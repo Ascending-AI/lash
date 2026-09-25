@@ -103,14 +103,11 @@ const ANCHOR_TABLE: &str = "lash_schema_versions";
 /// This governs the catalog comparison and nothing else. Two preconditions sit
 /// outside it:
 ///
-/// - **The component version stamp.** It is normally the reject-and-recreate
-///   boundary. Component 62 is a hard append-identity cutover from component 61.
-///   Every pre-61 graph shape carries the removed sequence column and is refused
-///   before any creation-only migration DDL can run. An older stamp over
-///   incompatible artifacts is refused with an inspect-and-recreate remedy.
-///   Other mismatches remain fatal, so a valve
-///   adopted for a structural false positive cannot silently run one build
-///   against another schema generation.
+/// - **The component version stamp.** It is the supported-range boundary
+///   (FIG-3797): a stamp outside `[MIN_SUPPORTED_SCHEMA_VERSION,
+///   SCHEMA_VERSION]` is refused unconditionally, whichever direction it
+///   differs in, so a valve adopted for a structural false positive cannot
+///   silently run one build against another schema generation.
 /// - **The catalog identity row.** Without it there is no identity to hand
 ///   the session catalogs open builds, so there is nothing for open to return:
 ///   no identity, no store.
@@ -129,22 +126,6 @@ pub enum SchemaCheck {
     #[default]
     Enforce,
     WarnOnly,
-}
-
-/// Who owns the DDL for the database a [`crate::PostgresStorage`] opens.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
-pub enum SchemaProvisioning {
-    /// lash applies its own idempotent creation DDL at open, then verifies the
-    /// result. Requires `CREATE` on the target schema. This is the default and
-    /// the historical behaviour.
-    #[default]
-    LashManaged,
-    /// The host provisioned the schema — from `schema.sql`, vendored into its own
-    /// migration tooling — and lash runs no DDL at all. Open reads the component
-    /// version stamp, verifies the structure, and verifies the seed rows, so it
-    /// needs no privilege beyond `SELECT` on lash's tables (plus the writes the
-    /// runtime itself performs).
-    HostProvisioned,
 }
 
 /// Referential action a foreign key takes when its parent row is deleted.
@@ -220,10 +201,6 @@ pub enum ColumnValueSource {
 
 impl ColumnValueSource {
     /// Whether an insert may omit the column and still get a value.
-    ///
-    /// `pub(crate)` because the migration gate reads it too: a column that
-    /// supplies its own value supplies it for every existing row, which is a
-    /// table rewrite and therefore not creation-only.
     pub(crate) fn supplies_own_value(self) -> bool {
         !matches!(self, Self::Supplied)
     }
@@ -1067,10 +1044,11 @@ fn diff_paired_objects<T: PairedObject>(
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum SchemaFinding {
-    /// The component version stamp is absent or names another version. Ordinary
-    /// open treats it as fatal. Component 62 refuses component 61 for the append-
-    /// identity cutover. Every pre-61 graph shape is refused before migration DDL
-    /// because those shapes carry the removed sequence column.
+    /// The component version stamp is absent or names a version outside the
+    /// supported range `[MIN_SUPPORTED_SCHEMA_VERSION, SCHEMA_VERSION]`
+    /// (FIG-3797). Ordinary open treats it as fatal regardless of direction:
+    /// below the floor is an older or skipped release, above the latest is a
+    /// newer build's catalog.
     VersionMismatch {
         /// Version this build implements.
         expected: i32,
@@ -1384,18 +1362,20 @@ impl fmt::Display for SchemaReport {
         if self.has_version_finding() {
             return write!(
                 formatter,
-                " The component schema is a reject-and-recreate boundary: a stamp that is not \
-                 this build's own component version is refused before any migration DDL runs, \
-                 whichever direction it differs in. Drain the affected sessions and recreate the \
-                 whole Lash trust domain with this build: drop the schema lash owns \
+                " The component schema is a reject-and-recreate boundary admitting only the \
+                 supported range [MIN_SUPPORTED_SCHEMA_VERSION, SCHEMA_VERSION] (FIG-3797): a \
+                 stamp outside it is refused unconditionally, whichever direction it differs \
+                 in. A stamp below the range is an older or skipped release — drain the \
+                 affected sessions and recreate the whole Lash trust domain with this build: \
+                 drop the schema lash owns \
                  (`DROP SCHEMA ... CASCADE`) or recreate the database, then reset the Restate \
                  state with it — Restate left behind still refers to sessions the recreated \
                  database does not have. `PostgresStorage::teardown_ddl()` (committed as \
                  crates/lash-postgres-store/teardown.sql) drops only the objects this build \
                  owns: an older build's catalog can hold tables this build no longer declares, \
-                 so tearing that catalog down with it leaves them behind. \
-                 docs/adr/0081-destructive-schema-changes-are-currently-reject-and-recreate.md \
-                 records why this boundary refuses instead of migrating. This gate is \
+                 so tearing that catalog down with it leaves them behind. A stamp above the \
+                 range is a newer build's catalog — deploy a build whose range includes it \
+                 rather than downgrading the schema. This gate is \
                  unconditional and no `SchemaCheck` relaxes it."
             );
         }
@@ -1410,14 +1390,13 @@ impl fmt::Display for SchemaReport {
 #[path = "schema_shape/introspect.rs"]
 mod introspect;
 
-pub(crate) use introspect::{
-    ComponentVersion, read_component_version, read_search_path, resolve_installation,
-    resolve_tables, verify_schema_migration_source_shape, verify_schema_shape,
-};
 /// Reached only by the artifact-generation and catalog tests, which drive the
 /// introspection directly rather than through a full verification.
 #[cfg(test)]
 pub(crate) use introspect::{normalize_predicate, read_live_shape};
+pub(crate) use introspect::{
+    read_search_path, resolve_installation, resolve_tables, verify_schema_shape,
+};
 
 #[path = "schema_shape/tests.rs"]
 #[cfg(test)]

@@ -10,7 +10,7 @@
 //! stamps, migrates, locks or deletes, and none of them constructs a
 //! [`PostgresStorage`](crate::PostgresStorage): building the store is the
 //! side-effectful act the whole preflight surface exists to precede (advisory
-//! lock, creation DDL, migration, signing-secret precondition, schema-gate
+//! lock, release-stamp write, signing-secret precondition, schema-gate
 //! telemetry). The two deep surfaces need more than one statement to agree with
 //! each other, so they run inside an explicitly `READ ONLY` transaction — the
 //! same move SQLite's side makes with `PRAGMA query_only`, and for the same

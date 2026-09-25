@@ -387,6 +387,15 @@ start_gate_postgres() {
     "$gate_postgres_image" -c shared_preload_libraries=pg_stat_statements >/dev/null
 }
 
+# Worker open never provisions the schema (FIG-3797): the gate applies the
+# committed artifact to the database it just started, the same step `lash
+# migrate` performs in a deployment.
+provision_gate_postgres() {
+  local container="$1"
+  docker exec -i "$container" psql -U lash -d lash -v ON_ERROR_STOP=1 -q \
+    < crates/lash-postgres-store/schema.sql >/dev/null
+}
+
 assert_no_panics_in_artifacts() {
   # cargo-mutants writes each mutant's run logs under `mutants.out/log/`; a
   # caught mutant is *expected* to panic, so those logs are evidence of the lane working, not
@@ -922,6 +931,7 @@ start_mutation_postgres() {
     fi
     sleep 1
   done
+  provision_gate_postgres "$mutation_postgres_container"
   mutation_postgres_database_url="postgres://lash:lash@127.0.0.1:${port}/lash"
 }
 
@@ -1795,6 +1805,7 @@ EOF
     fi
     sleep 1
   done
+  provision_gate_postgres "$container"
 
   LASH_POSTGRES_DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
     LASH_REQUIRE_POSTGRES=1 \
@@ -1942,6 +1953,7 @@ EOF
     fi
     sleep 1
   done
+  provision_gate_postgres "$container"
 
   LASH_POSTGRES_DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
     LASH_REQUIRE_POSTGRES=1 \
@@ -2014,6 +2026,7 @@ EOF
     fi
     sleep 1
   done
+  provision_gate_postgres "$container"
 
   LASH_POSTGRES_DATABASE_URL="postgres://lash:lash@127.0.0.1:${port}/lash" \
     run_backend_contention_evidence

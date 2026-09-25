@@ -100,6 +100,11 @@ pub struct SharedDatabaseLock {
 }
 
 impl SharedDatabaseLock {
+    /// Holds the shared-database turn and provisions the schema while holding
+    /// it: worker open never runs DDL (FIG-3797), so the test harness applies
+    /// the committed `schema.sql` artifact itself — the same job `lash migrate`
+    /// does for a deployment. The artifact is creation-only and idempotent, so
+    /// reapplying it on every acquisition is a no-op.
     pub async fn acquire(database_url: &str) -> Self {
         let mut connection = PgConnection::connect(database_url)
             .await
@@ -109,6 +114,10 @@ impl SharedDatabaseLock {
             .execute(&mut connection)
             .await
             .expect("acquire Postgres test advisory lock");
+        sqlx::raw_sql(lash_postgres_store::PostgresStorage::schema_ddl())
+            .execute(&mut connection)
+            .await
+            .expect("provision the shared test database from schema.sql");
         Self {
             _connection: connection,
         }

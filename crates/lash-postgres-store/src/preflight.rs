@@ -8,8 +8,8 @@
 //! built from. This module is the adapter between those two, and nothing more.
 //!
 //! **Construction is not an open.** Opening a `PostgresStorage` is the
-//! side-effectful act preflight exists to precede: it may run creation DDL or an
-//! explicit migration, it insists on a usable await-event signing secret, and it
+//! side-effectful act preflight exists to precede: it writes the release stamp,
+//! it insists on a usable await-event signing secret, and it
 //! emits schema-gate telemetry — each of which can be exactly what a broken
 //! deployment fails at, and none of which a probe may perform. Nothing here
 //! calls a `PostgresStorage` constructor. The only statements this module's own

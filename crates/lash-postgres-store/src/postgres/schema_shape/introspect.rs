@@ -57,13 +57,6 @@ pub(crate) struct Installation {
     anchor_oid: i64,
 }
 
-impl Installation {
-    /// Namespace the installation is anchored in.
-    pub(crate) fn namespace(&self) -> &str {
-        &self.namespace
-    }
-}
-
 /// Picks the first namespace on the search path that carries the anchoring table,
 /// which is the same relation an unqualified statement would resolve — but read
 /// from `pg_class` directly, so the answer belongs to the transaction's snapshot
@@ -196,31 +189,16 @@ async fn probe_columns_match_expected(
 /// Reads the live shape of lash's tables and diffs it against this build's
 /// expectation, then checks the seed rows the structural diff cannot see.
 ///
-/// A readable version stamp naming another generation short-circuits the
-/// structural diff: the database is a different schema generation, so a per-column
-/// diff of it is noise rather than a diagnosis. An *unreadable* stamp does not
-/// short-circuit — there the column diff is the diagnosis.
+/// A readable version stamp outside the supported range
+/// ([`MIN_SUPPORTED_SCHEMA_VERSION`](crate::MIN_SUPPORTED_SCHEMA_VERSION),
+/// [`SCHEMA_VERSION`]) short-circuits the structural diff: the database is a
+/// different schema generation, so a per-column diff of it is noise rather
+/// than a diagnosis. A stamp *inside* the range diffs normally — the
+/// structural expectation of an admitted older version is still this build's
+/// shape, because expand-only additions are invisible to it. An *unreadable*
+/// stamp does not short-circuit — there the column diff is the diagnosis.
 pub(crate) async fn verify_schema_shape(
     connection: &mut PgConnection,
-) -> Result<SchemaReport, StoreError> {
-    verify_schema_shape_with_version_policy(connection, true).await
-}
-
-/// Reads the full live shape even when the component stamp differs.
-///
-/// Ordinary opens short-circuit on a readable version mismatch because a diff
-/// against an unrelated generation is noise. An explicit migration is the one
-/// place that needs the opposite answer: it must prove the live catalog is the
-/// exact published source shape before executing any DDL.
-pub(crate) async fn verify_schema_migration_source_shape(
-    connection: &mut PgConnection,
-) -> Result<SchemaReport, StoreError> {
-    verify_schema_shape_with_version_policy(connection, false).await
-}
-
-async fn verify_schema_shape_with_version_policy(
-    connection: &mut PgConnection,
-    short_circuit_version_mismatch: bool,
 ) -> Result<SchemaReport, StoreError> {
     let expected = SchemaShape::expected();
     let table_names: Vec<String> = expected.tables.keys().cloned().collect();
@@ -247,8 +225,16 @@ async fn verify_schema_shape_with_version_policy(
         found_version,
         findings: Vec::new(),
     };
+    // The stamp is a generation statement, not a structural finding: only a
+    // stamp *outside* the supported range short-circuits the structural diff,
+    // because diffing an unrelated generation is noise rather than diagnosis.
+    // A stamp inside the range diffs against this build's shape as normal — an
+    // admitted older version is expected to be structurally indistinguishable
+    // under the expand-only rules (FIG-3797).
     let readable_version_mismatch = match &stamp {
-        ComponentVersion::Readable(version) if *version != Some(SCHEMA_VERSION) => Some(*version),
+        ComponentVersion::Readable(version) if !crate::schema::supported_version(*version) => {
+            Some(*version)
+        }
         ComponentVersion::Readable(_) | ComponentVersion::Unreadable => None,
     };
     if let Some(version) = readable_version_mismatch {
@@ -256,9 +242,7 @@ async fn verify_schema_shape_with_version_policy(
             expected: SCHEMA_VERSION,
             found: version,
         });
-        if short_circuit_version_mismatch {
-            return Ok(report);
-        }
+        return Ok(report);
     }
     report
         .findings

@@ -1178,6 +1178,16 @@ async fn recreate_fixture_schema(database_url: &str) {
     .execute(&pool)
     .await
     .expect("recreate dedicated Postgres durable-fixture schema");
+    // Worker open never provisions (FIG-3797): the fixture schema gets its
+    // tables from the committed artifact, applied the way `lash migrate` does.
+    sqlx::raw_sql(&format!("SET search_path TO {FIXTURE_SCHEMA};"))
+        .execute(&pool)
+        .await
+        .expect("point the fixture pool at the recreated schema");
+    sqlx::raw_sql(PostgresStorage::schema_ddl())
+        .execute(&pool)
+        .await
+        .expect("provision the durable-fixture schema from schema.sql");
     pool.close().await;
 }
 

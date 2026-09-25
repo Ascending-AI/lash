@@ -737,6 +737,27 @@ pub enum StoreError {
         /// Backend diagnostic for the failed storage operation.
         message: String,
     },
+    /// A store open found a schema component stamp outside the range of
+    /// versions this build admits (FIG-3797). `found` is `None` when the
+    /// database carries the component's relations but no readable stamp, or
+    /// no installation at all. `message` is the full operator-facing refusal —
+    /// it names the found version and the supported range — while the fields
+    /// carry the same facts for programmatic classification.
+    #[error("{message}")]
+    SchemaVersionOutOfRange {
+        /// The versioned schema component, e.g. `lash-postgres-store`.
+        component: String,
+        /// The stamped version found, or `None` for an unstamped/uninstalled
+        /// database.
+        found: Option<i32>,
+        /// The oldest component version this build admits.
+        supported_min: i32,
+        /// The newest component version this build admits.
+        supported_latest: i32,
+        /// The operator-facing refusal text, naming `found` and the supported
+        /// range.
+        message: String,
+    },
     #[error("store backend error: {0}")]
     Backend(String),
 }
@@ -874,6 +895,7 @@ impl StoreError {
             Self::ArtifactStagingEdgeMissing { .. } => "ArtifactStagingEdgeMissing",
             Self::ParkFeedCursorCompacted { .. } => "ParkFeedCursorCompacted",
             Self::StorageFailure { .. } => "StorageFailure",
+            Self::SchemaVersionOutOfRange { .. } => "SchemaVersionOutOfRange",
             Self::Backend(_) => "Backend",
         }
     }

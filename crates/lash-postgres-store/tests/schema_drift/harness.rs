@@ -4,9 +4,7 @@
 //! scratch-schema lifecycle and the rejection assertion are machinery every case
 //! reuses, not evidence any one case carries.
 
-use lash_postgres_store::{
-    PostgresStorage, PostgresStoreConfig, SchemaCheck, SchemaFinding, SchemaProvisioning,
-};
+use lash_postgres_store::{PostgresStorage, PostgresStoreConfig, SchemaCheck, SchemaFinding};
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use sqlx::{Connection, Executor, PgConnection};
 
@@ -67,8 +65,8 @@ impl ScratchSchema {
             .unwrap_or_else(|error| panic!("apply scratch mutation: {error}"));
     }
 
-    /// Opens the store the way a host with its own migrations does: no DDL, hard
-    /// failure on drift.
+    /// Opens the store the way every worker does: no DDL, hard failure on
+    /// drift under `SchemaCheck::Enforce`.
     pub async fn open_host_provisioned(
         &self,
         check: SchemaCheck,
@@ -76,7 +74,6 @@ impl ScratchSchema {
         PostgresStorage::from_pool_with(
             self.pool.clone(),
             PostgresStoreConfig {
-                schema_provisioning: SchemaProvisioning::HostProvisioned,
                 schema_check: check,
                 ..PostgresStoreConfig::default()
             },
