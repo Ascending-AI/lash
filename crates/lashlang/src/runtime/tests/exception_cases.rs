@@ -631,7 +631,7 @@ async fn suspend_in_exceptional_finally<H: ExecutionHost>(
             .expect("finally effect should suspend"),
         ExecutionOutcome::Continued
     );
-    let mut continuation = vm.suspend().expect("finally continuation");
+    let continuation = vm.suspend().expect("finally continuation");
     assert!(matches!(
         continuation.finally_stack.as_slice(),
         [VmFinallyContinuation {
@@ -752,8 +752,7 @@ async fn exception_effect_checkpoint(
         vm.run_for_mode().await.expect("effect checkpoint runs"),
         ExecutionOutcome::Continued
     );
-    let mut continuation = vm.suspend().expect("effect checkpoint captures");
-    continuation
+    vm.suspend().expect("effect checkpoint captures")
 }
 
 async fn exception_determinism_dump() -> Vec<u8> {

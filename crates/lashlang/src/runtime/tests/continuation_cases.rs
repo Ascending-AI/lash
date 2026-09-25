@@ -1188,9 +1188,7 @@ async fn determinism_process_probe() {
     let mut vm = Vm::from_state(&program, &mut state, &host).expect("state should install");
     let outcome = vm.run_for_mode().await.expect("probe should execute");
     assert!(matches!(outcome, ExecutionOutcome::Finished(_)));
-    let mut continuation = vm.suspend().expect("probe should suspend");
-    // Active wall time is intentionally nondeterministic (ADR-0055); normalize
-    // only that field so the cross-process probe compares the VM/heap wire.
+    let continuation = vm.suspend().expect("probe should suspend");
     assert!(continuation.heap.allocation_counter() > 1_024);
     assert!(continuation.heap.live_object_count() > 3);
     assert!(continuation.heap.swept_object_count() > 0);

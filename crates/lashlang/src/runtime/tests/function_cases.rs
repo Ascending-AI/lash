@@ -1135,7 +1135,7 @@ async fn function_recursion_determinism_process_probe() {
         return;
     }
     let program = compile_program_internal(&factorial_program(9.0));
-    let mut continuation =
+    let continuation =
         find_instruction_continuation(&program, |continuation| continuation.frame_stack.len() >= 3)
             .await;
     let bytes = serde_json::to_vec(&continuation).expect("serialize recursive continuation");

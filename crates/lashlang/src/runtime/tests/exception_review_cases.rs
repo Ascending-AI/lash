@@ -257,8 +257,7 @@ async fn suspension_inside_a_catch_body_is_byte_identical_under_gc_stress() {
             vm.run_for_mode().await.expect("the catch effect suspends"),
             ExecutionOutcome::Continued
         );
-        let mut continuation = vm.suspend().expect("catch continuation");
-        continuation
+        vm.suspend().expect("catch continuation")
     }
 
     let normal = suspend_in_catch(&program, &Host).await;
