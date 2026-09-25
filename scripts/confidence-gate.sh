@@ -1160,7 +1160,10 @@ run_state_machine_and_fault_matrix() {
 
 run_sim_unit_suite() {
   step "Deterministic simulation unit/oracle suite"
-  run_cargo_tests -p lash-sim --locked -- \
+  # The serial-lane determinism unit test defaults to a per-PR seed subset;
+  # the gate runs its full sweep.
+  LASH_SIM_SERIAL_LANE_SEEDS="${LASH_SIM_SERIAL_LANE_SEEDS:-20}" \
+    run_cargo_tests -p lash-sim --locked -- \
     --skip generated_sim_profile_writes_trace_replay_and_provider_artifacts \
     --skip minimizer_preserves \
     --skip minimizer_writes_replayable_regression_package

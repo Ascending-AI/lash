@@ -18265,7 +18265,7 @@
         },
         {
           "cargo": "lash_sim",
-          "cargo_only": "the generated-profile, minimizer and replay-artifact cases run 109--213 s; too slow for the developer loop, still in the PR Bazel partition",
+          "cargo_only": "the generated-profile, minimizer and replay-artifact cases run 109--213 s, and the serial-lane determinism sweep is bounded to 4 of its 20 seeds per run (LASH_SIM_SERIAL_LANE_SEEDS) after measuring ~74--118 s at all twenty; too slow for the developer loop, still in the PR Bazel partition",
           "kind": "unit-test",
           "label": "//crates/lash-sim:lash-sim__unit_test",
           "shard_count": 8,
