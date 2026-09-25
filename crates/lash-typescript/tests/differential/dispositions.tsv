@@ -77,3 +77,11 @@
 # where sloppy Node would quietly write the name.
 "(() => { eval = 1; return eval; })()"	reject	TS_SYNTAX_ERROR
 "(() => { ({ x: arguments } = { x: 1 }); return arguments; })()"	reject	TS_SYNTAX_ERROR
+# FIG-3731: a lone-surrogate URI decode argument is unrepresentable output,
+# so the literal rejects; building one with `String.fromCharCode` (as the
+# exhaustive test262 rows do inside their own try) hits the registered
+# lone-surrogate refusal before the codec runs.
+"decodeURI('\\uD800')"	reject	TS_LONE_SURROGATE_LITERAL_UNSUPPORTED
+"String.fromCharCode(0xD800)"	runtime-reject	TS_LONE_SURROGATE_UNSUPPORTED
+"decodeURI(String.fromCharCode(0xD800))"	runtime-reject	TS_LONE_SURROGATE_UNSUPPORTED
+"encodeURI(String.fromCharCode(0xD800))"	runtime-reject	TS_LONE_SURROGATE_UNSUPPORTED

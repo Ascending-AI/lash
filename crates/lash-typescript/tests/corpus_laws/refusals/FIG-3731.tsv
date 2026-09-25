@@ -1,0 +1,23 @@
+# Corpus programs the lens printer refuses, typed (FIG-3599). Each row names
+# the program, the exact refusal and why the printer cannot spell it. A row
+# whose program now round-trips, or whose refusal changed, fails the law
+# until it is deleted or corrected.
+# program id	refusal	reason
+differential:FIG-3731:1	generated binding `__typescript_decode_uri` has no authored TypeScript spelling	a URI codec call lowers to a generated intrinsic binding, which the lens printer does not re-sugar
+differential:FIG-3731:2	generated binding `__typescript_decode_uri` has no authored TypeScript spelling	a URI codec call lowers to a generated intrinsic binding, which the lens printer does not re-sugar
+differential:FIG-3731:3	generated binding `__typescript_decode_uri` has no authored TypeScript spelling	a URI codec call lowers to a generated intrinsic binding, which the lens printer does not re-sugar
+differential:FIG-3731:4	generated binding `__typescript_decode_uri_component` has no authored TypeScript spelling	a URI codec call lowers to a generated intrinsic binding, which the lens printer does not re-sugar
+differential:FIG-3731:5	generated binding `__typescript_decode_uri_component` has no authored TypeScript spelling	a URI codec call lowers to a generated intrinsic binding, which the lens printer does not re-sugar
+differential:FIG-3731:6	generated binding `__typescript_decode_uri` has no authored TypeScript spelling	a URI codec call lowers to a generated intrinsic binding, which the lens printer does not re-sugar
+differential:FIG-3731:7	generated binding `__typescript_decode_uri` has no authored TypeScript spelling	a URI codec call lowers to a generated intrinsic binding, which the lens printer does not re-sugar
+differential:FIG-3731:8	generated binding `__typescript_decode_uri` has no authored TypeScript spelling	a URI codec call lowers to a generated intrinsic binding, which the lens printer does not re-sugar
+differential:FIG-3731:9	generated binding `__typescript_decode_uri` has no authored TypeScript spelling	a URI codec call lowers to a generated intrinsic binding, which the lens printer does not re-sugar
+differential:FIG-3731:10	generated binding `__typescript_decode_uri` has no authored TypeScript spelling	a URI codec call lowers to a generated intrinsic binding, which the lens printer does not re-sugar
+differential:FIG-3731:11	generated binding `__typescript_decode_uri` has no authored TypeScript spelling	a URI codec call lowers to a generated intrinsic binding, which the lens printer does not re-sugar
+differential:FIG-3731:12	generated binding `__typescript_decode_uri_component` has no authored TypeScript spelling	a URI codec call lowers to a generated intrinsic binding, which the lens printer does not re-sugar
+differential:FIG-3731:13	generated binding `__typescript_encode_uri` has no authored TypeScript spelling	a URI codec call lowers to a generated intrinsic binding, which the lens printer does not re-sugar
+differential:FIG-3731:14	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a lone-surrogate encodeURI literal lowers to a generated URIError throw, which the lens printer does not re-sugar
+differential:FIG-3731:15	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a lone-surrogate encodeURI literal lowers to a generated URIError throw, which the lens printer does not re-sugar
+differential:FIG-3731:17	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3731:18	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3731:19	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
