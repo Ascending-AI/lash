@@ -39,7 +39,11 @@ import vm from 'node:vm';
 export const NODE_VERSION = 'v25.2.1';
 
 /// Refuses any Node other than the stamped one: every answer is that Node's.
+/// Also pins TZ=UTC itself (FIG-3812): a Date cell or row must answer the
+/// same bytes whatever timezone the host runs in, so the oracle's callers
+/// never have to set it.
 export function requirePinnedNode() {
+  process.env.TZ = 'UTC';
   if (process.version !== NODE_VERSION) {
     throw new Error(`oracle requires Node ${NODE_VERSION}, got ${process.version}`);
   }
