@@ -1,0 +1,62 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+FIG-3730	1	accept	"5 & 3"	"1"	-
+FIG-3730	2	accept	"5 | 3"	"7"	-
+FIG-3730	3	accept	"5 ^ 3"	"6"	-
+FIG-3730	4	accept	"-1 & 0xff"	"255"	-
+FIG-3730	5	accept	"0xFFFFFFFF | 0"	"-1"	-
+FIG-3730	6	accept	"2 ** 31 | 0"	"-2147483648"	-
+FIG-3730	7	accept	"(2 ** 32 + 5) | 0"	"5"	-
+FIG-3730	8	accept	"(-(2 ** 31) - 1) | 0"	"2147483647"	-
+FIG-3730	9	accept	"1e21 | 0"	"-559939584"	-
+FIG-3730	10	accept	"2 ** 53 | 0"	"0"	-
+FIG-3730	11	accept	"(-(2 ** 53)) >>> 0"	"0"	-
+FIG-3730	12	accept	"1.9 | 0"	"1"	-
+FIG-3730	13	accept	"-1.9 | 0"	"-1"	-
+FIG-3730	14	accept	"NaN | 0"	"0"	-
+FIG-3730	15	accept	"Infinity & 1"	"0"	-
+FIG-3730	16	accept	"-Infinity ^ 0"	"0"	-
+FIG-3730	17	accept	"1 << 31"	"-2147483648"	-
+FIG-3730	18	accept	"1 << 32"	"1"	-
+FIG-3730	19	accept	"1 << 33"	"2"	-
+FIG-3730	20	accept	"3 << -1"	"-2147483648"	-
+FIG-3730	21	accept	"-1 >> 28"	"-1"	-
+FIG-3730	22	accept	"-2147483648 >> 31"	"-1"	-
+FIG-3730	23	accept	"-1 >>> 0"	"4294967295"	-
+FIG-3730	24	accept	"-1 >>> 28"	"15"	-
+FIG-3730	25	accept	"-8 >>> 1"	"2147483644"	-
+FIG-3730	26	accept	"5 >> 32"	"5"	-
+FIG-3730	27	accept	"5 >>> 33"	"2"	-
+FIG-3730	28	accept	"5 << 1.9"	"10"	-
+FIG-3730	29	accept	"2 ** 32 >>> 0"	"0"	-
+FIG-3730	30	accept	"~0"	"-1"	-
+FIG-3730	31	accept	"~-1"	"0"	-
+FIG-3730	32	accept	"~NaN"	"-1"	-
+FIG-3730	33	accept	"~4294967295"	"0"	-
+FIG-3730	34	accept	"~2147483647"	"-2147483648"	-
+FIG-3730	35	accept	"~~-5.7"	"-5"	-
+FIG-3730	36	accept	"~~'17'"	"17"	-
+FIG-3730	37	accept	"Object.is(-0 | 0, 0)"	"true"	-
+FIG-3730	38	accept	"Object.is(-0 & -1, 0)"	"true"	-
+FIG-3730	39	accept	"Object.is(~~-0, 0)"	"true"	-
+FIG-3730	40	accept	"Object.is(-0 >>> 0, 0)"	"true"	-
+FIG-3730	41	accept	"1 / (-0 | 0)"	"Infinity"	-
+FIG-3730	42	accept	"'12' & 7"	"4"	-
+FIG-3730	43	accept	"'0x10' | 0"	"16"	-
+FIG-3730	44	accept	"' 3 ' ^ 1"	"2"	-
+FIG-3730	45	accept	"'abc' | 5"	"5"	-
+FIG-3730	46	accept	"'' >> 1"	"0"	-
+FIG-3730	47	accept	"null | 1"	"1"	-
+FIG-3730	48	accept	"undefined | 1"	"1"	-
+FIG-3730	49	accept	"true << 2"	"4"	-
+FIG-3730	50	accept	"[5] & 3"	"1"	-
+FIG-3730	51	accept	"[] | 1"	"1"	-
+FIG-3730	52	accept	"[1, 2] | 1"	"1"	-
+FIG-3730	53	accept	"typeof (1 & 1)"	"number"	-
+FIG-3730	54	accept	"(() => { let x = 7; x &= 3; x <<= 4; x >>>= 1; x ^= 1; x |= 256; x >>= 2; return x; })()"	"70"	-
+FIG-3730	55	accept	"(() => { const o = { n: 12 }; o.n &= 5; o.n <<= 3; return o.n; })()"	"32"	-
+FIG-3730	56	accept	"(() => { const a = [1, 2]; a[1] |= 8; a[0] ^= 3; return a.join(','); })()"	"2,10"	-
+FIG-3730	57	accept	"(() => { const log = []; const f = (v) => { log.push(v); return v; }; return (f(1) << f(2)) + ':' + log.join(''); })()"	"4:12"	-
+FIG-3730	58	accept	"(() => { let h = 0; for (const c of 'hello') { h = ((h << 5) - h + c.charCodeAt(0)) | 0; } return h; })()"	"99162322"	-
+FIG-3730	59	accept	"(() => { let x = 0x12345678; return [(x >>> 24) & 0xff, (x >>> 16) & 0xff, (x >>> 8) & 0xff, x & 0xff].join(','); })()"	"18,52,86,120"	-
+FIG-3730	60	accept	"(() => { let s = 0; for (let i = 0; i < 40; i++) { s = (s * 31 + i) >>> 0; } return s; })()"	"3591305236"	-
+FIG-3730	61	accept	"[1, 2, 3, 4].map((v) => v << 2).join(',')"	"4,8,12,16"	-

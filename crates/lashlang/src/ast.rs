@@ -1591,6 +1591,16 @@ pub enum JavaScriptUnaryOp {
     Negate,
     Not,
     TypeOf,
+    // `~`: ECMA-262's bitwise NOT over ToInt32 of the operand.
+    BitNot,
+}
+
+impl JavaScriptUnaryOp {
+    /// Whether the operator reads its operand as a number (ToNumber, through
+    /// ToPrimitive for an object).
+    pub fn coerces_to_number(self) -> bool {
+        matches!(self, Self::Plus | Self::Negate | Self::BitNot)
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
@@ -1608,6 +1618,16 @@ pub enum JavaScriptBinaryOp {
     LessEqual,
     Greater,
     GreaterEqual,
+    // `&`, `|` and `^`: ECMA-262's bitwise operators over ToInt32 of each
+    // operand.
+    BitAnd,
+    BitOr,
+    BitXor,
+    // `<<`, `>>` and `>>>`: ECMA-262's shifts of ToInt32 (ToUint32 for
+    // `>>>`) of the left operand by ToUint32 of the right, modulo 32.
+    ShiftLeft,
+    ShiftRight,
+    ShiftRightUnsigned,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

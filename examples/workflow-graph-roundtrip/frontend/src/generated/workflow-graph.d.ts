@@ -494,7 +494,7 @@ export type BinaryOp =
   | 'In'
   | 'And'
   | 'Or';
-export type JavaScriptUnaryOp = 'Plus' | 'Negate' | 'Not' | 'TypeOf';
+export type JavaScriptUnaryOp = 'Plus' | 'Negate' | 'Not' | 'TypeOf' | 'BitNot';
 export type JavaScriptBinaryOp =
   | 'Add'
   | 'Subtract'
@@ -508,7 +508,13 @@ export type JavaScriptBinaryOp =
   | 'Less'
   | 'LessEqual'
   | 'Greater'
-  | 'GreaterEqual';
+  | 'GreaterEqual'
+  | 'BitAnd'
+  | 'BitOr'
+  | 'BitXor'
+  | 'ShiftLeft'
+  | 'ShiftRight'
+  | 'ShiftRightUnsigned';
 export type JavaScriptLogicalOp = 'And' | 'Or' | 'NullishCoalesce';
 /**
  * One call or effect argument in graph order.
@@ -652,7 +658,7 @@ export interface WorkflowGraph {
   declarations?: WorkflowDeclaration[];
   facet_schema_version?: number | null;
   main: WorkflowSubgraph;
-  schema_version: 18;
+  schema_version: 19;
   /**
    * The definition identity of the admitted module artifact this graph projects ([`crate::ModuleArtifact::source_identity`]), which the module's traces carry too. A draft projected from source that has not been admitted claims no runtime identity and carries `None`. [`WORKFLOW_GRAPH_SCHEMA_VERSION`] identifies this document's wire shape, `facet_schema_version` identifies optional derived facts.
    */

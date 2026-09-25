@@ -861,7 +861,9 @@ pub(super) fn parse_int_prefix(value: &str, radix: Option<f64>) -> f64 {
         .strip_prefix('-')
         .map_or((false, value), |value| (true, value));
     let value = value.strip_prefix('+').unwrap_or(value);
-    let radix = radix.map_or(0, to_int32);
+    let radix = radix.map_or(0, |radix| {
+        i64::from(crate::runtime::javascript_to_int32(radix))
+    });
     if radix != 0 && !(2..=36).contains(&radix) {
         return f64::NAN;
     }
@@ -892,18 +894,6 @@ pub(super) fn parse_int_prefix(value: &str, radix: Option<f64>) -> f64 {
         .and_then(|value| num_traits::ToPrimitive::to_f64(&value))
         .unwrap_or(f64::INFINITY);
     if negative { -number } else { number }
-}
-
-pub(super) fn to_int32(value: f64) -> i64 {
-    if !value.is_finite() || value == 0.0 {
-        return 0;
-    }
-    let value = value.trunc().rem_euclid(4_294_967_296.0) as i64;
-    if value >= 2_147_483_648 {
-        value - 4_294_967_296
-    } else {
-        value
-    }
 }
 
 impl<H: ExecutionHost> Vm<'_, H> {

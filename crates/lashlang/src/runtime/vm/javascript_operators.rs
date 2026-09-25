@@ -14,8 +14,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             return Ok(true);
         };
         Ok(matches!(value, Value::Projected(_))
-            || matches!(op, JavaScriptUnaryOp::Plus | JavaScriptUnaryOp::Negate)
-                && self.heap.javascript_coercion_contains_projected(value)?)
+            || op.coerces_to_number() && self.heap.javascript_coercion_contains_projected(value)?)
     }
 
     pub(super) fn javascript_binary_needs_async(
@@ -50,14 +49,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
             self.stack.push(Value::String(
                 if is_function { "function" } else { "object" }.into(),
             ));
-        } else if matches!(op, JavaScriptUnaryOp::Plus | JavaScriptUnaryOp::Negate) {
+        } else if op.coerces_to_number() {
             let number = self.heap.javascript_to_number(&value)?;
             self.stack
-                .push(Value::Number(if op == JavaScriptUnaryOp::Negate {
-                    -number
-                } else {
-                    number
-                }));
+                .push(eval_javascript_unary(Value::Number(number), op)?);
         } else if op == JavaScriptUnaryOp::Not && matches!(value, Value::Ref(_)) {
             self.stack.push(Value::Bool(false));
         } else {
@@ -71,7 +66,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         op: JavaScriptUnaryOp,
     ) -> Result<VmStep, RuntimeError> {
         let mut value = materialize_javascript_operand(self.pop_stack()?).await?;
-        if matches!(op, JavaScriptUnaryOp::Plus | JavaScriptUnaryOp::Negate) {
+        if op.coerces_to_number() {
             value = self
                 .heap
                 .javascript_to_primitive_string_or_number_async(&value)

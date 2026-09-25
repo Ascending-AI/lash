@@ -10,7 +10,7 @@ const generated = path.join(frontend, 'src/generated');
 const check = process.argv.slice(2).includes('--check');
 
 const documents = [
-  ['workflow-graph/v18.schema.json', 'workflow-graph.d.ts'],
+  ['workflow-graph/v19.schema.json', 'workflow-graph.d.ts'],
   ['workflow-type-facets/v3.schema.json', 'workflow-type-facets.d.ts'],
   [
     '../../examples/workflow-graph-roundtrip/frontend/src/generated/workflow-document.schema.json',

@@ -22,7 +22,6 @@ mod array_map;
 mod attribute_update;
 mod await_expr;
 mod binding;
-mod bitwise;
 mod calls;
 mod captures;
 mod constructs;
@@ -1180,7 +1179,7 @@ impl Lowerer {
                 UnaryOp::Plus => js_unary(JavaScriptUnaryOp::Plus, self.lower_expr(value)?),
                 UnaryOp::Minus => js_unary(JavaScriptUnaryOp::Negate, self.lower_expr(value)?),
                 UnaryOp::Not => js_unary(JavaScriptUnaryOp::Not, self.lower_expr(value)?),
-                UnaryOp::BitNot => self.lower_bit_not(value)?,
+                UnaryOp::BitNot => js_unary(JavaScriptUnaryOp::BitNot, self.lower_expr(value)?),
                 // `typeof` on a name nothing binds answers "undefined" without
                 // resolving it — except the reserved value idents, which are
                 // never unbound names: each lowers to a concrete literal below,
@@ -1607,15 +1606,15 @@ fn map_binary(op: BinaryOp) -> JavaScriptBinaryOp {
         BinaryOp::LessEqual => JavaScriptBinaryOp::LessEqual,
         BinaryOp::Greater => JavaScriptBinaryOp::Greater,
         BinaryOp::GreaterEqual => JavaScriptBinaryOp::GreaterEqual,
-        BinaryOp::Exponent
-        | BinaryOp::BitAnd
-        | BinaryOp::BitOr
-        | BinaryOp::BitXor
-        | BinaryOp::ShiftLeft
-        | BinaryOp::ShiftRight
-        | BinaryOp::ShiftRightUnsigned
-        | BinaryOp::In
-        | BinaryOp::InstanceOf => unreachable!("operator has a dedicated lowering"),
+        BinaryOp::BitAnd => JavaScriptBinaryOp::BitAnd,
+        BinaryOp::BitOr => JavaScriptBinaryOp::BitOr,
+        BinaryOp::BitXor => JavaScriptBinaryOp::BitXor,
+        BinaryOp::ShiftLeft => JavaScriptBinaryOp::ShiftLeft,
+        BinaryOp::ShiftRight => JavaScriptBinaryOp::ShiftRight,
+        BinaryOp::ShiftRightUnsigned => JavaScriptBinaryOp::ShiftRightUnsigned,
+        BinaryOp::Exponent | BinaryOp::In | BinaryOp::InstanceOf => {
+            unreachable!("operator has a dedicated lowering")
+        }
     }
 }
 
