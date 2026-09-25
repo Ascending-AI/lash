@@ -488,8 +488,8 @@ impl Drop for Shutdown {
         for invocation in &mut state.invocations {
             if let Status::Running(attempt) = &mut invocation.status {
                 attempt.close();
-                if let Some(abort) = attempt.abort.take() {
-                    abort.abort();
+                if let Some(task) = attempt.task.take() {
+                    task.abort();
                 }
             }
             // Ingress callers still waiting on an outcome hold the server
@@ -795,7 +795,30 @@ impl RestateTestServer {
     pub fn kill(&self, invocation: &str) -> Option<bool> {
         let mut state = self.shared.lock();
         let key = state.lookup(invocation)?;
-        Some(state.kill(&self.shared, key) != ControlResult::AlreadyCompleted)
+        let mut tasks = Vec::new();
+        Some(state.kill(&self.shared, key, &mut tasks) != ControlResult::AlreadyCompleted)
+    }
+
+    /// Kill `invocation` as the admin API does, and wait until every attempt
+    /// task the kill stopped has actually ended. An abort is cooperative —
+    /// the runtime drops the task only once its poll in flight returns, and
+    /// a replay resolves every step inline, so a killed attempt can still
+    /// run the rest of a poll after `kill` returns. A caller about to make
+    /// a killed invocation's work visible again — resubmitting its workflow
+    /// key, say — waits here so that last poll cannot overtake it.
+    pub async fn kill_and_await(&self, invocation: &str) -> Option<bool> {
+        let (killed, tasks) = {
+            let mut state = self.shared.lock();
+            let key = state.lookup(invocation)?;
+            let mut tasks = Vec::new();
+            let killed =
+                state.kill(&self.shared, key, &mut tasks) != ControlResult::AlreadyCompleted;
+            (killed, tasks)
+        };
+        for task in tasks {
+            let _ = task.await;
+        }
+        Some(killed)
     }
 
     /// Purge a completed `invocation` as the admin API does: its journal, its

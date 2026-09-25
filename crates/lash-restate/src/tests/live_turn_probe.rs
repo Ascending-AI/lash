@@ -794,6 +794,10 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
             }
             lash_conformance::SegmentRecovery::SubstrateLost => {
                 let key = crate::process::process_segment_workflow_key(process_id, 0);
+                // The kill must have stopped the crashed execution for
+                // real — its attempt's task ended, not just been aborted —
+                // before the body is served: an abort lets a poll in flight
+                // run to its next yield, and that poll would find the body.
                 let killed = self
                     .admin
                     .kill_workflow_run(crate::LashService::ProcessWorkflow.name(), &key)

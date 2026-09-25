@@ -480,7 +480,7 @@ impl Routes {
         };
         let result = match action {
             "cancel" => state.cancel(&self.shared, invocation),
-            "kill" => state.kill(&self.shared, invocation),
+            "kill" => state.kill(&self.shared, invocation, &mut Vec::new()),
             "purge" => {
                 if state.purge(invocation) {
                     ControlResult::Done
