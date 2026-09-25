@@ -68,19 +68,28 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     Value::Number(-1.0)
                 })
             } else if method == "lastIndexOf" && argument_count < 2 {
-                array_last_index_of(current, &needle, current.len())
+                let present = |index: usize| !self.heap.is_list_hole(receiver, index);
+                array_last_index_of(current, &needle, current.len(), &present)
             } else {
+                // `indexOf`/`lastIndexOf` ask `HasProperty` of each index —
+                // a hole never matches, even an `undefined` needle.
+                // `includes` uses `SameValueZero` on `Get` alone, so a hole
+                // reads `undefined` and can match.
+                let present = |index: usize| !self.heap.is_list_hole(receiver, index);
                 let from = self.heap.javascript_to_number(&from)?;
                 match method {
                     "includes" => {
                         array_includes(current, &needle, clamp_relative_index(from, current.len()))
                     }
-                    "indexOf" => {
-                        array_index_of(current, &needle, clamp_relative_index(from, current.len()))
-                    }
+                    "indexOf" => array_index_of(
+                        current,
+                        &needle,
+                        clamp_relative_index(from, current.len()),
+                        &present,
+                    ),
                     _ => last_index_exclusive(from, current.len())
                         .map_or(Ok(Value::Number(-1.0)), |end| {
-                            array_last_index_of(current, &needle, end)
+                            array_last_index_of(current, &needle, end, &present)
                         }),
                 }
             }?;
@@ -113,17 +122,57 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 }
                 .max(start);
                 values[start..end].fill(value);
+                // `fill` writes the range — holes outside it stay holes.
+                let holes: std::collections::BTreeSet<usize> = (0..values.len())
+                    .filter(|index| {
+                        self.heap.is_list_hole(receiver, *index) && !(start..end).contains(index)
+                    })
+                    .collect();
                 self.heap.replace_javascript_list(receiver, values)?;
+                self.heap.mark_list_holes(receiver, holes);
                 Value::Ref(receiver)
             }
             "reverse" => {
+                // A hole keeps being a hole at its mirrored position.
+                let length = values.len();
+                let holes: std::collections::BTreeSet<usize> = (0..length)
+                    .filter(|index| self.heap.is_list_hole(receiver, *index))
+                    .map(|index| length - 1 - index)
+                    .collect();
                 values.reverse();
                 self.heap.replace_javascript_list(receiver, values)?;
+                self.heap.mark_list_holes(receiver, holes);
                 Value::Ref(receiver)
             }
             "copyWithin" => {
+                // A hole at a source slot makes the target a hole — ECMA
+                // moves presence, not the stored `undefined` placeholder.
+                // `replace_javascript_list` clears the hole set, so it is
+                // rebuilt around the move and re-marked.
+                let len = values.len();
+                let to = relative_bound(args.first(), len, 0);
+                let from = relative_bound(args.get(1), len, 0);
+                let end = match args.get(2) {
+                    None | Some(Value::Undefined) => len,
+                    Some(_) => relative_bound(args.get(2), len, len),
+                };
+                let count = end.saturating_sub(from).min(len.saturating_sub(to));
+                let mut holes: std::collections::BTreeSet<usize> = (0..len)
+                    .filter(|index| self.heap.is_list_hole(receiver, *index))
+                    .collect();
+                if count > 0 {
+                    for offset in 0..count {
+                        holes.remove(&(to + offset));
+                    }
+                    for offset in 0..count {
+                        if self.heap.is_list_hole(receiver, from + offset) {
+                            holes.insert(to + offset);
+                        }
+                    }
+                }
                 copy_within(&mut values, args);
                 self.heap.replace_javascript_list(receiver, values)?;
+                self.heap.mark_list_holes(receiver, holes);
                 Value::Ref(receiver)
             }
             "splice" => {

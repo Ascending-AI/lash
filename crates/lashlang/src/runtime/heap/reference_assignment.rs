@@ -207,16 +207,17 @@ impl Heap {
                     && index < values.len()
                 {
                     // `delete` on a hole answers `true` — there is no own
-                    // property to remove; deleting a stored element would
-                    // create a hole, which stays refused.
+                    // property to remove. Deleting a stored element empties
+                    // the slot: the placeholder stays in the vector and the
+                    // hole set records that `i in a` no longer answers.
                     if self.is_list_hole(*target_id, index) {
                         return Ok(true);
                     }
-                    return Err(RuntimeError::ValidationFailed {
-                        reason: format!(
-                            "TS_DELETE_ARRAY_INDEX_UNSUPPORTED: delete on dense array index {index} would create a hole; use splice({index}, 1)"
-                        ),
-                    });
+                    values[index] = Value::Undefined;
+                    let mut holes = self.list_holes.get(target_id).cloned().unwrap_or_default();
+                    holes.insert(index);
+                    self.mark_list_holes(*target_id, holes);
+                    return self.commit_javascript_delete(*target_id, old_object, new_object);
                 }
                 false
             }
@@ -268,19 +269,30 @@ impl Heap {
         if !deleted {
             return Ok(true);
         }
+        self.commit_javascript_delete(*target_id, old_object, new_object)
+    }
+
+    /// The write-back a successful `delete` does: swap the object in, fix the
+    /// byte accounting and the GC edges the old and new children span.
+    fn commit_javascript_delete(
+        &mut self,
+        target_id: HeapId,
+        old_object: HeapObject,
+        new_object: HeapObject,
+    ) -> Result<bool, RuntimeError> {
         let old_bytes = old_object.logical_bytes();
         let new_bytes = new_object.logical_bytes();
         let old_children = old_object.child_refs();
         let new_children = new_object.child_refs();
-        let entry = self.entry_mut(*target_id)?;
+        let entry = self.entry_mut(target_id)?;
         entry.object = new_object;
         entry.logical_bytes = new_bytes;
         self.live_logical_bytes = self
             .live_logical_bytes
             .saturating_sub(old_bytes)
             .saturating_add(new_bytes);
-        self.retarget_parent_edges(*target_id, &old_children, &new_children);
-        self.invalidate_materialized_reaching(*target_id);
+        self.retarget_parent_edges(target_id, &old_children, &new_children);
+        self.invalidate_materialized_reaching(target_id);
         self.debug_assert_byte_accounting();
         Ok(true)
     }

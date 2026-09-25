@@ -533,20 +533,25 @@ pub(super) fn array_includes(
     })))
 }
 
+/// `indexOf`/`lastIndexOf` gate each index on `HasProperty` (ECMA-262
+/// 23.1.3.15/16): a hole reads `undefined` on a `Get`, but the methods never
+/// read it — the absent slot cannot match even an `undefined` needle.
+/// `present` names the slots that exist; an inline list has no holes, so its
+/// callers pass `&|_| true`.
 pub(super) fn array_index_of(
     items: &[Value],
     needle: &Value,
     start: usize,
+    present: &dyn Fn(usize) -> bool,
 ) -> Result<Value, RuntimeError> {
     use crate::runtime::javascript::javascript_strict_equal;
     Ok(Value::Number(
         items
-            .get(start..)
-            .and_then(|tail| {
-                tail.iter()
-                    .position(|item| javascript_strict_equal(item, needle))
-            })
-            .map_or(-1.0, |index| (start + index) as f64),
+            .iter()
+            .enumerate()
+            .skip(start)
+            .find(|(index, item)| present(*index) && javascript_strict_equal(item, needle))
+            .map_or(-1.0, |(index, _)| index as f64),
     ))
 }
 
@@ -554,13 +559,16 @@ pub(super) fn array_last_index_of(
     items: &[Value],
     needle: &Value,
     end: usize,
+    present: &dyn Fn(usize) -> bool,
 ) -> Result<Value, RuntimeError> {
     use crate::runtime::javascript::javascript_strict_equal;
     Ok(Value::Number(
         items[..end.min(items.len())]
             .iter()
-            .rposition(|item| javascript_strict_equal(item, needle))
-            .map_or(-1.0, |index| index as f64),
+            .enumerate()
+            .rev()
+            .find(|(index, item)| present(*index) && javascript_strict_equal(item, needle))
+            .map_or(-1.0, |(index, _)| index as f64),
     ))
 }
 

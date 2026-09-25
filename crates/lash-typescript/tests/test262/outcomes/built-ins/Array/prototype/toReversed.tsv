@@ -4,14 +4,14 @@ test/built-ins/Array/prototype/toReversed/get-descending-order.js	refused	TS_ACC
 test/built-ins/Array/prototype/toReversed/holes-not-preserved.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Array/prototype/toReversed/ignores-species.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Array/prototype/toReversed/immutable.js	pass	-
-test/built-ins/Array/prototype/toReversed/length-casted-to-zero.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/toReversed/length-casted-to-zero.js	pass	-
 test/built-ins/Array/prototype/toReversed/length-decreased-while-iterating.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Array/prototype/toReversed/length-exceeding-array-length-limit.js	refused	TS_ACCESSOR_UNSUPPORTED
 test/built-ins/Array/prototype/toReversed/length-increased-while-iterating.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Array/prototype/toReversed/length-tolength.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/toReversed/length-tolength.js	pass	-
 test/built-ins/Array/prototype/toReversed/length.js	pass	-
 test/built-ins/Array/prototype/toReversed/name.js	pass	-
 test/built-ins/Array/prototype/toReversed/property-descriptor.js	pass	-
 test/built-ins/Array/prototype/toReversed/this-value-boolean.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
-test/built-ins/Array/prototype/toReversed/this-value-nullish.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/toReversed/this-value-nullish.js	pass	-
 test/built-ins/Array/prototype/toReversed/zero-or-one-element.js	pass	-

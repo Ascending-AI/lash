@@ -1,3 +1,4 @@
+use super::continuation::{VmCallbackCompletion, VmCallbackContinuation};
 use super::*;
 
 pub(super) trait IteratorRootView {
@@ -45,6 +46,28 @@ impl IteratorRootView for VmIteratorContinuation {
     }
 }
 
+/// The heap references a callback return target keeps live: the callback
+/// itself, the `this` each of its calls runs under, the pending argument
+/// tuples, the folded results, a comparator sort's in-flight ordering, the
+/// receiver a lazy array-like walk keeps reading, and a `reduce`'s running
+/// accumulator.
+pub(super) struct CallbackRoots<'a> {
+    pub(super) function: &'a Value,
+    pub(super) this_arg: &'a Value,
+    pub(super) calls: &'a [Value],
+    pub(super) results: &'a [Value],
+    pub(super) sort: Option<CallbackSortRoots<'a>>,
+    pub(super) walk_receiver: Option<&'a Value>,
+    pub(super) accumulator: Option<&'a Value>,
+}
+
+pub(super) struct CallbackSortRoots<'a> {
+    pub(super) pending: &'a [Value],
+    pub(super) sorted: &'a [Value],
+    pub(super) current: &'a Value,
+    pub(super) receiver: &'a Value,
+}
+
 pub(super) trait FrameRootView {
     type Iterator: IteratorRootView;
 
@@ -52,7 +75,7 @@ pub(super) trait FrameRootView {
     fn slots(&self) -> &[Option<Value>];
     fn globals(&self) -> &Record;
     fn iterators(&self) -> &[Self::Iterator];
-    fn callback_roots(&self) -> Option<(&Value, &[Value], &[Value])>;
+    fn callback_roots(&self) -> Option<CallbackRoots<'_>>;
 }
 
 pub(super) trait FinallyRootView {
@@ -96,13 +119,38 @@ impl FrameRootView for CallFrame {
         &self.iter_stack
     }
 
-    fn callback_roots(&self) -> Option<(&Value, &[Value], &[Value])> {
+    fn callback_roots(&self) -> Option<CallbackRoots<'_>> {
         match &self.return_target {
             ReturnTarget::Direct => None,
-            ReturnTarget::Callback(callback) => {
-                Some((&callback.function, &callback.calls, &callback.results))
-            }
-            ReturnTarget::Coercion(driver) => Some((&driver.object, &[], &[])),
+            ReturnTarget::Callback(callback) => Some(CallbackRoots {
+                function: &callback.function,
+                this_arg: &callback.this_arg,
+                calls: &callback.calls,
+                results: &callback.results,
+                sort: match &callback.completion {
+                    CallbackCompletion::Sort(state) => Some(CallbackSortRoots {
+                        pending: &state.pending,
+                        sorted: &state.sorted,
+                        current: &state.current,
+                        receiver: &state.receiver,
+                    }),
+                    _ => None,
+                },
+                walk_receiver: callback.array_like.as_ref().map(|walk| &walk.receiver),
+                accumulator: match &callback.completion {
+                    CallbackCompletion::Reduce { accumulator } => Some(accumulator),
+                    _ => None,
+                },
+            }),
+            ReturnTarget::Coercion(driver) => Some(CallbackRoots {
+                function: &driver.object,
+                this_arg: &driver.object,
+                calls: &[],
+                results: &[],
+                sort: None,
+                walk_receiver: None,
+                accumulator: None,
+            }),
         }
     }
 }
@@ -126,15 +174,40 @@ impl FrameRootView for VmFrameContinuation {
         &self.iterator_stack
     }
 
-    fn callback_roots(&self) -> Option<(&Value, &[Value], &[Value])> {
+    fn callback_roots(&self) -> Option<CallbackRoots<'_>> {
         match &self.return_target {
             VmFrameReturnContinuation::Direct => None,
-            VmFrameReturnContinuation::Callback {
-                function,
-                calls,
-                results,
-                ..
-            } => Some((function, calls, results)),
+            VmFrameReturnContinuation::Callback(callback) => {
+                let VmCallbackContinuation {
+                    function,
+                    this_arg,
+                    calls,
+                    results,
+                    completion,
+                    array_like,
+                    ..
+                } = callback.as_ref();
+                Some(CallbackRoots {
+                    function,
+                    this_arg,
+                    calls,
+                    results,
+                    sort: match completion {
+                        VmCallbackCompletion::Sort(state) => Some(CallbackSortRoots {
+                            pending: &state.pending,
+                            sorted: &state.sorted,
+                            current: &state.current,
+                            receiver: &state.receiver,
+                        }),
+                        _ => None,
+                    },
+                    walk_receiver: array_like.as_ref().map(|walk| &walk.receiver),
+                    accumulator: match completion {
+                        VmCallbackCompletion::Reduce { accumulator } => Some(accumulator),
+                        _ => None,
+                    },
+                })
+            }
         }
     }
 }
@@ -348,13 +421,27 @@ pub(super) fn visit_vm_roots<'a, V: VmRootView>(view: &'a V, visitor: &mut impl 
                 visitor.transient(value);
             }
         }
-        if let Some((function, calls, results)) = frame.callback_roots() {
-            visitor.transient(function);
-            for value in calls {
+        if let Some(roots) = frame.callback_roots() {
+            visitor.transient(roots.function);
+            visitor.transient(roots.this_arg);
+            for value in roots.calls {
                 visitor.transient(value);
             }
-            for value in results {
+            for value in roots.results {
                 visitor.transient(value);
+            }
+            if let Some(sort) = roots.sort {
+                for value in sort.pending.iter().chain(sort.sorted.iter()) {
+                    visitor.transient(value);
+                }
+                visitor.transient(sort.current);
+                visitor.transient(sort.receiver);
+            }
+            if let Some(receiver) = roots.walk_receiver {
+                visitor.transient(receiver);
+            }
+            if let Some(accumulator) = roots.accumulator {
+                visitor.transient(accumulator);
             }
         }
     }

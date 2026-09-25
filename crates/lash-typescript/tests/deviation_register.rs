@@ -323,10 +323,6 @@ const PROBES: &[Probe] = &[
         "TS_EXOTIC_PROPERTY_UNSUPPORTED",
         "const f = () => 1; const g: any = f; g.cache = 1; finish(1);",
     ),
-    readme_probe(
-        "TS_DELETE_ARRAY_INDEX_UNSUPPORTED",
-        "const a = [1, 2]; delete a[0]; finish(a.length);",
-    ),
     readme_probe("TS_DELETE_NON_REFERENCE_UNSUPPORTED", "finish(delete 1);"),
     readme_probe(
         "TS_FUNCTION_REDECLARATION_UNSUPPORTED",
@@ -335,6 +331,10 @@ const PROBES: &[Probe] = &[
     readme_probe(
         "TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED",
         "const f = Function('return 1'); finish(f());",
+    ),
+    readme_probe(
+        "TS_FUNCTION_TOSTRING_UNSUPPORTED",
+        "const f = () => 1; finish(f.toString());",
     ),
     readme_probe("TS_NEW_UNSUPPORTED", "function F() { } const o = new F();"),
     readme_probe(

@@ -50,5 +50,5 @@ test/built-ins/parseInt/S15.1.2.2_A7.3_T2.js	pass	-
 test/built-ins/parseInt/S15.1.2.2_A7.3_T3.js	pass	-
 test/built-ins/parseInt/S15.1.2.2_A8.js	refused	TS_LONE_SURROGATE_UNSUPPORTED
 test/built-ins/parseInt/S15.1.2.2_A9.5.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/parseInt/S15.1.2.2_A9.6.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/parseInt/S15.1.2.2_A9.6.js	pass	-
 test/built-ins/parseInt/prop-desc.js	refused	TS_THIS_UNSUPPORTED

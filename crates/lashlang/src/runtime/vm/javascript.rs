@@ -389,6 +389,51 @@ impl<H: ExecutionHost> Vm<'_, H> {
         {
             return self.execute_javascript_heap_method(method, *receiver, args);
         }
+        // A member call `o.m(..)` whose receiver is a record, a built-in
+        // object or a function resolves `m` against the receiver itself — an
+        // own member (a re-attached `o.push = Array.prototype.push`), then
+        // the prototype's built-in (`o.toString`, `f.call`) — and calls it
+        // with `o` as `this` (FIG-3787). Leaving it to the export below would
+        // either drop a function member at the boundary or answer a builtin
+        // with the wrong receiver.
+        if let [Value::String(method), receiver @ Value::Ref(id), args @ ..] = values.as_slice()
+            && !method.contains('.')
+            && matches!(
+                self.heap.get(*id)?,
+                HeapObject::Record(_)
+                    | HeapObject::BuiltinFunction(_)
+                    | HeapObject::Closure { .. }
+                    | HeapObject::RegExpMatch(_)
+                    | HeapObject::Tuple(_)
+            )
+        {
+            let method = method.to_string();
+            let receiver = receiver.clone();
+            let args = args.to_vec();
+            let inherited = heap_inherited_builtin(self.heap.get(*id)?, &method);
+            let callee = match self.heap.get(*id)? {
+                HeapObject::BuiltinFunction(_) => self.heap.builtin_read(*id, &method)?,
+                _ => {
+                    let own = self.array_like_get(&receiver, &method)?;
+                    self.or_builtin(own, inherited)?
+                }
+            };
+            if self.is_callable(&callee)? {
+                return self.begin_function_call(
+                    callee,
+                    receiver,
+                    CallArguments::Owned(args),
+                    ReturnTarget::Direct,
+                );
+            }
+            let error = self.heap.allocate_error(
+                ErrorKind::TypeError,
+                Some(format!("{method} is not a function")),
+                None,
+                None,
+            )?;
+            return Err(RuntimeError::UncaughtException { value: error });
+        }
         if let [Value::String(method), Value::Ref(receiver)] = values.as_slice()
             && matches!(method.as_str(), "Lash.ArrayFromIterable" | "Array.from")
         {
@@ -540,7 +585,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
         clippy::expect_used,
         reason = "each arm's receiver kind was checked by the match, so map_entries or set_values resolves, per each message"
     )]
-    fn execute_javascript_heap_method(
+    pub(super) fn execute_javascript_heap_method(
         &mut self,
         method: &str,
         receiver: HeapId,
@@ -673,7 +718,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         .into(),
                 ))
             }
-            ("Map", "forEach", [function]) => {
+            ("Map", "forEach", [function, ..]) => {
                 // The durable call queue is updated by Map mutations while the
                 // callback is active. It therefore acts like ECMA's live ordered
                 // entry list, including delete-and-reinsert at the tail.
@@ -686,7 +731,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .collect();
                 // The queue holds one call per entry.
                 self.charge_intrinsic_work(calls.len());
-                self.begin_callback_driver(function.clone(), calls, false, true)?;
+                self.begin_callback_driver(
+                    function.clone(),
+                    calls,
+                    CallbackCompletion::Discard,
+                    true,
+                    args.get(1).cloned().unwrap_or(Value::Undefined),
+                )?;
                 None
             }
             ("Set", "has", [value]) => {
@@ -723,7 +774,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .into(),
                 ))
             }
-            ("Set", "forEach", [function]) => {
+            ("Set", "forEach", [function, ..]) => {
                 // As with Map, mutation maintains this durable pending queue as
                 // the live ordered Set contents change.
                 let calls: Vec<Vec<Value>> = self
@@ -735,7 +786,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .collect();
                 // The queue holds one call per member.
                 self.charge_intrinsic_work(calls.len());
-                self.begin_callback_driver(function.clone(), calls, false, true)?;
+                self.begin_callback_driver(
+                    function.clone(),
+                    calls,
+                    CallbackCompletion::Discard,
+                    true,
+                    args.get(1).cloned().unwrap_or(Value::Undefined),
+                )?;
                 None
             }
             (
@@ -1154,14 +1211,16 @@ pub(super) fn javascript_array_method(
             items,
             needle,
             clamp_relative_index(heap.javascript_to_number(from)?, items.len()),
+            // An inline list has no holes — every slot is present.
+            &|_| true,
         ),
         ("lastIndexOf", [needle, Value::Undefined]) if argument_count < 2 => {
-            array_last_index_of(items, needle, items.len())
+            array_last_index_of(items, needle, items.len(), &|_| true)
         }
         ("lastIndexOf", [needle, from]) => {
             last_index_exclusive(heap.javascript_to_number(from)?, items.len())
                 .map_or(Ok(Value::Number(-1.0)), |end| {
-                    array_last_index_of(items, needle, end)
+                    array_last_index_of(items, needle, end, &|_| true)
                 })
         }
         ("join", [separator]) => {

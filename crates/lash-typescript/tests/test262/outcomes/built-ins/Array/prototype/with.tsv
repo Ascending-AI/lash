@@ -11,11 +11,11 @@ test/built-ins/Array/prototype/with/index-throw-completion.js	refused	TS_NEW_UNS
 test/built-ins/Array/prototype/with/length-decreased-while-iterating.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Array/prototype/with/length-exceeding-array-length-limit.js	refused	TS_ACCESSOR_UNSUPPORTED
 test/built-ins/Array/prototype/with/length-increased-while-iterating.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Array/prototype/with/length-tolength.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/with/length-tolength.js	pass	-
 test/built-ins/Array/prototype/with/length.js	pass	-
 test/built-ins/Array/prototype/with/name.js	pass	-
 test/built-ins/Array/prototype/with/negative-fractional-index-truncated-to-zero.js	pass	-
 test/built-ins/Array/prototype/with/no-get-replaced-index.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Array/prototype/with/property-descriptor.js	pass	-
 test/built-ins/Array/prototype/with/this-value-boolean.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
-test/built-ins/Array/prototype/with/this-value-nullish.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/with/this-value-nullish.js	pass	-

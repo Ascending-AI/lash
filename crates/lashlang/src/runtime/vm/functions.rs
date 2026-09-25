@@ -1,4 +1,5 @@
 use super::*;
+use std::collections::BTreeSet;
 
 #[derive(Clone)]
 pub(super) struct CallFrame {
@@ -44,7 +45,9 @@ impl CallArguments<'_> {
 #[derive(Clone)]
 pub(super) enum ReturnTarget {
     Direct,
-    Callback(CallbackDriver),
+    /// Boxed: a callback driver carries the walk and the sort window, where
+    /// the common `Direct` frame is empty.
+    Callback(Box<CallbackDriver>),
     /// A guest `valueOf`/`toString` a coercion called (FIG-3652): its answer
     /// goes to the suspended instruction's log, not the operand stack.
     Coercion(CoercionDriver),
@@ -53,16 +56,94 @@ pub(super) enum ReturnTarget {
 #[derive(Clone)]
 pub(super) struct CallbackDriver {
     pub(super) function: Value,
-    /// Each item is an inline tuple of arguments for one callback invocation.
+    /// Each item is an inline tuple of arguments for one callback
+    /// invocation. For a `Queued` plan the still-pending tuples sit at
+    /// `next_index..`; an `array_like` walk materializes each tuple only as
+    /// it is issued, so `calls[next_index - 1]` is always the call that
+    /// just answered.
     pub(super) calls: Vec<Value>,
     pub(super) next_index: usize,
     pub(super) results: Vec<Value>,
     pub(super) completion: CallbackCompletion,
     pub(super) allow_effects: bool,
+    /// The receiver each callback runs with — the array methods' `thisArg`.
+    /// `undefined` for the collection methods, which pass no receiver.
+    pub(super) this_arg: Value,
     /// `calls[0]` is the rooted URLSearchParams receiver and `next_index` is
     /// the next live list index. The list is re-read after every callback so
     /// appends and deletions follow WHATWG iteration semantics.
     pub(super) live_url_search_params: bool,
+    /// `Some` when the pending invocations come from a live index walk over
+    /// a generic array-like receiver rather than a materialized `calls`
+    /// queue (FIG-3787). The walk resolves each index against the receiver
+    /// as it stands *then* — a callback's own writes are observed and its
+    /// deletes are skipped, ECMA's per-index `Has`/`Get` ordering — and a
+    /// `length` near `2**53` costs only the calls actually made.
+    pub(super) array_like: Option<ArrayLikeWalk>,
+}
+
+/// A lazy index walk over a generic array-like receiver — the pending-call
+/// source the callback methods use instead of a materialized tuple queue.
+#[derive(Clone)]
+pub(super) struct ArrayLikeWalk {
+    /// The receiver each index read runs against — and each callback's
+    /// final argument.
+    pub(super) receiver: Value,
+    /// Ascending: the first unvisited index. Descending: the next candidate,
+    /// visited then decremented; `u64::MAX` marks the walk exhausted once
+    /// index 0 has been visited (or the receiver had `length` 0).
+    pub(super) next: u64,
+    /// The receiver's `length`, read once when the walk began — ECMA's `len`
+    /// snapshot.
+    pub(super) length: u64,
+    /// Descending order (`findLast`/`findLastIndex`/`reduceRight`).
+    pub(super) descending: bool,
+    /// `true` gates each visit on a live `Has` — every/some/map/filter/
+    /// flatMap/forEach/reduce*; `false` visits every index in range (the
+    /// find family, and `Array.from`'s mapfn).
+    pub(super) gated: bool,
+    /// `Array.from`'s mapfn is `Call(mapfn, thisArg, «element, index»)` — two
+    /// arguments, where the prototype methods append the receiver.
+    pub(super) omit_receiver: bool,
+}
+
+/// A `function` index no compiled chunk provides: the marker a bound
+/// function's closure carries. `Function.prototype.bind` answers a
+/// `HeapObject::Closure` whose captures are `[target, receiver, boundArgs]`
+/// and whose function index is this sentinel — `begin_function_call` unwraps
+/// it into a call of `target` rather than pushing a frame. The wire shape is
+/// an ordinary closure, so a bound function snapshots, restores and is
+/// garbage-collected exactly as a closure is.
+pub(crate) const BOUND_FUNCTION_INDEX: u32 = u32::MAX;
+
+/// The in-flight ordering a comparator `sort` runs: a binary-search
+/// insertion sort whose comparisons are guest calls. Each completed answer
+/// narrows `current`'s window in `sorted`; when the window closes the next
+/// `pending` element starts a fresh search.
+#[derive(Clone)]
+pub(super) struct SortState {
+    /// The elements still to be inserted, in reverse visit order (the next
+    /// one pops off the back). `undefined` never reaches the comparator —
+    /// `undefined_count` appends it after the sorted defined elements.
+    pub(super) pending: Vec<Value>,
+    /// The sorted prefix.
+    pub(super) sorted: Vec<Value>,
+    /// The element the open binary search is placing.
+    pub(super) current: Value,
+    /// The `sorted` index the last comparator call probed.
+    pub(super) probe: usize,
+    /// The binary-search window in `sorted`: `lo..hi`.
+    pub(super) lo: usize,
+    pub(super) hi: usize,
+    /// How many present elements were `undefined`.
+    pub(super) undefined_count: u64,
+    /// The receiver the ordering writes back to (`sort`) or clones
+    /// (`toSorted`).
+    pub(super) receiver: Value,
+    /// The receiver's `length`.
+    pub(super) length: u64,
+    /// `sort` writes back; `toSorted` allocates a fresh dense array.
+    pub(super) in_place: bool,
 }
 
 /// A plain object's answer to a member call on a built-in method name.
@@ -83,10 +164,39 @@ const OBJECT_PROTOTYPE_METHODS: &[&str] = &[
     "valueOf",
 ];
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(super) enum CallbackCompletion {
     Collect,
     Discard,
+    /// `every`: the first falsy predicate result answers `false`; exhaustion
+    /// answers `true`.
+    Every,
+    /// `some`: the first truthy predicate result answers `true`; exhaustion
+    /// answers `false`.
+    Some,
+    /// `filter`: a truthy predicate result keeps its element — the first
+    /// argument of the call that produced it — in `results`.
+    Filter,
+    /// `find`/`findLast`: the first truthy predicate answers its element.
+    Find,
+    /// `findIndex`/`findLastIndex`: the first truthy predicate answers its
+    /// index — the second argument of the call that produced it.
+    FindIndex,
+    /// `map`: results fill a fresh dense array at their own indices; holes
+    /// stay holes.
+    Map {
+        length: u64,
+    },
+    /// `flatMap`: the collected results flatten one level into the answer.
+    FlatMap,
+    /// `reduce`/`reduceRight`: each result becomes the next call's
+    /// accumulator (its first argument); the last result is the answer.
+    Reduce {
+        accumulator: Value,
+    },
+    /// `sort`/`toSorted` with a comparator function: the insertion-sort
+    /// state machine above.
+    Sort(SortState),
 }
 
 pub(super) fn slot_names_for(chunk: &Chunk, active_function: Option<usize>) -> &[Name] {
@@ -290,9 +400,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             _ => return Ok(None),
         };
         Ok(match record.get(name) {
-            Some(member @ Value::Ref(id))
-                if matches!(self.heap.get(*id)?, HeapObject::Closure { .. }) =>
-            {
+            Some(member @ Value::Ref(id)) if self.heap.get(*id)?.is_function() => {
                 Some(PlainObjectMethod::Own(member.clone()))
             }
             Some(_) => Some(PlainObjectMethod::NotCallable),
@@ -368,8 +476,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// capture, so no frame carries a receiver it never reads.
     pub(super) fn begin_function_call(
         &mut self,
-        closure: Value,
-        receiver: Value,
+        mut callee: Value,
+        mut receiver: Value,
         mut args: CallArguments<'_>,
         return_target: ReturnTarget,
     ) -> Result<(), RuntimeError> {
@@ -377,9 +485,50 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if self.frames.len() as u64 >= limit {
             return Err(RuntimeError::FrameDepthExceeded { limit });
         }
-        let Value::Ref(id) = closure else {
+        // `Function.prototype.bind` products are closures on the sentinel
+        // index: a call unwraps them into a call of the bound target with
+        // the bound receiver and the bound arguments ahead of the call's
+        // own — iteratively, so `f.bind(a).bind(b)` costs no extra frames
+        // and `call`/`apply` chains of them stay in the one instruction.
+        while let Value::Ref(id) = &callee {
+            let HeapObject::Closure {
+                function, captures, ..
+            } = self.heap.get(*id)?
+            else {
+                break;
+            };
+            if *function != BOUND_FUNCTION_INDEX {
+                break;
+            }
+            let [target, bound_receiver, bound_args] = captures.as_slice() else {
+                return Err(RuntimeError::ValidationFailed {
+                    reason: "invalid bound-function captures".to_string(),
+                });
+            };
+            let mut bound = match bound_args {
+                Value::List(values) | Value::Tuple(values) => values.to_vec(),
+                Value::Ref(bound_id) => match self.heap.get(*bound_id)? {
+                    HeapObject::List(values) | HeapObject::Tuple(values) => values.clone(),
+                    _ => {
+                        return Err(RuntimeError::ValidationFailed {
+                            reason: "invalid bound-function argument list".to_string(),
+                        });
+                    }
+                },
+                _ => {
+                    return Err(RuntimeError::ValidationFailed {
+                        reason: "invalid bound-function argument list".to_string(),
+                    });
+                }
+            };
+            bound.extend(args.to_vec());
+            args = CallArguments::Owned(bound);
+            callee = target.clone();
+            receiver = bound_receiver.clone();
+        }
+        let Value::Ref(id) = callee else {
             return Err(RuntimeError::NonFunctionCall {
-                actual: crate::runtime::value_type_name(&closure).to_string(),
+                actual: crate::runtime::value_type_name(&callee).to_string(),
             });
         };
         // `arguments` materializes lazily through `Lash.Arguments` from the
@@ -394,11 +543,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
             } => (*function as usize, captures.clone()),
             HeapObject::BuiltinFunction(function) => {
                 let function = *function;
-                // A prototype-owned built-in is a method value: a detached
-                // call gives it an `undefined` receiver. Everything else —
-                // constructors, namespaces, statics — answers by name.
+                // A prototype-owned built-in is a method value: the receiver
+                // the call site carried is its `this` — a member call's own
+                // object, a `call`/`apply`/`bind` product's bound receiver,
+                // or `undefined` for a detached plain call (FIG-3787).
                 if function.prototype().is_some() {
-                    return self.call_detached_builtin(function, &args.into_owned(), return_target);
+                    return self.call_detached_builtin(
+                        function,
+                        receiver,
+                        args.into_owned(),
+                        return_target,
+                    );
                 }
                 return self.call_builtin(function, args, return_target);
             }
@@ -548,21 +703,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 ReturnTarget::Callback(callback) => callback,
             };
             {
-                if matches!(callback.completion, CallbackCompletion::Collect) {
-                    // A heap reference is the value the callback returned: a
-                    // copy would be a different object (ECMA identity) and
-                    // would copy the binding cells a returned closure shares.
-                    // Only an inline compound is given its own object.
-                    let result = match result {
-                        Value::Ref(_) => result,
-                        result => {
-                            let (isolated, staged) = self.heap.isolate_value_with_work(&result)?;
-                            // The result copy walks every object it reaches.
-                            charge_collection_work(&mut self.instructions_executed, staged);
-                            isolated
-                        }
-                    };
-                    callback.results.push(result);
+                // The just-finished call's result folds into the completion
+                // state first: an early answer (`every`/`some`/`find*`), a
+                // kept element (`filter`), the next accumulator (`reduce`),
+                // or the sort's next comparison.
+                if let Some(done) = self.callback_result(&mut callback, &result)? {
+                    self.stack.push(done);
+                    return Ok(());
                 }
                 let call = if callback.live_url_search_params {
                     let Value::Ref(receiver) = callback.calls[0] else {
@@ -587,32 +734,46 @@ impl<H: ExecutionHost> Vm<'_, H> {
                                 .into(),
                             )
                         })
+                } else if callback.array_like.is_some() {
+                    // The generic array-like walk resolves each index live
+                    // and appends the produced tuple to `calls`, keeping the
+                    // `calls[next_index - 1]` convention the element-keyed
+                    // completions read.
+                    match self.array_like_next_call(&mut callback)? {
+                        Some(arguments) => {
+                            let call = Value::Tuple(arguments.into());
+                            callback.calls.push(call.clone());
+                            Some(call)
+                        }
+                        None => None,
+                    }
                 } else {
                     callback.calls.get(callback.next_index).cloned()
                 };
                 if let Some(call) = call {
                     callback.next_index += 1;
                     let function = callback.function.clone();
+                    let this_arg = callback.this_arg.clone();
                     // Each builtin-initiated frame push has the same unit cost
                     // as an explicit `Call` opcode.
                     self.instructions_executed = self.instructions_executed.saturating_add(1);
                     let arguments = callback_arguments(call)?;
                     if let Some(builtin) = self.builtin_callee(&function)? {
-                        result = self.detached_builtin_result(builtin, &arguments)?;
+                        // A built-in callback answers synchronously — the
+                        // method's receiver is the callback's `this`.
+                        result = self.detached_builtin_result(builtin, &this_arg, &arguments)?;
                         return_target = ReturnTarget::Callback(callback);
                         continue;
                     }
                     return self.begin_function_call(
                         function,
-                        Value::Undefined,
+                        this_arg,
                         CallArguments::Borrowed(&arguments),
                         ReturnTarget::Callback(callback),
                     );
                 }
-                self.stack.push(match callback.completion {
-                    CallbackCompletion::Collect => Value::List(callback.results.into()),
-                    CallbackCompletion::Discard => Value::Undefined,
-                });
+                let finished = self.callback_finish(&callback)?;
+                self.stack.push(finished);
                 return Ok(());
             }
         }
@@ -858,23 +1019,328 @@ impl<H: ExecutionHost> Vm<'_, H> {
         Ok(result)
     }
 
+    /// Folds a completed callback's `result` into the driver's completion
+    /// state. `Some` answers the whole driven call early; `None` lets the
+    /// next pending call run.
+    fn callback_result(
+        &mut self,
+        callback: &mut CallbackDriver,
+        result: &Value,
+    ) -> Result<Option<Value>, RuntimeError> {
+        match &mut callback.completion {
+            CallbackCompletion::Collect
+            | CallbackCompletion::Map { .. }
+            | CallbackCompletion::FlatMap => {
+                // A heap reference is the value the callback returned: a copy
+                // would be a different object (ECMA identity) and would copy
+                // the binding cells a returned closure shares. Only an inline
+                // compound is given its own object.
+                let result = match result {
+                    Value::Ref(_) => result.clone(),
+                    result => {
+                        let (isolated, staged) = self.heap.isolate_value_with_work(result)?;
+                        charge_collection_work(&mut self.instructions_executed, staged);
+                        isolated
+                    }
+                };
+                callback.results.push(result);
+                Ok(None)
+            }
+            CallbackCompletion::Discard => Ok(None),
+            CallbackCompletion::Every => {
+                Ok((!self.is_truthy_for_dialect(result)?).then_some(Value::Bool(false)))
+            }
+            CallbackCompletion::Some => {
+                Ok((self.is_truthy_for_dialect(result)?).then_some(Value::Bool(true)))
+            }
+            CallbackCompletion::Filter => {
+                if self.is_truthy_for_dialect(result)? {
+                    callback.results.push(callback_call_arg(
+                        &callback.calls,
+                        callback.next_index,
+                        0,
+                    ));
+                }
+                Ok(None)
+            }
+            CallbackCompletion::Find => Ok(self
+                .is_truthy_for_dialect(result)?
+                .then(|| callback_call_arg(&callback.calls, callback.next_index, 0))),
+            CallbackCompletion::FindIndex => Ok(self
+                .is_truthy_for_dialect(result)?
+                .then(|| callback_call_arg(&callback.calls, callback.next_index, 1))),
+            CallbackCompletion::Reduce { accumulator } => {
+                // The result is the next call's accumulator — the first
+                // argument of `reduce`'s `(acc, item, i, o)` shape — and the
+                // answer once the walk exhausts.
+                *accumulator = result.clone();
+                Ok(None)
+            }
+            CallbackCompletion::Sort(_) => self.sort_callback_result(callback, result),
+        }
+    }
+
+    /// A comparator `sort`'s step: narrow `current`'s insertion window by the
+    /// comparison the callback answered, and when it closes place `current`
+    /// and open the next element's search. The answer arrives when every
+    /// pending element has been placed.
+    fn sort_callback_result(
+        &mut self,
+        callback: &mut CallbackDriver,
+        result: &Value,
+    ) -> Result<Option<Value>, RuntimeError> {
+        let CallbackCompletion::Sort(state) = &mut callback.completion else {
+            unreachable!("sort_callback_result only runs for a Sort completion")
+        };
+        // The comparator's answer coerces by ToNumber; a value that needs a
+        // guest hook cannot suspend from a callback return, so it refuses
+        // rather than silently ordering by `NaN`.
+        let primitive = matches!(
+            result,
+            Value::Null | Value::Undefined | Value::Bool(_) | Value::Number(_) | Value::String(_)
+        );
+        let comparison = match self.heap.javascript_to_number(result) {
+            Ok(number) => number,
+            Err(error) => {
+                if primitive {
+                    return Err(error);
+                }
+                return Err(RuntimeError::ValidationFailed {
+                    reason: "TS_SORT_COMPARATOR_HOOK_UNSUPPORTED: a comparator answer needing a guest hook cannot run inside a callback return".to_string(),
+                });
+            }
+        };
+        if !matches!(comparison.partial_cmp(&0.0), Some(std::cmp::Ordering::Less)) {
+            // `>= 0` and `NaN` both place `current` after the probe — ECMA
+            // keeps an unstable-but-defined order for both.
+            state.lo = state.probe + 1;
+        } else {
+            state.hi = state.probe;
+        }
+        if state.lo < state.hi {
+            // The search continues: enqueue the next probe as the driver's
+            // next call.
+            state.probe = state.lo + (state.hi - state.lo) / 2;
+            let call =
+                Value::Tuple(vec![state.current.clone(), state.sorted[state.probe].clone()].into());
+            callback.calls.truncate(callback.next_index);
+            callback.calls.push(call);
+            return Ok(None);
+        }
+        state.sorted.insert(state.lo, state.current.clone());
+        let Some(next) = state.pending.pop() else {
+            // The ordering is complete: sorted defined elements, then the
+            // `undefined` elements, then the holes the receiver keeps.
+            let mut ordered = std::mem::take(&mut state.sorted);
+            ordered.extend(std::iter::repeat_n(
+                Value::Undefined,
+                state.undefined_count as usize,
+            ));
+            let receiver = state.receiver.clone();
+            let length = state.length;
+            let in_place = state.in_place;
+            return if in_place {
+                self.array_like_write_back(&receiver, length, ordered)?;
+                let receiver = self.array_like_receiver_object(&receiver);
+                Ok(Some(receiver))
+            } else {
+                ordered.resize(length.min(usize::MAX as u64) as usize, Value::Undefined);
+                self.heap.allocate_list(ordered).map(Some)
+            };
+        };
+        state.current = next;
+        state.lo = 0;
+        state.hi = state.sorted.len();
+        state.probe = state.hi / 2;
+        let call =
+            Value::Tuple(vec![state.current.clone(), state.sorted[state.probe].clone()].into());
+        callback.calls.truncate(callback.next_index);
+        callback.calls.push(call);
+        Ok(None)
+    }
+
+    /// The driver's answer when its pending calls run out — each completion's
+    /// exhaustion value.
+    fn callback_finish(&mut self, callback: &CallbackDriver) -> Result<Value, RuntimeError> {
+        Ok(match &callback.completion {
+            CallbackCompletion::Collect => Value::List(callback.results.clone().into()),
+            CallbackCompletion::Discard => Value::Undefined,
+            CallbackCompletion::Every => Value::Bool(true),
+            CallbackCompletion::Some | CallbackCompletion::Find => Value::Undefined,
+            // `findIndex`'s miss and `some`'s miss differ: one is `-1`.
+            CallbackCompletion::FindIndex => Value::Number(-1.0),
+            CallbackCompletion::Filter | CallbackCompletion::FlatMap => {
+                let mut items = Vec::new();
+                for result in &callback.results {
+                    match result {
+                        Value::List(values) | Value::Tuple(values)
+                            if matches!(callback.completion, CallbackCompletion::FlatMap) =>
+                        {
+                            items.extend(values.iter().cloned());
+                        }
+                        Value::Ref(id)
+                            if matches!(callback.completion, CallbackCompletion::FlatMap) =>
+                        {
+                            match self.heap.get(*id)? {
+                                HeapObject::List(values) | HeapObject::Tuple(values) => {
+                                    items.extend(values.iter().cloned());
+                                }
+                                _ => items.push(result.clone()),
+                            }
+                        }
+                        _ => items.push(result.clone()),
+                    }
+                }
+                self.heap.allocate_list(items)?
+            }
+            CallbackCompletion::Map { length } => {
+                // Each result lands at the index its call carried; positions
+                // no call visited stay holes.
+                let mut written: Vec<(u64, Value)> = Vec::with_capacity(callback.results.len());
+                for (position, result) in callback.results.iter().enumerate() {
+                    let index = match callback.calls.get(position) {
+                        Some(Value::Tuple(arguments)) => match arguments.get(1) {
+                            Some(Value::Number(index)) => *index as u64,
+                            _ => continue,
+                        },
+                        _ => continue,
+                    };
+                    written.push((index, result.clone()));
+                }
+                if *length > u32::MAX as u64 {
+                    return Err(RuntimeError::range_error("Invalid array length"));
+                }
+                self.heap.ensure_list_allocation_len(*length as usize)?;
+                let mut items = vec![Value::Undefined; *length as usize];
+                let mut holes: BTreeSet<usize> = (0..*length as usize).collect();
+                for (index, value) in written {
+                    if index < *length {
+                        items[index as usize] = value;
+                        holes.remove(&(index as usize));
+                    }
+                }
+                let list = self.heap.allocate_list(items)?;
+                if let Value::Ref(id) = list {
+                    self.heap.mark_list_holes(id, holes);
+                }
+                list
+            }
+            // `reduce`'s answer is the accumulator the last callback left —
+            // or the seed the walk started with when no index was present.
+            CallbackCompletion::Reduce { accumulator } => accumulator.clone(),
+            CallbackCompletion::Sort(state) => {
+                // All elements were placed before the queue ran dry — the
+                // one-element fast path that never issued a comparison.
+                let mut ordered = state.sorted.clone();
+                ordered.extend(std::iter::repeat_n(
+                    Value::Undefined,
+                    state.undefined_count as usize,
+                ));
+                if state.in_place {
+                    self.array_like_write_back(&state.receiver, state.length, ordered)?;
+                    self.array_like_receiver_object(&state.receiver)
+                } else {
+                    ordered.resize(
+                        state.length.min(usize::MAX as u64) as usize,
+                        Value::Undefined,
+                    );
+                    self.heap.allocate_list(ordered)?
+                }
+            }
+        })
+    }
+
+    /// Starts the callback driver over a comparator `sort`'s first probe.
+    /// `state` is the ready search over the receiver's present defined
+    /// elements.
+    pub(super) fn begin_sort_driver(
+        &mut self,
+        comparator: Value,
+        mut state: SortState,
+    ) -> Result<(), RuntimeError> {
+        // The first element needs no comparison; each later element opens a
+        // binary-search probe against the sorted prefix. A closed window
+        // places `current` and takes the next pending element until either a
+        // probe is issued or the ordering is complete.
+        loop {
+            if state.lo < state.hi {
+                state.probe = state.lo + (state.hi - state.lo) / 2;
+                let first = vec![state.current.clone(), state.sorted[state.probe].clone()];
+                // `calls[0]` is the call being issued: the driver convention
+                // reads the completed call as `calls[next_index - 1]` and the
+                // next one as `calls[next_index]`.
+                let callback = CallbackDriver {
+                    function: comparator.clone(),
+                    calls: vec![Value::Tuple(first.clone().into())],
+                    next_index: 1,
+                    results: Vec::new(),
+                    completion: CallbackCompletion::Sort(state),
+                    allow_effects: true,
+                    this_arg: Value::Undefined,
+                    live_url_search_params: false,
+                    array_like: None,
+                };
+                return self.begin_function_call(
+                    comparator,
+                    Value::Undefined,
+                    CallArguments::Owned(first),
+                    ReturnTarget::Callback(Box::new(callback)),
+                );
+            }
+            state.sorted.insert(state.lo, state.current.clone());
+            let Some(next) = state.pending.pop() else {
+                break;
+            };
+            state.current = next;
+            state.lo = 0;
+            state.hi = state.sorted.len();
+        }
+        // A sorted-empty or single-element receiver answers without a single
+        // comparator call.
+        let mut ordered = state.sorted;
+        ordered.extend(std::iter::repeat_n(
+            Value::Undefined,
+            state.undefined_count as usize,
+        ));
+        let result = if state.in_place {
+            self.array_like_write_back(&state.receiver, state.length, ordered)?;
+            state.receiver
+        } else {
+            ordered.resize(
+                state.length.min(usize::MAX as u64) as usize,
+                Value::Undefined,
+            );
+            self.heap.allocate_list(ordered)?
+        };
+        self.stack.push(result);
+        Ok(())
+    }
+
     pub(super) fn begin_callback_driver(
         &mut self,
         function: Value,
         calls: Vec<Vec<Value>>,
-        collect_results: bool,
+        completion: CallbackCompletion,
         allow_effects: bool,
+        this_arg: Value,
     ) -> Result<(), RuntimeError> {
         let calls = calls
             .into_iter()
             .map(|arguments| Value::Tuple(arguments.into()))
             .collect::<Vec<_>>();
         if calls.is_empty() {
-            self.stack.push(if collect_results {
-                Value::List(Vec::new().into())
-            } else {
-                Value::Undefined
-            });
+            let finished = self.callback_finish(&CallbackDriver {
+                function: function.clone(),
+                calls: Vec::new(),
+                next_index: 0,
+                results: Vec::new(),
+                completion,
+                allow_effects,
+                this_arg: this_arg.clone(),
+                live_url_search_params: false,
+                array_like: None,
+            })?;
+            self.stack.push(finished);
             return Ok(());
         }
         // The queue writes one call per element it was built from.
@@ -885,19 +1351,62 @@ impl<H: ExecutionHost> Vm<'_, H> {
             calls,
             next_index: 1,
             results: Vec::new(),
-            completion: if collect_results {
-                CallbackCompletion::Collect
-            } else {
-                CallbackCompletion::Discard
-            },
+            completion,
             allow_effects,
+            this_arg: this_arg.clone(),
             live_url_search_params: false,
+            array_like: None,
         };
         self.begin_function_call(
             function,
-            Value::Undefined,
+            this_arg,
             CallArguments::Borrowed(&first),
-            ReturnTarget::Callback(callback),
+            ReturnTarget::Callback(Box::new(callback)),
+        )
+    }
+
+    /// Starts the callback driver over a generic array-like `walk` — the
+    /// generic `Array.prototype` methods' pending-call source (FIG-3787).
+    /// The first call is materialized the same way every later one is: the
+    /// walk resolves its index against the live receiver and the produced
+    /// tuple joins `calls` as the driver's history.
+    pub(super) fn begin_array_like_driver(
+        &mut self,
+        function: Value,
+        walk: ArrayLikeWalk,
+        completion: CallbackCompletion,
+        this_arg: Value,
+        return_target: ReturnTarget,
+    ) -> Result<(), RuntimeError> {
+        if !matches!(return_target, ReturnTarget::Direct) {
+            return Err(RuntimeError::ValidationFailed {
+                reason: "TS_NESTED_DRIVER_UNSUPPORTED: a callback method reached as a callback cannot suspend".to_string(),
+            });
+        }
+        let mut callback = CallbackDriver {
+            function: function.clone(),
+            calls: Vec::new(),
+            next_index: 0,
+            results: Vec::new(),
+            completion,
+            allow_effects: true,
+            this_arg: this_arg.clone(),
+            live_url_search_params: false,
+            array_like: Some(walk),
+        };
+        let Some(arguments) = self.array_like_next_call(&mut callback)? else {
+            let finished = self.callback_finish(&callback)?;
+            self.stack.push(finished);
+            return Ok(());
+        };
+        callback.calls.push(Value::Tuple(arguments.into()));
+        callback.next_index = 1;
+        let call = callback_arguments(callback.calls[0].clone())?;
+        self.begin_function_call(
+            function,
+            this_arg,
+            CallArguments::Borrowed(&call),
+            ReturnTarget::Callback(Box::new(callback)),
         )
     }
 
@@ -932,13 +1441,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
             results: Vec::new(),
             completion: CallbackCompletion::Discard,
             allow_effects: true,
+            this_arg: Value::Undefined,
             live_url_search_params: true,
+            array_like: None,
         };
         self.begin_function_call(
             function,
             Value::Undefined,
             CallArguments::Owned(first),
-            ReturnTarget::Callback(callback),
+            ReturnTarget::Callback(Box::new(callback)),
         )
     }
 }
@@ -967,7 +1478,7 @@ fn live_collection_callbacks(
         let ReturnTarget::Callback(callback) = &mut frame.return_target else {
             return None;
         };
-        callback_targets_receiver(callback, receiver).then_some(callback)
+        callback_targets_receiver(callback, receiver).then_some(callback.as_mut())
     })
 }
 
@@ -984,6 +1495,15 @@ fn clear_pending_calls(frames: &mut [CallFrame], receiver: HeapId) -> usize {
         callback.calls.truncate(callback.next_index);
     }
     work
+}
+
+/// The `arg`-th argument of the call that just completed — `calls[next_index
+/// - 1]` — for the element-keyed completions.
+fn callback_call_arg(calls: &[Value], next_index: usize, arg: usize) -> Value {
+    match calls.get(next_index.saturating_sub(1)) {
+        Some(Value::Tuple(arguments)) => arguments.get(arg).cloned().unwrap_or(Value::Undefined),
+        _ => Value::Undefined,
+    }
 }
 
 fn callback_arguments(call: Value) -> Result<ListValue, RuntimeError> {

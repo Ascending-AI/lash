@@ -1,0 +1,68 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+FIG-3787	1	accept	"(() => { const f = function (a, b) { return a + b; }; return f.call(null, 1, 2); })()"	"3"	-
+FIG-3787	2	accept	"(() => { const f = function (a, b) { return a * b; }; return f.apply(null, [3, 4]); })()"	"12"	-
+FIG-3787	3	accept	"(() => { const f = function () { return arguments.length; }; return f.apply(null, [1, 2, 3]); })()"	"3"	-
+FIG-3787	4	accept	"(() => { const f = function (a, b) { return a + b; }; return f.apply(null, { 0: 'x', 1: 'y', length: 2 }); })()"	"xy"	-
+FIG-3787	5	accept	"(() => { const f = function (a, b) { return a - b; }; return f.bind(null, 10)(3); })()"	"7"	-
+FIG-3787	6	accept	"(() => { const f = function (a, b) { return this.k * 100 + a * 10 + b; }; return f.bind({ k: 1 }, 2).bind(null, 9)(3); })()"	"129"	-
+FIG-3787	7	accept	"(() => { const o = { x: 7, f(a) { return this.x + a; } }; return o.f.call({ x: 1 }, 5); })()"	"6"	-
+FIG-3787	8	accept	"Function.prototype.call.call(function (a) { return a + 1; }, null, 4)"	"5"	-
+FIG-3787	9	accept	"(() => { const o = { k: 1, f() { return this.k; } }; return o.f(); })()"	"1"	-
+FIG-3787	10	accept	"(() => { const o = { k: 2, f: function () { return this.k; } }; const m = 'f'; return o[m](); })()"	"2"	-
+FIG-3787	11	accept	"(() => { const o = { k: 3, f() { return [1, 2].map((x) => this.k + x).join(); } }; return o.f(); })()"	"4,5"	-
+FIG-3787	12	accept	"(() => { const o = { k: 4, f() { return this; } }; const g = o.f; return String(g()); })()"	"undefined"	-
+FIG-3787	13	accept	"(() => { const a = { b() { return this.c; }, c: 6 }; return String((a?.b)()) + String(a.b?.()); })()"	"66"	-
+FIG-3787	14	accept	"(() => { const o = { n: 0, inc() { this.n++; return this.n; } }; o.inc(); return o.inc(); })()"	"2"	-
+FIG-3787	15	accept	"(() => { const o = { f() { return this; } }; return o.f() === o; })()"	"true"	-
+FIG-3787	16	accept	"(() => { const m = Array.prototype.pop; const o = { 0: 'a', 1: 'b', length: 2 }; return m.call(o) + ':' + o.length; })()"	"b:1"	-
+FIG-3787	17	accept	"(() => { const o = { 0: 'a', 1: 'b', length: 2 }; o.pop = Array.prototype.pop; return o.pop() + ':' + o.length + ':' + o[0]; })()"	"b:1:a"	-
+FIG-3787	18	accept	"(() => { const o = { length: 0 }; o.push = Array.prototype.push; return o.push('x', 'y') + ':' + o[0] + o[1]; })()"	"2:xy"	-
+FIG-3787	19	accept	"(() => { const o = { toString() { return 'AB'; } }; return String.prototype.toLowerCase.call(o); })()"	"ab"	-
+FIG-3787	20	accept	"String.prototype.trim.call({ toString() { return '  x  ' } })"	"x"	-
+FIG-3787	21	accept	"(() => { const join = Array.prototype.join; return join.call({ 0: 'x', 1: 'y', length: 2 }, '|'); })()"	"x|y"	-
+FIG-3787	22	accept	"(() => { const o = { length: 0 }; Array.prototype.push.apply(o, ['a', 'b']); return o.length + ':' + o[1]; })()"	"2:b"	-
+FIG-3787	23	accept	"(() => { const g = Array.prototype.join.bind({ 0: 'a', 1: 'b', length: 2 }, '-'); return g(); })()"	"a-b"	-
+FIG-3787	24	accept	"(() => { try { Array.prototype.pop(); return 'returned'; } catch (e) { return e.name; } })()"	"returned"	-
+FIG-3787	25	accept	"(() => { try { Array.prototype.pop.call(null); return 'returned'; } catch (e) { return e.name; } })()"	"TypeError"	-
+FIG-3787	26	accept	"Array.prototype.join.call('ab', '-')"	"a-b"	-
+FIG-3787	27	accept	"Number.prototype.toFixed.call(1.2345, 2)"	"1.23"	-
+FIG-3787	28	accept	"({ k: 1, sort(c) { return this.k; } }).sort((a, b) => a - b)"	"1"	-
+FIG-3787	29	accept	"({ hasOwnProperty(k) { return 'own'; } }).hasOwnProperty('a')"	"own"	-
+FIG-3787	30	accept	"({ replace(a, fn) { return 'own:' + fn(); }, indexOf() { return 0; } }).replace('x', () => 'y')"	"own:y"	-
+FIG-3787	31	accept	"(() => { const t = { k: 5 }; return [1, 2].map(function (x) { return this.k + x; }, t).join(','); })()"	"6,7"	-
+FIG-3787	32	accept	"(() => { const t = { p: '>' }; const s = []; Array.prototype.forEach.call({ 0: 'a', 1: 'b', length: 2 }, function (v) { s.push(this.p + v); }, t); return s.join(','); })()"	">a,>b"	-
+FIG-3787	33	accept	"(() => { const a = [0, 1, 2, 3]; const s = []; a.forEach((v, k, arr) => { if (k === 0) { delete arr[1]; } s.push(v); }); return s.join(','); })()"	"0,2,3"	-
+FIG-3787	34	accept	"(() => { const a = [0, 1, 2]; const s = []; a.forEach((v, k, arr) => { s.push(v); if (k === 0) { arr[3] = 9; } }); return s.join(',') + ':' + a.length; })()"	"0,1,2:4"	-
+FIG-3787	35	accept	"(() => { const r = [1, , 3].map((v) => v * 2); return [r.length, 0 in r, 1 in r, 2 in r, r[0], r[2]].join(':'); })()"	"3:true:false:true:2:6"	-
+FIG-3787	36	accept	"(() => { const a = [1, , 3]; delete a[0]; return [a.hasOwnProperty(0), a.hasOwnProperty(1), a.hasOwnProperty(2)].join(':'); })()"	"false:false:true"	-
+FIG-3787	37	accept	"[0, , 2].indexOf(undefined)"	"-1"	-
+FIG-3787	38	accept	"[0, , 2].includes(undefined)"	"true"	-
+FIG-3787	39	accept	"[0, , 0].lastIndexOf(0)"	"2"	-
+FIG-3787	40	accept	"String([1, , 3].find((v) => v === undefined))"	"undefined"	-
+FIG-3787	41	accept	"(() => { const a = [0, 1, , , 1]; a.copyWithin(0, 1, 4); return [a.hasOwnProperty(0), a.hasOwnProperty(1), a.hasOwnProperty(4), a[0], a[4]].join(':'); })()"	"true:false:true:1:1"	-
+FIG-3787	42	accept	"(() => { const a = [1, , 3]; a.reverse(); return [a.hasOwnProperty(0), a.hasOwnProperty(2), a[0], a[2]].join(':'); })()"	"true:true:3:1"	-
+FIG-3787	43	accept	"(() => { const a = [1, , 3]; a.fill(9, 1, 2); return [a[0], a[1], a[2], 1 in a].join(':'); })()"	"1:9:3:true"	-
+FIG-3787	44	accept	"(() => { const o = { 0: 5, 1: 9, length: 2 }; Array.prototype.copyWithin.call(o, 1, 0); return [o[0], o[1]].join(','); })()"	"5,5"	-
+FIG-3787	45	accept	"(() => { const o = { 0: 'a', 1: 'b', 2: 'c', length: 3 }; const r = Array.prototype.splice.call(o, 1, 1, 'X'); return r.join(',') + '|' + [o[0], o[1], o[2]].join('') + o.length; })()"	"b|aXc3"	-
+FIG-3787	46	accept	"(() => { const o = { 0: 1, 1: 2, 2: 3, length: 3 }; return Array.prototype.reduce.call(o, (a, v) => a + v, 10); })()"	"16"	-
+FIG-3787	47	accept	"(() => { try { Array.prototype.reduce.call([], (a, b) => a + b); return 'returned'; } catch (e) { return e.name; } })()"	"TypeError"	-
+FIG-3787	48	accept	"(() => { const o = { length: 4294967296, 4294967295: 'z' }; let c = 0; Array.prototype.forEach.call(o, () => { c += 1; }); return c; })()"	"1"	-
+FIG-3787	49	accept	"(() => { const al = {}; al['9007199254740987'] = 'B'; al['9007199254740988'] = 'C'; al.length = Math.pow(2, 53) + 2; const r = Array.prototype.splice.call(al, 9007199254740987, 1); return [r.join(','), al.length, al['9007199254740987'], '9007199254740988' in al].join(':'); })()"	"B:9007199254740990:C:false"	-
+FIG-3787	50	accept	"Array.of.call(undefined, 1, 2).join(',')"	"1,2"	-
+FIG-3787	51	accept	"Array.from.call(undefined, { 0: 'a', 1: 'b', length: 2 }).join(',')"	"a,b"	-
+FIG-3787	52	accept	"Array.from({ 0: 'x', 2: 'z', length: 3 }).join(',')"	"x,,z"	-
+FIG-3787	53	accept	"Array.from({ 0: 1, 1: 2, length: 2 }, (v, i) => v * 10 + i).join(',')"	"10,21"	-
+FIG-3787	54	accept	"(() => { try { Array.from(null); return 'returned'; } catch (e) { return e.name; } })()"	"TypeError"	-
+FIG-3787	55	accept	"(() => { const calls = []; const d = { valueOf() { calls.push('v'); return 0; }, toISOString() { calls.push('i'); return 'ISO'; } }; return Date.prototype.toJSON.call(d) + ':' + calls.join(''); })()"	"ISO:vi"	-
+FIG-3787	56	accept	"(() => { const r = {}; return Date.prototype.toJSON.call({ toISOString() { return r; } }) === r; })()"	"true"	-
+FIG-3787	57	accept	"String(Date.prototype.toJSON.call({ valueOf() { return NaN; } }))"	"null"	-
+FIG-3787	58	accept	"Object.prototype.toString.call([1, 2])"	"[object Array]"	-
+FIG-3787	59	accept	"Object.prototype.toString.call('s') + '|' + Object.prototype.toString.call(1) + '|' + Object.prototype.toString.call(true)"	"[object String]|[object Number]|[object Boolean]"	-
+FIG-3787	60	accept	"(() => { const argObj = (function () { return arguments; })(1, 2); return Object.prototype.toString.call(argObj); })()"	"[object Arguments]"	-
+FIG-3787	61	accept	"(() => { const argObj = (function () { return arguments; })(1, 2, false); return Array.prototype.indexOf.call(argObj, false); })()"	"2"	-
+FIG-3787	62	accept	"(() => { const argObj = (function () { return arguments; })(1, 2); return Array.prototype.join.call(argObj, '-'); })()"	"1-2"	-
+FIG-3787	63	accept	"(() => { const argObj = (function () { return arguments; })(1, 2); return String.prototype.trim.call(argObj); })()"	"[object Arguments]"	-
+FIG-3787	64	accept	"typeof Object.prototype.valueOf.call('s')"	"object"	-
+FIG-3787	65	accept	"(() => { const o = { valueOf() { return 4; } }; return String.prototype.padStart.call('ab', o, 'q'); })()"	"qqab"	-
+FIG-3787	66	accept	"(() => { try { Number.prototype.toFixed.call(1.5, { valueOf: undefined, toString: undefined }); return 'returned'; } catch (e) { return e.name; } })()"	"TypeError"	-
+FIG-3787	67	accept	"(() => { try { Function.prototype.toString.call(42); return 'returned'; } catch (e) { return e.name; } })()"	"TypeError"	-

@@ -47,7 +47,7 @@ test/built-ins/Object/S15.2.2.1_A6_T2.js	refused	TS_NEW_UNSUPPORTED
 test/built-ins/Object/S15.2.2.1_A6_T3.js	refused	TS_SEQUENCE_UNSUPPORTED
 test/built-ins/Object/S15.2.3_A1.js	pass	-
 test/built-ins/Object/S15.2.3_A2.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Object/S15.2.3_A3.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/S15.2.3_A3.js	pass	-
 test/built-ins/Object/S15.2_A1.js	refused	TS_THIS_UNSUPPORTED
 test/built-ins/Object/S9.9_A3.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Object/S9.9_A4.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED

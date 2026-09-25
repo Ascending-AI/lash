@@ -76,40 +76,34 @@ pub(super) fn validate_program_continuation(
             .return_instruction_pointer
             .checked_sub(1)
             .and_then(|index| chunk.code.get(index));
-        let return_site_matches = matches!(
-            (call_instruction, &frame.return_target),
+        let return_site_matches = match (call_instruction, &frame.return_target) {
             (
                 Some(
                     Instruction::Call { .. }
-                        | Instruction::CallMethod { .. }
-                        | Instruction::CallDynamic
-                        | Instruction::CallMethodDynamic
-                        | Instruction::Intrinsic(IntrinsicOp::JavaScriptStdlib(_))
+                    | Instruction::CallMethod { .. }
+                    | Instruction::CallDynamic
+                    | Instruction::CallMethodDynamic
+                    | Instruction::Intrinsic(IntrinsicOp::JavaScriptStdlib(_)),
                 ),
-                VmFrameReturnContinuation::Direct
-            ) | (
-                Some(Instruction::AsyncMap),
-                VmFrameReturnContinuation::Callback {
-                    completion: VmCallbackCompletion::Collect,
-                    allow_effects: true,
-                    ..
-                },
-            ) | (
-                Some(Instruction::Map),
-                VmFrameReturnContinuation::Callback {
-                    completion: VmCallbackCompletion::Collect,
-                    allow_effects: false,
-                    ..
-                },
-            ) | (
+                VmFrameReturnContinuation::Direct,
+            ) => true,
+            (Some(Instruction::AsyncMap), VmFrameReturnContinuation::Callback(callback)) => {
+                matches!(callback.completion, VmCallbackCompletion::Collect)
+                    && callback.allow_effects
+            }
+            (Some(Instruction::Map), VmFrameReturnContinuation::Callback(callback)) => {
+                matches!(callback.completion, VmCallbackCompletion::Collect)
+                    && !callback.allow_effects
+            }
+            (
                 Some(Instruction::Intrinsic(IntrinsicOp::JavaScriptStdlib(_))),
-                VmFrameReturnContinuation::Callback {
-                    completion: VmCallbackCompletion::Discard,
-                    allow_effects: true,
-                    ..
-                },
-            )
-        );
+                VmFrameReturnContinuation::Callback(callback),
+            ) => {
+                matches!(callback.completion, VmCallbackCompletion::Discard)
+                    && callback.allow_effects
+            }
+            _ => false,
+        };
         if !return_site_matches {
             return Err(ContinuationError::InvalidReturnSite {
                 frame: frame_index,

@@ -8,7 +8,7 @@ test/built-ins/Array/prototype/concat/S15.4.4.4_A1_T2.js	refused	TS_NEW_UNSUPPOR
 test/built-ins/Array/prototype/concat/S15.4.4.4_A1_T3.js	refused	TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED
 test/built-ins/Array/prototype/concat/S15.4.4.4_A1_T4.js	refused	TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED
 test/built-ins/Array/prototype/concat/S15.4.4.4_A2_T1.js	refused	TS_NEW_UNSUPPORTED
-test/built-ins/Array/prototype/concat/S15.4.4.4_A2_T2.js	fail	FIG-3700
+test/built-ins/Array/prototype/concat/S15.4.4.4_A2_T2.js	refused	TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED
 test/built-ins/Array/prototype/concat/S15.4.4.4_A3_T1.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Array/prototype/concat/S15.4.4.4_A3_T2.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Array/prototype/concat/S15.4.4.4_A3_T3.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED

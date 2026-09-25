@@ -750,7 +750,7 @@ impl Heap {
         self.commit_object_update(id, object)
     }
 
-    pub(super) fn commit_object_update(
+    pub(crate) fn commit_object_update(
         &mut self,
         id: HeapId,
         object: HeapObject,
@@ -888,6 +888,13 @@ impl Heap {
                 GuestPrimitive::Value(primitive) => return Ok(primitive),
                 GuestPrimitive::Tag => {}
             }
+        }
+        // An `arguments` object is a marked record; its `[[Class]]`-style tag
+        // is `Arguments`, which is what a hookless ToString surfaces.
+        if let Value::Ref(id) = value
+            && self.is_arguments_record(*id)
+        {
+            return Ok(Value::String("[object Arguments]".into()));
         }
         Ok(Value::String("[object Object]".into()))
     }

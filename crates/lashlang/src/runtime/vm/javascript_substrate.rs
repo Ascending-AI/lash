@@ -88,7 +88,13 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .collect();
         // The driver queues one call per element.
         self.charge_intrinsic_work(calls.len());
-        self.begin_callback_driver(function, calls, true, true)
+        self.begin_callback_driver(
+            function,
+            calls,
+            CallbackCompletion::Collect,
+            true,
+            Value::Undefined,
+        )
     }
 
     pub(super) fn execute_javascript_heap_new(&mut self, argc: usize) -> Result<(), RuntimeError> {

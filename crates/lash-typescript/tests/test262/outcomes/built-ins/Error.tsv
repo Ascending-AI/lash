@@ -34,8 +34,8 @@ test/built-ins/Error/prototype/toString/length.js	pass	-
 test/built-ins/Error/prototype/toString/name.js	pass	-
 test/built-ins/Error/prototype/toString/prop-desc.js	pass	-
 test/built-ins/Error/prototype/toString/tostring-get-throws.js	refused	TS_ACCESSOR_UNSUPPORTED
-test/built-ins/Error/prototype/toString/tostring-message-throws-toprimitive.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Error/prototype/toString/undefined-props.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Error/prototype/toString/tostring-message-throws-toprimitive.js	pass	-
+test/built-ins/Error/prototype/toString/undefined-props.js	pass	-
 test/built-ins/Error/the-initial-value-of-errorprototypemessage-is-the-empty-string.js	pass	-
 test/built-ins/Error/tostring-1.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Error/tostring-2.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED

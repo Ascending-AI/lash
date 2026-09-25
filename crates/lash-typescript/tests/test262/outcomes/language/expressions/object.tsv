@@ -432,7 +432,7 @@ test/language/expressions/object/method-definition/name-param-redecl.js	pass	-
 test/language/expressions/object/method-definition/name-params.js	pass	-
 test/language/expressions/object/method-definition/name-prop-name-eval-error.js	pass	-
 test/language/expressions/object/method-definition/name-property-desc.js	pass	-
-test/language/expressions/object/method-definition/name-prototype-prop.js	refused	TS_METHOD_UNSUPPORTED
+test/language/expressions/object/method-definition/name-prototype-prop.js	pass	-
 test/language/expressions/object/method-definition/name-prototype.js	refused	TS_METHOD_UNSUPPORTED
 test/language/expressions/object/method-definition/name-super-call-body.js	refused	TS_SUPER_UNSUPPORTED
 test/language/expressions/object/method-definition/name-super-call-param.js	refused	TS_SUPER_UNSUPPORTED

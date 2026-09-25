@@ -62,7 +62,13 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// member before the arguments evaluate, and converts a computed
 /// object-literal key before its value, so unchanged source lowers to a
 /// program an artifact minted under v22 does not carry.
-pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v23";
+///
+/// v24 (FIG-3787): the array-callback lowering gates element visits on a
+/// per-index `HasProperty` probe and writes `map`'s output positionally —
+/// deleting the output index where the source element is absent — so
+/// unchanged source lowers to a program an artifact minted under v23 does
+/// not carry.
+pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v24";
 
 pub use attachment::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, InvalidAttachmentId,

@@ -548,15 +548,21 @@ fn callback_body(
     } else {
         LashExpr::Number(0.0)
     };
-    // Whether the receiver has an element at `index`: ECMA-262 HasProperty,
-    // which for a dense array is the index being below the current length. A
-    // callback that shrinks the array makes the indices past the new length
-    // absent, and the methods that skip holes skip them.
+    // Whether the receiver has an element at `index`: ECMA-262 HasProperty —
+    // a `delete`d index is a hole the gated methods skip, where a read alone
+    // would still answer `undefined`. `arrayFromMap`'s iterator walk instead
+    // re-reads the length at every step.
     let present = binary(
         variable(&index),
         JavaScriptBinaryOp::Less,
         field(receiver, "length"),
     );
+    let has_element = || {
+        stdlib(
+            "Lash.HasProperty",
+            vec![variable(&index), variable(receiver)],
+        )
+    };
     let condition = if reverse {
         binary(
             variable(&index),
@@ -624,7 +630,28 @@ fn callback_body(
         },
     );
     let operation = match method {
-        "map" | "arrayFromMap" => append(&output, predicate()),
+        // `map` keeps the receiver's positions: a present index writes
+        // `output[index]` (the output grows one slot per step, so the write
+        // is contiguous), and an absent index leaves a real hole — append a
+        // placeholder, then `delete` it.
+        "map" => LashExpr::If {
+            condition: Box::new(has_element()),
+            then_block: Box::new(LashExpr::Assign {
+                target: AssignTarget {
+                    root: output.as_str().into(),
+                    steps: vec![AssignPathStep::Index(variable(&index))],
+                },
+                expr: Box::new(predicate()),
+            }),
+            else_block: Box::new(LashExpr::Block(vec![
+                append(&output, LashExpr::Undefined),
+                LashExpr::BuiltinCall {
+                    name: "__typescript_heap_delete_member".into(),
+                    args: vec![variable(&output), variable(&index)],
+                },
+            ])),
+        },
+        "arrayFromMap" => append(&output, predicate()),
         "filter" => LashExpr::If {
             condition: Box::new(predicate()),
             then_block: Box::new(append(&output, item.clone())),
@@ -677,10 +704,10 @@ fn callback_body(
     };
     let operation = if matches!(
         method,
-        "forEach" | "map" | "filter" | "flatMap" | "some" | "every" | "reduce" | "reduceRight"
+        "forEach" | "filter" | "flatMap" | "some" | "every" | "reduce" | "reduceRight"
     ) {
         LashExpr::If {
-            condition: Box::new(present),
+            condition: Box::new(has_element()),
             then_block: Box::new(operation),
             else_block: Box::new(LashExpr::Undefined),
         }
@@ -691,28 +718,6 @@ fn callback_body(
         condition: Box::new(condition),
         body: Box::new(LashExpr::Block(vec![operation, step])),
     });
-    if method == "map" {
-        // `map`'s result has the receiver's original length. A skipped index
-        // is only ever a suffix (no callback runs once one is absent), and it
-        // is a hole in the result, which the dense array model refuses by
-        // name (`TS_SPARSE_ARRAY_UNSUPPORTED`, from the write past the end)
-        // rather than filling with `undefined`.
-        expressions.push(LashExpr::If {
-            condition: Box::new(binary(
-                field(&output, "length"),
-                JavaScriptBinaryOp::Less,
-                variable(&length),
-            )),
-            then_block: Box::new(LashExpr::Assign {
-                target: AssignTarget {
-                    root: output.as_str().into(),
-                    steps: vec![AssignPathStep::Index(variable(&length))],
-                },
-                expr: Box::new(LashExpr::Undefined),
-            }),
-            else_block: Box::new(LashExpr::Undefined),
-        });
-    }
     expressions.push(match method {
         "map" | "arrayFromMap" | "filter" | "flatMap" => variable(&output),
         "forEach" => LashExpr::Undefined,

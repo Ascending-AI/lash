@@ -24,6 +24,18 @@ mod runner;
 
 use std::collections::BTreeSet;
 
+/// Dev-time focused row runner: `TEST262_ONLY=a.js,b.js` prints each observed
+/// outcome instead of running the full selection.
+#[test]
+fn focused_rows() {
+    let Ok(filter) = std::env::var("TEST262_ONLY") else {
+        return;
+    };
+    for relative in filter.split(',') {
+        eprintln!("{relative}\n  -> {}", runner::run(relative));
+    }
+}
+
 #[test]
 fn full_selection_matches_the_ratchet() {
     let recorded = runner::recorded_outcomes();

@@ -4,7 +4,7 @@ test/built-ins/Array/prototype/toString/S15.4.4.2_A1_T2.js	refused	TS_NEW_UNSUPP
 test/built-ins/Array/prototype/toString/S15.4.4.2_A1_T3.js	refused	TS_NEW_UNSUPPORTED
 test/built-ins/Array/prototype/toString/S15.4.4.2_A1_T4.js	refused	TS_NEW_UNSUPPORTED
 test/built-ins/Array/prototype/toString/S15.4.4.2_A3_T1.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
-test/built-ins/Array/prototype/toString/call-with-boolean.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/toString/call-with-boolean.js	pass	-
 test/built-ins/Array/prototype/toString/length.js	pass	-
 test/built-ins/Array/prototype/toString/name.js	pass	-
 test/built-ins/Array/prototype/toString/prop-desc.js	pass	-

@@ -8,14 +8,14 @@ test/built-ins/Array/prototype/toSorted/frozen-this-value.js	refused	TS_METHOD_U
 test/built-ins/Array/prototype/toSorted/holes-not-preserved.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Array/prototype/toSorted/ignores-species.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Array/prototype/toSorted/immutable.js	pass	-
-test/built-ins/Array/prototype/toSorted/length-casted-to-zero.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/toSorted/length-casted-to-zero.js	pass	-
 test/built-ins/Array/prototype/toSorted/length-decreased-while-iterating.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Array/prototype/toSorted/length-exceeding-array-length-limit.js	refused	TS_ACCESSOR_UNSUPPORTED
 test/built-ins/Array/prototype/toSorted/length-increased-while-iterating.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Array/prototype/toSorted/length-tolength.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/toSorted/length-tolength.js	pass	-
 test/built-ins/Array/prototype/toSorted/length.js	pass	-
 test/built-ins/Array/prototype/toSorted/name.js	pass	-
 test/built-ins/Array/prototype/toSorted/property-descriptor.js	pass	-
 test/built-ins/Array/prototype/toSorted/this-value-boolean.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
-test/built-ins/Array/prototype/toSorted/this-value-nullish.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/toSorted/this-value-nullish.js	pass	-
 test/built-ins/Array/prototype/toSorted/zero-or-one-element.js	pass	-

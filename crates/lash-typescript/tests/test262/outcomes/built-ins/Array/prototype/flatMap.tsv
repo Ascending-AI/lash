@@ -1,12 +1,12 @@
 # test262-path	class	qualifier
 test/built-ins/Array/prototype/flatMap/array-like-objects.js	refused	TS_ACCESSOR_UNSUPPORTED
-test/built-ins/Array/prototype/flatMap/bound-function-argument.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Array/prototype/flatMap/call-with-boolean.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/flatMap/bound-function-argument.js	pass	-
+test/built-ins/Array/prototype/flatMap/call-with-boolean.js	pass	-
 test/built-ins/Array/prototype/flatMap/depth-always-one.js	pass	-
 test/built-ins/Array/prototype/flatMap/length.js	pass	-
 test/built-ins/Array/prototype/flatMap/mapperfunction-throws.js	pass	-
 test/built-ins/Array/prototype/flatMap/name.js	pass	-
 test/built-ins/Array/prototype/flatMap/prop-desc.js	pass	-
 test/built-ins/Array/prototype/flatMap/proxy-access-count.js	refused	TS_NEW_UNSUPPORTED
-test/built-ins/Array/prototype/flatMap/this-value-null-undefined-throws.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/flatMap/this-value-null-undefined-throws.js	pass	-
 test/built-ins/Array/prototype/flatMap/thisArg-argument.js	pass	-

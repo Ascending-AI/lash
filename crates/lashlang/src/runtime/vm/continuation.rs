@@ -118,9 +118,16 @@ use super::exceptions::PendingErrorOrigin;
 /// executable, so it is refused rather than resumed against whatever program
 /// the caller supplies.
 ///
+/// v29 (FIG-3787) carries the callback driver's receiver and its wider
+/// completion vocabulary: `this_arg` is the callback's `this`, and the
+/// element-keyed completions (`every`, `some`, `filter`, `find`,
+/// `findIndex`, `map`, `flatMap`, `reduce`) plus the comparator `sort`'s
+/// in-flight ordering are variants a v28 wire never wrote. A v28 reader
+/// meets the missing field and unknown kinds, so it is refused.
+///
 /// Re-exported by the facade's `formats` manifest so a host can read it before
 /// wiring a store.
-pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 28;
+pub const VM_CONTINUATION_FORMAT_VERSION: u32 = 29;
 
 /// The suspended execution's live tool requests, keyed by the handle the cell
 /// holds (ADR 0095).
@@ -265,35 +272,172 @@ pub(crate) struct VmFrameContinuation {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub(crate) enum VmFrameReturnContinuation {
     Direct,
-    Callback {
-        #[serde(
-            serialize_with = "continuation_serde::serialize_value",
-            deserialize_with = "continuation_serde::deserialize_value"
-        )]
-        function: Value,
-        #[serde(
-            serialize_with = "continuation_serde::serialize_values",
-            deserialize_with = "continuation_serde::deserialize_values"
-        )]
-        calls: Vec<Value>,
-        next_index: usize,
-        #[serde(
-            serialize_with = "continuation_serde::serialize_values",
-            deserialize_with = "continuation_serde::deserialize_values"
-        )]
-        results: Vec<Value>,
-        completion: VmCallbackCompletion,
-        allow_effects: bool,
-        #[serde(default)]
-        live_url_search_params: bool,
-    },
+    /// Boxed so the common `Direct` frame stays pointer-sized.
+    Callback(Box<VmCallbackContinuation>),
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+/// The `callback` return target's wire payload.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct VmCallbackContinuation {
+    #[serde(
+        serialize_with = "continuation_serde::serialize_value",
+        deserialize_with = "continuation_serde::deserialize_value"
+    )]
+    pub(crate) function: Value,
+    #[serde(
+        serialize_with = "continuation_serde::serialize_value",
+        deserialize_with = "continuation_serde::deserialize_value"
+    )]
+    pub(crate) this_arg: Value,
+    #[serde(
+        serialize_with = "continuation_serde::serialize_values",
+        deserialize_with = "continuation_serde::deserialize_values"
+    )]
+    pub(crate) calls: Vec<Value>,
+    pub(crate) next_index: usize,
+    #[serde(
+        serialize_with = "continuation_serde::serialize_values",
+        deserialize_with = "continuation_serde::deserialize_values"
+    )]
+    pub(crate) results: Vec<Value>,
+    pub(crate) completion: VmCallbackCompletion,
+    pub(crate) allow_effects: bool,
+    #[serde(default)]
+    pub(crate) live_url_search_params: bool,
+    /// The lazy array-like index walk (FIG-3787) — `None` for the
+    /// materialized `calls` queue the collection drivers use.
+    #[serde(default)]
+    pub(crate) array_like: Option<VmArrayLikeWalk>,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum VmCallbackCompletion {
     Collect,
     Discard,
+    Every,
+    Some,
+    Filter,
+    Find,
+    FindIndex,
+    Map {
+        length: u64,
+    },
+    FlatMap,
+    Reduce {
+        #[serde(
+            serialize_with = "continuation_serde::serialize_value",
+            deserialize_with = "continuation_serde::deserialize_value"
+        )]
+        accumulator: Value,
+    },
+    Sort(VmSortState),
+}
+
+/// The durable shape of a lazy array-like index walk (FIG-3787) — the
+/// pending-call source a callback driver carries instead of a materialized
+/// tuple queue.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct VmArrayLikeWalk {
+    #[serde(
+        serialize_with = "continuation_serde::serialize_value",
+        deserialize_with = "continuation_serde::deserialize_value"
+    )]
+    pub receiver: Value,
+    pub next: u64,
+    pub length: u64,
+    pub descending: bool,
+    pub gated: bool,
+    #[serde(default)]
+    pub omit_receiver: bool,
+}
+
+fn callback_completion_continuation(completion: &CallbackCompletion) -> VmCallbackCompletion {
+    match completion {
+        CallbackCompletion::Collect => VmCallbackCompletion::Collect,
+        CallbackCompletion::Discard => VmCallbackCompletion::Discard,
+        CallbackCompletion::Every => VmCallbackCompletion::Every,
+        CallbackCompletion::Some => VmCallbackCompletion::Some,
+        CallbackCompletion::Filter => VmCallbackCompletion::Filter,
+        CallbackCompletion::Find => VmCallbackCompletion::Find,
+        CallbackCompletion::FindIndex => VmCallbackCompletion::FindIndex,
+        CallbackCompletion::Map { length } => VmCallbackCompletion::Map { length: *length },
+        CallbackCompletion::FlatMap => VmCallbackCompletion::FlatMap,
+        CallbackCompletion::Reduce { accumulator } => VmCallbackCompletion::Reduce {
+            accumulator: accumulator.clone(),
+        },
+        CallbackCompletion::Sort(state) => VmCallbackCompletion::Sort(VmSortState {
+            pending: state.pending.clone(),
+            sorted: state.sorted.clone(),
+            current: state.current.clone(),
+            probe: state.probe,
+            lo: state.lo,
+            hi: state.hi,
+            undefined_count: state.undefined_count,
+            receiver: state.receiver.clone(),
+            length: state.length,
+            in_place: state.in_place,
+        }),
+    }
+}
+
+fn callback_completion_from_continuation(completion: VmCallbackCompletion) -> CallbackCompletion {
+    match completion {
+        VmCallbackCompletion::Collect => CallbackCompletion::Collect,
+        VmCallbackCompletion::Discard => CallbackCompletion::Discard,
+        VmCallbackCompletion::Every => CallbackCompletion::Every,
+        VmCallbackCompletion::Some => CallbackCompletion::Some,
+        VmCallbackCompletion::Filter => CallbackCompletion::Filter,
+        VmCallbackCompletion::Find => CallbackCompletion::Find,
+        VmCallbackCompletion::FindIndex => CallbackCompletion::FindIndex,
+        VmCallbackCompletion::Map { length } => CallbackCompletion::Map { length },
+        VmCallbackCompletion::FlatMap => CallbackCompletion::FlatMap,
+        VmCallbackCompletion::Reduce { accumulator } => CallbackCompletion::Reduce { accumulator },
+        VmCallbackCompletion::Sort(state) => CallbackCompletion::Sort(SortState {
+            pending: state.pending,
+            sorted: state.sorted,
+            current: state.current,
+            probe: state.probe,
+            lo: state.lo,
+            hi: state.hi,
+            undefined_count: state.undefined_count,
+            receiver: state.receiver,
+            length: state.length,
+            in_place: state.in_place,
+        }),
+    }
+}
+
+/// The wire form of a comparator `sort`'s in-flight ordering
+/// ([`SortState`]): every field a resume needs, held as plain data.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub(crate) struct VmSortState {
+    #[serde(
+        serialize_with = "continuation_serde::serialize_values",
+        deserialize_with = "continuation_serde::deserialize_values"
+    )]
+    pub pending: Vec<Value>,
+    #[serde(
+        serialize_with = "continuation_serde::serialize_values",
+        deserialize_with = "continuation_serde::deserialize_values"
+    )]
+    pub sorted: Vec<Value>,
+    #[serde(
+        serialize_with = "continuation_serde::serialize_value",
+        deserialize_with = "continuation_serde::deserialize_value"
+    )]
+    pub current: Value,
+    pub probe: usize,
+    pub lo: usize,
+    pub hi: usize,
+    pub undefined_count: u64,
+    #[serde(
+        serialize_with = "continuation_serde::serialize_value",
+        deserialize_with = "continuation_serde::deserialize_value"
+    )]
+    pub receiver: Value,
+    pub length: u64,
+    pub in_place: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -1216,18 +1360,26 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                         variant: "guest coercion",
                     });
                 }
-                ReturnTarget::Callback(callback) => VmFrameReturnContinuation::Callback {
-                    function: callback.function.clone(),
-                    calls: callback.calls.clone(),
-                    next_index: callback.next_index,
-                    results: callback.results.clone(),
-                    completion: match callback.completion {
-                        CallbackCompletion::Collect => VmCallbackCompletion::Collect,
-                        CallbackCompletion::Discard => VmCallbackCompletion::Discard,
-                    },
-                    allow_effects: callback.allow_effects,
-                    live_url_search_params: callback.live_url_search_params,
-                },
+                ReturnTarget::Callback(callback) => {
+                    VmFrameReturnContinuation::Callback(Box::new(VmCallbackContinuation {
+                        function: callback.function.clone(),
+                        this_arg: callback.this_arg.clone(),
+                        calls: callback.calls.clone(),
+                        next_index: callback.next_index,
+                        results: callback.results.clone(),
+                        completion: callback_completion_continuation(&callback.completion),
+                        allow_effects: callback.allow_effects,
+                        live_url_search_params: callback.live_url_search_params,
+                        array_like: callback.array_like.as_ref().map(|walk| VmArrayLikeWalk {
+                            receiver: walk.receiver.clone(),
+                            next: walk.next,
+                            length: walk.length,
+                            descending: walk.descending,
+                            gated: walk.gated,
+                            omit_receiver: walk.omit_receiver,
+                        }),
+                    }))
+                }
             };
             frame_stack.push(VmFrameContinuation {
                 return_instruction_pointer: frame.return_ip,
@@ -1501,26 +1653,37 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     .collect(),
                 return_target: match frame.return_target {
                     VmFrameReturnContinuation::Direct => ReturnTarget::Direct,
-                    VmFrameReturnContinuation::Callback {
-                        function,
-                        calls,
-                        next_index,
-                        results,
-                        completion,
-                        allow_effects,
-                        live_url_search_params,
-                    } => ReturnTarget::Callback(CallbackDriver {
-                        function,
-                        calls,
-                        next_index,
-                        results,
-                        completion: match completion {
-                            VmCallbackCompletion::Collect => CallbackCompletion::Collect,
-                            VmCallbackCompletion::Discard => CallbackCompletion::Discard,
-                        },
-                        allow_effects,
-                        live_url_search_params,
-                    }),
+                    VmFrameReturnContinuation::Callback(callback) => {
+                        let VmCallbackContinuation {
+                            function,
+                            this_arg,
+                            calls,
+                            next_index,
+                            results,
+                            completion,
+                            allow_effects,
+                            live_url_search_params,
+                            array_like,
+                        } = *callback;
+                        ReturnTarget::Callback(Box::new(CallbackDriver {
+                            function,
+                            this_arg,
+                            calls,
+                            next_index,
+                            results,
+                            completion: callback_completion_from_continuation(completion),
+                            allow_effects,
+                            live_url_search_params,
+                            array_like: array_like.map(|walk| ArrayLikeWalk {
+                                receiver: walk.receiver,
+                                next: walk.next,
+                                length: walk.length,
+                                descending: walk.descending,
+                                gated: walk.gated,
+                                omit_receiver: walk.omit_receiver,
+                            }),
+                        }))
+                    }
                 },
             })
             .collect();

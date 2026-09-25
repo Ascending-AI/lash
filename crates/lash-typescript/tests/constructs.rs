@@ -238,19 +238,16 @@ fn map_and_set_for_each_observe_live_add_delete_and_reinsert() {
 }
 
 #[test]
-fn delete_preserves_alias_identity_and_rejects_array_holes() {
+fn delete_preserves_alias_identity_and_empties_array_slots() {
     assert_eq!(
         finished(
             "const o={a:1,b:2}; const alias=o; const ok=delete o.a; finish(`${ok}|${'a' in alias}|${alias.b}`);"
         ),
         Value::String("true|false|2".into())
     );
-    let error = execute("const a=[1]; delete a[0]; finish(a);")
-        .expect_err("dense arrays cannot represent delete-created holes");
-    assert!(
-        error
-            .to_string()
-            .contains("TS_DELETE_ARRAY_INDEX_UNSUPPORTED")
+    assert_eq!(
+        finished("const a=[1,2,3]; delete a[1]; finish(`${a.length}|${1 in a}|${a[1]}`);"),
+        Value::String("3|false|undefined".into())
     );
 }
 

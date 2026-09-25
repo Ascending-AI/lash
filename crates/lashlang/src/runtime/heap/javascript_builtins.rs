@@ -897,6 +897,12 @@ impl Heap {
             else {
                 continue;
             };
+            // A `Function.prototype.bind` product stands behind no compiled
+            // function — the sentinel marks a closure `begin_function_call`
+            // unwraps into its captured target's call.
+            if *function == crate::runtime::vm::functions::BOUND_FUNCTION_INDEX {
+                continue;
+            }
             let compiled = functions
                 .get(*function as usize)
                 .ok_or(RuntimeError::UnknownFunction { index: *function })?;

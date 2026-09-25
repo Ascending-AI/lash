@@ -355,6 +355,9 @@ pub(crate) fn read_javascript_index_direct_with_key(
                 .unwrap_or(Value::Undefined)
         }),
         Value::String(value) => {
+            if key == "length" {
+                return Ok(Value::Number(value.encode_utf16().count() as f64));
+            }
             let Some(index) = javascript_array_index_key(key) else {
                 return Ok(Value::Undefined);
             };

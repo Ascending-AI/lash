@@ -293,14 +293,15 @@ fn callback_continuations_validate_cursor_effect_policy_and_return_site_mode() {
         + 1;
     let mut map = foreach.clone();
     map.frame_stack[0].return_instruction_pointer = map_return_ip;
-    let VmFrameReturnContinuation::Callback {
-        completion,
-        allow_effects,
-        ..
-    } = &mut map.frame_stack[0].return_target
+    let VmFrameReturnContinuation::Callback(callback) = &mut map.frame_stack[0].return_target
     else {
         panic!("driver must use callback return target")
     };
+    let VmCallbackContinuation {
+        completion,
+        allow_effects,
+        ..
+    } = callback.as_mut();
     *completion = VmCallbackCompletion::Collect;
     *allow_effects = false;
     Vm::resume_from(map.clone(), &program, &CallbackHost)
@@ -315,62 +316,62 @@ fn callback_continuations_validate_cursor_effect_policy_and_return_site_mode() {
         + 1;
     let mut async_map = foreach.clone();
     async_map.frame_stack[0].return_instruction_pointer = async_map_return_ip;
-    let VmFrameReturnContinuation::Callback {
-        completion,
-        allow_effects,
-        ..
-    } = &mut async_map.frame_stack[0].return_target
+    let VmFrameReturnContinuation::Callback(callback) = &mut async_map.frame_stack[0].return_target
     else {
         panic!("async map must use callback return target")
     };
+    let VmCallbackContinuation {
+        completion,
+        allow_effects,
+        ..
+    } = callback.as_mut();
     *completion = VmCallbackCompletion::Collect;
     *allow_effects = true;
     Vm::resume_from(async_map.clone(), &program, &CallbackHost)
         .expect("authentic AsyncMap callback continuation resumes");
 
     let mut async_map_sync_policy = async_map;
-    let VmFrameReturnContinuation::Callback { allow_effects, .. } =
+    let VmFrameReturnContinuation::Callback(callback) =
         &mut async_map_sync_policy.frame_stack[0].return_target
     else {
         panic!("async map must use callback return target")
     };
-    *allow_effects = false;
+    callback.allow_effects = false;
     assert!(matches!(
         Vm::resume_from(async_map_sync_policy, &program, &CallbackHost),
         Err(ContinuationError::InvalidReturnSite { .. })
     ));
 
     let mut map_effects = map.clone();
-    let VmFrameReturnContinuation::Callback { allow_effects, .. } =
+    let VmFrameReturnContinuation::Callback(callback) =
         &mut map_effects.frame_stack[0].return_target
     else {
         panic!("Map must use callback return target")
     };
-    *allow_effects = true;
+    callback.allow_effects = true;
     assert!(matches!(
         Vm::resume_from(map_effects, &program, &CallbackHost),
         Err(ContinuationError::InvalidReturnSite { .. })
     ));
 
     let mut map_mode = map;
-    let VmFrameReturnContinuation::Callback { completion, .. } =
-        &mut map_mode.frame_stack[0].return_target
+    let VmFrameReturnContinuation::Callback(callback) = &mut map_mode.frame_stack[0].return_target
     else {
         panic!("Map must use callback return target")
     };
-    *completion = VmCallbackCompletion::Discard;
+    callback.completion = VmCallbackCompletion::Discard;
     assert!(matches!(
         Vm::resume_from(map_mode, &program, &CallbackHost),
         Err(ContinuationError::InvalidReturnSite { .. })
     ));
 
     let mut zero_cursor = foreach.clone();
-    let VmFrameReturnContinuation::Callback { next_index, .. } =
+    let VmFrameReturnContinuation::Callback(callback) =
         &mut zero_cursor.frame_stack[0].return_target
     else {
         panic!("forEach must use callback return target")
     };
-    *next_index = 0;
+    callback.next_index = 0;
     assert!(
         validate_continuation(&zero_cursor)
             .expect_err("Discard callback cannot replay calls[0]")
@@ -379,24 +380,24 @@ fn callback_continuations_validate_cursor_effect_policy_and_return_site_mode() {
     );
 
     let mut foreach_effects = foreach.clone();
-    let VmFrameReturnContinuation::Callback { allow_effects, .. } =
+    let VmFrameReturnContinuation::Callback(callback) =
         &mut foreach_effects.frame_stack[0].return_target
     else {
         panic!("forEach must use callback return target")
     };
-    *allow_effects = false;
+    callback.allow_effects = false;
     assert!(matches!(
         Vm::resume_from(foreach_effects, &program, &CallbackHost),
         Err(ContinuationError::InvalidReturnSite { .. })
     ));
 
     let mut foreach_mode = foreach;
-    let VmFrameReturnContinuation::Callback { completion, .. } =
+    let VmFrameReturnContinuation::Callback(callback) =
         &mut foreach_mode.frame_stack[0].return_target
     else {
         panic!("forEach must use callback return target")
     };
-    *completion = VmCallbackCompletion::Collect;
+    callback.completion = VmCallbackCompletion::Collect;
     assert!(matches!(
         Vm::resume_from(foreach_mode, &program, &CallbackHost),
         Err(ContinuationError::InvalidReturnSite { .. })

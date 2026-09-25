@@ -1,6 +1,6 @@
 # test262-path	class	qualifier
 test/language/statements/for-of/Array.prototype.entries.js	pass	-
-test/language/statements/for-of/Array.prototype.keys.js	fail	FIG-3700
+test/language/statements/for-of/Array.prototype.keys.js	pass	-
 test/language/statements/for-of/array-contract-expand.js	pass	-
 test/language/statements/for-of/array-contract.js	pass	-
 test/language/statements/for-of/array-expand-contract.js	pass	-
