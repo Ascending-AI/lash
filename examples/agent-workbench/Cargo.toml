@@ -68,6 +68,7 @@ lash = { workspace = true, features = ["rlm", "testing"] }
 # manifest and the build-geometry rule in `runbooks/RULES.md`.
 lash-protocol-rlm = { workspace = true, features = ["testing"] }
 lash-remote-protocol = { workspace = true, features = ["core-conversions"] }
+lash-restate-test = { workspace = true }
 lash-sim = { path = "../../crates/lash-sim" }
 lash-typescript = { workspace = true }
 sqlx = { workspace = true }
