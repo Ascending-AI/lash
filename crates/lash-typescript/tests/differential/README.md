@@ -8,7 +8,8 @@ are retained so each lane's provenance count stays executable.
 
 To add findings, write `findings/<TICKET>.txt` (one expression per line),
 regenerate, then allowlist only that shard's refusals in
-`tests/corpus_laws/round_trip_refusals.tsv`, keyed by its ids.
+`tests/corpus_laws/refusals/<shard>.tsv`, keyed by its `differential:<shard>:<n>`
+ids — one file per shard, so a new lane's rows never touch another's.
 
 Regeneration is deliberate, not part of normal tests. Enum rows are first
 transpiled with pinned TypeScript 7.0.2 through `npx tsc --target esnext`, then

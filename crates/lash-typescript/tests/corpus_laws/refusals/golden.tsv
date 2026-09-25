@@ -1,0 +1,6 @@
+# Corpus programs the lens printer refuses, typed (FIG-3599). Each row names
+# the program, the exact refusal and why the printer cannot spell it. A row
+# whose program now round-trips, or whose refusal changed, fails the law
+# until it is deleted or corrected.
+# program id	refusal	reason
+golden:span-lifted-inline	cannot render host descriptor constructor `timer.Schedule` without a constructor path	an admitted host descriptor constructor keeps no constructor path the printer can spell

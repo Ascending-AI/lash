@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """The Test262 outcome ratchet across commits (FIG-3646).
 
-The conformance runner holds each head to its own `outcomes.tsv`: a changed
-outcome fails until the record changes with it. This check holds the record
-to its base, so the record itself can only improve:
+The conformance runner holds each head to its own outcome record — the
+`outcomes/<top-level directory>.tsv` shards, one file per top-level test
+directory (FIG-3727): a changed outcome fails until the record changes with
+it. This check holds the record to its base, so the record itself can only
+improve:
 
 - a test that passed at the base passes at the head;
 - a test failing at the head either failed at the base too, or was not
@@ -31,8 +33,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTCOMES = "crates/lash-typescript/tests/test262/outcomes.tsv"
-CENSUS = "crates/lash-typescript/tests/test262/census.tsv"
+TEST262 = "crates/lash-typescript/tests/test262"
+OUTCOMES = f"{TEST262}/outcomes.tsv"
+OUTCOMES_DIR = f"{TEST262}/outcomes"
+CENSUS = f"{TEST262}/census.tsv"
 
 
 def parse(text: str) -> dict[str, tuple[str, str]]:
@@ -43,6 +47,39 @@ def parse(text: str) -> dict[str, tuple[str, str]]:
         path, outcome_class, qualifier = line.split("\t")
         outcomes[path] = (outcome_class, qualifier)
     return outcomes
+
+
+def parse_shards(texts: list[tuple[str, str]]) -> dict[str, tuple[str, str]]:
+    """The union of every `outcomes/<shard>.tsv`: an id may appear in only one file."""
+    outcomes: dict[str, tuple[str, str]] = {}
+    for name, text in texts:
+        for path, outcome in parse(text).items():
+            if path in outcomes:
+                raise SystemExit(f"check_test262_ratchet: {path} has an outcome in two shards ({name})")
+            outcomes[path] = outcome
+    return outcomes
+
+
+def outcome_paths(ref: str | None) -> list[str]:
+    """The record's paths at `ref` (None = the working tree): the legacy single
+    `outcomes.tsv`, or every `outcomes/<shard>.tsv` (FIG-3727)."""
+    if ref is None:
+        paths = []
+        if (ROOT / OUTCOMES).is_file():
+            paths.append(OUTCOMES)
+        directory = ROOT / OUTCOMES_DIR
+        if directory.is_dir():
+            paths.extend(f"{OUTCOMES_DIR}/{name}" for name in sorted(p.name for p in directory.glob("*.tsv")))
+        return paths
+    listed = subprocess.run(
+        ["git", "ls-tree", "-r", "--name-only", ref, "--", OUTCOMES, OUTCOMES_DIR],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+    )
+    if listed.returncode != 0:
+        return []
+    return [line for line in listed.stdout.splitlines() if line.endswith(".tsv")]
 
 
 def tallies(outcomes: dict[str, tuple[str, str]]) -> dict[tuple[str, str], int]:
@@ -98,8 +135,11 @@ def show(base: str, path: str) -> str | None:
 
 
 def base_outcomes(base: str) -> dict[str, tuple[str, str]] | None:
-    text = show(base, OUTCOMES)
-    return parse(text) if text is not None else None
+    paths = outcome_paths(base)
+    if not paths:
+        return None
+    texts = [(path, show(base, path)) for path in paths]
+    return parse_shards([(name, text) for name, text in texts if text is not None])
 
 
 def new_refusal_codes(base: str) -> frozenset[str]:
@@ -116,9 +156,9 @@ def main() -> int:
     args = parser.parse_args()
     base = base_outcomes(args.base)
     if base is None:
-        print(f"check_test262_ratchet: {OUTCOMES} is new at this head; nothing to compare")
+        print("check_test262_ratchet: the outcomes record is new at this head; nothing to compare")
         return 0
-    head = parse((ROOT / OUTCOMES).read_text())
+    head = parse_shards([(path, (ROOT / path).read_text()) for path in outcome_paths(None)])
     ruled = new_refusal_codes(args.base)
     problems = regressions(base, head, ruled)
     for path, (head_class, head_qualifier) in sorted(head.items()):

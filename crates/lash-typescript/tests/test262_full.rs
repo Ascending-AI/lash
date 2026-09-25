@@ -31,7 +31,7 @@ fn full_selection_matches_the_ratchet() {
     let paths = runner::vendored_tests().into_iter().collect::<Vec<_>>();
     let observed = runner::run_all(&paths);
     if runner::bless(&paths, &observed, &recorded) {
-        eprintln!("blessed outcomes.tsv from the run");
+        eprintln!("blessed the outcomes shards from the run");
         return;
     }
     let mismatches = runner::compare(&paths, &observed, &recorded);

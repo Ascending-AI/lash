@@ -1,0 +1,11 @@
+# Corpus programs the lens printer refuses, typed (FIG-3599). Each row names
+# the program, the exact refusal and why the printer cannot spell it. A row
+# whose program now round-trips, or whose refusal changed, fails the law
+# until it is deleted or corrected.
+# program id	refusal	reason
+differential:FIG-3706:1	cannot render a block in expression position as TypeScript	a compound assignment lowers to a statement sequence (its reference and operand conversion), which has no expression spelling
+differential:FIG-3706:10	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3706:2	cannot render a block in expression position as TypeScript	an update expression used as a value lowers to a statement sequence (its old and new values), which has no expression spelling
+differential:FIG-3706:3	generated binding `__typescript_0_update_old` has no authored TypeScript spelling	an update expression statement lowers through a generated temporary, which has no authored spelling
+differential:FIG-3706:7	generated binding `__typescript_0_update_old` has no authored TypeScript spelling	an update expression statement lowers through a generated temporary, which has no authored spelling
+differential:FIG-3706:8	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
