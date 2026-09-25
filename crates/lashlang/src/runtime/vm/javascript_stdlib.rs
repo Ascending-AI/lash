@@ -127,20 +127,56 @@ const _: () = {
     }
 };
 
+/// Each fixed-length call's padded arity, sorted by name: the policy list
+/// joined with its signature rows once, so a dispatch finds its call by
+/// binary search instead of scanning the policy list and then every
+/// signature row on every call (FIG-3730).
+fn fixed_length_arities(
+    table: &'static std::sync::OnceLock<Vec<(&'static str, usize)>>,
+    members: &[&'static str],
+    arity: fn(&str) -> Option<usize>,
+) -> &'static [(&'static str, usize)] {
+    table.get_or_init(|| {
+        let mut arities = members
+            .iter()
+            .filter_map(|&method| Some((method, arity(method)?)))
+            .collect::<Vec<_>>();
+        arities.sort_unstable_by_key(|&(method, _)| method);
+        arities
+    })
+}
+
+fn fixed_length_arity(arities: &[(&'static str, usize)], method: &str) -> Option<usize> {
+    arities
+        .binary_search_by_key(&method, |&(name, _)| name)
+        .ok()
+        .map(|index| arities[index].1)
+}
+
 pub(super) fn normalized_static_arguments(method: &str, args: &[Value]) -> Vec<Value> {
-    if !FIXED_LENGTH_STATIC_METHODS.contains(&method) {
-        return args.to_vec();
+    static ARITIES: std::sync::OnceLock<Vec<(&'static str, usize)>> = std::sync::OnceLock::new();
+    let arities = fixed_length_arities(
+        &ARITIES,
+        FIXED_LENGTH_STATIC_METHODS,
+        crate::ecma_stdlib::static_method_arity,
+    );
+    match fixed_length_arity(arities, method) {
+        Some(arity) => normalized_arguments(args, arity),
+        None => args.to_vec(),
     }
-    let arity = crate::ecma_stdlib::static_method_arity(method).unwrap_or(args.len());
-    normalized_arguments(args, arity)
 }
 
 pub(super) fn normalized_instance_arguments(method: &str, args: &[Value]) -> Vec<Value> {
-    if !FIXED_LENGTH_INSTANCE_METHODS.contains(&method) {
-        return args.to_vec();
+    static ARITIES: std::sync::OnceLock<Vec<(&'static str, usize)>> = std::sync::OnceLock::new();
+    let arities = fixed_length_arities(
+        &ARITIES,
+        FIXED_LENGTH_INSTANCE_METHODS,
+        crate::ecma_stdlib::instance_method_arity,
+    );
+    match fixed_length_arity(arities, method) {
+        Some(arity) => normalized_arguments(args, arity),
+        None => args.to_vec(),
     }
-    let arity = crate::ecma_stdlib::instance_method_arity(method).unwrap_or(args.len());
-    normalized_arguments(args, arity)
 }
 
 pub(super) fn normalized_arguments(args: &[Value], arity: usize) -> Vec<Value> {

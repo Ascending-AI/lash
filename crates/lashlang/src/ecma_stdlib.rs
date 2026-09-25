@@ -652,11 +652,23 @@ const fn str_eq(left: &str, right: &str) -> bool {
     true
 }
 
-/// Whether `method` is an instance method of the advertised surface.
+/// Whether `method` is an instance method of the advertised surface. The
+/// runtime asks this on every standard-library call, so the names are sorted
+/// once and searched rather than scanned.
 pub(crate) fn is_instance_method(method: &str) -> bool {
-    INSTANCE_STDLIB_SIGNATURES
-        .iter()
-        .any(|signature| signature.method == method)
+    static METHODS: std::sync::OnceLock<Vec<&'static str>> = std::sync::OnceLock::new();
+    METHODS
+        .get_or_init(|| {
+            let mut methods = INSTANCE_STDLIB_SIGNATURES
+                .iter()
+                .map(|signature| signature.method)
+                .collect::<Vec<_>>();
+            methods.sort_unstable();
+            methods.dedup();
+            methods
+        })
+        .binary_search(&method)
+        .is_ok()
 }
 
 /// The declared arity of an instance method that takes a fixed number of

@@ -243,6 +243,51 @@ pub(super) fn instruction_heap_plan(
     Ok(plan)
 }
 
+/// Whether an instruction keeps VM state heapified: run on state that holds
+/// no inline tuple, list or record, it leaves none behind, starts no
+/// iterator, rebinds no frame and allocates nothing, so the post-instruction
+/// import pass would find nothing to do after it.
+///
+/// Each opcode listed reads scalars or references and pushes, stores or
+/// branches on scalars and references only. The operands its heap plan
+/// exports from the stack are ones it pops, and none exports a slot. A
+/// constant counts only when it is not itself a compound. Every other opcode
+/// answers `false` and keeps the pass, which is always safe.
+pub(super) fn instruction_keeps_vm_state_heapified(
+    instruction: Instruction,
+    chunk: &Chunk,
+) -> bool {
+    use Instruction as I;
+    match instruction {
+        I::PushConst(index) => chunk.constants.get(index).is_some_and(|constant| {
+            !matches!(
+                constant,
+                crate::runtime::Value::Tuple(_)
+                    | crate::runtime::Value::List(_)
+                    | crate::runtime::Value::Record(_)
+            )
+        }),
+        I::PushNull
+        | I::PushUndefined
+        | I::PushBool(_)
+        | I::PushNumber(_)
+        | I::LoadName(_)
+        | I::StoreName(_)
+        | I::Duplicate
+        | I::Pop
+        | I::Jump(_)
+        | I::JumpIfFalse(_)
+        | I::JumpIfTrue(_)
+        | I::JumpIfCompareFalse { .. }
+        | I::ToBool
+        | I::IsNullish
+        | I::ObserveStep
+        | I::JavaScriptUnary(_)
+        | I::JavaScriptBinary(_) => true,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1123,6 +1123,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             execution_nonce: mint_execution_nonce(0),
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
+            #[cfg(test)]
+            heapify_passes: 0,
         }
     }
 
@@ -1520,6 +1522,8 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             execution_nonce: continuation.execution_nonce,
             #[cfg(test)]
             test_suspension: TestSuspension::Disabled,
+            #[cfg(test)]
+            heapify_passes: 0,
         };
         // Everything decoded from the wire is an unavailable placeholder: the
         // host descriptor is not serializable, only the projection's identity

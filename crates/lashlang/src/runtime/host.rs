@@ -554,6 +554,16 @@ pub trait ExecutionHost: Sync {
 
     fn observe_profile(&self, _profile: ProfileReport) {}
 
+    /// Whether the VM delivers Lashlang execution observations to
+    /// [`Self::observe_lashlang_execution`]. The VM builds none for a host
+    /// that answers `false`, which keeps loop steps, branches and calls free
+    /// of the work; a host that observes must answer `true`.
+    fn observes_lashlang_execution(&self) -> bool {
+        false
+    }
+
+    /// Receives each Lashlang execution observation, when
+    /// [`Self::observes_lashlang_execution`] answers `true`.
     fn observe_lashlang_execution(&self, _observation: LashlangExecutionObservation) {}
 }
 
@@ -564,6 +574,7 @@ pub struct ExecutionEnvironment<'host, H: ExecutionHost> {
     scratch: Mutex<Option<ExecutionScratch>>,
     trace_runtime_errors: bool,
     profile_execution: bool,
+    observes_lashlang_execution: bool,
     execution_bounds: ExecutionBounds,
     runtime_failure: Mutex<Option<RuntimeFailure>>,
     profile: Mutex<Option<ProfileReport>>,
@@ -578,6 +589,7 @@ impl<'host, H: ExecutionHost> ExecutionEnvironment<'host, H> {
             scratch: Mutex::new(host.take_scratch()),
             trace_runtime_errors: host.trace_runtime_errors(),
             profile_execution: host.profile_execution(),
+            observes_lashlang_execution: host.observes_lashlang_execution(),
             execution_bounds: host.execution_bounds(),
             runtime_failure: Mutex::new(None),
             profile: Mutex::new(None),
@@ -684,6 +696,10 @@ impl<H: ExecutionHost> ExecutionHost for ExecutionEnvironment<'_, H> {
     fn observe_profile(&self, profile: ProfileReport) {
         self.host.observe_profile(profile.clone());
         *self.profile.lock_recover() = Some(profile);
+    }
+
+    fn observes_lashlang_execution(&self) -> bool {
+        self.observes_lashlang_execution
     }
 
     fn observe_lashlang_execution(&self, observation: LashlangExecutionObservation) {

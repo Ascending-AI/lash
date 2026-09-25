@@ -1399,6 +1399,10 @@ impl lashlang::ExecutionHost for LashlangProcessHost<'_> {
         self.cancellation.is_cancelled()
     }
 
+    fn observes_lashlang_execution(&self) -> bool {
+        true
+    }
+
     fn observe_lashlang_execution(&self, observation: lashlang::LashlangExecutionObservation) {
         let observation = match observation {
             lashlang::LashlangExecutionObservation::NodeFailed {

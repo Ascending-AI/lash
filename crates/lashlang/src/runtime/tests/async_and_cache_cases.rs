@@ -240,6 +240,10 @@ async fn process_handle_await_reports_the_child_and_its_resolution() {
             AsyncHost.perform(op).await
         }
 
+        fn observes_lashlang_execution(&self) -> bool {
+            true
+        }
+
         fn observe_lashlang_execution(&self, observation: LashlangExecutionObservation) {
             self.0
                 .lock()
@@ -316,6 +320,10 @@ async fn aggregate_await_reports_all_children_once() {
                 return Ok(AbilityResult::Value(Value::Record(Arc::new(record))));
             }
             Ok(result)
+        }
+
+        fn observes_lashlang_execution(&self) -> bool {
+            true
         }
 
         fn observe_lashlang_execution(&self, observation: LashlangExecutionObservation) {

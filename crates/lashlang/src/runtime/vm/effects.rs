@@ -965,8 +965,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if process_ids.is_empty() {
             return;
         }
-        self.host.observe_lashlang_execution(
-            crate::LashlangExecutionObservation::ChildProcessWaiting {
+        self.observe(
+            || crate::LashlangExecutionObservation::ChildProcessWaiting {
                 site: active.site.clone(),
                 occurrence: active.occurrence,
                 process_ids,
@@ -976,12 +976,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
 
     fn observe_wait_resumed(&self, active: Option<&ActiveLashlangExecutionNode>) {
         if let Some(active) = active {
-            self.host.observe_lashlang_execution(
-                crate::LashlangExecutionObservation::NodeResumed {
-                    site: active.site.clone(),
-                    occurrence: active.occurrence,
-                },
-            );
+            self.observe(|| crate::LashlangExecutionObservation::NodeResumed {
+                site: active.site.clone(),
+                occurrence: active.occurrence,
+            });
         }
     }
 }

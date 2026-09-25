@@ -80,6 +80,10 @@ async fn real_run_observations_use_projected_workflow_node_ids_directly() {
             EchoHost.perform(op).await
         }
 
+        fn observes_lashlang_execution(&self) -> bool {
+            true
+        }
+
         fn observe_lashlang_execution(&self, observation: LashlangExecutionObservation) {
             let site = match observation {
                 LashlangExecutionObservation::NodeStarted { site, .. }
@@ -287,6 +291,10 @@ async fn real_runs_correlate_every_execution_site_to_the_selected_workflow_path(
     impl ExecutionHost for CorrelationHost {
         async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
             EchoHost.perform(op).await
+        }
+
+        fn observes_lashlang_execution(&self) -> bool {
+            true
         }
 
         fn observe_lashlang_execution(&self, observation: LashlangExecutionObservation) {

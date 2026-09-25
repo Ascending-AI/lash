@@ -80,6 +80,10 @@ name = "append_cost"
 path = "tests/append_cost.rs"
 
 [[test]]
+name = "observation_cost"
+path = "tests/observation_cost.rs"
+
+[[test]]
 name = "diagnostic_locations"
 path = "tests/diagnostic_locations.rs"
 

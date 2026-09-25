@@ -59,6 +59,10 @@ impl ExecutionHost for FailedSleepObservationHost {
         }
     }
 
+    fn observes_lashlang_execution(&self) -> bool {
+        true
+    }
+
     fn observe_lashlang_execution(&self, observation: crate::LashlangExecutionObservation) {
         self.observations.lock_recover().push(observation);
     }
