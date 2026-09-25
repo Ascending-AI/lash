@@ -190,6 +190,34 @@ Mutually recursive function declarations reject with
 `TS_MUTUAL_RECURSION_UNSUPPORTED`; a function *expression* may still be named
 and call itself by that name, and self-recursive declarations are unaffected.
 
+Some rejections are strictness the real toolchain shares rather than
+missing surface: `tsc --strict` — typescript@7.0.2, the version the
+differential generator pins — rejects the same program, and the refusal
+names its diagnostic (FIG-3705; the full register, with the splits where a
+`TS_*` code also covers `tsc`-accepted shapes and the ticket that owns each,
+is ADR 0064's dialect-strictness section). Reading a name nothing binds is
+`TS_UNKNOWN_BINDING` (TS2304); a `let`/`const` read before its declaration
+is `TS_TEMPORAL_DEAD_ZONE` (TS2448); a missing field of a statically closed
+object literal is `TS_LINK_ERROR` (TS2339), and a member a built-in
+namespace lacks is `TS_METHOD_UNSUPPORTED` to read and `TS_UNKNOWN_BINDING`
+to write (TS2339, or TS2540 on a read-only member). A listed method,
+builtin, or constructor called with the wrong arity is
+`TS_METHOD_UNSUPPORTED` (`[1].map()`), `TS_EXPRESSION_UNSUPPORTED`
+(`parseInt()`), or `TS_CONSTRUCTOR_UNSUPPORTED` at run time
+(`new Map(1, 2)`) — all TS2554; an authored function called short is *not*
+refused, since ECMA supplies `undefined`. `+` on an object without a string
+operand is `TS_OBJECT_STRING_COERCION` at run time (TS2365); `new` on an
+authored function is `TS_NEW_UNSUPPORTED` (TS7009), as is `new RegExp` with
+a non-string literal pattern (TS2769). Assigning a `const` or a function
+declaration is `TS_ASSIGN_CONST` (TS2588, TS2630); `instanceof` on a
+primitive is `TS_INSTANCEOF_UNSUPPORTED` (TS2358); `with` is
+`TS_WITH_UNSUPPORTED` (TS1101 — the dialect is strict-only, where `with` is
+already a syntax error); a comma whose left operand does nothing is
+`TS_SEQUENCE_UNSUPPORTED` (TS2695); destructuring or spreading a
+non-iterable (`const [a] = null;`) is `TS_METHOD_UNSUPPORTED` at run time
+(TS2488). The probes are pinned in `tests/rejections.rs` and the census's
+`typescript`-kind rows.
+
 The canonical classic `for` lowering rejects a `continue` that crosses a
 `finally` with `TS_FOR_UNSUPPORTED`, because the current loop epilogue would
 otherwise run before the `finally`. `for...of` follows its iterable live, as
