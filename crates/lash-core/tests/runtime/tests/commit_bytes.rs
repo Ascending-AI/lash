@@ -434,6 +434,7 @@ async fn cancelled_mid_tool_turn_commits_the_pinned_bytes() {
             cancel: cancel.clone(),
             inner: SlowTool {
                 observed_cancel: Arc::new(AtomicBool::new(false)),
+                started: Arc::new(tokio::sync::Notify::new()),
             },
         }),
         cancel,
