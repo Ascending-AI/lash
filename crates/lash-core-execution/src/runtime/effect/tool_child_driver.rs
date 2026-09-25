@@ -417,6 +417,18 @@ impl super::group_drain::GroupExecutors for ToolChildHost {
         ) || super::group_drain::GroupExecutors::executor_for(self, envelope).is_some()
     }
 
+    /// Routes through the host that installed this resolver: a layer over
+    /// that host wraps every child an engine handler runs for it, tool,
+    /// timer and durable wait alike.
+    fn route_handler_child_controller<'run>(
+        &self,
+        controller: crate::ScopedEffectController<'run>,
+    ) -> Result<crate::ScopedEffectController<'run>, crate::RuntimeError> {
+        self.effect_host()
+            .map_err(RuntimeEffectControllerError::into_runtime_error)?
+            .route_handler_child_controller(controller)
+    }
+
     /// Routes a tool child to this host's driver, and answers `None` for
     /// everything else.
     ///
@@ -677,10 +689,10 @@ impl RuntimeEffectLocalRunner for ToolChildRunner {
 /// controller is valid exactly as long as the handler drives it.
 #[async_trait::async_trait]
 pub trait ToolChildDriver: Send {
-    /// Runs the child to a terminal on `controller`, routed through the stack
-    /// of the host that routed the child
-    /// ([`EffectHost::route_handler_child_controller`]), returning its
-    /// settlement outcome. `child` is the child's own `ToolInvocation`
+    /// Runs the child to a terminal on `controller`, returning its settlement
+    /// outcome. The tier routes `controller` through the resolver's host
+    /// ([`GroupExecutors::route_handler_child_controller`](super::group_drain::GroupExecutors::route_handler_child_controller))
+    /// before handing it here, as it routes every other child kind. `child` is the child's own `ToolInvocation`
     /// envelope address — the replay row its §4 final commits against (ADR
     /// 0099 §4). A live opener's token is the parent of the child's body
     /// token, as it is for the in-process `execute`; a deployment-built
@@ -702,16 +714,6 @@ impl ToolChildDriver for ToolChildRunner {
         child: crate::EffectAddress,
         controller: ScopedEffectController<'run>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        // The engine's handler minted `controller` from its own context. It
-        // crosses the stack of the host that routed this child, so a layer
-        // over the opener's host sees the child's effects on every engine, as
-        // it does where the host mints the child's controller itself
-        // (`child_controller`).
-        let controller = self
-            .host
-            .effect_host()?
-            .route_handler_child_controller(controller)
-            .map_err(RuntimeEffectControllerError::from)?;
         Box::pin(run_tool_child(
             &self.host,
             &self.opener,

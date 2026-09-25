@@ -166,6 +166,24 @@ pub trait GroupExecutors: Send + Sync {
         let _ = opener;
         None
     }
+
+    /// A group child's controller that an engine handler minted from the
+    /// child invocation's own context, routed through the stack of the host
+    /// this resolver runs children for
+    /// ([`EffectHost::route_handler_child_controller`](super::executor::EffectHost::route_handler_child_controller)).
+    ///
+    /// Every kind of child a handler-driven engine runs (a tool child's
+    /// driver, a timer, a durable wait) is routed here once, before its
+    /// first effect, so a layer over that host sees the child's effects as
+    /// it sees the effects of controllers the host lends itself. The default
+    /// is the controller unchanged: a resolver that belongs to no layered
+    /// host has no stack to add.
+    fn route_handler_child_controller<'run>(
+        &self,
+        controller: crate::ScopedEffectController<'run>,
+    ) -> Result<crate::ScopedEffectController<'run>, crate::RuntimeError> {
+        Ok(controller)
+    }
 }
 
 /// The host-owned driver that runs a closed group's remaining children to

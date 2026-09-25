@@ -2200,6 +2200,7 @@ fn witness_shape(group_key: &str, children: &[RuntimeEffectEnvelope]) -> EffectG
             .iter()
             .map(|child| serde_json::to_string(child).expect("witness child serializes"))
             .collect(),
+        opener: lash_core::AdmittedScope::turn("session", "turn"),
     }
 }
 

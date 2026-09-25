@@ -16,6 +16,7 @@
 #[doc(hidden)]
 pub use async_trait::async_trait;
 
+pub use lash_core_execution::admitted_scope_wire;
 pub use lash_core_execution::direct;
 pub(crate) use lash_core_execution::direct_completion_client;
 pub use lash_core_execution::engine;

@@ -299,7 +299,7 @@ pub struct ToolChildScope {
     /// `AdmittedScope::new` through the wire helper rather than trusting the
     /// bytes; this is the pin the child's controller is constructed from,
     /// never `enclosing_process`.
-    #[serde(with = "admitted_scope_wire")]
+    #[serde(with = "lash_core_store::admitted_scope::wire")]
     pub admitted_scope: AdmittedScope,
     /// The session the child's work is attributed to.
     ///
@@ -315,48 +315,6 @@ pub struct ToolChildScope {
     /// holds many frames (ADR 0092), so a recovered child that re-derived a
     /// frame from its session would attribute its work to the wrong one.
     pub agent_frame_id: FrameNodeId,
-}
-
-/// The wire shape of an admitted scope: the bare pair, re-checked at decode.
-///
-/// [`AdmittedScope`] does not implement `Deserialize` on purpose — its only
-/// construction is [`AdmittedScope::new`], which refuses a process scope with
-/// no incarnation, a pin naming another process, or a pin on a non-process
-/// scope. The journal carries the two halves plainly so the durable shape
-/// stays legible, and decoding runs the check again rather than trusting the
-/// bytes: a hand-edited or cross-version journal entry cannot smuggle in the
-/// half-admitted pair the type exists to make unrepresentable.
-mod admitted_scope_wire {
-    use serde::{Deserialize, Deserializer, Serialize, Serializer};
-
-    use super::*;
-
-    /// The serialized pair: the claim address and, for a process claim, the
-    /// incarnation the admission authority bound.
-    #[derive(Serialize, Deserialize)]
-    pub struct AdmittedScopeWire {
-        pub scope: crate::ExecutionScope,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        pub process: Option<ProcessRef>,
-    }
-
-    pub fn serialize<S: Serializer>(
-        admitted: &AdmittedScope,
-        serializer: S,
-    ) -> Result<S::Ok, S::Error> {
-        AdmittedScopeWire {
-            scope: admitted.scope().clone(),
-            process: admitted.process_ref().cloned(),
-        }
-        .serialize(serializer)
-    }
-
-    pub fn deserialize<'de, D: Deserializer<'de>>(
-        deserializer: D,
-    ) -> Result<AdmittedScope, D::Error> {
-        let wire = AdmittedScopeWire::deserialize(deserializer)?;
-        AdmittedScope::new(wire.scope, wire.process).map_err(serde::de::Error::custom)
-    }
 }
 
 impl ToolChildScope {

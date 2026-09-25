@@ -557,6 +557,7 @@ impl EffectGroupDispatch {
                     child.scope.admitted_scope.clone(),
                     binding,
                 )
+                .and_then(|scoped| self.executors.route_handler_child_controller(scoped))
                 .map_err(TerminalError::from_error)?;
             let mut drive =
                 driver.drive(child, request.envelope.invocation.address.clone(), scoped);
@@ -606,6 +607,9 @@ impl EffectGroupDispatch {
             // at open and this invocation is that member, so the wait runs as
             // a plain effect on the child's own journal rather than
             // re-carrying the membership the controller's command arms refuse.
+            // It runs under the group's recorded opener, routed through the
+            // host's stack like every other child kind, so a layer over that
+            // host sees the wait (FIG-3780).
             let Some(executor) = self.executors.executor_for(&request.envelope) else {
                 return Err(std::io::Error::other(format!(
                     "no executor currently routes effect group {} child {}; retry on a carrying deployment",
@@ -618,12 +622,14 @@ impl EffectGroupDispatch {
                 group: None,
                 ..request.envelope.clone()
             };
+            let scoped = lash_core::ScopedEffectController::borrowed(
+                &controller,
+                request.shape.opener.clone(),
+            )
+            .and_then(|scoped| self.executors.route_handler_child_controller(scoped))
+            .map_err(TerminalError::from_error)?;
             let outcome = {
-                let wait = lash_core::RuntimeEffectController::execute_effect(
-                    &controller,
-                    envelope,
-                    executor,
-                );
+                let wait = scoped.execute_effect(envelope, executor);
                 tokio::pin!(wait);
                 tokio::select! {
                     biased;
@@ -1160,6 +1166,7 @@ mod tests {
                 replay_keys: vec!["child-0".to_owned()],
                 wait_scope: ExecutionScope::runtime_operation("group"),
                 membership: vec!["{}".to_owned()],
+                opener: lash_core::AdmittedScope::turn("session", "turn"),
             },
             position: 0,
             envelope: RuntimeEffectEnvelope::new(
