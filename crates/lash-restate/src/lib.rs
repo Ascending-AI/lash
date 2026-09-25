@@ -85,6 +85,7 @@ mod effect_host;
 mod engine;
 mod formats;
 mod ingress;
+mod object_state;
 mod process;
 mod process_attach;
 mod process_stop;
@@ -101,16 +102,17 @@ pub use controller::{
     RestateEffectControllerOptions, RestateEffectError, RestateRuntimeEffectController,
 };
 pub use durable_wait::{
-    DURABLE_WAIT_REQUEST_VERSION, RestateDurableWaitAddress, RestateDurableWaitAwaitInput,
-    RestateDurableWaitAwaitRequest, RestateDurableWaitAwakeableRequest,
-    RestateDurableWaitCancelDecidedRequest, RestateDurableWaitClassification,
-    RestateDurableWaitDeadline, RestateDurableWaitEffectRequest, RestateDurableWaitGroupRequest,
-    RestateDurableWaitIndexRequest, RestateDurableWaitRegistration,
+    DURABLE_WAIT_REGISTRY_FORMAT_VERSION, DURABLE_WAIT_REQUEST_VERSION, RestateDurableWaitAddress,
+    RestateDurableWaitAwaitInput, RestateDurableWaitAwaitRequest,
+    RestateDurableWaitAwakeableRequest, RestateDurableWaitCancelDecidedRequest,
+    RestateDurableWaitClassification, RestateDurableWaitDeadline, RestateDurableWaitEffectRequest,
+    RestateDurableWaitGroupRequest, RestateDurableWaitIndexRequest, RestateDurableWaitRegistration,
     RestateDurableWaitResolveRequest, RestateDurableWaitResolveResponse, RestateDurableWaitScope,
     RestateDurableWaitSettleRequest,
 };
 pub use effect_group::{
-    EFFECT_GROUP_INDEX_PROTOCOL_VERSION, EffectGroupAdmissionRequest, EffectGroupAdmissionResponse,
+    EFFECT_GROUP_INDEX_PROTOCOL_VERSION, EFFECT_GROUP_PAYLOAD_FORMAT_VERSION,
+    EFFECT_GROUP_STATE_FORMAT_VERSION, EffectGroupAdmissionRequest, EffectGroupAdmissionResponse,
     EffectGroupAdoptRequest, EffectGroupCleanup, EffectGroupCleanupFacts,
     EffectGroupCloseDisposition, EffectGroupCloseRequest, EffectGroupCloseResponse,
     EffectGroupDispatchRequest, EffectGroupDispatchState, EffectGroupFinishRetirementResponse,

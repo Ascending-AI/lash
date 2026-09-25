@@ -489,7 +489,7 @@ fn ingress_group_error(
     operation: &str,
     error: crate::RestateHttpError,
 ) -> RuntimeEffectControllerError {
-    if let Some(refusal) = ingress_protocol_refusal(&error) {
+    if let Some(refusal) = ingress_stored_format_refusal(&error) {
         return refusal;
     }
     let service_unregistered = error.is_service_unregistered();
@@ -501,10 +501,9 @@ fn ingress_group_error(
     }
 }
 
-/// The typed effect-group protocol refusal an index handler answered an
-/// ingress call with, recovered from the terminal error's message in the
-/// response body.
-pub(crate) fn ingress_protocol_refusal(
+/// The typed stored-format refusal an index handler answered an ingress call
+/// with, recovered from the terminal error's message in the response body.
+pub(crate) fn ingress_stored_format_refusal(
     error: &crate::RestateHttpError,
 ) -> Option<RuntimeEffectControllerError> {
     let crate::RestateHttpError::Status { body, .. } = error else {
@@ -515,7 +514,7 @@ pub(crate) fn ingress_protocol_refusal(
         .get("message")?
         .as_str()?
         .to_owned();
-    crate::effect_group::protocol_refusal_in(&message)
+    crate::object_state::stored_format_error_in(&message)
 }
 
 #[async_trait::async_trait]

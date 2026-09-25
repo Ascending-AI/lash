@@ -1,14 +1,12 @@
-//! The effect-group index protocol version, and the refusal of index state
-//! another version wrote.
+//! The effect-group index's stored state decode (ADR 0106 §3, FIG-3814).
 //!
-//! The `EffectGroupIndex` handlers, their request and response wire types, and
-//! the index record Restate retains for each group move together as one
-//! protocol. A deployment that changes any of them cannot read what an older
-//! one left behind, and an in-flight invocation replaying an older journal
-//! would meet a journal mismatch that Restate retries without end. So every
-//! index record carries the version that wrote it, and each handler refuses a
-//! record stamped with any other version before it acts, with a terminal
-//! typed error that Restate does not retry.
+//! The record Restate retains for each group lives under the stamped
+//! object-state envelope in [`crate::object_state`]: a `format` stamp that
+//! decode dispatches on — the current format directly, a stamp one format
+//! behind through the family's N-1 upcaster hook. Any other stamp — a newer
+//! deployment's, or an unstamped record that predates the envelope — is
+//! refused before the handler acts, with a typed terminal error Restate does
+//! not retry.
 
 use super::*;
 
@@ -23,54 +21,43 @@ use super::*;
 /// the child's dispatch invocation reads as no cancel (FIG-3709).
 pub const EFFECT_GROUP_INDEX_PROTOCOL_VERSION: u32 = 4;
 
-/// The record field the protocol version is stamped under.
-const PROTOCOL_VERSION_FIELD: &str = "protocol_version";
+/// The stored format the group index's retained record stamps into its
+/// object-state envelope. Bump it when the record's stored shape changes;
+/// the previous format reads through the N-1 upcaster slot in
+/// [`EFFECT_GROUP_STATE_FORMATS`].
+pub const EFFECT_GROUP_STATE_FORMAT_VERSION: u16 = 1;
+
+/// The group index's stored-format table: the current stamp, plus the N-1
+/// upcaster hooks (empty while the first stamped layout is the baseline).
+pub(crate) const EFFECT_GROUP_STATE_FORMATS: StoredValueFormats = StoredValueFormats {
+    what: "effect group",
+    current: EFFECT_GROUP_STATE_FORMAT_VERSION,
+    upcast_n1: &[],
+};
 
 /// Every index handler's first read: the group's retained record, refused
-/// before the handler acts when another protocol version wrote it.
+/// before the handler acts when it carries a stamp this build does not read.
 pub(super) async fn load_index(
     ctx: &ObjectContext<'_>,
 ) -> Result<Option<EffectGroupIndexRecord>, TerminalError> {
-    ctx.get::<Json<serde_json::Value>>(INDEX_STATE_KEY)
-        .await?
-        .map(|Json(state)| decode_index_state(ctx.key(), state))
-        .transpose()
+    object_state::get_stamped(ctx, INDEX_STATE_KEY, &EFFECT_GROUP_STATE_FORMATS).await
 }
 
 pub(super) async fn load_index_shared(
     ctx: &SharedObjectContext<'_>,
 ) -> Result<Option<EffectGroupIndexRecord>, TerminalError> {
-    ctx.get::<Json<serde_json::Value>>(INDEX_STATE_KEY)
-        .await?
-        .map(|Json(state)| decode_index_state(ctx.key(), state))
-        .transpose()
+    object_state::get_stamped_shared(ctx, INDEX_STATE_KEY, &EFFECT_GROUP_STATE_FORMATS).await
 }
 
-/// Decode a group's retained index state, refusing state that another
-/// protocol version wrote, or that predates the stamp.
-///
-/// The stamp is read from the raw state before the record is decoded, so
-/// state whose shape has since moved is refused by version, never by an
-/// accident of decoding.
+/// Decode a group's retained index state, dispatching on its stored-format
+/// stamp before the record is decoded, so state whose shape has moved is
+/// refused by stamp, never by an accident of decoding.
+#[cfg(test)]
 pub(crate) fn decode_index_state(
     group_key: &str,
     state: serde_json::Value,
 ) -> Result<EffectGroupIndexRecord, TerminalError> {
-    let stamped = state
-        .get(PROTOCOL_VERSION_FIELD)
-        .and_then(serde_json::Value::as_u64);
-    if stamped != Some(u64::from(EFFECT_GROUP_INDEX_PROTOCOL_VERSION)) {
-        let refusal = protocol_retired_error(group_key, stamped);
-        return Err(TerminalError::new(
-            serde_json::to_string(&refusal).unwrap_or(refusal.message),
-        ));
-    }
-    serde_json::from_value(state).map_err(|error| {
-        TerminalError::new(format!(
-            "effect group {group_key} index state stamped with protocol version \
-             {EFFECT_GROUP_INDEX_PROTOCOL_VERSION} does not decode: {error}"
-        ))
-    })
+    object_state::decode_stamped_value(group_key, state, &EFFECT_GROUP_STATE_FORMATS)
 }
 
 /// The typed refusal of index state written under another protocol version.
@@ -104,8 +91,8 @@ pub(crate) fn protocol_refusal_in(message: &str) -> Option<RuntimeEffectControll
 mod tests {
     use super::*;
 
-    fn record_state(protocol_version: Option<u32>) -> serde_json::Value {
-        let mut state = serde_json::to_value(EffectGroupIndexRecord {
+    fn record_state(format: Option<u16>) -> serde_json::Value {
+        let body = serde_json::to_value(EffectGroupIndexRecord {
             protocol_version: EFFECT_GROUP_INDEX_PROTOCOL_VERSION,
             shape_digest: "shape-digest".to_owned(),
             lifecycle: EffectGroupLifecycle::Retired {
@@ -113,41 +100,35 @@ mod tests {
             },
         })
         .expect("serialize an index record");
-        let object = state.as_object_mut().expect("the record is an object");
-        match protocol_version {
-            Some(version) => {
-                object.insert(PROTOCOL_VERSION_FIELD.to_owned(), version.into());
-            }
-            None => {
-                object.remove(PROTOCOL_VERSION_FIELD);
-            }
+        match format {
+            Some(format) => serde_json::json!({ "format": format, "body": body }),
+            None => body,
         }
-        state
     }
 
     #[test]
-    fn index_state_of_this_protocol_version_decodes() {
+    fn index_state_of_the_current_format_decodes() {
         let record = decode_index_state(
             "group",
-            record_state(Some(EFFECT_GROUP_INDEX_PROTOCOL_VERSION)),
+            record_state(Some(EFFECT_GROUP_STATE_FORMAT_VERSION)),
         )
-        .expect("current state decodes");
-        assert_eq!(record.protocol_version, EFFECT_GROUP_INDEX_PROTOCOL_VERSION);
+        .expect("current-format state decodes");
+        assert_eq!(record.shape_digest, "shape-digest");
     }
 
     #[test]
-    fn index_state_of_another_or_no_protocol_version_is_refused_typed() {
+    fn index_state_of_another_or_no_format_is_refused_typed() {
         for stale in [
             record_state(None),
-            record_state(Some(EFFECT_GROUP_INDEX_PROTOCOL_VERSION - 1)),
-            record_state(Some(EFFECT_GROUP_INDEX_PROTOCOL_VERSION + 1)),
+            record_state(Some(EFFECT_GROUP_STATE_FORMAT_VERSION - 1)),
+            record_state(Some(EFFECT_GROUP_STATE_FORMAT_VERSION + 1)),
         ] {
             let refusal = decode_index_state("group", stale).expect_err("stale state is refused");
-            let typed = protocol_refusal_in(refusal.message())
-                .expect("the refusal carries the typed protocol error");
+            let typed = crate::object_state::stored_format_error_in(refusal.message())
+                .expect("the refusal carries the typed stored-format error");
             assert_eq!(
                 typed.code,
-                RuntimeErrorCode::EngineEffectGroupProtocolRetired
+                RuntimeErrorCode::EngineObjectStateFormatUnsupported
             );
             assert!(
                 typed.code.is_terminal(),

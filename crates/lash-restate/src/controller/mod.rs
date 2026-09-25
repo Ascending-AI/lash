@@ -1414,7 +1414,7 @@ fn effect_group_engine_error(
     operation: &str,
     error: TerminalError,
 ) -> RuntimeEffectControllerError {
-    if let Some(refusal) = crate::effect_group::protocol_refusal_in(error.message()) {
+    if let Some(refusal) = crate::object_state::stored_format_error_in(error.message()) {
         return refusal;
     }
     group_shape_error(format!(
