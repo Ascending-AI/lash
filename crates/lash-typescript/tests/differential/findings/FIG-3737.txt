@@ -1,0 +1,30 @@
+typeof Date.prototype
+Date.prototype.constructor === Date
+Date.prototype.hasOwnProperty('getDate')
+Date.prototype.getDate.length
+Date.prototype.getDate.name
+Date.prototype.setUTCHours.length
+Date.prototype.setUTCHours.name
+Date.prototype.toGMTString === Date.prototype.toUTCString
+Date.prototype.hasOwnProperty('toGMTString')
+Set.prototype.keys === Set.prototype.values
+Array.prototype.length
+Array.isArray(Array.prototype)
+typeof Array.prototype.toLocaleString
+Array.prototype.hasOwnProperty('toLocaleString')
+Error.prototype.name
+Error.prototype.message
+AggregateError.prototype.name
+AggregateError.prototype.message
+TypeError.prototype.name
+TypeError.prototype.message
+TypeError.prototype.hasOwnProperty('toString')
+TypeError.prototype.toString === Error.prototype.toString
+new Error().message === Error.prototype.message
+RegExp.prototype.global
+RegExp.prototype.source
+RegExp.prototype.flags
+RegExp.prototype.hasOwnProperty('global')
+(() => { const p = RegExp.prototype; const d = delete p.global; return [d, p.hasOwnProperty('global')]; })()
+(() => { try { RegExp.prototype.exec(''); return 'none'; } catch (e) { return e instanceof TypeError; } })()
+(() => { try { RegExp.prototype.test(''); return 'none'; } catch (e) { return e instanceof TypeError; } })()

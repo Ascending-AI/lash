@@ -459,10 +459,12 @@ const REGEXP_PROTOTYPE_KEYS: &[&str] = &[
     "exec",
     "flags",
     "global",
+    "hasIndices",
     "ignoreCase",
     "multiline",
     "source",
     "sticky",
+    "test",
     "toString",
     "unicode",
     "unicodeSets",
@@ -494,7 +496,7 @@ const SET_PROTOTYPE_KEYS: &[&str] = &[
 ];
 
 /// The own keys of `Date.prototype`.
-const DATE_PROTOTYPE_KEYS: &[&str] = &[
+pub(crate) const DATE_PROTOTYPE_KEYS: &[&str] = &[
     "getDate",
     "getDay",
     "getFullYear",
@@ -531,6 +533,7 @@ const DATE_PROTOTYPE_KEYS: &[&str] = &[
     "setUTCSeconds",
     "setYear",
     "toDateString",
+    "toGMTString",
     "toISOString",
     "toJSON",
     "toLocaleDateString",

@@ -413,7 +413,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .map(|cache| cache.program.clone()),
             ),
             object => {
-                return Err(js_stdlib_error(format!(
+                return Err(RuntimeError::type_error(format!(
                     "RegExp method requires a RegExp receiver, got {}",
                     object.kind_name()
                 )));
@@ -609,7 +609,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let units = bounded_utf16_input(&self.heap, input)?;
         let (global, sticky) = match self.heap.get(receiver)? {
             HeapObject::RegExp(regexp) => (regexp.flags.contains('g'), regexp.flags.contains('y')),
-            _ => return Err(js_stdlib_error("RegExp.exec requires a RegExp receiver")),
+            _ => {
+                return Err(RuntimeError::type_error(
+                    "RegExp.exec requires a RegExp receiver",
+                ));
+            }
         };
         let stateful = global || sticky;
         // `lastIndex` stores the raw written value; `exec` coerces at use.
