@@ -90,6 +90,10 @@ macro_rules! admitted_head_redrive_tests {
 /// is the admitted-head one: a guard, a prefix, the tier's effect host, the
 /// store set under test and its
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner).
+///
+/// A tier that must quarantine a law registers the laws by name and marks the
+/// quarantined ones:
+/// `drive_admission_tests!(@laws [] { fixture }; [(law, "label"), #[ignore = "why"] (other, "label"), ...])`.
 #[macro_export]
 macro_rules! drive_admission_tests {
     ($(#[$attr:meta])* $fixture:block) => {
@@ -105,13 +109,14 @@ macro_rules! drive_admission_tests {
             (every_driver_turn_is_owned_by_its_root, "drive-owned-root"),
         ]);
     };
-    (@laws $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+    (@laws $attrs:tt $fixture:block; [$($(#[$law_attr:meta])* ( $law:ident, $label:literal )),* $(,)?]) => {
         $(
-            $crate::drive_admission_tests!(@law $attrs $fixture; ($law, $label));
+            $crate::drive_admission_tests!(@law $attrs [$(#[$law_attr])*] $fixture; ($law, $label));
         )*
     };
-    (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
+    (@law [$($attr:tt)*] [$($law_attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
         $($attr)*
+        $($law_attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
             let (_guard, prefix, host, stores, runner) = $fixture;

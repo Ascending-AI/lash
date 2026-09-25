@@ -319,9 +319,11 @@ pub async fn one_drive_claims_many_items(
     assert_eq!(parts.calls.load(Ordering::SeqCst), 1, "one model call");
 }
 
-/// L-S3: running an admitted root again under the same admission drives
-/// exactly the claim its first run recorded: the same answer, no second model
-/// call, no second epoch transition, the input applied once.
+/// L-S3: a redrive of an admitted root drives exactly the claim its first
+/// execution recorded: the same answer, no second model call, no second
+/// epoch transition, the input applied once. The first execution dies right
+/// after its root commits; the tier redelivers it the way it recovers a
+/// crashed turn.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -337,26 +339,50 @@ pub async fn claim_identity_is_idempotent_within_ownership(
         .enqueue("ask once", Some("claim-idempotent-root"))
         .await;
     let request = parts.request("claim-idempotent-drive");
-    let (first, again) = on_tier(&runner, &parts, move |mut runtime, scope| {
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<RootOutcome>();
+    let attempt = |crash: bool| -> crate::ConformanceTurnAttempt {
+        let parts = parts.clone();
         let request = request.clone();
-        Box::pin(async move {
-            let admitted = admitted(
-                lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0)
+        let tx = tx.clone();
+        Arc::new(move |scope| {
+            let parts = parts.clone();
+            let request = request.clone();
+            let tx = tx.clone();
+            Box::pin(async move {
+                let mut runtime = parts.runtime().await;
+                let admitted = admitted(
+                    lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0)
+                        .await
+                        .expect("admit the root"),
+                );
+                let outcome = lash_core::drive::run_admitted_root(&mut runtime, &scope, admitted)
                     .await
-                    .expect("admit the root"),
-            );
-            let first = lash_core::drive::run_admitted_root(&mut runtime, &scope, admitted.clone())
-                .await
-                .expect("run the root");
-            let again = lash_core::drive::run_admitted_root(&mut runtime, &scope, admitted)
-                .await
-                .expect("run the same admission again");
-            (first, again)
+                    .expect("run the root");
+                let _ = tx.send(outcome);
+                if crash {
+                    panic!("the root's execution dies after its commit");
+                }
+                crate::ConformanceTurnEnd::Settled
+            })
         })
-    })
-    .await;
+    };
+    runner
+        .run_crashed_then_redriven_turn(
+            admit(crate::ExecutionScope::turn(
+                &parts.session_id,
+                TurnId::from("drive-law-driver"),
+            )),
+            attempt(true),
+            attempt(false),
+        )
+        .await;
+    let first = rx.recv().await.expect("the first execution ran its root");
+    let again = rx.recv().await.expect("the redrive ran its root");
     assert!(matches!(first, RootOutcome::Committed { .. }), "{first:?}");
-    assert_eq!(again, first, "the same admission drives the same root");
+    assert_eq!(
+        again, first,
+        "the redrive drives the same root to the same answer"
+    );
     assert_eq!(
         parts.calls.load(Ordering::SeqCst),
         1,
