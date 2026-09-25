@@ -229,7 +229,7 @@ lash_rust_integration_test(
         "tests/store_backed.rs",
         "tests/store_backed/**/*.rs",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2621440", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2621440", "test.cpu_count": "2", "test.memory_kb": "1048576"},
     extra_compile_data = [],
     library = ":lash-core-execution",
     library_crate_name = "lash_core_execution",
@@ -244,9 +244,9 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
-    cpu_count = 6,
+    cpu_count = 5,
     jobs = 2,
-    memory_kb = 5242880,
+    memory_kb = 1048576,
     tests = [
         ":effect_model__test",
         ":lash-core-execution__unit_test",

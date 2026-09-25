@@ -101,7 +101,7 @@ lash_rust_integration_test(
     data_exclude = [
         "tests/test262/test/**/*.js",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
     extra_compile_data = [],
     library = ":lash-typescript",
     library_crate_name = "lash_typescript",
@@ -127,7 +127,7 @@ lash_rust_integration_test(
     data_exclude = [
         "tests/test262/test/**/*.js",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
     extra_compile_data = [],
     library = ":lash-typescript",
     library_crate_name = "lash_typescript",
@@ -150,7 +150,7 @@ lash_rust_integration_test(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "2", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//examples:codemode_parity_cells",
     ],
@@ -178,7 +178,7 @@ lash_rust_integration_test(
     data_exclude = [
         "tests/test262/test/**/*.js",
     ],
-    exec_properties = {"test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"test.cpu_count": "2", "test.memory_kb": "1048576"},
     extra_compile_data = [],
     library = ":lash-typescript",
     library_crate_name = "lash_typescript",
@@ -199,7 +199,7 @@ lash_rust_integration_test(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "2", "test.memory_kb": "1048576"},
     extra_compile_data = [],
     library = ":lash-typescript",
     library_crate_name = "lash_typescript",
@@ -220,7 +220,7 @@ lash_rust_integration_test(
     declared_features = [
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "8", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "8", "test.memory_kb": "1572864"},
     extra_compile_data = [],
     library = ":lash-typescript",
     library_crate_name = "lash_typescript",
@@ -247,9 +247,9 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
-    cpu_count = 8,
+    cpu_count = 4,
     jobs = 2,
-    memory_kb = 8388608,
+    memory_kb = 1048576,
     tests = [
         ":fuel_law__test",
         ":lash-typescript__unit_test",

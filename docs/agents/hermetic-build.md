@@ -184,12 +184,15 @@ rebuilds from the pool's usage logs for Lash packages only; an unmeasured
 compile inherits the default. A test target's `test.cpu_count` /
 `test.memory_kb` size its TestRunner spawn alone, from the per-label table in
 `tools/bazel/test-run-sizes.json` (`action_sizes_from_log.py --test-runs`, at
-least 3 pool runs per label). An unmeasured run asks for 4 CPU / 4 GiB, or 8 CPU
+least 3 pool runs per label; a `__fv_` feature variant inherits its base
+label's row). An unmeasured run asks for 2 CPU / 1 GiB, or 8 CPU
 for the large suites in `[test_runs.large_suites]` of
 `tools/bazel/package-policy.toml`; lash-perf and lash-sim never drop below 4 CPU
-(`[test_runs] contention_floor`). A `:test_batch` reserves its two largest members'
-requests side by side, never less than the batch itself measured, and runs at
-most two members at once. Local
+(`[test_runs] contention_floor`), and a few runs and batches carry a per-label
+request in `[test_runs.pinned]`. A `:test_batch` reserves its own measured row
+when one exists, else its two largest members' requests side by side, and runs at
+most two members at once; the contention floor counts once per batch, not once
+per member. Local
 clients submit at most 16 jobs; CI submits 32. These are in-flight action
 limits, not compiler thread counts. The scheduler admits work against each
 worker's advertised capacity. Keep a fork's Bazel server alive to preserve
@@ -415,8 +418,9 @@ The generator reads everything `cargo metadata` cannot tell it from
 - feature-only compile inputs, shared filegroups, trybuild fixture gates and
   the service-job package map;
 - the test-run exceptions (`[test_runs]`): the large suites' unmeasured
-  requests, which also keep them out of `:test_batch`, and the timing-sensitive
-  packages' core floor.
+  requests, which also keep them out of `:test_batch`, the timing-sensitive
+  packages' core floor, and the per-label pins for runs and batches no
+  measured row prices.
 
 A `[[rule]]` selects labels by package, target kind and target-name glob, and
 rules apply in file order. The generator refuses a rule that names an unknown

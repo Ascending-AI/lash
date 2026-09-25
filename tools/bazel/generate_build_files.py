@@ -49,19 +49,24 @@ DEFAULT_CPU_COUNT = 1
 # records which test each run belongs to, and `action_sizes_from_log.py
 # --test-runs` rebuilds this table from it (the rule is documented there).
 TEST_RUN_SIZES_PATH = ROOT / "tools/bazel/test-run-sizes.json"
-# What a run asks for until it has been measured: the request every run had
-# before measurement existed. A new test starts here and comes down once the
-# pool has seen it.
-UNMEASURED_TEST_RUN = {"cpu_count": 4, "memory_kb": 4194304}
+# What a run asks for until it has been measured. A new test starts here and
+# comes down once the pool has seen it; sizing it for the worst suite in the
+# workspace reserved roughly twice the cores and six times the memory an
+# ordinary libtest binary uses.
+UNMEASURED_TEST_RUN = {"cpu_count": 2, "memory_kb": 1048576}
 # Per-package test-run policy (`[test_runs]` in tools/bazel/package-policy.toml):
 # the large suites' unmeasured requests, which also keep them out of every
-# `:test_batch`, and the contention core floor of the timing-sensitive suites.
+# `:test_batch`, the contention core floor of the timing-sensitive suites, and
+# the per-label pins whose request is policy rather than measurement.
 PACKAGE_POLICY = tomllib.loads((ROOT / "tools/bazel/package-policy.toml").read_text())
 LARGE_TEST_RUNS = PACKAGE_POLICY["test_runs"]["large_suites"]
 CONTENTION_FLOOR = PACKAGE_POLICY["test_runs"]["contention_floor"]
-# Members a `:test_batch` runs at once. The batch reserves the sum of its
-# largest BATCH_JOBS members' requests and the runner reads the same number
-# from `LASH_BATCH_JOBS`, never from `nproc`.
+# Requests pinned per Bazel label: runs too few times sampled for a measured
+# row, and unmeasured batches the member sum would oversize.
+PINNED_TEST_RUNS = PACKAGE_POLICY["test_runs"].get("pinned", {})
+# Members a `:test_batch` runs at once. An unmeasured batch reserves the sum
+# of its largest BATCH_JOBS members' requests and the runner reads the same
+# number from `LASH_BATCH_JOBS`, never from `nproc`.
 BATCH_JOBS = 2
 LOAD = """load(
     "//tools/bazel:lash_rust.bzl",
@@ -96,20 +101,28 @@ def compile_request(package_name: str, crate_name: str) -> dict[str, int]:
     }
 
 
-def test_run_request(package_name: str, crate_name: str, label: str) -> dict[str, int]:
+def test_run_request(
+    package_name: str, crate_name: str, label: str, *, floor: bool = True
+) -> dict[str, int]:
     """What one run of this test binary reserves.
 
-    The measured row for the label, else the request it had before it was
-    measured; a timing-sensitive suite never drops below its core floor.
+    The measured row for the label wins. A `__fv_` feature variant is the
+    same binary under another resolution, so it inherits its base label's
+    row when the variant itself is unmeasured. Below both sit the per-label
+    policy pin, the large-suite request, and the unmeasured default; a
+    timing-sensitive suite never drops below its core floor.
     """
-    measured = TEST_RUN_SIZES.get(label)
+    base_label = label.split("__fv_", 1)[0]
+    measured = TEST_RUN_SIZES.get(label) or TEST_RUN_SIZES.get(base_label)
     if measured is not None:
         request = {"cpu_count": measured["cpu_count"], "memory_kb": measured["memory_kb"]}
     else:
         request = dict(
-            LARGE_TEST_RUNS.get(f"{package_name}/{crate_name}", UNMEASURED_TEST_RUN)
+            PINNED_TEST_RUNS.get(label)
+            or PINNED_TEST_RUNS.get(base_label)
+            or LARGE_TEST_RUNS.get(f"{package_name}/{crate_name}", UNMEASURED_TEST_RUN)
         )
-    if package_name in CONTENTION_FLOOR["packages"]:
+    if floor and package_name in CONTENTION_FLOOR["packages"]:
         request["cpu_count"] = max(request["cpu_count"], CONTENTION_FLOOR["cpu_count"])
     return request
 
@@ -153,24 +166,38 @@ def batchable_run(package_name: str, crate_name: str) -> bool:
     return f"{package_name}/{crate_name}" not in LARGE_TEST_RUNS
 
 
-def batch_budget(label: str, requests: list[dict[str, int]]) -> dict[str, int]:
-    """What a batch reserves: its largest BATCH_JOBS members side by side.
+def batch_budget(
+    package_name: str, label: str, requests: list[dict[str, int]]
+) -> dict[str, int]:
+    """What a batch reserves: its measured row when one exists.
 
-    A batch that has itself been measured never reserves less than that
-    measurement. Its members' short runs carry no CPU evidence and ask for one
-    core each, while two of them side by side, plus the runner, can keep more
-    busy: `//crates/lash-core:test_batch` holds 3.3 cores at p95 over members
-    that each ask for one.
+    The member sum let one unmeasured member inflate a batch the pool had
+    already priced: `//crates/lash-protocol-rlm:test_batch` asked for 6c/5G
+    over a measured 2c/1G row. An unmeasured batch still reserves its
+    largest BATCH_JOBS members side by side, and a timing-sensitive
+    package's contention floor counts once per batch, not once per member:
+    the callers pass the members' unfloored requests so the floor never
+    enters the sum.
     """
     EMITTED_TEST_LABELS.add(label)
-    measured = TEST_RUN_SIZES.get(label, {})
-    return {
-        field: max(
-            sum(sorted((request[field] for request in requests), reverse=True)[:BATCH_JOBS]),
-            measured.get(field, 0),
+    measured = TEST_RUN_SIZES.get(label)
+    if measured is not None:
+        budget = {"cpu_count": measured["cpu_count"], "memory_kb": measured["memory_kb"]}
+    else:
+        budget = dict(
+            PINNED_TEST_RUNS.get(label)
+            or {
+                field: sum(
+                    sorted((request[field] for request in requests), reverse=True)[
+                        :BATCH_JOBS
+                    ]
+                )
+                for field in ("cpu_count", "memory_kb")
+            }
         )
-        for field in ("cpu_count", "memory_kb")
-    }
+    if package_name in CONTENTION_FLOOR["packages"]:
+        budget["cpu_count"] = max(budget["cpu_count"], CONTENTION_FLOOR["cpu_count"])
+    return budget
 
 
 def pool_exec_group_name(request: dict[str, int]) -> str:
@@ -254,12 +281,12 @@ def validate_action_sizes(metadata: dict) -> None:
 
 
 def validate_test_run_sizes() -> None:
-    """Every measured run names a test this generation emitted.
+    """Every measured or pinned run names a test this generation emitted.
 
     Checked after generation, because only the generator knows the labels it
     writes: a renamed or deleted test leaves a row that still looks like policy.
     """
-    stale = sorted(set(TEST_RUN_SIZES) - EMITTED_TEST_LABELS)
+    stale = sorted((set(TEST_RUN_SIZES) | set(PINNED_TEST_RUNS)) - EMITTED_TEST_LABELS)
     if stale:
         raise SystemExit(
             "generate_build_files: test-run sizes name no generated test: "
@@ -568,6 +595,12 @@ def validate_package_policy(metadata: dict) -> None:
     ]
     if unknown_floor:
         raise ValueError(f"package-policy.toml [test_runs.contention_floor] names {unknown_floor}")
+    for label, request in test_runs.get("pinned", {}).items():
+        if set(request) != {"cpu_count", "memory_kb"}:
+            raise ValueError(
+                f"package-policy.toml [test_runs.pinned] {label} sets {sorted(request)}; "
+                "a pin is exactly cpu_count and memory_kb"
+            )
     for service, names in PACKAGE_POLICY.get("service_packages", {}).items():
         if not names or any(name not in members for name in names):
             raise ValueError(f"package-policy.toml [service_packages] {service} names {names}")
@@ -834,6 +867,7 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                             package["name"],
                             library["name"],
                             f"//{package_dir}:{primary_target}__unit_test",
+                            floor=False,
                         ),
                     )
                 )
@@ -976,7 +1010,9 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
             batch_members.append(
                 (
                     f":{name}",
-                    test_run_request(package["name"], crate_name, f"//{package_dir}:{name}"),
+                    test_run_request(
+                        package["name"], crate_name, f"//{package_dir}:{name}", floor=False
+                    ),
                 )
             )
         target_inventory = {
@@ -1051,7 +1087,10 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
                     (
                         f":{name}__unit_test",
                         test_run_request(
-                            package["name"], crate_name, f"//{package_dir}:{name}__unit_test"
+                            package["name"],
+                            crate_name,
+                            f"//{package_dir}:{name}__unit_test",
+                            floor=False,
                         ),
                     )
                 )
@@ -1063,7 +1102,9 @@ def render_package(package: dict, features: list[str]) -> tuple[str, dict]:
     batch_label = None
     if len(batch_members) >= 2:
         batch_label = f"//{package_dir}:test_batch"
-        budget = batch_budget(batch_label, [request for _member, request in batch_members])
+        budget = batch_budget(
+            package["name"], batch_label, [request for _member, request in batch_members]
+        )
         chunks.append(
             'load("//tools/bazel:test_batch.bzl", "lash_batch_test")\n\n'
             "lash_batch_test(\n"

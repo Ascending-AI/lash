@@ -276,9 +276,9 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
-    cpu_count = 2,
+    cpu_count = 1,
     jobs = 2,
-    memory_kb = 2097152,
+    memory_kb = 1048576,
     tests = [
         ":lash-e2e-mock-provider__bin__unit_test",
         ":lash-e2e-process-operator-flow__bin__unit_test",

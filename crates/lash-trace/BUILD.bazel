@@ -130,7 +130,7 @@ lash_batch_test(
     name = "test_batch",
     cpu_count = 2,
     jobs = 2,
-    memory_kb = 2097152,
+    memory_kb = 1048576,
     tests = [
         ":lash-trace__unit_test",
         ":schema__test",

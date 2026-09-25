@@ -176,7 +176,7 @@ lash_rust_integration_test(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3670016", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "3670016", "test.cpu_count": "2", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//crates/lash-core:queued_claim_atomicity",
     ],
@@ -280,9 +280,9 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
-    cpu_count = 7,
+    cpu_count = 4,
     jobs = 2,
-    memory_kb = 5242880,
+    memory_kb = 1572864,
     tests = [
         ":conformance_memory__test",
         ":durable_read_fixture__test",
@@ -326,7 +326,7 @@ lash_rust_feature_test(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3670016", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "3670016", "test.cpu_count": "3", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//crates/lash-core:queued_claim_atomicity",
     ],
@@ -362,7 +362,7 @@ lash_rust_feature_test(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "3670016", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "3670016", "test.cpu_count": "2", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//crates/lash-core:queued_claim_atomicity",
     ],
@@ -394,7 +394,7 @@ lash_rust_feature_test(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//crates/lash-core:durable_read_fixture_source",
         "//:durable_fixtures",
@@ -430,7 +430,7 @@ lash_rust_feature_test(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
     extra_compile_data = [],
     library = "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
     library_crate_name = "lash_sqlite_store",
@@ -460,7 +460,7 @@ lash_rust_feature_test(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2097152", "test.cpu_count": "1", "test.memory_kb": "1048576"},
     extra_compile_data = [],
     library = "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
     library_crate_name = "lash_sqlite_store",
@@ -770,7 +770,7 @@ lash_rust_feature_test(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "2621440", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "2621440", "test.cpu_count": "3", "test.memory_kb": "1048576"},
     extra_compile_data = [
         "//crates/lashlang:old_module_fixture",
     ],
@@ -799,7 +799,7 @@ lash_rust_feature_test(
         "perf-witness",
         "testing",
     ],
-    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "4", "test.memory_kb": "4194304"},
+    exec_properties = {"cpu_count": "2", "memory_kb": "1572864", "test.cpu_count": "1", "test.memory_kb": "1048576"},
     extra_compile_data = [],
     library = "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
     library_crate_name = "lash_sqlite_store",

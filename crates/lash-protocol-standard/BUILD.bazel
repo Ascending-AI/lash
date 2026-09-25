@@ -122,9 +122,9 @@ load("//tools/bazel:test_batch.bzl", "lash_batch_test")
 
 lash_batch_test(
     name = "test_batch",
-    cpu_count = 2,
+    cpu_count = 1,
     jobs = 2,
-    memory_kb = 2097152,
+    memory_kb = 1048576,
     tests = [
         ":embedded_builder__test",
         ":lash-protocol-standard__unit_test",
