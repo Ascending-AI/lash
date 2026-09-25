@@ -1,4 +1,5 @@
 use super::*;
+use crate::object_state::StampedValue;
 use bytes::BytesMut;
 
 /// FIG-779 control: the identical input against the bare SDK timer is handled
@@ -1756,12 +1757,13 @@ pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
     );
     fig1943_apply_state_commands(&mut state, &registered);
     let state_key = durable_wait_index_state_key(&RestateDurableWaitAddress::for_key(&key));
-    let indexed_key: AwaitEventKey = serde_json::from_slice(
+    let indexed_key: AwaitEventKey = serde_json::from_slice::<StampedValue<AwaitEventKey>>(
         state
             .get(&state_key)
             .expect("FIG-2005 index state stores the key preimage"),
     )
-    .expect("decode FIG-2005 indexed key preimage");
+    .expect("decode FIG-2005 indexed key preimage")
+    .body;
     assert_eq!(indexed_key, key);
 
     let terminal = Resolution::Ok(serde_json::json!({ "tool_result": "complete" }));

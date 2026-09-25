@@ -30,8 +30,8 @@ const BODY_FIELD: &str = "body";
 /// `{ "format": F, "body": <the value> }`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct StampedValue<T> {
-    format: u16,
-    body: T,
+    pub(crate) format: u16,
+    pub(crate) body: T,
 }
 
 /// An N-1 upcaster: the stored `body` of a value written under a registered
@@ -229,7 +229,7 @@ mod tests {
         let raw = stamped(1, serde_json::json!({"value": {"name": "beta"}}));
         let decoded: serde_json::Value = decode_stamped_value("state-key", raw, &FORMATS)
             .expect("the N-1 upcaster answers a current body");
-        assert_eq!(decoded["name"], "beta");
+        assert_eq!(decoded["body"]["name"], "beta");
     }
 
     #[test]
