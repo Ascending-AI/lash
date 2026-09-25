@@ -213,8 +213,8 @@ impl LashRuntime {
                 AdmitVerdict::Idle => break DriveStop::Idle,
                 AdmitVerdict::Parked(park) => break DriveStop::Parked(park),
                 AdmitVerdict::SubstrateLost { root } => break DriveStop::SubstrateLost { root },
-                AdmitVerdict::RootTerminal { root, by } => {
-                    break DriveStop::RootTerminal { root, by };
+                AdmitVerdict::RootTerminal { root, kind, commit } => {
+                    break DriveStop::RootTerminal { root, kind, commit };
                 }
             };
             ordinal = ordinal.checked_add(1).ok_or_else(|| {
@@ -235,7 +235,7 @@ impl LashRuntime {
             let ran_nothing = match &run.outcome {
                 RootOutcome::Committed { .. } => false,
                 RootOutcome::Ceded { .. } => queued,
-                RootOutcome::Refused { .. } => true,
+                RootOutcome::Refused { .. } | RootOutcome::Released { .. } => true,
             };
             let finished = done(&run);
             runs.push(run);

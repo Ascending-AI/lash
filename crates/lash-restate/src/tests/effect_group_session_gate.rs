@@ -124,6 +124,26 @@ impl SessionStoreFactory for OneSessionCatalog {
         })
     }
 
+    async fn root_terminal(
+        &self,
+        _session_id: &lash_core::SessionId,
+        _root: &lash_core::TurnId,
+    ) -> std::result::Result<Option<lash_core::store::RootTerminal>, lash_core::StoreError> {
+        Err(lash_core::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::root_terminal",
+        })
+    }
+
+    async fn list_open_control_intents(
+        &self,
+        _after: Option<lash_core::store::ControlIntentId>,
+        _limit: std::num::NonZeroUsize,
+    ) -> std::result::Result<Vec<lash_core::store::ControlIntent>, lash_core::StoreError> {
+        Err(lash_core::StoreError::UnsupportedStoreOperation {
+            operation: "SessionStoreFactory::list_open_control_intents",
+        })
+    }
+
     async fn compact_turn_park_feed(
         &self,
         _through: lash_core::store::ParkFeedCursor,

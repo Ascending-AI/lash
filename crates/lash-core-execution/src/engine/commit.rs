@@ -15,11 +15,11 @@
 use serde::{Deserialize, Serialize};
 
 use super::context::EpochMs;
-pub use crate::store::SessionHeadRef;
 use crate::store::{BlobRef, ParkReason, StoreError};
+pub use crate::store::{ParkId, RootTerminalWrite, SessionHeadRef, TurnCommitId};
 use crate::{
     AttachmentId, BatchId, FrameNodeId, InputId, NodeId, PluginState, ProtocolTurnOptions,
-    SessionId, SessionPolicy, TokenUsage, TurnCancellationEvidence, TurnId, TurnStop,
+    SessionId, SessionPolicy, TokenUsage, TurnCancellationEvidence, TurnId,
 };
 
 /// One turn's commit, serialized and immutable.
@@ -46,8 +46,9 @@ pub struct TurnCommitRequest {
     pub ingress: IngressSettlement,
     pub cancellation: Option<CancellationSettlement>,
     pub attachments: CommittedAttachments,
-    /// Root-addressed terminal evidence.
-    pub terminal: TurnTerminalEvidence,
+    /// Root-addressed terminal evidence: present exactly on the commit of
+    /// the root's final physical turn.
+    pub terminal: Option<RootTerminalWrite>,
 }
 
 /// What a `CommitTurn` step recorded.
@@ -73,28 +74,6 @@ pub enum CommitTurnOutcome {
     HeadConflict {
         found: SessionHeadRef,
     },
-}
-
-/// A turn commit's identity: the logical root and the physical ordinal of
-/// the attempt that commits it.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct TurnCommitId {
-    root: TurnId,
-    ordinal: u32,
-}
-
-impl TurnCommitId {
-    pub fn new(root: TurnId, ordinal: u32) -> Self {
-        Self { root, ordinal }
-    }
-
-    pub fn root(&self) -> &TurnId {
-        &self.root
-    }
-
-    pub fn ordinal(&self) -> u32 {
-        self.ordinal
-    }
 }
 
 /// The graph nodes one commit appends, with final ids.
@@ -176,31 +155,6 @@ pub struct CommittedAttachments {
     pub committed: Vec<AttachmentId>,
     /// Upload intents the commit adopts.
     pub adopted_intents: Vec<String>,
-}
-
-/// Terminal evidence, addressed by the logical root.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TurnTerminalEvidence {
-    pub root: TurnId,
-    /// The physical turn that reached the terminal.
-    pub turn: TurnId,
-    /// Why the turn stopped; `None` when it completed.
-    pub stop: Option<TurnStop>,
-}
-
-/// A park record's id.
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct ParkId(String);
-
-impl ParkId {
-    pub fn new(id: impl Into<String>) -> Self {
-        Self(id.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
 }
 
 /// The work a park names.

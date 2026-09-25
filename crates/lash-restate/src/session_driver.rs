@@ -151,8 +151,46 @@ fn check_generation(
 
 /// The `LashTurn` workflow key of `root` in `session`: one workflow per
 /// logical root, so a replay of the session's drive re-calls the same root.
+///
+/// The key is `{len}:{session}{root}`, where `len` is the session id's length
+/// in bytes, so it parses back to exactly one `(session, root)` whatever
+/// either id contains ([`parse_turn_workflow_key`]): reconciliation maps a
+/// paused `LashTurn` invocation to its root by its key alone.
 pub(crate) fn turn_workflow_key(session: &SessionId, root: &lash_core::TurnId) -> String {
-    format!("{}:{}", session.as_str(), root.as_str())
+    format!(
+        "{}:{}{}",
+        session.as_str().len(),
+        session.as_str(),
+        root.as_str()
+    )
+}
+
+/// The `(session, root)` a [`turn_workflow_key`] names, or `None` for a key
+/// no build of this generation wrote.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "park reconciliation maps a paused LashTurn to its root by this parse (FIG-3600 S7-B)"
+    )
+)]
+pub(crate) fn parse_turn_workflow_key(key: &str) -> Option<(SessionId, lash_core::TurnId)> {
+    let (len, rest) = key.split_once(':')?;
+    if len.is_empty()
+        || !len.bytes().all(|byte| byte.is_ascii_digit())
+        || (len.len() > 1 && len.starts_with('0'))
+    {
+        return None;
+    }
+    let len = len.parse::<usize>().ok()?;
+    if !rest.is_char_boundary(len) {
+        return None;
+    }
+    let (session, root) = rest.split_at(len);
+    if session.is_empty() || root.is_empty() {
+        return None;
+    }
+    Some((SessionId::from(session), lash_core::TurnId::from(root)))
 }
 
 // ---------------------------------------------------------------------------
@@ -539,6 +577,10 @@ async fn drive_session_journal(
     let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone());
     let admission_scope = drive_admission_scope(&request.session, &request.request);
     let mut ran = Vec::new();
+    // The roots whose `LashTurn` ended without a lash outcome in this drive.
+    // Every entry comes from a journaled call result, so a replay rebuilds
+    // the same set.
+    let mut released = std::collections::BTreeSet::new();
     let mut ordinal = 0_u32;
     loop {
         let scoped = controller
@@ -550,8 +592,18 @@ async fn drive_session_journal(
             .map_err(abort_failure)?;
         let stop = match verdict {
             AdmitVerdict::Admit(admitted) => {
-                let key = turn_workflow_key(admitted.session(), admitted.root());
-                let Json(outcome) = controller
+                let root = admitted.root().clone();
+                // Admission named a root whose execution this drive already
+                // saw released: the store still owes it work nothing will
+                // run, so the drive stops instead of calling it again.
+                if released.contains(&root) {
+                    return Ok(DriveOutcome {
+                        ran,
+                        stop: DriveStop::RootAborted { root },
+                    });
+                }
+                let key = turn_workflow_key(admitted.session(), &root);
+                let outcome = match controller
                     .context()
                     .workflow_client::<LashTurnClient>(key)
                     .run(Json(RestateTurnDriveRequest {
@@ -560,7 +612,25 @@ async fn drive_session_journal(
                         admitted,
                     }))
                     .call()
-                    .await?;
+                    .await
+                {
+                    Ok(Json(outcome)) => outcome,
+                    // The root's execution ended terminally without a lash
+                    // outcome: an operator's verb killed it, or it was
+                    // refused. It is consumed, never a failure of the whole
+                    // drive; the next admission reads what the store decided
+                    // about the root (ADR 0104 O4).
+                    Err(error) => {
+                        tracing::warn!(
+                            session_id = request.session.as_str(),
+                            root = root.as_str(),
+                            error = %error,
+                            "session drive consumed a released root execution"
+                        );
+                        released.insert(root.clone());
+                        RootOutcome::Released { root }
+                    }
+                };
                 ran.push(outcome);
                 ordinal = ordinal.checked_add(1).ok_or_else(|| {
                     HandlerError::from(TerminalError::new(format!(
@@ -574,7 +644,9 @@ async fn drive_session_journal(
             AdmitVerdict::Idle => DriveStop::Idle,
             AdmitVerdict::Parked(park) => DriveStop::Parked(park),
             AdmitVerdict::SubstrateLost { root } => DriveStop::SubstrateLost { root },
-            AdmitVerdict::RootTerminal { root, by } => DriveStop::RootTerminal { root, by },
+            AdmitVerdict::RootTerminal { root, kind, commit } => {
+                DriveStop::RootTerminal { root, kind, commit }
+            }
         };
         return Ok(DriveOutcome { ran, stop });
     }
@@ -619,6 +691,48 @@ async fn run_root_journal(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// W5: the `LashTurn` key parses back to exactly the session and root
+    /// it was built from, whatever either id contains.
+    #[test]
+    fn a_turn_workflow_key_round_trips_any_session_and_root() {
+        let cases = [
+            ("s", "r"),
+            ("a:b", "c"),
+            ("a", "b:c"),
+            ("12:ab", ":x:"),
+            ("sess\u{e9}:\u{1f600}", "root:agent-frame:2"),
+            ("0", "0"),
+            (":", ":"),
+        ];
+        for (session, root) in cases {
+            let session = SessionId::from(session);
+            let root = lash_core::TurnId::from(root);
+            let key = turn_workflow_key(&session, &root);
+            assert_eq!(
+                parse_turn_workflow_key(&key),
+                Some((session.clone(), root.clone())),
+                "{key}"
+            );
+        }
+        assert_ne!(
+            turn_workflow_key(&SessionId::from("a:b"), &lash_core::TurnId::from("c")),
+            turn_workflow_key(&SessionId::from("a"), &lash_core::TurnId::from("b:c")),
+            "the pre-S7 `{{session}}:{{root}}` key was ambiguous here"
+        );
+        for malformed in [
+            "",
+            "s:r",
+            "3:ab",
+            "03:abcd",
+            "2:ab",
+            ":ab",
+            "x2:abc",
+            "1:\u{e9}x",
+        ] {
+            assert_eq!(parse_turn_workflow_key(malformed), None, "{malformed}");
+        }
+    }
 
     #[test]
     fn a_request_decodes_whatever_generation_it_carries() {

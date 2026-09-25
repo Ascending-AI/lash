@@ -1092,6 +1092,30 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
             .await
     }
 
+    async fn root_terminal(
+        &self,
+        session_id: &lash::SessionId,
+        root: &lash::TurnId,
+    ) -> std::result::Result<Option<lash::persistence::RootTerminal>, lash::persistence::StoreError>
+    {
+        lash::persistence::SessionStoreFactory::root_terminal(self.inner.as_ref(), session_id, root)
+            .await
+    }
+
+    async fn list_open_control_intents(
+        &self,
+        after: Option<lash::persistence::ControlIntentId>,
+        limit: std::num::NonZeroUsize,
+    ) -> std::result::Result<Vec<lash::persistence::ControlIntent>, lash::persistence::StoreError>
+    {
+        lash::persistence::SessionStoreFactory::list_open_control_intents(
+            self.inner.as_ref(),
+            after,
+            limit,
+        )
+        .await
+    }
+
     async fn compact_turn_park_feed(
         &self,
         through: lash::persistence::ParkFeedCursor,
@@ -1227,6 +1251,30 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
     > {
         lash::persistence::SessionStoreFactory::turn_park_feed(self.inner.as_ref(), after, limit)
             .await
+    }
+
+    async fn root_terminal(
+        &self,
+        session_id: &lash::SessionId,
+        root: &lash::TurnId,
+    ) -> std::result::Result<Option<lash::persistence::RootTerminal>, lash::persistence::StoreError>
+    {
+        lash::persistence::SessionStoreFactory::root_terminal(self.inner.as_ref(), session_id, root)
+            .await
+    }
+
+    async fn list_open_control_intents(
+        &self,
+        after: Option<lash::persistence::ControlIntentId>,
+        limit: std::num::NonZeroUsize,
+    ) -> std::result::Result<Vec<lash::persistence::ControlIntent>, lash::persistence::StoreError>
+    {
+        lash::persistence::SessionStoreFactory::list_open_control_intents(
+            self.inner.as_ref(),
+            after,
+            limit,
+        )
+        .await
     }
 
     async fn compact_turn_park_feed(

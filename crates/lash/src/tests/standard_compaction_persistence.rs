@@ -1635,6 +1635,22 @@ impl lash_core::SessionStoreFactory for FailArmedCommitFactory {
         self.inner.turn_park_feed(after, limit).await
     }
 
+    async fn root_terminal(
+        &self,
+        session_id: &lash_core::SessionId,
+        root: &lash_core::TurnId,
+    ) -> std::result::Result<Option<lash_core::store::RootTerminal>, lash_core::StoreError> {
+        self.inner.root_terminal(session_id, root).await
+    }
+
+    async fn list_open_control_intents(
+        &self,
+        after: Option<lash_core::store::ControlIntentId>,
+        limit: std::num::NonZeroUsize,
+    ) -> std::result::Result<Vec<lash_core::store::ControlIntent>, lash_core::StoreError> {
+        self.inner.list_open_control_intents(after, limit).await
+    }
+
     async fn compact_turn_park_feed(
         &self,
         through: lash_core::store::ParkFeedCursor,

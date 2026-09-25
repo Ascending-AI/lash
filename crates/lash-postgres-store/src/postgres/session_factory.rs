@@ -708,6 +708,24 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         Ok(page)
     }
 
+    async fn root_terminal(
+        &self,
+        session_id: &SessionId,
+        root: &lash_sansio::TurnId,
+    ) -> Result<Option<lash_core_execution::store::RootTerminal>, StoreError> {
+        let _ = (session_id, root);
+        Ok(None)
+    }
+
+    async fn list_open_control_intents(
+        &self,
+        after: Option<lash_core_execution::store::ControlIntentId>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<lash_core_execution::store::ControlIntent>, StoreError> {
+        let _ = (after, limit);
+        Ok(Vec::new())
+    }
+
     async fn compact_turn_park_feed(
         &self,
         through: lash_core_execution::store::ParkFeedCursor,

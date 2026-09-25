@@ -378,6 +378,14 @@ pub mod persistence {
         SessionHeadPayload, TurnPark, TurnParkQuery, TurnParkTarget, TurnParkWrite, UnparkCause,
         UnsettledTurnCounts, commit_runtime_state_verified, load_persisted_session_state,
     };
+    /// A logical root's durable terminal evidence and the store segment that
+    /// answers and binds roots (FIG-3600 S7, FIG-3607 item 8), and the
+    /// control intents a session's close and a parked root's verbs record.
+    pub use lash_core::store::{
+        CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind,
+        ControlIntentState, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
+        RootTerminalWrite, TurnCommitId,
+    };
     /// Test-only store hooks and the conformance-suite handle types that
     /// carry them (`testing` feature only; no production trait requires them).
     #[cfg(any(test, feature = "testing"))]

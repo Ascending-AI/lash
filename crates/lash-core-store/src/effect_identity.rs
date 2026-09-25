@@ -63,6 +63,10 @@ pub enum RuntimeEffectKind {
     /// The recorded seal of a drive admission: the drive-epoch
     /// compare-and-set whose fence the admitted root's commits present.
     SealDriveAdmission,
+    /// The recorded close of a logical root's scope, after its terminal
+    /// evidence (FIG-3600 S7, FIG-3607 item 7): the one step a root's end
+    /// runs, and what its lifetime-scope owner hooks.
+    CloseRootScope,
     Checkpoint,
     SyncExecutionEnvironment,
     /// The recorded read of a tool child's execution environment (FIG-3683):
@@ -93,6 +97,7 @@ impl RuntimeEffectKind {
             Self::ClaimAcceptedTurnInput => "claim_accepted_turn_input",
             Self::AdmitDrive => "admit_drive",
             Self::SealDriveAdmission => "seal_drive_admission",
+            Self::CloseRootScope => "close_root_scope",
             Self::Checkpoint => "checkpoint",
             Self::SyncExecutionEnvironment => "sync_execution_environment",
             Self::LoadExecutionEnv => "load_execution_env",

@@ -53,6 +53,23 @@ impl QueuedRunPosition {
             .unwrap_or_else(|| (turn_id.clone(), 0))
     }
 
+    /// The physical ordinal of `turn` within `root`: the inverse of
+    /// [`Self::derive_turn_id`], `None` when `turn` is not one of `root`'s
+    /// physical turns.
+    #[must_use]
+    pub fn physical_ordinal_of(root: &TurnId, turn: &TurnId) -> Option<u64> {
+        if turn == root {
+            return Some(0);
+        }
+        let ordinal = turn
+            .as_str()
+            .strip_prefix(root.as_str())?
+            .strip_prefix(":agent-frame:")?
+            .parse::<u64>()
+            .ok()?;
+        (ordinal > 0 && Self::derive_turn_id(root, ordinal) == *turn).then_some(ordinal)
+    }
+
     pub fn next(&self, scope: &ExecutionScope) -> Result<Self, StoreError> {
         let physical_ordinal = StoreError::checked_monotonic_increment(
             "queued_run_physical_ordinal",

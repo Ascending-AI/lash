@@ -11,8 +11,8 @@
 use std::sync::Arc;
 
 use crate::engine::{
-    AdmissionId, AdmitRequest, AdmitVerdict, Admitted, AdmittedWork, DriveRequestId, ParkId,
-    ParkRef, SealVerdict,
+    AdmissionId, AdmitRequest, AdmitVerdict, Admitted, AdmittedWork, DriveRequestId, ParkRef,
+    SealVerdict,
 };
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::store::{DriveEpochSeal, SessionHeadRef};
@@ -115,7 +115,7 @@ impl AdmitDriveRunner {
             return Ok(AdmitVerdict::Parked(ParkRef {
                 session: session_id.clone(),
                 root: park.turn_id,
-                park: ParkId::new(park.park_id.to_string()),
+                park: park.park_id,
             }));
         }
 
