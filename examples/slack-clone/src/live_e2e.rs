@@ -618,9 +618,10 @@ async fn finish_live_core<T>(
 
 async fn finish_smoke_stream_with_timeout(
     stream_session: &lash::LashSession,
-    mut live_stream: lash::TurnStream,
+    handle: lash::SendHandle,
     turn_timeout: Duration,
 ) -> std::result::Result<(lash::TurnReport, usize), FailureReason> {
+    let mut live_stream = handle.events();
     let activity_result = tokio::time::timeout(turn_timeout, async {
         let mut activity_count = 0;
         while let Some(activity) = live_stream.next().await {
@@ -632,8 +633,8 @@ async fn finish_smoke_stream_with_timeout(
     .await;
     match activity_result {
         Ok(Ok(activity_count)) => {
-            let result = live_stream.finish().await.map_err(FailureReason::harness)?;
-            Ok((result, activity_count))
+            let result = handle.output().await.map_err(FailureReason::harness)?;
+            Ok((result.result, activity_count))
         }
         Ok(Err(primary)) => {
             stream_session.cancel_running_turns_with_origin(Some(
@@ -646,7 +647,7 @@ async fn finish_smoke_stream_with_timeout(
                     );
                 }
             }
-            if let Err(join_error) = live_stream.finish().await {
+            if let Err(join_error) = handle.output().await {
                 log_err!(
                     "slack-clone-live-e2e: smoke-stream completion failed after activity error {primary:?}: {join_error}"
                 );
@@ -670,7 +671,7 @@ async fn finish_smoke_stream_with_timeout(
                     );
                 }
             }
-            if let Err(join_error) = live_stream.finish().await {
+            if let Err(join_error) = handle.output().await {
                 log_err!(
                     "slack-clone-live-e2e: smoke-stream completion failed after timeout: {join_error}"
                 );
@@ -704,11 +705,11 @@ async fn run_smoke_probes(
             .open()
             .await
             .map_err(FailureReason::harness)?;
-        let live_stream = stream_session
-            .turn(TurnInput::text("Reply now."))
-            .stream()
+        let handle = stream_session
+            .send(TurnInput::text("Reply now."))
+            .await
             .map_err(FailureReason::harness)?;
-        finish_smoke_stream_with_timeout(&stream_session, live_stream, TURN_TIMEOUT).await
+        finish_smoke_stream_with_timeout(&stream_session, handle, TURN_TIMEOUT).await
     }
     .await;
     let (stream, stream_activity_count) =

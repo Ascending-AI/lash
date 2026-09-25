@@ -323,8 +323,8 @@ async fn run_case(
         .await
         .expect("session");
     let result = session
-        .turn(TurnInput::text("Call the probe."))
-        .run()
+        .send(TurnInput::text("Call the probe."))
+        .output()
         .await
         .expect("turn");
     assert_eq!(result.assistant_message(), Some("done"));

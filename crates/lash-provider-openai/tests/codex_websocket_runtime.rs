@@ -84,10 +84,11 @@ async fn codex_websocket_facade_turn_streams_text_from_local_server() {
         .await
         .expect("session");
 
-    let mut stream = session
-        .turn(TurnInput::text("say hello"))
-        .stream()
-        .expect("turn stream");
+    let handle = session
+        .send(TurnInput::text("say hello"))
+        .await
+        .expect("send");
+    let mut stream = handle.events();
     let mut streamed = String::new();
     while let Some(activity) = stream.next_activity().await {
         let activity = activity.expect("turn activity");
@@ -95,7 +96,7 @@ async fn codex_websocket_facade_turn_streams_text_from_local_server() {
             streamed.push_str(&text);
         }
     }
-    let result = stream.finish().await.expect("turn result");
+    let result = handle.output().await.expect("turn result").result;
 
     assert_eq!(
         result.assistant_message().unwrap_or_default(),
@@ -206,8 +207,8 @@ async fn codex_websocket_facade_turn_round_trips_a_tool_call() {
         .expect("session");
 
     let output = session
-        .turn(TurnInput::text("probe the echo tool"))
-        .run()
+        .send(TurnInput::text("probe the echo tool"))
+        .output()
         .await
         .expect("turn");
 

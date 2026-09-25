@@ -144,8 +144,8 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
         .expect("session");
 
     let output = session
-        .turn(lash::TurnInput::text("reason around a tool"))
-        .run()
+        .send(lash::TurnInput::text("reason around a tool"))
+        .output()
         .await
         .expect("turn");
     let activities = output
@@ -237,8 +237,8 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
         .expect("session");
 
     let output = session
-        .turn(lash::TurnInput::text("reason about the answer"))
-        .run()
+        .send(lash::TurnInput::text("reason about the answer"))
+        .output()
         .await
         .expect("turn");
     let activities = output

@@ -264,8 +264,8 @@ async fn bundled_server_exercises_sampling_both_elicitation_modes_and_roots_thro
         .expect("open session");
 
     let turn = session
-        .turn(TurnInput::text("@lashbot exercise MCP client depth"))
-        .run()
+        .send(TurnInput::text("@lashbot exercise MCP client depth"))
+        .output()
         .await
         .expect("run MCP client-depth turn");
     assert_eq!(turn.result.tool_calls.len(), 4);
@@ -469,8 +469,8 @@ async fn bundled_mcp_tools_join_the_catalog_and_feed_the_standard_tool_loop() {
     );
 
     session
-        .turn(TurnInput::text("@lashbot summarize the workspace"))
-        .run()
+        .send(TurnInput::text("@lashbot summarize the workspace"))
+        .output()
         .await
         .expect("run MCP turn");
     let requests = script.requests();
@@ -585,8 +585,8 @@ async fn server_death_is_a_typed_failure_and_the_next_turn_uses_a_respawned_serv
     assert_ne!(replacement_pid, original_pid, "the stdio pool must respawn");
     tokio::time::sleep(Duration::from_millis(250)).await;
     session
-        .turn(TurnInput::text("@lashbot try the count again"))
-        .run()
+        .send(TurnInput::text("@lashbot try the count again"))
+        .output()
         .await
         .expect("next turn recovers");
     let requests = script.requests();
@@ -882,8 +882,8 @@ async fn attaching_and_detaching_an_http_server_moves_its_tools_through_the_cata
         .await
         .expect("open session");
     let turn = session
-        .turn(TurnInput::text("@lashbot check the HTTP integration"))
-        .run()
+        .send(TurnInput::text("@lashbot check the HTTP integration"))
+        .output()
         .await
         .expect("run a turn against the attached server");
     assert_eq!(turn.result.tool_calls.len(), 1);
@@ -959,8 +959,8 @@ async fn binary_mcp_content_becomes_an_attachment_only_where_the_host_opted_in()
         .await
         .expect("open session");
     let stored = session
-        .turn(TurnInput::text("@lashbot fetch the badge"))
-        .run()
+        .send(TurnInput::text("@lashbot fetch the badge"))
+        .output()
         .await
         .expect("run the opted-in badge turn");
     let process_hopped_output = lash::process::ProcessAwaitOutput::from_tool_output(
@@ -1014,8 +1014,8 @@ async fn binary_mcp_content_becomes_an_attachment_only_where_the_host_opted_in()
         .len();
 
     let inline = session
-        .turn(TurnInput::text("@lashbot fetch the badge again"))
-        .run()
+        .send(TurnInput::text("@lashbot fetch the badge again"))
+        .output()
         .await
         .expect("run the opted-out badge turn");
     let inline_output = inline.result.tool_calls[0].output.value_for_projection();
@@ -1071,8 +1071,8 @@ async fn a_stalled_call_times_out_as_a_tool_failure_and_keeps_the_connection() {
         .await
         .expect("open session");
     let stalled = session
-        .turn(TurnInput::text("@lashbot call the stalling tool"))
-        .run()
+        .send(TurnInput::text("@lashbot call the stalling tool"))
+        .output()
         .await
         .expect("the call timeout is model-visible, not a turn failure");
     let failure = stalled.result.tool_calls[0].output.value_for_projection();
@@ -1086,8 +1086,8 @@ async fn a_stalled_call_times_out_as_a_tool_failure_and_keeps_the_connection() {
     let status = status_of(&runtime, mcp_http_server::SERVER_NAME);
     assert!(status.connected, "last_error: {:?}", status.last_error);
     session
-        .turn(TurnInput::text("@lashbot check the integration again"))
-        .run()
+        .send(TurnInput::text("@lashbot check the integration again"))
+        .output()
         .await
         .expect("the next call reuses the same connection");
     let requests = script.requests();
@@ -1141,8 +1141,8 @@ async fn a_host_can_opt_out_of_timeout_disconnects_entirely() {
         .await
         .expect("open session");
     let stalled = session
-        .turn(TurnInput::text("@lashbot call the stalling tool"))
-        .run()
+        .send(TurnInput::text("@lashbot call the stalling tool"))
+        .output()
         .await
         .expect("the call timeout is model-visible, not a turn failure");
     let failure = stalled.result.tool_calls[0].output.value_for_projection();
@@ -1186,8 +1186,8 @@ async fn a_form_the_answer_book_cannot_satisfy_is_declined_rather_than_answered(
         .await
         .expect("open session");
     let turn = session
-        .turn(TurnInput::text("@lashbot ask how many badges"))
-        .run()
+        .send(TurnInput::text("@lashbot ask how many badges"))
+        .output()
         .await
         .expect("run the elicitation turn");
     let output = turn.result.tool_calls[0].output.value_for_projection();
@@ -1229,8 +1229,8 @@ async fn a_question_the_host_has_not_read_is_declined_even_with_a_familiar_field
         .await
         .expect("open session");
     let turn = session
-        .turn(TurnInput::text("@lashbot ask the unread question"))
-        .run()
+        .send(TurnInput::text("@lashbot ask the unread question"))
+        .output()
         .await
         .expect("run the elicitation turn");
     let output = turn.result.tool_calls[0].output.value_for_projection();
@@ -1301,8 +1301,8 @@ async fn publishing_a_root_notifies_the_connected_server_which_re_reads_the_list
         .await
         .expect("open session");
     let turn = session
-        .turn(TurnInput::text("@lashbot report the roots"))
-        .run()
+        .send(TurnInput::text("@lashbot report the roots"))
+        .output()
         .await
         .expect("run the roots-report turn");
     let output = turn.result.tool_calls[0].output.value_for_projection();
@@ -1565,8 +1565,8 @@ async fn publishing_a_root_through_the_operator_api_reaches_the_connected_server
         .await
         .expect("open session");
     let turn = session
-        .turn(TurnInput::text("@lashbot report the roots"))
-        .run()
+        .send(TurnInput::text("@lashbot report the roots"))
+        .output()
         .await
         .expect("run the roots-report turn");
     let output = turn.result.tool_calls[0].output.value_for_projection();
