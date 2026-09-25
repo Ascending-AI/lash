@@ -69,7 +69,15 @@ async fn drive(
     body: AttemptBody,
     probe: Arc<InputProbe>,
 ) {
-    let invocation_id = shared.invocation_id(key);
+    let (invocation_id, target_key, pinned) = {
+        let state = shared.lock();
+        let invocation = &state.invocations[key.0];
+        (
+            invocation.id.as_str().to_owned(),
+            invocation.target.key.clone(),
+            invocation.pinned_deployment.clone(),
+        )
+    };
     let request = match http::Request::builder()
         .method(http::Method::POST)
         .uri(format!("/invoke/{service}/{handler}"))
@@ -78,7 +86,7 @@ async fn drive(
             shared.config.protocol.content_type(),
         )
         .header(http::header::ACCEPT, shared.config.protocol.content_type())
-        .header("x-restate-invocation-id", invocation_id)
+        .header("x-restate-invocation-id", &invocation_id)
         .body(body)
     {
         Ok(request) => request,
@@ -87,11 +95,57 @@ async fn drive(
             return;
         }
     };
-    let Some(endpoint) = shared.endpoint() else {
-        shared.stream_ended(key, number, "no deployment is registered".to_owned());
+    // The invocation's pinned deployment, not the newest: retries, resumes
+    // and replays all dispatch to the deployment that started it. A
+    // force-removed one ends the stream the way a deleted deployment's
+    // dead endpoint does.
+    let Some(deployment) = shared.deployment(&pinned) else {
+        shared.stream_ended(
+            key,
+            number,
+            format!("deployment {pinned} is no longer registered"),
+        );
         return;
     };
-    let response = endpoint.handle(request);
+    let dispatch = super::AttemptDispatch {
+        invocation_id,
+        deployment: deployment.id.clone(),
+        service: service.clone(),
+        handler: handler.clone(),
+        key: target_key,
+        attempt: number,
+    };
+    if let Some(served) = &deployment.hooks.served {
+        served(&dispatch);
+    }
+    if let Some(refuse) = &deployment.hooks.refuse {
+        match refuse(&dispatch) {
+            Some(super::Refusal::Retryable) => {
+                shared.stream_ended(
+                    key,
+                    number,
+                    format!(
+                        "deployment `{}` refused {service}/{handler}",
+                        deployment.label
+                    ),
+                );
+                return;
+            }
+            Some(super::Refusal::Terminal) => {
+                shared.fail_terminally(
+                    key,
+                    number,
+                    format!(
+                        "deployment `{}` refused {service}/{handler}",
+                        deployment.label
+                    ),
+                );
+                return;
+            }
+            None => {}
+        }
+    }
+    let response = deployment.endpoint.handle(request);
     let status = response.status();
     if !status.is_success() {
         let body = response

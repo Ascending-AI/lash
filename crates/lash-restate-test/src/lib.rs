@@ -44,10 +44,11 @@ mod backend;
 pub mod protocol;
 pub mod server;
 
-pub use backend::{BackendError, HandlerAttempt, RestateTestBackend, backend};
+pub use backend::{BackendError, HandlerAttempt, RestateTestBackend, backend, backend_with_build};
 pub use protocol::ProtocolVersion;
 pub use server::{
-    CrashPoint, CrashRule, DropWatch, InvocationView, JournalEntryView, OutsideGate, OutsideGates,
-    RandomCrashes, RestateTestServer, RetryPolicy, Scheduling, ServerConfig, StartError, Stats,
-    TimeMode, TimerView,
+    AttemptDispatch, CrashPoint, CrashRule, DeploymentHooks, DeploymentId, DropWatch,
+    InvocationView, JournalEntryView, OutsideGate, OutsideGates, RandomCrashes, Refusal,
+    RefuseHook, RemoveDeploymentError, RestateTestServer, ResumeDeployment, ResumeRefusal,
+    RetryPolicy, Scheduling, ServedHook, ServerConfig, StartError, Stats, TimeMode, TimerView,
 };

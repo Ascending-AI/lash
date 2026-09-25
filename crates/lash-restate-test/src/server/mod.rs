@@ -1,11 +1,16 @@
 //! The Restate server double.
 //!
-//! [`RestateTestServer`] plays `restate-server` for one endpoint: its ingress
-//! and admin APIs are an in-process [`HttpTransport`], its invoker drives the
-//! endpoint's real `Endpoint::handle` with protocol streams, and its partition
-//! processor keeps journals, keys, promises and timers in memory. Time is
-//! virtual; ids, random seeds, timer tie-breaks and random crashes come from
-//! one seed.
+//! [`RestateTestServer`] plays `restate-server` for a set of endpoints: its
+//! ingress and admin APIs are an in-process [`HttpTransport`], its invoker
+//! drives an endpoint's real `Endpoint::handle` with protocol streams, and
+//! its partition processor keeps journals, keys, promises and timers in
+//! memory. Registration is a deployment list, not a singleton: each
+//! [`register`](RestateTestServer::register) adds a deployment with a fresh
+//! id, a new invocation routes to the newest deployment serving its service
+//! name, and every attempt of an invocation — retries, suspension resumes,
+//! crash replays — dispatches to the deployment the invocation is pinned
+//! to. Time is virtual; ids, random seeds, timer tie-breaks and random
+//! crashes come from one seed.
 
 mod attempt;
 mod body;
@@ -30,7 +35,7 @@ use tokio::sync::Notify;
 
 pub use catalog::{HandlerKind, OnMaxAttempts, ServiceKind};
 pub use crash::{CrashPoint, CrashRule, RandomCrashes};
-pub use ids::InvocationId;
+pub use ids::{DeploymentId, InvocationId};
 pub use model::TimerView;
 pub use processor::{RetryPolicy, Stats};
 
@@ -187,14 +192,116 @@ impl ServerConfig {
     }
 }
 
-/// The registered deployment: the endpoint and what it serves.
+/// One registered deployment: its id, its endpoint, what it serves and the
+/// hooks a test attached at registration. The server keeps them in
+/// registration order; the newest that serves a service name takes new
+/// invocations of it.
 struct Deployment {
+    id: ids::DeploymentId,
+    /// The build's label (`add_build`); a bare [`RestateTestServer::register`]
+    /// names the deployment by its id. Only ever reported in refusal
+    /// messages.
+    label: String,
     endpoint: Endpoint,
     catalog: Catalog,
+    hooks: DeploymentHooks,
+}
+
+/// Test hooks carried by a deployment: [`RestateTestServer::register_with`]
+/// and [`crate::RestateTestBackend::add_build`] attach them. They let a test
+/// tell one build apart from another — which build served a call — and make
+/// a build refuse a call outright, modelling a build that cannot take a
+/// handover.
+#[derive(Clone, Default)]
+pub struct DeploymentHooks {
+    /// Called on every attempt dispatched to this deployment — the first
+    /// run, retries and replays alike — before the endpoint sees it. It
+    /// fires for a dispatch `refuse` turns away too.
+    pub served: Option<ServedHook>,
+    /// Called on every dispatch after `served`. `Some` refuses the call —
+    /// the endpoint never sees it and the attempt fails the way `Refusal`
+    /// names; `None` lets the call run.
+    pub refuse: Option<RefuseHook>,
+}
+
+/// A [`DeploymentHooks::served`] callback: observes one dispatch.
+pub type ServedHook = Arc<dyn Fn(&AttemptDispatch) + Send + Sync>;
+
+/// A [`DeploymentHooks::refuse`] callback: refuses a dispatch or lets it
+/// through.
+pub type RefuseHook = Arc<dyn Fn(&AttemptDispatch) -> Option<Refusal> + Send + Sync>;
+
+/// One dispatch of an invocation attempt onto a deployment, as a
+/// deployment's [`DeploymentHooks`] see it.
+#[derive(Clone, Debug)]
+pub struct AttemptDispatch {
+    /// The printed invocation id.
+    pub invocation_id: String,
+    /// The deployment this dispatch lands on.
+    pub deployment: ids::DeploymentId,
+    pub service: String,
+    pub handler: String,
+    /// The object or workflow key; `None` for a plain service.
+    pub key: Option<String>,
+    /// The invocation's 1-based attempt number.
+    pub attempt: u32,
+}
+
+/// How a refused call fails, as a [`DeploymentHooks::refuse`] verdict names
+/// it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Refusal {
+    /// The attempt ends without a terminal message, as an unreachable
+    /// deployment would end it: the invoker retries the invocation on the
+    /// handler's retry policy, still pinned to the refusing deployment.
+    Retryable,
+    /// The invocation ends in a terminal failure, as a handler answering a
+    /// terminal error ends it.
+    Terminal,
+}
+
+/// Which deployment a manual resume runs the invocation on, as the admin
+/// API's `?deployment=` parameter names it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ResumeDeployment {
+    /// The deployment the invocation is pinned to (a plain resume).
+    Keep,
+    /// The newest deployment that registered the invocation's service name:
+    /// Restate's `?deployment=latest`.
+    Latest,
+    /// The deployment carrying this id.
+    Id(ids::DeploymentId),
+}
+
+/// Why a resume was refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ResumeRefusal {
+    /// The invocation is not paused, suspended or backing off; its status.
+    Status(&'static str),
+    /// The named deployment is not registered.
+    UnknownDeployment(ids::DeploymentId),
+    /// No registered deployment serves the invocation's service name (a
+    /// `Latest` resume of a service every deployment has been removed from).
+    Unrouted(String),
+}
+
+/// Why removing a deployment was refused.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum RemoveDeploymentError {
+    /// No registered deployment carries the id.
+    UnknownDeployment(ids::DeploymentId),
+    /// This many retained, uncompleted invocations are still pinned to it;
+    /// pass `force` to remove it anyway, as Restate's `?force=true` does.
+    Pinned(usize),
 }
 
 pub(crate) struct Shared {
-    deployment: OnceLock<Deployment>,
+    /// Every deployment ever registered, in registration order; removal
+    /// drops its entry. Lock after `state`, never before it.
+    deployments: Mutex<Vec<Arc<Deployment>>>,
+    /// Deployment ids seed from this ordinal so a removal never lets a new
+    /// registration reuse a live deployment's id.
+    next_deployment_ordinal: AtomicUsize,
     config: ServerConfig,
     runtime: tokio::runtime::Handle,
     state: Mutex<State>,
@@ -333,22 +440,63 @@ impl Shared {
         self.state.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// What the registered deployment serves; empty before registration, so
-    /// every target is "not found" as on a server with no deployment.
-    fn catalog(&self) -> &Catalog {
-        static EMPTY: OnceLock<Catalog> = OnceLock::new();
-        self.deployment.get().map_or_else(
-            || EMPTY.get_or_init(Catalog::default),
-            |deployment| &deployment.catalog,
-        )
+    fn deployments(&self) -> MutexGuard<'_, Vec<Arc<Deployment>>> {
+        self.deployments
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
     }
 
-    fn endpoint(&self) -> Option<&Endpoint> {
-        self.deployment.get().map(|deployment| &deployment.endpoint)
+    /// The deployment a *new* invocation of `service` routes to: the newest
+    /// registered deployment that serves the name.
+    fn route(&self, service: &str) -> Option<Arc<Deployment>> {
+        self.deployments()
+            .iter()
+            .rev()
+            .find(|deployment| deployment.catalog.service(service).is_some())
+            .cloned()
     }
 
-    fn invocation_id(&self, key: InvKey) -> String {
-        self.lock().invocations[key.0].id.as_str().to_owned()
+    /// The registered deployment carrying `id`, if it is still registered.
+    fn deployment(&self, id: &ids::DeploymentId) -> Option<Arc<Deployment>> {
+        self.deployments()
+            .iter()
+            .find(|deployment| &deployment.id == id)
+            .cloned()
+    }
+
+    /// `DELETE /deployments/{id}`: refuse removal while a retained,
+    /// uncompleted invocation is pinned to the deployment, unless `force`.
+    fn remove_deployment(
+        &self,
+        id: &ids::DeploymentId,
+        force: bool,
+    ) -> Result<(), RemoveDeploymentError> {
+        let state = self.lock();
+        let mut deployments = self.deployments();
+        let index = deployments
+            .iter()
+            .position(|deployment| &deployment.id == id)
+            .ok_or_else(|| RemoveDeploymentError::UnknownDeployment(id.clone()))?;
+        if !force {
+            let pinned = state
+                .invocations
+                .iter()
+                .enumerate()
+                .filter(|(index, invocation)| {
+                    state.is_retained(InvKey(*index))
+                        && !invocation.status.is_completed()
+                        && &invocation.pinned_deployment == id
+                })
+                .count();
+            if pinned > 0 {
+                return Err(RemoveDeploymentError::Pinned(pinned));
+            }
+        }
+        deployments.remove(index);
+        drop(deployments);
+        drop(state);
+        self.activity.notify_waiters();
+        Ok(())
     }
 
     fn on_frame(
@@ -371,6 +519,29 @@ impl Shared {
     fn stream_ended(self: &Arc<Self>, key: InvKey, number: u32, detail: String) {
         let mut state = self.lock();
         state.stream_ended(self, key, number, detail);
+        let granted = state.schedule();
+        drop(state);
+        if granted {
+            self.turn_granted();
+        }
+    }
+
+    /// Fail `key`'s attempt `number` terminally, as a handler answering a
+    /// terminal error does: the invocation ends in the failure.
+    fn fail_terminally(self: &Arc<Self>, key: InvKey, number: u32, detail: String) {
+        let mut state = self.lock();
+        state.attempt_failed(
+            self,
+            key,
+            number,
+            model::AttemptFailure {
+                code: 500,
+                message: detail,
+                related_command: None,
+            },
+            None,
+            crate::protocol::generated::ErrorBehavior::Fail,
+        );
         let granted = state.schedule();
         drop(state);
         if granted {
@@ -554,8 +725,6 @@ pub enum StartError {
     Discovery(String),
     #[error("the server needs a Tokio runtime to run attempts on")]
     NoRuntime,
-    #[error("the server already has a deployment registered")]
-    AlreadyRegistered,
 }
 
 /// What an introspection read reports about one invocation.
@@ -563,6 +732,8 @@ pub enum StartError {
 pub struct InvocationView {
     pub id: String,
     pub target: String,
+    /// The deployment the invocation is pinned to.
+    pub pinned_deployment_id: String,
     pub status: &'static str,
     pub attempts: u32,
     pub suspensions: u32,
@@ -617,7 +788,8 @@ impl RestateTestServer {
         let runtime = tokio::runtime::Handle::try_current().map_err(|_| StartError::NoRuntime)?;
         let state = State::new(config.seed, config.start_time_ms, config.scheduling);
         let shared = Arc::new(Shared {
-            deployment: OnceLock::new(),
+            deployments: Mutex::new(Vec::new()),
+            next_deployment_ordinal: AtomicUsize::new(0),
             config,
             runtime,
             state: Mutex::new(state),
@@ -641,16 +813,50 @@ impl RestateTestServer {
         })
     }
 
-    /// Register `endpoint` as the server's one deployment, reading its
-    /// discovery document as `restate-server` does.
-    pub async fn register(&self, endpoint: Endpoint) -> Result<(), StartError> {
+    /// Register `endpoint` as a new deployment, reading its discovery
+    /// document as `restate-server` does, and return the fresh deployment
+    /// id. Each registration adds a deployment: a new invocation of a
+    /// service name goes to the newest deployment that registered it, while
+    /// an in-flight invocation stays pinned to the deployment that started
+    /// it.
+    pub async fn register(&self, endpoint: Endpoint) -> Result<ids::DeploymentId, StartError> {
+        self.register_with(endpoint, "", DeploymentHooks::default())
+            .await
+    }
+
+    /// [`register`](Self::register) with a build `label` and test `hooks`
+    /// on the new deployment.
+    pub async fn register_with(
+        &self,
+        endpoint: Endpoint,
+        label: impl Into<String>,
+        hooks: DeploymentHooks,
+    ) -> Result<ids::DeploymentId, StartError> {
         let catalog = Catalog::discover(&endpoint)
             .await
             .map_err(StartError::Discovery)?;
-        self.shared
-            .deployment
-            .set(Deployment { endpoint, catalog })
-            .map_err(|_| StartError::AlreadyRegistered)
+        let mut label = label.into();
+        let id = {
+            let mut deployments = self.shared.deployments();
+            let ordinal = self
+                .shared
+                .next_deployment_ordinal
+                .fetch_add(1, Ordering::SeqCst) as u64;
+            let id = ids::SeededIds::new(self.shared.config.seed).deployment_id(ordinal);
+            if label.is_empty() {
+                label = id.to_string();
+            }
+            deployments.push(Arc::new(Deployment {
+                id: id.clone(),
+                label,
+                endpoint,
+                catalog,
+                hooks,
+            }));
+            id
+        };
+        self.shared.activity.notify_waiters();
+        Ok(id)
     }
 
     /// Start a server and register `endpoint` on it.
@@ -692,9 +898,57 @@ impl RestateTestServer {
         Arc::new(ingress::IngressTransport::new(&self.shared))
     }
 
-    /// The service names the registered endpoint serves.
+    /// The service names every registered deployment serves, deduplicated
+    /// and sorted.
     pub fn service_names(&self) -> Vec<String> {
-        self.shared.catalog().names().map(str::to_owned).collect()
+        let mut names: Vec<String> = self
+            .shared
+            .deployments()
+            .iter()
+            .flat_map(|deployment| deployment.catalog.names().map(str::to_owned))
+            .collect();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    /// Every deployment registered so far, oldest first.
+    pub fn deployments(&self) -> Vec<ids::DeploymentId> {
+        self.shared
+            .deployments()
+            .iter()
+            .map(|deployment| deployment.id.clone())
+            .collect()
+    }
+
+    /// The deployment a new invocation of `service` would route to: the
+    /// newest registered deployment serving the name, or `None` when none
+    /// does.
+    pub fn route_to(&self, service: &str) -> Option<ids::DeploymentId> {
+        self.shared
+            .route(service)
+            .map(|deployment| deployment.id.clone())
+    }
+
+    /// The deployment `invocation` is pinned to: the one every attempt of
+    /// it dispatches to.
+    pub fn pinned_deployment(&self, invocation: &str) -> Option<ids::DeploymentId> {
+        let state = self.shared.lock();
+        let key = state.lookup(invocation)?;
+        Some(state.invocations[key.0].pinned_deployment.clone())
+    }
+
+    /// Remove the deployment `id`, as `DELETE /deployments/{id}` does.
+    /// Refused while a retained, uncompleted invocation is pinned to it,
+    /// unless `force` — a forced removal lets an attempt already running on
+    /// it finish but fails the next attempt of anything still pinned, the
+    /// way a deleted deployment breaks its in-flight invocations.
+    pub fn remove_deployment(
+        &self,
+        id: &ids::DeploymentId,
+        force: bool,
+    ) -> Result<(), RemoveDeploymentError> {
+        self.shared.remove_deployment(id, force)
     }
 
     // --- virtual time ----------------------------------------------------
@@ -831,11 +1085,25 @@ impl RestateTestServer {
         Some(state.purge(key))
     }
 
-    /// Resume a paused `invocation` as the admin API does.
+    /// Resume a paused `invocation` as the admin API does, on the
+    /// deployment it is pinned to.
     pub fn resume(&self, invocation: &str) -> Option<bool> {
+        self.resume_on(invocation, &ResumeDeployment::Keep)
+            .map(|result| result.is_ok())
+    }
+
+    /// Resume `invocation` on `deployment`, as the admin API's
+    /// `PATCH /invocations/{id}/resume?deployment=…` does: `None` when the
+    /// invocation is unknown, `Err` when the resume is refused — it is not
+    /// in a resumable state, or the named deployment cannot be routed.
+    pub fn resume_on(
+        &self,
+        invocation: &str,
+        deployment: &ResumeDeployment,
+    ) -> Option<Result<(), ResumeRefusal>> {
         let mut state = self.shared.lock();
         let key = state.lookup(invocation)?;
-        Some(state.resume(&self.shared, key))
+        Some(state.resume_on(&self.shared, key, deployment))
     }
 
     // --- introspection ------------------------------------------------------
@@ -855,6 +1123,7 @@ impl RestateTestServer {
             .map(|(_, invocation)| InvocationView {
                 id: invocation.id.as_str().to_owned(),
                 target: invocation.target.display(),
+                pinned_deployment_id: invocation.pinned_deployment.as_str().to_owned(),
                 status: invocation.status.name(),
                 attempts: invocation.attempts,
                 suspensions: invocation.suspensions,

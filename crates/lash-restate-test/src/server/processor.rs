@@ -23,6 +23,7 @@ use super::model::{
     AttemptFailure, Entry, InvKey, Invocation, KeyRecord, LiveAttempt, NotificationKey, Outcome,
     RetryState, Status, Target, TimerAction, TimerView, WaitSet, Waiter,
 };
+use super::{ResumeDeployment, ResumeRefusal};
 use crate::protocol::generated::{
     self as pb, ErrorMessage, Failure, InputCommandMessage, NotificationTemplate,
     ProposeRunCompletionAckMessage, ProposeRunCompletionMessage, RunCommandMessage, StartMessage,
@@ -236,8 +237,15 @@ impl State {
         sh: &Arc<Shared>,
         submission: Submission,
     ) -> Result<(InvKey, Submitted), SubmitError> {
-        let spec = sh
-            .catalog()
+        // A new invocation routes to the newest deployment that registered
+        // its service name, and pins to that deployment for its whole life.
+        let Some(deployment) = sh.route(&submission.target.service) else {
+            return Err(SubmitError::Unresolved(Unresolved::Service(
+                submission.target.service.clone(),
+            )));
+        };
+        let spec = deployment
+            .catalog
             .resolve(&submission.target.service, &submission.target.handler)
             .map_err(SubmitError::Unresolved)?;
         if spec.kind.is_keyed() && submission.target.key.is_none() {
@@ -288,6 +296,7 @@ impl State {
             id: id.clone(),
             target: target.clone(),
             spec,
+            pinned_deployment: deployment.id.clone(),
             idempotency_key: submission.idempotency_key.clone(),
             random_seed,
             journal: vec![Entry {
@@ -1149,14 +1158,44 @@ impl State {
         );
     }
 
-    /// Operator resume of a paused invocation: a fresh retry loop.
+    /// Operator resume of a paused invocation: a fresh retry loop, pinned
+    /// where it was.
     pub fn resume(&mut self, sh: &Arc<Shared>, key: InvKey) -> bool {
+        self.resume_on(sh, key, &ResumeDeployment::Keep).is_ok()
+    }
+
+    /// Operator resume on `deployment`, as the admin API's
+    /// `?deployment=` parameter does: only a paused invocation resumes, and
+    /// it re-pins to the deployment it resumes on.
+    pub fn resume_on(
+        &mut self,
+        sh: &Arc<Shared>,
+        key: InvKey,
+        deployment: &ResumeDeployment,
+    ) -> Result<(), ResumeRefusal> {
         if !matches!(self.invocations[key.0].status, Status::Paused) {
-            return false;
+            return Err(ResumeRefusal::Status(self.invocations[key.0].status.name()));
         }
-        self.invocations[key.0].retry.failures_in_loop = 0;
+        let invocation = &self.invocations[key.0];
+        let pinned = match deployment {
+            ResumeDeployment::Keep => invocation.pinned_deployment.clone(),
+            ResumeDeployment::Latest => sh
+                .route(&invocation.target.service)
+                .map(|deployment| deployment.id.clone())
+                .ok_or_else(|| ResumeRefusal::Unrouted(invocation.target.service.clone()))?,
+            ResumeDeployment::Id(id) => {
+                if sh.deployment(id).is_none() {
+                    return Err(ResumeRefusal::UnknownDeployment(id.clone()));
+                }
+                id.clone()
+            }
+        };
+        self.remove_retry_timer(key);
+        let invocation = &mut self.invocations[key.0];
+        invocation.retry.failures_in_loop = 0;
+        invocation.pinned_deployment = pinned;
         self.start_attempt(sh, key);
-        true
+        Ok(())
     }
 
     /// Drop the running attempt mid-step, as a deployment crash does, and

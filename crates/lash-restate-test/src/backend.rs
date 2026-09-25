@@ -24,7 +24,7 @@ use restate_sdk::context::WorkflowContext;
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
 
-use crate::server::{RestateTestServer, ServerConfig, StartError};
+use crate::server::{DeploymentHooks, DeploymentId, RestateTestServer, ServerConfig, StartError};
 
 /// One handler execution's run of an attempt.
 type HandlerJob = Box<
@@ -72,6 +72,7 @@ pub struct RestateTestBackend {
     connection: RestateConnection,
     processes: RestateProcessWorkerSlot,
     jobs: Arc<ParkedJobs>,
+    authority: RestateAuthorityId,
 }
 
 impl std::fmt::Debug for RestateTestBackend {
@@ -91,11 +92,29 @@ impl std::fmt::Debug for RestateTestBackend {
 /// `ServerConfig::default()` unless a test needs another time mode, protocol
 /// version, retry policy or always-replay.
 pub async fn backend(seed: u64, config: ServerConfig) -> Result<RestateTestBackend, BackendError> {
-    RestateTestBackend::build(config.with_seed(seed)).await
+    RestateTestBackend::build(config.with_seed(seed), "", DeploymentHooks::default()).await
+}
+
+/// [`backend`] with a `label` and deployment `hooks` on the first build, so
+/// a test can tell it apart from the builds [`add_build`] adds and refuse
+/// or record its dispatches the same way.
+///
+/// [`add_build`]: RestateTestBackend::add_build
+pub async fn backend_with_build(
+    seed: u64,
+    config: ServerConfig,
+    label: impl Into<String>,
+    hooks: DeploymentHooks,
+) -> Result<RestateTestBackend, BackendError> {
+    RestateTestBackend::build(config.with_seed(seed), label, hooks).await
 }
 
 impl RestateTestBackend {
-    async fn build(config: ServerConfig) -> Result<Self, BackendError> {
+    async fn build(
+        config: ServerConfig,
+        first_label: impl Into<String>,
+        first_hooks: DeploymentHooks,
+    ) -> Result<Self, BackendError> {
         let clock = Arc::new(TestClock::new(config.start_time_ms));
         let server = RestateTestServer::new(config)?;
         let follower = Arc::clone(&clock);
@@ -126,10 +145,12 @@ impl RestateTestBackend {
             .endpoint_builder(processes.clone())
             .bind(HandlerHost {
                 jobs: Arc::clone(&jobs),
-                authority,
+                authority: authority.clone(),
             })
             .build();
-        server.register(endpoint).await?;
+        server
+            .register_with(endpoint, first_label, first_hooks)
+            .await?;
         Ok(Self {
             server,
             restate,
@@ -138,7 +159,30 @@ impl RestateTestBackend {
             connection,
             processes,
             jobs,
+            authority,
         })
+    }
+
+    /// Register another build of this backend's services on the server: a
+    /// second deployment of the same code under the opaque `label` (FIG-3795
+    /// part A turns it into a typed `BuildGeneration`). `hooks` are the
+    /// test's levers on this build — refuse a handler call, record that this
+    /// build served one. A new invocation routes to this deployment; one
+    /// already in flight stays pinned to the build that started it.
+    pub async fn add_build(
+        &self,
+        label: impl Into<String>,
+        hooks: DeploymentHooks,
+    ) -> Result<DeploymentId, BackendError> {
+        let endpoint = self
+            .restate
+            .endpoint_builder(self.processes.clone())
+            .bind(HandlerHost {
+                jobs: Arc::clone(&self.jobs),
+                authority: self.authority.clone(),
+            })
+            .build();
+        Ok(self.server.register_with(endpoint, label, hooks).await?)
     }
 
     /// The server double: time, crashes, operator commands, introspection.

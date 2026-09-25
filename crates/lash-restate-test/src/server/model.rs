@@ -9,7 +9,7 @@ use tokio::sync::{mpsc, oneshot};
 
 use super::body::InputProbe;
 use super::catalog::HandlerSpec;
-use super::ids::InvocationId;
+use super::ids::{DeploymentId, InvocationId};
 use crate::protocol::Frame;
 use crate::protocol::generated::Failure;
 
@@ -293,6 +293,10 @@ pub struct Invocation {
     pub id: InvocationId,
     pub target: Target,
     pub spec: HandlerSpec,
+    /// The deployment this invocation runs on, fixed at submission: retries,
+    /// suspension resumes and replays all dispatch to it until an operator
+    /// resume re-pins it.
+    pub pinned_deployment: DeploymentId,
     pub idempotency_key: Option<String>,
     pub random_seed: u64,
     pub journal: Vec<Entry>,

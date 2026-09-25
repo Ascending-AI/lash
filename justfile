@@ -213,6 +213,19 @@ effect-group-conformance-e2e:
     python3 "{{repo}}/scripts/ci/restate_suite.py" suite effect-group --leg replay \
     --artifacts "$receipts_dir"
 
+# The server double's deployment laws against a live restate-server (FIG-3795
+# part B): newest-deployment routing and invocation pinning, so the double
+# cannot drift. Suite wiring lives in `scripts/restate-suites.toml` under
+# `server-double`.
+server-double-e2e:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  source "{{repo}}/scripts/worktree-gate-env.sh"
+  lash_gate_acquire_locks server-double-e2e
+
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite server-double --leg live
+  python3 "{{repo}}/scripts/ci/restate_suite.py" suite server-double --leg replay
+
 agent-workbench-attachment-usage-gate port='3030':
   bash "{{repo}}/scripts/agent-workbench-attachment-usage-gate.sh" "{{port}}"
 

@@ -256,7 +256,11 @@ impl Routes {
         let segments: Vec<&str> = segments.iter().map(String::as_str).collect();
         match (request.method, segments.as_slice()) {
             (HttpMethod::Get, ["health"] | ["restate", "health"]) => respond(200, ""),
+            // Registering a deployment is the host's call into the Rust API
+            // (`register`), not an admin request the double can act on: an
+            // in-process deployment is an `Endpoint`, not a URI to fetch.
             (HttpMethod::Post, ["deployments"]) => respond_json(201, &json!({})),
+            (HttpMethod::Delete, ["deployments", id]) => self.delete_deployment(id, query),
             (
                 HttpMethod::Patch | HttpMethod::Put,
                 [
@@ -264,7 +268,7 @@ impl Routes {
                     id,
                     action @ ("cancel" | "kill" | "resume" | "purge"),
                 ],
-            ) => self.control(id, action),
+            ) => self.control(id, action, query),
             (HttpMethod::Post, ["query"]) => self.query(&request),
             (HttpMethod::Post, ["services", service, "state"]) => {
                 self.modify_state(service, &request.body)
@@ -321,13 +325,17 @@ impl Routes {
         rest: &[&str],
         query: &str,
     ) -> HttpResponse {
-        let Some(entry) = self.shared.catalog().service(service) else {
+        let Some(deployment) = self.shared.route(service) else {
             return error(
                 404,
                 format!(
                     "service '{service}' not found, make sure to register the service before calling it."
                 ),
             );
+        };
+        // `route` matched it on this name; it cannot miss here.
+        let Some(entry) = deployment.catalog.service(service) else {
+            return error(404, format!("service '{service}' not found"));
         };
         let keyed = entry.kind != ServiceKind::Service;
         let (key, handler, send) = match (keyed, rest) {
@@ -473,7 +481,44 @@ impl Routes {
         respond(202, "")
     }
 
-    fn control(&self, id: &str, action: &str) -> HttpResponse {
+    /// `DELETE /deployments/{id}[?force=]`: refuse while invocations stay
+    /// pinned to it, unless forced.
+    fn delete_deployment(&self, id: &str, query: &str) -> HttpResponse {
+        let force = query
+            .split('&')
+            .any(|pair| percent_decode(pair) == "force=true");
+        match self
+            .shared
+            .remove_deployment(&super::ids::DeploymentId::new(id), force)
+        {
+            Ok(()) => respond(202, ""),
+            Err(super::RemoveDeploymentError::UnknownDeployment(id)) => {
+                error(404, format!("deployment {id} not found"))
+            }
+            Err(super::RemoveDeploymentError::Pinned(pinned)) => error(
+                409,
+                format!("deployment {id} has {pinned} pinned invocation(s) still in flight"),
+            ),
+        }
+    }
+
+    /// `?deployment=` as the resume action accepts it: `keep`, `latest`, or
+    /// a deployment id.
+    fn resume_deployment(query: &str) -> Result<super::ResumeDeployment, String> {
+        for pair in query.split('&') {
+            let Some(value) = pair.strip_prefix("deployment=") else {
+                continue;
+            };
+            return Ok(match percent_decode(value).as_str() {
+                "" | "keep" => super::ResumeDeployment::Keep,
+                "latest" => super::ResumeDeployment::Latest,
+                id => super::ResumeDeployment::Id(super::ids::DeploymentId::new(id)),
+            });
+        }
+        Ok(super::ResumeDeployment::Keep)
+    }
+
+    fn control(&self, id: &str, action: &str, query: &str) -> HttpResponse {
         let mut state = self.shared.lock();
         let Some(invocation) = state.lookup(id) else {
             return error(404, format!("invocation {id} not found"));
@@ -489,10 +534,24 @@ impl Routes {
                 }
             }
             _ => {
-                if state.resume(&self.shared, invocation) {
-                    ControlResult::Done
-                } else {
-                    return error(409, format!("invocation {id} is not paused"));
+                let deployment = match Self::resume_deployment(query) {
+                    Ok(deployment) => deployment,
+                    Err(message) => return error(400, message),
+                };
+                match state.resume_on(&self.shared, invocation, &deployment) {
+                    Ok(()) => ControlResult::Done,
+                    Err(super::ResumeRefusal::Status(status)) => {
+                        return error(
+                            409,
+                            format!("invocation {id} cannot be resumed from status '{status}'"),
+                        );
+                    }
+                    Err(super::ResumeRefusal::UnknownDeployment(deployment)) => {
+                        return error(404, format!("deployment {deployment} not found"));
+                    }
+                    Err(super::ResumeRefusal::Unrouted(service)) => {
+                        return error(404, format!("no deployment serves '{service}'"));
+                    }
                 }
             }
         };
@@ -516,7 +575,7 @@ impl Routes {
         let Ok(modify) = serde_json::from_slice::<ModifyState>(body) else {
             return error(400, "the body must be {\"object_key\", \"new_state\"}");
         };
-        if self.shared.catalog().service(service).is_none() {
+        if self.shared.route(service).is_none() {
             return error(404, format!("service '{service}' not found"));
         }
         let mut state = self.shared.lock();

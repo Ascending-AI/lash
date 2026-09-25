@@ -18,6 +18,7 @@ use bytes::Bytes;
 pub const INVOCATION_ID_LEN: usize = 24;
 const INVOCATION_PREFIX: &str = "inv_1";
 const AWAKEABLE_PREFIX: &str = "sign_1";
+const DEPLOYMENT_PREFIX: &str = "dp_";
 
 const URL_SAFE_INDIFFERENT: GeneralPurpose = GeneralPurpose::new(
     &alphabet::URL_SAFE,
@@ -70,6 +71,28 @@ impl InvocationId {
 impl std::fmt::Display for InvocationId {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter.write_str(&self.printed)
+    }
+}
+
+/// A registered deployment's id: `dp_` plus seeded hex, minted once per
+/// registration from the server's seed and the deployment's index in
+/// registration order.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct DeploymentId(String);
+
+impl DeploymentId {
+    pub fn new(id: impl Into<String>) -> Self {
+        Self(id.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for DeploymentId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
     }
 }
 
@@ -149,6 +172,13 @@ impl SeededIds {
             chunk.copy_from_slice(&draw[..chunk.len()]);
         }
         (InvocationId::from_bytes(bytes), expand.next_u64())
+    }
+
+    /// The deployment id of the `ordinal`th registration under this seed.
+    /// Derived, not drawn: minting it consumes no other id's draws.
+    pub fn deployment_id(&self, ordinal: u64) -> DeploymentId {
+        let draw = self.derive(&[b"deployment", &ordinal.to_be_bytes()]).1;
+        DeploymentId(format!("{DEPLOYMENT_PREFIX}{draw:016x}"))
     }
 }
 

@@ -89,3 +89,15 @@ redelivery_laws = [
 # slot; each shard takes its own, and its own Restate trust domain.
 AGENT_WORKBENCH_E2E_DATABASE_URL = "{AGENT_WORKBENCH_E2E_POSTGRES_BASE_URL}/lash_slot_{shard}"
 RESTATE_AUTHORITY_ID = "agent-workbench-e2e:{AGENT_WORKBENCH_E2E_RUN_ID}:{shard}"
+
+# The server double's own laws against the real server: the deployment
+# routing and pinning the double models (FIG-3795 part B), checked so the
+# double cannot drift. Two endpoint binds per shard: the test registers
+# build N and build N+1 side by side.
+[suites.server-double]
+label = "//crates/lash-restate-test:server_semantics__test"
+cwd = "crates/lash-restate-test"
+filters = ["live_restate_"]
+endpoints = ["DEP_A", "DEP_B"]
+shards = 1
+timeout_seconds = 120

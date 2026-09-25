@@ -156,7 +156,7 @@ fn row(state: &State, invocation: &Invocation) -> Map<String, Value> {
     row.insert(
         "pinned_deployment_id".into(),
         if invocation.attempts > 0 {
-            json!("dp_restate_test")
+            json!(invocation.pinned_deployment.as_str())
         } else {
             Value::Null
         },
