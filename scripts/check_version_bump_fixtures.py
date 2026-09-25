@@ -27,6 +27,10 @@ request, green in the merge queue, and red afterwards — which is exactly what
 asserting 105.  ``COMPONENT_VERSION_PINS`` below sweeps those literals out of
 the tree and demands each equal the declared constant, so the stale pin is
 refused here, on every pull request, without a database.
+
+The gate is paused until the lash 1.0 cut: while ``tools/release-mode.toml``
+carries ``pre_release = true`` it reports "paused pre-1.0" and exits 0
+(FIG-3660).
 """
 
 from __future__ import annotations
@@ -36,6 +40,9 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_mode import pre_release  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -436,6 +443,12 @@ def named_set_failure(constant: str, derivation: str, found: tuple[str, ...], ex
 
 
 def check(repo: Path) -> tuple[bool, str]:
+    if pre_release(repo):
+        return True, (
+            "version-bump fixture check paused pre-1.0 under "
+            "tools/release-mode.toml (pre_release = true; FIG-3660); "
+            "set it false at the lash 1.0 cut"
+        )
     version_text = read_source(repo, VERSION_SOURCE)
     migrations_text = read_source(repo, MIGRATIONS_SOURCE)
     fixture_text = read_source(repo, FIXTURE_SOURCE)

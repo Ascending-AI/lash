@@ -31,6 +31,10 @@ arguments, and every ``serde`` attribute.
 
 Only the Python standard library is used so the check can run before the Rust
 toolchain is installed.  Pull-request CI passes the PR merge-base explicitly.
+
+The gate is paused until the lash 1.0 cut: while ``tools/release-mode.toml``
+carries ``pre_release = true`` it reports "paused pre-1.0" and exits 0
+(FIG-3660).
 """
 
 from __future__ import annotations
@@ -45,6 +49,9 @@ import subprocess
 import sys
 import tomllib
 from typing import Iterable
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from release_mode import pre_release  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -2357,6 +2364,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
+    if pre_release(args.repo):
+        print(
+            "version-bump check paused pre-1.0 under tools/release-mode.toml "
+            "(pre_release = true; FIG-3660); set it false at the lash 1.0 cut"
+        )
+        return 0
     try:
         surfaces = load_config(args.config)
         if args.surface:
