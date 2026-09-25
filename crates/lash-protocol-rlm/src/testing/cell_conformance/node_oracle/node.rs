@@ -119,7 +119,7 @@ impl NodeOracle {
             .expect("read the Node oracle's answer");
         assert!(
             read > 0,
-            "the Node oracle exited without answering (LASH_NODE or the mise-installed Node {} — see node_program)",
+            "the Node oracle exited without answering (it needs Node {} from LASH_NODE, mise or PATH — see node_program)",
             super::PINNED_NODE
         );
         serde_json::from_str(&answer).expect("the Node oracle answers in the observation shape")
