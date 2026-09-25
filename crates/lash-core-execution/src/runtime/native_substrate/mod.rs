@@ -39,6 +39,13 @@ pub trait SessionWorkEngine: Send + Sync {
     /// candidate and uses whatever comes back (the precedent is
     /// [`EffectHost::install_tool_child_host`](crate::EffectHost::install_tool_child_host)).
     fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver>;
+
+    /// The engine half of the control verbs over this engine's executions
+    /// (FIG-3600 S7). An engine that holds no execution across calls has
+    /// nothing to release.
+    fn control(&self) -> Arc<dyn crate::engine::SessionControlEngine> {
+        Arc::new(crate::engine::NoEngineControl)
+    }
 }
 
 /// The kernel's drive of one session, as the core installs it on its

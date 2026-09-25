@@ -1468,6 +1468,59 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
     }
 }
 
+#[async_trait::async_trait]
+impl lash_core_execution::store::ControlIntentStore for SqliteSessionStoreFactory {
+    async fn begin_session_close(
+        &self,
+        _session_id: &SessionId,
+        _at_ms: u64,
+    ) -> std::result::Result<Option<lash_core_execution::store::ControlIntent>, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "ControlIntentStore::begin_session_close",
+        })
+    }
+
+    async fn claim_intent_application(
+        &self,
+        _id: lash_core_execution::store::ControlIntentId,
+    ) -> std::result::Result<lash_core_execution::store::IntentApplication, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "ControlIntentStore::claim_intent_application",
+        })
+    }
+
+    async fn acknowledge_intent(
+        &self,
+        _id: lash_core_execution::store::ControlIntentId,
+        _at_ms: u64,
+    ) -> std::result::Result<(), StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "ControlIntentStore::acknowledge_intent",
+        })
+    }
+
+    async fn record_intent_failure(
+        &self,
+        _id: lash_core_execution::store::ControlIntentId,
+        _error: &str,
+        _retryable: bool,
+        _at_ms: u64,
+    ) -> std::result::Result<lash_core_execution::store::ControlIntent, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "ControlIntentStore::record_intent_failure",
+        })
+    }
+
+    async fn load_intent(
+        &self,
+        _id: lash_core_execution::store::ControlIntentId,
+    ) -> std::result::Result<Option<lash_core_execution::store::ControlIntent>, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "ControlIntentStore::load_intent",
+        })
+    }
+}
+
 fn list_session_summaries(
     conn: &Connection,
     filter: &SessionListFilter,

@@ -83,6 +83,8 @@ pub use commit_identity::{
 };
 pub use control_intent::{
     CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
+    ControlIntentStore, IntentApplication, decide_intent_acknowledgement,
+    decide_intent_application, decide_intent_failure, stored_intent_kind, stored_intent_state,
 };
 pub use drive_fence::{
     AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence,

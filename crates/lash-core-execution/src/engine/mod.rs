@@ -61,7 +61,10 @@ pub use contracts::{
     BuildGeneration, ChangeId, DriveHandover, DriveRequest, Never, PendingResolution,
     RecordedVersion, ResolveAck, RootProgress, TurnSegmentHandover, UnresolvedChild, VersionRange,
 };
-pub use control::{NoScopeClose, ScopeCloseSink};
+pub use control::{
+    EngineAck, EngineRefusal, NoEngineControl, NoScopeClose, RootRef, ScopeCloseSink,
+    SessionControlEngine,
+};
 pub use drive::{
     DriveAbort, DriveOutcome, DriveStop, RootOutcome, admission_body, drive_admission_replay_key,
     drive_admission_scope, drive_close_root_replay_key, drive_root_scope, drive_seal_replay_key,
