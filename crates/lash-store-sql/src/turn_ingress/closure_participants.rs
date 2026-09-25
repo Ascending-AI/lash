@@ -13,8 +13,8 @@ pub const TABLE: &str = "turn_cancel_closure_participants";
 pub const INSERT_COLUMNS: &str = "scope_id, participant_id, scope_json";
 
 crate::statements! {
-    /// `turn_cancel_closure_participants` statements both backends issue
-    /// verbatim.
+    /// `turn_cancel_closure_participants` statements SQLite's effect journal
+    /// issues (PostgreSQL journals no effects, ADR 0104).
     pub struct ClosureParticipantStatements @ "turn_cancel_closure_participant" {
         /// Admit `?2` to scope `?1`, keeping an existing admission.
         insert_new = "INSERT INTO turn_cancel_closure_participants (

@@ -33,7 +33,7 @@ pub const RECORD_COLUMNS: &str = "group_key, scope_id, session_id, wake, loser_d
 pub const SESSION_PIN_COLUMNS: &str = "group_key, lifecycle";
 
 crate::statements! {
-    /// `runtime_effect_group` statements both backends issue verbatim.
+    /// `runtime_effect_group` statements SQLite's effect journal issues.
     pub struct GroupStatements @ "effect_group" {
         /// The durably recorded group row for `?1`.
         select_by_key = "SELECT group_key, scope_id, session_id, wake, loser_disposition,
