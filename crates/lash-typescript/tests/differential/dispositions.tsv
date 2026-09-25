@@ -74,3 +74,4 @@
 "`\\uD800`"	reject	TS_LONE_SURROGATE_LITERAL_UNSUPPORTED
 "`\\8`"	reject	TS_SYNTAX_ERROR
 "`\\u{1F_639}`"	reject	TS_SYNTAX_ERROR
+"(() => { const p=/a/g; const f={toString: function() { return 'i'; }}; return new RegExp(p,f).flags; })()"	runtime-reject	TS_OBJECT_STRING_COERCION

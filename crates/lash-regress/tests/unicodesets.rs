@@ -3147,3 +3147,100 @@ fn test_unicode_sets_nested_class_tc(tc: TestConfig) {
     tc.test_match_succeeds(r"^[[0-9]&&\q{0|2|4}]$", "v", "2");
     tc.test_match_succeeds(r"^[[0-9]&&\q{0|2|4}]$", "v", "4");
 }
+
+// FIG-3698: under UnicodeSets + ignoreCase, \P{...} applies
+// MaybeSimpleCaseFolding to the property set before complementing, so the
+// match set is the complement of the case-fold closure. This differs from
+// 'iu', where the raw property set is complemented first.
+#[test]
+fn test_unicode_sets_negated_property_icase() {
+    test_with_configs(|tc| {
+        // Under 'iv' the folded set is complemented: nothing that folds into
+        // Lu (uppercase, lowercase, or fold sources like ſ) matches.
+        tc.test_match_fails(r"^\P{Lu}$", "iv", "A");
+        tc.test_match_fails(r"^\P{Lu}$", "iv", "a");
+        tc.test_match_fails(r"^\P{Lu}$", "iv", "\u{017F}");
+        tc.test_match_succeeds(r"^\P{Lu}$", "iv", "1");
+
+        // Under 'iu' the raw set is complemented first: 'A' matches because
+        // its fold 'a' is reachable from the complemented set.
+        tc.test_match_succeeds(r"^\P{Lu}$", "iu", "A");
+        tc.test_match_succeeds(r"^\P{Lu}$", "iu", "a");
+        tc.test_match_succeeds(r"^\P{Lu}$", "iu", "1");
+
+        // Inside a class the same rule applies.
+        tc.test_match_fails(r"^[\P{Lu}]$", "iv", "a");
+        tc.test_match_succeeds(r"^[\P{Lu}]$", "iv", "1");
+        tc.test_match_succeeds(r"^[\p{Lu}]$", "iv", "a");
+        tc.test_match_succeeds(r"^[\p{Lu}]$", "iv", "\u{017F}");
+        tc.test_match_succeeds(r"^[\p{Ll}]$", "iv", "A");
+    })
+}
+
+// Under 'iv', \w is closed under simple case folding, so ſ and K are word
+// characters; \W and [^\W] must fold before complementing.
+#[test]
+fn test_unicode_sets_word_chars_icase() {
+    test_with_configs(|tc| {
+        tc.test_match_succeeds(r"^\w$", "iv", "\u{017F}");
+        tc.test_match_succeeds(r"^\w$", "iv", "\u{212A}");
+        tc.test_match_fails(r"^\W$", "iv", "\u{017F}");
+        tc.test_match_fails(r"^[\W]$", "iv", "\u{017F}");
+        tc.test_match_fails(r"^[\W]$", "iv", "\u{212A}");
+        tc.test_match_fails(r"^[\W]$", "iv", "x");
+        tc.test_match_succeeds(r"^[^\W]$", "iv", "\u{017F}");
+        tc.test_match_succeeds(r"^[^\W]$", "iv", "\u{212A}");
+        tc.test_match_succeeds(r"^[^\W]$", "iv", "x");
+    })
+}
+
+// \b under 'iv' is Unicode-aware: characters that fold to ASCII word
+// characters count as word characters.
+#[test]
+fn test_unicode_sets_word_boundary_icase() {
+    test_with_configs(|tc| {
+        tc.test_match_succeeds(r"\b\u{017F}", "iv", "\u{017F}");
+        tc.test_match_succeeds(r"\b\u{212A}", "iv", "\u{212A}");
+        tc.test_match_succeeds(r"x\b", "iv", "\u{017F}x");
+        tc.test_match_fails(r"\B\u{017F}", "iv", "\u{017F}x");
+        tc.test_match_succeeds(r"\B\u{017F}", "iv", "x\u{017F}");
+    })
+}
+
+// Under 'iv' each operand of && and -- contributes its case-fold image, and
+// complemented operands fold before complementing.
+#[test]
+fn test_unicode_sets_set_operations_icase() {
+    test_with_configs(|tc| {
+        // img(\w) ∩ comp(img(Lu)) = digits and underscore only.
+        tc.test_match_fails(r"^[\w&&\P{Lu}]$", "iv", "a");
+        tc.test_match_fails(r"^[\w&&\P{Lu}]$", "iv", "A");
+        tc.test_match_fails(r"^[\w&&\P{Lu}]$", "iv", "\u{017F}");
+        tc.test_match_succeeds(r"^[\w&&\P{Lu}]$", "iv", "5");
+        tc.test_match_succeeds(r"^[\w&&\P{Lu}]$", "iv", "_");
+
+        // A character operand behaves as its folded set: {k,K,K}.
+        tc.test_match_succeeds(r"^[\w&&k]$", "iv", "k");
+        tc.test_match_succeeds(r"^[\w&&k]$", "iv", "K");
+        tc.test_match_succeeds(r"^[\w&&k]$", "iv", "\u{212A}");
+        tc.test_match_fails(r"^[\w&&k]$", "iv", "a");
+
+        // Subtraction removes the whole fold class of 'k'.
+        tc.test_match_fails(r"^[\w--k]$", "iv", "k");
+        tc.test_match_fails(r"^[\w--k]$", "iv", "K");
+        tc.test_match_fails(r"^[\w--k]$", "iv", "\u{212A}");
+        tc.test_match_succeeds(r"^[\w--k]$", "iv", "a");
+    })
+}
+
+// Case-insensitive backreferences and modifier groups under 'v' use simple
+// case folding, as with 'u'.
+#[test]
+fn test_unicode_sets_icase_backref_and_modifier() {
+    test_with_configs(|tc| {
+        tc.test_match_succeeds(r"^(k)\1$", "iv", "k\u{212A}");
+        tc.test_match_succeeds(r"^(?i:(k)\1)$", "v", "k\u{212A}");
+        tc.test_match_succeeds(r"^(?i:(a)\1)$", "v", "aA");
+        tc.test_match_succeeds(r"^(?i:k)$", "v", "\u{212A}");
+    })
+}

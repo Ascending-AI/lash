@@ -1,0 +1,29 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+FIG-3698	1	accept	"(() => { let i=0; 'a'.match(/a/, i++); return i; })()"	"1"	-
+FIG-3698	2	accept	"(() => { let i=0; 'a'.search(/a/, i++); return i; })()"	"1"	-
+FIG-3698	3	accept	"(() => { let i=0; return 'ab'.match(/b/, i++)[0] + '|' + i; })()"	"b|1"	-
+FIG-3698	4	accept	"(() => { let i=0; return 'ab'.search(/b/, i++) + '|' + i; })()"	"1|1"	-
+FIG-3698	5	runtime-reject	"(() => { const p=/a/g; const f={toString: function() { return 'i'; }}; return new RegExp(p,f).flags; })()"	"i"	TS_OBJECT_STRING_COERCION
+FIG-3698	6	accept	"/\\u017F/i.test('s')"	"false"	-
+FIG-3698	7	accept	"/\\u017F/i.test('\\u017F')"	"true"	-
+FIG-3698	8	accept	"/k/i.test('\\u212A')"	"false"	-
+FIG-3698	9	accept	"/k/i.test('K')"	"true"	-
+FIG-3698	10	accept	"/[a-z]/i.test('\\u017F')"	"false"	-
+FIG-3698	11	accept	"/[a-z]/i.test('\\u212A')"	"false"	-
+FIG-3698	12	accept	"/[a-z]/iu.test('\\u017F')"	"true"	-
+FIG-3698	13	accept	"/[a-z]/iu.test('\\u212A')"	"true"	-
+FIG-3698	14	accept	"/[\\W]/i.test('\\u017F')"	"true"	-
+FIG-3698	15	accept	"/[\\W]/iu.test('\\u017F')"	"false"	-
+FIG-3698	16	accept	"/[^\\W]/iu.test('\\u017F')"	"true"	-
+FIG-3698	17	accept	"/(s)\\1/i.test('s\\u017F')"	"false"	-
+FIG-3698	18	accept	"/(s)\\1/iu.test('s\\u017F')"	"true"	-
+FIG-3698	19	accept	"/(?i:s)/.test('\\u017F')"	"false"	-
+FIG-3698	20	accept	"/(?i:k)/.test('\\u212A')"	"false"	-
+FIG-3698	21	accept	"/(?i:(k)\\1)/.test('k\\u212A')"	"false"	-
+FIG-3698	22	accept	"/(?i:(k)\\1)/u.test('k\\u212A')"	"true"	-
+FIG-3698	23	accept	"/\\P{Lu}/iu.test('A')"	"true"	-
+FIG-3698	24	accept	"/\\P{Lu}/iu.test('a')"	"true"	-
+FIG-3698	25	accept	"/\\P{Lu}/iu.test('1')"	"true"	-
+FIG-3698	26	accept	"/\\u00B5/i.test('\\u039C')"	"true"	-
+FIG-3698	27	accept	"/\\u00B5/i.test('M')"	"false"	-
+FIG-3698	28	accept	"/\\u03C3/i.test('\\u03C2')"	"true"	-

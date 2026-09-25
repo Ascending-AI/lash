@@ -2292,3 +2292,108 @@ fn test_duplicate_named_groups_with_noncapturing_prefix() {
         re.test_fails("yx");
     })
 }
+
+// FIG-3698: ECMA-262 Canonicalize without either Unicode flag applies
+// toUppercase, but a non-ASCII code point that would map into ASCII keeps its
+// original code point. This differs from simple case folding: /i must not
+// match 's' against 'ſ' (U+017F) or 'k' against 'K' (U+212A).
+#[test]
+fn test_nonunicode_canonicalize() {
+    test_with_configs(test_nonunicode_canonicalize_tc)
+}
+
+fn test_nonunicode_canonicalize_tc(tc: TestConfig) {
+    // U+017F (long s) uppercases to 'S', but that non-ASCII to ASCII mapping
+    // is forbidden by Canonicalize, so it only matches itself under 'i'.
+    tc.test_match_fails(r"^\u017F$", "i", "s");
+    tc.test_match_fails(r"^\u017F$", "i", "S");
+    tc.test_match_succeeds(r"^\u017F$", "i", "\u{017F}");
+    // Under 'iu' simple case folding applies and ſ folds to s.
+    tc.test_match_succeeds(r"^\u017F$", "iu", "s");
+
+    // U+212A (Kelvin sign) uppercases to 'K'; same guard.
+    tc.test_match_fails(r"^k$", "i", "\u{212A}");
+    tc.test_match_succeeds(r"^k$", "i", "K");
+    tc.test_match_succeeds(r"^k$", "iu", "\u{212A}");
+
+    // Ranges get the same treatment.
+    tc.test_match_fails(r"^[a-z]$", "i", "\u{017F}");
+    tc.test_match_fails(r"^[a-z]$", "i", "\u{212A}");
+    tc.test_match_succeeds(r"^[a-z]$", "iu", "\u{017F}");
+    tc.test_match_succeeds(r"^[a-z]$", "iu", "\u{212A}");
+    tc.test_match_succeeds(r"^[a-z]$", "i", "A");
+
+    // Non-ASCII to non-ASCII uppercase mappings still apply.
+    tc.test_match_succeeds(r"^σ$", "i", "Σ");
+    tc.test_match_succeeds(r"^σ$", "i", "ς");
+    tc.test_match_succeeds(r"^µ$", "i", "Μ");
+    tc.test_match_fails(r"^µ$", "i", "M");
+}
+
+// A negated class escape inside a class (\W inside [...]) is complemented
+// before folding; under 'iu' the fold closure of \w excludes ſ and K, under
+// plain 'i' they remain non-word characters.
+#[test]
+fn test_negated_class_escape_icase() {
+    test_with_configs(test_negated_class_escape_icase_tc)
+}
+
+fn test_negated_class_escape_icase_tc(tc: TestConfig) {
+    tc.test_match_succeeds(r"^[\W]$", "i", "\u{017F}");
+    tc.test_match_succeeds(r"^[\W]$", "i", "\u{212A}");
+    tc.test_match_fails(r"^[\W]$", "iu", "\u{017F}");
+    tc.test_match_fails(r"^[\W]$", "iu", "\u{212A}");
+    tc.test_match_fails(r"^[\W]$", "iu", "x");
+
+    tc.test_match_fails(r"^[^\W]$", "i", "\u{017F}");
+    tc.test_match_fails(r"^[^\W]$", "i", "\u{212A}");
+    tc.test_match_succeeds(r"^[^\W]$", "iu", "\u{017F}");
+    tc.test_match_succeeds(r"^[^\W]$", "iu", "\u{212A}");
+    tc.test_match_succeeds(r"^[^\W]$", "iu", "x");
+}
+
+// Inline '(?i:...)' modifier groups use the same Canonicalize as the 'i'
+// flag: without a Unicode flag ſ and K do not fold into ASCII.
+#[test]
+fn test_modifier_group_icase() {
+    test_with_configs(test_modifier_group_icase_tc)
+}
+
+fn test_modifier_group_icase_tc(tc: TestConfig) {
+    tc.test_match_fails(r"^(?i:s)$", "", "\u{017F}");
+    tc.test_match_fails(r"^(?i:k)$", "", "\u{212A}");
+    tc.test_match_succeeds(r"^(?i:k)$", "", "K");
+    tc.test_match_fails(r"^(?i:[a-z])$", "", "\u{017F}");
+    tc.test_match_succeeds(r"^(?i:[^a-z])$", "", "\u{017F}");
+    tc.test_match_fails(r"^(?i:\w)$", "", "\u{017F}");
+    tc.test_match_succeeds(r"^(?i:\W)$", "", "\u{017F}");
+
+    // Inside a 'u' regex, the modifier group uses simple case folding.
+    tc.test_match_succeeds(r"^(?i:k)$", "u", "\u{212A}");
+    tc.test_match_succeeds(r"^(?i:s)$", "u", "\u{017F}");
+}
+
+// Backreferences capture the 'i' flag of the position where they appear:
+// case-insensitive backrefs use Canonicalize of the enclosing flags.
+#[test]
+fn test_icase_backref() {
+    test_with_configs(test_icase_backref_tc)
+}
+
+fn test_icase_backref_tc(tc: TestConfig) {
+    // Without Unicode, Canonicalize does not fold K to k or ſ to s.
+    tc.test_match_succeeds(r"^(k)\1$", "i", "kK");
+    tc.test_match_fails(r"^(k)\1$", "i", "k\u{212A}");
+    tc.test_match_fails(r"^(s)\1$", "i", "s\u{017F}");
+
+    // With 'u', simple case folding applies.
+    tc.test_match_succeeds(r"^(k)\1$", "iu", "k\u{212A}");
+    tc.test_match_succeeds(r"^(s)\1$", "iu", "s\u{017F}");
+
+    // The backref takes icase from the modifier group it is inside.
+    tc.test_match_succeeds(r"^(?i:(k)\1)$", "", "kK");
+    tc.test_match_fails(r"^(?i:(k)\1)$", "", "k\u{212A}");
+    tc.test_match_succeeds(r"^(?i:(k)\1)$", "u", "k\u{212A}");
+    // A backref outside the group stays case-sensitive.
+    tc.test_match_fails(r"^(?i:(k))\1$", "u", "kK");
+}

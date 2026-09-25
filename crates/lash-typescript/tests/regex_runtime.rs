@@ -784,3 +784,50 @@ fn match_and_search_coerce_non_regexp_arguments() {
         "the refusal is the named one: {error}"
     );
 }
+
+#[test]
+fn match_and_search_evaluate_every_argument_in_order() {
+    // ECMA-262 evaluates every argument for its side effects even though only
+    // the first is used (FIG-3698).
+    assert_eq!(
+        finished("let i=0; 'a'.match(/a/, i++); finish(i);"),
+        Value::Number(1.0)
+    );
+    assert_eq!(
+        finished("let i=0; 'a'.search(/a/, i++); finish(i);"),
+        Value::Number(1.0)
+    );
+    // The extra argument's value is still ignored semantically: the match
+    // uses only the first.
+    assert_eq!(
+        finished("let i=0; finish('ab'.match(/b/, i++)[0]);"),
+        Value::String("b".into())
+    );
+    assert_eq!(
+        finished("let i=0; finish('ab'.search(/b/, i++));"),
+        Value::Number(1.0)
+    );
+}
+
+#[test]
+fn regexp_constructor_flags_object_coercion_refuses() {
+    // `new RegExp(regexp, flags)` must apply the same guest-coercion guard to
+    // flags as the string-coercion paths do (FIG-3698).
+    let error = execute(
+        "const p=/a/g; const f={toString:function(){return 'i';}}; finish(new RegExp(p, f).flags);",
+    )
+    .expect_err("an object with a guest toString must refuse as flags");
+    assert!(
+        error.to_string().contains("TS_OBJECT_STRING_COERCION"),
+        "the refusal is the named one: {error}"
+    );
+    // String and absent flags still work.
+    assert_eq!(
+        finished("const p=/a/g; finish(new RegExp(p, 'i').flags);"),
+        Value::String("i".into())
+    );
+    assert_eq!(
+        finished("const p=/a/g; finish(new RegExp(p).flags);"),
+        Value::String("g".into())
+    );
+}
