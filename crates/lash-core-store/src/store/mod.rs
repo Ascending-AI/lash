@@ -88,8 +88,8 @@ pub use control_intent::{
 };
 pub use drive_fence::{
     AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence,
-    InMemoryDriveEpochs, SessionHeadRef, StoredDriveEpoch, decide_drive_epoch_seal,
-    require_current_drive_fence,
+    InMemoryDriveEpochs, SessionHeadRef, StoredDriveEpoch, close_admission,
+    decide_drive_epoch_seal, require_current_drive_fence,
 };
 pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
 pub use fencing::{

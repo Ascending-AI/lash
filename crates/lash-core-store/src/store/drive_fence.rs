@@ -117,6 +117,9 @@ pub struct StoredDriveEpoch {
     pub epoch: u64,
     /// The admission that last raised the epoch; `None` before the first seal.
     pub admission: Option<AdmissionId>,
+    /// The `CloseSession` intent the session is closing under (FIG-3600 S7):
+    /// a closing session admits nothing and seals nothing.
+    pub closing: Option<super::ControlIntentId>,
 }
 
 /// Decide one seal from the stored epoch (ADR 0105 §2).
@@ -126,7 +129,9 @@ pub struct StoredDriveEpoch {
 /// lost reply, whatever epoch the retried body observed — and it answers the
 /// stored fence without writing, so one admission makes exactly one epoch
 /// transition (ADR 0105 L-S3, L-S4). Otherwise a seal observed at the stored
-/// epoch raises it by one, and anything else was superseded.
+/// epoch raises it by one, and anything else was superseded. A closing
+/// session raises nothing: its close already raised the epoch past every
+/// admission.
 #[must_use]
 pub fn decide_drive_epoch_seal(
     session_id: &SessionId,
@@ -139,7 +144,7 @@ pub fn decide_drive_epoch_seal(
             DriveFence::sealed_by_store(session_id.clone(), stored.epoch, admission.clone()),
         ));
     }
-    if stored.epoch == observed_epoch {
+    if stored.epoch == observed_epoch && stored.closing.is_none() {
         return DriveEpochSealDecision::Raise {
             next: observed_epoch.saturating_add(1),
         };
@@ -226,6 +231,7 @@ impl InMemoryDriveEpochs {
             .or_insert(StoredDriveEpoch {
                 epoch: 0,
                 admission: None,
+                closing: None,
             });
         match decide_drive_epoch_seal(session_id, stored, admission, observed_epoch) {
             DriveEpochSealDecision::Answer(seal) => seal,
@@ -233,6 +239,7 @@ impl InMemoryDriveEpochs {
                 *stored = StoredDriveEpoch {
                     epoch: next,
                     admission: Some(admission.clone()),
+                    closing: None,
                 };
                 DriveEpochSeal::Sealed(DriveFence::sealed_by_store(
                     session_id.clone(),
@@ -253,8 +260,40 @@ impl InMemoryDriveEpochs {
             .unwrap_or(StoredDriveEpoch {
                 epoch: 0,
                 admission: None,
+                closing: None,
             })
     }
+
+    /// Close `session_id` under `intent`: the drive-epoch half of
+    /// [`ControlIntentStore::begin_session_close`](super::ControlIntentStore::begin_session_close).
+    /// A session already closing keeps its first intent.
+    pub fn close(&self, session_id: &SessionId, intent: super::ControlIntentId) {
+        let mut epochs = self
+            .epochs
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        let stored = epochs
+            .entry(session_id.clone())
+            .or_insert(StoredDriveEpoch {
+                epoch: 0,
+                admission: None,
+                closing: None,
+            });
+        if stored.closing.is_none() {
+            *stored = StoredDriveEpoch {
+                epoch: stored.epoch.saturating_add(1),
+                admission: Some(close_admission(intent)),
+                closing: Some(intent),
+            };
+        }
+    }
+}
+
+/// The admission a session close records as the one that last raised the
+/// drive epoch: `intent:{id}`.
+#[must_use]
+pub fn close_admission(intent: super::ControlIntentId) -> AdmissionId {
+    AdmissionId::new(format!("intent:{intent}"))
 }
 
 #[cfg(test)]
@@ -265,7 +304,22 @@ mod tests {
         StoredDriveEpoch {
             epoch,
             admission: admission.map(AdmissionId::new),
+            closing: None,
         }
+    }
+
+    #[test]
+    fn a_closing_session_seals_nothing() {
+        let session = SessionId::from("s");
+        let closing = StoredDriveEpoch {
+            epoch: 5,
+            admission: Some(AdmissionId::new("intent:1")),
+            closing: Some(super::super::ControlIntentId::from_sequence(1)),
+        };
+        assert_eq!(
+            decide_drive_epoch_seal(&session, &closing, &AdmissionId::new("a"), 5),
+            DriveEpochSealDecision::Answer(DriveEpochSeal::Superseded { epoch: 5 })
+        );
     }
 
     #[test]

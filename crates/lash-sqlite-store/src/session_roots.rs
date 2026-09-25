@@ -9,8 +9,10 @@
 use std::sync::LazyLock;
 
 use lash_core_execution::store::{
-    ControlIntent, ControlIntentId, RootStore, RootTerminal, RootTerminalWriteDecision,
-    decide_root_terminal_write, root_binding_conflict,
+    CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
+    EnginePark, ParkCancelCause, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
+    RootTerminalWriteDecision, TurnParkEventKind, close_admission, decide_root_terminal_write,
+    root_binding_conflict, stored_intent_kind, stored_intent_state,
 };
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::session_roots::{
@@ -254,6 +256,242 @@ pub(crate) fn open_control_intents_conn(
         .collect::<Result<Vec<_>, _>>()
         .map_err(sqlite_error)?;
     rows.into_iter().map(StoredIntentRow::decode).collect()
+}
+
+/// Intent `id`, read on `conn`.
+pub(crate) fn load_intent_conn(
+    conn: &Connection,
+    id: ControlIntentId,
+) -> Result<Option<ControlIntent>, StoreError> {
+    conn.query_row(
+        session_roots_sql().intents.select_by_id.sql(),
+        params![sql_i64("control intent id", id.sequence())?],
+        intent_row,
+    )
+    .optional()
+    .map_err(sqlite_error)?
+    .map(StoredIntentRow::decode)
+    .transpose()
+}
+
+/// Session `session_id`'s open verbs (pending, or failed and retryable), in
+/// id order, read on `conn`.
+pub(crate) fn open_verbs_by_session_conn(
+    conn: &Connection,
+    session_id: &SessionId,
+) -> Result<Vec<ControlIntent>, StoreError> {
+    let mut statement = conn
+        .prepare(
+            session_roots_sql()
+                .intents
+                .select_open_verbs_by_session
+                .sql(),
+        )
+        .map_err(sqlite_error)?;
+    let rows = statement
+        .query_map(params![session_id.as_str()], intent_row)
+        .map_err(sqlite_error)?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(sqlite_error)?;
+    rows.into_iter().map(StoredIntentRow::decode).collect()
+}
+
+/// Record a new intent of `session_id` in the caller's transaction: `kind`,
+/// `Pending`, no attempt yet. Answers it with its allocated id.
+pub(crate) fn insert_intent_conn(
+    tx: &Connection,
+    session_id: &SessionId,
+    kind: ControlIntentKind,
+    engine: Option<&EnginePark>,
+    at_ms: u64,
+) -> Result<ControlIntent, StoreError> {
+    let state = ControlIntentState::Pending;
+    let (state_code, state_json) = stored_intent_state(&state)?;
+    let id: i64 = tx
+        .query_row(
+            session_roots_sql().intents.insert.sql(),
+            params![
+                session_id.as_str(),
+                i64::from(CONTROL_INTENT_FORMAT),
+                kind.code(),
+                stored_intent_kind(&kind)?,
+                state_code,
+                state_json,
+                sql_i64("control intent instant", at_ms)?,
+                engine.map(EnginePark::as_str),
+            ],
+            |row| row.get(0),
+        )
+        .map_err(sqlite_error)?;
+    Ok(ControlIntent {
+        id: ControlIntentId::from_sequence(stored_u64("ControlIntent", id)?),
+        session_id: session_id.clone(),
+        format: CONTROL_INTENT_FORMAT,
+        kind,
+        state,
+        attempts: 0,
+        created_at_ms: at_ms,
+        engine: engine.cloned(),
+    })
+}
+
+/// Move intent `prior` to `next`'s state and attempt count in the caller's
+/// transaction, if it is still as `prior` read it. `false` when another
+/// writer moved it first.
+pub(crate) fn write_intent_state_conn(
+    tx: &Connection,
+    prior: &ControlIntent,
+    next: &ControlIntent,
+) -> Result<bool, StoreError> {
+    let (state_code, state_json) = stored_intent_state(&next.state)?;
+    let (_, prior_json) = stored_intent_state(&prior.state)?;
+    let changed = tx
+        .execute(
+            session_roots_sql().intents.update_state.sql(),
+            params![
+                sql_i64("control intent id", next.id.sequence())?,
+                state_code,
+                state_json,
+                i64::from(next.attempts),
+                prior_json,
+                i64::from(prior.attempts),
+            ],
+        )
+        .map_err(sqlite_error)?;
+    Ok(changed == 1)
+}
+
+/// The store half of session `session_id`'s close, in the caller's
+/// transaction ([`ControlIntentStore::begin_session_close`]).
+///
+/// The close names the roots it releases: every root without terminal
+/// evidence (its logical-root rows, its parked root, its pending queued
+/// run), each ended `Cancelled` by `SessionDeleted`, plus the roots of the
+/// open verbs it supersedes, whose engine half then never runs.
+///
+/// [`ControlIntentStore::begin_session_close`]: lash_core_execution::store::ControlIntentStore::begin_session_close
+pub(crate) fn begin_session_close_conn(
+    tx: &Connection,
+    session_id: &SessionId,
+    at_ms: u64,
+) -> Result<Option<ControlIntent>, StoreError> {
+    if let Some(intent) = close_session_intent_conn(tx, session_id)? {
+        return Ok(Some(intent));
+    }
+    let exists = tx
+        .query_row(
+            crate::session_sql::session_sql()
+                .meta_sqlite
+                .exists_materialized
+                .sql(),
+            params![session_id.as_str()],
+            |_| Ok(()),
+        )
+        .optional()
+        .map_err(sqlite_error)?
+        .is_some();
+    if !exists {
+        return Ok(None);
+    }
+    let sql = session_roots_sql();
+    let mut roots = std::collections::BTreeSet::new();
+    {
+        let mut statement = tx
+            .prepare(sql.roots.select_open_roots.sql())
+            .map_err(sqlite_error)?;
+        let open = statement
+            .query_map(params![session_id.as_str()], |row| row.get::<_, String>(0))
+            .map_err(sqlite_error)?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(sqlite_error)?;
+        roots.extend(open.into_iter().map(TurnId::from));
+    }
+    // The parked root is released with the park, whose feed event outlives
+    // the session (FIG-3659).
+    let released: Option<(String, i64)> = tx
+        .query_row(
+            crate::turn_ingress::turn_ingress_sql()
+                .turn_parks
+                .delete_by_session_returning
+                .sql(),
+            params![session_id.as_str()],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .optional()
+        .map_err(sqlite_error)?;
+    if let Some((parked_root, park_id)) = released {
+        crate::persistence::turn_park_feed::log_turn_park_closed_conn(
+            tx,
+            session_id,
+            &parked_root,
+            park_id,
+            &TurnParkEventKind::Cancelled {
+                cause: ParkCancelCause::SessionDeleted,
+            },
+            crate::clamp_epoch_ms(at_ms),
+        )?;
+        roots.insert(TurnId::from(parked_root));
+    }
+    roots.extend(crate::persistence::pending_queued_root_conn(
+        tx, session_id,
+    )?);
+    let verbs = open_verbs_by_session_conn(tx, session_id)?;
+    for verb in &verbs {
+        match &verb.kind {
+            ControlIntentKind::Redrive { root, .. }
+            | ControlIntentKind::Cancel { root, .. }
+            | ControlIntentKind::Fork { root, .. } => {
+                roots.insert(root.clone());
+            }
+            ControlIntentKind::CloseSession { .. } => {}
+        }
+    }
+    let roots: Vec<TurnId> = roots.into_iter().collect();
+    let intent = insert_intent_conn(
+        tx,
+        session_id,
+        ControlIntentKind::CloseSession {
+            roots: roots.clone(),
+        },
+        None,
+        at_ms,
+    )?;
+    for root in &roots {
+        if root_terminal_conn(tx, session_id, root)?.is_none() {
+            write_root_terminal_conn(
+                tx,
+                &RootTerminal {
+                    session_id: session_id.clone(),
+                    root: root.clone(),
+                    kind: RootTerminalKind::Cancelled,
+                    cause: RootTerminalCause::SessionDeleted { intent: intent.id },
+                    head_revision: None,
+                    at_ms,
+                },
+            )?;
+        }
+    }
+    for verb in verbs {
+        let mut superseded = verb.clone();
+        superseded.state = ControlIntentState::Superseded { by: intent.id };
+        if !write_intent_state_conn(tx, &verb, &superseded)? {
+            return Err(StoreError::Contended);
+        }
+    }
+    let closed = tx
+        .execute(
+            crate::session_sql::session_sql().meta.begin_close.sql(),
+            params![
+                session_id.as_str(),
+                sql_i64("control intent id", intent.id.sequence())?,
+                close_admission(intent.id).as_str(),
+            ],
+        )
+        .map_err(sqlite_error)?;
+    if closed != 1 {
+        return Err(StoreError::Contended);
+    }
+    Ok(Some(intent))
 }
 
 /// Forget what session `session_id`'s roots hold, in its deletion's

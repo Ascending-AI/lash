@@ -492,6 +492,7 @@ impl TurnInputStore for PostgresSessionStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         ensure_session_not_deleted_tx(&mut tx, &draft.session_id).await?;
+        ensure_session_not_closing_tx(&mut tx, &draft.session_id).await?;
         let now = self.clock.timestamp_ms();
         let enqueue_seq: i64 = sqlx::query_scalar(
             crate::turn_ingress::turn_ingress_sql()

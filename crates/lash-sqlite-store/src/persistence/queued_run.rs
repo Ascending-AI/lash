@@ -819,3 +819,13 @@ pub(super) fn validate_run_members_conn(
     }
     Ok(())
 }
+
+/// The root of session `session_id`'s pending queued run, if it has one, read
+/// in the caller's transaction: what a session close ends besides the roots
+/// its logical-root rows name (FIG-3600 S7).
+pub(crate) fn pending_queued_root_conn(
+    tx: &Connection,
+    session_id: &SessionId,
+) -> Result<Option<lash_sansio::TurnId>, StoreError> {
+    Ok(load_run_conn(tx, session_id, None)?.map(|run| lash_sansio::TurnId::from(run.scope.id())))
+}

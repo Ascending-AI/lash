@@ -2397,10 +2397,10 @@ async fn snapshot_store_reports_the_holder_a_claim_displaces() {
     .await;
 }
 
-#[path = "tests/root_stores.rs"]
-mod root_stores;
 #[path = "tests/refusing_control_intents.rs"]
 mod refusing_control_intents;
+#[path = "tests/root_stores.rs"]
+mod root_stores;
 #[path = "tests/snapshot_store_lease.rs"]
 mod snapshot_store_lease;
 #[path = "tests/turn_input_stores.rs"]
