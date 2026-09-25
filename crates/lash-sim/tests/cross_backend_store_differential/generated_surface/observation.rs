@@ -695,10 +695,6 @@ pub(super) async fn read_postgres_triggers(pool: &PgPool) -> TriggerRows {
     }
 }
 
-#[expect(
-    clippy::unwrap_used,
-    reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-)]
 pub(super) fn states_agree(observations: &[(&str, SurfaceState)]) -> bool {
     observations.windows(2).all(|pair| {
         pair[0].1.processes == pair[1].1.processes

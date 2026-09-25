@@ -222,10 +222,6 @@ fn generated_surface_operations(seed: u64) -> Vec<SurfaceOperation> {
 }
 
 impl SurfaceRunner {
-    #[expect(
-        clippy::expect_used,
-        reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
-    )]
     async fn apply(&mut self, operation: &SurfaceOperation) -> Result<(), String> {
         match operation {
             SurfaceOperation::StoreContract(operation) => self.scenario.apply(operation).await,
