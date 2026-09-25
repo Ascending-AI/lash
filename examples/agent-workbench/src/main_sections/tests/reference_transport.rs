@@ -462,7 +462,7 @@ pub(crate) async fn recoverable_chat_test_state_with_replay_store(
     effect_layer: Option<Arc<dyn lash::testing::EffectLayer>>,
 ) -> AppState {
     let sqlite = test_file_backend(data_dir);
-    let mut decorated = DecoratedBackend::over(sqlite)
+    let mut decorated = DecoratedBackend::over(sqlite.into())
         .with_catalog(Arc::clone(&store_factory))
         .with_trigger_store(Arc::clone(&trigger_store));
     if let Some(layer) = effect_layer {
@@ -471,7 +471,7 @@ pub(crate) async fn recoverable_chat_test_state_with_replay_store(
     if let Some(driver) = queued_work_driver {
         decorated = decorated.with_queued_work(driver);
     }
-    let backend: Arc<dyn lash::Backend> = Arc::new(decorated);
+    let backend: lash::Backend = decorated.into();
     let model = with_workbench_model_capability(
         lash::ModelSpec::builder("test-model")
             .context_window_tokens(context_window_tokens)

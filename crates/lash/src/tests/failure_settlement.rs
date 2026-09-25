@@ -88,7 +88,7 @@ impl SqliteBackend {
         plugins: Vec<Arc<dyn PluginFactory>>,
     ) -> LashCore {
         let builder =
-            LashCore::standard_builder(self.backend.clone(), crate::TurnBudget::Unbounded);
+            LashCore::standard_builder(self.backend.clone().into(), crate::TurnBudget::Unbounded);
         let builder = match protocol {
             Some(protocol) => builder.protocol_plugin(
                 lash_core::testing::test_standard_protocol_factory_with_runtime_state(

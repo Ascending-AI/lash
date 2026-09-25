@@ -5,7 +5,7 @@ mod tests {
     async fn attachment_limit_defaults_unbounded_and_accepts_host_override() {
         let backend = crate::support::memory_backend().await;
         let unbounded = RuntimeHostConfig::new(
-            std::sync::Arc::new(backend),
+            std::sync::Arc::new(backend).into(),
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         );

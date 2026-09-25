@@ -5,7 +5,8 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
     let backend = memory_backend().await;
     let registry = backend.process_registry();
     let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(backend, crate::TurnBudget::Unbounded).model(mock_model_spec()),
+        LashCore::standard_builder(backend.into(), crate::TurnBudget::Unbounded)
+            .model(mock_model_spec()),
     )
     .build(crate::testing::runtime_lease_owner())
     .expect("build core with a process registry");
@@ -67,10 +68,10 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
 #[tokio::test]
 async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
     {
-        let backend: Arc<dyn lash_core::Backend> = memory_backend().await;
+        let backend: lash_core::Backend = memory_backend().await.into();
         let factory = backend.session_store_factory();
         let core = explicit_ephemeral_facets(
-            LashCore::standard_builder(Arc::clone(&backend), crate::TurnBudget::Unbounded)
+            LashCore::standard_builder(backend.clone(), crate::TurnBudget::Unbounded)
                 .model(mock_model_spec()),
         )
         .build(crate::testing::runtime_lease_owner())
@@ -159,11 +160,11 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
 /// through one cursor, and `drain_status` counts the parked processes.
 #[tokio::test]
 async fn parked_work_merges_parked_turns_and_processes() {
-    let backend: Arc<dyn lash_core::Backend> = memory_backend().await;
+    let backend: lash_core::Backend = memory_backend().await.into();
     let factory = backend.session_store_factory();
     let registry = backend.process_registry();
     let core = explicit_ephemeral_facets(
-        LashCore::standard_builder(Arc::clone(&backend), crate::TurnBudget::Unbounded)
+        LashCore::standard_builder(backend.clone(), crate::TurnBudget::Unbounded)
             .model(mock_model_spec()),
     )
     .build(crate::testing::runtime_lease_owner())

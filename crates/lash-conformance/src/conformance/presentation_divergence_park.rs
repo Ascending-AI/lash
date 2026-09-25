@@ -208,7 +208,7 @@ pub async fn a_diverged_tool_presentation_parks_the_turn(
             }
         })
         .build();
-    let mut host = crate::LawBackend::over_stores(stores.as_ref(), Arc::clone(&effect_host))
+    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores), Arc::clone(&effect_host))
         .host_config(
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),

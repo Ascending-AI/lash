@@ -2,7 +2,7 @@ use super::*;
 
 pub(super) fn runtime_core_for_scripts(
     scripts: Vec<ProviderWireScript>,
-    backend: Arc<dyn lash::Backend>,
+    backend: lash::Backend,
     provider_schedule: Option<ScriptedTransportSchedule>,
     disable_native_queued_work_driver: bool,
 ) -> Result<(lash::LashCore, Arc<ScriptedLlmHttpTransport>, String), FixedScriptRunnerError> {

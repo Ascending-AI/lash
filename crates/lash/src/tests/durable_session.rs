@@ -144,20 +144,20 @@ impl SessionStoreFactory for CountingSessionStoreFactory {
 /// A counting catalog over a fresh memory backend's own.
 async fn counting_factory(
     open_delay_ms: u64,
-) -> (Arc<DecoratedBackend>, Arc<CountingSessionStoreFactory>) {
+) -> (DecoratedBackend, Arc<CountingSessionStoreFactory>) {
     let inner = memory_backend().await;
     let factory = Arc::new(CountingSessionStoreFactory::new(
         inner.session_store_factory(),
         open_delay_ms,
     ));
     let catalog = Arc::clone(&factory);
-    let backend = Arc::new(DecoratedBackend::over(inner).session_store_factory(move |_| catalog));
+    let backend = DecoratedBackend::over(inner.into()).session_store_factory(move |_| catalog);
     (backend, factory)
 }
 
-fn counting_core(backend: Arc<DecoratedBackend>) -> Result<LashCore> {
+fn counting_core(backend: DecoratedBackend) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(
-        backend,
+        backend.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -171,7 +171,7 @@ async fn durable_acquisition_is_non_creating_and_happens_once_per_handle() -> Re
     let (backend, factory) = counting_factory(20).await;
     let creates = Arc::clone(&factory.creates);
     let by_id_opens = Arc::clone(&factory.by_id_opens);
-    let core = counting_core(Arc::clone(&backend))?;
+    let core = counting_core(backend.clone())?;
 
     // One create: the open that brings the session into existence.
     drop(core.session("durable-acquisition").open().await?);
@@ -218,7 +218,7 @@ async fn durable_acquisition_is_non_creating_and_happens_once_per_handle() -> Re
 async fn durable_enqueue_to_an_unknown_id_stores_nothing_and_creates_nothing() -> Result<()> {
     let (backend, factory) = counting_factory(0).await;
     let creates = Arc::clone(&factory.creates);
-    let core = counting_core(Arc::clone(&backend))?;
+    let core = counting_core(backend.clone())?;
 
     let durable = core.session("never-created").durable().await?;
     let error = durable
@@ -256,7 +256,7 @@ async fn durable_enqueue_to_an_unknown_id_stores_nothing_and_creates_nothing() -
 #[tokio::test]
 async fn durable_operations_on_a_deleted_id_report_the_tombstone() -> Result<()> {
     let (backend, factory) = counting_factory(0).await;
-    let core = counting_core(Arc::clone(&backend))?;
+    let core = counting_core(backend.clone())?;
     drop(core.session("deleted-durable").open().await?);
     lash_core::SessionStoreFactory::delete_session(
         factory.as_ref(),
@@ -287,7 +287,7 @@ async fn durable_operations_on_a_deleted_id_report_the_tombstone() -> Result<()>
 #[tokio::test]
 async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Result<()> {
     let (backend, _) = counting_factory(0).await;
-    let core = counting_core(Arc::clone(&backend))?;
+    let core = counting_core(backend.clone())?;
 
     // Metadata only: created through the catalog, never committed.
     crate::tests::create_catalog_session(&core, "metadata-only").await?;
@@ -336,7 +336,7 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
     );
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -406,7 +406,7 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
 async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_session() -> Result<()>
 {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -456,7 +456,7 @@ async fn a_live_observer_sees_queue_events_from_a_separately_acquired_durable_se
 #[tokio::test]
 async fn queue_events_publish_with_no_live_runtime_and_replay_from_a_cursor() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -497,7 +497,7 @@ async fn queue_events_publish_with_no_live_runtime_and_replay_from_a_cursor() ->
 #[tokio::test]
 async fn two_durable_handles_operate_beside_an_independently_leased_writer() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -586,7 +586,7 @@ async fn two_durable_handles_operate_beside_an_independently_leased_writer() -> 
 #[tokio::test]
 async fn abandoning_a_claim_a_caller_does_not_hold_moves_nothing() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -776,7 +776,7 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
 
     // A core that carries the session's tool source, to persist tool state.
     let granting_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -811,15 +811,17 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
     // The grantless core: same store, no tool source, fully instrumented.
     let counters = Arc::new(RuntimeBuildCounters::default());
     let grantless_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        Arc::new(DecoratedBackend::over(backend.clone()).process_work({
-            let counters = Arc::clone(&counters);
-            move |registry| {
-                lash_core::ProcessWorkWiring::new(
-                    lash_core::facade_support::watch_process_registry(registry),
-                    Arc::new(CountingProcessWork { counters }),
-                )
-            }
-        })),
+        DecoratedBackend::over(backend.clone().into())
+            .process_work({
+                let counters = Arc::clone(&counters);
+                move |registry| {
+                    lash_core::ProcessWorkWiring::new(
+                        lash_core::facade_support::watch_process_registry(registry),
+                        Arc::new(CountingProcessWork { counters }),
+                    )
+                }
+            })
+            .into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1009,10 +1011,10 @@ impl SessionStoreFactory for NoByIdLookupFactory {
 #[tokio::test]
 async fn a_catalog_without_the_by_id_seam_names_the_capability_not_a_missing_session() -> Result<()>
 {
-    let backend = DecoratedBackend::over(memory_backend().await)
+    let backend = DecoratedBackend::over(memory_backend().await.into())
         .session_store_factory(|inner| Arc::new(NoByIdLookupFactory { inner }));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        Arc::new(backend),
+        backend.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1089,7 +1091,7 @@ async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Res
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -1155,8 +1157,8 @@ async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Res
 async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
     let counters = Arc::new(RuntimeBuildCounters::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        Arc::new(
-            DecoratedBackend::over(memory_backend().await).process_work({
+        DecoratedBackend::over(memory_backend().await.into())
+            .process_work({
                 let counters = Arc::clone(&counters);
                 move |registry| {
                     lash_core::ProcessWorkWiring::new(
@@ -1164,8 +1166,8 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
                         Arc::new(CountingProcessWork { counters }),
                     )
                 }
-            }),
-        ),
+            })
+            .into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1240,7 +1242,7 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
 #[tokio::test]
 async fn create_is_idempotent_and_preserves_the_recorded_relation() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1288,7 +1290,7 @@ async fn create_on_a_deleted_id_is_refused_with_the_tombstone() -> Result<()> {
     let backend = memory_backend().await;
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1326,7 +1328,7 @@ async fn create_on_a_deleted_id_is_refused_with_the_tombstone() -> Result<()> {
 #[tokio::test]
 async fn reused_enqueue_id_with_changed_input_is_a_typed_identity_conflict() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())

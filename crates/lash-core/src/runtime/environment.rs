@@ -248,9 +248,9 @@ impl RuntimeEnvironment {
 mod tests {
     use super::*;
 
-    fn core_over(backend: &Arc<dyn crate::Backend>) -> RuntimeHostConfig {
+    fn core_over(backend: &crate::Backend) -> RuntimeHostConfig {
         RuntimeHostConfig::new(
-            Arc::clone(backend),
+            backend.clone(),
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         )
@@ -319,7 +319,7 @@ mod tests {
     }
 
     fn registry_only_environment(
-        backend: &Arc<dyn crate::Backend>,
+        backend: &crate::Backend,
         registry: &Arc<dyn ProcessRegistry>,
     ) -> RuntimeEnvironment {
         RuntimeEnvironment::builder(core_over(backend))
@@ -384,11 +384,12 @@ mod tests {
     async fn the_trigger_store_stamps_from_the_backend_clock() {
         const NOW_MS: u64 = 4_200_000;
         let clock: Arc<dyn crate::Clock> = Arc::new(crate::testing::TestClock::new(NOW_MS));
-        let backend: Arc<dyn crate::Backend> = Arc::new(
+        let backend: crate::Backend = Arc::new(
             lash_sqlite_store::SqliteBackend::memory_with_clock(Arc::clone(&clock))
                 .await
                 .expect("open a SQLite memory backend"),
-        );
+        )
+        .into();
 
         let env = RuntimeEnvironment::builder(core_over(&backend)).build();
         let receipt = env

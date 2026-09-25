@@ -1436,7 +1436,7 @@ fn reference_turn_scope(identity: &ReferenceIdentity) -> crate::ExecutionScope {
 }
 
 async fn build_runtime(
-    stores: &dyn crate::StoreSet,
+    stores: Arc<dyn crate::StoreSet>,
     store: Arc<dyn RuntimePersistence>,
     control: SeamControl,
     effect_controller: Arc<dyn RuntimeEffectController>,
@@ -1460,7 +1460,7 @@ async fn build_runtime(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn build_runtime_with_lease_timings(
-    stores: &dyn crate::StoreSet,
+    stores: Arc<dyn crate::StoreSet>,
     store: Arc<dyn RuntimePersistence>,
     control: SeamControl,
     effect_controller: Arc<dyn RuntimeEffectController>,
@@ -1484,7 +1484,7 @@ async fn build_runtime_with_lease_timings(
 /// Build the reference runtime, returning the builder's refusal instead of
 /// panicking on it: session admission runs inside `build`.
 async fn try_build_runtime_with_lease_timings(
-    stores: &dyn crate::StoreSet,
+    stores: Arc<dyn crate::StoreSet>,
     store: Arc<dyn RuntimePersistence>,
     control: SeamControl,
     effect_controller: Arc<dyn RuntimeEffectController>,
@@ -1519,7 +1519,7 @@ async fn try_build_runtime_with_lease_timings(
 /// lends, behind the same seam ([`SeamLayer::over_scoped`]), so the seam sees
 /// the turn's effects and turn-control resolutions on every tier.
 async fn try_build_runtime_on_host(
-    stores: &dyn crate::StoreSet,
+    stores: Arc<dyn crate::StoreSet>,
     store: Arc<dyn RuntimePersistence>,
     seam: &SeamLayer,
     host: Arc<dyn crate::EffectHost>,
@@ -1544,7 +1544,7 @@ async fn try_build_runtime_on_host(
 }
 
 async fn try_build_runtime_over_host(
-    stores: &dyn crate::StoreSet,
+    stores: Arc<dyn crate::StoreSet>,
     store: Arc<dyn RuntimePersistence>,
     control: SeamControl,
     effect_host: Arc<dyn crate::EffectHost>,

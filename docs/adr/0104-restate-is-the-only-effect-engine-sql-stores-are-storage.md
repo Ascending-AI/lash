@@ -7,8 +7,9 @@ the hard constraint that the effect interface stays engine-neutral. **Not yet
 implemented**: FIG-3665 through FIG-3668, FIG-3670, FIG-3585, FIG-3600 and the
 B2 backend-construction cutover build it, in the order under *Order*. Nothing below describes current behaviour unless it says
 so. Implemented so far: step 2 (FIG-3585) and step 3 (FIG-3667): the
-PostgreSQL engine is deleted, `PostgresBackend` with it, and a PostgreSQL
-deployment runs `RestateBackend<PostgresStoreSet>`.
+PostgreSQL engine is deleted, `PostgresBackend` with it. The B2 construction
+of section 2 is implemented as described there: a PostgreSQL deployment runs a
+`RestateEngine` over a `PostgresStoreSet`.
 
 Supersedes [ADR 0102](0102-zero-infra-is-a-sqlite-in-memory-backend.md); see
 "What 0104 kept" at the end of that ADR. Amends every ADR that specifies
@@ -138,10 +139,19 @@ StoreSet::module_artifacts(&self) -> Arc<dyn ModuleArtifactStore>;
   single `lash-restate-test` constructor (FIG-3665, FIG-3668), never by
   assembling ports.
 
-Today's code has the `Backend` trait of ADR 0102, which SQLite, PostgreSQL and
-Restate each implement. The B2 cutover replaces it with the shape above;
-`SqliteBackend` and `PostgresBackend` become store-set constructors, and
-`RestateBackend` becomes `RestateEngine`.
+**Implemented (B2 cutover).** `Backend` is a struct over one
+`Arc<dyn EffectEngine>`; `RestateEngine::new(stores, RestateConfig)` replaces
+`RestateBackend`; `StoreSet::binding_identity` names the storage, and the
+runtime no longer compares it with the effect host's turn-control binding.
+Two parts of the sketch above wait for FIG-3600, which replaces the queued-work
+wiring with the engine's own session work: `RestateConfig` still carries the
+existing `RestateQueuedWork` choice, and `SubmitOnly | Serve` is not a config
+choice yet, because a serving endpoint needs the process worker of the core
+built over the backend, which exists only after the engine does; a submit-only
+process is still one that never calls `endpoint_builder`. `RestateEngine::new`
+is infallible until a construction check exists. Until FIG-3668 deletes the
+SQLite engine, `SqliteBackend` is its `EffectEngine`, and
+`EffectEngine::process_work` returns `None` for it.
 
 **The execution seam.** The driver exposes replayable decisions and
 registered, serializable effect commands; adapters own scheduling and I/O

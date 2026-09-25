@@ -11,7 +11,7 @@ pub(super) async fn pending_host_tool_completion_parks_turn_and_resolves_through
     let (key_tx, key_rx) = oneshot::channel();
     let events = Arc::new(RecordingEvents::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(tool_roundtrip_provider())
@@ -128,7 +128,7 @@ pub(super) async fn stream_returns_terminal_metadata_without_prose() -> Result<(
 #[tokio::test]
 pub(super) async fn stream_emits_chronological_tool_events_without_prose_pollution() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(tool_roundtrip_provider())
@@ -227,7 +227,7 @@ pub(super) async fn interleaved_standard_parts_keep_order_through_store_history_
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -374,7 +374,7 @@ pub(super) fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_r
             .build()
             .into_handle();
 
-        let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+        let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
             .provider(provider)
             .model(mock_model_spec())
             .build(crate::testing::runtime_lease_owner())?;
@@ -437,7 +437,7 @@ pub(super) fn rlm_streamed_lashlang_cell_uses_captured_body_when_final_text_is_r
 
 #[cfg(feature = "rlm")]
 pub(super) async fn rlm_abort_drain_core(provider: ProviderHandle) -> Result<LashCore> {
-    explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+    explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
         .provider(provider)
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())
@@ -537,14 +537,15 @@ pub(super) fn rlm_abort_drain_preserves_late_reasoning_replay_and_usage() -> Res
             .build()
             .into_handle();
         let recorder = EffectRecorder::default();
-        let core = explicit_ephemeral_facets(rlm_core_builder_over(recorder.backend().await))
-            .generation(lash_core::GenerationOptions {
-                stop_sequences: vec!["caller-owned-stop".to_string()],
-                ..Default::default()
-            })
-            .provider(provider)
-            .model(mock_model_spec())
-            .build(crate::testing::runtime_lease_owner())?;
+        let core =
+            explicit_ephemeral_facets(rlm_core_builder_over(recorder.backend().await.into()))
+                .generation(lash_core::GenerationOptions {
+                    stop_sequences: vec!["caller-owned-stop".to_string()],
+                    ..Default::default()
+                })
+                .provider(provider)
+                .model(mock_model_spec())
+                .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("rlm-abort-late-events").open().await?;
 
         let result = session.turn(TurnInput::text("finish")).run().await?;
@@ -799,7 +800,7 @@ pub(super) fn rlm_tool_calls_stream_from_live_exec_boundary() -> Result<()> {
 
 #[cfg(feature = "rlm")]
 pub(super) async fn rlm_tool_calls_stream_from_live_exec_boundary_inner() -> Result<()> {
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
         .provider(queued_text_provider(vec![typescript_block(
             r#"const value = await tools.app_lookup({});
 finish("done");"#,
@@ -971,7 +972,7 @@ finish("done");"#,
 #[test]
 pub(super) fn rlm_recovered_tool_failure_remains_in_turn_accounting() -> Result<()> {
     run_async_test_on_stack_budget("rlm-recovered-tool-failure-test", || async {
-        let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+        let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
             .provider(queued_text_provider(vec![typescript_block(
                 r#"let failure;
 try {
@@ -1016,7 +1017,7 @@ pub(super) fn rlm_code_block_aggregate_lists_every_collected_tool_call() -> Resu
 
 #[cfg(feature = "rlm")]
 pub(super) async fn rlm_code_block_aggregate_lists_every_collected_tool_call_inner() -> Result<()> {
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
         .provider(queued_text_provider(vec![typescript_block(
             r#"const a = await tools.app_lookup({});
 const b = await tools.app_lookup({});
@@ -1091,7 +1092,7 @@ pub(super) async fn rlm_tool_calls_emit_typed_trace_pair_and_inline_boundary_pro
             .expect("clock")
             .as_nanos()
     ));
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
         .provider(queued_text_provider(vec![typescript_block(
             r#"const value = await tools.app_lookup({});
 finish("done");"#,
@@ -1228,7 +1229,7 @@ pub(super) fn rlm_native_provider_tool_call_repairs_and_the_next_cell_finishes()
             })
             .build()
             .into_handle();
-        let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+        let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
             .provider(provider)
             .model(mock_model_spec())
             .trace_jsonl_path(trace_path.clone())
@@ -1303,7 +1304,7 @@ pub(super) fn rlm_pending_host_tool_completion_resumes_lashlang_await() -> Resul
 pub(super) async fn rlm_pending_host_tool_completion_resumes_lashlang_await_inner() -> Result<()> {
     let (key_tx, key_rx) = oneshot::channel();
     let events = Arc::new(RecordingEvents::default());
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
         .provider(queued_text_provider(vec![typescript_block(
             "const value = await tools.app_lookup({});\nfinish(value);",
         )]))
@@ -1378,7 +1379,7 @@ pub(super) async fn rlm_process_pending_host_tool_completion_resumes_process_awa
 -> Result<()> {
     let (key_tx, key_rx) = oneshot::channel();
     let events = Arc::new(RecordingEvents::default());
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
     .provider(queued_text_provider(vec![typescript_block(
         r#"
 const lookup = async () => {
@@ -1464,7 +1465,7 @@ pub(super) fn continue_as_observation_emits_frame_switch_then_commit() -> Result
 
 #[cfg(feature = "rlm")]
 pub(super) async fn continue_as_observation_emits_frame_switch_then_commit_inner() -> Result<()> {
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
         .provider(queued_text_provider(vec![
             typescript_block(r#"await control.continue_as({ task: "finish in a fresh frame" });"#),
             typescript_block(r#"finish("done after continue_as");"#),
@@ -1516,7 +1517,7 @@ pub(super) async fn lane_less_post_commit_from_plain_turn_does_not_affect_next_t
             .expect("open the SQLite backend"),
     );
     let store_factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
         .provider(queued_text_provider(vec![
             typescript_block(r#"finish("plain turn complete");"#),
             typescript_block(r#"await control.continue_as({ task: "finish turn two" });"#),
@@ -1580,7 +1581,7 @@ pub(super) async fn probe_inprocess_continue_as_survives_post_commit_graph_appen
             .expect("open the SQLite backend"),
     );
     let store_factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
         .provider(queued_text_provider(vec![
             typescript_block(r#"await control.continue_as({ task: "finish in process" });"#),
             typescript_block(r#"finish("done after in-process handoff");"#),
@@ -1635,7 +1636,7 @@ pub(super) async fn durable_queued_continue_as_survives_post_commit_graph_append
             .expect("open the SQLite backend"),
     );
     let store_factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
         .provider(queued_text_provider(vec![
             typescript_block(
                 r#"await control.continue_as({ task: "finish from durable handoff" });"#,
@@ -1757,7 +1758,7 @@ finish({ established: established.total });"#,
             .await
             .expect("open the SQLite backend"),
     );
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
         .provider(provider)
         .model(mock_model_spec())
         .without_queued_work()

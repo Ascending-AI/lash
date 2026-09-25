@@ -80,7 +80,7 @@ impl PossessionWorld {
         let backend = lash_sqlite_store::SqliteBackend::memory()
             .await
             .expect("open a memory backend");
-        let registry = lash_core::Backend::process_registry(&backend);
+        let registry = lash_core::Backend::from(backend.clone()).process_registry();
         Self {
             host: Arc::new(
                 MockSessionManager::default().with_process_registry(Arc::clone(&registry)),
@@ -94,7 +94,7 @@ impl PossessionWorld {
     }
 
     fn context_for(&self, session: &SessionId) -> RuntimeExecutionContext<'static> {
-        TestExecutionContextBuilder::for_backend(&self.backend)
+        TestExecutionContextBuilder::for_backend(&self.backend.clone().into())
             .session_id(session.clone())
             .shared_session_host(self.host.clone())
             .processes(self.host.clone())

@@ -61,7 +61,7 @@ async fn core_shutdown_visits_protocol_then_common_factories_and_continues_after
 -> Result<()> {
     let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         lash_core::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -112,7 +112,7 @@ fn persisted_tool_state_at_generation(
 #[tokio::test]
 async fn plugin_surface_streams_as_semantic_turn_event() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -159,7 +159,7 @@ async fn embedded_sessions_always_expose_tool_state() -> Result<()> {
 #[tokio::test]
 async fn registered_static_tools_appear_in_tool_state() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -177,7 +177,7 @@ async fn registered_static_tools_appear_in_tool_state() -> Result<()> {
 #[tokio::test]
 async fn apply_tool_state_and_membership_update_live_catalog() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -230,7 +230,7 @@ async fn apply_tool_state_and_membership_update_live_catalog() -> Result<()> {
 #[tokio::test]
 async fn persisted_session_restores_tool_state() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -259,7 +259,7 @@ async fn persisted_session_restores_tool_state() -> Result<()> {
     state.set_tool_state_snapshot(Some(persisted_tool_state));
     let store: Arc<dyn lash_core::RuntimePersistence> = Arc::new(SnapshotStore::with_state(state));
     let reopened_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend_serving(store).await,
+        backend_serving(store).await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -340,7 +340,7 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
             .build()
             .into_handle();
         let standard_core = explicit_ephemeral_facets(LashCore::standard_builder(
-            memory_backend().await,
+            memory_backend().await.into(),
             crate::TurnBudget::Unbounded,
         ))
         .provider(standard_provider)

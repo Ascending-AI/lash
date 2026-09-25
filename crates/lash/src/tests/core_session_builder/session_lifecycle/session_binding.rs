@@ -78,7 +78,7 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
     let source_host = backend.effect_host();
     let source_catalog = backend.session_store_factory();
     let source = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(text_provider(
@@ -89,7 +89,7 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
     .model(model_spec("resume-model", None, 200_000))
     .build(owner.clone())?;
     let receiving = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(text_provider(
@@ -146,10 +146,10 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
 
 #[tokio::test]
 async fn session_delete_context_retries_after_storage_tombstone() -> Result<()> {
-    let backend = DecoratedBackend::over(memory_backend().await)
+    let backend = DecoratedBackend::over(memory_backend().await.into())
         .effect_host(|inner| Arc::new(FailOnceRetirementHost::over(inner)));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        Arc::new(backend),
+        backend.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -187,7 +187,7 @@ async fn session_delete_context_retries_after_storage_tombstone() -> Result<()> 
 #[tokio::test]
 async fn parent_relation_is_read_back_and_a_conflicting_rebind_is_refused() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -273,7 +273,7 @@ async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> 
     let receiving_registry = receiving_backend.process_registry();
 
     let source = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(text_provider(
@@ -284,7 +284,7 @@ async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> 
     .model(model_spec("owner-services-model", None, 200_000))
     .build(owner.clone())?;
     let receiving = explicit_ephemeral_facets(LashCore::standard_builder(
-        receiving_backend.clone(),
+        receiving_backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(text_provider(

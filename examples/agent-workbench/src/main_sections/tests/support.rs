@@ -24,7 +24,7 @@ pub(crate) fn memory_trigger_store() -> Arc<lash_sqlite_store::SqliteTriggerStor
 /// every other port its own, for a test that observes the effect boundary or
 /// the process-event sink.
 pub(crate) struct DecoratedBackend {
-    inner: Arc<dyn lash::Backend>,
+    inner: lash::Backend,
     catalog: Arc<dyn lash::persistence::SessionStoreFactory>,
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
     effect_host: Arc<dyn lash::durability::EffectHost>,
@@ -33,7 +33,7 @@ pub(crate) struct DecoratedBackend {
 }
 
 impl DecoratedBackend {
-    pub(crate) fn over(inner: Arc<dyn lash::Backend>) -> Self {
+    pub(crate) fn over(inner: lash::Backend) -> Self {
         Self {
             catalog: inner.session_store_factory(),
             trigger_store: inner.trigger_store(),
@@ -89,8 +89,55 @@ impl DecoratedBackend {
     }
 }
 
-impl lash::Backend for DecoratedBackend {
-    fn binding_identity(&self) -> &str {
+impl From<DecoratedBackend> for lash::Backend {
+    fn from(decorated: DecoratedBackend) -> Self {
+        let inner_stores = decorated.inner.stores();
+        lash::Backend::new(Arc::new(DecoratedEngine {
+            stores: Arc::new(DecoratedStoreSet {
+                inner: inner_stores,
+                catalog: decorated.catalog,
+                trigger_store: decorated.trigger_store,
+            }),
+            effect_host: decorated.effect_host,
+            process_work: decorated.process_work,
+            queued_work: decorated.queued_work,
+        }))
+    }
+}
+
+struct DecoratedEngine {
+    stores: Arc<DecoratedStoreSet>,
+    effect_host: Arc<dyn lash::durability::EffectHost>,
+    process_work: Option<lash::process::ProcessWorkWiring>,
+    queued_work: lash::BackendQueuedWork,
+}
+
+impl lash::EffectEngine for DecoratedEngine {
+    fn stores(&self) -> Arc<dyn lash::durability::StoreSet> {
+        Arc::clone(&self.stores) as Arc<dyn lash::durability::StoreSet>
+    }
+
+    fn effect_host(&self) -> Arc<dyn lash::durability::EffectHost> {
+        Arc::clone(&self.effect_host)
+    }
+
+    fn process_work(&self) -> Option<lash::process::ProcessWorkWiring> {
+        self.process_work.clone()
+    }
+
+    fn queued_work(&self) -> lash::BackendQueuedWork {
+        self.queued_work.clone()
+    }
+}
+
+struct DecoratedStoreSet {
+    inner: Arc<dyn lash::durability::StoreSet>,
+    catalog: Arc<dyn lash::persistence::SessionStoreFactory>,
+    trigger_store: Arc<dyn lash::triggers::TriggerStore>,
+}
+
+impl lash::durability::StoreSet for DecoratedStoreSet {
+    fn binding_identity(&self) -> &lash::StoreBindingId {
         self.inner.binding_identity()
     }
 
@@ -102,15 +149,12 @@ impl lash::Backend for DecoratedBackend {
         Arc::clone(&self.catalog)
     }
 
-    fn effect_host(&self) -> Arc<dyn lash::durability::EffectHost> {
-        Arc::clone(&self.effect_host)
+    fn process_registry(&self) -> Arc<dyn lash::process::ProcessRegistry> {
+        self.inner.process_registry()
     }
 
-    fn process_registry(&self) -> Arc<dyn lash::process::ProcessRegistry> {
-        match &self.process_work {
-            Some(wiring) => Arc::clone(wiring.registry()),
-            None => self.inner.process_registry(),
-        }
+    fn process_continuations(&self) -> Arc<dyn lash::process::ProcessContinuationStore> {
+        self.inner.process_continuations()
     }
 
     fn trigger_store(&self) -> Arc<dyn lash::triggers::TriggerStore> {
@@ -131,14 +175,6 @@ impl lash::Backend for DecoratedBackend {
 
     fn module_artifacts(&self) -> Arc<dyn lash::persistence::ModuleArtifactStore> {
         self.inner.module_artifacts()
-    }
-
-    fn process_work(&self) -> Option<lash::process::ProcessWorkWiring> {
-        self.process_work.clone()
-    }
-
-    fn queued_work(&self) -> lash::BackendQueuedWork {
-        self.queued_work.clone()
     }
 }
 

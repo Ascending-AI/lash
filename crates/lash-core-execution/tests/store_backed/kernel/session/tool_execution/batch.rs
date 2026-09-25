@@ -74,7 +74,7 @@ mod tests {
             .expect("plugin session");
         let backend = crate::support::memory_backend().await;
         let attachment_store = Arc::new(crate::SessionAttachmentStore::ephemeral(
-            crate::Backend::attachment_store(&backend),
+            crate::Backend::from(backend.clone()).attachment_store(),
         ));
         let host = Arc::new(crate::testing::MockSessionManager::default());
         let controller = crate::support::scoped_controller(

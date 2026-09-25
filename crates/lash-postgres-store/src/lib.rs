@@ -996,6 +996,12 @@ impl PostgresStorage {
         &self.pool
     }
 
+    /// The catalog this storage opened, `<database>.<schema>`: the storage's
+    /// identity.
+    pub fn catalog_id(&self) -> &str {
+        &self.catalog_id
+    }
+
     pub fn session_store_factory(&self) -> PostgresSessionStoreFactory {
         self.unwired_session_store_factory("PostgresStorage::session_store_factory")
     }

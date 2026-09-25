@@ -1,9 +1,7 @@
 use super::*;
 use lash_core::SessionCommitStore as _;
 
-async fn freshness_runtime(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
-) -> (LashRuntime, Arc<RecordingStore>) {
+async fn freshness_runtime(backend: &lash_core::Backend) -> (LashRuntime, Arc<RecordingStore>) {
     let store = unbound_recording_store(backend).await;
     let runtime = runtime_with_plugins_and_tools_and_host_and_store(
         Vec::new(),

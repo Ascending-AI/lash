@@ -39,7 +39,7 @@ async fn queued_lane_guard(backend: &lash_sqlite_store::SqliteBackend) -> Queued
         &crate::LeaseOwnerIdentity::opaque("owner", "owner:incarnation"),
         "queued-lane-test-executor",
         crate::LeaseTimings::default(),
-        crate::Backend::clock(backend),
+        crate::Backend::from(backend.clone()).clock(),
     )
     .await
     .expect("queued-lane test claim")

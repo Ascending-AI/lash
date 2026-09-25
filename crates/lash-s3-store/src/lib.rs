@@ -654,7 +654,7 @@ mod tests {
             .await
             .expect("open a SQLite memory backend");
         lash_conformance::attachment_reference_lifecycle_with_store(
-            lash_core::Backend::session_store_factory(&backend),
+            lash_core::Backend::from(backend.clone()).session_store_factory(),
             Arc::new(S3AttachmentStore::from_config(config).expect("store"))
                 as Arc<dyn AttachmentStore>,
         )

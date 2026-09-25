@@ -38,7 +38,7 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
     let store = unbound_recording_store(&backend).await;
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let mut config = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -995,7 +995,7 @@ pub(super) async fn turn_finalized_borrowed_append_lane_loss_keeps_typed_issue()
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store;
     let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let mut config = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -1211,7 +1211,7 @@ pub(super) async fn durable_queued_lapsed_lane_stays_loud_at_agent_frame_handoff
     let borrowed_append_attempted = Arc::new(AtomicBool::new(false));
     let borrowed_append_error = Arc::new(std::sync::Mutex::new(None));
     let mut config = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -1380,7 +1380,7 @@ pub(super) async fn inprocess_lapsed_lane_stays_loud_after_agent_frame_handoff()
     let borrowed_append_attempted = Arc::new(AtomicBool::new(false));
     let borrowed_append_error = Arc::new(std::sync::Mutex::new(None));
     let mut config = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -1660,7 +1660,7 @@ pub(super) async fn lost_lease_and_reacquisition_force_graph_reloads() {
     let runtime_store: Arc<dyn lash_core::store::RuntimePersistence> = store.clone();
     let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
     let mut config = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )

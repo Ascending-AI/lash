@@ -10,7 +10,7 @@
 //! service nothing binds all spell it through this enum. [`bind_lash_services`]
 //! is the only code that binds them, and it binds every variant, so a
 //! deployment serves all of lash's services or none of them. A host reaches it
-//! through [`RestateBackend::endpoint_builder`](crate::RestateBackend::endpoint_builder)
+//! through [`RestateEngine::endpoint_builder`](crate::RestateEngine::endpoint_builder)
 //! and binds only its own services on the builder it gets back.
 
 use std::sync::Arc;

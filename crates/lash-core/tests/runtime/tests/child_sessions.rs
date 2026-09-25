@@ -329,7 +329,7 @@ async fn durable_child_writes_to_its_own_attachment_namespace() {
         .map_session_store_factory(|_| Arc::new(child_factory.clone()))
         .into_backend();
     let host_config = lash_core::facade_support::RuntimeHostConfig::new(
-        std::sync::Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
@@ -462,7 +462,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
         .into_backend();
     let embedded = lash_core::facade_support::EmbeddedRuntimeHost::new(
         lash_core::facade_support::RuntimeHostConfig::new(
-            std::sync::Arc::clone(&backend),
+            backend.clone(),
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
         ),

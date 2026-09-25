@@ -178,14 +178,15 @@ fn flat_commit_growth_after_large_bindings_stabilize() -> Result<()> {
         )));
         programs.push(typescript_block("let small_00 = 102;\nfinish(\"stored\");"));
         let growth_samples = Arc::clone(&samples);
-        let backend =
-            DecoratedBackend::over(memory_backend().await).session_store_factory(move |inner| {
+        let backend = DecoratedBackend::over(memory_backend().await.into()).session_store_factory(
+            move |inner| {
                 Arc::new(GrowthFactory {
                     inner,
                     samples: growth_samples,
                 })
-            });
-        let core = explicit_ephemeral_facets(rlm_core_builder_over(Arc::new(backend)))
+            },
+        );
+        let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.into()))
             .provider(queued_text_provider(programs))
             .model(mock_model_spec())
             .build(crate::testing::runtime_lease_owner())?;
@@ -325,14 +326,15 @@ fn checkpoint_flatness_rejects_a_binding_that_grows_each_turn() -> Result<()> {
             )));
         }
         let growth_samples = Arc::clone(&samples);
-        let backend =
-            DecoratedBackend::over(memory_backend().await).session_store_factory(move |inner| {
+        let backend = DecoratedBackend::over(memory_backend().await.into()).session_store_factory(
+            move |inner| {
                 Arc::new(GrowthFactory {
                     inner,
                     samples: growth_samples,
                 })
-            });
-        let core = explicit_ephemeral_facets(rlm_core_builder_over(Arc::new(backend)))
+            },
+        );
+        let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.into()))
             .provider(queued_text_provider(programs))
             .model(mock_model_spec())
             .build(crate::testing::runtime_lease_owner())?;

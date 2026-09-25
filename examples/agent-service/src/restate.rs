@@ -897,7 +897,7 @@ mod restate_tests {
     struct LiveRestateTestHarness {
         state: AppStateData,
         process_worker: lash::durability::DurableProcessWorker,
-        backend: Arc<lash_restate::RestateBackend<lash_sqlite_store::SqliteStoreSet>>,
+        backend: Arc<lash_restate::RestateEngine>,
     }
 
     async fn live_restate_test_state(
@@ -937,13 +937,15 @@ finish("done via Restate E2E");
         let stores = lash_sqlite_store::SqliteStoreSet::open(data_dir.join("lash-sessions"))
             .await
             .expect("open the SQLite store set");
-        let backend = Arc::new(lash_restate::RestateBackend::new(
-            ingress_url,
-            lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),
+        let backend = Arc::new(lash_restate::RestateEngine::new(
             Arc::new(stores),
-            // Turns run in the foreground under a handler-scoped controller;
-            // an in-process queue pump would race the Restate handlers.
-            lash_restate::RestateQueuedWork::Disabled,
+            lash_restate::RestateConfig::new(
+                ingress_url,
+                lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),
+                // Turns run in the foreground under a handler-scoped controller;
+                // an in-process queue pump would race the Restate handlers.
+                lash_restate::RestateQueuedWork::Disabled,
+            ),
         ));
         // The worked example keeps its Sleep-only resolver as the deployment's
         // one answer, so no tool-child host is installed here — the same shape
@@ -961,7 +963,7 @@ finish("done via Restate E2E");
             backend.as_ref(),
         );
         let core = LashCore::rlm_builder(
-            Arc::clone(&backend) as Arc<dyn lash::Backend>,
+            lash::Backend::new(backend.clone()),
             lash::TurnBudget::Unbounded,
             factory,
         )

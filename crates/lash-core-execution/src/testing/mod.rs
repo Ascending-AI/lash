@@ -1469,7 +1469,7 @@ async fn execute_tool_intents_with_services_and_hook_and_trigger_router(
 /// Build the real engine run context used by validation-path tests that are
 /// expected to settle before constructing a nested runtime context.
 pub fn process_engine_run_context_for_validation(
-    backend: &dyn crate::Backend,
+    backend: &crate::Backend,
     registration: crate::ProcessRegistration,
     tool_catalog: Arc<crate::ToolCatalog>,
     process_registry_available: bool,

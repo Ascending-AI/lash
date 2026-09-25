@@ -1705,7 +1705,7 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for ExpireLeaseAfterRetainedCommi
 }
 
 pub(super) async fn standard_runtime_with_transport_and_queue_store(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     transport: TestProvider,
 ) -> (LashRuntime, Arc<RecordingStore>) {
     let store = unbound_recording_store(backend).await;
@@ -1722,7 +1722,7 @@ pub(super) async fn standard_runtime_with_transport_and_queue_store(
 }
 
 pub(super) async fn standard_runtime_with_transport_and_queue_store_for_session(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     transport: TestProvider,
     session_id: &SessionId,
 ) -> (LashRuntime, Arc<RecordingStore>) {
@@ -1738,7 +1738,7 @@ pub(super) async fn standard_runtime_with_transport_and_queue_store_for_session(
 }
 
 pub(super) async fn standard_runtime_with_transport_and_queue_store_clock(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     transport: TestProvider,
     clock: Arc<dyn lash_core::Clock>,
 ) -> (LashRuntime, Arc<RecordingStore>) {
@@ -1781,7 +1781,7 @@ impl lash_core::testing::EffectLayer for JournalReplayEffectController {
 }
 
 pub(super) fn journal_replay_host(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     controller: Arc<dyn lash_core::testing::EffectLayer>,
 ) -> lash_core::facade_support::EmbeddedRuntimeHost {
     test_host_config(&super::effect::backend_with_effect_layer(

@@ -401,45 +401,51 @@ impl lash_core::testing::EffectLayer for CountingEffectController {
 
 /// A SQLite memory backend (ADR 0102) and the runtime host config over it.
 pub(super) async fn test_host() -> (
-    Arc<dyn lash_core::Backend>,
+    lash_core::Backend,
     lash_core::facade_support::RuntimeHostConfig,
 ) {
-    host_over(Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("open a SQLite memory backend"),
-    ))
+    host_over(
+        Arc::new(
+            lash_sqlite_store::SqliteBackend::memory()
+                .await
+                .expect("open a SQLite memory backend"),
+        )
+        .into(),
+    )
 }
 
 /// [`test_host`] with the backend's effect host under `layer`.
 pub(super) async fn layered_test_host(
     layer: Arc<dyn lash_core::testing::EffectLayer>,
 ) -> (
-    Arc<dyn lash_core::Backend>,
+    lash_core::Backend,
     lash_core::facade_support::RuntimeHostConfig,
 ) {
     // Layered before any host config is built over the backend: the first
     // config installs the host's one tool-child resolver, and a batch's
     // children must reach their controllers through the layer.
     host_over(
-        lash_core::testing::runtime_helpers::LayeredBackend::over(Arc::new(
-            lash_sqlite_store::SqliteBackend::memory()
-                .await
-                .expect("open a SQLite memory backend"),
-        ))
+        lash_core::testing::runtime_helpers::LayeredBackend::over(
+            Arc::new(
+                lash_sqlite_store::SqliteBackend::memory()
+                    .await
+                    .expect("open a SQLite memory backend"),
+            )
+            .into(),
+        )
         .map_effect_host(|host| Arc::new(lash_core::testing::LayeredEffectHost::new(host, layer)))
         .into_backend(),
     )
 }
 
 fn host_over(
-    backend: Arc<dyn lash_core::Backend>,
+    backend: lash_core::Backend,
 ) -> (
-    Arc<dyn lash_core::Backend>,
+    lash_core::Backend,
     lash_core::facade_support::RuntimeHostConfig,
 ) {
     let host = lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
@@ -448,7 +454,7 @@ fn host_over(
 
 /// `backend`'s effect host, scoped to `session_id`'s first turn.
 pub(super) fn test_turn_scope(
-    backend: &Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     session_id: &str,
 ) -> lash_core::ScopedEffectController<'static> {
     backend

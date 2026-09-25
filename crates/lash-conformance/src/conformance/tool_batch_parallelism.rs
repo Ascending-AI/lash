@@ -1111,7 +1111,7 @@ async fn drive_turn(
     // `control.effect_host` swap would leave the resolver registered on the
     // discarded host.
     let mut law_backend =
-        crate::LawBackend::over_stores(world.stores.as_ref(), Arc::clone(&world.effect_host));
+        crate::LawBackend::over_stores(Arc::clone(&world.stores), Arc::clone(&world.effect_host));
     if let Some(registry) = world.process_registry.as_ref() {
         law_backend = law_backend.with_process_registry(Arc::clone(registry));
     }

@@ -30,7 +30,7 @@ fn turn_context(
         ))
         .expect("the turn scope validates")
         .expect("the backend host lends a static controller");
-    crate::testing::TestExecutionContextBuilder::for_backend(backend)
+    crate::testing::TestExecutionContextBuilder::for_backend(&backend.clone().into())
         .session_id("presentation-session")
         .borrowed_effect_controller(controller)
         .build()

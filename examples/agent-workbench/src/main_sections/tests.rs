@@ -135,14 +135,12 @@ pub(super) fn explicit_durable_test_facets(data_dir: &std::path::Path) -> lash::
 pub(super) fn explicit_durable_test_facets_over(
     backend: Arc<lash_sqlite_store::SqliteBackend>,
 ) -> lash::LashCoreBuilder {
-    explicit_durable_test_facets_on(backend)
+    explicit_durable_test_facets_on(backend.into())
 }
 
 /// A durable test core over `backend`, whose RLM factory keeps its Lashlang
 /// artifacts in that same backend.
-pub(super) fn explicit_durable_test_facets_on(
-    backend: Arc<dyn lash::Backend>,
-) -> lash::LashCoreBuilder {
+pub(super) fn explicit_durable_test_facets_on(backend: lash::Backend) -> lash::LashCoreBuilder {
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
             .channel(lash::rlm::RlmChannel::Cell)
@@ -150,10 +148,10 @@ pub(super) fn explicit_durable_test_facets_on(
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        backend.as_ref(),
+        &backend,
     );
     lash::LashCore::rlm_builder(
-        backend as Arc<dyn lash::Backend>,
+        backend,
         lash::TurnBudget::Unbounded,
         factory,
     )
@@ -1105,9 +1103,9 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        backend.as_ref(),
+        &backend.clone().into(),
     );
-    let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
+    let core = LashCore::rlm_builder(backend.into(), lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .provider(provider)
@@ -1623,14 +1621,16 @@ async fn live_workbench_restate_state_with_provider_and_database(
     });
     let queued_work_driver = lash::runtime::NativeQueuedWork::new(queued_run_handle.clone());
     let queued_work_port = Arc::new(lash::runtime::NativeQueuedWork::new(queued_run_handle));
-    let backend = Arc::new(lash_restate::RestateBackend::new(
-        lash_restate::RestateConnection::with_client(
-            restate_ingress_url.clone(),
-            restate_http.clone(),
-        ),
-        live_restate_authority_id(),
+    let backend = Arc::new(lash_restate::RestateEngine::new(
         store_set,
-        lash_restate::RestateQueuedWork::Engine(queued_work_port),
+        lash_restate::RestateConfig::new(
+            lash_restate::RestateConnection::with_client(
+                restate_ingress_url.clone(),
+                restate_http.clone(),
+            ),
+            live_restate_authority_id(),
+            lash_restate::RestateQueuedWork::Engine(queued_work_port),
+        ),
     ));
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash::rlm::RlmProtocolPluginConfig::builder()
@@ -1639,11 +1639,11 @@ async fn live_workbench_restate_state_with_provider_and_database(
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        backend.as_ref(),
+        &backend.clone().into(),
     )
     .with_lashlang_execution_sink(lashlang_execution_sink);
     let core = LashCore::rlm_builder(
-        Arc::clone(&backend) as Arc<dyn lash::Backend>,
+        lash::Backend::new(backend.clone()),
         lash::TurnBudget::Unbounded,
         factory,
     )
@@ -1880,9 +1880,9 @@ fn test_workbench_core(backend: Arc<lash_sqlite_store::SqliteBackend>) -> LashCo
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        backend.as_ref(),
+        &backend.clone().into(),
     );
-    LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
+    LashCore::rlm_builder(backend.into(), lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .provider(provider)

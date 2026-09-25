@@ -198,7 +198,7 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
     );
     let effect_host = backend.effect_host();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(responses))
@@ -355,10 +355,11 @@ async fn standard_compaction_projection_usage_is_pinned_across_a_cold_mid_turn_r
         .into_handle();
     let layer = Arc::new(ProjectionRedriveLayer::failing_on_llm_call(3));
     let layered = Arc::clone(&layer) as Arc<dyn lash_core::testing::EffectLayer>;
-    let backend: Arc<dyn lash_core::Backend> =
-        Arc::new(DecoratedBackend::over(backend).effect_host(move |inner| {
+    let backend: lash_core::Backend = DecoratedBackend::over(backend.into())
+        .effect_host(move |inner| {
             Arc::new(lash_core::testing::LayeredEffectHost::new(inner, layered))
-        }));
+        })
+        .into();
 
     let build_core = |_store_factory: Arc<lash_sqlite_store::SqliteSessionStoreFactory>| {
         explicit_ephemeral_facets(LashCore::standard_builder(
@@ -484,7 +485,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
         response_with_usage("durable summary", 1),
     ]);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -598,7 +599,7 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
     drop(session);
     drop(core);
     let reopened_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(vec![response_with_usage(
@@ -642,7 +643,7 @@ async fn compaction_accepts_parent_turn_authority() -> Result<()> {
     );
     let effect_host = backend.effect_host();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(vec![
@@ -704,7 +705,7 @@ async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_paren
     );
     let effect_host = backend.effect_host();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(vec![
@@ -788,7 +789,7 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
     );
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(vec![
@@ -908,7 +909,7 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
         .map(|ordinal| response_with_usage(&format!("response {ordinal}"), 20_000))
         .collect();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(responses))
@@ -974,7 +975,7 @@ async fn standard_compaction_threshold_continue_as_extends_the_pre_switch_durabl
         ),
         response_with_usage(&typescript_block(r#"finish("continued");"#), 1),
     ]);
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
         .provider(provider)
         .model(model_spec("standard-compaction-rlm-model", None, 40_000))
         .plugin(Arc::new(
@@ -1091,7 +1092,7 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
         })),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(vec![
@@ -1228,7 +1229,7 @@ async fn mid_turn_graph_append_never_replicates_the_read_tail_durably() -> Resul
         })),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(vec![
@@ -1365,7 +1366,7 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
         })),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(vec![
@@ -1492,7 +1493,7 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
         })),
     );
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(standard_compaction_provider(vec![response_with_usage(
@@ -1674,7 +1675,7 @@ async fn admin_compaction_commit_failure_rolls_back_resident_state_and_settles_o
     let effect_host = sqlite.effect_host();
     let commit_failure = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let armed = Arc::clone(&commit_failure);
-    let backend = DecoratedBackend::over(Arc::new(sqlite))
+    let backend = DecoratedBackend::over(Arc::new(sqlite).into())
         .session_store_factory(move |inner| Arc::new(FailArmedCommitFactory { inner, armed }));
     let (provider, provider_calls) = standard_compaction_provider_counted(vec![
         response_with_usage("first response", 1),
@@ -1685,7 +1686,7 @@ async fn admin_compaction_commit_failure_rolls_back_resident_state_and_settles_o
         response_with_usage("rolled-back-then-summarized", 1),
     ]);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        Arc::new(backend),
+        backend.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)

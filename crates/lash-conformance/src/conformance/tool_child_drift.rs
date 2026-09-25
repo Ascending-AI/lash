@@ -109,7 +109,7 @@ async fn build_runtime(
         })
         .build();
     let mut host =
-        crate::LawBackend::over_stores(world.stores.as_ref(), Arc::clone(&world.effect_host))
+        crate::LawBackend::over_stores(Arc::clone(&world.stores), Arc::clone(&world.effect_host))
             .host_config(
                 crate::CommitBudget::bounded(1024 * 1024, 512),
                 crate::QueuedWorkBatchingConfig::new(1),

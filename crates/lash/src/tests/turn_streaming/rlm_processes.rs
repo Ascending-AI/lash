@@ -9,7 +9,7 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
         let source = format!(
             "const retained = [{{ payload: {retained_payload:?} }}];\nfinish(\"committed\");"
         );
-        let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+        let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
             .provider(queued_text_provider(vec![typescript_block(&source)]))
             .model(mock_model_spec())
             .without_queued_work()
@@ -157,16 +157,15 @@ pub(super) async fn frame_switch_state_after_cold_reopen(
     let checkpoint_writes =
         lash_core::testing::checkpoint_observer::CheckpointWriteCollector::default();
     let observed_writes = checkpoint_writes.clone();
-    let backend = Arc::new(
-        DecoratedBackend::over(sqlite_backend).session_store_factory(move |inner| {
+    let backend =
+        DecoratedBackend::over(sqlite_backend.into()).session_store_factory(move |inner| {
             Arc::new(
                 lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
                     inner,
                     observed_writes,
                 ),
             )
-        }),
-    );
+        });
     // The retired surface inlined the whole abandoned payload as a literal; the
     // TypeScript compiler refuses a cell over 64 KiB of source (ADR 0096), so
     // the same global is built at runtime instead of spelled out.
@@ -175,10 +174,10 @@ pub(super) async fn frame_switch_state_after_cold_reopen(
 const probe_result = await fixture.probe({{}});
 await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_seed: "seed:survives" }} }});"#
     );
-    let first_factory = rlm_factory(backend.as_ref())
+    let first_factory = rlm_factory(&backend.clone().into())
         .with_deferred_tool_resolver(Arc::new(FrameStateDeferredResolver));
     let first_core = explicit_ephemeral_facets(LashCore::rlm_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
         first_factory,
     ))
@@ -295,7 +294,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         })
         .build()
         .into_handle();
-    let reopened_core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+    let reopened_core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
         .provider(follow_on_provider)
         .model(mock_model_spec())
         .without_queued_work()
@@ -351,11 +350,16 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
 #[test]
 pub(super) fn agent_frame_switch_clears_execution_state_across_cold_reopen() -> Result<()> {
     run_async_test_on_stack_budget("agent-frame-switch-cold-reopen-test", || async {
-        let small =
-            frame_switch_state_after_cold_reopen(&SessionId::from("frame-clear-small"), 16).await?;
-        let large =
-            frame_switch_state_after_cold_reopen(&SessionId::from("frame-clear-large"), 128 * 1024)
-                .await?;
+        let small = Box::pin(frame_switch_state_after_cold_reopen(
+            &SessionId::from("frame-clear-small"),
+            16,
+        ))
+        .await?;
+        let large = Box::pin(frame_switch_state_after_cold_reopen(
+            &SessionId::from("frame-clear-large"),
+            128 * 1024,
+        ))
+        .await?;
 
         for (geometry, state) in [
             ("resident", &large.resident_execution_state),
@@ -411,7 +415,7 @@ pub(super) async fn durable_queued_chained_continue_as_survives_nested_commit_ha
             .expect("open the SQLite backend"),
     );
     let store_factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
         .provider(queued_text_provider(vec![
             typescript_block(r#"await control.continue_as({ task: "switch again" });"#),
             typescript_block(r#"await control.continue_as({ task: "finish chain" });"#),
@@ -474,11 +478,12 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
     let store_factory = backend.session_store_factory();
     let controller = EffectRecorder::default();
     let backend = controller.layered_over(backend);
-    let scoped_effect_controller = lash_core::Backend::effect_host(backend.as_ref())
+    let scoped_effect_controller = lash_core::Backend::from(backend.clone())
+        .effect_host()
         .scoped_static(lash_core::AdmittedScope::turn(session_id, root_turn_id))
         .expect("scope the root turn")
         .expect("the backend host lends a static controller");
-    let core = LashCore::standard_builder(backend, crate::TurnBudget::Unbounded)
+    let core = LashCore::standard_builder(backend.into(), crate::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(agent_frame_switch_provider())
         .model(mock_model_spec())
@@ -583,7 +588,7 @@ pub(super) fn processes_lists_started_lashlang_process_until_awaited() -> Result
 pub(super) async fn processes_lists_started_lashlang_process_until_awaited_inner() -> Result<()> {
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
     .provider(queued_text_provider(vec![typescript_block(
         r#"
 const lookup = async () => {
@@ -663,9 +668,9 @@ pub(super) async fn lashlang_execution_graph_store_observes_lashlang_process_fro
     let graph_store = Arc::new(crate::tracing::TraceLashlangGraphStore::default());
     let backend = memory_backend().await;
     let core = explicit_ephemeral_facets(LashCore::rlm_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
-        rlm_factory(backend.as_ref()).with_lashlang_execution_sink(
+        rlm_factory(&backend.clone().into()).with_lashlang_execution_sink(
             Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
         ),
     ))
@@ -762,7 +767,7 @@ finish(value);"#,
 #[cfg(feature = "rlm")]
 #[tokio::test]
 pub(super) async fn natural_rlm_completion_emits_no_terminal_output() -> Result<()> {
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
         .provider(queued_text_provider(vec!["done in prose"]))
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
@@ -802,7 +807,7 @@ pub(super) async fn natural_rlm_completion_emits_no_terminal_output() -> Result<
 #[cfg(feature = "rlm")]
 #[tokio::test]
 pub(super) async fn finish_required_rlm_completion_emits_terminal_output() -> Result<()> {
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
         .provider(queued_text_provider(vec![typescript_block(
             r#"finish("done via finish");"#,
         )]))
@@ -844,7 +849,7 @@ pub(super) async fn finish_required_rlm_completion_emits_terminal_output() -> Re
 #[tokio::test]
 pub(super) async fn rlm_failed_code_emits_failed_code_completion_without_fake_tools() -> Result<()>
 {
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
         .provider(queued_text_provider(vec![
             typescript_block("this is not valid typescript"),
             typescript_block(r#"finish("recovered");"#),
@@ -915,7 +920,7 @@ pub(super) async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_l
 
     // Boot 1: the host accepts a queued turn, then is hard-killed.
     let first_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(
@@ -972,7 +977,7 @@ pub(super) async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_l
     // expiry boundary that makes the queued turn drainable.
     clock.advance(dead_lane_expiry - lash_core::ClockWallTime::timestamp_ms(clock.as_ref()));
     let second_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(
@@ -1058,7 +1063,7 @@ pub(super) async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained
     let provider_entered = Arc::new(tokio::sync::Notify::new());
     let entered = Arc::clone(&provider_entered);
     let first_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(
@@ -1111,7 +1116,7 @@ pub(super) async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained
     // wait to acquire the lane only when it starts draining.
     clock.advance(lash_core::facade_support::LeaseTimings::default().ttl_ms());
     let second_core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(
@@ -1219,7 +1224,7 @@ pub(super) async fn cancel_running_turns_after_step_stops_at_the_step_boundary()
     let released = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(gated_app_lookup_provider(
@@ -1279,7 +1284,7 @@ pub(super) async fn host_escalates_a_local_after_step_stop_to_an_immediate_abort
     // The response never arrives, so an after-step stop can never land by
     // itself; the host escalates after its own deadline.
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(gated_app_lookup_provider(
@@ -1336,7 +1341,7 @@ pub(super) async fn host_escalates_a_local_after_step_stop_to_an_immediate_abort
 async fn definition_filtered_process_list(cell: &str) -> Result<serde_json::Value> {
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
         .provider(queued_text_provider(vec![format!(
             "<typescript>\n{}\n</typescript>",
             cell.trim()

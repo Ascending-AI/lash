@@ -151,7 +151,7 @@ async fn run_session_surface_case(grant: bool) -> lash_core::ProcessAwaitOutput 
     let sqlite_backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open a SQLite memory backend");
-    let backend: Arc<dyn lash_core::Backend> = Arc::new(sqlite_backend.clone());
+    let backend: lash_core::Backend = Arc::new(sqlite_backend.clone()).into();
     let env_store: Arc<dyn ProcessExecutionEnvStore> = backend.process_env_store();
     let plugin_options = if grant {
         PluginOptions::typed(
@@ -183,7 +183,7 @@ async fn run_session_surface_case(grant: bool) -> lash_core::ProcessAwaitOutput 
         ),
     );
     let runtime_host = RuntimeHostConfig::new(
-        Arc::clone(&backend),
+        backend.clone(),
         CommitBudget::bounded(1024 * 1024, 512),
         QueuedWorkBatchingConfig::new(1),
     )
@@ -397,7 +397,7 @@ async fn fig3463_crashed_worker_retry_keeps_both_telemetry_attempts_but_executes
     let sqlite_backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open a SQLite memory backend");
-    let backend: Arc<dyn lash_core::Backend> = Arc::new(sqlite_backend.clone());
+    let backend: lash_core::Backend = Arc::new(sqlite_backend.clone()).into();
     let env_store: Arc<dyn ProcessExecutionEnvStore> = backend.process_env_store();
     let env_ref = lash_core::runtime::publish_process_execution_env(
         env_store.as_ref(),
@@ -416,12 +416,13 @@ async fn fig3463_crashed_worker_retry_keeps_both_telemetry_attempts_but_executes
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     // The retry is a second worker over the same backend: a fresh handle on
     // the crashed worker's databases.
-    let backend_b: Arc<dyn lash_core::Backend> = Arc::new(
+    let backend_b: lash_core::Backend = Arc::new(
         sqlite_backend
             .reopen()
             .await
             .expect("reopen the backend for the retry"),
-    );
+    )
+    .into();
     let tool_factory: Arc<dyn lash_core::facade_support::PluginFactory> =
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
             "fig3463-recovery-echo",
@@ -429,7 +430,7 @@ async fn fig3463_crashed_worker_retry_keeps_both_telemetry_attempts_but_executes
                 executions: Arc::clone(&executions),
             })),
         ));
-    let worker = |sink: Arc<dyn lash_trace::TraceSink>, backend: Arc<dyn lash_core::Backend>| {
+    let worker = |sink: Arc<dyn lash_trace::TraceSink>, backend: lash_core::Backend| {
         let engine = LashlangProcessEngine::new(artifact_store.clone(), LashlangSurface::default())
             .with_execution_trace(Some(sink), lash_trace::TraceContext::default());
         let runtime_host = RuntimeHostConfig::new(
@@ -472,7 +473,7 @@ async fn fig3463_crashed_worker_retry_keeps_both_telemetry_attempts_but_executes
         )
         .await
         .expect("register recovery process");
-    let worker_a = worker(crash_sink.clone(), Arc::clone(&backend));
+    let worker_a = worker(crash_sink.clone(), backend.clone());
     let first_report = worker_a
         .drive_pending_processes()
         .await
@@ -628,7 +629,7 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
     let sqlite_backend = lash_sqlite_store::SqliteBackend::open(backend_dir.path())
         .await
         .expect("open a SQLite file backend");
-    let backend: Arc<dyn lash_core::Backend> = Arc::new(sqlite_backend.clone());
+    let backend: lash_core::Backend = Arc::new(sqlite_backend.clone()).into();
     let env_store: Arc<dyn ProcessExecutionEnvStore> = backend.process_env_store();
     let env_ref = lash_core::runtime::publish_process_execution_env(
         env_store.as_ref(),
@@ -647,12 +648,13 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     // The retry is a second worker over the same backend: a fresh handle on
     // the crashed worker's databases.
-    let backend_b: Arc<dyn lash_core::Backend> = Arc::new(
+    let backend_b: lash_core::Backend = Arc::new(
         sqlite_backend
             .reopen()
             .await
             .expect("reopen the backend for the retry"),
-    );
+    )
+    .into();
     let tool_factory: Arc<dyn lash_core::facade_support::PluginFactory> =
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
             "fig3463-recovery-echo",
@@ -660,7 +662,7 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
                 executions: Arc::clone(&executions),
             })),
         ));
-    let worker = |sink: Arc<dyn lash_trace::TraceSink>, backend: Arc<dyn lash_core::Backend>| {
+    let worker = |sink: Arc<dyn lash_trace::TraceSink>, backend: lash_core::Backend| {
         let engine = LashlangProcessEngine::new(artifact_store.clone(), LashlangSurface::default())
             .with_execution_trace(Some(sink), lash_trace::TraceContext::default());
         let runtime_host = RuntimeHostConfig::new(
@@ -706,7 +708,7 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
         )
         .await
         .expect("register recovery process");
-    let worker_a = worker(crash_sink.clone(), Arc::clone(&backend));
+    let worker_a = worker(crash_sink.clone(), backend.clone());
     let first_report = worker_a
         .drive_pending_processes()
         .await
@@ -858,7 +860,7 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
     let sqlite_backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open a SQLite memory backend");
-    let backend: Arc<dyn lash_core::Backend> = Arc::new(sqlite_backend.clone());
+    let backend: lash_core::Backend = Arc::new(sqlite_backend.clone()).into();
     let env_store: Arc<dyn ProcessExecutionEnvStore> = backend.process_env_store();
     let env_ref = lash_core::runtime::publish_process_execution_env(
         env_store.as_ref(),
@@ -872,7 +874,7 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
     let engine = LashlangProcessEngine::new(artifact_store, LashlangSurface::default())
         .with_execution_trace(Some(graphs.clone()), lash_trace::TraceContext::default());
     let runtime_host = RuntimeHostConfig::new(
-        Arc::clone(&backend),
+        backend.clone(),
         CommitBudget::bounded(1024 * 1024, 512),
         QueuedWorkBatchingConfig::new(1),
     )

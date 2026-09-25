@@ -187,7 +187,8 @@ async fn run_counted(
         lash_core::testing::TestExecutionContextBuilder::over_controller(scoped.clone()).build();
     let plugins = Arc::clone(&built.dispatch.plugins);
     let catalog = Arc::clone(&built.dispatch.tool_catalog);
-    let registry = lash_core::Backend::process_registry(&crate::lib_tests::memory_backend().await);
+    let registry =
+        lash_core::Backend::process_registry(&crate::lib_tests::memory_backend().await.into());
     let authority =
         lash_core::ProcessExecutionWriteAuthority::invocation(process_id, "pre-cutover-run")
             .bind_attempt(1);

@@ -142,7 +142,7 @@ impl Session {
         let state = &mut self.state;
         let host_bindings = self.host_bindings.clone();
         let projections = Arc::clone(&self.projections);
-        let artifact_store = lashlang::LashlangArtifacts::of_backend(&self.backend);
+        let artifact_store = lashlang::LashlangArtifacts::of_backend(&self.backend.clone().into());
         let response = block_on(async move {
             execute_code_with_channel_and_bounds(
                 state,

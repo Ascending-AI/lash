@@ -172,7 +172,7 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
             }
         })
         .build();
-    let mut host = crate::LawBackend::over_stores(stores.as_ref(), Arc::clone(&effect_host))
+    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores), Arc::clone(&effect_host))
         .host_config(
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),

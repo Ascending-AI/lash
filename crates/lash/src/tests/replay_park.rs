@@ -128,7 +128,7 @@ impl Backend {
             })
             .build()
             .into_handle();
-        explicit_ephemeral_facets(rlm_core_builder_over(self.backend.clone()))
+        explicit_ephemeral_facets(rlm_core_builder_over(self.backend.clone().into()))
             .provider(provider)
             .model(mock_model_spec())
             .tools(Arc::new(ProbeTool {
@@ -708,7 +708,7 @@ impl Backend {
                 )))
             },
         );
-        explicit_ephemeral_facets(rlm_core_builder_over(self.backend.clone()))
+        explicit_ephemeral_facets(rlm_core_builder_over(self.backend.clone().into()))
             .provider(provider)
             .model(mock_model_spec())
             .plugin(Arc::new(lash_subagents::SubagentsPluginFactory::new(
@@ -817,7 +817,7 @@ impl Backend {
             .build()
             .into_handle();
         explicit_ephemeral_facets(LashCore::standard_builder(
-            self.backend.clone(),
+            self.backend.clone().into(),
             crate::TurnBudget::Unbounded,
         ))
         .provider(provider)

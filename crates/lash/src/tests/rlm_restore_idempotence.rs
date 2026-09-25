@@ -222,7 +222,7 @@ async fn plugin_host_with_plugins(extra_plugins: &[Arc<dyn PluginFactory>]) -> P
                 .instruction_limit(InstructionBound::instructions(1_000_000))
                 .memory_limit(MemoryBound::mebibytes(64))
                 .build(),
-            crate::tests::memory_backend().await.as_ref(),
+            &crate::tests::memory_backend().await.clone().into(),
         )
         .with_process_lifecycle(false),
     )];
@@ -278,7 +278,7 @@ fn provider(
 }
 
 async fn open_with_plugins(
-    backend: &Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     store: Arc<FaultStore>,
     script: Arc<Script>,
     state: RuntimeSessionState,
@@ -297,7 +297,7 @@ async fn open_with_plugins(
             .expect("build plugins")
     };
     let mut config = RuntimeHostConfig::new(
-        Arc::clone(backend),
+        backend.clone(),
         CommitBudget::bounded(8 * 1024 * 1024, 1024),
         QueuedWorkBatchingConfig::new(1),
     );
@@ -359,18 +359,19 @@ fn count(haystack: &str, needle: &str) -> usize {
 struct Backend {
     label: &'static str,
     /// The backend every runtime of the law takes its ports from.
-    backend: Arc<dyn lash_core::Backend>,
+    backend: lash_core::Backend,
     factory: Arc<dyn SessionStoreFactory>,
     _tempdir: Option<tempfile::TempDir>,
 }
 
 impl Backend {
     async fn memory() -> Self {
-        let backend: Arc<dyn lash_core::Backend> = Arc::new(
+        let backend: lash_core::Backend = Arc::new(
             lash_sqlite_store::SqliteBackend::memory()
                 .await
                 .expect("open a SQLite memory backend"),
-        );
+        )
+        .into();
         Self {
             label: "memory",
             factory: backend.session_store_factory(),
@@ -381,11 +382,12 @@ impl Backend {
 
     async fn sqlite() -> Self {
         let dir = tempfile::tempdir().expect("tempdir");
-        let backend: Arc<dyn lash_core::Backend> = Arc::new(
+        let backend: lash_core::Backend = Arc::new(
             lash_sqlite_store::SqliteBackend::open(dir.path())
                 .await
                 .expect("open a SQLite file backend"),
-        );
+        )
+        .into();
         Self {
             label: "sqlite",
             factory: backend.session_store_factory(),
@@ -1058,11 +1060,12 @@ async fn storeless_runtime(
         responses,
         ..Script::default()
     });
-    let backend: Arc<dyn lash_core::Backend> = Arc::new(
+    let backend: lash_core::Backend = Arc::new(
         lash_sqlite_store::SqliteBackend::memory()
             .await
             .expect("open a SQLite memory backend"),
-    );
+    )
+    .into();
     // The provider arms faults on a store; a storeless session has none, so it
     // gets a detached one that nothing commits to.
     let detached = Arc::new(FaultStore {
@@ -1097,7 +1100,7 @@ async fn storeless_runtime(
                 .instruction_limit(InstructionBound::instructions(1_000_000))
                 .memory_limit(MemoryBound::mebibytes(64))
                 .build(),
-            crate::tests::memory_backend().await.as_ref(),
+            &crate::tests::memory_backend().await.clone().into(),
         )
         .with_process_lifecycle(false),
     )];

@@ -76,7 +76,7 @@ async fn a_file_database_from_the_component_constructors_opens_as_a_backend() {
         .await
         .expect("the existing session activates with no TurnCancelBindingMismatch");
     assert_eq!(
-        lash_core_execution::Backend::binding_identity(&backend),
+        backend.identity(),
         recorded_binding,
         "the backend answers to the identity the component host persisted"
     );

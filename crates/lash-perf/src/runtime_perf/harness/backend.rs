@@ -9,7 +9,7 @@
 
 use std::sync::Arc;
 
-use lash_core::{Backend, EffectHost, SessionStoreFactory};
+use lash_core::{Backend, SessionStoreFactory};
 
 /// The seed of every in-process lane's server double. A perf run measures
 /// cost, not a schedule, so one fixed seed serves every scenario.
@@ -19,18 +19,14 @@ const RESTATE_SEED: u64 = 0x5eed_9e4f;
 /// the inner backend's Lashlang artifacts, so an RLM factory built over it
 /// keeps them there too.
 pub(super) struct PerfBackend {
-    inner: Arc<dyn Backend>,
-    catalog: Arc<dyn SessionStoreFactory>,
-    effect_host: Arc<dyn EffectHost>,
+    layered: lash_core::testing::runtime_helpers::LayeredBackend,
 }
 
 impl PerfBackend {
     /// `inner`, undecorated.
-    pub(super) fn over(inner: Arc<dyn lash_core::Backend>) -> Self {
+    pub(super) fn over(inner: Backend) -> Self {
         Self {
-            catalog: inner.session_store_factory(),
-            effect_host: inner.effect_host(),
-            inner,
+            layered: lash_core::testing::runtime_helpers::LayeredBackend::over(inner),
         }
     }
 
@@ -41,59 +37,16 @@ impl PerfBackend {
     }
 
     /// Serve sessions from `catalog`, the perf store decorator.
-    pub(super) fn with_catalog(mut self, catalog: Arc<dyn SessionStoreFactory>) -> Self {
-        self.catalog = catalog;
-        self
+    pub(super) fn with_catalog(self, catalog: Arc<dyn SessionStoreFactory>) -> Self {
+        Self {
+            layered: self.layered.map_session_store_factory(|_| catalog),
+        }
     }
 }
 
-impl Backend for PerfBackend {
-    fn binding_identity(&self) -> &str {
-        self.inner.binding_identity()
-    }
-
-    fn clock(&self) -> Arc<dyn lash_core::Clock> {
-        self.inner.clock()
-    }
-
-    fn session_store_factory(&self) -> Arc<dyn SessionStoreFactory> {
-        Arc::clone(&self.catalog)
-    }
-
-    fn effect_host(&self) -> Arc<dyn EffectHost> {
-        Arc::clone(&self.effect_host)
-    }
-
-    fn process_registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
-        self.inner.process_registry()
-    }
-
-    fn trigger_store(&self) -> Arc<dyn lash_core::TriggerStore> {
-        self.inner.trigger_store()
-    }
-
-    fn process_definition_registry(&self) -> Arc<dyn lash_core::ProcessDefinitionRegistry> {
-        self.inner.process_definition_registry()
-    }
-
-    fn process_env_store(&self) -> Arc<dyn lash_core::ProcessExecutionEnvStore> {
-        self.inner.process_env_store()
-    }
-
-    fn attachment_store(&self) -> Arc<dyn lash_core::AttachmentStore> {
-        self.inner.attachment_store()
-    }
-
-    fn module_artifacts(&self) -> Arc<dyn lash_core::ModuleArtifactStore> {
-        self.inner.module_artifacts()
-    }
-
-    fn process_work(&self) -> Option<lash_core::ProcessWorkWiring> {
-        self.inner.process_work()
-    }
-
-    fn queued_work(&self) -> lash_core::BackendQueuedWork {
-        self.inner.queued_work()
+impl From<PerfBackend> for Backend {
+    fn from(backend: PerfBackend) -> Self {
+        backend.layered.into_backend()
     }
 }
 

@@ -13,11 +13,8 @@ impl LashCoreBuilder {
             .queued_work_batching
             .take()
             .ok_or(EmbedError::MissingQueuedWorkBatching)?;
-        let core = RuntimeHostConfig::new(
-            Arc::clone(&self.backend),
-            commit_budget,
-            queued_work_batching,
-        );
+        let core =
+            RuntimeHostConfig::new(self.backend.clone(), commit_budget, queued_work_batching);
         Ok(self.apply_core_overrides(core))
     }
 

@@ -224,7 +224,7 @@ pub(super) fn drift_law_rlm_factory() -> Arc<dyn lash_core::facade_support::Plug
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            &*RECOVERY_ARTIFACT_BACKEND,
+            &RECOVERY_ARTIFACT_BACKEND.clone().into(),
         )
         .with_process_lifecycle(false),
     )
@@ -1927,7 +1927,7 @@ pub(super) static RECOVERY_PROCESS_ENV_STORE: LazyLock<Arc<dyn ProcessExecutionE
 
 /// [`RECOVERY_ARTIFACT_BACKEND`]'s Lashlang artifact store.
 pub(super) fn recovery_artifact_store() -> lashlang::LashlangArtifacts {
-    lashlang::LashlangArtifacts::of_backend(&*RECOVERY_ARTIFACT_BACKEND)
+    lashlang::LashlangArtifacts::of_backend(&RECOVERY_ARTIFACT_BACKEND.clone().into())
 }
 
 pub(super) struct CommitRetryStore {

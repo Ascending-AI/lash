@@ -14,21 +14,19 @@ std::thread_local! {
 }
 
 /// A fresh SQLite memory backend (ADR 0102), held for the running test.
-pub(super) async fn memory_backend() -> Arc<dyn crate::Backend> {
+pub(super) async fn memory_backend() -> crate::Backend {
     let backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open a SQLite memory backend");
     TEST_BACKENDS.with(|held| held.borrow_mut().push(backend.clone()));
-    Arc::new(backend)
+    Arc::new(backend).into()
 }
 
 /// [`memory_backend`] with its process registry under a fault layer: the
 /// layer is the backend's registry, so the worker and the test both read
 /// through it.
-pub(super) async fn faulted_memory_backend() -> (
-    Arc<dyn crate::Backend>,
-    Arc<crate::testing::ProcessRegistryFaults>,
-) {
+pub(super) async fn faulted_memory_backend()
+-> (crate::Backend, Arc<crate::testing::ProcessRegistryFaults>) {
     let backend = memory_backend().await;
     let faults = Arc::new(crate::testing::ProcessRegistryFaults::new(
         backend.process_registry(),
@@ -41,9 +39,9 @@ pub(super) async fn faulted_memory_backend() -> (
 }
 
 /// The worker tests' host config over `backend`.
-pub(super) fn test_host_config(backend: &Arc<dyn crate::Backend>) -> RuntimeHostConfig {
+pub(super) fn test_host_config(backend: &crate::Backend) -> RuntimeHostConfig {
     RuntimeHostConfig::new(
-        Arc::clone(backend),
+        backend.clone(),
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     )

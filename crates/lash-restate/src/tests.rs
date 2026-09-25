@@ -88,7 +88,8 @@ pub(super) async fn memory_host_config() -> lash_core::facade_support::RuntimeHo
             lash_sqlite_store::SqliteBackend::memory()
                 .await
                 .expect("open a SQLite memory backend"),
-        ),
+        )
+        .into(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )

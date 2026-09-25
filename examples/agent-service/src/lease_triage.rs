@@ -206,7 +206,7 @@ mod tests {
                 .expect("open the scratch SQLite backend"),
         );
         let factory: Arc<dyn SessionStoreFactory> = backend.session_store_factory();
-        let core = LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+        let core = LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
             .model(

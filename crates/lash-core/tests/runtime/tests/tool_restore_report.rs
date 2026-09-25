@@ -81,7 +81,7 @@ fn state_for(session_id: &SessionId) -> RuntimeSessionState {
 }
 
 fn environment(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
     policy: lash_core::ToolSourcePolicy,
 ) -> lash_core::facade_support::RuntimeEnvironment {
@@ -92,7 +92,7 @@ fn environment(
 }
 
 fn environment_preserving_tools(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
     policy: lash_core::ToolSourcePolicy,
 ) -> lash_core::facade_support::RuntimeEnvironment {
@@ -106,7 +106,7 @@ fn owner(label: &str) -> lash_core::LeaseOwnerIdentity {
 }
 
 async fn open_runtime(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     session_id: &SessionId,
     store: &Arc<dyn lash_core::RuntimePersistence>,
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
@@ -371,7 +371,7 @@ async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit() {
 /// Seed the two-tool fixture: a granted open that records a beta opt-out and
 /// parks. Returns the catalog generation the durable snapshot is left at.
 async fn seed_opted_out_session(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     session_id: &SessionId,
     store: &Arc<dyn lash_core::RuntimePersistence>,
 ) -> u64 {
@@ -1151,7 +1151,7 @@ impl lash_core::ToolProvider for MutableTools {
 /// with alpha's source gone. Everything a live install could be asked to do
 /// happens from here.
 async fn live_require_runtime(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     session_id: &SessionId,
     store: &Arc<dyn lash_core::RuntimePersistence>,
 ) -> (LashRuntime, Arc<MutableTools>, lash_core::ToolState) {

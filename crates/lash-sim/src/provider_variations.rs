@@ -469,7 +469,7 @@ mod tests {
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            backend.as_ref(),
+            &backend,
         );
         let core = lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
             .generation(GenerationOptions {

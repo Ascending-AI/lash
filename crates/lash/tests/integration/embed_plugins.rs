@@ -205,7 +205,7 @@ async fn core_with_responses(responses: Vec<LlmResponse>) -> LashCore {
     let backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open a memory backend");
-    LashCore::standard_builder(Arc::new(backend), lash::TurnBudget::Unbounded)
+    LashCore::standard_builder(Arc::new(backend).into(), lash::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(provider)
         .model(

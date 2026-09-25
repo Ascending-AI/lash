@@ -221,7 +221,7 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
         .expect("register the cancel_process target");
 
     let (model, model_calls) = migrated_model(prefix, &target);
-    let mut host = crate::LawBackend::over_stores(stores.as_ref(), Arc::clone(&effect_host))
+    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores), Arc::clone(&effect_host))
         .host_config(
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),

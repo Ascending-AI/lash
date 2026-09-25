@@ -873,29 +873,6 @@ macro_rules! process_change_horizon_tests {
     };
 }
 
-/// Register the laws every `Backend` implementation answers (ADR 0102).
-///
-/// The fixture yields `(guard, Arc<dyn Backend>)`.
-#[macro_export]
-macro_rules! backend_tests {
-    ($fixture:block) => {
-        $crate::backend_tests!(@catalogue $fixture; [
-            (a_backend_binds_its_effect_host_to_its_identity, "backend-binding-identity"),
-        ]);
-    };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
-        $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, backend) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(backend).await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-            }
-        )*
-    };
-}
-
 /// Register the leased-completion projection-repair law.
 #[macro_export]
 macro_rules! process_projection_repair_tests {
@@ -1631,7 +1608,7 @@ macro_rules! session_read_view_tests {
 /// Register the mid-stream failure-evidence law: it runs a turn, so it needs
 /// a backend with an effect engine.
 ///
-/// The fixture yields `(guard, Arc<dyn Backend>, advance-commit-clock)`.
+/// The fixture yields `(guard, Backend, advance-commit-clock)`.
 #[macro_export]
 macro_rules! session_failure_evidence_tests {
     ($fixture:block) => {

@@ -8,7 +8,7 @@ use super::*;
 #[tokio::test]
 pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
     let sqlite = sqlite_memory_backend().await;
-    let backend: Arc<dyn lash_core::Backend> = Arc::new(sqlite.clone());
+    let backend: lash_core::Backend = Arc::new(sqlite.clone()).into();
     let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let transport = TestProvider::builder()
         .kind("openai-compatible")
@@ -135,7 +135,7 @@ pub(super) async fn failed_attempt_partial_usage_is_ledgered() {
 #[tokio::test]
 pub(super) async fn all_attempts_failed_partial_usage_is_ledgered() {
     let sqlite = sqlite_memory_backend().await;
-    let backend: Arc<dyn lash_core::Backend> = Arc::new(sqlite.clone());
+    let backend: lash_core::Backend = Arc::new(sqlite.clone()).into();
     let attempts = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let transport = TestProvider::builder()
         .kind("openai-compatible")

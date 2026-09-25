@@ -204,7 +204,7 @@ pub async fn public_signal_intent_wakes_parked_process(
                 let input = input.clone();
                 let turn_tx = turn_tx.clone();
                 Box::pin(async move {
-                    let mut host = crate::LawBackend::over_stores(stores.as_ref(), effect_host)
+                    let mut host = crate::LawBackend::over_stores(Arc::clone(&stores), effect_host)
                         .host_config(
                             crate::CommitBudget::bounded(1024 * 1024, 512),
                             crate::QueuedWorkBatchingConfig::new(1),

@@ -34,7 +34,7 @@ pub const DEFAULT_ENGINE_CHILD_MAX_ATTEMPTS: std::num::NonZeroU32 =
 /// registry — is read from the same backend. There is no in-memory default.
 #[derive(Clone)]
 pub struct RuntimeHostConfig {
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     pub durability: RuntimeDurabilityConfig,
     pub process_engines: ProcessEngineRegistry,
     pub providers: RuntimeProviderConfig,
@@ -171,7 +171,7 @@ impl RuntimeHostConfig {
     /// so hosts must choose them rather than silently inheriting policy; the
     /// zero-infra choice is a SQLite memory backend (ADR 0102, D3).
     pub fn new(
-        backend: Arc<dyn crate::Backend>,
+        backend: crate::Backend,
         commit_budget: crate::CommitBudget,
         queued_work_batching: crate::QueuedWorkBatchingConfig,
     ) -> Self {
@@ -236,7 +236,7 @@ impl RuntimeHostConfig {
     }
 
     /// The backend this config's ports come from.
-    pub fn backend(&self) -> &Arc<dyn crate::Backend> {
+    pub fn backend(&self) -> &crate::Backend {
         &self.backend
     }
 
@@ -244,7 +244,7 @@ impl RuntimeHostConfig {
     /// process-exec-env store and clock become `backend`'s, with every other
     /// setting kept. Every backend-bound port moves together, so the config
     /// still names exactly one backend (ADR 0102, D2).
-    pub fn with_backend(mut self, backend: Arc<dyn crate::Backend>) -> Self {
+    pub fn with_backend(mut self, backend: crate::Backend) -> Self {
         let max_attachment_bytes = self.durability.attachment_store.max_attachment_bytes();
         self.durability.attachment_store = Arc::new(
             crate::SessionAttachmentStore::ephemeral(backend.attachment_store())

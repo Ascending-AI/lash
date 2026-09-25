@@ -110,7 +110,7 @@ impl ReferenceTurn {
                 let store = SeamStore::wrap(Arc::clone(&turn.store), turn.seam.control.clone());
                 turn.host.route_to(&turn.seam);
                 let mut runtime = Box::pin(try_build_runtime_over_host(
-                    turn.stores.as_ref(),
+                    Arc::clone(&turn.stores),
                     store,
                     turn.seam.control.clone(),
                     turn.host.host(),

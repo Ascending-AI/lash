@@ -56,7 +56,7 @@ async fn build_runtime(parts: TurnParts) -> crate::LashRuntime {
         plugin,
         model,
     } = parts;
-    let mut config = crate::LawBackend::over_stores(stores.as_ref(), host).host_config(
+    let mut config = crate::LawBackend::over_stores(Arc::clone(&stores), host).host_config(
         crate::CommitBudget::bounded(1024 * 1024, 512),
         crate::QueuedWorkBatchingConfig::new(1),
     );

@@ -452,7 +452,7 @@ pub async fn record_turn_activity(
 /// The harness's Restate backend: the Restate engine host over the
 /// PostgreSQL store set, which also keeps the RLM factory's Lashlang
 /// artifacts.
-pub type E2eBackend = lash_restate::RestateBackend<lash_postgres_store::PostgresStoreSet>;
+pub type E2eBackend = lash_restate::RestateEngine;
 
 /// The Restate backend every worker and runner core of the harness runs on:
 /// the Restate engine host over the PostgreSQL store set, whose attachment
@@ -463,18 +463,20 @@ pub fn e2e_backend(
     restate_ingress_url: impl Into<lash_restate::RestateConnection>,
     restate_authority_id: lash_restate::RestateAuthorityId,
 ) -> Arc<E2eBackend> {
-    Arc::new(lash_restate::RestateBackend::new(
-        restate_ingress_url,
-        restate_authority_id,
+    Arc::new(lash_restate::RestateEngine::new(
         Arc::new(lash_postgres_store::PostgresStoreSet::new(
             storage,
             attachment_store,
         )),
-        // Restate turns must enter through an explicit handler-scoped effect
-        // controller. The harness drains durable ingress from its workflow
-        // handlers, so an ambient local queue pump would race those handlers
-        // and cannot legally execute their effects.
-        lash_restate::RestateQueuedWork::Disabled,
+        lash_restate::RestateConfig::new(
+            restate_ingress_url,
+            restate_authority_id,
+            // Restate turns must enter through an explicit handler-scoped effect
+            // controller. The harness drains durable ingress from its workflow
+            // handlers, so an ambient local queue pump would race those handlers
+            // and cannot legally execute their effects.
+            lash_restate::RestateQueuedWork::Disabled,
+        ),
     ))
 }
 
@@ -509,7 +511,7 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
             .memory_limit(MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(LashlangAbilities::default().with_sleep()),
-        config.backend.as_ref(),
+        &config.backend.clone().into(),
     );
     if let Some(trace_dir) = config.trace_dir.as_ref() {
         factory = factory.with_lashlang_execution_jsonl_path(
@@ -517,7 +519,7 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         );
     }
     let mut builder = lash::LashCore::rlm_builder(
-        Arc::clone(&config.backend) as Arc<dyn lash::Backend>,
+        lash::Backend::new(config.backend.clone()),
         lash::TurnBudget::Unbounded,
         factory,
     )

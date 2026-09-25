@@ -2064,19 +2064,6 @@ lash_conformance::effect_host_tests!({
     })
 });
 
-lash_conformance::backend_tests!({
-    let stores = lash_sqlite_store::SqliteStoreSet::memory()
-        .await
-        .expect("SQLite memory store set");
-    let backend = Arc::new(crate::RestateBackend::new(
-        "http://127.0.0.1:8080",
-        crate::RestateAuthorityId::new("lash-restate-backend-law").expect("valid authority"),
-        Arc::new(stores),
-        crate::RestateQueuedWork::Disabled,
-    )) as Arc<dyn lash_core::Backend>;
-    ((), backend)
-});
-
 /// FIG-3808: a process await's existence guard is a recorded step, so a
 /// crash-redriven awaiter serves the guard its first execution passed. By
 /// the redrive the awaited process has ended, its row has been pruned, and

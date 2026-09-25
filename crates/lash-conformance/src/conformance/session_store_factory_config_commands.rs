@@ -344,10 +344,10 @@ fn config_settlement_clock_wall_clock_faces_agree() {
 async fn config_settlement_store<M, Fut>(
     make: &M,
     request: &crate::SessionStoreCreateRequest,
-) -> (Arc<dyn crate::Backend>, Arc<dyn crate::RuntimePersistence>)
+) -> (crate::Backend, Arc<dyn crate::RuntimePersistence>)
 where
     M: Fn() -> Fut,
-    Fut: Future<Output = Arc<dyn crate::Backend>>,
+    Fut: Future<Output = crate::Backend>,
 {
     let backend = make().await;
     let store = backend
@@ -363,7 +363,7 @@ where
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn runtime_for_config_settlement(
-    backend: Arc<dyn crate::Backend>,
+    backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
     request: &crate::SessionStoreCreateRequest,
     clock: Arc<ConfigSettlementClock>,
@@ -456,7 +456,7 @@ fn config_settlement_patch(model_id: &str) -> crate::SessionConfigPatch {
 pub async fn session_config_settlement_timeout_is_typed<M, Fut>(make: M)
 where
     M: Fn() -> Fut,
-    Fut: Future<Output = Arc<dyn crate::Backend>>,
+    Fut: Future<Output = crate::Backend>,
 {
     let clock = Arc::new(ConfigSettlementClock::new(1_800_000_000_000));
     let request = session_store_request(
@@ -467,7 +467,7 @@ where
     let (backend, store) = config_settlement_store(&make, &request).await;
     enqueue_config_settlement_blocker(store.as_ref(), &request.session_id).await;
     let mut runtime = runtime_for_config_settlement(
-        Arc::clone(&backend),
+        backend.clone(),
         Arc::clone(&store),
         &request,
         Arc::clone(&clock),
@@ -501,7 +501,7 @@ where
 pub async fn cancelled_session_config_settlement_is_typed<M, Fut>(make: M)
 where
     M: Fn() -> Fut,
-    Fut: Future<Output = Arc<dyn crate::Backend>>,
+    Fut: Future<Output = crate::Backend>,
 {
     let clock = Arc::new(ConfigSettlementClock::new(1_800_000_000_000));
     let request = session_store_request(
@@ -512,7 +512,7 @@ where
     let (backend, store) = config_settlement_store(&make, &request).await;
     enqueue_config_settlement_blocker(store.as_ref(), &request.session_id).await;
     let runtime = runtime_for_config_settlement(
-        Arc::clone(&backend),
+        backend.clone(),
         Arc::clone(&store),
         &request,
         Arc::clone(&clock),
@@ -580,7 +580,7 @@ where
 pub async fn superseded_config_settlement_adopts_the_newer_head<M, Fut>(make: M)
 where
     M: Fn() -> Fut,
-    Fut: Future<Output = Arc<dyn crate::Backend>>,
+    Fut: Future<Output = crate::Backend>,
 {
     let clock = Arc::new(ConfigSettlementClock::new(1_800_000_000_000));
     let request = session_store_request(
@@ -590,7 +590,7 @@ where
     );
     let (backend, store) = config_settlement_store(&make, &request).await;
     let runtime = runtime_for_config_settlement(
-        Arc::clone(&backend),
+        backend.clone(),
         Arc::clone(&store),
         &request,
         Arc::clone(&clock),

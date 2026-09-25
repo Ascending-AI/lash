@@ -386,7 +386,7 @@ async fn measured_refcount_replacement_operations() {
     let backends: Vec<(&str, Arc<dyn SessionStoreFactory>)> = vec![
         (
             "sqlite_memory",
-            lash_core_execution::Backend::session_store_factory(&sqlite_memory),
+            lash_core_execution::Backend::from(sqlite_memory.clone()).session_store_factory(),
         ),
         (
             "sqlite",

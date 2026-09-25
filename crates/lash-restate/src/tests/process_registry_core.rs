@@ -401,7 +401,7 @@ pub(super) async fn restate_replay_does_not_reexecute_scalar_lashlang_tool_befor
     let artifact_backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open the artifact backend");
-    let artifact_store = lashlang::LashlangArtifacts::of_backend(&artifact_backend);
+    let artifact_store = lashlang::LashlangArtifacts::of_backend(&artifact_backend.clone().into());
     let rlm_plugin: Arc<dyn lash_core::facade_support::PluginFactory> = Arc::new(
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -409,7 +409,7 @@ pub(super) async fn restate_replay_does_not_reexecute_scalar_lashlang_tool_befor
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            &artifact_backend,
+            &artifact_backend.clone().into(),
         )
         .with_process_lifecycle(true),
     );

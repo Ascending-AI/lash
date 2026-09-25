@@ -14,12 +14,10 @@ use lash_sansio::SessionId;
 /// A standard-mode builder over a fresh memory backend with a model and
 /// provider already named.
 async fn peer_coherence_builder() -> crate::core::LashCoreBuilder {
-    peer_coherence_builder_over(memory_backend().await).without_queued_work()
+    peer_coherence_builder_over(memory_backend().await.into()).without_queued_work()
 }
 
-fn peer_coherence_builder_over(
-    backend: Arc<dyn lash_core::Backend>,
-) -> crate::core::LashCoreBuilder {
+fn peer_coherence_builder_over(backend: lash_core::Backend) -> crate::core::LashCoreBuilder {
     LashCore::standard_builder(backend, crate::TurnBudget::Unbounded)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
@@ -30,7 +28,7 @@ fn peer_coherence_builder_over(
 #[tokio::test]
 async fn commit_budget_is_required_for_builder_construction_and_deserialization() {
     let error = expect_build_error(
-        LashCore::standard_builder(memory_backend().await, crate::TurnBudget::Unbounded)
+        LashCore::standard_builder(memory_backend().await.into(), crate::TurnBudget::Unbounded)
             .without_queued_work()
             .provider(mock_provider())
             .model(mock_model_spec())
@@ -49,7 +47,7 @@ async fn commit_budget_is_required_for_builder_construction_and_deserialization(
 #[tokio::test]
 async fn queued_work_action_reserve_is_required() {
     let error = expect_build_error(
-        LashCore::standard_builder(memory_backend().await, crate::TurnBudget::Unbounded)
+        LashCore::standard_builder(memory_backend().await.into(), crate::TurnBudget::Unbounded)
             .without_queued_work()
             .provider(mock_provider())
             .model(mock_model_spec())
@@ -69,87 +67,6 @@ fn expect_build_error<T>(result: std::result::Result<T, EmbedError>, message: &s
     }
 }
 
-/// A backend whose binding identity names a different substrate than its
-/// effect host binds to: every port is a real memory backend's, only the
-/// identity lies.
-struct MisboundBackend {
-    inner: Arc<dyn lash_core::Backend>,
-}
-
-impl lash_core::Backend for MisboundBackend {
-    fn binding_identity(&self) -> &str {
-        "some-other-substrate"
-    }
-
-    fn clock(&self) -> Arc<dyn lash_core::Clock> {
-        self.inner.clock()
-    }
-
-    fn session_store_factory(&self) -> Arc<dyn lash_core::SessionStoreFactory> {
-        self.inner.session_store_factory()
-    }
-
-    fn effect_host(&self) -> Arc<dyn lash_core::EffectHost> {
-        self.inner.effect_host()
-    }
-
-    fn process_registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
-        self.inner.process_registry()
-    }
-
-    fn trigger_store(&self) -> Arc<dyn lash_core::TriggerStore> {
-        self.inner.trigger_store()
-    }
-
-    fn process_definition_registry(&self) -> Arc<dyn lash_core::ProcessDefinitionRegistry> {
-        self.inner.process_definition_registry()
-    }
-
-    fn process_env_store(&self) -> Arc<dyn lash_core::ProcessExecutionEnvStore> {
-        self.inner.process_env_store()
-    }
-
-    fn attachment_store(&self) -> Arc<dyn lash_core::AttachmentStore> {
-        self.inner.attachment_store()
-    }
-
-    fn module_artifacts(&self) -> Arc<dyn lash_core::ModuleArtifactStore> {
-        self.inner.module_artifacts()
-    }
-
-    fn process_work(&self) -> Option<lash_core::ProcessWorkWiring> {
-        self.inner.process_work()
-    }
-
-    fn queued_work(&self) -> lash_core::BackendQueuedWork {
-        self.inner.queued_work()
-    }
-}
-
-/// A backend whose effect host binds to another identity than its own is
-/// refused at build, before a record could name the wrong substrate.
-#[tokio::test]
-async fn a_backend_whose_host_binds_elsewhere_is_refused_at_build() {
-    let inner: Arc<dyn lash_core::Backend> = memory_backend().await;
-    let host_binding = inner.effect_host().turn_control_binding_id();
-    let error = expect_build_error(
-        peer_coherence_builder_over(Arc::new(MisboundBackend { inner }))
-            .without_queued_work()
-            .build(crate::testing::runtime_lease_owner()),
-        "a misbound backend must be refused",
-    );
-    match error {
-        EmbedError::BackendBindingMismatch {
-            binding_identity,
-            effect_host_binding,
-        } => {
-            assert_eq!(binding_identity, "some-other-substrate");
-            assert_eq!(effect_host_binding, host_binding);
-        }
-        other => panic!("expected BackendBindingMismatch, got {other}"),
-    }
-}
-
 /// FIG-3633: the RLM protocol keeps its Lashlang artifacts in the backend it
 /// was built over, so a core over any other backend refuses it at build, and
 /// a session refuses one supplied as a per-session factory. Otherwise a
@@ -162,15 +79,15 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
     let core_backend = memory_backend().await;
     // Precondition: two memory backends are two substrates.
     assert_ne!(
-        lash_core::Backend::binding_identity(artifacts.as_ref()),
-        lash_core::Backend::binding_identity(core_backend.as_ref()),
+        artifacts.identity(),
+        core_backend.identity(),
         "two memory backends must name two substrates"
     );
     let build = |factory_backend: &lash_sqlite_store::SqliteBackend| {
         LashCore::rlm_builder(
-            core_backend.clone(),
+            core_backend.clone().into(),
             crate::TurnBudget::Unbounded,
-            rlm_factory(factory_backend),
+            rlm_factory(&factory_backend.clone().into()),
         )
         .provider(mock_provider())
         .model(mock_model_spec())
@@ -194,14 +111,8 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
             backend,
         } => {
             assert_eq!(plugin_id, lash_protocol_rlm::RLM_PROTOCOL_PLUGIN_ID);
-            assert_eq!(
-                plugin_backend,
-                lash_core::Backend::binding_identity(artifacts.as_ref())
-            );
-            assert_eq!(
-                backend,
-                lash_core::Backend::binding_identity(core_backend.as_ref())
-            );
+            assert_eq!(plugin_backend, artifacts.identity());
+            assert_eq!(backend, core_backend.identity());
         }
         other => panic!("expected PluginBackendMismatch, got {other}"),
     }
@@ -211,7 +122,7 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
     let mut session = core.session("foreign-rlm-plugin");
     session
         .plugin_factories
-        .push(Arc::new(rlm_factory(artifacts.as_ref())));
+        .push(Arc::new(rlm_factory(&artifacts.clone().into())));
     let session_error = match session.open().await {
         Ok(_) => panic!("a per-session RLM factory over another backend must be refused"),
         Err(error) => error,
@@ -221,9 +132,9 @@ async fn a_core_refuses_an_rlm_factory_built_over_another_backend() -> Result<()
         "expected PluginBackendMismatch, got {session_error}"
     );
     let worker_error = expect_build_error(
-        core.durable_process_worker_config_with_plugins([
-            Arc::new(rlm_factory(artifacts.as_ref())) as Arc<dyn PluginFactory>,
-        ]),
+        core.durable_process_worker_config_with_plugins([Arc::new(rlm_factory(
+            &artifacts.clone().into(),
+        )) as Arc<dyn PluginFactory>]),
         "a worker's RLM factory over another backend must be refused",
     );
     assert!(
@@ -240,7 +151,7 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
     const NOW_MS: u64 = 4_200_000;
     let clock = Arc::new(lash_core::testing::TestClock::new(NOW_MS));
     let core = LashCore::standard_builder(
-        memory_backend_with_clock(clock).await,
+        memory_backend_with_clock(clock).await.into(),
         crate::TurnBudget::Unbounded,
     )
     .commit_budget(lash_core::CommitBudget::bounded(1024 * 1024, 512))
@@ -312,7 +223,7 @@ async fn backend_trigger_store_observes_the_backend_clock_for_inline_and_public_
     const NOW_MS: u64 = 4_200_000;
     let clock: Arc<dyn lash_core::Clock> = Arc::new(lash_core::testing::TestClock::new(NOW_MS));
     let core = explicit_ephemeral_facets_with_backend_work(peer_coherence_builder_over(
-        memory_backend_with_clock(clock).await,
+        memory_backend_with_clock(clock).await.into(),
     ))
     .build(crate::testing::runtime_lease_owner())?;
 
@@ -346,7 +257,8 @@ async fn a_file_backend_builds_successfully() -> Result<()> {
     let backend = lash_sqlite_store::SqliteBackend::open(dir.path())
         .await
         .expect("open the file backend");
-    peer_coherence_builder_over(Arc::new(backend)).build(crate::testing::runtime_lease_owner())?;
+    peer_coherence_builder_over(Arc::new(backend).into())
+        .build(crate::testing::runtime_lease_owner())?;
     Ok(())
 }
 
@@ -427,7 +339,7 @@ impl lash_core::ProcessWorkSubstrate for NoopProcessWork {
 /// A backend that runs its processes in `NoopProcessWork`, wired over the
 /// backend's own registry.
 async fn backend_with_external_process_work() -> DecoratedBackend {
-    DecoratedBackend::over(memory_backend().await).process_work(|registry| {
+    DecoratedBackend::over(memory_backend().await.into()).process_work(|registry| {
         lash_core::ProcessWorkWiring::new(
             lash_core::facade_support::watch_process_registry(registry),
             Arc::new(NoopProcessWork),
@@ -438,12 +350,13 @@ async fn backend_with_external_process_work() -> DecoratedBackend {
 #[tokio::test]
 async fn backend_process_work_configures_the_core_registry() -> Result<()> {
     let backend = backend_with_external_process_work().await;
-    let driver_registry = lash_core::Backend::process_work(&backend)
+    let driver_registry = lash_core::Backend::from(backend.clone())
+        .process_work()
         .expect("the backend supplies its process work")
         .registry()
         .clone();
     let core =
-        explicit_ephemeral_facets_with_backend_work(peer_coherence_builder_over(Arc::new(backend)))
+        explicit_ephemeral_facets_with_backend_work(peer_coherence_builder_over(backend.into()))
             .without_queued_work()
             .build(crate::testing::runtime_lease_owner())?;
 
@@ -455,9 +368,9 @@ async fn backend_process_work_configures_the_core_registry() -> Result<()> {
 
 #[tokio::test]
 async fn external_process_port_composes_native_queued_port_and_refreshes_after_ran() -> Result<()> {
-    let core = explicit_ephemeral_facets_with_backend_work(peer_coherence_builder_over(Arc::new(
-        backend_with_external_process_work().await,
-    )))
+    let core = explicit_ephemeral_facets_with_backend_work(peer_coherence_builder_over(
+        backend_with_external_process_work().await.into(),
+    ))
     .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("external-process-native-queue").open().await?;
@@ -565,10 +478,11 @@ async fn durable_process_worker_config_uses_the_backend_registry_and_trigger_sto
             ..lash_core::WorkCadencePolicy::default()
         },
     };
-    let core =
-        explicit_ephemeral_facets_with_backend_work(peer_coherence_builder_over(backend.clone()))
-            .native_substrate_config(native_substrate)
-            .build(core_owner)?;
+    let core = explicit_ephemeral_facets_with_backend_work(peer_coherence_builder_over(
+        backend.clone().into(),
+    ))
+    .native_substrate_config(native_substrate)
+    .build(core_owner)?;
 
     assert!(core.processes().observer().is_ok());
     let config = core.durable_process_worker_config()?;
@@ -597,7 +511,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
     let backend = memory_backend().await;
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -715,13 +629,13 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
     // below, over the backend's own registry.
     let sqlite = memory_backend().await;
     let registry = Arc::new(lash_core::testing::ProcessRegistryFaults::new(
-        lash_core::Backend::process_registry(sqlite.as_ref()),
+        lash_core::Backend::from(sqlite.clone()).process_registry(),
     ));
     let fault_registry = Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>;
-    let backend = DecoratedBackend::over(sqlite).process_registry(move |_| fault_registry);
-    let factory = lash_core::Backend::session_store_factory(&backend);
+    let backend = DecoratedBackend::over(sqlite.into()).process_registry(move |_| fault_registry);
+    let factory = lash_core::Backend::from(backend.clone()).session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        Arc::new(backend),
+        backend.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1156,7 +1070,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
 
 async fn duplicate_only_fork_intents_are_canonical(
     case: &str,
-    backend: Arc<dyn lash_core::Backend>,
+    backend: lash_core::Backend,
 ) -> Result<()> {
     let source_session_id = SessionId::from(format!("duplicate-only-source-{case}"));
     let branch_session_id = SessionId::from(format!("duplicate-only-branch-{case}"));
@@ -1261,7 +1175,7 @@ async fn duplicate_only_fork_intents_are_canonical(
 
 #[tokio::test]
 async fn duplicate_only_fork_intents_are_canonical_in_memory() -> Result<()> {
-    duplicate_only_fork_intents_are_canonical("memory", memory_backend().await).await
+    duplicate_only_fork_intents_are_canonical("memory", memory_backend().await.into()).await
 }
 
 #[tokio::test]
@@ -1273,7 +1187,8 @@ async fn duplicate_only_fork_intents_are_canonical_in_sqlite() -> Result<()> {
             lash_sqlite_store::SqliteBackend::open(root.path())
                 .await
                 .expect("open the file backend"),
-        ),
+        )
+        .into(),
     )
     .await
 }
@@ -1310,7 +1225,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
         })
         .await?;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1383,7 +1298,7 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
     let registry = backend.process_registry();
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1677,7 +1592,7 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
     let backend = memory_backend().await;
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())

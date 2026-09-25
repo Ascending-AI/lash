@@ -260,7 +260,7 @@ struct Backend {
     name: &'static str,
     /// The one substrate every core of the phase runs on, its RLM factory's
     /// Lashlang artifacts included.
-    backend: Arc<dyn lash::Backend>,
+    backend: lash::Backend,
     factory: Arc<dyn SessionStoreFactory>,
     /// Held so the SQLite root outlives the phase.
     _scratch: tempfile::TempDir,
@@ -281,7 +281,7 @@ impl Backend {
         Ok(Self {
             name: "sqlite",
             factory: backend.session_store_factory(),
-            backend,
+            backend: backend.into(),
             _scratch: scratch,
         })
     }
@@ -300,25 +300,22 @@ impl Backend {
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            self.backend.as_ref(),
+            &self.backend,
         );
-        let core = lash::LashCore::rlm_builder(
-            Arc::clone(&self.backend) as Arc<dyn lash::Backend>,
-            lash::TurnBudget::Unbounded,
-            factory,
-        )
-        .provider(provider)
-        .model(
-            lash::ModelSpec::builder("session-lease-triage-mock")
-                .context_window_tokens(200_000)
-                .build()
-                .map_err(anyhow::Error::msg)?,
-        )
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .lease_timings(timings)
-        .build(owner)
-        .context("build a session-lease-triage core")?;
+        let core =
+            lash::LashCore::rlm_builder(self.backend.clone(), lash::TurnBudget::Unbounded, factory)
+                .provider(provider)
+                .model(
+                    lash::ModelSpec::builder("session-lease-triage-mock")
+                        .context_window_tokens(200_000)
+                        .build()
+                        .map_err(anyhow::Error::msg)?,
+                )
+                .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+                .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+                .lease_timings(timings)
+                .build(owner)
+                .context("build a session-lease-triage core")?;
         Ok(TurnCore { core })
     }
 

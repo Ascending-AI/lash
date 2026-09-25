@@ -1171,19 +1171,21 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
     let recovered = queued_work.recovered.notified();
     // A Restate backend whose engine-backed queued driver is the failing
     // run handle: the enqueue commits, then the driver's wake fails.
-    let backend = Arc::new(crate::RestateBackend::new(
-        "http://127.0.0.1:8080",
-        crate::RestateAuthorityId::new("lash-restate-fig430").expect("valid authority"),
+    let backend = Arc::new(crate::RestateEngine::new(
         Arc::new(
             lash_sqlite_store::SqliteStoreSet::open(dir.path().join("sessions"))
                 .await
                 .expect("open FIG-430 store set"),
         ),
-        crate::RestateQueuedWork::Engine(Arc::new(lash_core::NativeQueuedWork::new(
-            queued_work.clone(),
-        ))),
+        crate::RestateConfig::new(
+            "http://127.0.0.1:8080",
+            crate::RestateAuthorityId::new("lash-restate-fig430").expect("valid authority"),
+            crate::RestateQueuedWork::Engine(Arc::new(lash_core::NativeQueuedWork::new(
+                queued_work.clone(),
+            ))),
+        ),
     ));
-    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    let core = lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
         .provider(provider)
         .model(lash_core::ModelSpec::new(
             "fig-430-model",

@@ -49,7 +49,7 @@ fn completed_text_call(text: &str) -> MockCall {
 }
 
 async fn run_composition_probe_turn(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     runtime: &mut LashRuntime,
     turn_id: &TurnId,
 ) {
@@ -447,7 +447,7 @@ async fn provider_spans_are_children_of_the_turn_span() {
 }
 
 async fn assert_standard_tool_lifecycle(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     call_id: &str,
     tool_name: &str,
     input_json: &str,
@@ -1267,7 +1267,7 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() {
 async fn provider_request_trace_sender_requires_extended_level_and_sink() {
     let backend = memory_backend().await;
     async fn assert_sender_absent(
-        backend: &std::sync::Arc<dyn lash_core::Backend>,
+        backend: &lash_core::Backend,
         host: EmbeddedRuntimeHost,
         turn_id: &TurnId,
     ) {

@@ -838,7 +838,7 @@ fn preview(value: &str, max_chars: usize) -> String {
 }
 
 fn benchmark_rlm_protocol_factory(
-    backend: &dyn lash::Backend,
+    backend: &lash::Backend,
 ) -> lash_protocol_rlm::RlmProtocolPluginFactory {
     lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -851,7 +851,7 @@ fn benchmark_rlm_protocol_factory(
 }
 
 fn benchmark_standard_builder(
-    backend: Arc<dyn lash::Backend>,
+    backend: lash::Backend,
     provider: ProviderHandle,
 ) -> lash::LashCoreBuilder {
     lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
@@ -860,7 +860,7 @@ fn benchmark_standard_builder(
 }
 
 fn benchmark_rlm_builder(
-    backend: Arc<dyn lash::Backend>,
+    backend: lash::Backend,
     provider: ProviderHandle,
     factory: lash_protocol_rlm::RlmProtocolPluginFactory,
 ) -> lash::LashCoreBuilder {
@@ -991,7 +991,7 @@ pub(crate) async fn build_embed_core(
         backend,
         stores,
     } = in_process_lane().await?;
-    let backend: Arc<dyn lash::Backend> = Arc::new(backend);
+    let backend: lash::Backend = backend.into();
     let effect_host = backend.effect_host();
     let provider = benchmark_provider(scenario).into_handle();
     let core = match scenario.execution_mode() {
@@ -1003,7 +1003,7 @@ pub(crate) async fn build_embed_core(
         ExecutionMode::Rlm => benchmark_rlm_builder(
             backend.clone(),
             provider,
-            benchmark_rlm_protocol_factory(backend.as_ref()),
+            benchmark_rlm_protocol_factory(&backend),
         )
         .with_explicit_ephemeral_facets()
         .tools(Arc::new(BenchmarkEchoTool::new(effect_host)))
@@ -1052,7 +1052,7 @@ pub(crate) async fn build_runtime(
         backend: perf_backend,
         stores: store_factory,
     } = in_process_lane().await?;
-    let backend: Arc<dyn lash::Backend> = Arc::new(perf_backend);
+    let backend: lash::Backend = perf_backend.into();
     let effect_host = backend.effect_host();
     let settlement_control = scenario
         .settlement_children()
@@ -1091,7 +1091,7 @@ pub(crate) async fn build_runtime(
             BenchmarkCore::Standard(builder.build(runtime_perf_owner())?)
         }
         ExecutionMode::Rlm => {
-            let mut factory = benchmark_rlm_protocol_factory(backend.as_ref());
+            let mut factory = benchmark_rlm_protocol_factory(&backend);
             if let Some(path) = trace_config
                 .as_ref()
                 .and_then(|config| config.lashlang_execution_jsonl_path.clone())
@@ -1294,8 +1294,9 @@ pub(crate) async fn build_runtime_with_sqlite_store(
         let metrics = factory.metrics();
         (Arc::new(factory), metrics)
     };
-    let backend: Arc<dyn lash::Backend> =
-        Arc::new(PerfBackend::over(sqlite).with_catalog(Arc::clone(&store_factory)));
+    let backend: lash::Backend = PerfBackend::over(sqlite.into())
+        .with_catalog(Arc::clone(&store_factory))
+        .into();
     let effect_host = backend.effect_host();
     for factory in benchmark_plugin_factories(scenario, &effect_host, None, None) {
         plugin_stack.push(factory);
@@ -1334,7 +1335,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
 
 /// A benchmark core on a durable backend, with the lane's plugin stack.
 fn durable_benchmark_core(
-    backend: Arc<dyn lash::Backend>,
+    backend: lash::Backend,
     mode_id: ExecutionMode,
     provider: ProviderHandle,
     plugin_stack: lash::PluginStack,
@@ -1343,7 +1344,7 @@ fn durable_benchmark_core(
     let builder = match mode_id {
         ExecutionMode::Standard => benchmark_standard_builder(backend, provider),
         ExecutionMode::Rlm => {
-            let factory = benchmark_rlm_protocol_factory(backend.as_ref());
+            let factory = benchmark_rlm_protocol_factory(&backend);
             benchmark_rlm_builder(backend, provider, factory)
         }
     };

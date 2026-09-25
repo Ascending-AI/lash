@@ -113,7 +113,7 @@ async fn attempt_reset_clears_response_establishment_before_later_evidence() {
 /// Collects the host-visible `TurnEvent`s for one streamed turn driven by a
 /// scripted provider call.
 async fn drive_streamed_turn(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     call: MockCall,
 ) -> (Vec<TurnActivity>, Vec<SessionStreamEvent>) {
     let mut runtime = standard_runtime_with_transport(backend, mock_provider(vec![call])).await;

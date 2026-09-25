@@ -123,7 +123,7 @@ pub(super) async fn run_once_checkpoint_state_hot_paths(
             // backend of their own; the state they capture is what is measured.
             let artifacts = lash_sqlite_store::SqliteBackend::memory().await?;
             let fixture = lash_protocol_rlm::RlmCheckpointPerfFixture::new(
-                &artifacts,
+                &artifacts.clone().into(),
                 CHECKPOINT_STATE_BINDINGS,
                 CHECKPOINT_STATE_BODY_BYTES,
             )?;

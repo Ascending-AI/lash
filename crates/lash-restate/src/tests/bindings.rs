@@ -1,4 +1,4 @@
-//! `RestateBackend::endpoint_builder` binds every service lash-restate
+//! `RestateEngine::endpoint_builder` binds every service lash-restate
 //! addresses by name — the set `LashService` spells for every caller — and
 //! leaves the host's own services to the host.
 
@@ -16,7 +16,7 @@ use restate_sdk::endpoint::Endpoint;
 use restate_sdk::prelude::{HandlerResult, WorkflowContext};
 
 use crate::services::LASH_SERVICES;
-use crate::{RestateAuthorityId, RestateBackend, RestateQueuedWork};
+use crate::{RestateAuthorityId, RestateConfig, RestateEngine, RestateQueuedWork};
 
 /// A host's own turn workflow, bound beside lash's services.
 #[restate_sdk::workflow]
@@ -81,20 +81,22 @@ fn lash_service_names() -> BTreeSet<String> {
 
 /// A Restate backend over a memory store set, and the process worker of a
 /// core built over it: what a host hands `endpoint_builder`.
-async fn backend_and_process_worker()
--> (Arc<RestateBackend>, lash_core_worker::DurableProcessWorker) {
-    let backend = Arc::new(RestateBackend::new(
-        "http://127.0.0.1:9",
-        RestateAuthorityId::new("lash-restate-endpoint-builder").expect("valid authority"),
+async fn backend_and_process_worker() -> (Arc<RestateEngine>, lash_core_worker::DurableProcessWorker)
+{
+    let backend = Arc::new(RestateEngine::new(
         Arc::new(
             lash_sqlite_store::SqliteStoreSet::memory()
                 .await
                 .expect("open the memory store set"),
         ) as Arc<dyn lash_core::StoreSet>,
-        RestateQueuedWork::Disabled,
+        RestateConfig::new(
+            "http://127.0.0.1:9",
+            RestateAuthorityId::new("lash-restate-endpoint-builder").expect("valid authority"),
+            RestateQueuedWork::Disabled,
+        ),
     ));
     let core = lash::LashCore::standard_builder(
-        Arc::clone(&backend) as Arc<dyn lash_core::Backend>,
+        lash_core::Backend::from(Arc::clone(&backend)),
         lash::TurnBudget::Unbounded,
     )
     .provider(

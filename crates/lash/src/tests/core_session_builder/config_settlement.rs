@@ -3,7 +3,7 @@ use super::*;
 #[tokio::test]
 async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -50,7 +50,7 @@ async fn settled_config_survives_park_without_pending_graph_nodes() -> Result<()
 #[tokio::test]
 async fn commanded_model_survives_an_incidental_default_spec_reopen() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -103,7 +103,7 @@ async fn host_supplied_reopen_value_is_durable_immediately_after_open() -> Resul
     let backend = memory_backend().await;
     let factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend,
+        backend.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())

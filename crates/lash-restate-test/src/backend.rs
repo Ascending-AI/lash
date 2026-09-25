@@ -17,7 +17,7 @@ use lash_core::testing::TestClock;
 use lash_core::{AdmittedScope, ScopedEffectController, StoreSet};
 use lash_core_worker::DurableProcessWorker;
 use lash_restate::{
-    RestateAuthorityId, RestateBackend, RestateConnection, RestateIngressClient,
+    RestateAuthorityId, RestateConfig, RestateConnection, RestateEngine, RestateIngressClient,
     RestateProcessServing, RestateProcessWorkerSlot, RestateQueuedWork,
 };
 use restate_sdk::context::WorkflowContext;
@@ -66,7 +66,7 @@ pub enum BackendError {
 #[derive(Clone)]
 pub struct RestateTestBackend {
     server: RestateTestServer,
-    restate: Arc<RestateBackend>,
+    restate: Arc<RestateEngine>,
     stores: Arc<lash_sqlite_store::SqliteStoreSet>,
     clock: Arc<TestClock>,
     connection: RestateConnection,
@@ -149,11 +149,13 @@ impl RestateTestBackend {
         let authority =
             RestateAuthorityId::new(format!("lash-restate-test-{}", server.config().seed))
                 .map_err(|error| BackendError::Authority(error.to_string()))?;
-        let restate = Arc::new(RestateBackend::new(
-            connection.clone(),
-            authority.clone(),
+        let restate = Arc::new(RestateEngine::new(
             Arc::clone(&stores) as Arc<dyn StoreSet>,
-            RestateQueuedWork::Disabled,
+            RestateConfig::new(
+                connection.clone(),
+                authority.clone(),
+                RestateQueuedWork::Disabled,
+            ),
         ));
         // The endpoint exists before any core over this backend does, so it
         // serves processes on whatever worker the fixture installs later.
@@ -216,12 +218,12 @@ impl RestateTestBackend {
     /// The backend a runtime runs on: lash-restate's engine over the store
     /// set, connected to the server double. Hand it to a core wherever a
     /// test used `SqliteBackend::memory()`.
-    pub fn lash_backend(&self) -> Arc<dyn lash_core::Backend> {
-        Arc::clone(&self.restate) as Arc<dyn lash_core::Backend>
+    pub fn lash_backend(&self) -> lash_core::Backend {
+        lash_core::Backend::new(self.restate.clone())
     }
 
     /// lash-restate's own backend value, for APIs that name it.
-    pub fn restate(&self) -> &Arc<RestateBackend> {
+    pub fn restate(&self) -> &Arc<RestateEngine> {
         &self.restate
     }
 

@@ -11,7 +11,7 @@ impl<const ENGINE: bool> lash_core::testing::EffectLayer for JournaledCommitCont
 }
 
 async fn assert_commit_placement(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     session_id: &SessionId,
     effect_host: Arc<dyn lash_core::EffectHost>,
     expected_entries: usize,
@@ -100,7 +100,7 @@ async fn assert_commit_placement(
 }
 
 /// The host an engine-owned controller is lent through.
-fn engine_commit_host(backend: &Arc<dyn lash_core::Backend>) -> Arc<dyn lash_core::EffectHost> {
+fn engine_commit_host(backend: &lash_core::Backend) -> Arc<dyn lash_core::EffectHost> {
     effect::layered_effect_host(backend, Arc::new(JournaledCommitController::<true>))
 }
 

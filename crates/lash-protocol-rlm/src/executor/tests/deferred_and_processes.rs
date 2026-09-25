@@ -3,12 +3,13 @@ use lash_core::testing::store_fixtures::durable_admission;
 
 /// A fresh SQLite memory backend's effect host: the one journal a
 /// fixture's worker, cell context and process service share.
-pub(super) async fn memory_backend() -> Arc<dyn lash_core::Backend> {
+pub(super) async fn memory_backend() -> lash_core::Backend {
     Arc::new(
         lash_sqlite_store::SqliteBackend::memory()
             .await
             .expect("open a memory backend"),
     )
+    .into()
 }
 
 /// Runs a deferred tool resolution and then fails its journal commit, over a
@@ -2060,7 +2061,7 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -2204,7 +2205,7 @@ pub(super) async fn typescript_restored_process_handle_await_crosses_turn_bounda
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )
@@ -2349,7 +2350,7 @@ pub(super) async fn typescript_cell_reads_process_handle_id_and_invokes_subseque
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
-        Arc::clone(&backend),
+        backend.clone(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     )

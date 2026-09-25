@@ -117,7 +117,7 @@ fn protocol_factory(
 }
 
 fn turn_scope(
-    backend: &Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     controller: &RecordingEffectController,
     session_id: &SessionId,
     turn_id: &TurnId,
@@ -277,7 +277,7 @@ async fn response_handoff_abort_settles_before_the_next_cell() {
     .await;
     let turn_id = "response-handoff-abort";
     let controller_for_first = controller.clone();
-    let backend_for_turn = Arc::clone(&backend);
+    let backend_for_turn = backend.clone();
     let first = lash_core::task::spawn(async move {
         let result = runtime
             .run_turn_assembled(

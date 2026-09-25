@@ -2,7 +2,7 @@ use super::*;
 
 /// The standard core over `backend`: a scope an advanced turn brings must
 /// be lent by the host the core controls turns through.
-fn standard_core_over(backend: Arc<dyn lash_core::Backend>) -> Result<LashCore> {
+fn standard_core_over(backend: lash_core::Backend) -> Result<LashCore> {
     explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
@@ -16,7 +16,7 @@ fn standard_core_over(backend: Arc<dyn lash_core::Backend>) -> Result<LashCore> 
 pub(super) async fn turn_run_uses_configured_effect_host_without_explicit_effects() -> Result<()> {
     let recorder = EffectRecorder::default();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        recorder.backend().await,
+        recorder.backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -45,13 +45,16 @@ pub(super) async fn turn_run_uses_configured_effect_host_without_explicit_effect
 #[tokio::test]
 pub(super) async fn durable_configured_effect_host_scopes_plain_turn_entry_points() -> Result<()> {
     let recorder = EffectRecorder::default();
-    let core = LashCore::standard_builder(recorder.backend().await, crate::TurnBudget::Unbounded)
-        .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
-        .without_queued_work()
-        .provider(mock_provider())
-        .model(mock_model_spec())
-        .build(crate::testing::runtime_lease_owner())?;
+    let core = LashCore::standard_builder(
+        recorder.backend().await.into(),
+        crate::TurnBudget::Unbounded,
+    )
+    .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
+    .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
+    .without_queued_work()
+    .provider(mock_provider())
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("durable-default-effect-host").open().await?;
     let events = RecordingEvents::default();
 
@@ -122,13 +125,13 @@ pub(super) async fn durable_configured_effect_host_scopes_plain_turn_entry_point
 pub(super) async fn advanced_turn_preserves_a_custom_effect_scope() -> Result<()> {
     let recorder = EffectRecorder::default();
     let backend = recorder.backend().await;
-    let effect_host = lash_core::Backend::effect_host(backend.as_ref());
+    let effect_host = lash_core::Backend::from(backend.clone()).effect_host();
     let custom_scope = lash_core::ExecutionScope::runtime_operation("custom-foreground-scope");
     let scoped_effect_controller = effect_host.scoped(
         lash_core::AdmittedScope::unpinned(custom_scope.clone())
             .expect("a runtime-operation scope admits unpinned"),
     )?;
-    let core = standard_core_over(backend.clone())?;
+    let core = standard_core_over(backend.clone().into())?;
     let session = core.session("custom-effect-scope").open().await?;
 
     let output = session
@@ -151,12 +154,12 @@ pub(super) async fn advanced_turn_preserves_a_custom_effect_scope() -> Result<()
 pub(super) async fn advanced_turn_rejects_mismatched_turn_scope_and_trace_identity() -> Result<()> {
     let recorder = EffectRecorder::default();
     let backend = recorder.backend().await;
-    let effect_host = lash_core::Backend::effect_host(backend.as_ref());
+    let effect_host = lash_core::Backend::from(backend.clone()).effect_host();
     let scoped_effect_controller = effect_host.scoped(lash_core::AdmittedScope::turn(
         "mismatched-turn-scope",
         "admitted-turn",
     ))?;
-    let core = standard_core_over(backend.clone())?;
+    let core = standard_core_over(backend.clone().into())?;
     let session = core.session("mismatched-turn-scope").open().await?;
 
     let error = session
@@ -191,7 +194,7 @@ pub(super) async fn advanced_turn_rejects_mismatched_turn_scope_and_trace_identi
 pub(super) async fn turn_id_sets_execution_scope_and_trace_identity() -> Result<()> {
     let recorder = EffectRecorder::default();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        recorder.backend().await,
+        recorder.backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -225,8 +228,8 @@ pub(super) async fn advanced_turn_id_precedence_prefers_builder_then_scope_fallb
 {
     let recorder = EffectRecorder::default();
     let backend = recorder.backend().await;
-    let effect_host = lash_core::Backend::effect_host(backend.as_ref());
-    let core = standard_core_over(backend.clone())?;
+    let effect_host = lash_core::Backend::from(backend.clone()).effect_host();
+    let core = standard_core_over(backend.clone().into())?;
 
     // A session pins the physical scope its turns are cancelled under at its
     // first admitted turn, so a runtime-operation scope and a turn scope run
@@ -313,7 +316,7 @@ pub(super) async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -352,7 +355,7 @@ pub(super) async fn queued_turn_run_drains_ready_work_and_returns_none_when_idle
 pub(super) async fn queued_turn_id_sets_physical_activity_and_effect_identity() -> Result<()> {
     let recorder = EffectRecorder::default();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        recorder.backend().await,
+        recorder.backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -424,7 +427,7 @@ pub(super) async fn all_queued_builder_families_begin_with_turn_started() -> Res
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -574,7 +577,7 @@ pub(super) async fn queued_turn_id_accepts_exact_cancel_before_dispatch() -> Res
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -630,7 +633,7 @@ pub(super) async fn queued_turn_id_accepts_exact_cancel_before_dispatch() -> Res
 pub(super) async fn anonymous_selected_noops_leave_no_unreachable_receipt() -> Result<()> {
     let backend = memory_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -661,7 +664,7 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -713,7 +716,7 @@ pub(super) async fn turn_started_identity_targets_cancellation_from_pull_stream(
 #[tokio::test]
 pub(super) async fn queued_turn_rejects_drain_id_with_turn_id_at_dispatch() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -754,7 +757,7 @@ pub(super) async fn queued_turn_rejects_drain_id_with_turn_id_at_dispatch() -> R
 #[tokio::test]
 pub(super) async fn an_exhausted_queue_reports_an_empty_claim_refusal() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(
@@ -809,7 +812,7 @@ pub(super) async fn refused_automatic_drain_does_not_block_a_direct_turn() -> Re
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(
@@ -876,7 +879,7 @@ pub(super) async fn automatic_pickup_keeps_an_explicit_empty_run_receipt() -> Re
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -941,7 +944,7 @@ pub(super) async fn explicit_reentry_keeps_an_anonymous_empty_run_receipt() -> R
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1036,7 +1039,7 @@ pub(super) async fn automatic_pickup_settles_a_frozen_selected_empty_run() -> Re
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -1114,7 +1117,7 @@ pub(super) async fn an_oversized_queued_row_fails_an_automatic_drain_by_name() -
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(
@@ -1178,7 +1181,7 @@ pub(super) async fn a_busy_execution_lane_is_never_reported_as_an_exhausted_queu
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
     let backend = memory_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -1233,7 +1236,7 @@ pub(super) async fn selected_queued_turn_refuses_partial_key_break_without_settl
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -1354,7 +1357,7 @@ pub(super) async fn selected_queued_turn_redrives_an_interrupted_composition_exa
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -1492,7 +1495,7 @@ pub(super) async fn selected_queued_turn_reports_claimed_now_and_already_satisfi
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -1575,7 +1578,7 @@ pub(super) async fn selected_queued_turn_deduplicates_absent_ids_and_requires_la
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -1658,7 +1661,7 @@ pub(super) async fn selected_queued_turn_deduplicates_present_claimable_id() -> 
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -1726,7 +1729,7 @@ pub(super) async fn selected_queued_turn_empty_selection_is_satisfied_noop() -> 
         .into_handle();
     let backend = memory_backend().await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -1776,7 +1779,7 @@ pub(super) async fn selected_queued_turn_validates_every_interrupted_composition
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -1959,7 +1962,7 @@ pub(super) async fn selected_queued_turn_redrive_ignores_successor_max_rows() ->
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -2096,7 +2099,7 @@ pub(super) async fn selected_queued_turn_reports_execution_lane_contention() -> 
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -2186,7 +2189,7 @@ pub(super) async fn selected_queued_turn_reports_execution_lane_contention() -> 
 pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable_identity()
 -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -2268,7 +2271,7 @@ pub(super) async fn idle_queued_input_emits_typed_remote_application_and_durable
 #[tokio::test]
 pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_window() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -2332,7 +2335,7 @@ pub(super) async fn queued_turn_explicit_effects_create_queue_drain_scope_intern
 {
     let recorder = EffectRecorder::default();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -2374,7 +2377,7 @@ pub(super) async fn selected_queued_turn_with_effects_preserves_batch_ids_and_sc
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())

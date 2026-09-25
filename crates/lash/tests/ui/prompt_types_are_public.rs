@@ -1,6 +1,6 @@
 use lash::PromptLayerSink;
 
-fn with_prompt_layer(backend: std::sync::Arc<dyn lash::Backend>) {
+fn with_prompt_layer(backend: lash::Backend) {
     let template =
         lash::prompt::PromptTemplate::new(vec![lash::prompt::PromptTemplateSection::untitled(
             vec![

@@ -325,9 +325,9 @@ finish("done through raw activities");
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            backend.as_ref(),
+            &backend.clone().into(),
         );
-        let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
+        let core = LashCore::rlm_builder(backend.into(), lash::TurnBudget::Unbounded, factory)
             .provider(provider)
             .model(
                 lash::ModelSpec::builder("scripted-model")

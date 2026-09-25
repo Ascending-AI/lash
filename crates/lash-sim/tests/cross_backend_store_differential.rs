@@ -1040,7 +1040,7 @@ struct BackendRunner {
     handles: BTreeMap<&'static str, NamedHandle>,
     /// The backend the facade lifecycle core runs on: the backend's own
     /// backend over the same storage.
-    lifecycle_backend: Arc<dyn lash::Backend>,
+    lifecycle_backend: lash::Backend,
     lifecycle_core: Option<lash::LashCore>,
     reopened_postgres_pool: Option<PgPool>,
     first_lease: Option<lash_core::SessionExecutionLease>,
@@ -1117,7 +1117,7 @@ impl BackendRunner {
         )
         .expect("build differential lifecycle provider");
         lash::LashCore::standard_builder(
-            Arc::clone(&self.lifecycle_backend),
+            self.lifecycle_backend.clone(),
             lash::TurnBudget::Unbounded,
         )
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -2083,9 +2083,8 @@ async fn runners_for_case_with_clock(
     let postgres_factory_dyn =
         Arc::clone(&postgres_factory) as Arc<dyn ConformanceSessionStoreFactory>;
 
-    let memory_lifecycle: Arc<dyn lash::Backend> =
-        Arc::clone(&memory_backend) as Arc<dyn lash::Backend>;
-    let sqlite_lifecycle: Arc<dyn lash::Backend> = Arc::new(
+    let memory_lifecycle: lash::Backend = lash::Backend::new(memory_backend.clone());
+    let sqlite_lifecycle: lash::Backend = Arc::new(
         lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
             &sqlite_case_root,
             lash_sqlite_store::SqliteBackendOptions::default(),
@@ -2093,7 +2092,8 @@ async fn runners_for_case_with_clock(
         )
         .await
         .expect("open the SQLite lifecycle backend"),
-    );
+    )
+    .into();
     // PostgreSQL is storage only (ADR 0104): the lifecycle runs over its
     // store set, and the session delete it drives runs as a process whose
     // outcome a real effect host journals, here a SQLite host beside the case.
@@ -2105,15 +2105,15 @@ async fn runners_for_case_with_clock(
         .await
         .expect("open the PostgreSQL lifecycle's effect host"),
     );
-    let postgres_lifecycle: Arc<dyn lash::Backend> = lash_conformance::backend_over(
-        &lash_postgres_store::PostgresStoreSet::with_clock(
+    let postgres_lifecycle: lash::Backend = lash_conformance::backend_over(
+        Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
             postgres,
             Arc::new(lash::persistence::FileAttachmentStore::new(
                 sqlite_case_root.join("postgres-attachments"),
             )),
             lash_core::WakeDeliveryConfig::default(),
             Arc::clone(&clock),
-        ),
+        )),
         postgres_effects,
     );
 

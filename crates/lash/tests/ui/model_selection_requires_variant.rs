@@ -1,4 +1,4 @@
-fn model_selection_requires_variant(backend: std::sync::Arc<dyn lash::Backend>) {
+fn model_selection_requires_variant(backend: lash::Backend) {
     let _ = lash::LashCore::standard_builder(backend.clone(), lash::TurnBudget::Unbounded)
         .model("model-only");
     let _ = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)

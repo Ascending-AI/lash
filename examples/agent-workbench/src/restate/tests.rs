@@ -710,15 +710,17 @@ async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
 async fn turn_control_binding_routes_foreground_turns_through_the_configured_host() {
     let data_dir = tempfile::tempdir().expect("turn control binding tempdir");
 
-    let restate = Arc::new(lash_restate::RestateBackend::new(
-        lash_restate::RestateConnection::new("http://127.0.0.1:8080"),
-        lash_restate::RestateAuthorityId::new("agent-workbench-tests").unwrap(),
+    let restate = Arc::new(lash_restate::RestateEngine::new(
         Arc::new(
             lash_sqlite_store::SqliteStoreSet::open(data_dir.path().join("lash-sessions"))
                 .await
                 .expect("open the SQLite store set"),
         ),
-        lash_restate::RestateQueuedWork::Disabled,
+        lash_restate::RestateConfig::new(
+            lash_restate::RestateConnection::new("http://127.0.0.1:8080"),
+            lash_restate::RestateAuthorityId::new("agent-workbench-tests").unwrap(),
+            lash_restate::RestateQueuedWork::Disabled,
+        ),
     ));
     let durable_host: Arc<dyn lash::durability::EffectHost> = restate.effect_host();
     let scope = lash::runtime::AdmittedScope::turn("routing-session", "routing-turn");
@@ -730,7 +732,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
     assert_eq!(binding.binding_id(), durable_host.turn_control_binding_id());
 
     let provider_calls = Arc::new(AtomicUsize::new(0));
-    let ownership_core = |backend: Arc<dyn lash::Backend>, name: &str| {
+    let ownership_core = |backend: lash::Backend, name: &str| {
         let provider_calls = Arc::clone(&provider_calls);
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-effect-replay-ownership")
@@ -751,27 +753,23 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
                 .instruction_limit(lash::rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
                 .build(),
-            backend.as_ref(),
+            &backend,
         );
-        lash::LashCore::rlm_builder(
-            backend as Arc<dyn lash::Backend>,
-            lash::TurnBudget::Unbounded,
-            factory,
-        )
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .provider(provider)
-        .model(
-            lash::ModelSpec::builder("test-model")
-                .context_window_tokens(4096)
-                .build()
-                .expect("model spec"),
-        )
-        .build(crate::test_core_owner())
-        .unwrap_or_else(|error| panic!("build {name} ownership core: {error:?}"))
+        lash::LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .provider(provider)
+            .model(
+                lash::ModelSpec::builder("test-model")
+                    .context_window_tokens(4096)
+                    .build()
+                    .expect("model spec"),
+            )
+            .build(crate::test_core_owner())
+            .unwrap_or_else(|error| panic!("build {name} ownership core: {error:?}"))
     };
 
-    let controller_owned = ownership_core(restate, "Restate");
+    let controller_owned = ownership_core(restate.into(), "Restate");
     let session = controller_owned
         .session("workbench-controller-owned-replay")
         .open()
@@ -802,7 +800,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
     // A backend whose host journals effects in process uses the same
     // facade entry point and executes the local provider body instead.
     let in_process = ownership_core(
-        crate::tests::test_file_backend(&data_dir.path().join("in-process")),
+        crate::tests::test_file_backend(&data_dir.path().join("in-process")).into(),
         "SQLite",
     );
     let session = in_process

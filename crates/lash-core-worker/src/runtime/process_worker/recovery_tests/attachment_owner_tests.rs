@@ -93,7 +93,7 @@ impl SessionStoreFactory for ParentBoundSessionStoreFactory {
 
 /// The parent session's store on `backend`, bound and committed.
 async fn parent_bound_session_store(
-    backend: &Arc<dyn crate::Backend>,
+    backend: &crate::Backend,
     policy: crate::SessionPolicy,
 ) -> Arc<dyn crate::RuntimePersistence> {
     const PARENT_SESSION_ID: &str = "parent-bound-process-worker";

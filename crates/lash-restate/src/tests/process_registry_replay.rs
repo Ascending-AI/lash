@@ -74,7 +74,7 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
     let artifact_backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open the artifact backend");
-    let artifact_store = lashlang::LashlangArtifacts::of_backend(&artifact_backend);
+    let artifact_store = lashlang::LashlangArtifacts::of_backend(&artifact_backend.clone().into());
     artifact_store
         .publish_module_artifact(
             &lash_core::ArtifactOwner::host("restate-serializable-input"),

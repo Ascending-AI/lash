@@ -83,7 +83,7 @@ use crate::state::{AgentServiceDurability, AppStateData, anyhow_like};
 #[cfg(feature = "restate")]
 use lash::durability::DurableProcessWorker;
 #[cfg(feature = "restate")]
-use lash_restate::RestateBackend;
+use lash_restate::RestateEngine;
 
 const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
 
@@ -91,7 +91,7 @@ const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
 /// Lashlang artifacts, with the handles on its stores that the service's own
 /// retention pass uses.
 struct ServiceBackend {
-    backend: Arc<dyn lash::Backend>,
+    backend: lash::Backend,
     store_factory: Arc<lash_sqlite_store::SqliteSessionStoreFactory>,
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
 }
@@ -267,7 +267,7 @@ async fn async_main() -> anyhow_like::Result<()> {
     // effect journal beside the stores; Restate durability puts the Restate
     // engine host over the same store set.
     #[cfg(feature = "restate")]
-    let mut restate_backend: Option<Arc<RestateBackend<lash_sqlite_store::SqliteStoreSet>>> = None;
+    let mut restate_backend: Option<Arc<RestateEngine>> = None;
     let ServiceBackend {
         backend,
         store_factory,
@@ -282,7 +282,7 @@ async fn async_main() -> anyhow_like::Result<()> {
             ServiceBackend {
                 store_factory: backend.session_store_factory(),
                 attachment_store: backend.attachment_store(),
-                backend,
+                backend: backend.into(),
             }
         }
         AgentServiceDurability::Restate => {
@@ -294,16 +294,18 @@ async fn async_main() -> anyhow_like::Result<()> {
                 let store_factory = stores.session_store_factory();
                 let attachment_store =
                     stores.attachment_store() as Arc<dyn lash::persistence::AttachmentStore>;
-                let backend = Arc::new(RestateBackend::new(
-                    restate_ingress_url.clone(),
-                    restate_authority_id
-                        .clone()
-                        .expect("Restate authority configured"),
+                let backend = Arc::new(RestateEngine::new(
                     Arc::new(stores),
-                    // The service runs every turn in the foreground through a
-                    // handler-scoped controller and enqueues no work; an
-                    // in-process queue pump would race the Restate handlers.
-                    lash_restate::RestateQueuedWork::Disabled,
+                    RestateConfig::new(
+                        restate_ingress_url.clone(),
+                        restate_authority_id
+                            .clone()
+                            .expect("Restate authority configured"),
+                        // The service runs every turn in the foreground through a
+                        // handler-scoped controller and enqueues no work; an
+                        // in-process queue pump would race the Restate handlers.
+                        lash_restate::RestateQueuedWork::Disabled,
+                    ),
                 ));
                 // Restate-backed turns pass a handler-scoped controller per
                 // turn via `.stream_to_with_effects(..., &controller)`; the
@@ -354,10 +356,10 @@ async fn async_main() -> anyhow_like::Result<()> {
             .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
             .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
             .build(),
-        backend.as_ref(),
+        &backend,
     );
     let mut core_builder = lash::LashCore::rlm_builder(
-        backend as Arc<dyn lash::Backend>,
+        backend,
         lash::TurnBudget::Unbounded,
         factory,
     )

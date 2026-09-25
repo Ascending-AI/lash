@@ -26,7 +26,7 @@ pub use lash_core_store::chronological;
 pub use lash_core_store::impl_noop_attachment_manifest;
 pub use lash_core_store::protocol_turn_options::{ProtocolTurnOptions, ProtocolTurnOptionsError};
 mod backend;
-pub use backend::{Backend, BackendQueuedWork, StoreSet};
+pub use backend::{Backend, BackendQueuedWork, EffectEngine, StoreBindingId, StoreSet};
 mod module_artifacts;
 pub use module_artifacts::{
     ArtifactPublicationPause, ArtifactStoreError, DurabilityTier, ModuleArtifactStore,

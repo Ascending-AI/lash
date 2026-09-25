@@ -29,7 +29,7 @@ mod tests {
         let controller = crate::EffectHost::scoped_static(backend.effect_host().as_ref(), admitted)
             .expect("the test scope validates")
             .expect("the backend host lends a static controller");
-        crate::testing::TestExecutionContextBuilder::for_backend(backend)
+        crate::testing::TestExecutionContextBuilder::for_backend(&backend.clone().into())
             .session_id(session_id)
             .borrowed_effect_controller(controller)
             .build()
@@ -66,10 +66,11 @@ mod tests {
     async fn a_session_path_process_start_publishes_no_environment_before_its_journal() {
         let backend = crate::support::memory_backend().await;
         let env_store = backend.process_env_store();
-        let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
-            .session_id("session")
-            .build()
-            .into_runtime();
+        let context =
+            crate::testing::TestExecutionContextBuilder::for_backend(&backend.clone().into())
+                .session_id("session")
+                .build()
+                .into_runtime();
         let registration = crate::ProcessRegistration::new(
             "journaled-process",
             crate::ProcessInput::Engine {
@@ -109,10 +110,11 @@ mod tests {
     async fn a_retired_durable_owner_still_fails_the_public_env_ref_publish() {
         let backend = crate::support::memory_backend().await;
         let env_store = backend.process_env_store();
-        let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
-            .session_id("session")
-            .build()
-            .into_runtime();
+        let context =
+            crate::testing::TestExecutionContextBuilder::for_backend(&backend.clone().into())
+                .session_id("session")
+                .build()
+                .into_runtime();
         let owner = crate::ArtifactOwner::Execution(crate::ExecutionScope::runtime_operation(
             "durable-owner",
         ));

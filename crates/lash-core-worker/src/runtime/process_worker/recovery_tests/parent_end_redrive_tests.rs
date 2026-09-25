@@ -64,7 +64,7 @@ fn cancel_child(
 ///
 /// `head_revision` is the store's revision this commit expects: every turn here
 /// commits into the one shared session, so a second commit follows the first.
-async fn commit_turn(backend: &Arc<dyn crate::Backend>, turn_id: &str, head_revision: u64) {
+async fn commit_turn(backend: &crate::Backend, turn_id: &str, head_revision: u64) {
     let factory = backend.session_store_factory();
     let session_id = SessionId::from(SESSION);
     let store = match factory

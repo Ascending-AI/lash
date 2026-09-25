@@ -162,13 +162,13 @@ async fn pg_law_backend(
     storage: &PostgresStorage,
 ) -> (
     (tempfile::TempDir, tempfile::TempDir),
-    Arc<dyn lash_core_execution::Backend>,
+    lash_core_execution::Backend,
 ) {
     let (attachments, stores) = pg_law_stores(storage);
     let (promise_dir, effect_host) = promise_authority().await;
     (
         (attachments, promise_dir),
-        lash_conformance::backend_over(stores.as_ref(), effect_host),
+        lash_conformance::backend_over(stores, effect_host),
     )
 }
 
@@ -806,7 +806,7 @@ lash_conformance::observer_intent_tests!({
     let (attachments, stores) = pg_law_stores(&storage);
     (
         (database_lock, attachments),
-        lash_conformance::recording_backend_over(stores.as_ref()),
+        lash_conformance::recording_backend_over(stores),
     )
 });
 
@@ -1772,14 +1772,14 @@ lash_conformance::session_failure_evidence_tests!({
         1_800_000_000_000,
     ));
     let attachments = tempfile::tempdir().expect("attachment directory");
-    let stores = lash_postgres_store::PostgresStoreSet::with_clock(
+    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::with_clock(
         &storage,
         Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path())),
         lash_core_execution::WakeDeliveryConfig::default(),
         Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
-    );
+    ));
     let (promise_dir, effect_host) = promise_authority().await;
-    let backend = lash_conformance::backend_over(&stores, effect_host);
+    let backend = lash_conformance::backend_over(stores, effect_host);
     (
         (_database_lock, attachments, promise_dir),
         backend,

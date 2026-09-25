@@ -17,7 +17,7 @@ pub(crate) struct BoundSession {
     effect_host: Arc<dyn EffectHost>,
     process: ProcessWorkWiring,
     queued: Arc<dyn QueuedWorkSubstrate>,
-    backend: Arc<dyn lash_core::Backend>,
+    backend: lash_core::Backend,
     attachment_store: Arc<lash_core::facade_support::SessionAttachmentStore>,
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
     process_engines: lash_core::ProcessEngineRegistry,
@@ -43,7 +43,7 @@ impl BoundSession {
             effect_host: Arc::clone(&env.core.control.effect_host),
             process,
             queued,
-            backend: Arc::clone(env.core.backend()),
+            backend: env.core.backend().clone(),
             attachment_store: Arc::clone(&env.core.durability.attachment_store),
             process_env_store: Arc::clone(&env.core.durability.process_env_store),
             process_engines: env.core.process_engines.clone(),
@@ -108,7 +108,7 @@ impl BoundSession {
     /// Provider, plugin, prompt, tracing, and policy configuration continue to
     /// come from the core performing resume.
     pub(crate) fn apply_owner(&self, mut env: RuntimeEnvironment) -> RuntimeEnvironment {
-        env.core = env.core.with_backend(Arc::clone(&self.backend));
+        env.core = env.core.with_backend(self.backend.clone());
         env.core.control.effect_host = self.effect_host();
         env.core.durability.attachment_store = Arc::clone(&self.attachment_store);
         env.core.durability.process_env_store = Arc::clone(&self.process_env_store);

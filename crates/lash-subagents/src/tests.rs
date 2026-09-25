@@ -1030,11 +1030,12 @@ async fn run_seed_probe_inner(
     let language_features = LashlangLanguageFeatures::default().with_label_annotations();
     // One SQLite memory backend (ADR 0102) holds every port of the probe; the
     // handle lives for the whole probe, and with it the databases.
-    let backend: Arc<dyn lash_core::Backend> = Arc::new(
+    let backend: lash_core::Backend = Arc::new(
         lash_sqlite_store::SqliteBackend::memory()
             .await
             .expect("open a SQLite memory backend"),
-    );
+    )
+    .into();
     // The RLM protocol plugin (which compiles + stores the parent turn's process
     // artifacts) and the process engine that the worker runs those artifacts
     // through must share ONE artifact store; otherwise the worker cannot load the
@@ -1042,7 +1043,8 @@ async fn run_seed_probe_inner(
     let artifact_backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open the artifact backend");
-    let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&artifact_backend);
+    let artifact_store =
+        lash_lashlang_runtime::LashlangArtifacts::of_backend(&artifact_backend.clone().into());
 
     let factories: Vec<Arc<dyn PluginFactory>> = vec![
         Arc::new(
@@ -1053,7 +1055,7 @@ async fn run_seed_probe_inner(
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                     .build()
                     .with_lashlang_language_features(language_features),
-                &artifact_backend,
+                &artifact_backend.clone().into(),
             )
             .with_lashlang_execution_trace(execution_sink.clone(), trace_context.clone())
             // This harness assembles the plugin host and process engine by hand
@@ -1101,7 +1103,7 @@ async fn run_seed_probe_inner(
         .expect("plugin session");
     let embedded = lash_core::facade_support::EmbeddedRuntimeHost::new({
         let mut config = RuntimeHostConfig::new(
-            Arc::clone(&backend),
+            backend.clone(),
             lash_core::CommitBudget::bounded(1024 * 1024, 512),
             lash_core::QueuedWorkBatchingConfig::new(1),
         );
@@ -1131,7 +1133,7 @@ async fn run_seed_probe_inner(
             factories,
             {
                 let mut config = RuntimeHostConfig::new(
-                    Arc::clone(&backend),
+                    backend.clone(),
                     lash_core::CommitBudget::bounded(1024 * 1024, 512),
                     lash_core::QueuedWorkBatchingConfig::new(1),
                 );
@@ -1213,7 +1215,7 @@ struct SeedProbe {
     child_execution_count: Arc<AtomicUsize>,
     process_registry: Arc<dyn lash_core::ProcessRegistry>,
     /// Holds the probe's memory backend, whose databases the registry reads.
-    _backend: Arc<dyn lash_core::Backend>,
+    _backend: lash_core::Backend,
 }
 
 impl SeedProbe {

@@ -112,6 +112,8 @@ struct StoreParts {
     /// The substrate's identity: the one value every component's identity
     /// is taken from, the effect host's turn-control binding included.
     identity: Arc<str>,
+    /// [`Self::identity`] as the store set's binding identity.
+    binding: lash_core_execution::StoreBindingId,
     anchors: Option<Arc<MemoryAnchors>>,
     options: SqliteBackendOptions,
     clock: Arc<dyn Clock>,
@@ -448,6 +450,7 @@ impl SqliteStoreSet {
         };
         Ok(Self {
             inner: Arc::new(StoreParts {
+                binding: lash_core_execution::StoreBindingId::new(Arc::clone(&identity)),
                 identity,
                 location,
                 anchors,
@@ -540,49 +543,16 @@ impl SqliteStoreSet {
     }
 }
 
-impl lash_core_execution::Backend for SqliteBackend {
-    fn binding_identity(&self) -> &str {
-        self.identity()
-    }
-
-    fn clock(&self) -> Arc<dyn Clock> {
-        Arc::clone(&self.stores.inner.clock)
-    }
-
-    fn session_store_factory(&self) -> Arc<dyn lash_core_execution::SessionStoreFactory> {
-        SqliteBackend::session_store_factory(self)
+/// The SQLite effect engine: its own replay host and the runtime's
+/// in-process process and queued-work drivers, over its store set. It remains
+/// until FIG-3668 deletes it (ADR 0104).
+impl lash_core_execution::EffectEngine for SqliteBackend {
+    fn stores(&self) -> Arc<dyn lash_core_execution::StoreSet> {
+        Arc::new(self.stores.clone())
     }
 
     fn effect_host(&self) -> Arc<dyn lash_core_execution::EffectHost> {
         SqliteBackend::effect_host(self)
-    }
-
-    fn process_registry(&self) -> Arc<dyn lash_core_execution::ProcessRegistry> {
-        SqliteBackend::process_registry(self)
-    }
-
-    fn trigger_store(&self) -> Arc<dyn lash_core_execution::TriggerStore> {
-        SqliteBackend::trigger_store(self)
-    }
-
-    fn process_definition_registry(
-        &self,
-    ) -> Arc<dyn lash_core_execution::ProcessDefinitionRegistry> {
-        SqliteBackend::process_definition_registry(self)
-    }
-
-    fn process_env_store(&self) -> Arc<dyn lash_core_execution::ProcessExecutionEnvStore> {
-        SqliteBackend::process_env_store(self)
-    }
-
-    fn attachment_store(&self) -> Arc<dyn lash_core_execution::AttachmentStore> {
-        SqliteBackend::attachment_store(self)
-    }
-
-    /// The durable-core store that keeps the process execution environments
-    /// keeps the Lashlang module artifacts too.
-    fn module_artifacts(&self) -> Arc<dyn lash_core_execution::ModuleArtifactStore> {
-        SqliteBackend::process_env_store(self)
     }
 
     /// The runtime's in-process worker drives this backend's registry.
@@ -596,6 +566,10 @@ impl lash_core_execution::Backend for SqliteBackend {
 }
 
 impl lash_core_execution::StoreSet for SqliteStoreSet {
+    fn binding_identity(&self) -> &lash_core_execution::StoreBindingId {
+        &self.inner.binding
+    }
+
     fn clock(&self) -> Arc<dyn Clock> {
         Arc::clone(&self.inner.clock)
     }
@@ -750,7 +724,7 @@ mod tests {
             );
         }
         assert_eq!(
-            lash_core_execution::Backend::binding_identity(&file),
+            lash_core_execution::StoreSet::binding_identity(file.stores()).as_str(),
             file.identity()
         );
         assert_eq!(

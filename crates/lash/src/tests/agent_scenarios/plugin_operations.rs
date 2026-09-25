@@ -56,7 +56,7 @@ pub(super) fn agent_scenario_plugin_task_query_command() -> Result<()> {
                 }
             });
         let core = explicit_ephemeral_facets(LashCore::standard_builder(
-            memory_backend().await,
+            memory_backend().await.into(),
             crate::TurnBudget::Unbounded,
         ))
         .provider(mock_provider())

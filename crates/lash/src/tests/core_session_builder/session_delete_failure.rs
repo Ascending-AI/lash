@@ -9,7 +9,7 @@ async fn facade_session_delete_failure_preserves_witnessed_partial_report() -> R
         deleted_blob_count: 2,
     };
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend_with_catalog(factory.clone()).await,
+        backend_with_catalog(factory.clone()).await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())

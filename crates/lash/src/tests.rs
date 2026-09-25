@@ -802,8 +802,8 @@ struct ReusableStoreFactory {
 /// records or faults the requests it serves.
 pub(crate) async fn backend_with_catalog(
     catalog: Arc<dyn lash_core::SessionStoreFactory>,
-) -> Arc<DecoratedBackend> {
-    Arc::new(DecoratedBackend::over(memory_backend().await).session_store_factory(move |_| catalog))
+) -> DecoratedBackend {
+    DecoratedBackend::over(memory_backend().await.into()).session_store_factory(move |_| catalog)
 }
 
 /// A memory backend whose catalog serves `store` for every session id:
@@ -811,11 +811,9 @@ pub(crate) async fn backend_with_catalog(
 /// directly. Every other port is the memory backend's.
 pub(crate) async fn backend_serving(
     store: Arc<dyn lash_core::RuntimePersistence>,
-) -> Arc<DecoratedBackend> {
-    Arc::new(
-        DecoratedBackend::over(memory_backend().await)
-            .session_store_factory(move |_| Arc::new(ReusableStoreFactory { store })),
-    )
+) -> DecoratedBackend {
+    DecoratedBackend::over(memory_backend().await.into())
+        .session_store_factory(move |_| Arc::new(ReusableStoreFactory { store }))
 }
 
 // The reusable mock store uses a no-op attachment manifest; this fixture
@@ -2355,11 +2353,11 @@ fn checkpoint_gated_provider(
 }
 
 pub(crate) async fn standard_core() -> LashCore {
-    standard_core_over(memory_backend().await)
+    standard_core_over(memory_backend().await.into())
 }
 
 /// A standard core over `backend`.
-pub(crate) fn standard_core_over(backend: Arc<dyn lash_core::Backend>) -> LashCore {
+pub(crate) fn standard_core_over(backend: lash_core::Backend) -> LashCore {
     explicit_ephemeral_facets(LashCore::standard_builder(
         backend,
         crate::TurnBudget::Unbounded,
@@ -2373,7 +2371,7 @@ pub(crate) fn standard_core_over(backend: Arc<dyn lash_core::Backend>) -> LashCo
 /// Default RLM protocol factory for tests, over `backend`, the substrate its
 /// Lashlang artifacts live in.
 #[cfg(feature = "rlm")]
-fn rlm_factory(backend: &dyn lash_core::Backend) -> lash_protocol_rlm::RlmProtocolPluginFactory {
+fn rlm_factory(backend: &lash_core::Backend) -> lash_protocol_rlm::RlmProtocolPluginFactory {
     lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -2387,19 +2385,15 @@ fn rlm_factory(backend: &dyn lash_core::Backend) -> lash_protocol_rlm::RlmProtoc
 /// A [`LashCoreBuilder`] pre-seeded with the default RLM factory.
 #[cfg(feature = "rlm")]
 async fn rlm_core_builder() -> crate::core::LashCoreBuilder {
-    rlm_core_builder_over(memory_backend().await)
+    rlm_core_builder_over(memory_backend().await.into())
 }
 
 /// [`rlm_core_builder`] over `backend`: the core and its RLM factory share
 /// the one backend.
 #[cfg(feature = "rlm")]
-fn rlm_core_builder_over(backend: Arc<dyn lash_core::Backend>) -> crate::core::LashCoreBuilder {
-    let factory = rlm_factory(backend.as_ref());
-    LashCore::rlm_builder(
-        backend as Arc<dyn lash_core::Backend>,
-        crate::TurnBudget::Unbounded,
-        factory,
-    )
+fn rlm_core_builder_over(backend: lash_core::Backend) -> crate::core::LashCoreBuilder {
+    let factory = rlm_factory(&backend);
+    LashCore::rlm_builder(backend, crate::TurnBudget::Unbounded, factory)
 }
 
 mod scope_support;

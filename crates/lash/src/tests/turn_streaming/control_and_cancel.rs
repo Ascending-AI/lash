@@ -3,7 +3,7 @@ use super::*;
 #[tokio::test]
 pub(super) async fn turn_stream_finish_returns_committed_assistant_prose() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(semantic_group_provider())
@@ -29,7 +29,7 @@ pub(super) async fn turn_stream_finish_returns_committed_assistant_prose() -> Re
 pub(super) async fn turn_run_collects_activities_and_returns_committed_assistant_prose()
 -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(semantic_group_provider())
@@ -54,7 +54,7 @@ pub(super) async fn turn_run_collects_activities_and_returns_committed_assistant
 #[tokio::test]
 pub(super) async fn retry_status_streams_as_semantic_turn_event() -> Result<()> {
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(retry_once_provider())
@@ -114,7 +114,7 @@ pub(super) async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Re
     let (entered_tx, entered_rx) = oneshot::channel();
     let (release_tx, release_rx) = oneshot::channel();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(checkpoint_gated_provider(entered_tx, release_rx))
@@ -246,7 +246,7 @@ pub(super) async fn cancel_running_turns_stops_inflight_turn() -> Result<()> {
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -357,7 +357,7 @@ pub(super) async fn next_turn_notification_during_a_live_turn_has_bounded_hydrat
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -434,10 +434,10 @@ pub(super) async fn create_only_factory_returns_to_idle_after_draining_unknown_c
         .into_handle();
     let inner = memory_backend().await;
     let catalog = inner.session_store_factory();
-    let backend = DecoratedBackend::over(inner)
+    let backend = DecoratedBackend::over(inner.into())
         .session_store_factory(|inner| Arc::new(CreateOnlySessionStoreFactory { inner }));
     let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
-        Arc::new(backend),
+        backend.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -567,7 +567,7 @@ pub(super) async fn native_queued_work_burst_reuses_one_hydrated_runtime() -> Re
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -677,7 +677,7 @@ pub(super) async fn cancel_running_turns_sweeps_lock_queued_turns() -> Result<()
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -713,7 +713,7 @@ pub(super) async fn cancel_running_turns_does_not_cross_separately_opened_handle
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -751,7 +751,7 @@ pub(super) async fn a_local_stop_commits_the_request_it_was_forwarded_as() -> Re
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -786,7 +786,7 @@ pub(super) async fn cancel_running_turns_reaches_queued_turn_drains() -> Result<
     let (started_tx, started_rx) = oneshot::channel::<()>();
     let provider = hang_on_signal_provider(Arc::new(StdMutex::new(vec![started_tx])));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -838,7 +838,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.clone(),
+        backend.clone().into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -1005,7 +1005,7 @@ pub(super) async fn active_steer_after_last_call_defers_to_next_turn_first_call(
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -1155,7 +1155,7 @@ pub(super) async fn accepted_active_steer_interrupt_is_not_requeued() -> Result<
         .build()
         .into_handle();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(provider)
@@ -1271,7 +1271,7 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
             })
             .build()
             .into_handle();
-        let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await))
+        let core = explicit_ephemeral_facets(rlm_core_builder_over(memory_backend().await.into()))
             .provider(provider)
             .model(mock_model_spec())
             .without_queued_work()
@@ -1412,7 +1412,7 @@ pub(super) async fn run_collects_ordered_assistant_prose_activity() -> Result<()
 pub(super) async fn core_catalog_and_actual_turn_resolve_the_identical_contract() -> Result<()> {
     let tools = ContractRecordingTools::default();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(tool_roundtrip_provider())
@@ -1513,7 +1513,7 @@ pub(super) async fn private_run_collector_records_ordered_activities() -> Result
 pub(super) async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Result<()> {
     let live = Arc::new(RecordingEvents::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await,
+        memory_backend().await.into(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(tool_roundtrip_provider())
@@ -1558,7 +1558,7 @@ pub(super) fn turn_run_batch_tool_runs_every_call_concurrently_and_preserves_ord
         let tools = Arc::new(RuntimeBatchTools::new());
         let tool_provider: Arc<dyn ToolProvider> = tools.clone();
         let core = explicit_ephemeral_facets(LashCore::standard_builder(
-            memory_backend().await,
+            memory_backend().await.into(),
             crate::TurnBudget::Unbounded,
         ))
         .provider(runtime_batch_provider())
@@ -1628,7 +1628,7 @@ pub(super) fn batch_child_tool_calls_carry_parent_call_id_linkage() -> Result<()
             let tools = Arc::new(RuntimeBatchTools::new());
             let tool_provider: Arc<dyn ToolProvider> = tools.clone();
             let core = explicit_ephemeral_facets(LashCore::standard_builder(
-                memory_backend().await,
+                memory_backend().await.into(),
                 crate::TurnBudget::Unbounded,
             ))
             .provider(runtime_batch_provider())

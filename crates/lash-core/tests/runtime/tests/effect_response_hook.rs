@@ -123,7 +123,7 @@ fn journaled_raw_completion(recorder: &RecordingEffectController) -> LlmResponse
 /// allocate the next index and silently become a fresh logical turn.
 async fn drive_turn(
     runtime: &mut LashRuntime,
-    backend: &Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     recorder: &RecordingEffectController,
     turn_id: &TurnId,
 ) -> Result<AssembledTurn, RuntimeError> {

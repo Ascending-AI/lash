@@ -40,7 +40,7 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
     );
     let stores = backend.session_store_factory();
     let processes = backend.process_registry();
-    let core = LashCore::standard_builder(backend, TurnBudget::Unbounded)
+    let core = LashCore::standard_builder(backend.into(), TurnBudget::Unbounded)
         .provider(provider)
         .model(model.clone())
         .commit_budget(CommitBudget::bounded(1024 * 1024, 512))

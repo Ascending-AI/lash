@@ -1,42 +1,62 @@
 //! A test backend that decorates the ports of one backend.
 //!
 //! A runtime takes every store port and its effect host from one
-//! [`Backend`](crate::Backend) (ADR 0102, D2). A test that records or faults a
-//! port does not hand the runtime a second port beside the backend; it layers
-//! a decorator over the backend's own port, and [`LayeredBackend`] is the
-//! backend that answers with the decorated port and with the inner backend's
-//! for every other.
+//! [`Backend`](crate::Backend) (ADR 0104, B2). A test that records or faults
+//! a port does not hand the runtime a second port beside the backend; it
+//! layers a decorator over the backend's own port, and [`LayeredBackend`]
+//! builds the backend whose engine and store set answer with the decorated
+//! port and with the inner backend's for every other.
 
 use std::sync::Arc;
 
 use crate::{
-    AttachmentStore, Backend, BackendQueuedWork, Clock, EffectHost, ModuleArtifactStore,
-    ProcessDefinitionRegistry, ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring,
-    SessionStoreFactory, TriggerStore,
+    AttachmentStore, Backend, BackendQueuedWork, Clock, EffectEngine, EffectHost,
+    ModuleArtifactStore, ProcessContinuationStore, ProcessDefinitionRegistry,
+    ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring, SessionStoreFactory,
+    StoreBindingId, StoreSet, TriggerStore,
 };
 
 /// One backend with some of its ports decorated. See the module
 /// documentation.
+#[derive(Clone)]
 pub struct LayeredBackend {
-    inner: Arc<dyn Backend>,
+    inner: Backend,
+    clock: Arc<dyn Clock>,
     session_store_factory: Arc<dyn SessionStoreFactory>,
     effect_host: Arc<dyn EffectHost>,
     process_registry: Arc<dyn ProcessRegistry>,
     trigger_store: Arc<dyn TriggerStore>,
     process_definitions: Arc<dyn ProcessDefinitionRegistry>,
+    process_env_store: Arc<dyn ProcessExecutionEnvStore>,
+    attachment_store: Arc<dyn AttachmentStore>,
+    module_artifacts: Arc<dyn ModuleArtifactStore>,
+    process_work: Option<ProcessWorkWiring>,
+    queued_work: BackendQueuedWork,
 }
 
 impl LayeredBackend {
     /// `inner`, undecorated.
-    pub fn over(inner: Arc<dyn Backend>) -> Self {
+    pub fn over(inner: Backend) -> Self {
         Self {
+            clock: inner.clock(),
             session_store_factory: inner.session_store_factory(),
             effect_host: inner.effect_host(),
             process_registry: inner.process_registry(),
             trigger_store: inner.trigger_store(),
             process_definitions: inner.process_definition_registry(),
+            process_env_store: inner.process_env_store(),
+            attachment_store: inner.attachment_store(),
+            module_artifacts: inner.module_artifacts(),
+            process_work: inner.process_work(),
+            queued_work: inner.queued_work(),
             inner,
         }
+    }
+
+    /// Stamp and sleep on `clock` in place of the inner backend's clock.
+    pub fn with_clock(mut self, clock: Arc<dyn Clock>) -> Self {
+        self.clock = clock;
+        self
     }
 
     /// Replace the session-store factory with `layer` over it.
@@ -84,31 +104,132 @@ impl LayeredBackend {
         self
     }
 
+    /// Replace the process-execution-environment store with `layer` over it.
+    pub fn map_process_env_store(
+        mut self,
+        layer: impl FnOnce(Arc<dyn ProcessExecutionEnvStore>) -> Arc<dyn ProcessExecutionEnvStore>,
+    ) -> Self {
+        self.process_env_store = layer(self.process_env_store);
+        self
+    }
+
+    /// Replace the attachment store with `layer` over it.
+    pub fn map_attachment_store(
+        mut self,
+        layer: impl FnOnce(Arc<dyn AttachmentStore>) -> Arc<dyn AttachmentStore>,
+    ) -> Self {
+        self.attachment_store = layer(self.attachment_store);
+        self
+    }
+
+    /// Replace the module-artifact store with `layer` over it.
+    pub fn map_module_artifacts(
+        mut self,
+        layer: impl FnOnce(Arc<dyn ModuleArtifactStore>) -> Arc<dyn ModuleArtifactStore>,
+    ) -> Self {
+        self.module_artifacts = layer(self.module_artifacts);
+        self
+    }
+
+    /// Drive the backend's processes through `wire`, which receives the
+    /// (possibly decorated) registry the wiring must be built over.
+    pub fn wire_process_work(
+        mut self,
+        wire: impl FnOnce(Arc<dyn ProcessRegistry>) -> ProcessWorkWiring,
+    ) -> Self {
+        let wiring = wire(Arc::clone(&self.process_registry));
+        self.process_registry = Arc::clone(wiring.registry());
+        self.process_work = Some(wiring);
+        self
+    }
+
+    /// Run the backend's queued work on `queued_work`.
+    pub fn with_queued_work(mut self, queued_work: BackendQueuedWork) -> Self {
+        self.queued_work = queued_work;
+        self
+    }
+
     /// The decorated backend, as the handle a host config takes.
-    pub fn into_backend(self) -> Arc<dyn Backend> {
-        Arc::new(self)
+    pub fn into_backend(self) -> Backend {
+        let inner_stores = self.inner.stores();
+        let stores = Arc::new(LayeredStoreSet {
+            binding: inner_stores.binding_identity().clone(),
+            inner: inner_stores,
+            clock: self.clock,
+            session_store_factory: self.session_store_factory,
+            process_registry: self.process_registry,
+            trigger_store: self.trigger_store,
+            process_definitions: self.process_definitions,
+            process_env_store: self.process_env_store,
+            attachment_store: self.attachment_store,
+            module_artifacts: self.module_artifacts,
+        });
+        Backend::new(Arc::new(LayeredEngine {
+            stores,
+            effect_host: self.effect_host,
+            process_work: self.process_work,
+            queued_work: self.queued_work,
+        }))
     }
 }
 
-impl Backend for LayeredBackend {
-    fn binding_identity(&self) -> &str {
-        self.inner.binding_identity()
-    }
+struct LayeredEngine {
+    stores: Arc<LayeredStoreSet>,
+    effect_host: Arc<dyn EffectHost>,
+    process_work: Option<ProcessWorkWiring>,
+    queued_work: BackendQueuedWork,
+}
 
-    fn clock(&self) -> Arc<dyn Clock> {
-        self.inner.clock()
-    }
-
-    fn session_store_factory(&self) -> Arc<dyn SessionStoreFactory> {
-        Arc::clone(&self.session_store_factory)
+impl EffectEngine for LayeredEngine {
+    fn stores(&self) -> Arc<dyn StoreSet> {
+        Arc::clone(&self.stores) as Arc<dyn StoreSet>
     }
 
     fn effect_host(&self) -> Arc<dyn EffectHost> {
         Arc::clone(&self.effect_host)
     }
 
+    fn process_work(&self) -> Option<ProcessWorkWiring> {
+        self.process_work.clone()
+    }
+
+    fn queued_work(&self) -> BackendQueuedWork {
+        self.queued_work.clone()
+    }
+}
+
+struct LayeredStoreSet {
+    inner: Arc<dyn StoreSet>,
+    binding: StoreBindingId,
+    clock: Arc<dyn Clock>,
+    session_store_factory: Arc<dyn SessionStoreFactory>,
+    process_registry: Arc<dyn ProcessRegistry>,
+    trigger_store: Arc<dyn TriggerStore>,
+    process_definitions: Arc<dyn ProcessDefinitionRegistry>,
+    process_env_store: Arc<dyn ProcessExecutionEnvStore>,
+    attachment_store: Arc<dyn AttachmentStore>,
+    module_artifacts: Arc<dyn ModuleArtifactStore>,
+}
+
+impl StoreSet for LayeredStoreSet {
+    fn binding_identity(&self) -> &StoreBindingId {
+        &self.binding
+    }
+
+    fn clock(&self) -> Arc<dyn Clock> {
+        Arc::clone(&self.clock)
+    }
+
+    fn session_store_factory(&self) -> Arc<dyn SessionStoreFactory> {
+        Arc::clone(&self.session_store_factory)
+    }
+
     fn process_registry(&self) -> Arc<dyn ProcessRegistry> {
         Arc::clone(&self.process_registry)
+    }
+
+    fn process_continuations(&self) -> Arc<dyn ProcessContinuationStore> {
+        self.inner.process_continuations()
     }
 
     fn trigger_store(&self) -> Arc<dyn TriggerStore> {
@@ -120,22 +241,14 @@ impl Backend for LayeredBackend {
     }
 
     fn process_env_store(&self) -> Arc<dyn ProcessExecutionEnvStore> {
-        self.inner.process_env_store()
+        Arc::clone(&self.process_env_store)
     }
 
     fn attachment_store(&self) -> Arc<dyn AttachmentStore> {
-        self.inner.attachment_store()
+        Arc::clone(&self.attachment_store)
     }
 
     fn module_artifacts(&self) -> Arc<dyn ModuleArtifactStore> {
-        self.inner.module_artifacts()
-    }
-
-    fn process_work(&self) -> Option<ProcessWorkWiring> {
-        self.inner.process_work()
-    }
-
-    fn queued_work(&self) -> BackendQueuedWork {
-        self.inner.queued_work()
+        Arc::clone(&self.module_artifacts)
     }
 }

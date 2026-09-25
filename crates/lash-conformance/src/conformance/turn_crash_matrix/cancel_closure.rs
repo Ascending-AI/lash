@@ -89,7 +89,7 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
                 let point = point.clone();
                 Box::pin(async move {
                     let runtime = Box::pin(try_build_runtime_on_host(
-                        stores.as_ref(),
+                        Arc::clone(&stores),
                         store,
                         &seam,
                         host,

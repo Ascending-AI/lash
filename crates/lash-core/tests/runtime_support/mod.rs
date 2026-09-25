@@ -22,20 +22,20 @@ std::thread_local! {
 
 /// A fresh SQLite memory backend (ADR 0102): every store port and the effect
 /// host of one named in-memory substrate, held for the running test.
-pub(crate) async fn memory_backend() -> std::sync::Arc<dyn lash_core::Backend> {
-    std::sync::Arc::new(sqlite_memory_backend().await)
+pub(crate) async fn memory_backend() -> lash_core::Backend {
+    std::sync::Arc::new(sqlite_memory_backend().await).into()
 }
 
 /// [`memory_backend`] on `clock`: every port of the backend, its effect
 /// host's timers included, reads and waits on `clock`.
 pub(crate) async fn memory_backend_with_clock(
     clock: std::sync::Arc<dyn lash_core::Clock>,
-) -> std::sync::Arc<dyn lash_core::Backend> {
+) -> lash_core::Backend {
     let backend = lash_sqlite_store::SqliteBackend::memory_with_clock(clock)
         .await
         .expect("open a clocked SQLite memory backend");
     TEST_BACKENDS.with(|held| held.borrow_mut().push(backend.clone()));
-    std::sync::Arc::new(backend)
+    std::sync::Arc::new(backend).into()
 }
 
 /// [`memory_backend`] as its concrete SQLite type.
@@ -50,7 +50,7 @@ pub(crate) async fn sqlite_memory_backend() -> lash_sqlite_store::SqliteBackend 
 /// A fresh, unbound session store on `backend`'s catalog: the first session
 /// admitted binds it. `backend` is one [`memory_backend`] opened.
 pub(crate) async fn unbound_store(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
 ) -> std::sync::Arc<dyn lash_core::RuntimePersistence> {
     let identity = backend.binding_identity().to_string();
     let sqlite = TEST_BACKENDS
@@ -66,7 +66,7 @@ pub(crate) async fn unbound_store(
 
 /// [`unbound_store`] under a recording decorator.
 pub(crate) async fn unbound_recording_store(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
 ) -> std::sync::Arc<lash_core::testing::runtime_helpers::RecordingStore> {
     std::sync::Arc::new(lash_core::testing::runtime_helpers::RecordingStore::over(
         unbound_store(backend).await,
@@ -77,7 +77,7 @@ pub(crate) async fn unbound_recording_store(
 /// `clock`, over the same databases as `backend`: a second handle on the
 /// backend configured with another clock.
 pub(crate) async fn unbound_recording_store_with_clock(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
+    backend: &lash_core::Backend,
     clock: std::sync::Arc<dyn lash_core::Clock>,
 ) -> std::sync::Arc<lash_core::testing::runtime_helpers::RecordingStore> {
     let identity = backend.binding_identity().to_string();
@@ -101,9 +101,7 @@ pub(crate) async fn unbound_recording_store_with_clock(
 
 /// Fresh handles on `backend`'s databases: what a second process over the
 /// same substrate is. `backend` is one [`memory_backend`] opened.
-pub(crate) async fn reopened_backend(
-    backend: &std::sync::Arc<dyn lash_core::Backend>,
-) -> std::sync::Arc<dyn lash_core::Backend> {
+pub(crate) async fn reopened_backend(backend: &lash_core::Backend) -> lash_core::Backend {
     let identity = backend.binding_identity().to_string();
     let sqlite = TEST_BACKENDS
         .with(|held| {
@@ -115,5 +113,5 @@ pub(crate) async fn reopened_backend(
         .expect("a reopen names a memory backend this test opened");
     let reopened = sqlite.reopen().await.expect("reopen the memory backend");
     TEST_BACKENDS.with(|held| held.borrow_mut().push(reopened.clone()));
-    std::sync::Arc::new(reopened)
+    std::sync::Arc::new(reopened).into()
 }
