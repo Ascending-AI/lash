@@ -845,7 +845,7 @@ impl Lowerer {
             }
             AssignOp::Binary(op) => {
                 let rhs = self.lower_expr(value)?;
-                let updated = self.lower_binary_values(old, op, rhs)?;
+                let updated = self.lower_binary_values(old.clone(), op, rhs)?;
                 // `object.step op= value` with an arithmetic operator is the
                 // attribute update the role names. The exponent lowers to a
                 // library call, and the bitwise and shift operators have no
@@ -863,12 +863,26 @@ impl Lowerer {
                             ..
                         }
                     );
-                output.push(Self::temp_assignment(&result, updated));
-                output.push(LashExpr::Assign {
-                    target,
-                    expr: Box::new(Self::variable(&result)),
-                });
-                output.push(Self::variable(&result));
+                if member || !matches!(updated, LashExpr::JavaScriptBinary { .. }) {
+                    // Exponent `op=` lowers to a library call, and member
+                    // targets keep the pinned base: both stay on the shared
+                    // temporary path.
+                    output.push(Self::temp_assignment(&result, updated));
+                    output.push(LashExpr::Assign {
+                        target,
+                        expr: Box::new(Self::variable(&result)),
+                    });
+                    output.push(Self::variable(&result));
+                } else {
+                    // `x op= rhs` on a bare name assigns `x op rhs` directly
+                    // so the compiler's fused `x = x + rhs` peephole applies;
+                    // the trailing read is the expression's value.
+                    output.push(LashExpr::Assign {
+                        target,
+                        expr: Box::new(updated),
+                    });
+                    output.push(old);
+                }
                 if update {
                     return Ok(LashExpr::Role {
                         role: StructuralRole::AttributeAssign,

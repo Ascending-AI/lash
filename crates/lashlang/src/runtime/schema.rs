@@ -191,7 +191,9 @@ impl ValidationPlan {
                 let Value::String(value) = value else {
                     return false;
                 };
-                allowed.iter().any(|candidate| candidate.as_ref() == value)
+                allowed
+                    .iter()
+                    .any(|candidate| candidate.as_ref() == value.as_str())
             }
             ValidationPlanKind::List(item_plan) => {
                 let items = match value {

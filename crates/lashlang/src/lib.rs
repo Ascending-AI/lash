@@ -163,7 +163,10 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// single instructions. A v24 stream is refused.
 /// v26 (FIG-3652): the `JavaScriptUnaryOp::ToString` operator joins the
 /// instruction vocabulary; a v25 stream is refused.
-pub const BYTECODE_FORMAT_VERSION: u32 = 26;
+/// v27 (FIG-3733): `JavaScriptAddAssign` fuses `s = s + rhs` under ECMA `+`
+/// rules, so a uniquely owned accumulator appends in place. A v26 stream is
+/// refused.
+pub const BYTECODE_FORMAT_VERSION: u32 = 27;
 pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{
     LashlangBranchSite, LashlangEffectFailure, LashlangExecutionCallSite, LashlangExecutionChild,

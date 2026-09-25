@@ -6,7 +6,7 @@ use crate::ast::{JavaScriptBinaryOp, JavaScriptUnaryOp};
 use num_bigint::BigUint;
 use num_traits::ToPrimitive;
 
-use super::{RuntimeError, Value, debug_assert_exported_value, is_truthy};
+use super::{RuntimeError, StringValue, Value, debug_assert_exported_value, is_truthy};
 
 pub(crate) const MAX_JAVASCRIPT_STRING_BYTES: usize = 8 * 1024 * 1024;
 
@@ -71,14 +71,12 @@ pub(crate) fn eval_javascript_binary(left: Value, op: JavaScriptBinaryOp, right:
             let left = javascript_to_primitive_string_or_number(&left);
             let right = javascript_to_primitive_string_or_number(&right);
             match (&left, &right) {
-                (Value::String(_), _) | (_, Value::String(_)) => Value::String(
-                    format!(
-                        "{}{}",
-                        javascript_to_string(&left),
-                        javascript_to_string(&right)
-                    )
-                    .into(),
-                ),
+                (Value::String(_), _) | (_, Value::String(_)) => {
+                    Value::String(StringValue::concatenated(
+                        &javascript_operand_text(&left),
+                        &javascript_operand_text(&right),
+                    ))
+                }
                 _ => Value::Number(javascript_to_number(&left) + javascript_to_number(&right)),
             }
         }
@@ -361,6 +359,16 @@ pub(crate) fn not_iterable_error(value: &Value) -> RuntimeError {
         _ => "object".to_string(),
     };
     RuntimeError::type_error(format!("{text} is not iterable"))
+}
+
+/// The text a `+` concat writes for an already-primitive operand — a string
+/// operand lends its bytes instead of copying them, so a two-string concat
+/// allocates only the result.
+pub(crate) fn javascript_operand_text(value: &Value) -> std::borrow::Cow<'_, str> {
+    match value {
+        Value::String(value) => std::borrow::Cow::Borrowed(value.as_str()),
+        _ => std::borrow::Cow::Owned(javascript_to_string(value)),
+    }
 }
 
 pub(crate) fn javascript_to_string(value: &Value) -> String {

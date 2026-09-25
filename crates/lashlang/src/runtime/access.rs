@@ -143,7 +143,7 @@ pub(crate) fn read_index_ref_direct(target: &Value, index: &Value) -> Result<Val
             let idx = resolve_index(index, value.chars().count())?;
             Ok(idx
                 .and_then(|idx| value.chars().nth(idx))
-                .map(|ch| Value::String(ch.to_compact_string()))
+                .map(|ch| Value::String(ch.to_compact_string().into()))
                 .unwrap_or(Value::Null))
         }
         Value::Record(record) => Ok(record
@@ -344,7 +344,7 @@ pub(crate) fn read_javascript_index_direct_with_key(
                 return Ok(Value::Undefined);
             };
             char::from_u32(unit.into())
-                .map(|ch| Value::String(ch.to_compact_string()))
+                .map(|ch| Value::String(ch.to_compact_string().into()))
                 .ok_or_else(|| RuntimeError::ValidationFailed {
                     reason: "TS_LONE_SURROGATE_UNSUPPORTED: string indexing produced an unrepresentable lone surrogate".to_string(),
                 })
@@ -352,7 +352,7 @@ pub(crate) fn read_javascript_index_direct_with_key(
         Value::Record(record) => Ok(record.get(key).cloned().unwrap_or(Value::Undefined)),
         Value::Null | Value::Undefined => Err(nullish_property_read(
             &target,
-            &Value::String(key.to_compact_string()),
+            &Value::String(key.to_compact_string().into()),
         )),
         _ => Ok(Value::Undefined),
     }

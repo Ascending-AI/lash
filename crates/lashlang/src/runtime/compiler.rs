@@ -19,8 +19,8 @@ use smallvec::SmallVec;
 use crate::artifact::CompiledModuleContext;
 use crate::ast::{
     AssignPathStep, AssignTarget, AstPath, BinaryOp, Declaration, Expr, FunctionExpr,
-    JavaScriptLogicalOp, LabelMetadata, ListComprehensionClause, MethodKey, Program, TypeExpr,
-    UnaryOp,
+    JavaScriptBinaryOp, JavaScriptLogicalOp, LabelMetadata, ListComprehensionClause, MethodKey,
+    Program, TypeExpr, UnaryOp,
 };
 use crate::span::Span;
 use crate::tracking::{LashlangExecutionContext, LashlangExecutionSite};

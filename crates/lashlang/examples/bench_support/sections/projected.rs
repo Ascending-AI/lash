@@ -139,7 +139,7 @@ impl ProjectedList {
 
 fn string_value(value: &Value) -> Result<compact_str::CompactString, ()> {
     match value {
-        Value::String(value) => Ok(value.clone()),
+        Value::String(value) => Ok(value.clone().into()),
         Value::Number(value) => Ok(value.to_string().into()),
         Value::Bool(value) => Ok(if *value { "true" } else { "false" }.into()),
         Value::Null => Ok("null".into()),
@@ -294,7 +294,7 @@ impl ProjectedHostDescriptor for ProjectedText {
                 ProjectedReadRequest::Index(index) => {
                     let index = resolve_index(&index, self.text.chars().count())?;
                     self.text.chars().nth(index).map(|ch| {
-                        ProjectedReadResponse::Value(Value::String(ch.to_compact_string()))
+                        ProjectedReadResponse::Value(Value::String(ch.to_compact_string().into()))
                     })
                 }
                 ProjectedReadRequest::Find { needle, start } => {

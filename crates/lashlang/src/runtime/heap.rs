@@ -1363,7 +1363,7 @@ impl Heap {
             }
             HeapObject::Record(record) => {
                 let key = match index {
-                    Value::String(key) => key.clone(),
+                    Value::String(key) => key.to_compact_string(),
                     _ => compact_str::CompactString::from(coerce_string(index)?.as_ref()),
                 };
                 let stored = record.get(key.as_str()).cloned();

@@ -1292,15 +1292,16 @@ pub(crate) fn compare_ordered(
 pub(crate) fn add_values(left: Value, right: Value) -> Result<Value, RuntimeError> {
     match (left, right) {
         (Value::Number(a), Value::Number(b)) => Ok(Value::Number(a + b)),
-        (Value::String(a), Value::String(b)) => Ok(Value::String(a + &b)),
+        (Value::String(a), Value::String(b)) => {
+            Ok(Value::String(StringValue::concatenated(&a, &b)))
+        }
         (Value::String(mut a), other) => {
             a.push_str(&stringify_value_blocking(&other)?);
             Ok(Value::String(a))
         }
         (other, Value::String(b)) => {
-            let mut text = stringify_value_blocking(&other)?;
-            text.push_str(&b);
-            Ok(Value::String(text.into()))
+            let text = stringify_value_blocking(&other)?;
+            Ok(Value::String(StringValue::concatenated(&text, &b)))
         }
         (Value::List(a), Value::List(b)) => {
             let mut values = Vec::with_capacity(a.len() + b.len());

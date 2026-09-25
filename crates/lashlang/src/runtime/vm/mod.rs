@@ -823,6 +823,12 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             Instruction::AddAssignSlot { slot, right } => {
                 self.add_assign_slot(slot, right)?;
             }
+            Instruction::JavaScriptAddAssign(slot) => {
+                if self.javascript_binary_needs_async(JavaScriptBinaryOp::Add)? {
+                    return Ok(None);
+                }
+                self.javascript_add_assign(slot)?;
+            }
             Instruction::AddAssignIndexNumber { slot, right } => {
                 let index = self.pop_stack()?;
                 if let Some(Value::Ref(id)) = self.slots.get(slot) {
@@ -950,11 +956,17 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
     ) -> Result<VmStep, RuntimeError> {
         let right = materialize_projected_async(self.pop_stack()?).await?;
         let left = materialize_projected_async(self.pop_stack()?).await?;
-        let (left, right) = if let Instruction::JavaScriptBinary(op) = &instruction {
-            self.prepare_javascript_binary_operands(*op, left, right)
-                .await?
-        } else {
-            (left, right)
+        let op = match &instruction {
+            Instruction::JavaScriptBinary(op) => Some(*op),
+            Instruction::JavaScriptAddAssign(_) => Some(JavaScriptBinaryOp::Add),
+            _ => None,
+        };
+        let (left, right) = match op {
+            Some(op) => {
+                self.prepare_javascript_binary_operands(op, left, right)
+                    .await?
+            }
+            None => (left, right),
         };
         self.stack.push(left);
         self.stack.push(right);
@@ -1117,6 +1129,11 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 return self.redispatch_javascript_unary(op).await;
             }
             Instruction::JavaScriptBinary(_) => {
+                return self
+                    .redispatch_with_materialized_stack_pair(instruction)
+                    .await;
+            }
+            Instruction::JavaScriptAddAssign(_) => {
                 return self
                     .redispatch_with_materialized_stack_pair(instruction)
                     .await;
@@ -1462,7 +1479,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                 let template = &self.chunk.format_templates[template];
                 let value = match self.load_slot(slot)? {
                     Value::Number(value) => Value::String(
-                        execute_compiled_format_one_number_compact_direct(template, *value)?,
+                        execute_compiled_format_one_number_compact_direct(template, *value)?.into(),
                     ),
                     value => {
                         let value = if matches!(value, Value::Projected(_)) {
@@ -1483,12 +1500,13 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
             } => {
                 let template = &self.chunk.format_templates[template];
                 let value = match self.load_slot(slot)? {
-                    Value::Number(left) => {
-                        Value::String(execute_compiled_format_one_number_compact_direct(
+                    Value::Number(left) => Value::String(
+                        execute_compiled_format_one_number_compact_direct(
                             template,
                             eval_number_numeric_binary_value(*left, op, right),
-                        )?)
-                    }
+                        )?
+                        .into(),
+                    ),
                     left => {
                         let left = materialize_projected_async(left.clone()).await?;
                         let value = eval_binary_values(left, op, Value::Number(right))?;

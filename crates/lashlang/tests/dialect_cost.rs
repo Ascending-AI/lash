@@ -363,3 +363,69 @@ async fn each_append_spelling_is_measured_beside_the_corpus() {
          which is no more than the {push:.0} that 2000 in-place appends cost"
     );
 }
+
+/// Allocated bytes across one execution of `source`, after one warm-up run
+/// absorbs the allocations a first execution makes.
+async fn typescript_run_bytes(source: &str) -> u64 {
+    let host = BenchHost;
+    let compiled = typescript(source);
+    let env = ExecutionEnvironment::new(&host);
+    let mut warm = State::new();
+    let _ = std::hint::black_box(execute(&compiled, &mut warm, &env).await);
+    let before = allocated_bytes_on_this_thread();
+    let mut state = State::new();
+    let _ = std::hint::black_box(execute(&compiled, &mut state, &env).await);
+    allocated_bytes_on_this_thread() - before
+}
+
+/// `appends` iterations of `s = s + <chunk>` (or `s += <chunk>`) building a
+/// string of `appends * chunk.len()` characters. Sixty-four characters per
+/// iteration keeps the loop short while the *string* — the length whose
+/// copying is what made concat quadratic — reaches a million characters.
+fn string_append_source(spelling: &str, appends: usize) -> String {
+    const CHUNK: &str = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+    let statement = match spelling {
+        "=" => format!("s = s + \"{CHUNK}\";"),
+        "+=" => format!("s += \"{CHUNK}\";"),
+        other => panic!("unsupported append spelling {other}"),
+    };
+    format!(
+        "let s = \"\";\nfor (let i = 0; i < {appends}; i++) {{\n  {statement}\n}}\nfinish(s.length);\n"
+    )
+}
+
+/// FIG-3733: `s = s + x` builds a string linearly, not quadratically.
+///
+/// A concat that copies its left operand charges every iteration the whole
+/// accumulated prefix, so the per-append figure grows with the string: at a
+/// million characters it would sit near a megabyte of allocation per append.
+/// The fused add-assign appends into the accumulator's own buffer, so the
+/// figure stays at the chunk plus the iteration's fixed VM work — measured
+/// here at ~100 bytes — and the 256x scale-up between the two runs must not
+/// move it. The absolute bound is the other half: a megabyte-long result is
+/// built for well under 32MiB of total allocation, which a quadratic shape
+/// could not meet by six orders of magnitude.
+#[tokio::test(flavor = "current_thread")]
+async fn string_concat_assign_allocates_for_the_append_not_the_prefix() {
+    const SMALL_APPENDS: usize = 128;
+    const LARGE_APPENDS: usize = 16_384; // 1,048,576 characters
+
+    for spelling in ["=", "+="] {
+        let small = typescript_run_bytes(&string_append_source(spelling, SMALL_APPENDS)).await;
+        let large = typescript_run_bytes(&string_append_source(spelling, LARGE_APPENDS)).await;
+        let per_append_small = small as f64 / SMALL_APPENDS as f64;
+        let per_append_large = large as f64 / LARGE_APPENDS as f64;
+
+        assert!(
+            large <= 32 * 1024 * 1024,
+            "a million-character `s {spelling} chunk` build must stay linear: \
+             measured {large} bytes total ({per_append_large:.0}/append)"
+        );
+        assert!(
+            per_append_large <= per_append_small * 4.0,
+            "per-append allocation must not grow with the accumulated prefix for \
+             `s {spelling} chunk`: {per_append_large:.0} bytes/append at a million \
+             characters against {per_append_small:.0} at eight thousand"
+        );
+    }
+}
