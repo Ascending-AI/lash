@@ -50,7 +50,7 @@ pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run(
             Arc::new(plugin_host),
             runtime_host,
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
-            Arc::new(lash_core::NoQueuedWork::new()),
+            Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(lash_core::SessionPolicy {

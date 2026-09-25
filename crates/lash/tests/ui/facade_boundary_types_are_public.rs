@@ -12,19 +12,20 @@ use lash::direct::{
 use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
-    CheckpointKind, GcReport, GraphAppend, LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure,
-    MaintenanceRefusal, MaintenanceResult, OperationId, OrphanedTurnInputScope,
-    PendingTurnInputDraft, PersistedSessionConfig, PersistedSessionRead, QueuedWorkBatch,
-    QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimOutcome,
-    QueuedWorkClaimPolicy, QueuedWorkEnqueueOutcome, QueuedWorkStore, RealizedNodeTimestamp,
-    RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence, RuntimeSessionState,
-    RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
-    SelectedQueuedWorkClaimOutcome, SessionCheckpoint, SessionCommitStore, SessionExecutionLease,
-    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
-    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionHeadMeta,
-    SessionHeadPayload, SessionMeta, SessionNodeRecord, StoreError, StoreMaintenance,
-    TurnInputCheckpointBoundary, TurnInputClaim, TurnInputIngress, TurnInputState, TurnInputStore,
-    VacuumReport, commit_runtime_state_verified, load_persisted_session_state,
+    AdmissionId, CheckpointKind, DriveEpochSeal, DriveEpochStore, GcReport, GraphAppend,
+    LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal, MaintenanceResult,
+    OperationId, OrphanedTurnInputScope, PendingTurnInputDraft, PersistedSessionConfig,
+    PersistedSessionRead, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkClaim,
+    QueuedWorkClaimBoundary, QueuedWorkClaimOutcome, QueuedWorkClaimPolicy,
+    QueuedWorkEnqueueOutcome, QueuedWorkStore, RealizedNodeTimestamp, RuntimeCommit,
+    RuntimeCommitReceipt, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
+    RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SelectedQueuedWorkClaimOutcome,
+    SessionCheckpoint, SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
+    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore,
+    SessionHeadMeta, SessionHeadPayload, SessionMeta, SessionNodeRecord, StoreError,
+    StoreMaintenance, StoredDriveEpoch, TurnInputCheckpointBoundary, TurnInputClaim,
+    TurnInputIngress, TurnInputState, TurnInputStore, VacuumReport, commit_runtime_state_verified,
+    load_persisted_session_state,
 };
 use lash::plugins::{
     AfterToolCallHook, AfterToolCallPluginDirective, BeforeToolCallHook,
@@ -275,6 +276,22 @@ impl TurnInputStore for FacadeStore {
         _settlement: Option<&lash::TurnCancelClosureSettlement>,
     ) -> Result<lash::TurnCancelRepairResult, StoreError> {
         Ok(lash::TurnCancelRepairResult::Applied(Default::default()))
+    }
+}
+
+#[async_trait]
+impl DriveEpochStore for FacadeStore {
+    async fn seal_drive_epoch(
+        &self,
+        _session_id: &SessionId,
+        _admission: &AdmissionId,
+        _observed_epoch: u64,
+    ) -> Result<DriveEpochSeal, StoreError> {
+        unreachable!("fixture runs no session drive")
+    }
+
+    async fn drive_epoch(&self, _session_id: &SessionId) -> Result<StoredDriveEpoch, StoreError> {
+        unreachable!("fixture runs no session drive")
     }
 }
 

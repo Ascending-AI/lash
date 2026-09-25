@@ -307,7 +307,7 @@ impl Backend for DecoratedBackend {
         self.inner.process_work()
     }
 
-    fn queued_work(&self) -> lash_core::BackendQueuedWork {
-        self.inner.queued_work()
+    fn session_work(&self) -> Option<std::sync::Arc<dyn lash_core::runtime::SessionWorkEngine>> {
+        self.inner.session_work()
     }
 }

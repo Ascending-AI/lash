@@ -43,14 +43,14 @@ enum ProcessWorkBinding {
 /// as new native drivers are added.
 struct EmbeddedRuntimeDriverBindings {
     process: ProcessWorkBinding,
-    queued: Arc<dyn crate::QueuedWorkSubstrate>,
+    queued: Arc<dyn crate::SessionWorkEngine>,
 }
 
 impl Default for EmbeddedRuntimeDriverBindings {
     fn default() -> Self {
         Self {
             process: ProcessWorkBinding::None,
-            queued: Arc::new(crate::NoQueuedWork::new()),
+            queued: Arc::new(crate::NoSessionWork::new()),
         }
     }
 }
@@ -191,7 +191,7 @@ impl EmbeddedRuntimeBuilder {
         self
     }
 
-    pub fn with_queued_work(mut self, queued: Arc<dyn crate::QueuedWorkSubstrate>) -> Self {
+    pub fn with_queued_work(mut self, queued: Arc<dyn crate::SessionWorkEngine>) -> Self {
         self.drivers.queued = queued;
         self
     }

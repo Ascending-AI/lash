@@ -29,7 +29,7 @@ pub(crate) struct DecoratedBackend {
     trigger_store: Arc<dyn lash::triggers::TriggerStore>,
     effect_host: Arc<dyn lash::durability::EffectHost>,
     process_work: Option<lash::process::ProcessWorkWiring>,
-    queued_work: lash::BackendQueuedWork,
+    session_work: Option<Arc<dyn lash::runtime::SessionWorkEngine>>,
 }
 
 impl DecoratedBackend {
@@ -39,7 +39,7 @@ impl DecoratedBackend {
             trigger_store: inner.trigger_store(),
             effect_host: inner.effect_host(),
             process_work: inner.process_work(),
-            queued_work: inner.queued_work(),
+            session_work: inner.session_work(),
             inner,
         }
     }
@@ -75,9 +75,9 @@ impl DecoratedBackend {
     /// Drive queued turns through `driver` instead of the in-process driver.
     pub(crate) fn with_queued_work(
         mut self,
-        driver: Arc<dyn lash::runtime::QueuedWorkSubstrate>,
+        driver: Arc<dyn lash::runtime::SessionWorkEngine>,
     ) -> Self {
-        self.queued_work = lash::BackendQueuedWork::Engine(driver);
+        self.session_work = Some(driver);
         self
     }
 
@@ -137,8 +137,8 @@ impl lash::Backend for DecoratedBackend {
         self.process_work.clone()
     }
 
-    fn queued_work(&self) -> lash::BackendQueuedWork {
-        self.queued_work.clone()
+    fn session_work(&self) -> Option<Arc<dyn lash::runtime::SessionWorkEngine>> {
+        self.session_work.clone()
     }
 }
 

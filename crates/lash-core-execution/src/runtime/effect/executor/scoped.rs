@@ -44,6 +44,15 @@ impl<'run> ScopedEffectController<'run> {
         }
     }
 
+    /// Whether this controller was built for its scope and can build itself
+    /// for another ([`ScopeBoundController`]): a [`rescope`](Self::rescope)
+    /// of it keeps every effect under the new scope. A borrowed or shared
+    /// controller keeps the scope its engine bound it to, so an effect under
+    /// another scope needs a controller of its own.
+    pub fn is_scope_bound(&self) -> bool {
+        matches!(self.controller, ScopedEffectControllerInner::Owned(_))
+    }
+
     pub fn into_static(self) -> Result<ScopedEffectController<'static>, Self> {
         match self.controller {
             ScopedEffectControllerInner::Borrowed(_) | ScopedEffectControllerInner::Owned(_) => {

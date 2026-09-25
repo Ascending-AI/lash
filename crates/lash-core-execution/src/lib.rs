@@ -26,7 +26,7 @@ pub use lash_core_store::chronological;
 pub use lash_core_store::impl_noop_attachment_manifest;
 pub use lash_core_store::protocol_turn_options::{ProtocolTurnOptions, ProtocolTurnOptionsError};
 mod backend;
-pub use backend::{Backend, BackendQueuedWork, StoreSet};
+pub use backend::{Backend, StoreSet};
 mod module_artifacts;
 pub use module_artifacts::{
     ArtifactPublicationPause, ArtifactStoreError, DurabilityTier, ModuleArtifactStore,
@@ -752,7 +752,7 @@ pub use runtime::{
     GroupExecutors, GroupFinalizationReport, GroupOnlyFinalization, GroupReopen, GroupSettlement,
     GroupWakePolicy, HandleId, IndependentEffectWork, InputItem, LedgerUsageDisposition,
     LlmRequestSpec, LlmStreamRecord, LocalTurnStop, LoserPolicy, NativeProcessWork,
-    NativeSubstrateConfig, NativeSubstrateConfigError, NoQueuedWork, OnParentEnd,
+    NativeSubstrateConfig, NativeSubstrateConfigError, NoSessionWork, OnParentEnd,
     OpenerFinalizationSteps, PARENT_SCOPE_STORAGE_PAYLOAD_VERSION,
     PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndPlan, ParentScope,
     ParentScopeStorageError, PendingTurnInput, PendingTurnInputCancelOutcome,
@@ -790,17 +790,16 @@ pub use runtime::{
     QueuedDrainCandidate, QueuedDrainPolicy, QueuedDrainRequest, QueuedDrainSelection,
     QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe,
     QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkClaimPolicy, QueuedWorkKind,
-    QueuedWorkSubstrate, RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys,
-    RecoveryContract, RefusedWriteRange, Resolution, ResolveOutcome, RuntimeAttribution,
-    RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
-    RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause, RuntimeErrorCode,
-    RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeSessionState,
-    ScopeBoundController, ScopedEffectController, SegmentHandover, SegmentProgress,
-    SegmentStartMarker, ServedOnly, ServedOnlyRange, SessionDrainOutcome, SessionId,
+    RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecoveryContract,
+    RefusedWriteRange, Resolution, ResolveOutcome, RuntimeAttribution, RuntimeCheckpointComponents,
+    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
+    RuntimeError, RuntimeErrorCause, RuntimeErrorCode, RuntimeInvocation, RuntimeReplay,
+    RuntimeReplayAttribution, RuntimeSessionState, ScopeBoundController, ScopedEffectController,
+    SegmentHandover, SegmentProgress, SegmentStartMarker, ServedOnly, ServedOnlyRange, SessionId,
     SessionListFilter, SessionRelationKind, SessionScope, SessionStateVersionRefusal,
-    SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, SessionWorkTarget, SleepSpec,
+    SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, SessionWorkEngine, SleepSpec,
     StoreEffectGroupClosing, StoreEffectGroupDrain, StoreRealization, TokenLedgerEntry,
     ToolAttemptLaunch, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
     TurnActivity, TurnActivityId, TurnCancelAffectedInput, TurnCancelClosureAuthorization,

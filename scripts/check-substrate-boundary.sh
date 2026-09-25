@@ -273,6 +273,8 @@ fi
 #
 #   crates/lash-core/src/runtime/{turn_loop,turn_driver}/**, logical_turn.rs,
 #   turn_boundary*                       -- the loop around the driver
+#   crates/lash-core/src/runtime/drive{.rs,/**}
+#                                        -- the session drive and its admission
 #   crates/lash-core-execution/src/session{,.rs}, tool_dispatch{,.rs},
 #   runtime/effect/{tool_child_driver.rs,group*.rs}
 #                                        -- execution-side session and group
@@ -305,6 +307,8 @@ fi
 # test only lets the total occurrence count shrink.
 
 drive_paths=(
+  crates/lash-core/src/runtime/drive.rs
+  crates/lash-core/src/runtime/drive
   crates/lash-core/src/runtime/turn_loop
   crates/lash-core/src/runtime/turn_driver
   crates/lash-core/src/runtime/logical_turn.rs
@@ -333,7 +337,17 @@ drive_allowlist=scripts/drive-determinism-allowlist.txt
 # and CI runners do not all carry ripgrep, so one engine keeps the allowlist
 # identical everywhere.
 drive_search_status=0
-grep -rEn --include='*.rs' "$drive_forbidden" "${drive_paths[@]}" >"$tmp_dir/rule5.raw" 2>/dev/null || drive_search_status=$?
+# Scan only the drive paths that exist: a tree may predate a newer drive
+# module, and a missing path must not read as a failed search.
+drive_existing=()
+for drive_path in "${drive_paths[@]}"; do
+  [[ -e $drive_path ]] && drive_existing+=("$drive_path")
+done
+if ((${#drive_existing[@]})); then
+  grep -rEn --include='*.rs' "$drive_forbidden" "${drive_existing[@]}" >"$tmp_dir/rule5.raw" 2>/dev/null || drive_search_status=$?
+else
+  : >"$tmp_dir/rule5.raw"
+fi
 if [[ $drive_search_status -gt 1 ]]; then
   echo "substrate boundary check failed: drive determinism search exited $drive_search_status" >&2
   failed=1

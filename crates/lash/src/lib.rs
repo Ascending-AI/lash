@@ -88,6 +88,11 @@ pub use crate::turn::{
     QueuedTurnBuilder, SelectedQueuedTurnBuilder, TurnActivityFanout, TurnBuilder, TurnOutput,
     TurnReport, TurnStream, message_role, message_text,
 };
+/// The one substrate a [`LashCore`] takes every persistence port and its
+/// effect host from (ADR 0102). [`LashCore::builder`] requires one:
+/// `lash::sqlite::SqliteBackend` (file or memory), the PostgreSQL
+/// backend, or the Restate backend.
+pub use lash_core::Backend;
 /// Re-exported so implementors of `#[async_trait]` facade traits (for example
 /// [`tools::StaticToolExecute`]) apply the macro without carrying their own
 /// `async-trait` dependency to keep version-aligned.
@@ -123,11 +128,6 @@ pub use lash_core::{
     facade_support::TurnWorkDriver, facade_support::WorkerSlotKind,
     facade_support::WorkerSlotPermit, facade_support::WorkerSlotSupplier,
 };
-/// The one substrate a [`LashCore`] takes every persistence port and its
-/// effect host from (ADR 0102). [`LashCore::builder`] requires one:
-/// `lash::sqlite::SqliteBackend` (file or memory), the PostgreSQL
-/// backend, or the Restate backend.
-pub use lash_core::{Backend, BackendQueuedWork};
 pub use lash_core::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
 /// Cooperative cancellation handle accepted by
 /// [`TurnBuilder::cancel`](crate::TurnBuilder::cancel); re-exported so
@@ -351,6 +351,9 @@ pub mod persistence {
             select_turn_work_claim_prefix,
         };
     }
+    /// The drive epoch a session drive's seal raises (FIG-3600): one segment
+    /// of [`RuntimePersistence`], implemented by every store a runtime drives.
+    pub use lash_core::store::{AdmissionId, DriveEpochSeal, DriveEpochStore, StoredDriveEpoch};
     pub use lash_core::store::{
         AppendRequestIdentity, BeginQueuedRun, CheckpointComponentDescriptor, GraphAppend,
         HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId,
@@ -883,23 +886,22 @@ pub mod runtime {
         DirectCompletionClient, EffectAddress, EffectGroupHandle, EffectGroupMembership,
         EmbeddedRuntimeHost, EventSink, ExecutionScope, GroupExecutors, GroupSettlement,
         GroupWakePolicy, LashRuntime, LlmRequestSpec, LlmStreamRecord, LoserPolicy,
-        NativeQueuedWork, NativeSubstrateConfig, NativeSubstrateConfigError, NoQueuedWork,
+        NativeQueuedWork, NativeSubstrateConfig, NativeSubstrateConfigError, NoSessionWork,
         NoopEventSink, NoopTurnActivitySink, ProcessCommand, ProcessEffectOutcome,
         QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder,
         QueuedLaneProbe, QueuedWorkExecutionConcurrencyError, QueuedWorkRunError,
         QueuedWorkRunErrorClass, QueuedWorkRunHandle, QueuedWorkRunProgress, QueuedWorkRunRequest,
-        QueuedWorkSlowWake, QueuedWorkSubstrate, QueuedWorkWakeContended, QueuedWorkWakeFailure,
-        QueuedWorkWakeOutcome, RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig,
-        RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-        RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
-        RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
-        RuntimeEnvironmentBuilder, RuntimeError, RuntimeErrorCode, RuntimeHandle,
-        RuntimeInvocation, RuntimeNamedPhase, RuntimeObservation, RuntimePromptConfig,
-        RuntimeProviderConfig, RuntimeTracingConfig, RuntimeTurnPhase, RuntimeTurnPhaseProbe,
-        RuntimeTurnPhaseProbeSlot, ScopedEffectController, SessionWorkTarget, SleepSpec,
-        ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TurnCancelWait,
-        TurnContext, TurnControlBinding, WorkCadencePolicy, WorkerSweepPolicy,
-        effect_groups_unsupported,
+        QueuedWorkSlowWake, QueuedWorkWakeContended, QueuedWorkWakeFailure, QueuedWorkWakeOutcome,
+        RuntimeAttribution, RuntimeControlConfig, RuntimeDurabilityConfig, RuntimeEffectCommand,
+        RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
+        RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor,
+        RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport, RuntimeEnvironmentBuilder,
+        RuntimeError, RuntimeErrorCode, RuntimeHandle, RuntimeInvocation, RuntimeNamedPhase,
+        RuntimeObservation, RuntimePromptConfig, RuntimeProviderConfig, RuntimeTracingConfig,
+        RuntimeTurnPhase, RuntimeTurnPhaseProbe, RuntimeTurnPhaseProbeSlot, ScopedEffectController,
+        SessionWorkEngine, SleepSpec, ToolIntentOutcomeSink, ToolIntentPreparation,
+        ToolIntentSubmissionGuard, TurnCancelWait, TurnContext, TurnControlBinding,
+        WorkCadencePolicy, WorkerSweepPolicy, effect_groups_unsupported,
     };
     /// The host clock a [`Backend`](crate::Backend) is opened on, used
     /// for runtime sleeps and store timestamps. [`SystemClock`] is the

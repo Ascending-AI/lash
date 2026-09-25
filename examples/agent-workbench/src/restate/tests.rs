@@ -972,12 +972,6 @@ impl QueuedWorkExt for lash::runtime::NativeQueuedWork {
         session_id: &SessionId,
         reason: &str,
     ) -> Result<(), lash::plugins::PluginError> {
-        lash::runtime::QueuedWorkSubstrate::drain_session_work(
-            self,
-            lash::runtime::SessionWorkTarget::Session(SessionId::from(session_id.to_string())),
-            reason,
-        )
-        .await
-        .map(|_| ())
+        self.drive_now(session_id, reason).await
     }
 }

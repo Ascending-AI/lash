@@ -1,6 +1,6 @@
 use crate::support::{
-    Arc, EffectHost, ProcessWorkWiring, QueuedWorkSubstrate, RuntimeEnvironment,
-    RuntimePersistence, SessionStoreFactory,
+    Arc, EffectHost, ProcessWorkWiring, RuntimeEnvironment, RuntimePersistence,
+    SessionStoreFactory, SessionWorkEngine,
 };
 use lash_sansio::SessionId;
 
@@ -16,7 +16,7 @@ pub(crate) struct BoundSession {
     store: Arc<dyn RuntimePersistence>,
     effect_host: Arc<dyn EffectHost>,
     process: ProcessWorkWiring,
-    queued: Arc<dyn QueuedWorkSubstrate>,
+    queued: Arc<dyn SessionWorkEngine>,
     backend: Arc<dyn lash_core::Backend>,
     attachment_store: Arc<lash_core::facade_support::SessionAttachmentStore>,
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
@@ -34,7 +34,7 @@ impl BoundSession {
         store: Arc<dyn RuntimePersistence>,
         env: &RuntimeEnvironment,
         process: ProcessWorkWiring,
-        queued: Arc<dyn QueuedWorkSubstrate>,
+        queued: Arc<dyn SessionWorkEngine>,
         catalog: Arc<dyn SessionStoreFactory>,
     ) -> Self {
         Self {
@@ -85,7 +85,7 @@ impl BoundSession {
 
     /// The owner-issued queued-work port. The binding-derived Durable Session
     /// wakes this port, never a core-level override.
-    pub(crate) fn queued(&self) -> Arc<dyn QueuedWorkSubstrate> {
+    pub(crate) fn queued(&self) -> Arc<dyn SessionWorkEngine> {
         Arc::clone(&self.queued)
     }
 

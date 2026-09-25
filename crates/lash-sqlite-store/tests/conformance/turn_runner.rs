@@ -43,3 +43,9 @@ lash_conformance::admitted_head_redrive_tests!({
         sqlite_turn_runner_fixture().await;
     (backend, prefix, effect_host, stores, turn_runner)
 });
+
+lash_conformance::drive_admission_tests!({
+    let (backend, prefix, effect_host, stores, _process_work, turn_runner, _after_law) =
+        sqlite_turn_runner_fixture().await;
+    (backend, prefix, effect_host, stores, turn_runner)
+});

@@ -29,7 +29,7 @@ use lash_trace::{TraceContext, TraceLevel, TraceSink};
 use super::host::RuntimeWork;
 use super::process::ProcessRegistry;
 use super::{
-    NoQueuedWork, ProcessWorkWiring, QueuedWorkSubstrate, RuntimeHostConfig, TerminationPolicy,
+    NoSessionWork, ProcessWorkWiring, RuntimeHostConfig, SessionWorkEngine, TerminationPolicy,
 };
 
 /// Shared runtime infrastructure an embedder builds once and reuses
@@ -69,7 +69,7 @@ impl RuntimeEnvironment {
             .map(|wiring| Arc::clone(wiring.port()))
     }
 
-    pub fn queued_work(&self) -> Arc<dyn QueuedWorkSubstrate> {
+    pub fn queued_work(&self) -> Arc<dyn SessionWorkEngine> {
         Arc::clone(self.work.queued_arc())
     }
 
@@ -108,7 +108,7 @@ impl RuntimeEnvironmentBuilder {
         Self {
             env: RuntimeEnvironment {
                 plugin_host: None,
-                work: RuntimeWork::sessions_only(Arc::new(NoQueuedWork::new())),
+                work: RuntimeWork::sessions_only(Arc::new(NoSessionWork::new())),
                 core,
             },
         }
@@ -134,7 +134,7 @@ impl RuntimeEnvironmentBuilder {
         self
     }
 
-    pub fn with_queued_work(mut self, queued: Arc<dyn QueuedWorkSubstrate>) -> Self {
+    pub fn with_queued_work(mut self, queued: Arc<dyn SessionWorkEngine>) -> Self {
         self.env.work = self.env.work.with_queued(queued);
         self
     }
@@ -236,7 +236,7 @@ impl RuntimeEnvironment {
     pub fn with_work_ports(
         mut self,
         process: Option<ProcessWorkWiring>,
-        queued: Arc<dyn QueuedWorkSubstrate>,
+        queued: Arc<dyn SessionWorkEngine>,
     ) -> Self {
         self.work = self.work.with_work_ports(process, queued);
         self
@@ -340,7 +340,7 @@ mod tests {
             "a registry-only environment starts with its registry"
         );
 
-        let rebound = env.with_work_ports(None, Arc::new(NoQueuedWork::new()));
+        let rebound = env.with_work_ports(None, Arc::new(NoSessionWork::new()));
 
         let kept = rebound
             .process_registry()

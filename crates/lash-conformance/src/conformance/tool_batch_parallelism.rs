@@ -1158,7 +1158,7 @@ async fn drive_turn(
                     )),
                     host.clone(),
                     lash_core_worker::WorkerProcessWork::SelfNative(watched),
-                    Arc::new(crate::NoQueuedWork::new()),
+                    Arc::new(crate::NoSessionWork::new()),
                     crate::testing::runtime_lease_owner(),
                 )
                 .with_session_policy(policy.clone()),
@@ -1180,7 +1180,7 @@ async fn drive_turn(
                 crate::conformance::law_session_store(world.stores.as_ref(), &world.session_id)
                     .await,
             )
-            .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
+            .with_queued_work(Arc::new(crate::NoSessionWork::new()))
             .build(),
     )
     .await

@@ -16,13 +16,6 @@ impl QueuedWorkExt for lash::runtime::NativeQueuedWork {
         session_id: &SessionId,
         reason: &str,
     ) -> Result<(), lash::plugins::PluginError> {
-        use lash::runtime::QueuedWorkSubstrate as _;
-
-        self.drain_session_work(
-            lash::runtime::SessionWorkTarget::Session(SessionId::from(session_id.to_string())),
-            reason,
-        )
-        .await
-        .map(|_| ())
+        self.drive_now(session_id, reason).await
     }
 }

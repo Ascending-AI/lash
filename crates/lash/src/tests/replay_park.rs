@@ -282,12 +282,14 @@ async fn assert_parked(
         .await
         .expect("read the pending inputs");
     assert_eq!(pending.len(), 1, "the parked turn's input stays accepted");
+    // The park blocks the session's admission, so its input stays pending
+    // and no other root drives it (FIG-3600).
     assert!(
         matches!(
             &pending[0].status,
-            lash_core::PendingTurnInputReadStatus::TurnBound { turn_id, .. } if turn_id.as_str() == TURN
+            lash_core::PendingTurnInputReadStatus::Pending
         ),
-        "the parked turn holds its input: {:?}",
+        "the parked turn's input stays pending: {:?}",
         pending[0].status
     );
     assert!(

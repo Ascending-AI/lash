@@ -446,7 +446,7 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
             })),
             runtime_host,
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
-            Arc::new(lash_core::NoQueuedWork::new()),
+            Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(session_policy.clone()),

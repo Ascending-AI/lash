@@ -438,6 +438,16 @@ pub enum RuntimeEffectCommand {
     ClaimAcceptedTurnInput {
         input_id: crate::InputId,
     },
+    /// Admit the next root of a session drive (ADR 0105 §2, FIG-3600); every
+    /// replay decodes the recorded verdict instead of re-reading the store.
+    AdmitDrive {
+        request: Box<crate::engine::AdmitRequest>,
+    },
+    /// Seal an admission: the drive-epoch compare-and-set keyed by its nonce.
+    /// The fence rides the outcome, never this envelope (L-S12).
+    SealDriveAdmission {
+        admitted: Box<crate::engine::Admitted>,
+    },
     Checkpoint {
         checkpoint: CheckpointKind,
     },
@@ -533,6 +543,8 @@ impl RuntimeEffectCommand {
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::ClaimAcceptedTurnInput { .. } => RuntimeEffectKind::ClaimAcceptedTurnInput,
+            Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
+            Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
             Self::LoadExecutionEnv { .. } => RuntimeEffectKind::LoadExecutionEnv,
@@ -1174,6 +1186,14 @@ pub enum RuntimeEffectOutcome {
     ClaimAcceptedTurnInput {
         drive: crate::AcceptedTurnInputDrive,
     },
+    /// The drive admission's recorded verdict.
+    AdmitDrive {
+        verdict: Box<crate::engine::AdmitVerdict>,
+    },
+    /// The seal's recorded verdict, with the fence when `Sealed`.
+    SealDriveAdmission {
+        verdict: Box<crate::engine::SealVerdict>,
+    },
     Checkpoint {
         result: CheckpointOutcome,
         #[serde(default)]
@@ -1652,6 +1672,8 @@ impl RuntimeEffectOutcome {
             Self::ExecCode { .. } => RuntimeEffectKind::ExecCode,
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::ClaimAcceptedTurnInput { .. } => RuntimeEffectKind::ClaimAcceptedTurnInput,
+            Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
+            Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
             Self::LoadExecutionEnv { .. } => RuntimeEffectKind::LoadExecutionEnv,

@@ -168,11 +168,15 @@ pub enum FenceSource {
 }
 
 /// What a drive asks admission for.
+///
+/// It names no root: admission mints the root inside its recorded body, from
+/// the work it admits (the unfinished run it resumes, or the first item of
+/// the queue prefix it takes), so a replay decodes the same root and a fresh
+/// execution never trusts a root the caller guessed.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AdmitRequest {
     pub session: SessionId,
     pub request: DriveRequestId,
-    pub root: TurnId,
 }
 
 /// Admission's decision.
@@ -230,9 +234,48 @@ pub struct Admitted {
     base: crate::store::SessionHeadRef,
     /// The root's turn index, fixed at admission.
     turn_index: u64,
+    /// What the root drives.
+    work: AdmittedWork,
+}
+
+/// What an admitted root drives. Decided by admission and recorded with it,
+/// so the root's run never re-reads the store to learn its own shape.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "work", rename_all = "snake_case")]
+pub enum AdmittedWork {
+    /// The prefix of accepted next-turn input headed by `head`.
+    Input { head: crate::InputId },
+    /// The session's queued work: the unfinished queued run named by the
+    /// root, or a new one under it.
+    Queued,
 }
 
 impl Admitted {
+    /// Only the `AdmitDrive` body mints an admission, through
+    /// [`admission_body::admitted`](super::drive::admission_body::admitted).
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn minted(
+        session: SessionId,
+        root: TurnId,
+        request: DriveRequestId,
+        admission: AdmissionId,
+        observed_epoch: u64,
+        base: crate::store::SessionHeadRef,
+        turn_index: u64,
+        work: AdmittedWork,
+    ) -> Self {
+        Self {
+            session,
+            root,
+            request,
+            admission,
+            observed_epoch,
+            base,
+            turn_index,
+            work,
+        }
+    }
+
     pub fn session(&self) -> &SessionId {
         &self.session
     }
@@ -264,6 +307,11 @@ impl Admitted {
     /// replay.
     pub fn turn_index(&self) -> u64 {
         self.turn_index
+    }
+
+    /// What the root drives.
+    pub fn work(&self) -> &AdmittedWork {
+        &self.work
     }
 }
 

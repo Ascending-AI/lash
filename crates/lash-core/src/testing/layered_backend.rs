@@ -10,9 +10,9 @@
 use std::sync::Arc;
 
 use crate::{
-    AttachmentStore, Backend, BackendQueuedWork, Clock, EffectHost, ModuleArtifactStore,
-    ProcessDefinitionRegistry, ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring,
-    SessionStoreFactory, TriggerStore,
+    AttachmentStore, Backend, Clock, EffectHost, ModuleArtifactStore, ProcessDefinitionRegistry,
+    ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring, SessionStoreFactory,
+    TriggerStore,
 };
 
 /// One backend with some of its ports decorated. See the module
@@ -135,7 +135,7 @@ impl Backend for LayeredBackend {
         self.inner.process_work()
     }
 
-    fn queued_work(&self) -> BackendQueuedWork {
-        self.inner.queued_work()
+    fn session_work(&self) -> Option<Arc<dyn crate::SessionWorkEngine>> {
+        self.inner.session_work()
     }
 }

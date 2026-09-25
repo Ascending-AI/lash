@@ -24,15 +24,6 @@ pub(super) fn is_resumable_turn_or_follow_on(
         .is_some_and(|rest| rest.is_empty() || rest.starts_with(":agent-frame:"))
 }
 
-/// Which drive claim an aborted direct turn binds to itself (FIG-3589).
-pub(super) enum DriveClaimToBind<'a> {
-    /// The drive the turn holds, from its journaled drive effect.
-    Claim(&'a crate::TurnInputClaim),
-    /// The drive effect failed after its body may have claimed rows: whatever
-    /// claim the accepted row carries under this lease generation.
-    HeldUnder { generation: u64 },
-}
-
 struct SessionExecutionLaneProbe {
     store: Arc<dyn crate::store::RuntimePersistence>,
     session_id: SessionId,
@@ -76,7 +67,7 @@ impl LashRuntime {
     /// ADR 0077 makes this stricter than the CAS-only fallback: a busy lane may
     /// not hydrate or execute while another generation can migrate the complete
     /// mutable continuation.
-    pub(super) async fn claim_session_execution_lease(
+    pub(in crate::runtime) async fn claim_session_execution_lease(
         &mut self,
     ) -> Result<Option<SessionExecutionLeaseGuard>, RuntimeError> {
         let Some(store) = self
@@ -171,7 +162,7 @@ impl LashRuntime {
         }
     }
 
-    pub(super) async fn settle_session_execution_lease<T>(
+    pub(in crate::runtime) async fn settle_session_execution_lease<T>(
         &self,
         guard: Option<&SessionExecutionLeaseGuard>,
         result: Result<T, RuntimeError>,
@@ -251,7 +242,11 @@ impl LashRuntime {
     /// replace its error. A park the store cannot write leaves the turn
     /// exactly as the abort left it — its held claims still keep the
     /// deployment from reporting drained.
-    pub(super) async fn record_turn_park_after_abort(&self, err: &RuntimeError, turn_id: &TurnId) {
+    pub(in crate::runtime) async fn record_turn_park_after_abort(
+        &self,
+        err: &RuntimeError,
+        turn_id: &TurnId,
+    ) {
         let Some(reason) = crate::store::ParkReason::of_error(err) else {
             return;
         };
@@ -299,11 +294,10 @@ impl LashRuntime {
 
     /// Hand claimed rows back after a local abort.
     ///
-    /// A direct turn's journaled drive claim is never handed back: its redrive
-    /// settles with the journaled claim token, so a handed-back row would cede
-    /// the redrive and fold the input into a later turn. The direct turn binds
-    /// that claim to itself instead
-    /// ([`bind_drive_claim_after_abort`](Self::bind_drive_claim_after_abort)).
+    /// A root's recorded claim is never handed back: its redrive settles with
+    /// the recorded claim token, so a handed-back row would cede the redrive.
+    /// The row stays claimed, and the session's next drive admits the same
+    /// root first (FIG-3600).
     pub(super) async fn abandon_turn_input_claims_after_local_abort(
         &self,
         err: &RuntimeError,
@@ -343,74 +337,6 @@ impl LashRuntime {
         }
     }
 
-    /// Bind an aborted direct turn's drive claim to that turn (FIG-3589,
-    /// ADR 0069 §7).
-    ///
-    /// Runs on the abort path, before the lease is released, so no successor
-    /// generation can reclaim the rows between the release and the binding.
-    /// From here only the redrive of `turn_id` or a cancel of the input by the
-    /// receipt the `Err` carries consumes them. A crashed turn never reaches
-    /// this, so its claim still lapses with its generation and a successor
-    /// recovers it (ADR 0029).
-    ///
-    /// Best effort, like every abort-path repair: the turn is already failing
-    /// and this must not replace its error. A binding the store cannot write
-    /// leaves the rows exactly as a crash leaves them, recoverable by the next
-    /// generation, never lost.
-    ///
-    /// The binding is fenced by the claim's id and token. If the live fault was
-    /// a lease loss and a successor generation already re-claimed the rows, the
-    /// binding is a no-op and that successor may fold the input into its turn.
-    pub(super) async fn bind_drive_claim_after_abort(
-        &self,
-        claim: DriveClaimToBind<'_>,
-        receipt_input_id: &crate::InputId,
-        turn_id: &TurnId,
-    ) {
-        let Some(store) = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-        else {
-            return;
-        };
-        let bound = match claim {
-            DriveClaimToBind::Claim(claim) => {
-                store
-                    .bind_turn_input_claim(claim, turn_id, receipt_input_id)
-                    .await
-            }
-            DriveClaimToBind::HeldUnder { generation } => {
-                store
-                    .bind_turn_input_claim_of_receipt(
-                        &self.state.session_id,
-                        receipt_input_id,
-                        generation,
-                        turn_id,
-                    )
-                    .await
-            }
-        };
-        match bound {
-            Ok(()) => tracing::debug!(
-                session_id = %self.state.session_id,
-                turn_id = %turn_id,
-                receipt_input_id = %receipt_input_id,
-                event = "turn_input.bound_to_aborted_turn",
-                "bound the aborted direct turn's drive claim to the turn"
-            ),
-            Err(error) => tracing::warn!(
-                session_id = %self.state.session_id,
-                turn_id = %turn_id,
-                receipt_input_id = %receipt_input_id,
-                error = %error,
-                event = "turn_input.bind_to_aborted_turn_failed",
-                "failed to bind the aborted direct turn's drive claim; the next lease \
-                 generation may reclaim it"
-            ),
-        }
-    }
-
     /// Drain-time backstop for inputs no turn can deliver (FIG-1573).
     ///
     /// Runs only when the drain holds the session-execution lane and found
@@ -443,7 +369,7 @@ impl LashRuntime {
     /// that turn, and an otherwise idle drain cannot tell that row apart from an
     /// orphan. Such a row is re-deferred and delivered at the next turn instead
     /// of the pre-named one - delivery timing, never a dropped input.
-    pub(super) async fn defer_orphaned_turn_inputs_before_drain(
+    pub(in crate::runtime) async fn defer_orphaned_turn_inputs_before_drain(
         &self,
         store: &Arc<dyn crate::store::RuntimePersistence>,
         fence: &crate::SessionExecutionLeaseAuthority,

@@ -1502,7 +1502,7 @@ pub fn process_engine_run_context_for_validation(
         tool_catalog,
         None,
         None,
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         crate::DeliveryPolicy::EarliestSafeBoundary,
         backend.clock(),
         process_registry_available,

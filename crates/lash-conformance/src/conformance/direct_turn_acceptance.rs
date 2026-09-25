@@ -244,8 +244,9 @@ pub async fn direct_turn_accepts_before_driving(
     );
     assert_eq!(acceptance.session_id, SESSION_ID);
     assert_eq!(
-        acceptance.source_key, None,
-        "direct ingress mints no idempotency key of its own"
+        acceptance.source_key.as_deref(),
+        Some(turn_id.as_str()),
+        "direct ingress names its row by the turn id, the root the drive runs it under"
     );
     assert_eq!(acceptance.ingress, crate::TurnInputIngress::next_turn());
 
@@ -400,9 +401,9 @@ pub async fn orphaned_direct_turn_input_is_drivable_by_another_worker(
     );
 }
 
-/// Direct ingress inherits queued identity exactly: two direct turns carrying
-/// the same content are two admissions, because neither named an identity Lash
-/// could recognise them by.
+/// Direct ingress identity is the turn id: two direct turns carrying the same
+/// content under two turn ids are two admissions, each keyed by its own turn
+/// id (the root the drive runs it under), never by its content.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -459,25 +460,31 @@ pub async fn direct_turn_acceptance_mints_no_idempotency_key(
         acceptances[0].input_id, acceptances[1].input_id,
         "identical content is two admissions, not one deduplicated retry"
     );
-    assert!(
+    assert_eq!(
         acceptances
             .iter()
-            .all(|acceptance| acceptance.source_key.is_none()),
-        "direct ingress never invents a source key on the caller's behalf"
+            .map(|acceptance| acceptance.source_key.clone())
+            .collect::<Vec<_>>(),
+        (0..2)
+            .map(|round| Some(format!("{prefix}-resubmit-{round}")))
+            .collect::<Vec<_>>(),
+        "direct ingress keys each row by its turn id and by nothing else"
     );
 }
 
-/// A direct turn may not accept or drive while another owner holds the session
+/// A direct turn may not drive while another owner holds the session
 /// execution lane (ADR 0077).
 ///
-/// Refusal precedes provider execution and durable input acceptance. After the
-/// holder releases the lane, the identical input can be admitted and driven by
-/// a successor exactly once.
+/// Acceptance is the store's and precedes the drive (FIG-3600): the input is
+/// durably accepted, and the drive refuses retryably before any provider
+/// execution, leaving the row pending. After the holder releases the lane,
+/// the identical input names the same accepted row, and a successor's drive
+/// answers it exactly once.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn busy_execution_lane_refuses_direct_turn_before_acceptance(
+pub async fn busy_execution_lane_defers_an_accepted_direct_turn(
     prefix: &str,
     backend: Arc<dyn crate::Backend>,
     store: Arc<dyn crate::RuntimePersistence>,
@@ -549,9 +556,10 @@ pub async fn busy_execution_lane_refuses_direct_turn_before_acceptance(
         .list_pending_turn_inputs(&SessionId::from(SESSION_ID))
         .await
         .expect("read pending inputs after lane refusal");
-    assert!(
-        pending.is_empty(),
-        "lane refusal must precede durable input acceptance: {pending:?}"
+    assert_eq!(
+        pending.len(),
+        1,
+        "the refused drive leaves the accepted input pending: {pending:?}"
     );
     crate::store::SessionExecutionLeaseStore::release_session_execution_lease(
         store.as_ref(),
@@ -1045,22 +1053,6 @@ impl Journal {
             )
             .await
     }
-}
-
-/// A turn that aborts with `Err` after its drive and before its commit: the
-/// turn fails in its prepare phase and writes nothing, and its abort path binds
-/// the drive claim to the turn (FIG-3589).
-pub(super) fn abort_before_commit_plugin() -> Arc<dyn crate::facade_support::PluginFactory> {
-    Arc::new(crate::plugin::StaticPluginFactory::new(
-        "conformance-abort-before-commit",
-        crate::facade_support::PluginSpec::new().with_before_turn(Arc::new(|_ctx| {
-            Box::pin(async move {
-                Err(crate::PluginError::Invoke(
-                    "conformance turn aborted before its commit".to_string(),
-                ))
-            })
-        })),
-    ))
 }
 
 /// A worker that dies after its drive and before its commit: its turn stops
@@ -1637,16 +1629,16 @@ impl crate::store::RuntimePersistenceDecorator for WithdrawBeforeClaim {
     }
 }
 
-/// A direct turn whose accepted input sits behind more earlier admissions than
-/// one claim absorbs drives nothing and drops nothing: the call succeeds with a
-/// `Queued` outcome naming the inputs ahead, a replay reports the same queue
-/// position without reading a row, and the queued-work drain then answers
-/// every input in arrival order, each exactly once.
+/// A direct turn whose accepted input sits behind earlier admissions is driven
+/// after them (FIG-3600): the drive admits each earlier root first, in arrival
+/// order, every root's claim takes the claimable prefix up to the claim bound,
+/// and the call returns the run of the root that drove its input. Every input
+/// is answered once, nothing is dropped, and nothing waits for a later drain.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn queued_direct_turn_input_is_answered_in_order_by_the_drain(
+pub async fn direct_turn_behind_earlier_admissions_runs_after_them(
     prefix: &str,
     backend: Arc<dyn crate::Backend>,
     store: Arc<dyn crate::RuntimePersistence>,
@@ -1657,106 +1649,21 @@ pub async fn queued_direct_turn_input_is_answered_in_order_by_the_drain(
     let journal = Journal::new(&backend).with_turn_input_claim(2);
     let (provider, requests) = recording_provider("answered in order");
 
-    let queued = journal
+    let turn = journal
         .run(&store, provider.clone(), &turn_id, "the direct input")
         .await
-        .expect("a direct turn past the claim bound succeeds with its input queued");
+        .expect("a direct turn behind earlier admissions runs after them");
     assert!(
-        matches!(queued.outcome, crate::TurnOutcome::Queued { ahead: 2 }),
-        "the call reports the queue position as its outcome: {:?}",
-        queued.outcome
+        matches!(turn.outcome, crate::TurnOutcome::Finished(_)),
+        "the call answers with its own turn: {:?}",
+        turn.outcome
     );
-    let input_id = queued
+    let input_id = turn
         .turn_input_acceptance
         .as_ref()
-        .expect("a queued call reports its acceptance")
+        .expect("the call reports its acceptance")
         .input_id
         .clone();
-    assert!(
-        queued.llm_calls.is_empty() && queued.tool_calls.is_empty(),
-        "a queued call ran no turn"
-    );
-    assert!(
-        matches!(
-            journal.controller.journaled_drive(),
-            Some(crate::AcceptedTurnInputDrive::Queued { ahead: 2 })
-        ),
-        "the queued outcome is journaled"
-    );
-    assert!(
-        requests.lock().expect("request lock").is_empty(),
-        "a queued direct turn reaches no provider"
-    );
-    assert_eq!(
-        pending_input_ids(&store).await,
-        vec![
-            first.input_id.clone(),
-            second.input_id.clone(),
-            input_id.clone()
-        ],
-        "nothing is dropped: every input stays queued in arrival order"
-    );
-
-    let (redrive_store, reads) = RedriveStore::wrap(&store);
-    let redrive_store: Arc<dyn crate::RuntimePersistence> = redrive_store;
-    let replayed = journal
-        .run(
-            &redrive_store,
-            provider.clone(),
-            &turn_id,
-            "the direct input",
-        )
-        .await
-        .expect("a replay succeeds with the same queue position");
-    assert!(
-        matches!(replayed.outcome, crate::TurnOutcome::Queued { ahead: 2 }),
-        "{:?}",
-        replayed.outcome
-    );
-    assert_eq!(
-        replayed
-            .turn_input_acceptance
-            .as_ref()
-            .map(|acceptance| acceptance.input_id.clone()),
-        Some(input_id.clone())
-    );
-    assert_eq!(reads.load(Ordering::SeqCst), 0);
-
-    let mut drains = 0;
-    loop {
-        let mut drainer = acceptance_runtime_with_batching(
-            SESSION_ID,
-            &store,
-            &journal.backend,
-            provider.clone(),
-            Vec::new(),
-            crate::testing::runtime_lease_owner(),
-            journal.batching.clone(),
-        )
-        .await;
-        let drain_id = format!("{prefix}-queued-drain-{drains}");
-        let scope = journal
-            .effect_host
-            .scoped(admit(crate::ExecutionScope::queue_drain(
-                SESSION_ID, &drain_id,
-            )))
-            .expect("scope a queued drain");
-        let drain = drainer
-            .stream_next_queued_work(crate::TurnOptions::new(
-                tokio_util::sync::CancellationToken::new(),
-                scope,
-            ))
-            .await
-            .expect("the drain runs");
-        match drain {
-            crate::QueuedTurnDrain::Ran(_) => drains += 1,
-            crate::QueuedTurnDrain::Empty(_) => break,
-            crate::QueuedTurnDrain::Replayed(_) => {
-                panic!("a fresh drain of queued inputs never replays a committed run")
-            }
-        }
-        assert!(drains <= 3, "the queue drains in a bounded number of turns");
-    }
 
     let answered = applications(&store).await;
     assert_eq!(
@@ -1765,25 +1672,29 @@ pub async fn queued_direct_turn_input_is_answered_in_order_by_the_drain(
             .map(|application| application.input_id.clone())
             .collect::<Vec<_>>(),
         vec![first.input_id, second.input_id, input_id.clone()],
-        "the drain answers every input once, in arrival order"
+        "the drive answers every input once, in arrival order"
     );
     let direct_answer = answered
         .iter()
         .find(|application| application.input_id == input_id)
-        .expect("the queued direct input is answered");
-    assert_ne!(
+        .expect("the direct input is answered");
+    assert_eq!(
         direct_answer.turn_id.as_str(),
-        turn_id,
-        "a drain turn answers the queued input, not the direct call"
+        turn_id.as_str(),
+        "the direct input is answered by its own root"
     );
     assert!(pending_input_ids(&store).await.is_empty());
     let requests = requests.lock().expect("request lock").clone();
-    assert_eq!(requests.len(), drains, "one provider call per drained turn");
+    assert_eq!(
+        requests.len(),
+        2,
+        "one root for the two earlier inputs under the claim bound, then the direct one"
+    );
     assert!(
         requests
             .last()
             .is_some_and(|last| last.contains("the direct input")),
-        "the queued direct input is answered last: {requests:?}"
+        "the direct input is answered last: {requests:?}"
     );
 }
 

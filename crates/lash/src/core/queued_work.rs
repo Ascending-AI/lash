@@ -38,42 +38,48 @@ pub(crate) fn native_queued_work_handle_for_tests(
     }))
 }
 
+/// The core's session driver (FIG-3600): opens a session's runtime with the
+/// core's plugins and runs the kernel's drive on it.
+///
+/// It is installed on the backend's session-work engine at core build. On the
+/// in-process engine that SQLite and PostgreSQL still use until FIG-3668, it
+/// is also that engine's run handle: each claimed session is driven to a stop
+/// under a fresh drive request.
 pub(crate) struct NativeQueuedWorkRunHandle {
     config: Arc<NativeQueuedWorkRunConfig>,
+    next_request: std::sync::atomic::AtomicU64,
 }
 
 impl NativeQueuedWorkRunHandle {
     pub(crate) fn new(config: Arc<NativeQueuedWorkRunConfig>) -> Self {
-        Self { config }
+        Self {
+            config,
+            next_request: std::sync::atomic::AtomicU64::new(0),
+        }
     }
 
-    fn drive_queued_work(
-        &self,
-        request: QueuedWorkRunRequest,
-    ) -> std::pin::Pin<
-        Box<
-            dyn std::future::Future<
-                    Output = std::result::Result<
-                        facade_support::QueuedWorkRunProgress,
-                        facade_support::QueuedWorkRunError,
-                    >,
-                > + Send
-                + '_,
-        >,
-    > {
-        Box::pin(self.drive_queued_work_inner(request))
+    /// A drive request unique to this process incarnation: the in-process
+    /// engine coalesces asks per session, so each run it starts is a new
+    /// drive whose admissions nothing else replays.
+    fn native_request(&self, session_id: &SessionId) -> lash_core::engine::DriveRequest {
+        let ordinal = self
+            .next_request
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        lash_core::engine::DriveRequest {
+            session: session_id.clone(),
+            request: lash_core::engine::DriveRequestId::new(format!(
+                "native:{}:{ordinal}",
+                self.config.session_execution_owner.incarnation_id
+            )),
+            build_generation: lash_core::engine::BuildGeneration::new(""),
+        }
     }
 
-    async fn drive_queued_work_inner(
+    /// Open `session_id`'s runtime with the core's plugins.
+    async fn open_runtime(
         &self,
-        request: QueuedWorkRunRequest,
-    ) -> std::result::Result<
-        facade_support::QueuedWorkRunProgress,
-        facade_support::QueuedWorkRunError,
-    > {
-        let Some(session_id) = request.session_id else {
-            return Ok(facade_support::QueuedWorkRunProgress::Unknown);
-        };
+        session_id: &SessionId,
+    ) -> std::result::Result<(RuntimeHandle, Arc<dyn lash_core::EffectHost>), OpenFailure> {
         let mut policy = self.config.policy.clone();
         policy.session_id = Some(session_id.clone());
         let store = self
@@ -87,12 +93,10 @@ impl NativeQueuedWorkRunHandle {
             })
             .await
             .map_err(|error| {
-                facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
-                    error.to_string(),
-                ))
+                OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string()))
             })?;
         let state = match crate::session::load_state_from_store(
-            &session_id,
+            session_id,
             &policy,
             store.as_ref(),
             &self.config.session_execution_owner,
@@ -102,12 +106,12 @@ impl NativeQueuedWorkRunHandle {
         {
             Ok(state) => state,
             Err(crate::EmbedError::Store(lash_core::StoreError::Contended)) => {
-                return Ok(facade_support::QueuedWorkRunProgress::Blocked);
+                return Err(OpenFailure::Contended);
             }
             Err(error) => {
-                return Err(facade_support::QueuedWorkRunError::terminal(
-                    lash_core::PluginError::Session(error.to_string()),
-                ));
+                return Err(OpenFailure::Terminal(lash_core::PluginError::Session(
+                    error.to_string(),
+                )));
             }
         };
         let plugin_host = build_plugin_host(
@@ -116,9 +120,7 @@ impl NativeQueuedWorkRunHandle {
             Vec::new(),
         )
         .map_err(|error| {
-            facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
-                error.to_string(),
-            ))
+            OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string()))
         })?;
         let mut env = self.config.env.clone();
         env.core = plugin_host
@@ -127,9 +129,7 @@ impl NativeQueuedWorkRunHandle {
                 self.config.process_lifecycle_available,
             )
             .map_err(|error| {
-                facade_support::QueuedWorkRunError::terminal(lash_core::PluginError::Session(
-                    error.to_string(),
-                ))
+                OpenFailure::Terminal(lash_core::PluginError::Session(error.to_string()))
             })?;
         env.plugin_host = Some(Arc::new(plugin_host));
         let effect_host = Arc::clone(&env.core.control.effect_host);
@@ -142,52 +142,123 @@ impl NativeQueuedWorkRunHandle {
         )
         .await
         .map_err(|error| {
-            let error = match error {
+            OpenFailure::Terminal(match error {
                 lash_core::SessionError::Plugin(error) => error,
                 error => lash_core::PluginError::Session(error.to_string()),
-            };
-            facade_support::QueuedWorkRunError::terminal(error)
+            })
         })?;
         let handle = RuntimeHandle::with_live_replay_store(
             runtime,
             Arc::clone(&self.config.live_replay_store),
         );
-        let mut claimed = false;
-        loop {
-            let drain = crate::turn::stream_next_queued_prepared_turn(
-                &handle,
-                crate::turn::TurnSinks::default(),
-                lash_core::facade_support::QueuedEffectSource::Host {
-                    host: effect_host.as_ref(),
-                    identity: None,
-                },
-                lash_core::LocalTurnStop::default(),
-            )
-            .await
-            .map_err(|error| {
-                let plugin_error = lash_core::PluginError::Session(error.to_string());
-                if error.is_retryable() {
-                    facade_support::QueuedWorkRunError::transient(plugin_error)
-                } else {
-                    facade_support::QueuedWorkRunError::terminal(plugin_error)
-                }
-            })?;
-            if let crate::turn::QueuedTurnDrain::Empty(empty_reason) = drain {
+        Ok((handle, effect_host))
+    }
+
+    async fn drive_queued_work(
+        &self,
+        request: QueuedWorkRunRequest,
+    ) -> std::result::Result<
+        facade_support::QueuedWorkRunProgress,
+        facade_support::QueuedWorkRunError,
+    > {
+        let Some(session_id) = request.session_id else {
+            return Ok(facade_support::QueuedWorkRunProgress::Unknown);
+        };
+        let drive = self.native_request(&session_id);
+        match lash_core::SessionDriver::drive(self, drive).await {
+            Ok(outcome) => {
                 tracing::debug!(
                     target: "lash::queued_work_run",
                     session_id = %session_id,
-                    reason = empty_reason.as_str(),
-                    claimed,
-                    "native queued-work run stopped on an empty drain"
+                    ran = outcome.ran.len(),
+                    stop = ?outcome.stop,
+                    "native session drive stopped"
                 );
-                return Ok(if claimed {
-                    facade_support::QueuedWorkRunProgress::Claimed
-                } else {
+                Ok(if outcome.ran.is_empty() {
                     facade_support::QueuedWorkRunProgress::Blocked
-                });
+                } else {
+                    facade_support::QueuedWorkRunProgress::Claimed
+                })
             }
-            claimed = true;
+            Err(abort) => {
+                let retry = matches!(abort, lash_core::engine::DriveAbort::Retry(_));
+                let error = lash_core::PluginError::Session(abort.to_string());
+                Err(if retry {
+                    facade_support::QueuedWorkRunError::transient(error)
+                } else {
+                    facade_support::QueuedWorkRunError::terminal(error)
+                })
+            }
         }
+    }
+}
+
+/// Why a session's runtime did not open for a drive.
+enum OpenFailure {
+    /// Another writer holds the session; the drive is retried.
+    Contended,
+    Terminal(lash_core::PluginError),
+}
+
+impl OpenFailure {
+    fn into_abort(self) -> lash_core::engine::DriveAbort {
+        match self {
+            Self::Contended => lash_core::engine::DriveAbort::Retry(lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::StoreCommitContended,
+                "the session's runtime is contended; the drive is retried",
+            )),
+            Self::Terminal(error) => {
+                lash_core::engine::DriveAbort::Refused(lash_core::RuntimeError::new(
+                    lash_core::RuntimeErrorCode::PluginSessionManager,
+                    error.to_string(),
+                ))
+            }
+        }
+    }
+}
+
+#[async_trait]
+impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
+    async fn drive(
+        &self,
+        request: lash_core::engine::DriveRequest,
+    ) -> std::result::Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
+        let (handle, effect_host) = self
+            .open_runtime(&request.session)
+            .await
+            .map_err(OpenFailure::into_abort)?;
+        let controller = effect_host
+            .scoped(lash_core::engine::drive_admission_scope(
+                &request.session,
+                &request.request,
+            ))
+            .map_err(lash_core::engine::DriveAbort::Refused)?;
+        crate::turn::drive_session_observed(&handle, &controller, &request).await
+    }
+
+    async fn admit(
+        &self,
+        controller: lash_core::ScopedEffectController<'_>,
+        request: &lash_core::engine::DriveRequest,
+        ordinal: u32,
+    ) -> std::result::Result<lash_core::engine::AdmitVerdict, lash_core::engine::DriveAbort> {
+        let (handle, _) = self
+            .open_runtime(&request.session)
+            .await
+            .map_err(OpenFailure::into_abort)?;
+        crate::turn::admit_drive_observed(&handle, &controller, request, ordinal).await
+    }
+
+    async fn run_root(
+        &self,
+        controller: lash_core::ScopedEffectController<'_>,
+        admitted: lash_core::engine::Admitted,
+    ) -> std::result::Result<lash_core::engine::RootOutcome, lash_core::engine::DriveAbort> {
+        let (handle, _) = self
+            .open_runtime(admitted.session())
+            .await
+            .map_err(OpenFailure::into_abort)?;
+        crate::turn::run_admitted_root_observed(&handle, &controller, admitted).await
     }
 }
 
@@ -225,7 +296,7 @@ impl QueuedWorkRunHandle for NativeQueuedWorkRunHandle {
         &self,
         request: QueuedWorkRunRequest,
     ) -> std::result::Result<(), facade_support::QueuedWorkRunError> {
-        self.drive_queued_work(request).await?;
+        Box::pin(self.drive_queued_work(request)).await?;
         Ok(())
     }
 
@@ -237,11 +308,11 @@ impl QueuedWorkRunHandle for NativeQueuedWorkRunHandle {
         facade_support::QueuedWorkRunProgress,
         facade_support::QueuedWorkRunError,
     > {
-        self.drive_queued_work(QueuedWorkRunRequest {
+        Box::pin(self.drive_queued_work(QueuedWorkRunRequest {
             session_id: session_id.cloned(),
             reason: reason.to_string(),
             trace_idle: false,
-        })
+        }))
         .await
     }
 }

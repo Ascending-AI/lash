@@ -6,7 +6,7 @@ use lash_core::facade_support::{
     watch_process_registry,
 };
 use lash_core::{
-    AdmittedProcessIdentity, ArtifactOwner, CommitBudget, NativeProcessWork, NoQueuedWork,
+    AdmittedProcessIdentity, ArtifactOwner, CommitBudget, NativeProcessWork, NoSessionWork,
     OnParentEnd, ParentScope, PluginError, PluginOptions, ProcessExecutionEnvSpec,
     ProcessExecutionEnvStore, ProcessLifecyclePolicy, ProcessProvenance, ProcessRegistration,
     ProcessRegistry, QueuedWorkBatchingConfig, RecoveryContract, SessionPolicy, TurnBudget,
@@ -196,7 +196,7 @@ async fn run_session_surface_case(grant: bool) -> lash_core::ProcessAwaitOutput 
             Arc::new(PluginHost::new(factories)),
             runtime_host,
             WorkerProcessWork::SelfNative(watched),
-            Arc::new(NoQueuedWork::new()),
+            Arc::new(NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(session_policy()),
@@ -451,7 +451,7 @@ async fn fig3463_crashed_worker_retry_keeps_both_telemetry_attempts_but_executes
                 Arc::new(PluginHost::new(factories)),
                 runtime_host,
                 WorkerProcessWork::SelfNative(watch_process_registry(Arc::clone(&registry))),
-                Arc::new(NoQueuedWork::new()),
+                Arc::new(NoSessionWork::new()),
                 lash_core::testing::runtime_lease_owner(),
             )
             .with_session_policy(session_policy()),
@@ -682,7 +682,7 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
                 Arc::new(PluginHost::new(factories)),
                 runtime_host,
                 WorkerProcessWork::SelfNative(watch_process_registry(Arc::clone(&registry))),
-                Arc::new(NoQueuedWork::new()),
+                Arc::new(NoSessionWork::new()),
                 lash_core::testing::runtime_lease_owner(),
             )
             .with_session_policy(session_policy()),
@@ -869,7 +869,7 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
             Arc::new(PluginHost::new(factories)),
             runtime_host,
             WorkerProcessWork::SelfNative(watch_process_registry(Arc::clone(&registry))),
-            Arc::new(NoQueuedWork::new()),
+            Arc::new(NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(session_policy()),

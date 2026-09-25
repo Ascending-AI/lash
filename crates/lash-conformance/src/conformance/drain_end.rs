@@ -338,7 +338,7 @@ fn drain_sweep(world: &DrainEndWorld) -> lash_core_worker::DurableProcessWorker 
             )),
             host,
             lash_core_worker::WorkerProcessWork::SelfNative(watched),
-            Arc::new(crate::NoQueuedWork::new()),
+            Arc::new(crate::NoSessionWork::new()),
             crate::testing::runtime_lease_owner(),
         )
         .with_session_policy(policy),

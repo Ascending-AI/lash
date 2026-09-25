@@ -2091,7 +2091,7 @@ pub(super) async fn no_queued_work_submit_defers_without_refreshing_resident_sta
             "deferred-queued-command",
         )
         .await
-        .expect("NoQueuedWork leaves the durable command pending");
+        .expect("NoSessionWork leaves the durable command pending");
 
     assert_eq!(store.load_session_count(), full_loads_before);
     assert_eq!(store.load_session_head_meta_count(), head_reads_before);

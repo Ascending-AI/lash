@@ -18,7 +18,7 @@ use super::context::DriveObservation;
 use crate::store::OperationId;
 use crate::{
     CancellationToken, RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectOutcome,
-    SessionId, TurnId,
+    SessionId,
 };
 
 /// A registered, serializable unit of I/O: today's envelope, unchanged.
@@ -32,10 +32,10 @@ pub type EffectResult = Result<RuntimeEffectOutcome, RuntimeEffectControllerErro
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum AdmissionCommand {
+    /// Admission mints the root inside its body; the command names none.
     AdmitDrive {
         session: SessionId,
         request: DriveRequestId,
-        root: TurnId,
     },
     /// Carries the whole admission, not only its nonce: the seal advances the
     /// epoch admission observed.

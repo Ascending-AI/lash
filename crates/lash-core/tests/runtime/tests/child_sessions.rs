@@ -471,7 +471,7 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
     let host = lash_core::facade_support::ProcessRuntimeHost::with_ports(
         embedded,
         lash_core::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
-        Arc::new(lash_core::NoQueuedWork::new()),
+        Arc::new(lash_core::NoSessionWork::new()),
     );
     let runtime_host = host;
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(

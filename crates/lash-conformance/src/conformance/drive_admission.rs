@@ -1,0 +1,684 @@
+//! The session drive's admission laws (FIG-3600, ADR 0105 §2, §11): every
+//! root a drive runs is admitted by a recorded `AdmitDrive` step and sealed by
+//! a recorded `SealDriveAdmission` step before its first effect.
+//!
+//! The laws reach an engine only through the kernel's drive entries
+//! ([`drive_session`](lash_core::drive::drive_session),
+//! [`admit_drive`](lash_core::drive::admit_drive),
+//! [`run_admitted_root`](lash_core::drive::run_admitted_root)) on the
+//! controller the tier's [`ConformanceTurnRunner`](crate::ConformanceTurnRunner)
+//! admits, so every tier that runs turns runs them unchanged.
+//!
+//! Not here: L-S5 and L-S6 (stale-epoch mutations refused before I/O) land
+//! with the table switch that fences claims by the drive epoch (S8/P15), and
+//! L-S8 (a fresh execution of a started root is `SubstrateLost`) is the
+//! engine's own start marker, so the engine registers it where it keeps one.
+
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
+
+use lash_core::engine::{
+    AdmitVerdict, Admitted, DriveOutcome, DriveRequest, DriveRequestId, DriveStop, RootOutcome,
+    SealVerdict,
+};
+use lash_sansio::{SessionId, TurnId};
+use pretty_assertions::assert_eq;
+
+use crate::admit;
+
+/// Everything a law's runtime is built from, shared by every run so each is
+/// the same session on the same store.
+#[derive(Clone)]
+struct DriveParts {
+    session_id: SessionId,
+    host: crate::RuntimeHostConfig,
+    store: Arc<dyn crate::RuntimePersistence>,
+    calls: Arc<AtomicUsize>,
+}
+
+impl DriveParts {
+    async fn new(
+        prefix: &str,
+        law: &str,
+        effect_host: &Arc<dyn crate::EffectHost>,
+        stores: &Arc<dyn crate::StoreSet>,
+        claim_bound: usize,
+    ) -> Self {
+        let session_id = SessionId::from(format!("{prefix}-{law}"));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let model = crate::testing::TestProvider::builder()
+            .kind("stub")
+            .complete({
+                let calls = Arc::clone(&calls);
+                move |_request| {
+                    let index = calls.fetch_add(1, Ordering::SeqCst);
+                    async move {
+                        Ok(crate::LlmResponse {
+                            parts: vec![crate::LlmOutputPart::Text {
+                                text: format!("answer {}", index + 1),
+                                response_meta: None,
+                            }],
+                            ..crate::LlmResponse::default()
+                        })
+                    }
+                }
+            })
+            .build();
+        let mut host = crate::LawBackend::over_stores(stores.as_ref(), Arc::clone(effect_host))
+            .host_config(
+                crate::CommitBudget::bounded(1024 * 1024, 512),
+                crate::QueuedWorkBatchingConfig::new(1).with_max_turn_input_claim(claim_bound),
+            );
+        host.providers.provider_resolver =
+            Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
+        let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
+        Self {
+            session_id,
+            host,
+            store,
+            calls,
+        }
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: the law's runtime builds"
+    )]
+    async fn runtime(&self) -> crate::LashRuntime {
+        let mut policy = crate::testing::mock_session_policy();
+        policy.session_id = Some(self.session_id.clone());
+        let state = crate::RuntimeSessionState {
+            session_id: self.session_id.clone(),
+            policy: policy.clone(),
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
+        };
+        Box::pin(
+            crate::LashRuntime::builder(self.host.clone(), crate::testing::runtime_lease_owner())
+                .with_session_id(&self.session_id)
+                .with_policy(policy)
+                .with_initial_state(state)
+                .with_plugin_factories(crate::testing::test_standard_protocol_factories())
+                .with_store(Arc::clone(&self.store))
+                .with_queued_work(Arc::new(crate::NoSessionWork::new()))
+                .build(),
+        )
+        .await
+        .expect("build the drive-admission conformance runtime")
+    }
+
+    /// Accept `text` as next-turn input, keyed by `host_id` when given.
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: the session store admits the row"
+    )]
+    async fn enqueue(&self, text: &str, host_id: Option<&str>) -> crate::InputId {
+        let mut draft = crate::PendingTurnInputDraft::new(
+            self.session_id.clone(),
+            crate::TurnInputIngress::next_turn(),
+            crate::TurnInput::text(text),
+        );
+        if let Some(host_id) = host_id {
+            draft = draft.with_source_key(host_id);
+        }
+        self.store
+            .enqueue_pending_turn_input(draft)
+            .await
+            .expect("accept the law's input")
+            .input_id
+    }
+
+    fn request(&self, id: &str) -> DriveRequest {
+        DriveRequest {
+            session: self.session_id.clone(),
+            request: DriveRequestId::new(id),
+            build_generation: lash_core::engine::BuildGeneration::new(""),
+        }
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: the store reads its own epoch"
+    )]
+    async fn epoch(&self) -> crate::store::StoredDriveEpoch {
+        self.store
+            .drive_epoch(&self.session_id)
+            .await
+            .expect("read the session's drive epoch")
+    }
+
+    #[expect(
+        clippy::expect_used,
+        reason = "conformance-law fixture: the store reads its applications"
+    )]
+    async fn applications(&self) -> Vec<(crate::InputId, TurnId)> {
+        self.store
+            .list_turn_input_applications(&self.session_id)
+            .await
+            .expect("read the applications")
+            .into_iter()
+            .map(|application| (application.input_id, application.turn_id))
+            .collect()
+    }
+}
+
+/// Run `step` once on a controller the tier admits for the law's driver
+/// scope, and hand back what it returned.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the tier runs the step once"
+)]
+async fn on_tier<T, F>(
+    runner: &Arc<dyn crate::ConformanceTurnRunner>,
+    parts: &DriveParts,
+    step: F,
+) -> T
+where
+    T: Send + 'static,
+    F: for<'a> Fn(
+            crate::LashRuntime,
+            crate::ScopedEffectController<'a>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = T> + Send + 'a>>
+        + Send
+        + Sync
+        + 'static,
+{
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    let step = Arc::new(step);
+    let attempt_parts = parts.clone();
+    runner
+        .run_turn(
+            admit(crate::ExecutionScope::turn(
+                &parts.session_id,
+                TurnId::from("drive-law-driver"),
+            )),
+            Arc::new(move |scope| {
+                let parts = attempt_parts.clone();
+                let step = Arc::clone(&step);
+                let tx = tx.clone();
+                Box::pin(async move {
+                    let runtime = parts.runtime().await;
+                    let value = step(runtime, scope).await;
+                    let _ = tx.send(value);
+                    crate::ConformanceTurnEnd::Settled
+                })
+            }),
+        )
+        .await;
+    rx.recv().await.expect("the tier ran the law's step")
+}
+
+fn admitted(verdict: AdmitVerdict) -> Admitted {
+    match verdict {
+        AdmitVerdict::Admit(admitted) => admitted,
+        other => panic!("admission admits the pending root: {other:?}"),
+    }
+}
+
+/// L-S1: two admissions that observed the same drive epoch are never both
+/// authorized. The first seal raises the epoch; the second is superseded and
+/// runs nothing.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn one_authorized_drive_per_session(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let parts = DriveParts::new(prefix, "one-drive", &effect_host, &stores, 8).await;
+    parts
+        .enqueue("the only question", Some("one-drive-root"))
+        .await;
+    let first = parts.request("drive-a");
+    let second = parts.request("drive-b");
+    let (a, b) = on_tier(&runner, &parts, move |mut runtime, scope| {
+        let first = first.clone();
+        let second = second.clone();
+        Box::pin(async move {
+            let a = lash_core::drive::admit_drive(&mut runtime, &scope, &first, 0)
+                .await
+                .expect("admit the first drive");
+            let b = lash_core::drive::admit_drive(&mut runtime, &scope, &second, 0)
+                .await
+                .expect("admit the second drive");
+            let a = lash_core::drive::run_admitted_root(&mut runtime, &scope, admitted(a))
+                .await
+                .expect("run the first root");
+            let b = lash_core::drive::run_admitted_root(&mut runtime, &scope, admitted(b))
+                .await
+                .expect("the superseded root ends without an abort");
+            (a, b)
+        })
+    })
+    .await;
+    assert!(
+        matches!(&a, RootOutcome::Committed { root, .. } if root.as_str() == "one-drive-root"),
+        "{a:?}"
+    );
+    assert!(
+        matches!(
+            &b,
+            RootOutcome::Refused {
+                verdict: SealVerdict::Superseded { epoch: 1 },
+                ..
+            }
+        ),
+        "the second admission observed a superseded epoch: {b:?}"
+    );
+    let epoch = parts.epoch().await;
+    assert_eq!(epoch.epoch, 1, "exactly one drive-epoch transition");
+    assert_eq!(
+        epoch.admission.as_ref().map(|id| id.as_str()),
+        Some("drive-a#0")
+    );
+    assert_eq!(parts.calls.load(Ordering::SeqCst), 1, "one root ran");
+}
+
+/// L-S2: one drive claims every item of the claimable prefix under one root:
+/// three accepted inputs within the claim bound are answered by one turn.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn one_drive_claims_many_items(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let parts = DriveParts::new(prefix, "many-items", &effect_host, &stores, 8).await;
+    let first = parts.enqueue("first", Some("many-items-root")).await;
+    let second = parts.enqueue("second", None).await;
+    let third = parts.enqueue("third", None).await;
+    let request = parts.request("many-items-drive");
+    let outcome: DriveOutcome = on_tier(&runner, &parts, move |mut runtime, scope| {
+        let request = request.clone();
+        Box::pin(async move {
+            lash_core::drive::drive_session(&mut runtime, &scope, &request)
+                .await
+                .expect("the drive runs")
+        })
+    })
+    .await;
+    assert_eq!(outcome.stop, DriveStop::Idle);
+    assert_eq!(outcome.ran.len(), 1, "one root: {outcome:?}");
+    let root = TurnId::from("many-items-root");
+    assert_eq!(
+        parts.applications().await,
+        vec![
+            (first, root.clone()),
+            (second, root.clone()),
+            (third, root.clone())
+        ],
+        "one root answers every item it claimed"
+    );
+    assert_eq!(parts.calls.load(Ordering::SeqCst), 1, "one model call");
+}
+
+/// L-S3: running an admitted root again under the same admission drives
+/// exactly the claim its first run recorded: the same answer, no second model
+/// call, no second epoch transition, the input applied once.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn claim_identity_is_idempotent_within_ownership(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let parts = DriveParts::new(prefix, "claim-idempotent", &effect_host, &stores, 8).await;
+    let input = parts
+        .enqueue("ask once", Some("claim-idempotent-root"))
+        .await;
+    let request = parts.request("claim-idempotent-drive");
+    let (first, again) = on_tier(&runner, &parts, move |mut runtime, scope| {
+        let request = request.clone();
+        Box::pin(async move {
+            let admitted = admitted(
+                lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0)
+                    .await
+                    .expect("admit the root"),
+            );
+            let first = lash_core::drive::run_admitted_root(&mut runtime, &scope, admitted.clone())
+                .await
+                .expect("run the root");
+            let again = lash_core::drive::run_admitted_root(&mut runtime, &scope, admitted)
+                .await
+                .expect("run the same admission again");
+            (first, again)
+        })
+    })
+    .await;
+    assert!(matches!(first, RootOutcome::Committed { .. }), "{first:?}");
+    assert_eq!(again, first, "the same admission drives the same root");
+    assert_eq!(
+        parts.calls.load(Ordering::SeqCst),
+        1,
+        "no second model call"
+    );
+    assert_eq!(parts.epoch().await.epoch, 1, "one drive-epoch transition");
+    assert_eq!(
+        parts.applications().await,
+        vec![(input, TurnId::from("claim-idempotent-root"))],
+        "the input is applied once"
+    );
+}
+
+/// L-S4: a redrive of a drive request replays its admissions and seals, so
+/// it mints no ownership: the epoch transitions once however often the
+/// request is driven.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn replay_cannot_mint_ownership(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let parts = DriveParts::new(prefix, "replay-ownership", &effect_host, &stores, 8).await;
+    parts
+        .enqueue("ask once", Some("replay-ownership-root"))
+        .await;
+    for _ in 0..3 {
+        let request = parts.request("replay-ownership-drive");
+        let outcome: DriveOutcome = on_tier(&runner, &parts, move |mut runtime, scope| {
+            let request = request.clone();
+            Box::pin(async move {
+                lash_core::drive::drive_session(&mut runtime, &scope, &request)
+                    .await
+                    .expect("the drive runs")
+            })
+        })
+        .await;
+        assert_eq!(outcome.stop, DriveStop::Idle);
+        let epoch = parts.epoch().await;
+        assert_eq!(epoch.epoch, 1, "a replay never raises the epoch again");
+        assert_eq!(
+            epoch.admission.as_ref().map(|id| id.as_str()),
+            Some("replay-ownership-drive#0")
+        );
+    }
+    assert_eq!(parts.calls.load(Ordering::SeqCst), 1, "one model call");
+}
+
+/// L-S7: admission precedes the first effect: when the root's first model
+/// call is made, its admission is already sealed.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn admission_precedes_first_effect(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let mut parts = DriveParts::new(prefix, "admission-first", &effect_host, &stores, 8).await;
+    let sealed_at_call = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let model = crate::testing::TestProvider::builder()
+        .kind("stub")
+        .complete({
+            let store = Arc::clone(&parts.store);
+            let session_id = parts.session_id.clone();
+            let sealed_at_call = Arc::clone(&sealed_at_call);
+            move |_request| {
+                let store = Arc::clone(&store);
+                let session_id = session_id.clone();
+                let sealed_at_call = Arc::clone(&sealed_at_call);
+                async move {
+                    let epoch = store
+                        .drive_epoch(&session_id)
+                        .await
+                        .expect("read the epoch at the model call");
+                    sealed_at_call
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .push(epoch.epoch);
+                    Ok(crate::LlmResponse {
+                        parts: vec![crate::LlmOutputPart::Text {
+                            text: "sealed first".to_string(),
+                            response_meta: None,
+                        }],
+                        ..crate::LlmResponse::default()
+                    })
+                }
+            }
+        })
+        .build();
+    parts.host.providers.provider_resolver =
+        Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
+    parts.enqueue("ask", Some("admission-first-root")).await;
+    let request = parts.request("admission-first-drive");
+    let outcome: DriveOutcome = on_tier(&runner, &parts, move |mut runtime, scope| {
+        let request = request.clone();
+        Box::pin(async move {
+            lash_core::drive::drive_session(&mut runtime, &scope, &request)
+                .await
+                .expect("the drive runs")
+        })
+    })
+    .await;
+    assert_eq!(outcome.ran.len(), 1, "{outcome:?}");
+    assert_eq!(
+        *sealed_at_call
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner),
+        vec![1],
+        "the root's first model call ran under its sealed admission"
+    );
+}
+
+/// L-S9: an admission whose seal never ran (a reset discarded it) holds
+/// nothing: a fresh drive admits and seals anew, and the stale admission's
+/// later seal is superseded.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn reset_before_admission_admits_fresh(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let parts = DriveParts::new(prefix, "reset-admission", &effect_host, &stores, 8).await;
+    parts.enqueue("ask", Some("reset-admission-root")).await;
+    let stale = parts.request("reset-admission-stale");
+    let fresh = parts.request("reset-admission-fresh");
+    let (outcome, late) = on_tier(&runner, &parts, move |mut runtime, scope| {
+        let stale = stale.clone();
+        let fresh = fresh.clone();
+        Box::pin(async move {
+            let stale = admitted(
+                lash_core::drive::admit_drive(&mut runtime, &scope, &stale, 0)
+                    .await
+                    .expect("admit the stale drive"),
+            );
+            let outcome = lash_core::drive::drive_session(&mut runtime, &scope, &fresh)
+                .await
+                .expect("the fresh drive runs");
+            let late = lash_core::drive::run_admitted_root(&mut runtime, &scope, stale)
+                .await
+                .expect("the stale root ends without an abort");
+            (outcome, late)
+        })
+    })
+    .await;
+    assert_eq!(outcome.ran.len(), 1, "{outcome:?}");
+    assert!(
+        matches!(late, RootOutcome::Refused { .. }),
+        "a stale admission's late seal is superseded: {late:?}"
+    );
+    let epoch = parts.epoch().await;
+    assert_eq!(epoch.epoch, 1);
+    assert_eq!(
+        epoch.admission.as_ref().map(|id| id.as_str()),
+        Some("reset-admission-fresh#0")
+    );
+    assert_eq!(parts.calls.load(Ordering::SeqCst), 1);
+}
+
+/// L-S10: a parked root blocks admission: while the session's park stands, a
+/// fresh drive admits nothing and runs nothing, and the pending work stays
+/// accepted.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn parked_root_blocks_admission(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let parts = DriveParts::new(prefix, "parked-root", &effect_host, &stores, 8).await;
+    let input = parts
+        .enqueue("waits behind the park", Some("after-the-park"))
+        .await;
+    parts
+        .store
+        .record_turn_park(&crate::store::TurnParkWrite {
+            session_id: parts.session_id.clone(),
+            turn_id: TurnId::from("parked-root"),
+            reason: crate::store::ParkReason::ReplayDivergence {
+                message: "the drive-admission law parks this root".to_string(),
+            },
+            at_ms: 1,
+        })
+        .await
+        .expect("record the park");
+    let request = parts.request("parked-root-drive");
+    let outcome: DriveOutcome = on_tier(&runner, &parts, move |mut runtime, scope| {
+        let request = request.clone();
+        Box::pin(async move {
+            lash_core::drive::drive_session(&mut runtime, &scope, &request)
+                .await
+                .expect("the drive stops at the park")
+        })
+    })
+    .await;
+    assert!(outcome.ran.is_empty(), "{outcome:?}");
+    assert!(
+        matches!(&outcome.stop, DriveStop::Parked(park) if park.root.as_str() == "parked-root"),
+        "{outcome:?}"
+    );
+    assert_eq!(parts.epoch().await.epoch, 0, "nothing was sealed");
+    assert_eq!(parts.calls.load(Ordering::SeqCst), 0);
+    let pending = parts
+        .store
+        .list_pending_turn_inputs(&parts.session_id)
+        .await
+        .expect("read the pending inputs");
+    assert_eq!(
+        pending
+            .iter()
+            .map(|read| read.input.input_id.clone())
+            .collect::<Vec<_>>(),
+        vec![input],
+        "the pending work stays accepted"
+    );
+}
+
+/// L-S12: the fence is never part of the recorded envelope: a seal's command
+/// names only the admission, and the fence it yields rides its outcome.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn fence_is_not_in_the_envelope_hash(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let parts = DriveParts::new(prefix, "fence-envelope", &effect_host, &stores, 8).await;
+    parts.enqueue("ask", Some("fence-envelope-root")).await;
+    let request = parts.request("fence-envelope-drive");
+    let admission = on_tier(&runner, &parts, move |mut runtime, scope| {
+        let request = request.clone();
+        Box::pin(async move {
+            admitted(
+                lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0)
+                    .await
+                    .expect("admit the root"),
+            )
+        })
+    })
+    .await;
+    let command = serde_json::to_value(crate::RuntimeEffectCommand::SealDriveAdmission {
+        admitted: Box::new(admission),
+    })
+    .expect("serialize the seal command");
+    fn mentions_fence(value: &serde_json::Value) -> bool {
+        match value {
+            serde_json::Value::Object(map) => map
+                .iter()
+                .any(|(key, value)| key == "fence" || key == "epoch" || mentions_fence(value)),
+            serde_json::Value::Array(items) => items.iter().any(mentions_fence),
+            _ => false,
+        }
+    }
+    assert!(
+        !mentions_fence(&command),
+        "the seal command carries no fence: {command}"
+    );
+}
+
+/// FIG-3607 contract 4: every turn a drive runs is opened by its root: the
+/// root is the host's id for the input that starts it, and the committed turn
+/// answers under that id.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn every_driver_turn_is_owned_by_its_root(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let parts = DriveParts::new(prefix, "owned-root", &effect_host, &stores, 1).await;
+    let hosted = parts
+        .enqueue("host-named", Some("owned-root-host-id"))
+        .await;
+    let minted = parts.enqueue("unnamed", None).await;
+    let request = parts.request("owned-root-drive");
+    let outcome: DriveOutcome = on_tier(&runner, &parts, move |mut runtime, scope| {
+        let request = request.clone();
+        Box::pin(async move {
+            lash_core::drive::drive_session(&mut runtime, &scope, &request)
+                .await
+                .expect("the drive runs")
+        })
+    })
+    .await;
+    let roots = outcome
+        .ran
+        .iter()
+        .map(|root| root.root().clone())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        roots,
+        vec![
+            TurnId::from("owned-root-host-id"),
+            TurnId::from(minted.as_str())
+        ],
+        "a root is its input's host id, else its input id"
+    );
+    assert_eq!(
+        parts.applications().await,
+        vec![
+            (hosted, TurnId::from("owned-root-host-id")),
+            (minted.clone(), TurnId::from(minted.as_str()))
+        ],
+        "each turn answers under its root"
+    );
+}

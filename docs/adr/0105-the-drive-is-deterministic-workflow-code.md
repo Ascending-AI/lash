@@ -107,7 +107,9 @@ pub trait DriveAdmission: EngineContext {
 
 - **`admit`** reads the session head generation (the FIG-3619 gate), the
   drive epoch, the parked-root set and the root's start marker. It answers
-  `Admit`, `Parked`, `SubstrateLost`, `RootTerminal` or `Idle`.
+  `Admit`, `Parked`, `SubstrateLost`, `RootTerminal` or `Idle`. Its request
+  names no root: admission mints the root inside its recorded body, from the
+  work it admits (FIG-3600, S5 ruling Q4).
 - **`seal`** advances the drive epoch by one with a compare-and-set, sets the
   root's start marker if absent, keyed by the admission nonce, and revalidates
   authority in the same transaction. A reset before the seal may retain

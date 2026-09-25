@@ -9,7 +9,7 @@
 use std::sync::Arc;
 
 use lash_core::facade_support::{ProcessEventSink, TurnWorkDriver};
-use lash_core::{BackendQueuedWork, EffectHost as _, QueuedWorkSubstrate, StoreSet};
+use lash_core::{EffectHost as _, SessionWorkEngine, StoreSet};
 
 use crate::effect_host::RestateEffectHost;
 use crate::ingress::{RestateAuthorityId, RestateConnection, RestateIngressClient};
@@ -27,7 +27,7 @@ use crate::turn::RestateTurnAttach;
 pub enum RestateQueuedWork {
     /// The engine-backed driver: the port that hands each queued turn to the
     /// host's Restate workflow, so the turn runs inside a handler.
-    Engine(Arc<dyn QueuedWorkSubstrate>),
+    Engine(Arc<dyn SessionWorkEngine>),
     /// No driver: the host drains queued work from its own handlers, or runs
     /// no queued work at all.
     Disabled,
@@ -42,11 +42,11 @@ impl std::fmt::Debug for RestateQueuedWork {
     }
 }
 
-impl From<RestateQueuedWork> for BackendQueuedWork {
-    fn from(queued_work: RestateQueuedWork) -> Self {
-        match queued_work {
-            RestateQueuedWork::Engine(driver) => Self::Engine(driver),
-            RestateQueuedWork::Disabled => Self::Disabled,
+impl RestateQueuedWork {
+    fn into_engine(self) -> Arc<dyn SessionWorkEngine> {
+        match self {
+            Self::Engine(engine) => engine,
+            Self::Disabled => Arc::new(lash_core::NoSessionWork::new()),
         }
     }
 }
@@ -65,7 +65,7 @@ pub struct RestateBackend<S: ?Sized + StoreSet = dyn StoreSet> {
     connection: RestateConnection,
     effect_host: Arc<RestateEffectHost>,
     process: Arc<RestateProcessDeployment>,
-    queued_work: BackendQueuedWork,
+    session_work: Arc<dyn SessionWorkEngine>,
     identity: Arc<str>,
 }
 
@@ -76,7 +76,7 @@ impl<S: ?Sized + StoreSet> Clone for RestateBackend<S> {
             connection: self.connection.clone(),
             effect_host: Arc::clone(&self.effect_host),
             process: Arc::clone(&self.process),
-            queued_work: self.queued_work.clone(),
+            session_work: Arc::clone(&self.session_work),
             identity: Arc::clone(&self.identity),
         }
     }
@@ -123,7 +123,7 @@ impl<S: ?Sized + StoreSet> RestateBackend<S> {
             connection,
             effect_host,
             process,
-            queued_work: queued_work.into(),
+            session_work: queued_work.into_engine(),
             identity,
         }
     }
@@ -239,8 +239,8 @@ impl<S: ?Sized + StoreSet> lash_core::Backend for RestateBackend<S> {
         Some(self.process.process_work())
     }
 
-    fn queued_work(&self) -> BackendQueuedWork {
-        self.queued_work.clone()
+    fn session_work(&self) -> Option<Arc<dyn SessionWorkEngine>> {
+        Some(Arc::clone(&self.session_work))
     }
 }
 

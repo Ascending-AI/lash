@@ -1585,7 +1585,7 @@ async fn rejected_reassignment(label: &str, runtime: &mut LashRuntime) {
 /// from the accepted execution and reads `COMMITTED`, not the rejected
 /// executor's `REJECTED`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_storeless_rejected_turn_does_not_reach_the_next_turn() {
+async fn rlm_storeless_rejected_turn_is_redriven_before_the_next_turn() {
     let mut runtime = Box::pin(storeless_runtime(
         vec![establish_response(), reassign_response(), read_response()],
         vec![refuse_second_turn_finalize()],
@@ -1619,9 +1619,12 @@ async fn rlm_storeless_rejected_turn_does_not_reach_the_next_turn() {
     );
 }
 
-/// (g) store-backed: same shape as the storeless witness; the next ordinary
-/// turn after the rejected reassignment reads the durable head's `COMMITTED`.
-async fn rejected_turn_does_not_reach_the_next_turn(backend: Backend) {
+/// (g) store-backed: the rejected turn's input stays accepted, and the next
+/// drive redrives it first under its own root (FIG-3600). Its refusal was a
+/// one-shot hook failure, so the redrive replays the recorded reassignment and
+/// commits it; the next ordinary turn then reads the committed `REJECTED`,
+/// never a value the rejected attempt left only in resident state.
+async fn rejected_turn_is_redriven_before_the_next_turn(backend: Backend) {
     let SeededSession {
         mut runtime,
         plugins,
@@ -1639,22 +1642,22 @@ async fn rejected_turn_does_not_reach_the_next_turn(backend: Backend) {
     assert_final_value(
         backend.label,
         &turn(&mut runtime, "after-rejection").await,
-        serde_json::json!("COMMITTED"),
+        serde_json::json!("REJECTED"),
     );
     drop(plugins);
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_rejected_turn_does_not_reach_the_next_turn_on_memory() {
-    Box::pin(rejected_turn_does_not_reach_the_next_turn(
+async fn rlm_rejected_turn_is_redriven_before_the_next_turn_on_memory() {
+    Box::pin(rejected_turn_is_redriven_before_the_next_turn(
         Backend::memory().await,
     ))
     .await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-async fn rlm_rejected_turn_does_not_reach_the_next_turn_on_sqlite() {
-    Box::pin(rejected_turn_does_not_reach_the_next_turn(
+async fn rlm_rejected_turn_is_redriven_before_the_next_turn_on_sqlite() {
+    Box::pin(rejected_turn_is_redriven_before_the_next_turn(
         Backend::sqlite().await,
     ))
     .await;

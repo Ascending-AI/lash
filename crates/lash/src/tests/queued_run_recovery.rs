@@ -589,7 +589,7 @@ impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for ExhaustedWake {
 }
 
 #[tokio::test]
-async fn exhausted_queued_run_resumes_or_is_abandoned_without_new_input() -> Result<()> {
+async fn exhausted_input_root_resumes_or_is_withdrawn_without_new_input() -> Result<()> {
     use tracing_subscriber::prelude::*;
     for abandon in [false, true] {
         let exhausted = Arc::new(tokio::sync::Notify::new());
@@ -652,56 +652,38 @@ async fn exhausted_queued_run_resumes_or_is_abandoned_without_new_input() -> Res
         tokio::time::timeout(std::time::Duration::from_secs(10), exhausted.notified())
             .await
             .expect("scheduler exhausts its physical retry budget");
-        let pending = session
-            .durable()
-            .pending_queued_run()
-            .await?
-            .expect("exhaustion retains durable ownership");
+        // Exhaustion leaves the accepted input pending: the input root keeps
+        // its recorded history, and the next drive of the session resumes it
+        // (FIG-3600). The host may withdraw it instead.
+        let pending = session.durable().pending_turn_inputs().await?;
+        assert_eq!(pending.len(), 1, "exhaustion keeps the accepted input");
         assert_eq!(probe.provider_calls.load(Ordering::SeqCst), 1);
-        assert!(
-            session
-                .turn(TurnInput::text("conflicting direct input"))
-                .run()
-                .await
-                .is_err(),
-            "direct work cannot bypass a pending admission"
-        );
-        assert_eq!(
-            probe.provider_calls.load(Ordering::SeqCst),
-            1,
-            "direct refusal occurs before provider execution"
-        );
         probe.hook_release.add_permits(16);
         if abandon {
-            let receipt = session
-                .abandon_queued_run(
-                    pending.scope.clone(),
-                    pending.revision,
-                    "host canceled failed submission",
-                )
+            let cancelled = session
+                .durable()
+                .cancel_pending_turn_input(&pending[0].input.input_id)
                 .await?;
-            assert!(matches!(
-                receipt.terminal,
-                Some(lash_core::store::QueuedRunTerminal::Failed { .. })
-            ));
-            let replay = session
-                .queued_turn()
-                .drain_id(pending.scope.id())
-                .run()
-                .await?;
-            assert!(
-                matches!(replay, crate::QueuedTurnDrain::Replayed(receipt) if receipt.scope == pending.scope)
-            );
+            assert!(cancelled.is_cancelled(), "{cancelled:?}");
         } else {
+            // The host asks the engine to drive the session and waits for the
+            // drive to resume the exhausted root.
             let ports = core.substrate_slot.ports().await;
-            ports
-                .queued
-                .drain_session_work(
-                    lash_core::SessionWorkTarget::Session(SessionId::from("exhausted-queued-run")),
-                    "host resumes exhausted admission",
-                )
-                .await?;
-            assert_eq!(probe.provider_calls.load(Ordering::SeqCst), 1);
+            ports.queued.schedule_drive(
+                &SessionId::from("exhausted-queued-run"),
+                lash_core::engine::DriveRequestId::new("host resumes exhausted admission"),
+            );
+            for _ in 0..1_000 {
+                if session.durable().pending_turn_inputs().await?.is_empty() {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            }
+            assert_eq!(
+                probe.provider_calls.load(Ordering::SeqCst),
+                1,
+                "the resumed root replays its recorded model call"
+            );
             assert_eq!(
                 recorded_provider_effects(&effect_journal(directory.path())),
                 recorded
@@ -710,10 +692,26 @@ async fn exhausted_queued_run_resumes_or_is_abandoned_without_new_input() -> Res
         }
         assert!(session.durable().pending_queued_run().await?.is_none());
         assert!(session.durable().pending_turn_inputs().await?.is_empty());
-        session
-            .turn(TurnInput::text("direct work after disposition"))
-            .run()
-            .await?;
+        // The engine's drive may still be releasing the session's lane.
+        let mut attempts = 0;
+        loop {
+            match session
+                .turn(TurnInput::text("direct work after disposition"))
+                .turn_id("direct-after-disposition")
+                .run()
+                .await
+            {
+                Ok(_) => break,
+                Err(crate::EmbedError::Runtime(error))
+                    if error.code == lash_core::RuntimeErrorCode::SessionExecutionLaneBusy
+                        && attempts < 500 =>
+                {
+                    attempts += 1;
+                    tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                }
+                Err(error) => return Err(error),
+            }
+        }
         assert_eq!(probe.provider_calls.load(Ordering::SeqCst), 2);
     }
     Ok(())

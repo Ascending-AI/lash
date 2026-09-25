@@ -160,7 +160,7 @@ async fn build_runtime(
             .with_initial_state(state)
             .with_plugin_factories(factories)
             .with_store(store)
-            .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
+            .with_queued_work(Arc::new(crate::NoSessionWork::new()))
             .build(),
     )
     .await

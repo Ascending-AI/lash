@@ -95,9 +95,9 @@ pub use lash_core_ids::execution_permit::{
 };
 pub use native_substrate::{
     NativeProcessAdmissionDriver, NativeProcessWork, NativeSubstrateConfig,
-    NativeSubstrateConfigError, NoQueuedWork, ProcessTerminalWait, ProcessWorkSubstrate,
-    ProcessWorkWiring, QueuedWorkSubstrate, SessionDrainOutcome, SessionWorkTarget,
-    WakeDeliveryDriveReport, WakeDeliveryDriver, WorkCadencePolicy, WorkerSweepPolicy,
+    NativeSubstrateConfigError, NoSessionWork, ProcessTerminalWait, ProcessWorkSubstrate,
+    ProcessWorkWiring, SessionDriver, SessionWorkEngine, WakeDeliveryDriveReport,
+    WakeDeliveryDriver, WorkCadencePolicy, WorkerSweepPolicy,
 };
 #[cfg(any(test, feature = "testing"))]
 pub use process::reconcile_pruned_trigger_deliveries_interleaved;

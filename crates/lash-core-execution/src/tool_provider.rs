@@ -503,7 +503,7 @@ pub(crate) struct ToolProcessEventContext {
     store: Option<Arc<dyn crate::RuntimePersistence>>,
     session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
     session_graph: Arc<dyn SessionGraphService>,
-    queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
+    queued_work: Arc<dyn crate::SessionWorkEngine>,
     process_wake_delivery_policy: crate::DeliveryPolicy,
     clock: Arc<dyn crate::Clock>,
 }
@@ -617,7 +617,7 @@ impl<'run> ToolContextBuilder<'run> {
         process_work: crate::ProcessWorkWiring,
         store: Option<Arc<dyn crate::RuntimePersistence>>,
         session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
-        queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
+        queued_work: Arc<dyn crate::SessionWorkEngine>,
         process_wake_delivery_policy: crate::DeliveryPolicy,
         clock: Arc<dyn crate::Clock>,
     ) -> Self {
@@ -1077,7 +1077,7 @@ impl<'run> ToolContext<'run> {
             store: None,
             session_store_factory: None,
             session_graph: Arc::new(crate::plugin::NoopSessionManager),
-            queued_work: Arc::new(crate::NoQueuedWork::new()),
+            queued_work: Arc::new(crate::NoSessionWork::new()),
             process_wake_delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
             clock: Arc::new(crate::SystemClock),
         });

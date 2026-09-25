@@ -4,8 +4,8 @@ use std::sync::Arc;
 
 use super::process::{ProcessEngineRegistry, ProcessExecutionEnvStore, ProcessRegistry};
 use super::{
-    EffectHost, NoQueuedWork, ProcessWorkSubstrate, ProcessWorkWiring, QueuedWorkSubstrate,
-    SessionStoreFactory, TerminationPolicy,
+    EffectHost, NoSessionWork, ProcessWorkSubstrate, ProcessWorkWiring, SessionStoreFactory,
+    SessionWorkEngine, TerminationPolicy,
 };
 
 /// Default attempt bound stamped onto children started by the engine that runs
@@ -441,7 +441,7 @@ impl EmbeddedRuntimeHost {
 pub struct ProcessRuntimeHost {
     embedded: EmbeddedRuntimeHost,
     wiring: ProcessWorkWiring,
-    queued_work: Arc<dyn QueuedWorkSubstrate>,
+    queued_work: Arc<dyn SessionWorkEngine>,
 }
 
 impl ProcessRuntimeHost {
@@ -454,7 +454,7 @@ impl ProcessRuntimeHost {
     pub fn with_ports(
         embedded: EmbeddedRuntimeHost,
         wiring: ProcessWorkWiring,
-        queued_work: Arc<dyn QueuedWorkSubstrate>,
+        queued_work: Arc<dyn SessionWorkEngine>,
     ) -> Self {
         Self {
             embedded,
@@ -468,7 +468,7 @@ impl ProcessRuntimeHost {
     }
 
     /// Return the required queued-work port installed on this host.
-    pub fn queued_work(&self) -> &Arc<dyn QueuedWorkSubstrate> {
+    pub fn queued_work(&self) -> &Arc<dyn SessionWorkEngine> {
         &self.queued_work
     }
 
@@ -488,35 +488,35 @@ impl ProcessRuntimeHost {
 #[derive(Clone)]
 pub enum RuntimeWork {
     SessionsOnly {
-        queued: Arc<dyn QueuedWorkSubstrate>,
+        queued: Arc<dyn SessionWorkEngine>,
     },
     RegistryOnly {
         registry: Arc<dyn ProcessRegistry>,
-        queued: Arc<dyn QueuedWorkSubstrate>,
+        queued: Arc<dyn SessionWorkEngine>,
     },
     Processes {
         wiring: ProcessWorkWiring,
-        queued: Arc<dyn QueuedWorkSubstrate>,
+        queued: Arc<dyn SessionWorkEngine>,
     },
 }
 
 impl RuntimeWork {
-    pub fn sessions_only(queued: Arc<dyn QueuedWorkSubstrate>) -> Self {
+    pub fn sessions_only(queued: Arc<dyn SessionWorkEngine>) -> Self {
         Self::SessionsOnly { queued }
     }
 
     pub fn registry_only(
         registry: Arc<dyn ProcessRegistry>,
-        queued: Arc<dyn QueuedWorkSubstrate>,
+        queued: Arc<dyn SessionWorkEngine>,
     ) -> Self {
         Self::RegistryOnly { registry, queued }
     }
 
-    pub fn processes(wiring: ProcessWorkWiring, queued: Arc<dyn QueuedWorkSubstrate>) -> Self {
+    pub fn processes(wiring: ProcessWorkWiring, queued: Arc<dyn SessionWorkEngine>) -> Self {
         Self::Processes { wiring, queued }
     }
 
-    pub fn queued_arc(&self) -> &Arc<dyn QueuedWorkSubstrate> {
+    pub fn queued_arc(&self) -> &Arc<dyn SessionWorkEngine> {
         match self {
             Self::SessionsOnly { queued }
             | Self::RegistryOnly { queued, .. }
@@ -541,7 +541,7 @@ impl RuntimeWork {
         }
     }
 
-    pub fn with_queued(self, queued: Arc<dyn QueuedWorkSubstrate>) -> Self {
+    pub fn with_queued(self, queued: Arc<dyn SessionWorkEngine>) -> Self {
         match self {
             Self::SessionsOnly { .. } => Self::SessionsOnly { queued },
             Self::RegistryOnly { registry, .. } => Self::RegistryOnly { registry, queued },
@@ -567,7 +567,7 @@ impl RuntimeWork {
     pub fn with_work_ports(
         self,
         process: Option<ProcessWorkWiring>,
-        queued: Arc<dyn QueuedWorkSubstrate>,
+        queued: Arc<dyn SessionWorkEngine>,
     ) -> Self {
         match process {
             Some(wiring) => Self::Processes { wiring, queued },
@@ -601,7 +601,7 @@ impl RuntimeHost {
         self.work.process_wiring().map(ProcessWorkWiring::port)
     }
 
-    pub fn queued_work(&self) -> &Arc<dyn QueuedWorkSubstrate> {
+    pub fn queued_work(&self) -> &Arc<dyn SessionWorkEngine> {
         self.work.queued_arc()
     }
 
@@ -645,7 +645,7 @@ impl From<EmbeddedRuntimeHost> for RuntimeHost {
     fn from(value: EmbeddedRuntimeHost) -> Self {
         Self::from_embedded_with_work(
             value,
-            RuntimeWork::sessions_only(Arc::new(NoQueuedWork::new())),
+            RuntimeWork::sessions_only(Arc::new(NoSessionWork::new())),
         )
     }
 }

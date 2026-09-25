@@ -6,7 +6,7 @@ use std::sync::Arc;
 use crate::{
     AttachmentStore, Clock, EffectHost, ModuleArtifactStore, ProcessContinuationStore,
     ProcessDefinitionRegistry, ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring,
-    QueuedWorkSubstrate, SessionStoreFactory, TriggerStore,
+    SessionStoreFactory, SessionWorkEngine, TriggerStore,
 };
 
 /// One substrate: every persistence port a runtime needs and the effect host
@@ -73,40 +73,17 @@ pub trait Backend: Send + Sync {
     /// silently hand an engine-driven registry to the in-process worker too.
     fn process_work(&self) -> Option<ProcessWorkWiring>;
 
-    /// The driver that runs this backend's queued session work.
+    /// The engine that runs this backend's session drives (FIG-3600), when
+    /// the substrate supplies one of its own (Restate's session driver).
+    /// `None` means the runtime drives sessions in process: the interim SQL
+    /// engines, until FIG-3668 deletes them.
     ///
-    /// The work driver belongs to the backend for the same reason process work
-    /// does: the in-process driver on SQLite and PostgreSQL and the engine's on
-    /// Restate are each part of one substrate, never a separate builder input.
-    ///
-    /// Required, with no default, for the same reason as
-    /// [`Self::process_work`]: a forgotten forward would drive one
-    /// substrate's queued work twice.
-    fn queued_work(&self) -> BackendQueuedWork;
-}
-
-/// Which driver runs a backend's queued session work.
-#[derive(Clone)]
-pub enum BackendQueuedWork {
-    /// The runtime's in-process driver claims and runs the work the
-    /// backend's stores hold: SQLite and PostgreSQL.
-    InProcess,
-    /// The substrate's own engine-backed driver, such as a Restate workflow
-    /// submitter.
-    Engine(Arc<dyn QueuedWorkSubstrate>),
-    /// No driver runs the backend's queued work: the host drains it itself,
-    /// such as from its own engine handlers.
-    Disabled,
-}
-
-impl std::fmt::Debug for BackendQueuedWork {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(match self {
-            Self::InProcess => "InProcess",
-            Self::Engine(_) => "Engine",
-            Self::Disabled => "Disabled",
-        })
-    }
+    /// Session work belongs to the backend for the same reason process work
+    /// does: the engine that drives a session is part of one substrate, never
+    /// a separate builder input. Required, with no default, for the same
+    /// reason as [`Self::process_work`]: a forgotten forward would drive one
+    /// substrate's sessions in process as well.
+    fn session_work(&self) -> Option<Arc<dyn SessionWorkEngine>>;
 }
 
 /// Every persistence port of one SQL substrate without an effect host: the

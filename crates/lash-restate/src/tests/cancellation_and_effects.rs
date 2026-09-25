@@ -1368,7 +1368,7 @@ pub(super) async fn replay_test_runtime_with_plugins_and_registry(
                 watched,
                 Arc::new(lash_core::NativeProcessWork::for_registry(process_registry)),
             ))
-            .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()));
+            .with_queued_work(Arc::new(lash_core::NoSessionWork::new()));
     }
     Box::pin(builder.build())
         .await

@@ -9,9 +9,9 @@ use tokio_util::task::TaskTracker;
 
 use crate::runtime::process_wake_batch_draft_with_delivery_policy;
 use crate::{
-    Clock, PluginError, ProcessRegistry, QueuedWorkSubstrate, SessionPolicy, SessionRelation,
-    SessionStoreCreateRequest, SessionStoreFactory, SessionWorkTarget, StoreError,
-    WakeDeliveryClaimOutcome, WakeDiscardReason, WorkCadencePolicy,
+    Clock, PluginError, ProcessRegistry, SessionPolicy, SessionRelation, SessionStoreCreateRequest,
+    SessionStoreFactory, SessionWorkEngine, StoreError, WakeDeliveryClaimOutcome,
+    WakeDiscardReason, WorkCadencePolicy,
 };
 
 fn retry_delay_ms(attempts: u64, work_cadence: &WorkCadencePolicy) -> u64 {
@@ -62,7 +62,7 @@ pub struct WakeDeliveryDriver {
 struct WakeDeliveryDriverInner {
     registry: Arc<dyn ProcessRegistry>,
     session_store_factory: Arc<dyn SessionStoreFactory>,
-    queued_work: std::sync::Weak<dyn QueuedWorkSubstrate>,
+    queued_work: std::sync::Weak<dyn SessionWorkEngine>,
     clock: Arc<dyn Clock>,
     delivery_policy: crate::DeliveryPolicy,
     work_cadence: WorkCadencePolicy,
@@ -89,7 +89,7 @@ impl WakeDeliveryDriver {
     pub fn new(
         registry: Arc<dyn ProcessRegistry>,
         session_store_factory: Arc<dyn SessionStoreFactory>,
-        queued_work: Arc<dyn QueuedWorkSubstrate>,
+        queued_work: Arc<dyn SessionWorkEngine>,
         clock: Arc<dyn Clock>,
         delivery_policy: crate::DeliveryPolicy,
     ) -> Self {
@@ -107,7 +107,7 @@ impl WakeDeliveryDriver {
     pub fn with_work_cadence(
         registry: Arc<dyn ProcessRegistry>,
         session_store_factory: Arc<dyn SessionStoreFactory>,
-        queued_work: Arc<dyn QueuedWorkSubstrate>,
+        queued_work: Arc<dyn SessionWorkEngine>,
         clock: Arc<dyn Clock>,
         delivery_policy: crate::DeliveryPolicy,
         work_cadence: WorkCadencePolicy,
@@ -175,7 +175,7 @@ impl WakeDeliveryDriver {
     pub async fn drive_pending_once(
         registry: Arc<dyn ProcessRegistry>,
         session_store_factory: Arc<dyn SessionStoreFactory>,
-        queued_work: Arc<dyn QueuedWorkSubstrate>,
+        queued_work: Arc<dyn SessionWorkEngine>,
         clock: Arc<dyn Clock>,
         limit: usize,
     ) -> Result<WakeDeliveryDriveReport, PluginError> {
@@ -194,7 +194,7 @@ impl WakeDeliveryDriver {
     pub async fn drive_pending_once_with_delivery_policy(
         registry: Arc<dyn ProcessRegistry>,
         session_store_factory: Arc<dyn SessionStoreFactory>,
-        queued_work: Arc<dyn QueuedWorkSubstrate>,
+        queued_work: Arc<dyn SessionWorkEngine>,
         clock: Arc<dyn Clock>,
         delivery_policy: crate::DeliveryPolicy,
         limit: usize,
@@ -218,7 +218,7 @@ impl WakeDeliveryDriver {
     async fn drive_pending_once_with_delivery_policy_and_work_cadence(
         registry: Arc<dyn ProcessRegistry>,
         session_store_factory: Arc<dyn SessionStoreFactory>,
-        queued_work: Arc<dyn QueuedWorkSubstrate>,
+        queued_work: Arc<dyn SessionWorkEngine>,
         clock: Arc<dyn Clock>,
         delivery_policy: crate::DeliveryPolicy,
         limit: usize,
@@ -351,11 +351,9 @@ impl WakeDeliveryDriver {
                     // Dispatch is best-effort and strictly post-commit. Do it
                     // before settling the outbox claim so Applied, ClaimLost,
                     // and terminal-mark failures all re-arm the durable row.
-                    queued_work.notify_session_work(
-                        SessionWorkTarget::Session(SessionId::from(
-                            target_session_id.clone().to_string(),
-                        )),
-                        "process_wake",
+                    queued_work.schedule_drive(
+                        &target_session_id,
+                        crate::engine::DriveRequestId::new(enqueued.batch_id.to_string()),
                     );
                     if enqueue_outcome.process_wake_was_absorbed() {
                         tracing::info!(

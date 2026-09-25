@@ -438,7 +438,7 @@ fn tool_context_with_provider<'run>(
             lash_core::testing::process_work_wiring_for_registry(Arc::clone(&fixtures.registry)),
             None,
             None,
-            Arc::new(lash_core::NoQueuedWork::new()),
+            Arc::new(lash_core::NoSessionWork::new()),
             lash_core::DeliveryPolicy::EarliestSafeBoundary,
             Arc::new(lash_core::facade_support::SystemClock),
         )

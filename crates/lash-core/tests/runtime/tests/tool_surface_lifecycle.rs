@@ -685,7 +685,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         .with_process_work(lash_core::testing::process_work_wiring_for_registry(
             registry.clone(),
         ))
-        .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
+        .with_queued_work(Arc::new(lash_core::NoSessionWork::new()))
         .build();
     let runtime = LashRuntime::from_environment(
         &env,
@@ -908,7 +908,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     let report = lash_core::facade_support::WakeDeliveryDriver::drive_pending_once(
         registry,
         factory,
-        Arc::new(lash_core::NoQueuedWork),
+        Arc::new(lash_core::NoSessionWork::new()),
         Arc::new(lash_core::facade_support::SystemClock),
         32,
     )
@@ -953,7 +953,7 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
             .with_process_work(lash_core::testing::process_work_wiring_for_registry(
                 registry.clone(),
             ))
-            .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
+            .with_queued_work(Arc::new(lash_core::NoSessionWork::new()))
             .build();
     let runtime = LashRuntime::from_environment(
         &env,
@@ -1089,7 +1089,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
             .with_process_work(lash_core::testing::process_work_wiring_for_registry(
                 registry.clone(),
             ))
-            .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
+            .with_queued_work(Arc::new(lash_core::NoSessionWork::new()))
             .build();
     let runtime = LashRuntime::from_environment(
         &env,
@@ -2089,7 +2089,7 @@ async fn payload_gated_engine_runtime(
         .with_process_work(lash_core::testing::process_work_wiring_for_registry(
             registry.clone(),
         ))
-        .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
+        .with_queued_work(Arc::new(lash_core::NoSessionWork::new()))
         .build();
     let runtime = LashRuntime::from_environment(
         &env,

@@ -139,20 +139,14 @@ impl LashRuntime {
     /// * **This caller is the first driver, not the owner.** Dropping the
     ///   returned future does not stop the turn; abandonment is expressed by
     ///   cancelling the accepted input, never by silence.
-    /// * **The claim absorbs whatever else is already queued.** A direct turn
-    ///   claims the head of the pending next-turn queue exactly as a drain
-    ///   does, so inputs enqueued earlier join this turn instead of waiting for
-    ///   another one. Only earlier ones: the claim window closes at this turn's
-    ///   own journaled acceptance, so anything admitted after it waits for the
-    ///   next turn (FIG-3078).
-    /// * **An input behind a full claim is queued, not driven.** When more
-    ///   earlier inputs wait than one claim absorbs
-    ///   ([`QueuedWorkBatchingConfig::max_turn_input_claim`](crate::QueuedWorkBatchingConfig::max_turn_input_claim)),
-    ///   the call drives nothing and succeeds with one turn whose outcome is
-    ///   [`TurnOutcome::Queued`](crate::TurnOutcome::Queued), carrying the
-    ///   acceptance and the number of inputs ahead; the queued-work drain
-    ///   answers it in order. Retrying under a new turn id would admit it
-    ///   twice; retrying under the same turn id names the same admission.
+    /// * **The session drive runs it, in arrival order (FIG-3600).** The
+    ///   accepted row is driven by the drive body
+    ///   ([`drive_session`](crate::drive::drive_session)): work admitted ahead
+    ///   of it runs first, each root under its own recorded admission, and a
+    ///   root's claim takes the claimable prefix up to
+    ///   [`QueuedWorkBatchingConfig::max_turn_input_claim`](crate::QueuedWorkBatchingConfig::max_turn_input_claim),
+    ///   so this row may run inside an earlier input's root. The call returns
+    ///   the run of the root that drove it.
     /// * **Live per-turn context stays with this caller.** `protocol_extension`
     ///   and live `TurnContext` plugin inputs are process-local and cannot be
     ///   persisted, so a worker that recovers this accepted row drives its
@@ -183,59 +177,21 @@ impl LashRuntime {
             &mut input,
             opts.scoped_effect_controller().execution_scope(),
         );
-        use futures_util::FutureExt;
-
-        // Keep the guard outside the unwinding body. Both streamed facade turns
-        // and process-spawned child turns pass here, so their task JoinError cannot
-        // surface before owner-side release has finished. Cancellation still
-        // drops the guard and uses its best-effort cleanup / TTL fallback.
-        let mut lease = None;
-        let result = std::panic::AssertUnwindSafe(
-            self.stream_turn_with_agent_frames_holding_lease(input, opts, &mut lease)
-                .boxed(),
-        )
-        .catch_unwind()
-        .await;
-        match result {
-            Ok(result) => result,
-            Err(payload) => {
-                if let Some(lease) = lease.as_ref()
-                    && let Err(error) = lease.release_if_live().await
-                {
-                    tracing::warn!(%error, "failed to release session execution lease after turn panic");
-                }
-                std::panic::resume_unwind(payload)
-            }
-        }
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "a store-backed turn holds its execution lease here"
-    )]
-    async fn stream_turn_with_agent_frames_holding_lease(
-        &mut self,
-        mut input: TurnInput,
-        opts: TurnOptions<'_>,
-        session_execution_lease: &mut Option<SessionExecutionLeaseGuard>,
-    ) -> Result<AgentFrameRun, RuntimeError> {
-        let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
-        let local_stop = opts.local_stop().clone();
         let Some(store) = self
             .session
             .as_ref()
             .and_then(|session| session.history_store())
         else {
-            *session_execution_lease = self.claim_session_execution_lease().await?;
-            let scoped_effect_controller = opts.scoped_effect_controller();
+            let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
+            let mut session_execution_lease = self.claim_session_execution_lease().await?;
             let result = Box::pin(self.drive_logical_turn(
                 LogicalTurnStart::Input(input),
                 opts.events_or_noop(),
                 opts.turn_events_or_noop(),
-                scoped_effect_controller,
-                local_stop,
+                opts.scoped_effect_controller(),
+                opts.local_stop().clone(),
                 LogicalTurnClaims::new(Vec::new(), Vec::new()),
-                session_execution_lease,
+                &mut session_execution_lease,
                 stopwatch,
             ))
             .await;
@@ -244,36 +200,35 @@ impl LashRuntime {
                 .await;
         };
 
-        // The row carries no source key, like a queued admission; its input id
-        // is provisioned from the acceptance address below so every run of this
-        // acceptance names the same row (ADR 0069 §6).
+        if let Some(trace_turn_id) = input.trace_turn_id.as_ref()
+            && opts
+                .scoped_effect_controller()
+                .execution_scope()
+                .validates_turn_trace_id()
+            && trace_turn_id.as_str() != opts.execution_scope_id()
+        {
+            return Err(RuntimeError::new(
+                RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
+                format!(
+                    "input trace_turn_id `{trace_turn_id}` does not match execution scope id `{}`",
+                    opts.execution_scope_id()
+                ),
+            ));
+        }
+        // FIG-3619: a session whose state generation this build cannot run
+        // is refused before its input becomes admission evidence.
+        store
+            .read_session_state_version()
+            .await
+            .map_err(super::runtime_error_from_store_commit)?;
+        // The turn id names the root the accepted input starts: it is the
+        // row's host id, so the drive runs the turn under this id (ADR 0069
+        // §6, FIG-3600 ruling Q4).
         let trace_turn_id = input
             .trace_turn_id
             .clone()
             .unwrap_or_else(|| TurnId::from(opts.execution_scope_id()));
         input.trace_turn_id = Some(trace_turn_id.clone());
-        // Store-backed new turns acquire and admit the execution lane before
-        // the acceptance effect writes mutable session payload (ADR 0077).
-        *session_execution_lease = self.claim_session_execution_lease().await?;
-        let activation_controller = opts.scoped_effect_controller();
-        let activation_fence = session_execution_lease
-            .as_ref()
-            .map(SessionExecutionLeaseGuard::fence)
-            .expect("a store-backed turn acquires its execution lease before activation");
-        if let Err(error) = self
-            .defer_orphaned_turn_inputs_before_drain(
-                &store,
-                &activation_fence,
-                &trace_turn_id,
-                &activation_controller,
-            )
-            .await
-        {
-            if let Some(lease) = session_execution_lease.as_ref() {
-                let _ = lease.release_if_live().await;
-            }
-            return Err(error);
-        }
         // Acceptance is journaled, not written directly: it happens before the
         // turn runs, which puts it inside a durable engine's replay window, and
         // a replayed handler must re-derive this admission rather than mint a
@@ -292,18 +247,19 @@ impl LashRuntime {
                         // The id is provisioned from the acceptance address
                         // before the body runs, so a body re-run because its
                         // outcome was never recorded names the row the first
-                        // run wrote and the store adopts it (ADR 0069 §6).
+                        // run wrote and the store adopts it (ADR 0069 §6). The
+                        // source key is the turn id: the drive runs the row
+                        // under it.
                         draft: Box::new(
                             crate::PendingTurnInputDraft::new(
                                 self.state.session_id.clone(),
                                 crate::TurnInputIngress::next_turn(),
                                 input.durable_projection(),
                             )
-                            .with_input_id(
-                                super::turn_input_ingress::provisioned_turn_input_id(
-                                    acceptance_invocation.address(),
-                                ),
-                            ),
+                            .with_input_id(super::turn_input_ingress::provisioned_turn_input_id(
+                                acceptance_invocation.address(),
+                            ))
+                            .with_source_key(trace_turn_id.as_str()),
                         ),
                     },
                 ),
@@ -333,228 +289,56 @@ impl LashRuntime {
             self.host.core.clock.as_ref(),
         );
 
-        // The initial drive set is journaled too, exactly as checkpoint claims
-        // are: a replaying engine returns the rows the first execution claimed,
-        // with their settlement authority, and never reads pending rows, so
-        // nothing `vacuum()` prunes can change what a replay drives (ADR 0069
-        // §6). The commit then either settles those rows or finds the first
-        // execution's receipt and replays it.
-        //
-        // The drive is also the turn's admission. Its first execution records
-        // the head the turn is admitted on and the turn's index, so the
-        // resident head is brought current under the lease first; a replay
-        // reads both from the journal instead (FIG-3682).
-        if let Err(error) = self
-            .refresh_resident_head_under_lease(session_execution_lease.as_ref())
-            .await
-        {
-            if let Some(lease) = session_execution_lease.as_ref() {
-                let _ = lease.release_if_live().await;
-            }
-            return Err(aborted(error));
-        }
-        let admission_head = crate::store::SessionHeadRef {
-            // Read by the drive body on its first execution.
-            generation: 0,
-            revision: self.state.head_revision,
-            leaf: self.state.session_graph.leaf_node_id.clone(),
-            checkpoint: self.state.checkpoint_ref.clone(),
+        // The accepted row is driven by the session drive, in arrival order:
+        // any root admitted ahead of it runs first, and the drive stops once
+        // the root that drove this row has run. The request is named by the
+        // turn, so a redrive of the turn replays the same admissions.
+        let request = crate::engine::DriveRequest {
+            session: self.state.session_id.clone(),
+            request: crate::engine::DriveRequestId::new(format!("turn:{trace_turn_id}")),
+            build_generation: crate::engine::BuildGeneration::new(""),
         };
-        let drive_fence = session_execution_lease
-            .as_ref()
-            .map(SessionExecutionLeaseGuard::fence)
-            .expect("a store-backed turn acquires its execution lease before acceptance");
-        let drive_generation = drive_fence.fencing_token;
-        let drive = scoped_effect_controller
-            .execute_effect(
-                crate::RuntimeEffectEnvelope::new(
-                    super::causal::turn_input_drive_effect_invocation(&acceptance_invocation),
-                    crate::RuntimeEffectCommand::ClaimAcceptedTurnInput {
-                        input_id: accepted.input_id.clone(),
-                    },
-                ),
-                crate::RuntimeEffectLocalExecutor::owned_runner(
-                    Box::new(super::initial_drive::AcceptedTurnInputDriveRunner {
-                        store: Arc::clone(&store),
-                        fence: drive_fence,
-                        owner: self.runtime_lease_owner.clone(),
-                        accepted: accepted.clone(),
-                        base: admission_head,
-                        // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
-                        turn_index: self.state.turn_index + 1,
-                        max_inputs: self
-                            .host
-                            .core
-                            .durability
-                            .queued_work_batching
-                            .max_turn_input_claim(),
-                        trace: super::initial_drive::DriveTrace {
-                            sink: self.host.core.tracing.trace_sink.clone(),
-                            base: self.host.core.tracing.trace_context.clone(),
-                            clock: Arc::clone(&self.host.core.clock),
-                            session_id: self.state.session_id.clone(),
-                            // Restore safety: state::RESTORED_TURN_INDEX_HEADROOM.
-                            turn_index: self.state.turn_index + 1,
-                            turn_id: trace_turn_id.clone(),
-                        },
-                    }),
-                    None,
-                ),
-            )
-            .await
-            .and_then(crate::RuntimeEffectOutcome::into_accepted_turn_input_drive)
-            .map_err(crate::RuntimeEffectControllerError::into_runtime_error);
-        let drive = match drive {
-            Ok(crate::AcceptedTurnInputDrive::Claimed {
-                claim,
-                base,
-                turn_index,
-            }) => {
-                if let Err(error) = self
-                    .adopt_admitted_turn(
-                        &store,
-                        &base,
-                        turn_index,
-                        &trace_turn_id,
-                        &accepted.input_id,
-                    )
-                    .await
-                {
-                    self.bind_drive_claim_after_abort(
-                        DriveClaimToBind::Claim(&claim),
-                        &accepted.input_id,
-                        &trace_turn_id,
-                    )
-                    .await;
-                    self.record_turn_park_after_abort(&error, &trace_turn_id)
-                        .await;
-                    if let Some(lease) = session_execution_lease.as_ref() {
-                        let _ = lease.release_if_live().await;
-                    }
-                    return Err(aborted(error));
-                }
-                *claim
-            }
-            Ok(crate::AcceptedTurnInputDrive::Queued { ahead }) => {
-                // No turn runs: the accepted row waits in arrival order and
-                // the queued-work drain answers it. The call reports that as
-                // an outcome, not a failure.
-                if let Some(lease) = session_execution_lease.as_ref() {
-                    let _ = lease.release_if_live().await;
-                }
-                let mut queued = crate::AssembledTurn {
-                    state: self.export_state(),
-                    outcome: crate::TurnOutcome::Queued { ahead },
-                    assistant_output: crate::AssistantOutput {
-                        safe_text: String::new(),
-                        raw_text: String::new(),
-                        state: crate::OutputState::EmptyOutput,
-                    },
-                    execution: crate::TurnExecutionMetrics::default(),
-                    token_usage: crate::TokenUsage::default(),
-                    llm_calls: Vec::new(),
-                    tool_calls: Vec::new(),
-                    omitted: None,
-                    failure_evidence: Vec::new(),
-                    errors: Vec::new(),
-                    turn_input_acceptance: Some(acceptance.clone()),
-                    turn_cancel_input_outcome: Default::default(),
-                };
-                stopwatch.stamp(&mut queued, self.host.core.clock.as_ref());
-                return Ok(AgentFrameRun {
-                    turns: vec![queued],
-                    acceptance: Some(acceptance),
-                });
-            }
-            Ok(crate::AcceptedTurnInputDrive::Refused { refusal }) => {
-                if let Some(lease) = session_execution_lease.as_ref() {
-                    let _ = lease.release_if_live().await;
-                }
+        let sinks = crate::runtime::drive::DriveSinks {
+            events: opts.events_or_noop(),
+            turn_events: opts.turn_events_or_noop(),
+            local_stop: opts.local_stop().clone(),
+        };
+        let accepted_id = accepted.input_id.clone();
+        let (outcome, runs) = Box::pin(self.drive_until(
+            &scoped_effect_controller,
+            &request,
+            &sinks,
+            Some((&accepted_id, &input)),
+            |run| run.driven_inputs.contains(&accepted_id),
+        ))
+        .await
+        .map_err(|abort| aborted(abort.into_error()))?;
+        let Some(mut run) = runs
+            .into_iter()
+            .find(|run| run.driven_inputs.contains(&accepted_id))
+            .and_then(|run| run.run)
+        else {
+            if let crate::engine::DriveStop::Parked(park) = &outcome.stop {
+                // A parked root holds the session: the input stays accepted
+                // and is driven once the park is resolved.
                 return Err(aborted(RuntimeError::new(
-                    RuntimeErrorCode::AcceptedTurnInputCeded,
-                    match refusal {
-                        crate::AcceptedTurnInputRefusal::HeldByLiveClaim => format!(
-                            "accepted turn input `{}` is held by another claim of this session's \
-                             live lease generation, so this turn cannot drive it; it is \
-                             answered once that claim settles or its generation turns over",
-                            accepted.input_id
-                        ),
-                        crate::AcceptedTurnInputRefusal::SettledOrRemoved => format!(
-                            "accepted turn input `{}` was no longer open when this turn tried to \
-                             drive it: another driver settled it or the host cancelled it",
-                            accepted.input_id
-                        ),
-                    },
+                    RuntimeErrorCode::QueuedRunPending,
+                    format!(
+                        "accepted turn input `{accepted_id}` waits behind parked root `{}` \
+                         (park {}); it is driven once that park is resolved",
+                        park.root,
+                        park.park.as_str()
+                    ),
                 )));
             }
-            Err(error) => {
-                // The drive's body may have claimed rows before its outcome was
-                // lost (a journal finalize fault, say): bind whatever the
-                // accepted row's claim under this generation holds, while the
-                // lease still stands (FIG-3589).
-                self.bind_drive_claim_after_abort(
-                    DriveClaimToBind::HeldUnder {
-                        generation: drive_generation,
-                    },
-                    &accepted.input_id,
-                    &trace_turn_id,
-                )
-                .await;
-                if let Some(lease) = session_execution_lease.as_ref() {
-                    let _ = lease.release_if_live().await;
-                }
-                return Err(aborted(error));
-            }
+            return Err(aborted(RuntimeError::new(
+                RuntimeErrorCode::AcceptedTurnInputCeded,
+                format!(
+                    "accepted turn input `{accepted_id}` was no longer open when the drive \
+                     reached it: another driver settled it or the host cancelled it"
+                ),
+            )));
         };
-
-        // Drive the accepted rows, not the caller's copy: a claim may carry
-        // inputs enqueued before this one, and dropping them would settle rows
-        // whose content never reached a turn. Live per-turn state that cannot
-        // cross the durable boundary is re-attached from the caller's input.
-        let mut driven = drive.materialize_turn_input();
-        driven.protocol_turn_options = input
-            .protocol_turn_options
-            .clone()
-            .or(driven.protocol_turn_options);
-        let bound_turn_id = trace_turn_id.clone();
-        driven.trace_turn_id = Some(trace_turn_id);
-        driven.protocol_extension = input.protocol_extension.clone();
-        driven.turn_context = input.turn_context.clone();
-
-        let drive_claim = drive.clone();
-        // A replay carries the first execution's claim token; if another
-        // driver reclaimed these rows meanwhile, the commit cedes instead of
-        // dropping the settlement and answering them twice.
-        self.journaled_drive_claims.insert(drive.claim_id.clone());
-        let scoped_effect_controller = opts.scoped_effect_controller();
-        let result = Box::pin(self.drive_logical_turn(
-            LogicalTurnStart::Input(driven),
-            opts.events_or_noop(),
-            opts.turn_events_or_noop(),
-            scoped_effect_controller,
-            local_stop,
-            LogicalTurnClaims::new(Vec::new(), vec![drive]),
-            session_execution_lease,
-            stopwatch,
-        ))
-        .await;
-        self.journaled_drive_claims.remove(&drive_claim.claim_id);
-        self.admitted_turn_index = None;
-        if result.is_err() {
-            // The aborted turn keeps its claim and its `Err` names the input:
-            // bind the claim to the turn before the lease is released, so no
-            // later generation folds the input into another turn (FIG-3589).
-            self.bind_drive_claim_after_abort(
-                DriveClaimToBind::Claim(&drive_claim),
-                &acceptance.input_id,
-                &bound_turn_id,
-            )
-            .await;
-        }
-        let mut run = self
-            .settle_session_execution_lease(session_execution_lease.as_ref(), result)
-            .await
-            .map_err(aborted)?;
         // Only the physical turn this acceptance admitted carries it. An
         // agent-frame run's follow-on turns were started by the frame switch,
         // not by this admission, and stamping them would report an acceptance
@@ -564,87 +348,6 @@ impl LashRuntime {
         }
         run.acceptance = Some(acceptance);
         Ok(run)
-    }
-
-    /// Adopt the head a direct turn was admitted on and pin its recorded turn
-    /// index for the prepare phase (FIG-3682).
-    ///
-    /// The resident head is the live one, refreshed under the lease. When it
-    /// is still the admitted base, nothing is read. When it moved:
-    ///
-    /// * the turn's own commit moved it (a redrive after the commit): the
-    ///   turn is rebuilt from its base, so its replay issues the effects its
-    ///   journal holds and its commit replays the committed receipt;
-    /// * another driver answered the turn's rows while it was down: the turn
-    ///   cedes, exactly as its commit would;
-    /// * anything else moved it under the uncommitted turn: the turn parks as
-    ///   a replay divergence. It is never driven on a head it was not
-    ///   admitted on.
-    ///
-    /// A base the store no longer retains parks the turn too.
-    async fn adopt_admitted_turn(
-        &mut self,
-        store: &Arc<dyn crate::store::RuntimePersistence>,
-        base: &crate::store::SessionHeadRef,
-        turn_index: u64,
-        turn_id: &TurnId,
-        accepted_input_id: &crate::InputId,
-    ) -> Result<(), RuntimeError> {
-        let turn_index = usize::try_from(turn_index).map_err(|_| {
-            RuntimeError::new(
-                RuntimeErrorCode::StoreCommitFailed,
-                "admitted turn index exceeds platform range",
-            )
-        })?;
-        let head_moved = self.state.head_revision != base.revision
-            || self.state.session_graph.leaf_node_id != base.leaf
-            || self.state.checkpoint_ref != base.checkpoint;
-        if head_moved
-            && !store
-                .committed_turn_exists(turn_id)
-                .await
-                .map_err(super::runtime_error_from_store_commit)?
-        {
-            let open = store
-                .list_pending_turn_inputs(&self.state.session_id)
-                .await
-                .map_err(super::runtime_error_from_store_commit)?;
-            if !open
-                .iter()
-                .any(|read| read.input.input_id == *accepted_input_id)
-            {
-                return Err(RuntimeError::new(
-                    RuntimeErrorCode::AcceptedTurnInputCeded,
-                    format!(
-                        "accepted turn input `{accepted_input_id}` was answered by another \
-                         driver while turn `{turn_id}` was down, so this turn cedes and \
-                         commits nothing"
-                    ),
-                ));
-            }
-            return Err(RuntimeError::new(
-                RuntimeErrorCode::EffectReplayDivergence,
-                format!(
-                    "the session head moved from revision {} to {} under turn `{turn_id}` \
-                     before it committed; the turn is not driven on a head it was not \
-                     admitted on",
-                    base.revision, self.state.head_revision
-                ),
-            ));
-        }
-        self.adopt_admission_base(base)
-            .await
-            .map_err(|error| match error {
-                SessionError::Store {
-                    source: source @ crate::StoreError::TurnBaseNotRetained { .. },
-                    ..
-                } => {
-                    RuntimeError::new(RuntimeErrorCode::EffectReplayDivergence, source.to_string())
-                }
-                error => session_head_refresh_error(error),
-            })?;
-        self.admitted_turn_index = Some(turn_index);
-        Ok(())
     }
 
     pub async fn run_turn_assembled(

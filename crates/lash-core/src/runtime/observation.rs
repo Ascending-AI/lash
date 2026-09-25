@@ -54,7 +54,7 @@ pub struct RuntimeObservation {
     pub plugin_services: Option<ObservationPluginServices>,
     pub process_registry: Option<Arc<dyn ProcessRegistry>>,
     pub queue_store: Option<Arc<dyn crate::RuntimePersistence>>,
-    pub queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
+    pub queued_work: Arc<dyn crate::SessionWorkEngine>,
     /// Fingerprint of the resident authority at publication time, compared
     /// across publishes to detect revision-stable resident changes without
     /// retaining the resident state itself.

@@ -35,7 +35,7 @@ async fn session_turn_against_a_catalog_without_by_id_lookup_fails_in_one_admiss
         )),
         test_host_config(&backend),
         crate::WorkerProcessWork::SelfNative(watched),
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         local_owner("no-by-id-lookup-worker", "host-a", "no-by-id-lookup"),
     )
     .with_session_policy(policy)

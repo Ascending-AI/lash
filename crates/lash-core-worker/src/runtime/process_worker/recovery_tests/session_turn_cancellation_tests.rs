@@ -30,7 +30,7 @@ async fn cancelled_session_turn_never_creates_and_leaves_foreign_sessions_alone(
         )),
         test_host_config(&backend),
         crate::WorkerProcessWork::SelfNative(watched),
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         local_owner(
             "cancel-before-start-worker",
             "host-a",

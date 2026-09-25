@@ -180,7 +180,7 @@ pub(super) async fn worker_with_engine_registry_timings_supplier_and_sink(
         )),
         runtime_host,
         crate::WorkerProcessWork::External(process_work),
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         local_owner("engine-worker", "host-a", "engine-start"),
     )
     .with_session_policy(policy)
@@ -231,7 +231,7 @@ pub(super) async fn worker_on_backend(
         )),
         runtime_host,
         crate::WorkerProcessWork::External(process_work),
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         local_owner("redrive-worker", "host-a", "redrive-start"),
     )
     .with_session_policy(policy)
@@ -318,7 +318,7 @@ pub(super) async fn native_worker(
         )),
         host_config_with_fixture_env(backend).await,
         crate::WorkerProcessWork::SelfNative(watched),
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         lease_owner,
     ))
     .expect("valid test native substrate config")
@@ -341,7 +341,7 @@ pub(super) async fn reentrant_worker(
         )),
         host_config_with_fixture_env(backend).await,
         crate::WorkerProcessWork::External(process_work),
-        Arc::new(crate::NoQueuedWork::new()),
+        Arc::new(crate::NoSessionWork::new()),
         lease_owner,
     ))
     .expect("valid test native substrate config");

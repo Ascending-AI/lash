@@ -10,7 +10,7 @@ use tokio_util::task::TaskTracker;
 use crate::PluginError;
 use crate::runtime::{NativeSubstrateConfigError, WorkerSlotKind, WorkerSlotSupplier};
 
-use super::{QueuedWorkSubstrate, SessionDrainOutcome, SessionWorkTarget, WorkCadencePolicy};
+use super::{SessionDriver, SessionWorkEngine, WorkCadencePolicy};
 
 mod scheduler;
 mod task;
@@ -70,6 +70,9 @@ pub struct NativeQueuedWork {
 
 pub(crate) struct NativeQueuedWorkInner {
     pub(super) run_handle: Arc<dyn QueuedWorkRunHandle>,
+    /// The core's session driver, kept so the engine's install answers
+    /// get-or-init; the run handle is what drives sessions in process.
+    pub(super) driver: std::sync::OnceLock<Arc<dyn SessionDriver>>,
     pub(super) shutdown: CancellationToken,
     pub(super) wake_tasks: TaskTracker,
     pub(super) scheduler: Arc<QueuedWorkExecutionScheduler>,
@@ -228,6 +231,7 @@ impl NativeQueuedWork {
         Ok(Self {
             inner: Arc::new(NativeQueuedWorkInner {
                 run_handle,
+                driver: std::sync::OnceLock::new(),
                 shutdown: shutdown.clone(),
                 wake_tasks: wake_tasks.clone(),
                 scheduler: Arc::new(match (supplier, concurrency) {
@@ -248,15 +252,13 @@ impl NativeQueuedWork {
         })
     }
 
-    pub(crate) async fn claim_and_run_pending(
-        &self,
-        session_id: Option<&SessionId>,
-        reason: &str,
-    ) -> Result<(), PluginError> {
+    /// Drive `session_id` now, in process, and wait for the drive to stop:
+    /// the interim SQL engine's synchronous ask (FIG-3668 deletes it).
+    pub async fn drive_now(&self, session_id: &SessionId, reason: &str) -> Result<(), PluginError> {
         if let Err(err) = self
             .inner
             .run_handle
-            .claim_and_run_pending(session_id, reason)
+            .claim_and_run_pending(Some(session_id), reason)
             .await
         {
             tracing::warn!("queued work drive ({reason}) failed: {err}");
@@ -303,19 +305,15 @@ impl NativeQueuedWork {
     }
 }
 
-#[async_trait::async_trait]
-impl QueuedWorkSubstrate for NativeQueuedWork {
-    fn notify_session_work(&self, target: SessionWorkTarget, reason: &str) {
-        self.notify_pending_work(target.as_session_id(), reason);
+/// The in-process session-work engine of the interim SQL backends (FIG-3600
+/// ruling Q2; FIG-3668 deletes it with them): an ask is coalesced per
+/// session, and its run handle drives the session in process.
+impl SessionWorkEngine for NativeQueuedWork {
+    fn schedule_drive(&self, session: &SessionId, request: crate::engine::DriveRequestId) {
+        self.notify_pending_work(Some(session), request.as_str());
     }
 
-    async fn drain_session_work(
-        &self,
-        target: SessionWorkTarget,
-        reason: &str,
-    ) -> Result<SessionDrainOutcome, PluginError> {
-        self.claim_and_run_pending(target.as_session_id(), reason)
-            .await?;
-        Ok(SessionDrainOutcome::Ran)
+    fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
+        Arc::clone(self.inner.driver.get_or_init(|| driver))
     }
 }

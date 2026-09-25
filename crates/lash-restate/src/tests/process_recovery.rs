@@ -1230,7 +1230,7 @@ pub(super) async fn process_deployment_driver_and_workflow_share_registry() {
         Arc::new(lash_core::facade_support::PluginHost::empty()),
         memory_host_config().await,
         lash_core_worker::WorkerProcessWork::External(process_work),
-        Arc::new(lash_core::NoQueuedWork::new()),
+        Arc::new(lash_core::NoSessionWork::new()),
         lash_core::testing::runtime_lease_owner(),
     ))
     .expect("valid test native substrate config");

@@ -959,7 +959,7 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
             watched,
             Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
         ))
-        .with_queued_work(Arc::new(lash_core::NoQueuedWork::new()))
+        .with_queued_work(Arc::new(lash_core::NoSessionWork::new()))
         .build(),
     )
     .await

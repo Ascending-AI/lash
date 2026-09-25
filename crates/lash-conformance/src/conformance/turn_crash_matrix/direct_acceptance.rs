@@ -157,7 +157,9 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, S
     );
     let admitted_id = admitted[0].input.input_id.clone();
 
-    wait_for_recovery_lease(&make, scenario, &point, true).await;
+    // Acceptance commits before the drive takes the session lane (FIG-3600),
+    // so the crash leaves no predecessor executor for the recovery to displace.
+    wait_for_recovery_lease(&make, scenario, &point, false).await;
     let (turns, mut turned) = tokio::sync::mpsc::unbounded_channel();
     runner
         .run_turn(

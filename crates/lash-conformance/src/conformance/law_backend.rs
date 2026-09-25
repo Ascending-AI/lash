@@ -21,7 +21,7 @@ pub(crate) struct LawBackend {
     attachment_store: Arc<dyn crate::AttachmentStore>,
     module_artifacts: Arc<dyn crate::ModuleArtifactStore>,
     process_work: Option<crate::ProcessWorkWiring>,
-    queued_work: crate::BackendQueuedWork,
+    session_work: Option<Arc<dyn crate::SessionWorkEngine>>,
 }
 
 impl LawBackend {
@@ -39,7 +39,7 @@ impl LawBackend {
             attachment_store: backend.attachment_store(),
             module_artifacts: backend.module_artifacts(),
             process_work: backend.process_work(),
-            queued_work: backend.queued_work(),
+            session_work: backend.session_work(),
         }
     }
 
@@ -63,7 +63,7 @@ impl LawBackend {
             attachment_store: stores.attachment_store(),
             module_artifacts: stores.module_artifacts(),
             process_work: None,
-            queued_work: crate::BackendQueuedWork::Disabled,
+            session_work: Some(Arc::new(crate::NoSessionWork::new())),
         }
     }
 
@@ -181,8 +181,8 @@ impl crate::Backend for LawBackend {
         self.process_work.clone()
     }
 
-    fn queued_work(&self) -> crate::BackendQueuedWork {
-        self.queued_work.clone()
+    fn session_work(&self) -> Option<Arc<dyn crate::SessionWorkEngine>> {
+        self.session_work.clone()
     }
 }
 
@@ -195,7 +195,7 @@ pub fn backend_over(
     effect_host: Arc<dyn crate::EffectHost>,
 ) -> Arc<dyn crate::Backend> {
     Arc::new(LawBackend {
-        queued_work: crate::BackendQueuedWork::InProcess,
+        session_work: None,
         ..LawBackend::over_stores(stores, effect_host)
     })
 }
@@ -294,7 +294,7 @@ impl crate::Backend for StoreLawBackend {
         None
     }
 
-    fn queued_work(&self) -> crate::BackendQueuedWork {
-        crate::BackendQueuedWork::Disabled
+    fn session_work(&self) -> Option<Arc<dyn crate::SessionWorkEngine>> {
+        Some(Arc::new(crate::NoSessionWork::new()))
     }
 }

@@ -579,7 +579,7 @@ async fn run_worker(
         catalog,
         None,
         None,
-        Arc::new(lash_core::NoQueuedWork::new()),
+        Arc::new(lash_core::NoSessionWork::new()),
         lash_core::DeliveryPolicy::EarliestSafeBoundary,
         Arc::new(lash_core::facade_support::SystemClock),
         true,

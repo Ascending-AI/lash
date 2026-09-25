@@ -630,7 +630,9 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             // and its tool surface, so the double runs it as the host does.
             command @ (RuntimeEffectCommand::SyncExecutionEnvironment
             | RuntimeEffectCommand::AcceptTurnInput { .. }
-            | RuntimeEffectCommand::ClaimAcceptedTurnInput { .. }) => {
+            | RuntimeEffectCommand::ClaimAcceptedTurnInput { .. }
+            | RuntimeEffectCommand::AdmitDrive { .. }
+            | RuntimeEffectCommand::SealDriveAdmission { .. }) => {
                 local_executor
                     .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
                     .await

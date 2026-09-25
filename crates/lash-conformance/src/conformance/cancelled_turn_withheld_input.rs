@@ -314,8 +314,9 @@ async fn withheld_cancel_case(
         "{case}: the durable cancellation records the undelivered input"
     );
 
-    // Deferred input drives the next turn exactly once, in order; dropped
-    // input never reaches it.
+    // Deferred input is driven exactly once, in order, ahead of the next
+    // turn's own input: the next drive admits the deferred head first, under
+    // a root named by it (FIG-3600). Dropped input never reaches a turn.
     let run = harness
         .run(&next_turn_id, "carry on", CancellationToken::new())
         .await;
@@ -332,7 +333,7 @@ async fn withheld_cancel_case(
     let expected_delivered = match disposition {
         crate::TurnCancelDisposition::Defer => input_ids
             .iter()
-            .map(|input_id| (input_id.clone(), next_turn_id.clone()))
+            .map(|input_id| (input_id.clone(), crate::TurnId::from(input_ids[0].as_str())))
             .collect(),
         crate::TurnCancelDisposition::Drop => Vec::new(),
     };

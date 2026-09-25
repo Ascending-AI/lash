@@ -185,7 +185,7 @@ pub struct RuntimeExecutionProcessEventContext {
     pub process_work: crate::ProcessWorkWiring,
     pub store: Option<Arc<dyn crate::RuntimePersistence>>,
     pub session_store_factory: Option<Arc<dyn crate::SessionStoreFactory>>,
-    pub queued_work: Arc<dyn crate::QueuedWorkSubstrate>,
+    pub queued_work: Arc<dyn crate::SessionWorkEngine>,
     pub process_wake_delivery_policy: crate::DeliveryPolicy,
     pub clock: Arc<dyn crate::Clock>,
 }

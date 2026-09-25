@@ -1,10 +1,10 @@
 use crate::support::{
     Arc, EffectHost, EmbedError, InMemoryLiveReplayStore, LashRuntime, LashSession,
-    LiveReplayStore, NativeQueuedWork, NativeSubstrateConfig, NoQueuedWork, ParkedSession,
+    LiveReplayStore, NativeQueuedWork, NativeSubstrateConfig, NoSessionWork, ParkedSession,
     PluginFactory, PluginHost, PluginOptions, PluginSpec, PluginStack, ProcessRegistry,
-    PromptLayer, PromptLayerSink, ProviderHandle, QueuedWorkSubstrate, Result, RuntimeEnvironment,
-    RuntimeHandle, RuntimeHostConfig, SessionBuilder, SessionListFilter, SessionPolicy,
-    SessionSpec, SessionStoreFactory, SessionSummary, StaticPluginFactory, TerminationPolicy,
+    PromptLayer, PromptLayerSink, ProviderHandle, Result, RuntimeEnvironment, RuntimeHandle,
+    RuntimeHostConfig, SessionBuilder, SessionListFilter, SessionPolicy, SessionSpec,
+    SessionStoreFactory, SessionSummary, SessionWorkEngine, StaticPluginFactory, TerminationPolicy,
     ToolProvider, WorkerSlotSupplier,
 };
 use lash_core::Backend;
@@ -27,7 +27,7 @@ mod worker_capacity;
 
 pub use advanced_builder::AdvancedLashCoreBuilder;
 pub use drain::DeploymentDrainStatus;
-use queued_work::NativeQueuedWorkRunConfig;
+use queued_work::{NativeQueuedWorkRunConfig, NativeQueuedWorkRunHandle};
 use work_drivers::{
     NativeSubstrateSetup, NativeSubstrateSlot, ProcessPortSetup, ProcessWorkSelection,
     ProcessWorkSource, QueuedPortSetup, QueuedWorkSource, WakeDeliveryDriverSetup,
@@ -65,6 +65,10 @@ pub struct LashCore {
     pub(crate) worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
     /// Shared across core clones so native substrate ports are constructed at most once.
     pub(crate) substrate_slot: Arc<NativeSubstrateSlot>,
+    /// The session driver this core installed on its backend's session-work
+    /// engine (FIG-3600). The engine may hold it weakly, so the core keeps it
+    /// for its whole life.
+    pub(crate) _session_driver: Arc<dyn lash_core::SessionDriver>,
     /// Host-facing process event sink, retained so a worker config built from
     /// this core reports its worker faults to the same sink the registry
     /// decorator emits events on.
@@ -698,12 +702,12 @@ impl LashCore {
             extra_plugin_factories,
         )?;
         let process_work = self.substrate_slot.configured_worker_process_work();
-        let queued_work: Arc<dyn QueuedWorkSubstrate> = match &self.substrate_slot.setup.queued {
+        let queued_work: Arc<dyn SessionWorkEngine> = match &self.substrate_slot.setup.queued {
             QueuedPortSetup::External { port } => Arc::clone(port),
             // The outer dispatcher owns the native queued-work lane; nested
             // process runtimes must not start a competing dispatcher.
             QueuedPortSetup::Disabled | QueuedPortSetup::Native { .. } => {
-                Arc::new(NoQueuedWork::new())
+                Arc::new(NoSessionWork::new())
             }
         };
         worker_config(
@@ -739,10 +743,7 @@ struct NativeProcessWorkerSetup {
 }
 
 impl NativeProcessWorkerSetup {
-    fn build(
-        &self,
-        queued_work: Arc<dyn QueuedWorkSubstrate>,
-    ) -> Result<DurableProcessWorkerConfig> {
+    fn build(&self, queued_work: Arc<dyn SessionWorkEngine>) -> Result<DurableProcessWorkerConfig> {
         worker_config(
             &self.worker_plugin_host,
             &self.env,
@@ -770,7 +771,7 @@ fn worker_config(
     worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
     session_execution_owner: lash_core::LeaseOwnerIdentity,
     process_work: WorkerProcessWork,
-    queued_work: Arc<dyn QueuedWorkSubstrate>,
+    queued_work: Arc<dyn SessionWorkEngine>,
     process_event_sink: Option<Arc<dyn facade_support::ProcessEventSink>>,
     turn_phase_probe_slot: lash_core::runtime::RuntimeTurnPhaseProbeSlot,
     native_substrate: NativeSubstrateConfig,
@@ -1199,9 +1200,9 @@ impl LashCoreBuilder {
             process_event_sink.clone(),
             native_substrate.clone(),
         )?;
-        let queued_port = Self::resolve_queued_work(
+        let (queued_port, session_driver) = Self::resolve_queued_work(
             self.queued_work_source,
-            backend.queued_work(),
+            backend.session_work(),
             session_execution_owner.clone(),
             env.clone(),
             policy.clone(),
@@ -1265,6 +1266,7 @@ impl LashCoreBuilder {
             process_execution_concurrency,
             worker_slot_supplier,
             substrate_slot,
+            _session_driver: session_driver,
             process_event_sink,
             tool_intent_submission_gates: Default::default(),
             tool_child_context_source,
@@ -1315,14 +1317,18 @@ impl LashCoreBuilder {
         });
         // The live native worker is constructed lazily once the outer queued-work dispatcher
         // exists.
-        config.build(Arc::new(NoQueuedWork::new()))?;
+        config.build(Arc::new(NoSessionWork::new()))?;
         Ok(ProcessPortSetup::NativeDefault { config, watched })
     }
 
+    /// The core's session driver and where it runs (FIG-3600): installed on
+    /// the backend's own session-work engine when it has one, else run by the
+    /// in-process engine of the interim SQL backends. Returns the port setup
+    /// and the driver the core keeps.
     #[allow(clippy::too_many_arguments)]
     fn resolve_queued_work(
         queued_work_source: QueuedWorkSource,
-        backend_driver: lash_core::BackendQueuedWork,
+        backend_engine: Option<Arc<dyn lash_core::SessionWorkEngine>>,
         session_execution_owner: lash_core::LeaseOwnerIdentity,
         env: RuntimeEnvironment,
         policy: SessionPolicy,
@@ -1333,31 +1339,33 @@ impl LashCoreBuilder {
         process_lifecycle_available: bool,
         worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
         queued_work_execution_concurrency: usize,
-    ) -> QueuedPortSetup {
-        match (queued_work_source, backend_driver) {
-            (QueuedWorkSource::Disabled, _)
-            | (QueuedWorkSource::Backend, lash_core::BackendQueuedWork::Disabled) => {
-                QueuedPortSetup::Disabled
+    ) -> (QueuedPortSetup, Arc<dyn lash_core::SessionDriver>) {
+        let driver = Arc::new(NativeQueuedWorkRunHandle::new(Arc::new(
+            NativeQueuedWorkRunConfig {
+                session_execution_owner,
+                env,
+                policy,
+                protocol_factory,
+                plugin_factories,
+                store_factory: Arc::clone(store_factory),
+                live_replay_store,
+                process_lifecycle_available,
+            },
+        )));
+        match (queued_work_source, backend_engine) {
+            (QueuedWorkSource::Disabled, _) => (QueuedPortSetup::Disabled, driver),
+            (QueuedWorkSource::Backend, Some(port)) => {
+                let installed = port.install_session_driver(driver);
+                (QueuedPortSetup::External { port }, installed)
             }
-            (QueuedWorkSource::Backend, lash_core::BackendQueuedWork::Engine(port)) => {
-                QueuedPortSetup::External { port }
-            }
-            (QueuedWorkSource::Backend, lash_core::BackendQueuedWork::InProcess) => {
+            (QueuedWorkSource::Backend, None) => (
                 QueuedPortSetup::Native {
-                    config: Arc::new(NativeQueuedWorkRunConfig {
-                        session_execution_owner,
-                        env,
-                        policy,
-                        protocol_factory,
-                        plugin_factories,
-                        store_factory: Arc::clone(store_factory),
-                        live_replay_store,
-                        process_lifecycle_available,
-                    }),
+                    driver: Arc::clone(&driver),
                     slot_supplier: worker_slot_supplier,
                     execution_concurrency: queued_work_execution_concurrency,
-                }
-            }
+                },
+                driver,
+            ),
         }
     }
 

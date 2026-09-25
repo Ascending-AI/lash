@@ -2046,6 +2046,27 @@ impl lash_core::SessionExecutionLeaseStore for CommitRetryStore {
 }
 
 #[async_trait::async_trait]
+impl lash_core::store::DriveEpochStore for CommitRetryStore {
+    async fn seal_drive_epoch(
+        &self,
+        session_id: &SessionId,
+        admission: &lash_core::store::AdmissionId,
+        observed_epoch: u64,
+    ) -> Result<lash_core::store::DriveEpochSeal, lash_core::StoreError> {
+        self.inner
+            .seal_drive_epoch(session_id, admission, observed_epoch)
+            .await
+    }
+
+    async fn drive_epoch(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<lash_core::store::StoredDriveEpoch, lash_core::StoreError> {
+        self.inner.drive_epoch(session_id).await
+    }
+}
+
+#[async_trait::async_trait]
 impl lash_core::QueuedWorkStore for CommitRetryStore {
     async fn select_queued_run(
         &self,

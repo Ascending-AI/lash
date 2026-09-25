@@ -57,8 +57,7 @@
 //! default.
 
 use crate::support::{
-    Arc, EmbedError, QueuedWorkSubstrate, Result, RuntimePersistence, SessionStoreFactory,
-    TurnInput,
+    Arc, EmbedError, Result, RuntimePersistence, SessionStoreFactory, SessionWorkEngine, TurnInput,
 };
 use lash_core::LiveReplayStore;
 use lash_core::facade_support::DurableSessionOps;
@@ -98,7 +97,7 @@ impl DurableSession {
     pub(crate) fn from_catalog(
         session_id: SessionId,
         catalog: Arc<dyn SessionStoreFactory>,
-        queued: Arc<dyn QueuedWorkSubstrate>,
+        queued: Arc<dyn SessionWorkEngine>,
         live_replay_store: Arc<dyn LiveReplayStore>,
     ) -> Self {
         Self {
@@ -115,7 +114,7 @@ impl DurableSession {
     pub(crate) fn from_binding(
         session_id: SessionId,
         store: Arc<dyn RuntimePersistence>,
-        queued: Arc<dyn QueuedWorkSubstrate>,
+        queued: Arc<dyn SessionWorkEngine>,
         live_replay_store: Arc<dyn LiveReplayStore>,
         catalog: Arc<dyn SessionStoreFactory>,
     ) -> Self {

@@ -1551,8 +1551,9 @@ impl RuntimeEffectControllerError {
     }
 
     /// Only the host derivations — the assistant-response hooks, the
-    /// execution-environment sync and the execution-environment load — can
-    /// consume derivation retry authority, and any step whose cancellation
+    /// execution-environment sync and the execution-environment load — and a
+    /// drive's admission and seal, whose store faults are the attempt's (FIG-3600),
+    /// can consume derivation retry authority, and any step whose cancellation
     /// watch was lost ([`Self::turn_cancel_watch_lost`]): that fault is about
     /// the attempt, never the step.
     pub fn journal_disposition(&self, kind: RuntimeEffectKind) -> EffectErrorJournalDisposition {
@@ -1561,6 +1562,8 @@ impl RuntimeEffectControllerError {
             RuntimeEffectKind::AssistantResponseHooks
                 | RuntimeEffectKind::SyncExecutionEnvironment
                 | RuntimeEffectKind::LoadExecutionEnv
+                | RuntimeEffectKind::AdmitDrive
+                | RuntimeEffectKind::SealDriveAdmission
         ) || self.code == RuntimeErrorCode::TransientCancelWatch
         {
             self.journal_disposition

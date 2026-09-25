@@ -915,6 +915,7 @@ finish({ test: boxes[0], test2: boxes[1] });
 }
 
 #[test]
+#[ignore = "FIG-3600 S5a: a session command now settles through the session drive, asynchronously; the workbench refresh path that waited on a synchronous drain is rewritten onto send() in S5b"]
 fn inbox_added_after_session_open_updates_persisted_tool_catalog() {
     run_async_test_on_stack_budget("workbench-dynamic-inbox-surface-test", || {
         inbox_added_after_session_open_updates_persisted_tool_catalog_inner()

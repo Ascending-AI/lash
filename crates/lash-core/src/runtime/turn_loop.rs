@@ -14,7 +14,6 @@ mod accept;
 mod commit;
 mod drain_end;
 mod execute;
-mod initial_drive;
 mod lease;
 mod post_commit;
 #[cfg(feature = "testing")]
@@ -28,7 +27,6 @@ pub(in crate::runtime) use commit::LogicalTurnErrorContext;
 use commit::{CancelledTurnFinishContext, TurnCommitContext, TurnFinishInput};
 pub(in crate::runtime) use execute::PreparedTurnExecuteContext;
 use execute::TurnDriverRemainder;
-use lease::DriveClaimToBind;
 use post_commit::PostCommitDelivery;
 pub(in crate::runtime) use prepare::TurnPrepareContext;
 pub use queued_work::{
@@ -190,13 +188,13 @@ fn queued_work_batch_ids(claim: &crate::QueuedWorkClaim) -> Vec<crate::BatchId> 
 /// `started_at_ms` comes from the wall-clock source and the duration from the
 /// monotonic source, so deterministic clocks produce deterministic timing.
 #[derive(Clone, Copy)]
-pub(super) struct TurnStopwatch {
+pub(in crate::runtime) struct TurnStopwatch {
     started: std::time::Instant,
     started_at_ms: u64,
 }
 
 impl TurnStopwatch {
-    pub(super) fn start(clock: &dyn crate::Clock) -> Self {
+    pub(in crate::runtime) fn start(clock: &dyn crate::Clock) -> Self {
         Self {
             started: clock.now(),
             started_at_ms: clock.timestamp_ms(),
