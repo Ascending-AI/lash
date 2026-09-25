@@ -55,6 +55,7 @@ pub use super::store_maintenance_outcome::*;
 pub use super::store_recovery::*;
 pub use super::tool_access_persistence::*;
 pub use super::tool_batch_parallelism::*;
+pub use super::tool_child_drift::*;
 pub use super::tool_child_invocation::*;
 pub use super::tool_child_turn_cancel::*;
 pub use super::tool_intent_runtime::*;

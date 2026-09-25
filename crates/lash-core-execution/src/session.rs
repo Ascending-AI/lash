@@ -64,6 +64,10 @@ pub enum ToolSurfaceDriftKind {
     Missing,
     /// The live tool with the recorded id links or dispatches differently.
     Changed,
+    /// A group tool child whose recorded surface holds no definition for its
+    /// own tool: nothing recorded to judge the live tool by, so it is served
+    /// only from the journal (FIG-3725).
+    Unrecorded,
 }
 
 impl ToolSurfaceDriftKind {
@@ -71,6 +75,7 @@ impl ToolSurfaceDriftKind {
         match self {
             Self::Missing => "missing from",
             Self::Changed => "changed in",
+            Self::Unrecorded => "unjudgeable against",
         }
     }
 }
@@ -87,6 +92,32 @@ pub struct ToolSurfaceDrift {
 }
 
 impl ToolSurfaceDrift {
+    /// Judges one recorded tool against `live`, the catalog the live registry
+    /// resolves to, on what decides how a call links and dispatches
+    /// ([`tool_dispatch_surface`]): `None` when the live catalog holds it
+    /// undrifted. The one rule a turn's recorded surface and a group tool
+    /// child's recorded admission are both judged by (FIG-3587, FIG-3725).
+    pub fn judge(recorded: &crate::ToolDefinition, live: &crate::ToolCatalog) -> Option<Self> {
+        let kind = match live
+            .tools
+            .iter()
+            .find(|entry| entry.manifest.id == recorded.manifest.id)
+        {
+            None => ToolSurfaceDriftKind::Missing,
+            Some(entry)
+                if tool_dispatch_surface(&entry.manifest, &entry.contract)
+                    != tool_dispatch_surface(&recorded.manifest, &recorded.contract) =>
+            {
+                ToolSurfaceDriftKind::Changed
+            }
+            Some(_) => return None,
+        };
+        Some(Self {
+            kind,
+            recorded: recorded.clone(),
+        })
+    }
+
     /// The grant a call on the drifted tool is authorized under: the recorded
     /// definition, so its envelope is the one the journal recorded.
     pub fn recorded_binding(&self) -> crate::ToolExecutionGrant {
@@ -472,22 +503,11 @@ impl Session {
         tool_access: crate::SessionToolAccess,
         subagent: Option<crate::SubagentSessionContext>,
     ) -> Result<ToolCatalogHandle, crate::PluginError> {
-        let provider = Arc::clone(&tool_registry) as Arc<dyn ToolProvider>;
-        let tools = provider.tool_manifests();
-        let contract_provider = Arc::clone(&provider);
-        let resolve_contract: lash_sansio::ToolContractResolver =
-            Arc::new(move |manifest: &crate::ToolManifest| {
-                contract_provider.resolve_contract_by_id(&manifest.id)
-            });
-        let tool_catalog = Arc::new(self.plugins().resolve_tool_catalog(
-            crate::plugin::ToolCatalogContext {
-                session_id: SessionId::from(session_id.to_string()),
-                tools,
-                resolve_contract: Some(Arc::clone(&resolve_contract)),
-                tool_access,
-                subagent,
-                extensions: self.plugins().extensions().clone(),
-            },
+        let tool_catalog = Arc::new(self.plugins().resolve_live_tool_catalog(
+            session_id,
+            Arc::clone(&tool_registry) as Arc<dyn ToolProvider>,
+            tool_access,
+            subagent,
         )?);
         tool_registry.validate_resident_catalog_routes(&tool_catalog)?;
         let input = crate::ProtocolBuildInput {
@@ -533,29 +553,13 @@ impl Session {
             subagent.cloned(),
         )?;
         let live_tool_catalog = live.tool_catalog();
-        let live_by_id = live_tool_catalog
-            .tools
+        let drift = recorded
             .iter()
-            .map(|entry| (&entry.manifest.id, entry))
+            .filter_map(|definition| {
+                ToolSurfaceDrift::judge(definition, &live_tool_catalog)
+                    .map(|drift| (definition.manifest.id.clone(), drift))
+            })
             .collect::<std::collections::BTreeMap<_, _>>();
-        let mut drift = std::collections::BTreeMap::new();
-        for definition in recorded {
-            let kind = match live_by_id.get(&definition.manifest.id) {
-                None => Some(ToolSurfaceDriftKind::Missing),
-                Some(entry) => (tool_dispatch_surface(&entry.manifest, &entry.contract)
-                    != tool_dispatch_surface(&definition.manifest, &definition.contract))
-                .then_some(ToolSurfaceDriftKind::Changed),
-            };
-            if let Some(kind) = kind {
-                drift.insert(
-                    definition.manifest.id.clone(),
-                    ToolSurfaceDrift {
-                        kind,
-                        recorded: definition.clone(),
-                    },
-                );
-            }
-        }
         let tool_catalog = Arc::new(crate::ToolCatalog::from_tool_definitions(recorded.to_vec()));
         let preamble = self
             .plugins()

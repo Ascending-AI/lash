@@ -770,10 +770,6 @@ pub struct RecordedKeyRange {
 pub struct RecordedKeys {
     /// Replay keys of `runtime_effect_replay` rows.
     pub replay_keys: Vec<String>,
-    /// The subset of [`replay_keys`](Self::replay_keys) whose outcome is
-    /// recorded (completed or failed): what a replay can serve without
-    /// running anything live (FIG-3587).
-    pub settled_keys: Vec<String>,
     /// Group keys of `runtime_effect_group` rows.
     pub group_keys: Vec<String>,
     /// The recorded outcome of the completed replay row at the range's upper
@@ -890,10 +886,12 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
         replay_key: &str,
     ) -> Result<(), RuntimeEffectControllerError>;
 
-    /// Expire an ungrouped pending derivation claim without sealing an error.
-    /// Match all five fence columns and the live lease at write time. Retain
-    /// the canonical envelope and pending row; a subsequent claim rotates its
-    /// owner and token. Refuse committed, cancelled, grouped or expired rows.
+    /// Expire a pending claim without sealing an error: an ungrouped
+    /// derivation, or a group child whose refusal parks its opener
+    /// (FIG-3725). Match all five fence columns and the live lease at write
+    /// time. Retain the canonical envelope and pending row; a subsequent claim
+    /// rotates its owner and token. Refuse committed, cancel-decided or
+    /// expired rows.
     async fn release_uncommitted_derivation(
         &self,
         fence: &EffectLeaseFence,

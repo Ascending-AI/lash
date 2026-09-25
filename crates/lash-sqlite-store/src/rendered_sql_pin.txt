@@ -33,11 +33,6 @@ SELECT EXISTS(
 SELECT replay_key FROM main.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key >= ?2 AND replay_key <= ?3
              ORDER BY replay_key
-=== main | effect::replay::ReplayStatements | effect_replay.select_settled_keys_in_range
-SELECT replay_key FROM main.runtime_effect_replay
-             WHERE scope_id = ?1 AND replay_key >= ?2 AND replay_key <= ?3
-               AND status <> 'in_progress'
-             ORDER BY replay_key
 === main | effect::replay::ReplayStatements | effect_replay.select_completed_outcome_by_key
 SELECT outcome_json FROM main.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key = ?2 AND status = 'completed'
@@ -266,7 +261,6 @@ UPDATE main.runtime_effect_replay
                AND lease_owner_id = ?4
                AND lease_token = ?5
                AND status = 'in_progress'
-               AND group_key IS NULL
                AND commit_state = 'pending'
                AND lease_expires_at_ms > ?6
 === main | sqlite::ReplaySqliteStatements | effect_replay.renew_lease
@@ -380,11 +374,6 @@ SELECT EXISTS(
 === effect_journal | effect::replay::ReplayStatements | effect_replay.select_keys_in_range
 SELECT replay_key FROM effect_journal.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key >= ?2 AND replay_key <= ?3
-             ORDER BY replay_key
-=== effect_journal | effect::replay::ReplayStatements | effect_replay.select_settled_keys_in_range
-SELECT replay_key FROM effect_journal.runtime_effect_replay
-             WHERE scope_id = ?1 AND replay_key >= ?2 AND replay_key <= ?3
-               AND status <> 'in_progress'
              ORDER BY replay_key
 === effect_journal | effect::replay::ReplayStatements | effect_replay.select_completed_outcome_by_key
 SELECT outcome_json FROM effect_journal.runtime_effect_replay
@@ -614,7 +603,6 @@ UPDATE effect_journal.runtime_effect_replay
                AND lease_owner_id = ?4
                AND lease_token = ?5
                AND status = 'in_progress'
-               AND group_key IS NULL
                AND commit_state = 'pending'
                AND lease_expires_at_ms > ?6
 === effect_journal | sqlite::ReplaySqliteStatements | effect_replay.renew_lease
@@ -728,11 +716,6 @@ SELECT EXISTS(
 === process_registry | effect::replay::ReplayStatements | effect_replay.select_keys_in_range
 SELECT replay_key FROM process_registry.runtime_effect_replay
              WHERE scope_id = ?1 AND replay_key >= ?2 AND replay_key <= ?3
-             ORDER BY replay_key
-=== process_registry | effect::replay::ReplayStatements | effect_replay.select_settled_keys_in_range
-SELECT replay_key FROM process_registry.runtime_effect_replay
-             WHERE scope_id = ?1 AND replay_key >= ?2 AND replay_key <= ?3
-               AND status <> 'in_progress'
              ORDER BY replay_key
 === process_registry | effect::replay::ReplayStatements | effect_replay.select_completed_outcome_by_key
 SELECT outcome_json FROM process_registry.runtime_effect_replay
@@ -962,7 +945,6 @@ UPDATE process_registry.runtime_effect_replay
                AND lease_owner_id = ?4
                AND lease_token = ?5
                AND status = 'in_progress'
-               AND group_key IS NULL
                AND commit_state = 'pending'
                AND lease_expires_at_ms > ?6
 === process_registry | sqlite::ReplaySqliteStatements | effect_replay.renew_lease

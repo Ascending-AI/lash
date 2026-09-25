@@ -411,7 +411,7 @@ pub use lash_core_execution::runtime::{
     NOOP_TURN_ACTIVITY_SINK, NoopEventSink, NoopTurnActivitySink, ProtocolSessionExtension,
     ProtocolSessionExtensionHandle, RuntimeTurnPhaseProbeSlot, SessionStoreFactory,
     TerminationPolicy, TurnActivity, TurnActivitySink, TurnEvent, admit_session_state_generation,
-    park_turn_refused_by_generation,
+    park_turn_of_refused_group_child, park_turn_refused_by_generation,
 };
 
 mod normalized_item {

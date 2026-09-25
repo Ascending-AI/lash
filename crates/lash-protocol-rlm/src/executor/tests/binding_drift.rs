@@ -156,24 +156,6 @@ fn a_drifted_tool_whose_result_was_never_recorded_refuses() {
     }
 }
 
-/// An aggregate's leaves re-drive through the tool child host, which resolves
-/// each tool live; an aggregate naming a drifted binding refuses before its
-/// group is reopened, even when every leaf settled (a documented limitation).
-#[test]
-fn an_aggregate_naming_a_drifted_tool_refuses() {
-    const CELL: &str = "await Promise.all([app.a({ n: 1 }), app.b({ n: 2 })]); finish(1);";
-    block_on(async {
-        let journal = Journal::open();
-        let tools = AppTools::default();
-        journal.run(CELL, &tools).await.assert_clean();
-        let recorded = journal.keys().await;
-        let redriven = journal.run(CELL, &tools.with_app_a(AppA::Removed)).await;
-        assert_binding_drift(&redriven, AppA::Removed);
-        assert_eq!(tools.dispatched(), 2);
-        assert_eq!(journal.keys().await, recorded, "no group is reopened");
-    });
-}
-
 /// A redrive under an unchanged registry reads the recorded binding set and
 /// writes nothing new: the record is journaled once, on the first pass.
 #[test]
@@ -236,7 +218,7 @@ fn a_reworded_descriptor_never_parks() {
 
 /// A deferred tool whose binding drifted, redriven while its completion wait
 /// was never claimed: the attempt replays from the journal, and the wait —
-/// which dispatches nothing — passes the settled-key fence and receives the
+/// which dispatches nothing — carries no served-only refusal and receives the
 /// completion (FIG-3587).
 #[test]
 fn a_drifted_deferred_tool_still_waits_for_its_completion() {

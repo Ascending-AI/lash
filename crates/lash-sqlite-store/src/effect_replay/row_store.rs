@@ -136,11 +136,6 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                 };
                 let sql = effect_sql(Schema::Main);
                 let replay_keys = read(sql.replay.select_keys_in_range.sql(), &lower, &upper)?;
-                let settled_keys = read(
-                    sql.replay.select_settled_keys_in_range.sql(),
-                    &lower,
-                    &upper,
-                )?;
                 let group_keys = read(
                     sql.group.select_keys_in_range.sql(),
                     &format!("{group_key_prefix}{lower}"),
@@ -161,7 +156,6 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
                     .optional()?;
                 Ok(RecordedKeys {
                     replay_keys,
-                    settled_keys,
                     group_keys,
                     closing_outcome,
                 })

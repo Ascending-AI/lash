@@ -291,6 +291,13 @@ impl<'scope> ProcessCommandRunner<'scope> {
             local_executor = local_executor.with_process_turn_cancellation(turn_cancellation);
         }
         let outcome = if let Some(task_requests) = task_requests {
+            // The effect task hands the command to the raw controller, not
+            // through the scoped one: the command's guard marks it here, so a
+            // served-only command's process command reaches its engine served
+            // only, as through `execute_effect` (FIG-3719, FIG-3725).
+            let local_executor = scoped
+                .guard_local_executor(&envelope, local_executor)
+                .map_err(crate::PluginError::RuntimeEffectController)?;
             crate::runtime::effect::drive_effect_controller_task(
                 self.effect_controller,
                 scoped.execution_scope().clone(),

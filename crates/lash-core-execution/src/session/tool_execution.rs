@@ -101,7 +101,7 @@ impl ToolCallAuthorization {
 
     /// A recorded binding orchestrates as the catalog call it replays did
     /// (FIG-3587): a drifted orchestrating tool re-runs its body against its
-    /// recorded nested effects, served under the command's settled-key fence.
+    /// recorded nested effects, each served only from the journal (FIG-3719).
     fn allows_orchestration(&self) -> bool {
         matches!(self, Self::Catalog(_) | Self::Recorded(_))
     }

@@ -111,13 +111,6 @@ impl EffectReplayRowStore for PostgresEffectReplayRowStore {
             )
             .await
             .map_err(effect_store_error)?,
-            settled_keys: read(
-                sql.replay.select_settled_keys_in_range.sql(),
-                range.lower.clone(),
-                range.upper.clone(),
-            )
-            .await
-            .map_err(effect_store_error)?,
             group_keys: read(
                 sql.group.select_keys_in_range.sql(),
                 format!("{prefix}{}", range.lower),

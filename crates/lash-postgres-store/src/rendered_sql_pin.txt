@@ -33,11 +33,6 @@ SELECT EXISTS(
 SELECT replay_key FROM lash_runtime_effect_replay
              WHERE scope_id = $1 AND replay_key >= $2 AND replay_key <= $3
              ORDER BY replay_key
-=== effect::replay::ReplayStatements | effect_replay.select_settled_keys_in_range
-SELECT replay_key FROM lash_runtime_effect_replay
-             WHERE scope_id = $1 AND replay_key >= $2 AND replay_key <= $3
-               AND status <> 'in_progress'
-             ORDER BY replay_key
 === effect::replay::ReplayStatements | effect_replay.select_completed_outcome_by_key
 SELECT outcome_json FROM lash_runtime_effect_replay
              WHERE scope_id = $1 AND replay_key = $2 AND status = 'completed'
@@ -274,7 +269,6 @@ UPDATE lash_runtime_effect_replay
                AND lease_owner_id = $4
                AND lease_token = $5
                AND status = 'in_progress'
-               AND group_key IS NULL
                AND commit_state = 'pending'
                AND lease_expires_at_ms > floor(extract(epoch FROM transaction_timestamp()) * 1000)::bigint
 === postgres::ReplayPostgresStatements | effect_replay.renew_lease

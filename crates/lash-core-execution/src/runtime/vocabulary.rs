@@ -722,6 +722,53 @@ pub async fn admit_session_state_generation(
     }
 }
 
+/// Records the park of the turn a group tool child belongs to, when the child
+/// refused where it parks its opener and recorded nothing (FIG-3725) — its
+/// tool drifted and it would run live, or its replay diverged — and returns
+/// it. The child runs in its own invocation on an engine whose opener cannot
+/// learn of a refusal that settles nothing, so the child writes the park its
+/// opener would have: keyed by the turn — a turn scope's root turn, a queue
+/// drain's physical turn — in the turn's own session store. A refusal that
+/// parks nothing, a scope with no turn, and a session with no store answer
+/// `None`.
+pub async fn park_turn_of_refused_group_child(
+    sessions: &dyn SessionStoreFactory,
+    scope: &crate::ExecutionScope,
+    physical_turn: Option<&TurnId>,
+    refusal: &crate::RuntimeError,
+    at_ms: u64,
+) -> Result<Option<crate::store::TurnPark>, crate::StoreError> {
+    let Some(reason) = crate::store::ParkReason::of_error(refusal) else {
+        return Ok(None);
+    };
+    let (session_id, turn_id) = match (scope, physical_turn) {
+        (
+            crate::ExecutionScope::Turn {
+                session_id,
+                turn_id,
+            },
+            _,
+        ) => (session_id, turn_id),
+        (crate::ExecutionScope::QueueDrain { session_id, .. }, Some(turn_id)) => {
+            (session_id, turn_id)
+        }
+        _ => return Ok(None),
+    };
+    let Some(store) = sessions.open_existing_store_by_id(session_id).await? else {
+        return Ok(None);
+    };
+    let park = store
+        .record_turn_park(&crate::store::TurnParkWrite {
+            session_id: session_id.clone(),
+            turn_id: turn_id.clone(),
+            reason,
+            at_ms,
+        })
+        .await?;
+    crate::operational_metrics::record_work_parked("turn", park.reason.code().as_str());
+    Ok(Some(park))
+}
+
 /// Records the park of the turn a durable engine redelivered to a build whose
 /// generation gate refused its session (FIG-3735), and returns it. `store` is
 /// the refused session's own store, opened without admission (a catalog's

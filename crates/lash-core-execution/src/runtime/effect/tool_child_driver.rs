@@ -851,6 +851,70 @@ fn admitted_catalog(request: &ToolChildRequest) -> ToolCatalog {
     ToolCatalog::from_tool_definitions(definitions)
 }
 
+/// How the tool a catalog-admitted child calls drifted from the definition
+/// its opener recorded (FIG-3725): its admitted manifest, with the contract
+/// the recorded surface holds for it, judged against the catalog the serving
+/// registry resolves to under the child's recorded tool access and subagent
+/// context — the rule a turn's recorded surface is judged by (FIG-3587). A
+/// granted call carries its own definition and is not judged.
+fn admitted_tool_drift(
+    lent: &ToolDispatchContext<'_>,
+    request: &ToolChildRequest,
+) -> Result<Option<crate::ToolSurfaceDrift>, RuntimeEffectControllerError> {
+    let super::tool_child::ToolChildAdmission::Catalog { manifest } = &request.admission else {
+        return Ok(None);
+    };
+    // The opener records its whole surface, the admitted tool included. A
+    // request whose surface holds no definition for its tool recorded
+    // nothing to judge the live tool by, so it fails closed: served only
+    // from its journal.
+    let Some(contract) = request
+        .session
+        .tool_surface
+        .iter()
+        .find(|definition| definition.manifest.id == manifest.id)
+        .map(|definition| definition.contract.clone())
+    else {
+        return Ok(Some(crate::ToolSurfaceDrift {
+            kind: crate::ToolSurfaceDriftKind::Unrecorded,
+            recorded: crate::ToolDefinition {
+                manifest: manifest.as_ref().clone(),
+                contract: crate::ToolContract::default(),
+            },
+        }));
+    };
+    let recorded = crate::ToolDefinition {
+        manifest: manifest.as_ref().clone(),
+        contract,
+    };
+    // The registry the serving context dispatches through, as a turn's
+    // recorded surface is judged against it; a context with no registry
+    // serves its provider alone.
+    let live_tools = lent.tool_registry.as_ref().map_or_else(
+        || Arc::clone(&lent.tools),
+        |registry| Arc::clone(registry) as Arc<dyn crate::ToolProvider>,
+    );
+    let live = lent
+        .plugins
+        .resolve_live_tool_catalog(
+            &request.scope.session_id,
+            live_tools,
+            request.session.tool_access.clone(),
+            request.session.subagent.clone(),
+        )
+        .map_err(|error| {
+            RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::ToolCatalogResolutionFailed,
+                format!(
+                    "tool child `{}` could not resolve the live catalog its tool is judged \
+                     against: {error}",
+                    request.call.call_id
+                ),
+            )
+        })?;
+    Ok(crate::ToolSurfaceDrift::judge(&recorded, &live))
+}
+
 /// Runs one tool child to a terminal and reports what it produced.
 ///
 /// The ordering this provides, stated rather than assumed (§4/§5, FIG-3409):
@@ -887,6 +951,22 @@ async fn run_tool_child<'run>(
         .resolve_child_context(opener, request, &execution_env_spec)
         .await?;
     let live = &resolved.context;
+    // The child judges its own tool against the registry serving it
+    // (FIG-3725): a tool that drifted since its opener recorded it is served
+    // only from the child's journal. Every dispatching effect the child
+    // issues carries the drift refusal to its engine, which serves a recorded
+    // outcome and refuses — running and recording nothing — one it would run
+    // live (FIG-3719).
+    let served_only =
+        admitted_tool_drift(live.dispatch().as_ref(), request)?.map(|drift| {
+            Arc::new(crate::CommandJournalGuard::open().served_only(
+                crate::ServedOnlyRange::every_key(drift.refusal(&request.call.call_id)),
+            ))
+        });
+    let controller = match &served_only {
+        Some(guard) => controller.with_journal_guard(Arc::clone(guard)),
+        None => controller,
+    };
     let cancel = live.cancellation().child_token();
     let usage_ledger = ToolUsageLedger::new();
     let dispatch = Arc::new(rebind_child_dispatch(
@@ -942,6 +1022,12 @@ async fn run_tool_child<'run>(
             }
         },
     };
+    // An engine that refused a served-only effect tripped the guard, however
+    // the attempt's caller shaped the error: the child refuses with the
+    // drift, settles nothing and presents nothing (FIG-3725).
+    if let Some(refusal) = served_only.as_ref().and_then(|guard| guard.tripped()) {
+        return Err(refusal);
+    }
     // The settlement is aggregated from the journaled outcome by the one
     // constructor every terminal owns (FIG-3411): per-attempt facts ride
     // `outcome.captures` and its `triggers`; what the orchestrating lane wrote

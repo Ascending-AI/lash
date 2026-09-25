@@ -66,6 +66,90 @@ impl std::fmt::Debug for EffectGroupDispatch {
     }
 }
 
+impl EffectGroupDispatch {
+    /// Ends a tool child whose drive refused where it parks its opener,
+    /// recording nothing (FIG-3725).
+    ///
+    /// - A group its opener closed or retired no longer needs the child: only
+    ///   the child's own attempt ends, and no turn is parked for it.
+    /// - Otherwise the child writes its turn's park and ends its attempt the
+    ///   way a park ends (FIG-3697): every retry refuses and parks again
+    ///   until the tool is restored or the turn is cancelled. A park the store
+    ///   did not take fails the attempt as a live fault, so the retry writes
+    ///   it again.
+    /// - A child whose scope names no turn has no park to write, so it does
+    ///   not retry unseen: a drift refused at the live frontier settles as the
+    ///   child's typed outcome, which its opener reads (a process segment
+    ///   fails its run). Any other refusal was found mid-replay, where no
+    ///   settlement can be journaled, and ends the attempt as before.
+    async fn end_parked_child<'ctx>(
+        &self,
+        ctx: &SharedWorkflowContext<'ctx>,
+        request: &EffectGroupChildRequest,
+        child: &lash_core::runtime::effect::ToolChildRequest,
+        refusal: &RuntimeEffectControllerError,
+        outcome: &EffectGroupChildRunOutcome,
+    ) -> HandlerResult<Json<()>> {
+        let label = format!(
+            "effect group {} child {}",
+            request.group_key, request.position
+        );
+        if self.opener_released(&request.group_key).await {
+            return Err(crate::parked_turn_failure(format!(
+                "{label}: its group is closed, so no turn is parked for it: {refusal}"
+            )));
+        }
+        let parked = crate::turn_handler::park_refused_group_child(
+            self.sessions.as_ref(),
+            child.scope.admitted_scope.scope(),
+            child
+                .attempt_identity
+                .parent_invocation()
+                .and_then(|parent| parent.attribution.turn_id.as_ref()),
+            refusal,
+        )
+        .await;
+        match parked {
+            Ok(Some(_)) => Err(crate::parked_turn_failure(format!("{label}: {refusal}"))),
+            Ok(None) if refusal.code == RuntimeErrorCode::LashlangCellBindingDrift => {
+                tracing::warn!(
+                    group_key = %request.group_key,
+                    position = request.position,
+                    %refusal,
+                    "a drifted tool child whose scope names no turn settles its refusal"
+                );
+                record_child_settlement(ctx, request, outcome.clone()).await
+            }
+            Ok(None) => Err(crate::parked_turn_failure(format!("{label}: {refusal}"))),
+            Err(error) => Err(std::io::Error::other(format!(
+                "{label} parked on `{}` and its turn's park could not be recorded: {error}",
+                refusal.code
+            ))
+            .into()),
+        }
+    }
+
+    /// Whether the opener of `group_key` no longer needs its children's
+    /// ranks: the group is closed or retired. Read through ingress, outside
+    /// the child's journal, since nothing may be journaled after a refused
+    /// run's orphan; a read that fails answers `false`, so the park is kept.
+    async fn opener_released(&self, group_key: &str) -> bool {
+        matches!(
+            self.ingress
+                .call_object_empty_json::<EffectGroupProbeResponse>(
+                    crate::LashService::EffectGroupIndex,
+                    group_key,
+                    "probe",
+                )
+                .await,
+            Ok(EffectGroupProbeResponse::Exists {
+                phase: EffectGroupPhase::Closed | EffectGroupPhase::Retired,
+                ..
+            })
+        )
+    }
+}
+
 #[restate_sdk::workflow(name = "EffectGroupDispatch")]
 impl EffectGroupDispatch {
     #[handler]
@@ -494,6 +578,17 @@ impl EffectGroupDispatch {
                     EffectGroupChildRunOutcome::Completed { outcome }
                 }
             };
+            // A child that parks settles nothing, so its opener's rank wait
+            // cannot learn of it (FIG-3725).
+            if let EffectGroupChildRunOutcome::Completed {
+                outcome: Err(refusal),
+            } = &outcome
+                && refusal.turn_failure_cause() == lash_core::TurnFailureCause::Parked
+            {
+                return self
+                    .end_parked_child(controller.context(), &request, child, refusal, &outcome)
+                    .await;
+            }
             refuse_unrecorded_abort(&request, &outcome)?;
             return record_child_settlement(controller.context(), &request, outcome).await;
         }

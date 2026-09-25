@@ -134,7 +134,9 @@ macro_rules! model_call_drift_park_tests {
 /// Register the cell binding-drift law (FIG-3587): a redriven RLM cell links
 /// against its journaled binding set, completing from the journal when the
 /// drifted tool's result was recorded and parking when it would reach the
-/// tool live. The fixture hands back a guard, a prefix, the tier's effect
+/// tool live; and the tool-child drift law (FIG-3725): a group tool child —
+/// a model-issued call, an aggregate's leaf — judges its own tool the same
+/// way. The fixture hands back a guard, a prefix, the tier's effect
 /// host, the store set under test, its
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) — which must read
 /// its journal's replay keys and cut a turn at a
@@ -145,6 +147,8 @@ macro_rules! cell_binding_drift_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::cell_binding_drift_tests!(@law [$(#[$attr])*] $fixture;
             (redriven_cell_links_against_its_journaled_binding_set, "cell-binding-drift"));
+        $crate::cell_binding_drift_tests!(@law [$(#[$attr])*] $fixture;
+            (a_group_tool_child_judges_its_own_drifted_tool, "tool-child-drift"));
     };
     (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
         $($attr)*
