@@ -277,6 +277,33 @@ pub async fn process_continuation_store(
         Some(1),
         "the refused put parks nothing"
     );
+    // FIG-3819: an ended process starts no segment. The marker write is
+    // refused typed in its own transaction and records nothing.
+    let pruned_segment = crate::ProcessSegmentKey::new(pruned_process_id, 1);
+    let refused = store
+        .mark_segment_started(
+            &pruned_segment,
+            crate::SegmentStartMarker {
+                nonce: "nonce-after-terminal".to_string(),
+                started_at_ms: 40,
+            },
+        )
+        .await;
+    assert!(
+        matches!(
+            refused,
+            Err(crate::PluginError::ProcessAlreadyTerminal { .. })
+        ),
+        "a segment start on an ended process is refused typed: {refused:?}"
+    );
+    assert_eq!(
+        store
+            .segment_start(&pruned_segment)
+            .await
+            .expect("read the marker after the refused start"),
+        None,
+        "the refused start records no marker"
+    );
     registry
         .prune_terminal_processes(
             terminal.updated_at_ms.saturating_add(1),

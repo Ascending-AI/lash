@@ -112,6 +112,8 @@ pub(crate) enum SegmentFailure {
     Boundary(String),
     /// The handover to the successor could not be written.
     HandoverWrite(String),
+    /// The process's records break an admission invariant (FIG-3819).
+    AdmissionInvariant(String),
 }
 
 impl SegmentFailure {
@@ -122,6 +124,7 @@ impl SegmentFailure {
             Self::Controller(_) => "process_segment_controller",
             Self::Boundary(_) => "process_segment_boundary",
             Self::HandoverWrite(_) => "process_segment_handover_write",
+            Self::AdmissionInvariant(_) => "process_segment_admission_invariant",
         }
     }
 
@@ -131,7 +134,8 @@ impl SegmentFailure {
         | Self::HandoverMismatch(message)
         | Self::Controller(message)
         | Self::Boundary(message)
-        | Self::HandoverWrite(message)) = self;
+        | Self::HandoverWrite(message)
+        | Self::AdmissionInvariant(message)) = self;
         ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::failure(
             lash_core::ToolFailure::runtime(lash_core::ToolFailureClass::Execution, code, message),
         ))
@@ -966,6 +970,17 @@ where
                             "missing persisted handover for process `{process_id}` segment {}",
                             input.segment_ordinal
                         )),
+                        SegmentSignal::Unresolved,
+                    )
+                    .await;
+            }
+            SegmentAdmission::Invariant { message } => {
+                return self
+                    .fail_segment(
+                        &ctx,
+                        &process_id,
+                        input.segment_ordinal,
+                        SegmentFailure::AdmissionInvariant(message),
                         SegmentSignal::Unresolved,
                     )
                     .await;

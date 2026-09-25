@@ -572,7 +572,9 @@ pub trait ProcessContinuationStore: Send + Sync {
     /// store now holds: `marker` when this call wrote it, or the one an
     /// earlier call recorded, which is left unchanged. The caller compares the
     /// returned nonce with its own. The segment's handover must be retained;
-    /// marking a segment with none is an error.
+    /// marking a segment with none is an error. An ended process starts no
+    /// segment: the call is refused [`PluginError::ProcessAlreadyTerminal`],
+    /// checked in the transaction that writes the marker (FIG-3819).
     async fn mark_segment_started(
         &self,
         segment: &ProcessSegmentKey,
