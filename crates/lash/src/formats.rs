@@ -51,6 +51,9 @@
 //! semantic identity are owned by non-optional `lash-sansio`, so the format is
 //! listed in every build even when the optional verifier is absent.
 
+use lash_core::engine::BuildGeneration;
+use lash_sansio::core_support::Blake3DomainHasher;
+
 pub use lash_core::facade_support::PROCESS_LEASE_SCHEMA_VERSION;
 pub use lash_core::store::{
     APPEND_REQUEST_IDENTITY_ENCODING_VERSION, CHECKPOINT_COMPONENT_ENCODING_VERSION,
@@ -74,7 +77,7 @@ pub use lash_protocol_rlm::{
 #[cfg(feature = "restate")]
 pub use lash_restate::{
     DURABLE_WAIT_INDEX_IDENTITY_EPOCH, DURABLE_WAIT_REQUEST_VERSION,
-    EFFECT_GROUP_INDEX_PROTOCOL_VERSION, EFFECT_JOURNAL_VERSION,
+    EFFECT_GROUP_INDEX_PROTOCOL_VERSION, EFFECT_JOURNAL_VERSION, JOURNAL_LOGIC_EPOCH,
     PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION, RESTATE_PROCESS_JOURNAL_VERSION,
 };
 pub use lash_sansio::{LASHLANG_SEMANTIC_HASH_VERSION, TURN_CHECKPOINT_SCHEMA_VERSION};
@@ -228,6 +231,71 @@ impl DurableFormat {
             DurableFormat::VmAbi => "Lashlang VM ABI",
         }
     }
+
+    /// How this format's stored bytes move to a newer build (ADR 0106 §2).
+    ///
+    /// The match is exhaustive — every durable format declares one of the
+    /// three policies — and `scripts/check_format_registry.py` holds each
+    /// manifest row's arm equal to the `upgrade =` the surface's registry
+    /// entry declares, so the answer here cannot drift from the declared
+    /// upgrade path.
+    pub fn upgrade_policy(self) -> UpgradePolicy {
+        match self {
+            DurableFormat::ModuleArtifact => UpgradePolicy::Coexist,
+            DurableFormat::SessionCheckpointManifest => UpgradePolicy::Migrate,
+            DurableFormat::CheckpointComponentEncoding => UpgradePolicy::Migrate,
+            DurableFormat::SessionHeadMeta => UpgradePolicy::Migrate,
+            DurableFormat::ProcessWakeDelivery => UpgradePolicy::Migrate,
+            DurableFormat::SessionNodeBody => UpgradePolicy::Migrate,
+            DurableFormat::SessionStateGeneration => UpgradePolicy::Migrate,
+            DurableFormat::ProtocolTurnOptions => UpgradePolicy::Migrate,
+            DurableFormat::ParentScopeStoragePayload => UpgradePolicy::Migrate,
+            DurableFormat::ProcessLease => UpgradePolicy::Migrate,
+            DurableFormat::ProcessEffectSummary => UpgradePolicy::Migrate,
+            DurableFormat::AppendRequestIdentity => UpgradePolicy::Coexist,
+            DurableFormat::RecordConfigRequestIdentity => UpgradePolicy::Coexist,
+            DurableFormat::CreateSessionRequestIdentity => UpgradePolicy::Coexist,
+            DurableFormat::UsageLedgerRequestIdentity => UpgradePolicy::Coexist,
+            DurableFormat::ToolChildRequest => UpgradePolicy::Drain,
+            DurableFormat::ToolSettlement => UpgradePolicy::Drain,
+            DurableFormat::ToolAttemptCapture => UpgradePolicy::Drain,
+            DurableFormat::ToolPresentation => UpgradePolicy::Drain,
+            DurableFormat::TurnCheckpoint => UpgradePolicy::Drain,
+            DurableFormat::RuntimeCommitReceipt => UpgradePolicy::Migrate,
+            DurableFormat::Bytecode => UpgradePolicy::Coexist,
+            DurableFormat::VmContinuation => UpgradePolicy::Drain,
+            DurableFormat::LashlangSnapshot => UpgradePolicy::Migrate,
+            DurableFormat::HeapSizeSchedule => UpgradePolicy::Migrate,
+            DurableFormat::LashlangSegmentHandover => UpgradePolicy::Drain,
+            DurableFormat::RlmSnapshotEnvelope => UpgradePolicy::Migrate,
+            DurableFormat::WorkflowGraphSchema => UpgradePolicy::Migrate,
+            DurableFormat::WorkflowTypeFacet => UpgradePolicy::Migrate,
+            DurableFormat::NativeRlmDriverState => UpgradePolicy::Migrate,
+            DurableFormat::NativeRlmTransport => UpgradePolicy::Migrate,
+            DurableFormat::RestateDurableWaitRequest => UpgradePolicy::Drain,
+            DurableFormat::RestateDurableWaitIndexEpoch => UpgradePolicy::Coexist,
+            DurableFormat::RestateProcessCommandJournal => UpgradePolicy::Drain,
+            DurableFormat::RestateEffectGroupIndexProtocol => UpgradePolicy::Coexist,
+            DurableFormat::RestateProcessJournal => UpgradePolicy::Drain,
+            DurableFormat::RestateEffectJournal => UpgradePolicy::Drain,
+            DurableFormat::VmAbi => UpgradePolicy::Drain,
+        }
+    }
+}
+
+/// How a durable format's stored bytes move to a newer build (ADR 0106 §2).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum UpgradePolicy {
+    /// Forward migration: schema DDL or a read upcaster, then writing at the
+    /// fleet format.
+    Migrate,
+    /// A journal replays only under the code that wrote it, so it finishes on
+    /// its own build; the drain generation carries these formats.
+    Drain,
+    /// Both versions live during the roll window: content addresses,
+    /// idempotency keys, namespaced object state and negotiated wire versions.
+    Coexist,
 }
 
 /// A format's version, which is a counter for most formats and a build string
@@ -578,6 +646,65 @@ pub fn durable_formats() -> &'static [DurableFormatEntry] {
     ]
 }
 
+/// The build's drain generation `G` (FIG-3795): the digest of the
+/// drain-policy durable formats this build writes plus the journal-logic
+/// epoch, stamped on every journal-bearing Restate deployment so a journal
+/// written by another build is never replayed here.
+///
+/// The preimage is the sorted `(name, version)` rows of the
+/// [`UpgradePolicy::Drain`] entries of [`durable_formats`], then the
+/// `JOURNAL_LOGIC_EPOCH` — the manual counter beside the process handler's
+/// step names, bumped when handler logic moves without a format version —
+/// hashed under the `lash-build-generation/v1` BLAKE3 domain, first six
+/// bytes. Feature gating is honest: a build without `rlm` serves no Lashlang
+/// journals and so has a different `G`. There is no environment or host
+/// input; the same code gives the same `G`, which is what makes a generation
+/// routable.
+pub fn build_generation() -> BuildGeneration {
+    build_generation_of(durable_formats(), journal_logic_epoch())
+}
+
+/// The epoch input to [`build_generation`]: the Restate journal handlers'
+/// logic epoch when this build carries them, absent when it does not — a
+/// no-Restate build serves no journals and its `G` says so.
+#[cfg(feature = "restate")]
+fn journal_logic_epoch() -> Option<u32> {
+    Some(JOURNAL_LOGIC_EPOCH)
+}
+
+/// See [`journal_logic_epoch`].
+#[cfg(not(feature = "restate"))]
+fn journal_logic_epoch() -> Option<u32> {
+    None
+}
+
+/// The hash behind [`build_generation`], over an explicit manifest and epoch
+/// so the tests below can move one row at a time instead of depending on
+/// which durable format next bumps.
+fn build_generation_of(entries: &[DurableFormatEntry], epoch: Option<u32>) -> BuildGeneration {
+    let mut rows: Vec<(String, String)> = entries
+        .iter()
+        .filter(|entry| entry.format.upgrade_policy() == UpgradePolicy::Drain)
+        .map(|entry| (entry.format.name().to_string(), entry.version.to_string()))
+        .collect();
+    rows.sort();
+    let mut hasher = Blake3DomainHasher::new("lash-build-generation/v1");
+    for (name, version) in &rows {
+        hasher.update((name.len() as u64).to_be_bytes());
+        hasher.update(name.as_bytes());
+        hasher.update((version.len() as u64).to_be_bytes());
+        hasher.update(version.as_bytes());
+    }
+    if let Some(epoch) = epoch {
+        hasher.update(b"journal-logic-epoch");
+        hasher.update(epoch.to_be_bytes());
+    }
+    let digest = hasher.finalize();
+    let mut bytes = [0_u8; 6];
+    bytes.copy_from_slice(&digest[..6]);
+    BuildGeneration::from_digest(bytes)
+}
+
 /// The manifest row for one format, when this build carries it.
 ///
 /// `None` means the format is not part of this build — the Lashlang and RLM
@@ -679,6 +806,70 @@ mod tests {
         assert_eq!(
             FormatVersion::Identity("lashlang-vm-abi-v6").to_string(),
             "lashlang-vm-abi-v6"
+        );
+    }
+
+    #[test]
+    fn the_build_generation_is_stable_for_the_same_code() {
+        // L0: the same manifest and epoch must give the same G, or generation
+        // routing would pin work to a value that moves within one build.
+        assert_eq!(build_generation(), build_generation());
+        assert_eq!(
+            build_generation(),
+            build_generation_of(durable_formats(), journal_logic_epoch())
+        );
+    }
+
+    #[test]
+    fn a_drain_format_version_move_changes_the_generation() {
+        // L0: every Drain row is in the preimage and every non-Drain row is
+        // not — a migrate/coexist version move alone must not re-stamp the
+        // build, and a drain one must.
+        for index in 0..durable_formats().len() {
+            let mut moved = durable_formats().to_vec();
+            moved[index].version = match moved[index].version {
+                FormatVersion::Counter(v) => FormatVersion::Counter(v + 1),
+                FormatVersion::Identity(_) => FormatVersion::Identity("moved-identity"),
+            };
+            let generation = build_generation_of(&moved, journal_logic_epoch());
+            if moved[index].format.upgrade_policy() == UpgradePolicy::Drain {
+                assert_ne!(
+                    generation,
+                    build_generation(),
+                    "{:?} drains: its version is in the generation",
+                    moved[index].format
+                );
+            } else {
+                assert_eq!(
+                    generation,
+                    build_generation(),
+                    "{:?} does not drain: its version is outside the generation",
+                    moved[index].format
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn the_journal_logic_epoch_changes_the_generation() {
+        // L0: the epoch is in the preimage, so a handler-logic change that
+        // moves no format version still changes G. The preimage also
+        // distinguishes "epoch 0" from "no epoch", so feature gating stays
+        // honest in the digest as well as in the manifest.
+        assert_ne!(
+            build_generation_of(
+                durable_formats(),
+                Some(journal_logic_epoch().unwrap_or(0) + 1)
+            ),
+            build_generation()
+        );
+        assert_ne!(
+            build_generation_of(durable_formats(), Some(0)),
+            build_generation_of(durable_formats(), None)
+        );
+        assert_ne!(
+            build_generation_of(durable_formats(), Some(1)),
+            build_generation_of(durable_formats(), Some(2))
         );
     }
 

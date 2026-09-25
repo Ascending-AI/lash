@@ -8,6 +8,8 @@
 
 use std::sync::Arc;
 
+use lash_core::engine::BuildGeneration;
+
 /// See the module documentation.
 pub(crate) struct LawBackend {
     layered: crate::testing::runtime_helpers::LayeredBackend,
@@ -93,6 +95,13 @@ impl crate::EffectEngine for HostOverStores {
 
     fn effect_host(&self) -> Arc<dyn crate::EffectHost> {
         Arc::clone(&self.effect_host)
+    }
+
+    fn build_generation(&self) -> &BuildGeneration {
+        // A law engine serves no Restate journals, so nothing routes it by
+        // generation; a fixed value keeps the trait honest.
+        static GENERATION: std::sync::OnceLock<BuildGeneration> = std::sync::OnceLock::new();
+        GENERATION.get_or_init(|| BuildGeneration::for_test("host-over-stores"))
     }
 
     fn process_work(&self) -> Option<crate::ProcessWorkWiring> {
@@ -197,6 +206,13 @@ impl crate::EffectEngine for StoreLawBackend {
 
     fn effect_host(&self) -> Arc<dyn crate::EffectHost> {
         Arc::clone(&self.effect_host)
+    }
+
+    fn build_generation(&self) -> &BuildGeneration {
+        // A store law runs no engine-served journals; a fixed value keeps the
+        // trait honest.
+        static GENERATION: std::sync::OnceLock<BuildGeneration> = std::sync::OnceLock::new();
+        GENERATION.get_or_init(|| BuildGeneration::for_test("store-law-backend"))
     }
 
     fn process_work(&self) -> Option<crate::ProcessWorkWiring> {

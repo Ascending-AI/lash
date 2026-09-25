@@ -83,7 +83,7 @@ use crate::state::{AgentServiceDurability, AppStateData, anyhow_like};
 #[cfg(feature = "restate")]
 use lash::durability::DurableProcessWorker;
 #[cfg(feature = "restate")]
-use lash_restate::{RestateConfig, RestateEngine};
+use lash_restate::RestateEngine;
 
 const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
 
@@ -296,7 +296,7 @@ async fn async_main() -> anyhow_like::Result<()> {
                     stores.attachment_store() as Arc<dyn lash::persistence::AttachmentStore>;
                 let backend = Arc::new(RestateEngine::new(
                     Arc::new(stores),
-                    RestateConfig::new(
+                    lash::restate::config(
                         restate_ingress_url.clone(),
                         restate_authority_id
                             .clone()

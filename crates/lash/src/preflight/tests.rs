@@ -518,6 +518,8 @@ fn every_durable_format_has_one_explicit_surface_relation() {
             DurableFormat::RestateDurableWaitIndexEpoch,
             DurableFormat::RestateProcessCommandJournal,
             DurableFormat::RestateEffectGroupIndexProtocol,
+            DurableFormat::RestateProcessJournal,
+            DurableFormat::RestateEffectJournal,
         ]);
     }
     assert_eq!(

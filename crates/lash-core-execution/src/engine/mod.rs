@@ -54,8 +54,8 @@ pub use context::{
     EngineTerminal, EpochMs, ObservedEvent, ReplayKey, Winner, activity_projection,
 };
 pub use contracts::{
-    BuildGeneration, DriveHandover, DriveRequest, Never, PendingResolution, ResolveAck,
-    RootProgress, TurnSegmentHandover, UnresolvedChild,
+    BuildGeneration, BuildGenerationParseError, DriveHandover, DriveRequest, Never,
+    PendingResolution, ResolveAck, RootProgress, TurnSegmentHandover, UnresolvedChild,
 };
 pub use groups::{DriveGroups, GroupClosed, GroupKey};
 

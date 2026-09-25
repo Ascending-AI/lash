@@ -11972,13 +11972,13 @@
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-sim:lash-sim__fv_97b4ed14",
+      "label": "//crates/lash-sim:lash-sim__fv_dc2afe86",
       "package": "lash-sim"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-sim:lash-sim__fv_97b4ed14",
+      "label": "//crates/lash-sim:lash-sim__fv_dc2afe86",
       "package": "lash-sim"
     },
     {
@@ -14534,25 +14534,26 @@
       "package": "lash-runtime"
     },
     {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_09246f0a",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_09246f0a",
+      "package": "lash-runtime"
+    },
+    {
       "features": [
         "default",
+        "restate",
         "rlm",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash:lash__fv_09144d65",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_09246f0a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_09246f0a",
+      "label": "//crates/lash:lash__fv_202ab5d3",
       "package": "lash-runtime"
     },
     {
@@ -14647,26 +14648,6 @@
     },
     {
       "features": [
-        "default",
-        "rlm",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_558ae714",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "default",
-        "rlm",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_558ae714",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
         "subagents"
       ],
       "kind": "lib",
@@ -14721,6 +14702,28 @@
       ],
       "kind": "lib",
       "label": "//crates/lash:lash__fv_8fc779e9",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "default",
+        "restate",
+        "rlm",
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_a09066f5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "default",
+        "restate",
+        "rlm",
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_a09066f5",
       "package": "lash-runtime"
     },
     {
@@ -16116,6 +16119,14 @@
       "package": "lash-internal-lashlang"
     },
     {
+      "features": [
+        "restate"
+      ],
+      "kind": "bin",
+      "label": "//examples/agent-service:agent-service__fv_366b2af2",
+      "package": "agent-service"
+    },
+    {
       "features": [],
       "kind": "bin",
       "label": "//examples/agent-service:agent-service__fv_49a9f56c",
@@ -16125,8 +16136,8 @@
       "features": [
         "restate"
       ],
-      "kind": "bin",
-      "label": "//examples/agent-service:agent-service__fv_a7f26781",
+      "kind": "bin-unit-test",
+      "label": "//examples/agent-service:agent-service__unit_test__fv_366b2af2",
       "package": "agent-service"
     },
     {
@@ -16139,8 +16150,8 @@
       "features": [
         "restate"
       ],
-      "kind": "bin-unit-test",
-      "label": "//examples/agent-service:agent-service__unit_test__fv_a7f26781",
+      "kind": "test",
+      "label": "//examples/agent-service:fresh_boot__test__fv_366b2af2",
       "package": "agent-service"
     },
     {
@@ -16151,30 +16162,16 @@
     },
     {
       "features": [
-        "restate"
-      ],
-      "kind": "test",
-      "label": "//examples/agent-service:fresh_boot__test__fv_a7f26781",
-      "package": "agent-service"
-    },
-    {
-      "features": [],
-      "kind": "bin",
-      "label": "//examples/agent-workbench:agent-workbench__fv_782b5a81",
-      "package": "agent-workbench"
-    },
-    {
-      "features": [
         "provider-wire-fixtures"
       ],
       "kind": "bin",
-      "label": "//examples/agent-workbench:agent-workbench__fv_bc4abf6c",
+      "label": "//examples/agent-workbench:agent-workbench__fv_171cf676",
       "package": "agent-workbench"
     },
     {
       "features": [],
-      "kind": "bin-unit-test",
-      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_782b5a81",
+      "kind": "bin",
+      "label": "//examples/agent-workbench:agent-workbench__fv_69418178",
       "package": "agent-workbench"
     },
     {
@@ -16182,7 +16179,13 @@
         "provider-wire-fixtures"
       ],
       "kind": "bin-unit-test",
-      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_bc4abf6c",
+      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_171cf676",
+      "package": "agent-workbench"
+    },
+    {
+      "features": [],
+      "kind": "bin-unit-test",
+      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_69418178",
       "package": "agent-workbench"
     },
     {
@@ -18815,6 +18818,7 @@
       "package": "lash-runtime",
       "resolved_features": [
         "default",
+        "restate",
         "rlm",
         "sqlite",
         "testing",

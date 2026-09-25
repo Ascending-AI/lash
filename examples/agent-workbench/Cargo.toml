@@ -27,7 +27,7 @@ chrono-tz = { workspace = true }
 croner = { workspace = true }
 dotenvy = "0.15"
 futures-util = { workspace = true }
-lash = { workspace = true, features = ["rlm"] }
+lash = { workspace = true, features = ["rlm", "restate"] }
 lash-http-transport = { workspace = true }
 lashlang = { workspace = true }
 lash-plugin-mcp = { workspace = true, features = ["lashlang"] }

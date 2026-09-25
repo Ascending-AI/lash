@@ -796,6 +796,7 @@ impl LiveConformanceHarness {
                         connection,
                         crate::RestateAuthorityId::new("lash-conformance-backend-laws")
                             .expect("valid authority"),
+                        lash_core::engine::BuildGeneration::for_test("effect-group-conformance"),
                         crate::RestateQueuedWork::Disabled,
                     ),
                 )))

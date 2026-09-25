@@ -555,6 +555,17 @@ impl lash_core_execution::EffectEngine for SqliteBackend {
         SqliteBackend::effect_host(self)
     }
 
+    fn build_generation(&self) -> &lash_core_execution::engine::BuildGeneration {
+        // The SQLite engine serves no Restate journals, so nothing routes it
+        // by drain generation; it reports a fixed value until FIG-3668
+        // deletes it.
+        static GENERATION: std::sync::OnceLock<lash_core_execution::engine::BuildGeneration> =
+            std::sync::OnceLock::new();
+        GENERATION.get_or_init(|| {
+            lash_core_execution::engine::BuildGeneration::for_test("sqlite-backend")
+        })
+    }
+
     /// The runtime's in-process worker drives this backend's registry.
     fn process_work(&self) -> Option<lash_core_execution::ProcessWorkWiring> {
         None

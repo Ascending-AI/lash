@@ -1180,6 +1180,7 @@ pub(super) async fn restate_enqueue_never_errors_after_commit() {
         crate::RestateConfig::new(
             "http://127.0.0.1:8080",
             crate::RestateAuthorityId::new("lash-restate-fig430").expect("valid authority"),
+            lash_core::engine::BuildGeneration::for_test("cancellation-and-effects"),
             crate::RestateQueuedWork::Engine(Arc::new(lash_core::NativeQueuedWork::new(
                 queued_work.clone(),
             ))),

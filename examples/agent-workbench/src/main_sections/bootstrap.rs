@@ -260,7 +260,7 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
     // queued turn to the workbench's queued-turn workflow.
     let backend = Arc::new(lash_restate::RestateEngine::new(
         Arc::clone(&stores.stores),
-        lash_restate::RestateConfig::new(
+        lash::restate::config(
             lash_restate::RestateConnection::with_client_and_config(
                 restate_ingress_url.clone(),
                 restate_http.clone(),
