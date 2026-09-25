@@ -20,7 +20,6 @@ impl PostgresSessionStoreFactory {
     pub(super) fn store_for(&self, session_id: SessionId) -> PostgresSessionStore {
         PostgresSessionStore {
             pool: self.pool.clone(),
-            await_event_signing_secret: Arc::clone(&self.await_event_signing_secret),
             clock: Arc::clone(&self.clock),
             session_id,
             turn_cancel_closure_owner: self.turn_cancel_closure_owner_binding(),

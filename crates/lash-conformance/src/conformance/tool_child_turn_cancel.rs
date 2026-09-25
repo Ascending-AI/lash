@@ -29,18 +29,6 @@ use crate::{
 /// while the retry sleep is still parked on every tier, live Restate included.
 const RETRY_AFTER_MS: u64 = 3_000;
 
-/// A store the turn-work driver and the runtime share, carrying the host's
-/// turn-cancel authority so a cancel request resolves the durable gate.
-fn cancellable_store(host: &Arc<dyn EffectHost>) -> Arc<dyn crate::RuntimePersistence> {
-    let authority = crate::TurnCancellationAuthority::new(
-        host.turn_control_binding_id(),
-        Arc::clone(host) as Arc<dyn crate::AwaitEventResolver>,
-    );
-    Arc::new(
-        crate::InMemorySessionStore::new().with_turn_cancellation_authority_for_testing(authority),
-    )
-}
-
 /// What a law's turn is built from: inputs that outlive every execution of
 /// it. Restate re-runs a turn's handler from the top on every replay, so each
 /// execution builds its runtime afresh from these and reaches the same
@@ -48,8 +36,8 @@ fn cancellable_store(host: &Arc<dyn EffectHost>) -> Arc<dyn crate::RuntimePersis
 #[derive(Clone)]
 struct TurnParts {
     host: Arc<dyn EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
     store: Arc<dyn crate::RuntimePersistence>,
-    registry: Arc<dyn crate::ProcessRegistry>,
     session_id: SessionId,
     plugin: Arc<dyn crate::facade_support::PluginFactory>,
     model: crate::testing::TestProvider,
@@ -62,18 +50,16 @@ struct TurnParts {
 async fn build_runtime(parts: TurnParts) -> crate::LashRuntime {
     let TurnParts {
         host,
+        stores,
         store,
-        registry,
         session_id,
         plugin,
         model,
     } = parts;
-    let mut config = crate::LawBackend::in_process()
-        .with_effect_host(host)
-        .host_config(
-            crate::CommitBudget::bounded(1024 * 1024, 512),
-            crate::QueuedWorkBatchingConfig::new(1),
-        );
+    let mut config = crate::LawBackend::over_stores(stores.as_ref(), host).host_config(
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    );
     config.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
     let mut policy = crate::testing::mock_session_policy();
@@ -95,7 +81,9 @@ async fn build_runtime(parts: TurnParts) -> crate::LashRuntime {
                     .collect(),
             )
             .with_store(store)
-            .with_process_work(crate::testing::process_work_wiring_for_registry(registry))
+            .with_process_work(crate::testing::process_work_wiring_for_registry(
+                stores.process_registry(),
+            ))
             .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
             .build(),
     )
@@ -270,7 +258,7 @@ impl crate::ToolProvider for RetryOnceTool {
 pub async fn an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteration(
     prefix: &str,
     host: Arc<dyn EffectHost>,
-    registry: Arc<dyn crate::ProcessRegistry>,
+    stores: Arc<dyn crate::StoreSet>,
     // These laws start no process; the substrate is part of the shared
     // turn-runner fixture.
     _process_work: Arc<dyn crate::ProcessWorkSubstrate>,
@@ -291,11 +279,11 @@ pub async fn an_after_step_stop_during_a_child_retry_sleep_finishes_the_iteratio
         tool_call("retry-call-1", "conformance_retry_once"),
         text("finished after the retry"),
     ]);
-    let store = cancellable_store(&host);
+    let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
     let parts = TurnParts {
         host: Arc::clone(&host),
         store: Arc::clone(&store),
-        registry,
+        stores: Arc::clone(&stores),
         session_id: session_id.clone(),
         plugin,
         model,
@@ -459,7 +447,7 @@ impl crate::ToolProvider for FollowOnPendingTools {
 pub async fn a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gate(
     prefix: &str,
     host: Arc<dyn EffectHost>,
-    registry: Arc<dyn crate::ProcessRegistry>,
+    stores: Arc<dyn crate::StoreSet>,
     // These laws start no process; the substrate is part of the shared
     // turn-runner fixture.
     _process_work: Arc<dyn crate::ProcessWorkSubstrate>,
@@ -486,9 +474,9 @@ pub async fn a_follow_on_pending_child_waits_under_the_follow_on_turn_cancel_gat
         text("finished after the follow-on wait"),
     ]);
     let parts = TurnParts {
-        store: cancellable_store(&host),
+        store: crate::conformance::law_session_store(stores.as_ref(), &session_id).await,
         host: Arc::clone(&host),
-        registry,
+        stores: Arc::clone(&stores),
         session_id: session_id.clone(),
         plugin,
         model,
@@ -641,7 +629,7 @@ impl crate::ToolProvider for IgnoresCancellationTool {
 pub async fn a_cancelled_turn_drops_a_tool_child_that_ignores_cancellation(
     prefix: &str,
     host: Arc<dyn EffectHost>,
-    registry: Arc<dyn crate::ProcessRegistry>,
+    stores: Arc<dyn crate::StoreSet>,
     // These laws start no process; the substrate is part of the shared
     // turn-runner fixture.
     _process_work: Arc<dyn crate::ProcessWorkSubstrate>,
@@ -667,11 +655,11 @@ pub async fn a_cancelled_turn_drops_a_tool_child_that_ignores_cancellation(
         tool_call("ignores-cancel-call", "conformance_ignores_cancellation"),
         text("unreachable after the cancel"),
     ]);
-    let store = cancellable_store(&host);
+    let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
     let parts = TurnParts {
         host: Arc::clone(&host),
         store: Arc::clone(&store),
-        registry,
+        stores: Arc::clone(&stores),
         session_id: session_id.clone(),
         plugin,
         model,

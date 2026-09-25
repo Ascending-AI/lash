@@ -22,7 +22,6 @@ EXPECTED_INTERNAL_PACKAGES = {
     "lash-core-execution": "lash-internal-core-execution",
     "lash-core-ids": "lash-internal-core-ids",
     "lash-core-llm": "lash-internal-core-llm",
-    "lash-core-memory": "lash-internal-core-memory",
     "lash-core-store": "lash-internal-core-store",
     "lash-core-worker": "lash-internal-core-worker",
     "lash-http-transport": "lash-internal-http-transport",

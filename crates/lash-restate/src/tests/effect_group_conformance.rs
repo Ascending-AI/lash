@@ -377,7 +377,8 @@ pub(super) struct LiveConformanceHarness {
     admin: HarnessAdmin,
     host: Arc<RestateEffectHost>,
     executors: Arc<ConformanceExecutors>,
-    process_registry: Arc<lash_core::TestLocalProcessRegistry>,
+    /// The storage the endpoint's process workflow and a law's runtime share.
+    stores: lash_sqlite_store::SqliteStoreSet,
     process_runner: Arc<LawProcessRunner>,
     shutdown_tx: tokio::sync::Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
     server: tokio::sync::Mutex<Option<tokio::task::JoinHandle<()>>>,
@@ -479,14 +480,17 @@ impl LiveConformanceHarness {
         let ingress = RestateIngressClient::new(connection.clone());
         let host = Arc::new(RestateEffectHost::new_for_test(connection.clone()));
         register(&host);
-        let process_registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+        let stores = lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("open the endpoint's SQLite memory store set");
+        let process_registry = stores.process_registry();
         let process_runner = Arc::new(LawProcessRunner::default());
         let endpoint = crate::services::bind_lash_services(
             Endpoint::builder(),
             crate::services::LashServiceParts {
                 effect_host: &host,
                 ingress,
-                sessions: Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+                sessions: stores.session_store_factory() as Arc<dyn lash_core::SessionStoreFactory>,
                 process_workflow: LashProcessWorkflowImpl::new_for_test(
                     Arc::clone(&process_runner),
                     Arc::clone(&process_registry) as Arc<dyn lash_core::ProcessRegistry>,
@@ -537,7 +541,7 @@ impl LiveConformanceHarness {
             admin,
             host,
             executors,
-            process_registry,
+            stores,
             process_runner,
             shutdown_tx: tokio::sync::Mutex::new(shutdown_tx),
             server: tokio::sync::Mutex::new(server),
@@ -563,25 +567,14 @@ impl LiveConformanceHarness {
             // the registry the orchestrating child's start recorded, so the
             // dispatched context and the workflow must share this one. Rows
             // do not collide because scenario prefixes keep process ids
-            // distinct. The process-exec-env store is a fresh SQLite memory
-            // backend's: the endpoint reads no environment itself.
+            // distinct. Every other port is the same store set's.
             make_processes: Arc::new({
-                let registry = Arc::clone(&self.process_registry);
+                let stores = Arc::new(self.stores.clone()) as Arc<dyn lash_core::StoreSet>;
                 move || {
-                    let registry = Arc::clone(&registry);
-                    Box::pin(async move {
-                        let backend = lash_sqlite_store::SqliteBackend::memory()
-                            .await
-                            .expect("tool-child process-exec-env backend");
-                        lash_conformance::ToolChildProcesses {
-                            registry: registry as Arc<dyn lash_core::ProcessRegistry>,
-                            process_env_store: backend.process_env_store()
-                                as Arc<dyn lash_core::ProcessExecutionEnvStore>,
-                        }
-                    })
+                    let stores = Arc::clone(&stores);
+                    Box::pin(async move { stores })
                 }
             }),
-            deferrable_routing: lash_conformance::ToolChildDeferrableRouting::Durable,
         }
     }
 
@@ -616,11 +609,18 @@ impl LiveConformanceHarness {
         }
     }
 
-    /// The registry the endpoint's `LashProcessWorkflow` writes terminals
-    /// into: a law whose processes run on the endpoint must register and
-    /// observe them here.
-    pub(super) fn process_registry(&self) -> Arc<dyn lash_core::ProcessRegistry> {
-        Arc::clone(&self.process_registry) as Arc<dyn lash_core::ProcessRegistry>
+    /// The storage a law's runtime runs over: the store set whose registry
+    /// the endpoint's `LashProcessWorkflow` writes terminals into.
+    pub(super) fn law_stores(&self) -> Arc<dyn lash_core::StoreSet> {
+        Arc::new(self.stores.clone())
+    }
+
+    /// A maker of session-store factories over this endpoint's store set.
+    pub(super) fn session_catalog_factory(
+        &self,
+    ) -> impl Fn() -> Arc<dyn lash_core::SessionStoreFactory> + Send + Sync + 'static {
+        let stores = self.stores.clone();
+        move || stores.session_store_factory() as Arc<dyn lash_core::SessionStoreFactory>
     }
 
     pub(super) fn effect_host_factory(
@@ -671,8 +671,13 @@ impl LiveConformanceHarness {
                 Arc::new(RestateEffectHost::new_for_test(connection.clone()))
                     as Arc<dyn lash_core::EffectHost>
             }
-            None => Arc::new(lash_core::facade_support::NativeEffectHost::default())
-                as Arc<dyn lash_core::EffectHost>,
+            // A Restate host resolves its group children at the endpoint,
+            // not on the host, so there is no unwired Restate host: its legs
+            // register the wired group laws only.
+            None => panic!(
+                "the Restate legs register no unwired-host group laws; no law asks them \
+                 for an unwired host"
+            ),
         })
     }
 

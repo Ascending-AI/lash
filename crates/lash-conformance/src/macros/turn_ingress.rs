@@ -1,8 +1,9 @@
 //! Registration macros for turn-ingress laws: direct-turn acceptance
 //! (ADR 0069), the aborted turn's bound input (FIG-3589), the cancelled
 //! turn's withheld input (FIG-3531), and the redrive that cedes rows it
-//! restored from its journal (FIG-3552). All take
-//! the same `(guard, prefix, store)` fixture, so they share one catalogue arm.
+//! restored from its journal (FIG-3552). All take the same
+//! `(guard, prefix, backend, store)` fixture: the backend under test and a
+//! session store of that backend's catalog. They share one catalogue arm.
 
 /// Register one independently reported test per direct-turn acceptance law.
 #[macro_export]
@@ -25,7 +26,6 @@ macro_rules! direct_turn_acceptance_tests {
             (aborted_direct_turn_input_is_bound_until_its_redrive, "direct-turn-bound-until-redrive"),
             (later_direct_turn_never_folds_in_a_bound_input, "direct-turn-bound-later-turn"),
             (cancelling_a_bound_input_returns_its_drive_to_the_queue, "direct-turn-bound-cancel"),
-            (journal_less_redrive_retakes_its_bound_drive, "direct-turn-bound-journal-less-redrive"),
             (lost_drive_outcome_still_binds_its_claimed_input, "direct-turn-bound-lost-drive-outcome"),
         ]);
     };
@@ -33,9 +33,9 @@ macro_rules! direct_turn_acceptance_tests {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
-                let (_fixture_guard, prefix, store) = $fixture;
+                let (_fixture_guard, prefix, backend, store) = $fixture;
                 let _ = $label;
-                $crate::registration_macro_support::$law(prefix, store).await;
+                $crate::registration_macro_support::$law(prefix, backend, store).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*

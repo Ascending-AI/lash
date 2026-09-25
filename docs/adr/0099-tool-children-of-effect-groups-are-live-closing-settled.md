@@ -83,7 +83,8 @@ The primitives that exist: the durable group record and its rank counter; the
 host-registered `GroupExecutors` resolver; the loser drain over unsettled group
 children; the in-process committed-final protection and source-ordered intent
 drain gate; started-process possession and its segment handover; the shared
-token ledger; the Durable Wait seam; the native host's scope-liveness fence.
+token ledger; the Durable Wait seam. *(The native host's scope-liveness fence
+was listed here; FIG-3585 deleted it with the native host.)*
 
 What does not exist: any production caller of `open_effect_group`; a durable
 child request; production recovery of accepted tool children; a durable
@@ -105,8 +106,8 @@ a quoted phrase either still exists or visibly does not.
 **live.** Aggregate selection cancels nothing; a losing child keeps running,
 exactly as a losing promise does in ECMA-262. Worker loss does not end an
 opener: an accepted child is *recovered* while its opener lives, from durable
-input on the SQL and Restate tiers and from retained in-memory references on the
-native tier.
+input on every tier. No tier holds a child only in memory: FIG-3585 deleted the
+native tier, and every host journals (ADR 0102 D1, kept by ADR 0104).
 
 **closing.** Entered by a durable transition (§7), not by a worker dying. New
 tool work stops, cancel-eligible attempts become cancel-decided, and every
@@ -394,9 +395,10 @@ preparation answers `Issued | NotNeeded | Unsupported` from two live inputs —
 whether the tool may defer, which consults the live registry or provider, and
 whether the host routes completions durably. Both are deployment facts at
 recovery time and admission facts at formation time. The request records which
-of `inline`, `durable` or `process-lifetime` the child was admitted under, so a
-recovered child never derives a key nothing will resolve; a process-lifetime
-child recovered in another process is a typed refusal, never a fresh key (§14).
+of `inline` or `durable` the child was admitted under, so a recovered child
+never derives a key nothing will resolve. The request's cancellation authority
+is required, so every child names the binding that may cancel it. FIG-3585
+deleted the `process-lifetime` routing with the native tier (§14).
 
 **2b. The cancellation authority is a validated identity.** It is the value
 `turn_control_binding_id_for_scope` mints and `binding_id_admits_scope` checks —
@@ -762,7 +764,8 @@ issued stops.
 
 *Status.* The drain, disposition-at-open and work-driver seam **hold today**. The
 durable closing transition, the finalization sequence, the drain budget and the
-deletion exclusion are **implemented on the SQL and native tiers** (FIG-3410):
+deletion exclusion are **implemented on the SQL tiers** (FIG-3410; the native
+tier that also carried them was deleted by FIG-3585):
 `runtime_effect_group.lifecycle` carries `closing`/`settled` under a
 compare-and-set, finalization resumes from a recorded step cursor, and session
 retirement refuses a live or closing group. Step 2's opener-side incorporation
@@ -916,7 +919,7 @@ outstanding group. All are finite in the group's width and the width is bounded
 per opener, so an aggregate adds a bounded number of commands between two
 segment-boundary checks and **mid-aggregate VM suspension is not necessary**.
 
-*Amendment (FIG-3548).* The journal-less native tier retains every reaped group's settled record until its scope retires (`retire_effect_journal` evicts it), so a reopen after close serves the recorded settlements regardless of finalizer timing, in every build.
+*Amendment (FIG-3548, retired by FIG-3585).* FIG-3548 made the journal-less native tier retain every reaped group's settled record until its scope retired. FIG-3585 deleted that tier; every host reopens a closed group from its journal, so a reopen after close serves the recorded settlements regardless of finalizer timing.
 
 ---
 
@@ -1134,39 +1137,17 @@ opener's end, before the opener's accounting commits.
 
 ---
 
-### 14. Native tier
+### 14. No native tier
 
-**One semantic path on every tier, with substrate-specific storage.** Native is not
-a second tool implementation; it is this lifecycle with references in memory
-instead of rows on disk, and it obeys §4's arbitration, §7's closing sequence and
-§13's usage rules unchanged.
-
-**An owned opener supervisor polls losers while the VM or provider is elsewhere.**
-A scoped vector polled only while the aggregate is awaited is insufficient: the
-opener resumes after the winner and then spends time in the VM and in provider
-calls, during which a loser must still progress, settle and have its facts
-incorporated. The supervisor is owned by the opener and lives as long as it does.
-
-**Contexts are retained through protected drain**, not until the aggregate returns:
-a native loser whose final attempt committed still needs its execution context to
-drain its intents.
-
-**Unclaimed tasks are counted.** The host already keeps and fences live counts:
-`crates/lash-core-execution/src/runtime/effect/native_host.rs` describes
-`ScopeLiveness` as "the in-process twin of a journal's `in_progress` rows and open
-group rows, which a quiescent-gated retirement must not cut under", with an
-`admission` mutex that orders "check the fence, then count as live" against "prove
-nothing is live, then fence".
-
-**No disk manifest, and no promise past OS-process death.** Native durability ends
-at the runtime's lifetime, as the host already says of externally routed completion
-keys through `allow_process_lifetime_completion_keys` — "Explicitly accept that
-externally routed completion keys die with this process."
-
-*Status.* Scope liveness, its fence, the completion-key opt-in, the owned
-supervisor and context retention through drain **hold today** (FIG-2266 C3:
-the group owns its children's tasks for exactly its own life, and a closed
-group's unsettled children count against the scope's quiescence).
+**Every tier journals.** This section once specified a native tier: this
+lifecycle with references in memory instead of rows on disk, an owned opener
+supervisor, scope liveness counted in process, and completion keys that died with
+the process. FIG-3585 deleted that tier with the native effect host
+([ADR 0102](0102-zero-infra-is-a-sqlite-in-memory-backend.md) D1, kept by
+[ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)).
+Nothing in this ADR is held only in memory: an accepted child, a settled group
+record and a closing transition are durable facts on every tier, and OS process
+death is worker loss (W18).
 
 ---
 
@@ -1194,7 +1175,7 @@ both.
 | W15 | attach retention expired before the successor attached | A typed recovery failure. Never a re-execution of an opaque tool body, never a synthesized terminal. |
 | W16 | session delete requested while the group is accepted or closing | Refused until settled (§7, FIG-3410). |
 | W17 | a late completion arrives after the cancel decision committed | Refused, typed, with **no journal write**; the refusal's evidence survives retirement. Already-admitted descendant commands are not undone (§4). |
-| W18 | native: OS process death | Nothing is promised. Native durability ends at the runtime's lifetime (§14). |
+| W18 | OS process death | No tier holds group state only in memory (§14), so process death is worker loss: recovery reads the journal. |
 | W19 | **final record committed and its commit-order position assigned, crash before the drain runs** | Recovery drains in the **recorded** commit order and never re-derives it from whatever completes first on the redrive. The position is a durable fact assigned at the §4 linearization point, not a property of the run that observed it. |
 | W20 | **two finals commit concurrently** | The linearization point serializes them, so exactly one takes the lower position, and both positions are durable before either drain begins. A tie is not resolvable by source index, by wall clock or by whichever writer returned first; if the point cannot order them it has not committed either. |
 
@@ -1205,10 +1186,9 @@ both.
 lash TypeScript dialect. "Today" is `main`.
 
 **1. Fan-out.** `await Promise.all([fetch_doc("a"), fetch_doc("b"), fetch_doc("c")])`
-was concurrent on native, SQLite and Postgres and **serial on Restate** when this
-ADR was decided — the controller answered `supports_concurrent_effects() ->
-false`, so the batch took its serial branch. It is now three concurrent children
-on every tier (FIG-3397 deleted the flag and the serial branch), and a redrive
+was concurrent on SQLite and Postgres and **serial on Restate** when this ADR
+was decided, because the Restate batch took a serial branch. It is now three
+concurrent children on every tier (FIG-3397 deleted the serial branch), and a redrive
 replays the same settlement order from the ranks. No
 loser exists. FIG-3400 pins the parallelism by rendezvous.
 
@@ -1345,5 +1325,4 @@ refuses before any child is claimed — re-typed by the run to
 `{scope_id}:group:{parent_effect_id}:{batch_id}` key, whose batch id is
 `TOOL_BATCH_FAMILY_VERSION` 3. Both key shapes carry the opener's scope, so no
 two openers share a group row although the group table is keyed by the group
-key alone. The native tier
-(§14) does not yet run the content check: it fences a reopen by shape only.
+key alone.

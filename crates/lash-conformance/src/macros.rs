@@ -10,6 +10,7 @@ mod turn_ingress;
 macro_rules! __runtime_persistence_register {
     (reopenable $fixture:block;
         stores [$(( $store_law:ident, $store_label:literal )),* $(,)?]
+        hosted_stores [$(( $hosted_law:ident, $hosted_label:literal )),* $(,)?]
         store_refs [$(( $store_ref_law:ident, $store_ref_label:literal )),* $(,)?]
         factories [$(( $factory_law:ident, $factory_label:literal )),* $(,)?]
         timed_stores [$(( $timed_law:ident, $timed_label:literal )),* $(,)?]
@@ -22,6 +23,19 @@ macro_rules! __runtime_persistence_register {
                 $crate::runtime_persistence_macro_support::$store_law(make($store_label).open)
                     .await;
                 $crate::law_receipt::record(module_path!(), stringify!($store_law), $store_label);
+            }
+        )*
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $hosted_law() {
+                let (_fixture_guard, make, _lease_timing) = $fixture;
+                let handles = make($hosted_label);
+                $crate::runtime_persistence_macro_support::$hosted_law(
+                    handles.open,
+                    handles.effect_host,
+                )
+                .await;
+                $crate::law_receipt::record(module_path!(), stringify!($hosted_law), $hosted_label);
             }
         )*
         $(
@@ -185,7 +199,6 @@ macro_rules! runtime_persistence_tests {
             (queue_completion_and_turn_commit_stamp_are_atomic, "root"),
             (pending_turn_inputs_source_keys_order_cancel_and_cross_session, "root"),
             (pending_turn_input_duplicate_input_id, "root"),
-            (identical_retry_after_defer_is_existing_not_conflict, "root"),
             (changed_retry_is_typed_conflict, "root"),
             (pending_turn_input_bulk_and_suffix_cancellation, "pending-bulk-cancel"),
             (pending_turn_input_claims_reclaim_complete_and_fence, "root"),
@@ -194,10 +207,13 @@ macro_rules! runtime_persistence_tests {
             (turn_park_lives_while_its_turn_holds_work, "turn-parks"),
             (turn_input_application_identity_survives_pending_tombstone_vacuum, "turn-input-application"),
             (active_turn_input_claim_reacquires_after_unrecorded_checkpoint, "fig905-active-reacquire"),
-            (pending_turn_input_cancel_covers_active_and_deferred_states, "root"),
-            (pending_active_turn_inputs_defer_unaccepted_once_on_interrupt, "root"),
             (a_turn_that_cannot_commit_leaves_no_input_pinned_to_it, "root"),
             (committed_turn_receipt_answers_the_parent_end_recovery_read, "root"),
+            ]
+            hosted_stores [
+            (identical_retry_after_defer_is_existing_not_conflict, "root"),
+            (pending_turn_input_cancel_covers_active_and_deferred_states, "root"),
+            (pending_active_turn_inputs_defer_unaccepted_once_on_interrupt, "root"),
             ]
             store_refs [
             (session_execution_lease_fence_authority, "lease-fence-authority"),
@@ -448,6 +464,8 @@ macro_rules! store_maintenance_tests {
             async [
                 (idle_store_reports_witnessed_nothing_to_do, "maintenance-idle"),
                 (superseded_checkpoint_is_a_witnessed_sweep, "maintenance-sweep"),
+            ]
+            bytes [
                 (empty_root_set_refusal_returns_its_partial_report, "maintenance-refusal"),
             ]
         );
@@ -455,11 +473,12 @@ macro_rules! store_maintenance_tests {
     (@catalogue $fixture:block;
         sync [$(( $sync_law:ident, $sync_label:literal )),* $(,)?]
         async [$(( $async_law:ident, $async_label:literal )),* $(,)?]
+        bytes [$(( $bytes_law:ident, $bytes_label:literal )),* $(,)?]
     ) => {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $sync_law() {
-                let (_fixture_guard, backend, _make) = $fixture;
+                let (_fixture_guard, backend, _make, _make_bytes) = $fixture;
                 let _ = $sync_label;
                 $crate::registration_macro_support::$sync_law(backend);
                 $crate::law_receipt::record(module_path!(), stringify!($sync_law), $sync_label);
@@ -468,10 +487,20 @@ macro_rules! store_maintenance_tests {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $async_law() {
-                let (_fixture_guard, backend, make) = $fixture;
+                let (_fixture_guard, backend, make, _make_bytes) = $fixture;
                 let _ = $async_label;
                 $crate::registration_macro_support::$async_law(backend, make()).await;
                 $crate::law_receipt::record(module_path!(), stringify!($async_law), $async_label);
+            }
+        )*
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $bytes_law() {
+                let (_fixture_guard, backend, make, make_bytes) = $fixture;
+                let _ = $bytes_label;
+                $crate::registration_macro_support::$bytes_law(backend, make(), make_bytes())
+                    .await;
+                $crate::law_receipt::record(module_path!(), stringify!($bytes_law), $bytes_label);
             }
         )*
     };
@@ -545,6 +574,11 @@ macro_rules! __effect_group_host_register {
 }
 
 /// Register one independently reported test per shared effect-group host law.
+///
+/// These laws run over a host whose group executors are registered. The
+/// laws over an unregistered host register separately
+/// ([`effect_group_unwired_host_tests!`]): a tier whose host resolves group
+/// children elsewhere (Restate, at its endpoint) has no unregistered host.
 #[macro_export]
 macro_rules! effect_group_host_tests {
     ($fixture:block) => {
@@ -557,8 +591,6 @@ macro_rules! effect_group_host_tests {
         $crate::effect_group_host_tests!(@expand [$($attr)*] $fixture; [
             (cancel_stops_the_losers, "group-cancel", wired),
             (cancel_gives_every_unsettled_child_a_cancellation_terminal, "group-cancel-terminals", wired),
-            (an_unregistered_host_refuses_all_three_from_wiring, "group-unwired", unwired),
-            (a_refused_open_journals_nothing, "group-refused-open", mixed),
             (a_child_with_no_runner_refuses_the_open_and_refuses_the_retry, "group-no-runner", wired),
             (a_reopen_whose_runner_this_deployment_lost_is_not_an_open_refusal, "group-lost-runner", wired),
             (a_wired_host_serves_all_three_group_methods, "group-capability", wired),
@@ -618,6 +650,19 @@ macro_rules! effect_group_close_race_tests {
     };
 }
 
+/// Register the effect-group laws over a host with no registered group
+/// executors, beside [`effect_group_host_tests!`] on a tier whose host holds
+/// its group executors. The fixture is the same.
+#[macro_export]
+macro_rules! effect_group_unwired_host_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::effect_group_host_tests!(@expand [$(#[$attr])*] $fixture; [
+            (an_unregistered_host_refuses_all_three_from_wiring, "group-unwired", unwired),
+            (a_refused_open_journals_nothing, "group-refused-open", mixed),
+        ]);
+    };
+}
+
 /// Register the durable cancelled-child terminal law.
 #[macro_export]
 macro_rules! __effect_group_cancelled_child_terminal_register {
@@ -656,17 +701,18 @@ macro_rules! effect_group_cancelled_child_terminal_tests {
     };
 }
 
-/// The fixture yields `(guard, make, witness)`: the witness is how this host
-/// proves its active-wait registration before the quiescence law asks for
-/// retirement (`effect_host_journaled_wait_registration_witness` for a store
-/// journal).
+/// The fixture yields `(guard, make, witness, make_foreign)`: the witness is
+/// how this host proves its active-wait registration before the quiescence
+/// law asks for retirement (`effect_host_journaled_wait_registration_witness`
+/// for a store journal), and `make_foreign` builds a host over another
+/// substrate, whose registry did not mint this host's keys.
 #[macro_export]
 macro_rules! effect_host_await_event_tests {
     ($fixture:block) => {
         $crate::effect_host_await_event_tests!(@witnessed $fixture; [
             (effect_host_await_events_with_active_wait_witness, "effect-host-await-event"),
         ]);
-        $crate::effect_host_await_event_tests!(@catalogue $fixture; [
+        $crate::effect_host_await_event_tests!(@foreign $fixture; [
             (
                 completion_routing_pairwise_refusal,
                 "completion-routing-pairwise"
@@ -677,20 +723,20 @@ macro_rules! effect_host_await_event_tests {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
-                let (_fixture_guard, make, witness) = $fixture;
+                let (_fixture_guard, make, witness, _make_foreign) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make, witness).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*
     };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+    (@foreign $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
-                let (_fixture_guard, make, _witness) = $fixture;
+                let (_fixture_guard, make, _witness, make_foreign) = $fixture;
                 let _ = $label;
-                $crate::registration_macro_support::$law(make).await;
+                $crate::registration_macro_support::$law(make, make_foreign).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*
@@ -708,9 +754,9 @@ macro_rules! effect_host_cold_await_event_tests {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
-                let (_fixture_guard, make) = $fixture;
+                let (_fixture_guard, make, make_catalog) = $fixture;
                 let _ = $label;
-                $crate::registration_macro_support::$law(make).await;
+                $crate::registration_macro_support::$law(make, make_catalog).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*
@@ -729,9 +775,9 @@ macro_rules! attachment_condemnation_recovery_tests {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
-                let (_fixture_guard, factory, reopen) = $fixture;
+                let (_fixture_guard, factory, make_bytes, reopen) = $fixture;
                 let _ = $label;
-                $crate::registration_macro_support::$law(factory, reopen).await;
+                $crate::registration_macro_support::$law(factory, make_bytes, reopen).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*
@@ -741,17 +787,33 @@ macro_rules! attachment_condemnation_recovery_tests {
 #[macro_export]
 macro_rules! attachment_adoption_tests {
     ($fixture:block) => {
-        $crate::attachment_adoption_tests!(@catalogue $fixture; [
-            (cross_owner_attachment_adoption_conformance, "cross-owner-attachment-adoption"),
-            (attachment_condemnation_enumeration_conformance, "attachment-condemnation-enumeration"),
-            (attachment_owner_identity_round_trips_conformance, "attachment-owner-identity-round-trip"),
-        ]);
+        $crate::attachment_adoption_tests!(@catalogue $fixture;
+            bytes [
+                (cross_owner_attachment_adoption_conformance, "cross-owner-attachment-adoption"),
+            ]
+            roots [
+                (attachment_condemnation_enumeration_conformance, "attachment-condemnation-enumeration"),
+                (attachment_owner_identity_round_trips_conformance, "attachment-owner-identity-round-trip"),
+            ]
+        );
     };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+    (@catalogue $fixture:block;
+        bytes [$(( $bytes_law:ident, $bytes_label:literal )),* $(,)?]
+        roots [$(( $law:ident, $label:literal )),* $(,)?]
+    ) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $bytes_law() {
+                let (_fixture_guard, factory, make_bytes) = $fixture;
+                let _ = $bytes_label;
+                $crate::registration_macro_support::$bytes_law(factory, make_bytes).await;
+                $crate::law_receipt::record(module_path!(), stringify!($bytes_law), $bytes_label);
+            }
+        )*
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
-                let (_fixture_guard, factory) = $fixture;
+                let (_fixture_guard, factory, _make_bytes) = $fixture;
                 let _ = $label;
                 $crate::registration_macro_support::$law(factory).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
@@ -858,9 +920,9 @@ macro_rules! retention_tests {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
-                let (_fixture_guard, factory) = $fixture;
+                let (_fixture_guard, backend) = $fixture;
                 let _ = $label;
-                $crate::registration_macro_support::$law(factory).await;
+                $crate::registration_macro_support::$law(backend).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*
@@ -1431,6 +1493,8 @@ macro_rules! session_store_factory_tests {
             (turn_cancel_final_commit_intent_cas_is_atomic, "turn-cancel-final-commit-cas"),
             (turn_cancel_conflicting_repeat_leaves_no_durable_trace, "turn-cancel-conflicting-repeat"),
             (turn_cancel_concurrent_opposing_requests_converge, "turn-cancel-concurrent-opposing"),
+        ]);
+        $crate::session_store_factory_tests!(@turn_cancel_hosted $fixture; [
             (turn_cancel_wrong_binding_is_refused_at_every_phase, "turn-cancel-wrong-binding"),
         ]);
     };
@@ -1438,9 +1502,11 @@ macro_rules! session_store_factory_tests {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
-                let (_fixture_guard, backend, unbound, make) = $fixture;
+                let (_fixture_guard, backend, unbound, make, make_attached, _effect_host) =
+                    $fixture;
                 let _ = $label;
-                $crate::registration_macro_support::$law(backend, unbound, make).await;
+                $crate::registration_macro_support::$law(backend, unbound, make, make_attached)
+                    .await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*
@@ -1449,12 +1515,28 @@ macro_rules! session_store_factory_tests {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
-                let (_fixture_guard, _backend, _unbound, make) = $fixture;
+                let (_fixture_guard, _backend, _unbound, make, _make_attached, _effect_host) =
+                    $fixture;
                 let _unbound: Option<
                     ::std::sync::Arc<dyn lash_core::store::StoreMaintenance>,
                 > = _unbound;
                 let _ = $label;
                 $crate::registration_macro_support::$law(make()).await;
+                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+            }
+        )*
+    };
+    (@turn_cancel_hosted $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+        $(
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn $law() {
+                let (_fixture_guard, _backend, _unbound, make, _make_attached, effect_host) =
+                    $fixture;
+                let _unbound: Option<
+                    ::std::sync::Arc<dyn lash_core::store::StoreMaintenance>,
+                > = _unbound;
+                let _ = $label;
+                $crate::registration_macro_support::$law(make(), effect_host).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*
@@ -1520,16 +1602,16 @@ macro_rules! __session_read_view_register {
     ($fixture:block; $law:ident, $label:literal, failure) => {
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_fixture_guard, factory, advance) = $fixture;
+            let (_fixture_guard, backend, _factory, advance) = $fixture;
             let _ = $label;
-            $crate::registration_macro_support::$law(factory, advance).await;
+            $crate::registration_macro_support::$law(backend, advance).await;
             $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
     ($fixture:block; $law:ident, $label:literal, read) => {
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_fixture_guard, factory, _advance) = $fixture;
+            let (_fixture_guard, _backend, factory, _advance) = $fixture;
             let _ = $label;
             $crate::registration_macro_support::$law(factory).await;
             $crate::law_receipt::record(module_path!(), stringify!($law), $label);
@@ -1538,6 +1620,10 @@ macro_rules! __session_read_view_register {
 }
 
 /// Register one independently reported test per session read-view law.
+///
+/// The fixture yields `(guard, Arc<dyn Backend>, its session-store factory,
+/// advance-commit-clock)`: the failure-evidence law runs its turn on the
+/// backend, and the read law reads through the factory.
 #[macro_export]
 macro_rules! session_read_view_tests {
     ($fixture:block) => {
@@ -1564,9 +1650,9 @@ macro_rules! process_prune_session_store_tests {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
-                let (_fixture_guard, factory, registry) = $fixture;
+                let (_fixture_guard, factory, registry, effect_host) = $fixture;
                 let _ = $label;
-                $crate::registration_macro_support::$law(factory, registry).await;
+                $crate::registration_macro_support::$law(factory, registry, effect_host).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*
@@ -1705,9 +1791,10 @@ macro_rules! turn_work_driver_tests {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
-                let (_guard, host, registration_barrier) = $fixture;
+                let (_guard, host, stores, registration_barrier) = $fixture;
                 let _ = $label;
-                $crate::registration_macro_support::$law(host, registration_barrier).await;
+                $crate::registration_macro_support::$law(host, stores, registration_barrier)
+                    .await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*
@@ -1787,8 +1874,8 @@ macro_rules! abandoned_attachment_recovery_tests {
             async fn $law() {
                 let (_guard, make) = $fixture;
                 let _ = $label;
-                let (factory, reopen) = make().await;
-                $crate::registration_macro_support::$law(factory, reopen).await;
+                let (factory, make_bytes, reopen) = make().await;
+                $crate::registration_macro_support::$law(factory, make_bytes, reopen).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*
@@ -1827,9 +1914,9 @@ macro_rules! attachment_owner_degraded_tests {
         $(
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
             async fn $law() {
-                let (_guard, factory) = $fixture;
+                let (_guard, factory, attachments) = $fixture;
                 let _ = $label;
-                $crate::registration_macro_support::$law(factory).await;
+                $crate::registration_macro_support::$law(factory, attachments).await;
                 $crate::law_receipt::record(module_path!(), stringify!($law), $label);
             }
         )*
@@ -2162,11 +2249,11 @@ macro_rules! durable_queued_drain_wait_resolver_tests {
 /// Expansion machinery for await-event witness registration.
 #[macro_export]
 macro_rules! __effect_host_await_event_witness_register {
-    ([$($attr:tt)*] $fixture:block; $law:ident, $label:literal) => {
+    ([$($attr:tt)*] $fixture:block; warm $law:ident, $label:literal) => {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_guard, deadline, make, witness, finish) = $fixture;
+            let (_guard, deadline, make, _make_catalog, witness, finish) = $fixture;
             ::tokio::time::timeout(
                 deadline,
                 $crate::registration_macro_support::$law(make, witness),
@@ -2177,9 +2264,25 @@ macro_rules! __effect_host_await_event_witness_register {
             $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
+    ([$($attr:tt)*] $fixture:block; cold $law:ident, $label:literal) => {
+        $($attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, deadline, make, make_catalog, witness, finish) = $fixture;
+            ::tokio::time::timeout(
+                deadline,
+                $crate::registration_macro_support::$law(make, make_catalog, witness),
+            )
+            .await
+            .unwrap_or_else(|_| panic!("{} exceeded {deadline:?}", $label));
+            finish.await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
+    };
 }
 
-/// The fixture supplies the backend's host maker plus its own post-condition witness.
+/// The fixture supplies the backend's host maker, a maker of session-store
+/// factories over the same substrate, and its own post-condition witness.
 #[macro_export]
 macro_rules! effect_host_await_event_witness_tests {
     ($fixture:block) => {
@@ -2189,15 +2292,17 @@ macro_rules! effect_host_await_event_witness_tests {
         $crate::effect_host_await_event_witness_tests!(@catalogue [$(#[$attr])*] $fixture);
     };
     (@catalogue $attrs:tt $fixture:block) => {
-        $crate::effect_host_await_event_witness_tests!(@expand $attrs $fixture; [
+        $crate::effect_host_await_event_witness_tests!(@expand $attrs $fixture; warm [
             (effect_host_await_events_with_active_wait_witness, "await-event-warm-witness"),
+        ]);
+        $crate::effect_host_await_event_witness_tests!(@expand $attrs $fixture; cold [
             (effect_host_await_events_cold_instance_with_active_wait_witness, "await-event-cold-witness"),
         ]);
     };
-    (@expand $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+    (@expand $attrs:tt $fixture:block; $kind:ident [$(( $law:ident, $label:literal )),* $(,)?]) => {
         $(
             $crate::__effect_host_await_event_witness_register!(
-                $attrs $fixture; $law, $label
+                $attrs $fixture; $kind $law, $label
             );
         )*
     };

@@ -24,6 +24,11 @@ mod tests {
 
     #[async_trait::async_trait]
     impl crate::AwaitEventResolver for MissingBaseAfterSettleResolver {
+        /// A test double that mints keys under no durable authority.
+        fn await_event_authority_binding_id(&self) -> Option<String> {
+            None
+        }
+
         async fn resolve_await_event(
             &self,
             key: &crate::AwaitEventKey,

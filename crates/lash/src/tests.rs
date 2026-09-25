@@ -3,11 +3,11 @@ use crate::support::QueuedWorkSubstrate;
 use crate::support::{
     Arc, BTreeMap, CancellationToken, EffectHost, EmbedError, LashCore, PluginFactory,
     ProcessRegistry, PromptContribution, PromptLayerSink, PromptSlot, PromptTemplate,
-    ProviderHandle, Result, RunActivityCollector, RuntimeSessionState, ScopedEffectController,
+    ProviderHandle, Result, RunActivityCollector, RuntimeSessionState,
     SelectedQueuedWorkDrainRefusalCause, SessionError, SessionObservationSubscription,
-    SessionResume, SessionSpec, SessionStoreFactory, StaticPluginFactory, StdMutex,
-    TestLocalProcessRegistry, ToolProvider, TurnActivity, TurnActivityId, TurnActivitySink,
-    TurnEvent, TurnInput, TurnOutcome, TurnReport, async_trait, message_text,
+    SessionResume, SessionSpec, SessionStoreFactory, StaticPluginFactory, StdMutex, ToolProvider,
+    TurnActivity, TurnActivityId, TurnActivitySink, TurnEvent, TurnInput, TurnOutcome, TurnReport,
+    async_trait, message_text,
 };
 use lash_core::ProcessExecutionEnvStore;
 use lash_core::facade_support::{
@@ -96,7 +96,6 @@ fn session_completion_matches(
 
 #[derive(Default)]
 struct SnapshotStore {
-    turn_cancellation_authority: std::sync::OnceLock<lash_core::TurnCancellationAuthority>,
     read: std::sync::Mutex<Option<lash_core::store::PersistedSessionRead>>,
     session_meta: std::sync::Mutex<Option<lash_core::SessionMeta>>,
     runtime_turn_commits: std::sync::Mutex<
@@ -158,7 +157,6 @@ impl SnapshotStore {
             );
         }
         Self {
-            turn_cancellation_authority: Default::default(),
             read: std::sync::Mutex::new(Some(lash_core::store::PersistedSessionRead {
                 session_id: state.session_id,
                 head_revision: 7,
@@ -929,7 +927,6 @@ impl lash_core::SessionStoreFactory for ReusableStoreFactory {
 }
 
 struct BoundSessionStore {
-    turn_cancellation_authority: std::sync::OnceLock<lash_core::TurnCancellationAuthority>,
     session_id: SessionId,
 }
 

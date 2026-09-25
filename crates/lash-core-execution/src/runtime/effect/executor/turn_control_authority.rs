@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use super::control::{AwaitEventResolver, ScopedEffectController};
+use super::control::AwaitEventResolver;
 use crate::RuntimeError;
 
 /// A reopenable authority for the reserved turn-cancellation promises.
@@ -22,18 +22,6 @@ impl TurnCancellationAuthority {
 
     pub fn binding_id(&self) -> &str {
         &self.binding_id
-    }
-
-    /// Erase this authority for the store seam.
-    ///
-    /// [`crate::store::TurnInputStore::turn_cancellation_authority`] hands back
-    /// the object-safe [`lash_core_store::turn_control_binding::StoreTurnCancellationAuthority`]
-    /// because the concrete authority owns an `AwaitEventResolver`, which is
-    /// runtime machinery the store layer cannot depend on.
-    pub fn into_store_authority(
-        self,
-    ) -> Arc<dyn lash_core_store::turn_control_binding::StoreTurnCancellationAuthority> {
-        Arc::new(self)
     }
 
     pub fn resolver(&self) -> Arc<dyn AwaitEventResolver> {
@@ -89,69 +77,6 @@ impl TurnCancellationAuthority {
     }
 }
 
-impl lash_core_store::turn_control_binding::StoreTurnCancellationAuthority
-    for TurnCancellationAuthority
-{
-    fn binding_id(&self) -> &str {
-        self.binding_id()
-    }
-}
-
-/// Recover the concrete authority a store handed back through the seam.
-///
-/// Two concrete variants are known: `TurnCancellationAuthority` (custom
-/// resolver, constructed only in this crate) and
-/// [`lash_core_effect::core_internal::NativeAwaitEventAuthority`] (the erased
-/// native registry handle stores mint). A handle that is anything else is a
-/// programming error.
-#[expect(
-    clippy::expect_used,
-    reason = "only the two known concrete authority variants are constructed, so another concrete type is a programming error, per the message"
-)]
-pub fn concrete_turn_cancellation_authority(
-    handle: &Arc<dyn lash_core_store::turn_control_binding::StoreTurnCancellationAuthority>,
-) -> TurnCancellationAuthority {
-    let any: &dyn std::any::Any = handle.as_ref();
-    if let Some(authority) =
-        any.downcast_ref::<lash_core_effect::core_internal::NativeAwaitEventAuthority>()
-    {
-        return TurnCancellationAuthority::new(
-            handle.binding_id(),
-            Arc::new(
-                super::NativeRuntimeEffectController::with_await_event_registry(
-                    authority.registry(),
-                ),
-            ),
-        );
-    }
-    any.downcast_ref::<TurnCancellationAuthority>()
-        .expect("a store turn-cancellation authority must be a known native or custom authority")
-        .clone()
-}
-
-/// Whether a controller journals its effects durably.
-///
-/// One fixed fact about a controller, read synchronously. A `Journaled`
-/// controller owns turn-control reads through its own journal; a `Local`
-/// controller keeps turn control host-owned. Turn-failure settlement never
-/// reads it: a failure settles by its cause on every host (FIG-3575).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum EffectJournaling {
-    Local,
-    Journaled,
-}
-
-/// Which durable authority owns the reserved turn-control promises.
-///
-/// Most effect hosts own their cancellation promises together with their
-/// journal. The process-local Native host instead delegates only those three
-/// reserved waits to the persistent session store when one is available.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum TurnControlAuthorityOwner {
-    EffectHost,
-    SessionStore,
-}
-
 /// How turn-control promises are addressed for one turn. Exhaustive: there is
 /// no third arrangement, and no field is optional.
 pub enum TurnControlAttachment<'a> {
@@ -176,49 +101,28 @@ impl TurnControlAttachment<'_> {
     }
 }
 
-pub enum TurnControlBinding<'a> {
-    HostOwned {
-        binding_id: String,
-        resolver: &'a dyn AwaitEventResolver,
-        peek: ScopedEffectController<'a>,
-        turn_attach: TurnControlAttachment<'a>,
-    },
-    RunScoped {
-        binding_id: String,
-        resolver: &'a dyn AwaitEventResolver,
-        durable_cancel_after_llm: bool,
-        turn_attach: TurnControlAttachment<'a>,
-    },
+/// The turn-control promises one run observes: the authority's binding, the
+/// run-scoped resolver that owns the reserved promises, and how a caller
+/// attaches to the turn's terminal.
+///
+/// Every host journals its effects, so the resolver is the run's own
+/// journaled controller, and a cancellation observed after an LLM call is
+/// durable on every host.
+pub struct TurnControlBinding<'a> {
+    binding_id: String,
+    resolver: &'a dyn AwaitEventResolver,
+    turn_attach: TurnControlAttachment<'a>,
 }
 
 impl TurnControlBinding<'_> {
-    pub(super) fn host_owned<'a>(
-        binding_id: String,
-        resolver: &'a dyn AwaitEventResolver,
-        peek: ScopedEffectController<'a>,
-        turn_attach: Option<Arc<dyn crate::TurnAttach>>,
-    ) -> TurnControlBinding<'a> {
-        TurnControlBinding::HostOwned {
-            binding_id,
-            resolver,
-            peek,
-            turn_attach: turn_attach.map_or(
-                TurnControlAttachment::Resolver(resolver),
-                TurnControlAttachment::Dedicated,
-            ),
-        }
-    }
-
     pub(super) fn run_scoped<'a>(
         binding_id: String,
         resolver: &'a dyn AwaitEventResolver,
-        durable_cancel_after_llm: bool,
         turn_attach: Option<Arc<dyn crate::TurnAttach>>,
     ) -> TurnControlBinding<'a> {
-        TurnControlBinding::RunScoped {
+        TurnControlBinding {
             binding_id,
             resolver,
-            durable_cancel_after_llm,
             turn_attach: turn_attach.map_or(
                 TurnControlAttachment::Resolver(resolver),
                 TurnControlAttachment::Dedicated,
@@ -227,23 +131,15 @@ impl TurnControlBinding<'_> {
     }
 
     pub fn binding_id(&self) -> &str {
-        match self {
-            Self::HostOwned { binding_id, .. } | Self::RunScoped { binding_id, .. } => binding_id,
-        }
+        &self.binding_id
     }
 
     pub fn resolver(&self) -> &dyn AwaitEventResolver {
-        match self {
-            Self::HostOwned { resolver, .. } | Self::RunScoped { resolver, .. } => *resolver,
-        }
+        self.resolver
     }
 
     pub fn turn_attach(&self) -> &TurnControlAttachment<'_> {
-        match self {
-            Self::HostOwned { turn_attach, .. } | Self::RunScoped { turn_attach, .. } => {
-                turn_attach
-            }
-        }
+        &self.turn_attach
     }
 }
 

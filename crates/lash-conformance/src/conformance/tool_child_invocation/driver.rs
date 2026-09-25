@@ -15,7 +15,7 @@ fn lane_group(
     env_ref: &crate::ProcessExecutionEnvRef,
     parent: &crate::RuntimeInvocation,
     routing: ToolChildCompletionRouting,
-    cancellation: Option<crate::TurnControlBindingId>,
+    cancellation: crate::TurnControlBindingId,
 ) -> crate::RuntimeEffectGroup {
     let leaf = |position: usize, tool_id: &str, routing| {
         child_envelope(
@@ -143,7 +143,7 @@ pub async fn tool_children_run_through_the_invocation_driver(
         &group_key,
         &scenario.env_ref,
         &parent,
-        deferrable_routing(fixture.deferrable_routing, &host),
+        ToolChildCompletionRouting::Durable,
         recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
     );
     let scoped = host

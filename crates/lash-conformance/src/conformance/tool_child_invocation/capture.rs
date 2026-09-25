@@ -18,7 +18,7 @@ fn capture_group(
     group_key: &str,
     env_ref: &crate::ProcessExecutionEnvRef,
     routing: ToolChildCompletionRouting,
-    cancellation: Option<crate::TurnControlBindingId>,
+    cancellation: crate::TurnControlBindingId,
 ) -> crate::RuntimeEffectGroup {
     let parent = parent_invocation(scope);
     let leaf = |position: usize, tool_id: &str, routing: ToolChildCompletionRouting| {
@@ -72,10 +72,8 @@ fn capture_group(
 /// settled before the crash is served its journaled outcome unchanged: the
 /// replayed child touched nothing beside its own row.
 ///
-/// Drain-bearing tiers only: on a drain-less tier — the in-memory host,
-/// where the process is the substrate and nothing outlives the crash, and
-/// Restate, which redrives the child invocation itself — the edge is not
-/// reachable through this law.
+/// Drain-bearing tiers only: on the drain-less Restate tier, which redrives
+/// the child invocation itself, the edge is not reachable through this law.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -90,7 +88,7 @@ pub async fn a_crashed_child_replays_its_committed_attempts_facts(
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");
     let group_key = format!("{prefix}-capture-group");
-    let process_env_store = (fixture.make_processes)().await.process_env_store;
+    let process_env_store = (fixture.make_processes)().await.process_env_store();
     let env_ref = crate::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
 
     let probe_world = (fixture.make_world)(ToolChildWorldSpec {
@@ -106,6 +104,7 @@ pub async fn a_crashed_child_replays_its_committed_attempts_facts(
     let observation = Arc::new(LawObservation::default());
     let call_id = format!("{group_key}-call-0");
     crashed_world(fixture, {
+        let fixture_processes = Arc::clone(&fixture.make_processes);
         let scope = scope.clone();
         let session_id = session_id.clone();
         let group_key = group_key.clone();
@@ -113,7 +112,6 @@ pub async fn a_crashed_child_replays_its_committed_attempts_facts(
         let env_ref = env_ref.clone();
         let observation = Arc::clone(&observation);
         let call_id = call_id.clone();
-        let routing_kind = fixture.deferrable_routing;
         let opener = opener.clone();
         move |world| {
             Box::pin(async move {
@@ -129,7 +127,7 @@ pub async fn a_crashed_child_replays_its_committed_attempts_facts(
                     &world.host,
                     &scope,
                     provider,
-                    Arc::new(crate::TestLocalProcessRegistry::default()),
+                    fixture_processes().await.process_registry(),
                     env_store,
                     opener,
                     tokio_util::sync::CancellationToken::new(),
@@ -145,7 +143,7 @@ pub async fn a_crashed_child_replays_its_committed_attempts_facts(
                         &session_id,
                         &group_key,
                         &env_ref,
-                        deferrable_routing(routing_kind, &world.host),
+                        ToolChildCompletionRouting::Durable,
                         recorded_cancellation_authority(&world.host, &crate::admit(scope.clone()))
                             .await,
                     ))
@@ -210,7 +208,7 @@ pub async fn a_crashed_child_replays_its_committed_attempts_facts(
         intent_target: crate::ProcessId::from("unused-in-capture"),
         start_metadata: serde_json::Value::Null,
     });
-    let registry = (fixture.make_processes)().await.registry;
+    let registry = (fixture.make_processes)().await.process_registry();
     let _guard = register_opener(
         &successor.host,
         &scope,
@@ -273,7 +271,7 @@ pub async fn a_crashed_child_replays_its_committed_attempts_facts(
             &session_id,
             &group_key,
             &env_ref,
-            deferrable_routing(fixture.deferrable_routing, &successor.host),
+            ToolChildCompletionRouting::Durable,
             recorded_cancellation_authority(&successor.host, &crate::admit(scope.clone())).await,
         ))
         .await

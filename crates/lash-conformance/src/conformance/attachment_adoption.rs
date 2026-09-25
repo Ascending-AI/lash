@@ -1,9 +1,7 @@
 //! Cross-session stored references acquire receiver roots in the boundary commit.
 //! Root reconciliation is the layer-1 operation also used by terminal evidence
 //! reclamation, so this witness can run at every head in the stack.
-use lash_core::facade_support::{
-    InMemoryAttachmentStore, SessionAttachmentStore, reclaim_unreferenced_attachments,
-};
+use lash_core::facade_support::{SessionAttachmentStore, reclaim_unreferenced_attachments};
 use lash_core::testing::store_fixtures::session_store_request;
 use lash_core::*;
 use pretty_assertions::assert_eq;
@@ -11,15 +9,28 @@ use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-#[derive(Default)]
+/// Builds a fresh, empty attachment byte store, supplied by the tier: the
+/// root-set laws hold a factory's roots against the bytes of one store each,
+/// so every law and sub-law starts from no blobs at all.
+pub type AttachmentBytesFactory = Arc<dyn Fn() -> Arc<dyn AttachmentStore> + Send + Sync>;
+
 struct FaultingAttachmentStore {
-    inner: InMemoryAttachmentStore,
+    inner: Arc<dyn AttachmentStore>,
     fail_put: AtomicBool,
     fail_delete: AtomicBool,
     vanish_after_list: AtomicBool,
 }
 
 impl FaultingAttachmentStore {
+    fn over(inner: Arc<dyn AttachmentStore>) -> Self {
+        Self {
+            inner,
+            fail_put: AtomicBool::new(false),
+            fail_delete: AtomicBool::new(false),
+            vanish_after_list: AtomicBool::new(false),
+        }
+    }
+
     fn fail_put(&self, fail: bool) {
         self.fail_put.store(fail, Ordering::SeqCst);
     }
@@ -81,16 +92,16 @@ impl AttachmentStore for FaultingAttachmentStore {
 }
 
 struct CoordinatedFailingPutStore {
-    inner: InMemoryAttachmentStore,
+    inner: Arc<dyn AttachmentStore>,
     fail_first_put: AtomicBool,
     first_put_started: tokio::sync::Notify,
     release_first_put: tokio::sync::Notify,
 }
 
-impl Default for CoordinatedFailingPutStore {
-    fn default() -> Self {
+impl CoordinatedFailingPutStore {
+    fn over(inner: Arc<dyn AttachmentStore>) -> Self {
         Self {
-            inner: InMemoryAttachmentStore::new(),
+            inner,
             fail_first_put: AtomicBool::new(true),
             first_put_started: tokio::sync::Notify::new(),
             release_first_put: tokio::sync::Notify::new(),
@@ -257,6 +268,7 @@ async fn create(f: &Arc<dyn SessionStoreFactory>, id: &str) -> Arc<dyn RuntimePe
 )]
 pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
     initial_factory: Arc<dyn SessionStoreFactory>,
+    make_bytes: AttachmentBytesFactory,
     reopen: R,
 ) where
     R: FnOnce() -> Fut,
@@ -272,7 +284,7 @@ pub async fn abandoned_attachment_write_recovery_after_cold_reopen<R, Fut>(
     let adopter_id = SessionId::from(format!("cold-recovery-adopter-{namespace}"));
     let request = session_store_request(&session_id, "probe", SessionRelation::Root);
     let store = initial_factory.create_store(&request).await.unwrap();
-    let backend: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+    let backend: Arc<dyn AttachmentStore> = make_bytes();
     let payload = format!("cold-recovery-payload-{namespace}").into_bytes();
     let attachment_id = lash_core::attachments::content_id(&payload);
     let survivor_id =
@@ -430,11 +442,14 @@ async fn sweep(f: &Arc<dyn SessionStoreFactory>, bytes: &Arc<dyn AttachmentStore
     clippy::unwrap_used,
     reason = "conformance-law fixture: the unwrap mirrors the setup above"
 )]
-pub async fn cross_owner_attachment_adoption_conformance(f: Arc<dyn SessionStoreFactory>) {
+pub async fn cross_owner_attachment_adoption_conformance(
+    f: Arc<dyn SessionStoreFactory>,
+    make_bytes: AttachmentBytesFactory,
+) {
     let namespace = uuid::Uuid::new_v4();
     let owner_id = format!("adoption-owner-{namespace}");
     let receiver_id = format!("adoption-receiver-{namespace}");
-    let bytes: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+    let bytes: Arc<dyn AttachmentStore> = make_bytes();
     let owner = create(&f, &owner_id).await;
     let live = create(&f, &receiver_id).await;
     let r = put(owner.clone(), bytes.clone(), &owner_id, 99).await;
@@ -479,27 +494,27 @@ pub async fn cross_owner_attachment_adoption_conformance(f: Arc<dyn SessionStore
         1,
         "last receiver deletion releases the root"
     );
-    adoption_fence_and_rollback(f.clone()).await;
-    adoption_after_full_gc_and_release_is_refused(f.clone()).await;
-    reput_after_full_gc_allows_adoption(f.clone()).await;
-    out_of_band_absence_leaves_no_adoptable_evidence(f.clone()).await;
-    failed_delete_releases_the_digest_for_a_fresh_put(f.clone()).await;
-    failed_reput_restores_prior_phase(f.clone()).await;
-    competing_writer_survives_failed_reput(f.clone()).await;
-    sweep_cannot_overwrite_failed_reput_rollback(f.clone()).await;
+    adoption_fence_and_rollback(f.clone(), &make_bytes).await;
+    adoption_after_full_gc_and_release_is_refused(f.clone(), &make_bytes).await;
+    reput_after_full_gc_allows_adoption(f.clone(), &make_bytes).await;
+    out_of_band_absence_leaves_no_adoptable_evidence(f.clone(), &make_bytes).await;
+    failed_delete_releases_the_digest_for_a_fresh_put(f.clone(), &make_bytes).await;
+    failed_reput_restores_prior_phase(f.clone(), &make_bytes).await;
+    competing_writer_survives_failed_reput(f.clone(), &make_bytes).await;
+    sweep_cannot_overwrite_failed_reput_rollback(f.clone(), &make_bytes).await;
     stale_sweep_release_cannot_revoke_restoring_writer(f.clone()).await;
-    abandoned_writer_recovery_preserves_phase_and_unstrands_reput(f.clone()).await;
+    abandoned_writer_recovery_preserves_phase_and_unstrands_reput(f.clone(), &make_bytes).await;
     stale_writer_abort_cannot_clobber_a_newer_delete(f.clone()).await;
-    committed_restoring_settlement_preserves_root(f.clone()).await;
+    committed_restoring_settlement_preserves_root(f.clone(), &make_bytes).await;
     // FIG-2795: adoption is gated on positive upload evidence.
     failed_reput_leaves_the_intent_unstamped_and_unadoptable(f.clone()).await;
     stale_permit_cannot_certify_an_upload(f.clone()).await;
     evidence_survives_the_uploaders_forgotten_intent(f.clone()).await;
-    abort_after_a_foreign_adoption_preserves_that_root(f.clone()).await;
+    abort_after_a_foreign_adoption_preserves_that_root(f.clone(), &make_bytes).await;
     duplicate_put_preserves_stamp_and_commitment(f.clone()).await;
     batch_commit_with_one_unknown_digest_writes_nothing(f.clone()).await;
-    sweep_adoption_race(f.clone()).await;
-    sweep_reput_race(f).await;
+    sweep_adoption_race(f.clone(), &make_bytes).await;
+    sweep_reput_race(f, &make_bytes).await;
 }
 
 /// Shared host-facing condemnation-enumeration law.
@@ -672,6 +687,7 @@ impl AttachmentRootSet for StopBeforeCondemnationReclaim {
 )]
 pub async fn attachment_condemnation_delete_crash_survives_cold_reopen<Reopen, ReopenFuture>(
     factory: Arc<dyn SessionStoreFactory>,
+    make_bytes: AttachmentBytesFactory,
     reopen: Reopen,
 ) where
     Reopen: FnOnce() -> ReopenFuture,
@@ -687,7 +703,7 @@ pub async fn attachment_condemnation_delete_crash_survives_cold_reopen<Reopen, R
         ))
         .await
         .expect("materialize durable condemnation catalog");
-    let backend = Arc::new(InMemoryAttachmentStore::new());
+    let backend = make_bytes();
     let reference = backend
         .put(
             format!("condemnation-crash-{namespace}").into_bytes(),
@@ -764,11 +780,14 @@ pub async fn attachment_condemnation_delete_crash_survives_cold_reopen<Reopen, R
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn out_of_band_absence_leaves_no_adoptable_evidence(f: Arc<dyn SessionStoreFactory>) {
+async fn out_of_band_absence_leaves_no_adoptable_evidence(
+    f: Arc<dyn SessionStoreFactory>,
+    make_bytes: &AttachmentBytesFactory,
+) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("absent-head-receiver-{namespace}"));
     let store = create(&f, &session_id).await;
-    let backend = Arc::new(FaultingAttachmentStore::default());
+    let backend = Arc::new(FaultingAttachmentStore::over(make_bytes()));
     let payload = format!("absent-head-{namespace}").into_bytes();
     let reference = backend.put(payload, image_meta()).await.unwrap();
     backend.vanish_after_next_list();
@@ -794,11 +813,14 @@ async fn out_of_band_absence_leaves_no_adoptable_evidence(f: Arc<dyn SessionStor
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn failed_delete_releases_the_digest_for_a_fresh_put(f: Arc<dyn SessionStoreFactory>) {
+async fn failed_delete_releases_the_digest_for_a_fresh_put(
+    f: Arc<dyn SessionStoreFactory>,
+    make_bytes: &AttachmentBytesFactory,
+) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("failed-delete-receiver-{namespace}"));
     let store = create(&f, &session_id).await;
-    let backend = Arc::new(FaultingAttachmentStore::default());
+    let backend = Arc::new(FaultingAttachmentStore::over(make_bytes()));
     let reference = backend
         .put(
             format!("failed-delete-{namespace}").into_bytes(),
@@ -850,11 +872,14 @@ async fn failed_delete_releases_the_digest_for_a_fresh_put(f: Arc<dyn SessionSto
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn failed_reput_restores_prior_phase(f: Arc<dyn SessionStoreFactory>) {
+async fn failed_reput_restores_prior_phase(
+    f: Arc<dyn SessionStoreFactory>,
+    make_bytes: &AttachmentBytesFactory,
+) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("failed-reput-{namespace}"));
     let store = create(&f, &session_id).await;
-    let backend = Arc::new(FaultingAttachmentStore::default());
+    let backend = Arc::new(FaultingAttachmentStore::over(make_bytes()));
     let scoped = SessionAttachmentStore::new(
         backend.clone() as Arc<dyn AttachmentStore>,
         store.clone(),
@@ -909,13 +934,16 @@ async fn failed_reput_restores_prior_phase(f: Arc<dyn SessionStoreFactory>) {
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn competing_writer_survives_failed_reput(f: Arc<dyn SessionStoreFactory>) {
+async fn competing_writer_survives_failed_reput(
+    f: Arc<dyn SessionStoreFactory>,
+    make_bytes: &AttachmentBytesFactory,
+) {
     let namespace = uuid::Uuid::new_v4();
     let first_id = SessionId::from(format!("failed-writer-{namespace}"));
     let second_id = SessionId::from(format!("successful-writer-{namespace}"));
     let first_store = create(&f, &first_id).await;
     let second_store = create(&f, &second_id).await;
-    let backend = Arc::new(CoordinatedFailingPutStore::default());
+    let backend = Arc::new(CoordinatedFailingPutStore::over(make_bytes()));
     let payload = format!("competing-reput-{namespace}").into_bytes();
     let attachment_id = lash_core::attachments::content_id(&payload);
     assert_eq!(
@@ -974,11 +1002,14 @@ async fn competing_writer_survives_failed_reput(f: Arc<dyn SessionStoreFactory>)
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn sweep_cannot_overwrite_failed_reput_rollback(f: Arc<dyn SessionStoreFactory>) {
+async fn sweep_cannot_overwrite_failed_reput_rollback(
+    f: Arc<dyn SessionStoreFactory>,
+    make_bytes: &AttachmentBytesFactory,
+) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("sweep-reput-race-{namespace}"));
     let store = create(&f, &session_id).await;
-    let backend = Arc::new(CoordinatedFailingPutStore::default());
+    let backend = Arc::new(CoordinatedFailingPutStore::over(make_bytes()));
     let payload = format!("sweep-reput-race-{namespace}").into_bytes();
     let reference = backend
         .inner
@@ -1087,12 +1118,13 @@ async fn stale_sweep_release_cannot_revoke_restoring_writer(f: Arc<dyn SessionSt
 )]
 async fn abandoned_writer_recovery_preserves_phase_and_unstrands_reput(
     f: Arc<dyn SessionStoreFactory>,
+    make_bytes: &AttachmentBytesFactory,
 ) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("abandoned-condemned-writer-{namespace}"));
     let adopter_id = SessionId::from(format!("recovery-adopter-{namespace}"));
     let payload = format!("recovery-payload-{namespace}").into_bytes();
-    let backend: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+    let backend: Arc<dyn AttachmentStore> = make_bytes();
     let attachment_id = backend.put(payload.clone(), image_meta()).await.unwrap().id;
     assert_eq!(
         f.condemn_attachment(&attachment_id, 0).await.unwrap(),
@@ -1278,7 +1310,10 @@ enum CommittedRestoringSettlement {
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn committed_restoring_settlement_preserves_root(factory: Arc<dyn SessionStoreFactory>) {
+async fn committed_restoring_settlement_preserves_root(
+    factory: Arc<dyn SessionStoreFactory>,
+    make_bytes: &AttachmentBytesFactory,
+) {
     for settlement in [
         CommittedRestoringSettlement::Abort,
         CommittedRestoringSettlement::Recover,
@@ -1349,7 +1384,7 @@ async fn committed_restoring_settlement_preserves_root(factory: Arc<dyn SessionS
         );
     }
 
-    committed_restoring_abort_survives_the_older_sweep(factory).await;
+    committed_restoring_abort_survives_the_older_sweep(factory, make_bytes).await;
 }
 
 #[expect(
@@ -1408,13 +1443,16 @@ async fn commit_turn_owned_intent(
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn committed_restoring_abort_survives_the_older_sweep(factory: Arc<dyn SessionStoreFactory>) {
+async fn committed_restoring_abort_survives_the_older_sweep(
+    factory: Arc<dyn SessionStoreFactory>,
+    make_bytes: &AttachmentBytesFactory,
+) {
     let namespace = uuid::Uuid::new_v4();
     let session_id = SessionId::from(format!("attachment-committed-sweep-{namespace}"));
     let turn_id = TurnId::from(format!("attachment-committed-sweep-turn-{namespace}"));
     let request = session_store_request(&session_id, "probe", SessionRelation::Root);
     let store = factory.create_store(&request).await.unwrap();
-    let backend: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+    let backend: Arc<dyn AttachmentStore> = make_bytes();
     let reference = backend
         .put(
             format!("committed restoring sweep {namespace}").into_bytes(),
@@ -1711,13 +1749,16 @@ async fn evidence_survives_the_uploaders_forgotten_intent(f: Arc<dyn SessionStor
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn abort_after_a_foreign_adoption_preserves_that_root(f: Arc<dyn SessionStoreFactory>) {
+async fn abort_after_a_foreign_adoption_preserves_that_root(
+    f: Arc<dyn SessionStoreFactory>,
+    make_bytes: &AttachmentBytesFactory,
+) {
     let namespace = uuid::Uuid::new_v4();
     let uploader_id = SessionId::from(format!("abort-uploader-{namespace}"));
     let adopter_id = SessionId::from(format!("abort-adopter-{namespace}"));
     let uploader = create(&f, uploader_id.as_str()).await;
     let adopter = create(&f, adopter_id.as_str()).await;
-    let bytes: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+    let bytes: Arc<dyn AttachmentStore> = make_bytes();
     let payload = format!("abort-after-adoption-{namespace}").into_bytes();
     let attachment_id = bytes.put(payload, image_meta()).await.unwrap().id;
 
@@ -1859,9 +1900,12 @@ async fn batch_commit_with_one_unknown_digest_writes_nothing(f: Arc<dyn SessionS
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn adoption_fence_and_rollback(f: Arc<dyn SessionStoreFactory>) {
+async fn adoption_fence_and_rollback(
+    f: Arc<dyn SessionStoreFactory>,
+    make_bytes: &AttachmentBytesFactory,
+) {
     let session_id = SessionId::from(format!("fenced-adoption-{}", uuid::Uuid::new_v4()));
-    let bytes: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+    let bytes: Arc<dyn AttachmentStore> = make_bytes();
     let store = create(&f, &session_id).await;
     let scoped = SessionAttachmentStore::new(bytes.clone(), store.clone(), session_id.clone());
     let mut st = state(&session_id);
@@ -1961,12 +2005,15 @@ async fn adoption_fence_and_rollback(f: Arc<dyn SessionStoreFactory>) {
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn adoption_after_full_gc_and_release_is_refused(f: Arc<dyn SessionStoreFactory>) {
+async fn adoption_after_full_gc_and_release_is_refused(
+    f: Arc<dyn SessionStoreFactory>,
+    make_bytes: &AttachmentBytesFactory,
+) {
     let namespace = uuid::Uuid::new_v4();
     let owner_id = format!("swept-adoption-owner-{namespace}");
     let receiver_id = format!("swept-adoption-receiver-{namespace}");
     let payload = [owner_id.as_bytes(), &[251]].concat();
-    let bytes: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+    let bytes: Arc<dyn AttachmentStore> = make_bytes();
     let owner = create(&f, &owner_id).await;
     let receiver = create(&f, &receiver_id).await;
     let reference = SessionAttachmentStore::new(bytes.clone(), owner.clone(), &owner_id)
@@ -2052,12 +2099,15 @@ async fn adoption_after_full_gc_and_release_is_refused(f: Arc<dyn SessionStoreFa
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn reput_after_full_gc_allows_adoption(f: Arc<dyn SessionStoreFactory>) {
+async fn reput_after_full_gc_allows_adoption(
+    f: Arc<dyn SessionStoreFactory>,
+    make_bytes: &AttachmentBytesFactory,
+) {
     let namespace = uuid::Uuid::new_v4();
     let owner_id = format!("reput-owner-{namespace}");
     let receiver_id = format!("reput-receiver-{namespace}");
     let payload = [owner_id.as_bytes(), &[252]].concat();
-    let bytes: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+    let bytes: Arc<dyn AttachmentStore> = make_bytes();
     let owner = create(&f, &owner_id).await;
     let receiver = create(&f, &receiver_id).await;
     let scoped_owner = SessionAttachmentStore::new(bytes.clone(), owner.clone(), &owner_id);
@@ -2116,12 +2166,12 @@ const RACE_SCHEDULES: usize = 20;
     clippy::unwrap_used,
     reason = "conformance-law fixture: the unwrap mirrors the setup above"
 )]
-async fn sweep_adoption_race(f: Arc<dyn SessionStoreFactory>) {
+async fn sweep_adoption_race(f: Arc<dyn SessionStoreFactory>, make_bytes: &AttachmentBytesFactory) {
     for schedule in 0..RACE_SCHEDULES {
         let namespace = uuid::Uuid::new_v4();
         let owner_id = format!("adoption-race-owner-{schedule}-{namespace}");
         let receiver_id = format!("adoption-race-receiver-{schedule}-{namespace}");
-        let bytes: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+        let bytes: Arc<dyn AttachmentStore> = make_bytes();
         let owner = create(&f, &owner_id).await;
         let receiver = create(&f, &receiver_id).await;
         let reference = put(owner.clone(), bytes.clone(), &owner_id, schedule as u8).await;
@@ -2190,13 +2240,13 @@ async fn sweep_adoption_race(f: Arc<dyn SessionStoreFactory>) {
     clippy::unwrap_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn sweep_reput_race(f: Arc<dyn SessionStoreFactory>) {
+async fn sweep_reput_race(f: Arc<dyn SessionStoreFactory>, make_bytes: &AttachmentBytesFactory) {
     for schedule in 0..RACE_SCHEDULES {
         let namespace = uuid::Uuid::new_v4();
         let owner_id = format!("reput-race-owner-{schedule}-{namespace}");
         let writer_id = format!("reput-race-writer-{schedule}-{namespace}");
         let payload = [owner_id.as_bytes(), &[schedule as u8]].concat();
-        let bytes: Arc<dyn AttachmentStore> = Arc::new(InMemoryAttachmentStore::new());
+        let bytes: Arc<dyn AttachmentStore> = make_bytes();
         let owner = create(&f, &owner_id).await;
         let writer = create(&f, &writer_id).await;
         let reference = SessionAttachmentStore::new(bytes.clone(), owner.clone(), &owner_id)

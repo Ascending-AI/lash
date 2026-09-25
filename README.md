@@ -9,7 +9,7 @@ Most agent stacks treat the LLM as the runtime and stitch state around it — a 
 ## What's inside
 
 - **Durable per-turn commits** — every completed turn lands as one atomic `RuntimeCommit` against a `SessionGraph`. Effects are the replay boundary; turns are the semantic commit boundary.
-- **Workflow-host integration** — a sans-IO turn machine behind one `EffectHost` boundary. The default `NativeEffectHost` runs in-process; the first-party Restate adapter replays effects from host history, exposes durable exact-turn cancellation and terminal attachment through `TurnWorkDriver`, and retries the final idempotent commit.
+- **Workflow-host integration** — a sans-IO turn machine behind one `EffectHost` boundary. Every host journals: the SQLite and PostgreSQL backends replay effects from their stores, and the first-party Restate adapter replays effects from host history, exposes durable exact-turn cancellation and terminal attachment through `TurnWorkDriver`, and retries the final idempotent commit.
 - **Two execution modes, one commit unit** — `standard` uses native provider tool-calling with concurrent dispatch; `rlm` runs model-authored TypeScript, lowered into the `lashlang` IR, in a sandboxed VM where every effect crosses the host.
 - **Tool providers and plugins** — ordinary host operations are `ToolProvider`s; plugins add runtime/session behavior such as prompts, planning, memory, subagents, history transforms, UI activity, catalog policy, and tool-output budgeting. Hosts compose only what they embed.
 - **Provider portability** — Anthropic, OpenAI Responses, any OpenAI-compatible Chat Completions endpoint, OpenAI Codex, and Google Gemini / Code Assist. MCP servers attach through `lash-plugin-mcp`.

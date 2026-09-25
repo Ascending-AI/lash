@@ -697,6 +697,68 @@ where
     )
 }
 
+/// Run one effect through its local executor with no journal: the execution
+/// half of a controller-owned test double, which keeps its own journal and
+/// answers its own await events.
+///
+/// Await-event commands are refused, because answering them needs a promise
+/// authority this function does not have. A process command runs on a task of
+/// its own, as a host runs it, so a panicking process is contained as a typed
+/// failure rather than unwinding the double.
+pub async fn execute_effect_locally(
+    envelope: crate::RuntimeEffectEnvelope,
+    local_executor: crate::RuntimeEffectLocalExecutor<'_>,
+) -> Result<crate::RuntimeEffectOutcome, crate::RuntimeEffectControllerError> {
+    match envelope.command {
+        crate::RuntimeEffectCommand::PeekAwaitEvent { .. }
+        | crate::RuntimeEffectCommand::AwaitEvent { .. } => {
+            Err(crate::RuntimeEffectControllerError::new(
+                crate::RuntimeErrorCode::AwaitEventUnsupported,
+                "a locally executed effect has no await-event authority",
+            ))
+        }
+        crate::RuntimeEffectCommand::Process { command } => {
+            if matches!(
+                command.as_ref(),
+                crate::ProcessCommand::RegisterDefinition { .. }
+            ) {
+                let result = local_executor
+                    .into_process_definitions()?
+                    .execute(envelope.invocation.replay_key(), *command)
+                    .await?;
+                return Ok(crate::RuntimeEffectOutcome::Process { result });
+            }
+            let execution = local_executor.into_process()?;
+            if matches!(command.as_ref(), crate::ProcessCommand::Await { .. }) {
+                let result = execution.execute(*command).await?;
+                return Ok(crate::RuntimeEffectOutcome::Process { result });
+            }
+            let joined = crate::task::spawn(
+                lash_core_ids::execution_permit::inherit_process_execution_permit(async move {
+                    execution.execute(*command).await
+                }),
+            )
+            .await;
+            let result = match joined {
+                Ok(result) => result?,
+                Err(error) => {
+                    return Err(crate::RuntimeEffectControllerError::new(
+                        crate::RuntimeErrorCode::RuntimeEffectProcessTaskJoin,
+                        format!("locally executed process effect task failed: {error}"),
+                    ));
+                }
+            };
+            Ok(crate::RuntimeEffectOutcome::Process { result })
+        }
+        crate::RuntimeEffectCommand::Trigger { command } => {
+            local_executor
+                .execute_trigger(envelope.invocation, *command)
+                .await
+        }
+        _ => local_executor.execute(envelope).await,
+    }
+}
+
 /// The effect controller of a context with no effect host: every effect and
 /// group is refused, and await events answer the resolver's refusing
 /// defaults.
@@ -708,7 +770,12 @@ where
 #[derive(Debug, Default)]
 pub struct UnavailableEffectController;
 
-impl crate::AwaitEventResolver for UnavailableEffectController {}
+impl crate::AwaitEventResolver for UnavailableEffectController {
+    /// No effect host stands behind it, so no authority mints its keys.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl crate::RuntimeEffectController for UnavailableEffectController {
@@ -2331,4 +2398,3 @@ pub mod conformance_support;
 pub mod graph_integrity;
 pub mod lineage;
 pub mod store_fixtures;
-pub use crate::runtime::in_memory_lineage_handles;

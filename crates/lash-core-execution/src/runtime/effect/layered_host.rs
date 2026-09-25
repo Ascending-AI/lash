@@ -20,13 +20,12 @@ use tokio_util::sync::CancellationToken;
 use super::{
     AdmittedScope, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
     CompletionKeyPreparation, EffectGroupChildCommitOutcome, EffectGroupHandle, EffectHost,
-    EffectJournalRetirement, EffectJournaling, ExecutionScope, GroupChildBinding,
-    GroupChildFinalCommit, GroupExecutors, GroupSettlement, LoserPolicy, QueuedLaneAcquisition,
-    QueuedLaneProbe, RankedGroupSettlement, Resolution, ResolveOutcome, RuntimeEffectController,
+    EffectJournalRetirement, ExecutionScope, GroupChildBinding, GroupChildFinalCommit,
+    GroupExecutors, GroupSettlement, LoserPolicy, QueuedLaneAcquisition, QueuedLaneProbe,
+    RankedGroupSettlement, Resolution, ResolveOutcome, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController, SegmentProgress,
     StoreEffectGroupClosing, ToolChildHost, ToolIntentOutcomeSink, ToolIntentPreparation,
-    TurnControlAuthorityOwner,
 };
 use crate::{RuntimeError, RuntimeErrorCode, SessionId};
 
@@ -291,10 +290,6 @@ impl EffectHost for LayeredEffectHost {
         self.inner.turn_control_binding_id()
     }
 
-    fn turn_control_authority_owner(&self) -> TurnControlAuthorityOwner {
-        self.inner.turn_control_authority_owner()
-    }
-
     async fn list_outstanding_await_event_keys(
         &self,
         session_id: &SessionId,
@@ -537,10 +532,6 @@ impl RuntimeEffectController for LayeredController {
         self.layer.owns_commit_backpressure(self.inner.as_ref())
     }
 
-    fn effect_journaling(&self) -> EffectJournaling {
-        self.inner.effect_journaling()
-    }
-
     async fn drive_independent_effect_work<'work>(
         &self,
         work: Vec<crate::IndependentEffectWork<'work>>,
@@ -576,10 +567,6 @@ impl RuntimeEffectController for LayeredController {
         executors: Arc<dyn GroupExecutors>,
     ) -> Result<(), RuntimeEffectControllerError> {
         self.inner.register_group_executors(executors)
-    }
-
-    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
-        self.inner.native_effect_groups_substrate()
     }
 
     /// The inner substrate mints the bound child, and the layer still sees its

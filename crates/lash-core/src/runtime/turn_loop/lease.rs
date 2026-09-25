@@ -450,10 +450,6 @@ impl LashRuntime {
         let turn_control_binding = turn_control_host
             .turn_control_binding(scoped_effect_controller)
             .await?;
-        let settle_resumable_before_runtime_work = matches!(
-            &turn_control_binding,
-            crate::TurnControlBinding::HostOwned { .. }
-        );
         let turn_control_resolver = turn_control_binding.resolver();
         let binding_id = turn_control_binding.binding_id();
 
@@ -477,7 +473,7 @@ impl LashRuntime {
         for authorization in pending {
             let resumes_here =
                 is_resumable_turn_or_follow_on(authorization.turn_id(), resumable_turn_id);
-            if resumes_here && !settle_resumable_before_runtime_work {
+            if resumes_here {
                 // The interrupted logical turn must replay to the original
                 // closure position before issuing any of this authorization's
                 // promise operations. Retain both its input and exact durable
@@ -493,13 +489,6 @@ impl LashRuntime {
             let settlement = control
                 .settle_authorized(turn_control_resolver, &authorization)
                 .await?;
-            if resumes_here {
-                // Host-owned turn control has no invocation journal whose
-                // prefix can replay this decision. Settle the predecessor's
-                // exact proposal before fresh provider or tool work, while
-                // retaining its input and pin for atomic final consumption.
-                continue;
-            }
             loop {
                 let observed = store
                     .turn_cancel_request_intent(&address)

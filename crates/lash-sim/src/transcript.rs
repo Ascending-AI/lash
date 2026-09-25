@@ -442,7 +442,6 @@ mod tests {
         ProcessEventSemanticsSpec, ProcessEventType, ProcessValueSelector, ProcessWakeSpec,
         ProjectionWatermark, RecoveryContract, RuntimeSessionState, SessionRelation,
         SessionStoreCreateRequest, SessionStoreFactory as _, ToolState,
-        facade_support::InMemorySessionStoreFactory,
     };
 
     use super::*;
@@ -486,7 +485,10 @@ mod tests {
     /// coverage of real boundary shapes lives in the scenario harnesses.
     #[tokio::test]
     async fn process_cutover_reports_retarget_discard_and_pruned_await_as_information() {
-        let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+        let backend = crate::backend::memory_backend()
+            .await
+            .expect("SQLite memory backend");
+        let registry = backend.process_registry();
         let process_id = "transcript-process";
         registry
             .register_process(
@@ -611,10 +613,11 @@ mod tests {
     }
 
     async fn changed_component_commit(collector: CheckpointWriteCollector) -> CheckpointWriteEvent {
-        let factory = ObservedSessionStoreFactory::new(
-            Arc::new(InMemorySessionStoreFactory::new()),
-            collector.clone(),
-        );
+        let backend = crate::backend::memory_backend()
+            .await
+            .expect("SQLite memory backend");
+        let factory =
+            ObservedSessionStoreFactory::new(backend.session_store_factory(), collector.clone());
         let store = factory
             .create_store(&SessionStoreCreateRequest {
                 pending_observer_intents: Vec::new(),

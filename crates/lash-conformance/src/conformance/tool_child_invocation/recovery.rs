@@ -10,7 +10,7 @@ fn recovery_group(
     group_key: &str,
     env_ref: &crate::ProcessExecutionEnvRef,
     routing: ToolChildCompletionRouting,
-    cancellation: Option<crate::TurnControlBindingId>,
+    cancellation: crate::TurnControlBindingId,
 ) -> crate::RuntimeEffectGroup {
     single_leaf_group(
         scope,
@@ -38,7 +38,7 @@ fn recovery_group(
 ///   settlement a reopen serves, and the leaf's body never runs twice: the
 ///   journaled `Pending` attempt is replayed, the deferred resolver is
 ///   re-armed, and the out-of-band resolution is what settles it.
-/// * On the in-memory tier the process *is* the substrate, so the observable
+/// * On a drain-less tier the observable
 ///   edge is the first open: with the opener unregistered the open is refused
 ///   before anything is journaled, and the identical group opens and settles
 ///   once the opener registers.
@@ -56,7 +56,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
     let opener = crate::EffectOpener::for_scope(&crate::admit(scope.clone()))
         .expect("a turn scope derives an opener");
     let group_key = format!("{prefix}-recovery-group");
-    let process_env_store = (fixture.make_processes)().await.process_env_store;
+    let process_env_store = (fixture.make_processes)().await.process_env_store();
     let env_ref = crate::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
 
     let probe_world = (fixture.make_world)(ToolChildWorldSpec {
@@ -65,10 +65,9 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
     .await;
 
     if probe_world.drain.is_none() {
-        // The in-memory tier: no journal survives the process, so the routing
-        // gate is observable only at first open — the group is refused before
-        // anything is recorded, and the same key opens once the opener is
-        // live.
+        // A drain-less tier: the routing gate is observable only at first
+        // open — the group is refused before anything is recorded, and the
+        // same key opens once the opener is live.
         let host = probe_world.host;
         install_child_host(&host, &process_env_store);
         let scoped = host
@@ -79,7 +78,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
             &session_id,
             &group_key,
             &env_ref,
-            deferrable_routing(fixture.deferrable_routing, &host),
+            ToolChildCompletionRouting::Durable,
             recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
         );
         let refusal = scoped
@@ -92,8 +91,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
             "the refusal names the child it cannot route: {refusal}"
         );
 
-        let registry =
-            Arc::new(crate::TestLocalProcessRegistry::default()) as Arc<dyn crate::ProcessRegistry>;
+        let registry = (fixture.make_processes)().await.process_registry();
         let scenario = scenario(fixture, &session_id, serde_json::Value::Null).await;
         let _guard = register_opener(
             &host,
@@ -111,7 +109,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
                 &session_id,
                 &group_key,
                 &env_ref,
-                deferrable_routing(fixture.deferrable_routing, &host),
+                ToolChildCompletionRouting::Durable,
                 recorded_cancellation_authority(&host, &crate::admit(scope.clone())).await,
             ))
             .await
@@ -147,6 +145,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
     let observation = Arc::new(LawObservation::default());
     let call_id = format!("{group_key}-call-0");
     crashed_world(fixture, {
+        let fixture_processes = Arc::clone(&fixture.make_processes);
         let scope = scope.clone();
         let session_id = session_id.clone();
         let group_key = group_key.clone();
@@ -154,7 +153,6 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
         let env_ref = env_ref.clone();
         let observation = Arc::clone(&observation);
         let call_id = call_id.clone();
-        let routing_kind = fixture.deferrable_routing;
         let opener = opener.clone();
         move |world| {
             Box::pin(async move {
@@ -170,7 +168,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
                     &world.host,
                     &scope,
                     provider,
-                    Arc::new(crate::TestLocalProcessRegistry::default()),
+                    fixture_processes().await.process_registry(),
                     env_store,
                     opener,
                     tokio_util::sync::CancellationToken::new(),
@@ -186,7 +184,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
                         &session_id,
                         &group_key,
                         &env_ref,
-                        deferrable_routing(routing_kind, &world.host),
+                        ToolChildCompletionRouting::Durable,
                         recorded_cancellation_authority(&world.host, &crate::admit(scope.clone()))
                             .await,
                     ))
@@ -262,7 +260,6 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
         let group_key = group_key.clone();
         let make_processes = Arc::clone(&fixture.make_processes);
         let env_ref = env_ref.clone();
-        let routing_kind = fixture.deferrable_routing;
         move |peer| {
             Box::pin(async move {
                 let env_store = phase_env_store(&make_processes, &env_ref).await;
@@ -278,7 +275,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
                         &session_id,
                         &group_key,
                         &env_ref,
-                        deferrable_routing(routing_kind, &peer.host),
+                        ToolChildCompletionRouting::Durable,
                         recorded_cancellation_authority(&peer.host, &crate::admit(scope.clone()))
                             .await,
                     ))
@@ -317,7 +314,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
         intent_target: crate::ProcessId::from("unused-in-recovery"),
         start_metadata: serde_json::Value::Null,
     });
-    let registry = (fixture.make_processes)().await.registry;
+    let registry = (fixture.make_processes)().await.process_registry();
     let _guard = register_opener(
         &successor.host,
         &scope,
@@ -378,7 +375,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
             &session_id,
             &group_key,
             &env_ref,
-            deferrable_routing(fixture.deferrable_routing, &successor.host),
+            ToolChildCompletionRouting::Durable,
             recorded_cancellation_authority(&successor.host, &crate::admit(scope.clone())).await,
         ))
         .await

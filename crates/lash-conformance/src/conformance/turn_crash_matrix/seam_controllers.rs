@@ -1,5 +1,5 @@
-//! The crash-matrix seam controllers: recording, crash-injecting, and
-//! store-authority doubles that wrap the fixture's real controller and forward
+//! The crash-matrix seam controllers: recording and crash-injecting
+//! doubles that wrap the fixture's real controller and forward
 //! every group operation to it, so durable effect-group state stays in the
 //! substrate under test.
 
@@ -127,10 +127,6 @@ impl crate::AwaitEventResolver for SeamEffectController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for SeamEffectController {
-    fn effect_journaling(&self) -> crate::EffectJournaling {
-        self.inner.effect_journaling()
-    }
-
     async fn drive_independent_effect_work<'work>(
         &self,
         work: Vec<crate::IndependentEffectWork<'work>>,
@@ -162,6 +158,33 @@ impl RuntimeEffectController for SeamEffectController {
             _ => None,
         };
         let Some((operation, counts_external_execution)) = operation else {
+            if self.control.armed_error_return()
+                == Some(ErrorReturnPlacement::StartGatePeekFinalize)
+                && matches!(
+                    envelope.command,
+                    crate::RuntimeEffectCommand::PeekAwaitEvent { .. }
+                )
+                && envelope.invocation.effect_id()
+                    == lash_core::testing::conformance_support::TurnCancelPeekIdentity::StartGate
+                        .causal_identity()
+            {
+                // FIG-3647: fail the start-gate peek's journal finalize once;
+                // the peek crosses the seam so the oracle can place it.
+                self.journal_faults
+                    .clone()
+                    .unwrap_or_else(|| panic!("the start-gate placement requires a journaled controller"))
+                    .fail_next(
+                        lash_core::facade_support::effect_replay_driver::EffectJournalFaultPoint::Finalize,
+                        envelope.invocation.replay_key(),
+                    );
+                return self
+                    .control
+                    .around(
+                        TurnSeamOperation::Effect(EffectOperation::StartGatePeek),
+                        self.inner.execute_effect(envelope, executor),
+                    )
+                    .await;
+            }
             return self.inner.execute_effect(envelope, executor).await;
         };
         let operation = TurnSeamOperation::Effect(operation);
@@ -245,10 +268,6 @@ impl RuntimeEffectController for SeamEffectController {
         executors: Arc<dyn lash_core::GroupExecutors>,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.inner.register_group_executors(executors)
-    }
-
-    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
-        self.inner.native_effect_groups_substrate()
     }
 
     /// The group child's bound controller is the substrate's, but its seam
@@ -344,157 +363,6 @@ pub(crate) struct CrashAfterCheckpointExecutionController {
     pub(super) inner: Arc<dyn RuntimeEffectController>,
 }
 
-/// Persistent Native journals ordinary effects in the backend controller but
-/// keeps the three reserved turn-control promises in the session store.
-#[derive(Clone)]
-pub(crate) struct StoreOwnedTurnControlController {
-    pub(super) inner: Arc<dyn RuntimeEffectController>,
-}
-
-#[async_trait::async_trait]
-impl crate::AwaitEventResolver for StoreOwnedTurnControlController {
-    async fn prepare_completion_key(
-        &self,
-        scope: &crate::ExecutionScope,
-        wait: crate::AwaitEventWaitIdentity,
-        may_defer: bool,
-    ) -> Result<crate::CompletionKeyPreparation, crate::RuntimeError> {
-        self.inner
-            .prepare_completion_key(scope, wait, may_defer)
-            .await
-    }
-
-    async fn await_event_key(
-        &self,
-        scope: &crate::ExecutionScope,
-        wait: crate::AwaitEventWaitIdentity,
-    ) -> Result<crate::AwaitEventKey, crate::RuntimeError> {
-        self.inner.await_event_key(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &crate::AwaitEventKey,
-        resolution: crate::Resolution,
-    ) -> Result<crate::ResolveOutcome, crate::RuntimeError> {
-        self.inner.resolve_await_event(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &crate::AwaitEventKey,
-    ) -> Result<Option<crate::Resolution>, crate::RuntimeError> {
-        self.inner.peek_await_event(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &crate::AwaitEventKey,
-        cancel: tokio_util::sync::CancellationToken,
-        deadline: Option<std::time::Instant>,
-    ) -> Result<crate::Resolution, crate::RuntimeError> {
-        self.inner.await_await_event(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), crate::RuntimeError> {
-        self.inner.revoke_await_events_for_session(session_id).await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), crate::RuntimeError> {
-        self.inner.cancel_await_events_for_session(session_id).await
-    }
-}
-
-#[async_trait::async_trait]
-impl RuntimeEffectController for StoreOwnedTurnControlController {
-    async fn execute_effect(
-        &self,
-        envelope: RuntimeEffectEnvelope,
-        executor: RuntimeEffectLocalExecutor<'_>,
-    ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
-        self.inner.execute_effect(envelope, executor).await
-    }
-
-    async fn open_effect_group(
-        &self,
-        group: lash_core::RuntimeEffectGroup,
-    ) -> Result<lash_core::EffectGroupHandle, lash_core::RuntimeEffectControllerError> {
-        self.inner.open_effect_group(group).await
-    }
-
-    fn register_group_executors(
-        &self,
-        executors: Arc<dyn lash_core::GroupExecutors>,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.register_group_executors(executors)
-    }
-
-    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
-        self.inner.native_effect_groups_substrate()
-    }
-
-    fn group_child_scoped_controller(
-        &self,
-        admitted: crate::AdmittedScope,
-        binding: crate::GroupChildBinding,
-    ) -> Result<Option<crate::ScopedEffectController<'static>>, crate::RuntimeError> {
-        self.inner.group_child_scoped_controller(admitted, binding)
-    }
-
-    async fn await_next_settlement(
-        &self,
-        handle: &mut lash_core::EffectGroupHandle,
-        cancel: lash_core::CancellationToken,
-    ) -> Result<lash_core::GroupSettlement, lash_core::RuntimeEffectControllerError> {
-        self.inner.await_next_settlement(handle, cancel).await
-    }
-
-    async fn close_effect_group(
-        &self,
-        handle: lash_core::EffectGroupHandle,
-        disposition: lash_core::LoserPolicy,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner.close_effect_group(handle, disposition).await
-    }
-
-    async fn read_group_settlement(
-        &self,
-        group_key: &str,
-        rank: u64,
-    ) -> Result<
-        Option<lash_core::runtime::effect::RankedGroupSettlement>,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.inner.read_group_settlement(group_key, rank).await
-    }
-
-    async fn commit_group_child_final(
-        &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
-    ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
-        lash_core::RuntimeEffectControllerError,
-    > {
-        self.inner.commit_group_child_final(commit).await
-    }
-
-    async fn await_group_child_drain_admission(
-        &self,
-        group_key: &str,
-        commit_seq: u64,
-    ) -> Result<(), lash_core::RuntimeEffectControllerError> {
-        self.inner
-            .await_group_child_drain_admission(group_key, commit_seq)
-            .await
-    }
-}
-
 #[async_trait::async_trait]
 impl crate::AwaitEventResolver for CrashAfterCheckpointExecutionController {
     fn await_event_authority_binding_id(&self) -> Option<String> {
@@ -561,10 +429,6 @@ impl crate::AwaitEventResolver for CrashAfterCheckpointExecutionController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for CrashAfterCheckpointExecutionController {
-    fn effect_journaling(&self) -> crate::EffectJournaling {
-        self.inner.effect_journaling()
-    }
-
     async fn drive_independent_effect_work<'work>(
         &self,
         work: Vec<crate::IndependentEffectWork<'work>>,
@@ -610,10 +474,6 @@ impl RuntimeEffectController for CrashAfterCheckpointExecutionController {
         executors: Arc<dyn lash_core::GroupExecutors>,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.inner.register_group_executors(executors)
-    }
-
-    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
-        self.inner.native_effect_groups_substrate()
     }
 
     fn group_child_scoped_controller(

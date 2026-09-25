@@ -12,7 +12,6 @@ mod await_event_support;
 #[doc(hidden)]
 pub mod control;
 mod controller_error;
-mod native_controller;
 mod process_local;
 
 mod language_runtime;
@@ -68,12 +67,9 @@ pub fn effect_groups_unsupported(controller: &str) -> RuntimeEffectControllerErr
 pub use lash_core_store::turn_control_binding::admitted_turn_cancel_scope;
 pub use lash_core_store::turn_control_binding::turn_control_binding_id_for_scope;
 pub use lash_core_store::turn_control_binding::{TurnControlBindingId, TurnControlBindingIdError};
-pub use native_controller::NativeRuntimeEffectController;
-pub(crate) use native_controller::{NativeEffectGroups, NativeGroupClosing};
 pub use trigger::TriggerLocalExecution;
 pub use turn_control_authority::{
-    EffectJournaling, TurnCancellationAuthority, TurnControlAttachment, TurnControlAuthorityOwner,
-    TurnControlBinding, concrete_turn_cancellation_authority,
+    TurnCancellationAuthority, TurnControlAttachment, TurnControlBinding,
 };
 
 use crate::LlmRequest as CoreLlmRequest;
@@ -486,9 +482,9 @@ enum RuntimeEffectLocalExecutorState<'run> {
 
 /// Scoped local executor provided to a [`RuntimeEffectController`] for one effect.
 ///
-/// Durable controllers may ignore it and replay their own recorded result. The
-/// default native controller delegates to it, so local provider/tool/checkpoint
-/// work still crosses the same `execute_effect` boundary as durable controllers.
+/// A controller runs it on a first execution and replays its own recorded
+/// result on a redrive, so local provider/tool/checkpoint work always crosses
+/// the `execute_effect` boundary.
 pub struct RuntimeEffectLocalExecutor<'run> {
     state: RuntimeEffectLocalExecutorState<'run>,
     replay_trace: Option<super::RuntimeEffectReplayTrace>,

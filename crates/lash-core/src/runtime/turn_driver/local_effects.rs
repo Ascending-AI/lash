@@ -203,7 +203,6 @@ pub(super) fn turn_effect_executor(
         runtime_lease_owner: driver.runtime_lease_owner.clone(),
         turn_phase_probe: driver.turn_phase_probe.clone(),
         turn_control: Arc::clone(&driver.turn_control),
-        observes_durable_cancel_after_llm: driver.observes_durable_cancel_after_llm,
         protocol_reply: Default::default(),
         live_opener: std::sync::Mutex::new(None),
         opener_state: driver.opener_state.clone(),

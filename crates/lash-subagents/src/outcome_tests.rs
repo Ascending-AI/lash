@@ -1,6 +1,5 @@
 use super::*;
-use lash_core::{ProcessAwaitOutput, TestLocalProcessRegistry};
-use lash_core::{ProcessLifecycle as _, ProcessRegistrar as _, ProcessRetention as _};
+use lash_core::ProcessAwaitOutput;
 use lash_sansio::ProcessId;
 use serde_json::json;
 
@@ -15,7 +14,10 @@ async fn registry_result(
     prune: bool,
     output_schema: Option<&Value>,
 ) -> Result<Value, String> {
-    let registry = Arc::new(TestLocalProcessRegistry::default());
+    let backend = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open a SQLite memory backend");
+    let registry = lash_core::Backend::process_registry(&backend);
     let process_id = "subagent-outcome";
     registry
         .register_process(lash_core::ProcessRegistration::new(

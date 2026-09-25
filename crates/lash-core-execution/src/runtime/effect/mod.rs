@@ -1,7 +1,4 @@
 pub mod await_event_coordinator;
-mod await_events {
-    pub use lash_core_effect::core_internal::AwaitEventRegistry;
-}
 pub mod effect_replay_driver;
 pub use effect_replay_driver::{RecordedKeyRange, RecordedKeys};
 mod envelope;
@@ -16,9 +13,6 @@ mod layered_host;
 use lash_core_store::effect_identity as identity_types;
 mod live_openers;
 pub use live_openers::{LiveOpenerContext, LiveOpenerGuard, LiveOpenerRegistry};
-mod native_host;
-mod store_turn_control;
-pub use store_turn_control::bind_store_turn_control_authority;
 mod tool_child;
 pub use tool_child::{
     TOOL_CHILD_REQUEST_VERSION, ToolChildAdmission, ToolChildCompletionRouting, ToolChildRequest,
@@ -53,18 +47,17 @@ pub use envelope::{
 pub use executor::{
     AdmittedScope, AdmittedScopeError, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity,
     BoundaryReason, CommandJournalGuard, CompletionKeyPreparation, EffectHost,
-    EffectJournalIdentity, EffectJournalRetirement, EffectJournaling, EffectOpener,
-    EffectRetirementGate, ExecutionScope, ExternalCompletionError, IndependentEffectWork,
-    NativeRuntimeEffectController, ProcessLocalExecution, ProcessOutcomeObserver,
-    ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard,
-    QueuedLaneHolder, QueuedLaneProbe, RecordedJournal, RecordedKeyFence, Resolution,
-    ResolveOutcome, RuntimeAwaitEventOptions, RuntimeEffectController,
+    EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
+    ExecutionScope, ExternalCompletionError, IndependentEffectWork, ProcessLocalExecution,
+    ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt,
+    QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, RecordedJournal, RecordedKeyFence,
+    Resolution, ResolveOutcome, RuntimeAwaitEventOptions, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectLocalExecutor, RuntimeSleepOptions,
     ScopeBoundController, ScopedEffectController, SegmentProgress, ServedOnlyRange,
     ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution,
     TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
-    TurnControlAuthorityOwner, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
-    concrete_turn_cancellation_authority, turn_control_binding_id_for_scope,
+    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
+    turn_control_binding_id_for_scope,
 };
 pub use group::{
     EffectGroupDrainBudget, EffectGroupHandle, EffectGroupMembership, GroupChildBinding,
@@ -85,7 +78,6 @@ pub use identity_types::{
 pub use lash_sansio::{CausalRef, EffectAddress};
 #[cfg(any(test, feature = "testing"))]
 pub use layered_host::{EffectLayer, LayeredEffectHost};
-pub use native_host::NativeEffectHost;
 pub use validation::{
     CanonicalRuntimeEffectEnvelope, RuntimeEffectReplayMismatchReport, RuntimeEffectReplayTrace,
     validate_replayed_effect_envelope,

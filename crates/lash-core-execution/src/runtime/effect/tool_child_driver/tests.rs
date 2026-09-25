@@ -94,6 +94,7 @@ fn request_with_identity(identity: ToolAttemptEffectIdentity) -> ToolChildReques
             session_id: SessionId::from("child-session"),
             agent_frame_id: FrameNodeId::new("child-frame").expect("a valid frame id"),
         },
+        crate::TurnControlBindingId::new("recorded-authority").expect("a valid binding id"),
         ProcessExecutionEnvRef::new("env-ref"),
         ToolChildCompletionRouting::Inline,
     )
@@ -807,9 +808,7 @@ async fn a_billed_failed_completion_attempt_lands_on_the_child_usage() {
 /// reach it is the recorded binding's — never a foreign opener's.
 #[tokio::test]
 async fn the_cancel_wait_observes_the_admitted_scope() {
-    let with_authority = request().with_cancellation_authority(
-        crate::TurnControlBindingId::new("recorded-authority").expect("a valid binding id"),
-    );
+    let with_authority = request();
     let dispatch = Arc::new(rebound(&with_authority));
     let wait = child_turn_cancel_wait(
         &dispatch,
@@ -824,18 +823,6 @@ async fn the_cancel_wait_observes_the_admitted_scope() {
         ExecutionScope::turn("child-session", "turn"),
         "the wait observes the child's admitted scope"
     );
-
-    let request = request();
-    let dispatch = Arc::new(rebound(&request));
-    let wait = child_turn_cancel_wait(
-        &dispatch,
-        &request,
-        &tokio_util::sync::CancellationToken::new(),
-    );
-    assert!(
-        wait.process_turn_cancellation().is_none(),
-        "no recorded authority, no turn observation"
-    );
 }
 
 /// Records the turn-cancel shape of every journaled sleep, the way the
@@ -847,7 +834,12 @@ struct SleepShapeRecorder {
     sleeps: std::sync::Mutex<Vec<(bool, Option<crate::ExecutionScope>)>>,
 }
 
-impl crate::AwaitEventResolver for SleepShapeRecorder {}
+impl crate::AwaitEventResolver for SleepShapeRecorder {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl crate::RuntimeEffectController for SleepShapeRecorder {
@@ -938,14 +930,10 @@ impl crate::ToolProvider for RetryOnceTools {
 
 /// §3's exact-wait line inside a nested batch: the driver computes the
 /// cancellation trio once from the *recorded* authority and every nested
-/// retry and deferred wait rides that exact value. A child admitted with no
-/// cooperative authority must keep its nested waits unobserved even though
-/// its admitted scope names a turn — a wait derived from the scope alone
-/// (`ScopedEffectController::turn_cancel_wait` always yields an observing
-/// trio) would attach the host's gate and let a signalled turn cancel reach a
-/// child that never admitted the signal.
+/// retry and deferred wait rides that exact value, so a nested retry sleep
+/// observes the child's own gate and no other.
 #[tokio::test]
-async fn a_nested_retry_sleep_observes_no_host_turn_gate() {
+async fn a_nested_retry_sleep_observes_the_childs_recorded_gate() {
     let recorder = Arc::new(SleepShapeRecorder::default());
     let controller = ScopedEffectController::shared(
         recorder.clone(),
@@ -978,10 +966,11 @@ async fn a_nested_retry_sleep_observes_no_host_turn_gate() {
         &request,
         &tokio_util::sync::CancellationToken::new(),
     );
-    assert!(
-        wait.process_turn_cancellation().is_none(),
-        "a child admitted without a cancellation authority waits unobserved"
-    );
+    let observed = wait
+        .process_turn_cancellation()
+        .expect("a recorded authority observes turn cancellation")
+        .scope
+        .clone();
     let body_context = child_tool_context(
         &dispatch,
         &request,
@@ -1007,8 +996,8 @@ async fn a_nested_retry_sleep_observes_no_host_turn_gate() {
     assert_eq!(sleeps.len(), 1, "exactly one retry sleep is journaled");
     assert_eq!(
         sleeps[0],
-        (false, None),
-        "the nested retry sleep must not attach the host's turn-cancel gate"
+        (true, Some(observed)),
+        "the nested retry sleep rides the child's recorded turn-cancel gate"
     );
 }
 
@@ -1154,7 +1143,7 @@ async fn an_unresolved_environment_settles_by_whose_fact_it_is() {
     // Nothing stored under the reference: the request's outcome.
     let missing = settle(
         &request,
-        Arc::new(crate::InMemoryProcessExecutionEnvStore::new()),
+        Arc::new(crate::testing::UnavailableProcessExecutionEnvStore),
     )
     .await;
     assert!(!retried(&missing), "a missing environment is recorded");
@@ -1224,7 +1213,12 @@ impl IssueOrderRecorder {
     }
 }
 
-impl crate::AwaitEventResolver for IssueOrderRecorder {}
+impl crate::AwaitEventResolver for IssueOrderRecorder {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl crate::RuntimeEffectController for IssueOrderRecorder {

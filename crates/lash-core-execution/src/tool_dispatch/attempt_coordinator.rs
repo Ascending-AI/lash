@@ -232,8 +232,8 @@ pub struct GroupChildCoordination {
 /// Refuses a child whose recorded routing this deployment cannot honour.
 ///
 /// The routing mismatch ADR 0099 §3 amendment 2 names: "The request records
-/// which of `inline`, `durable` or `process-lifetime` the child was admitted
-/// under, so a recovered child never derives a key nothing will resolve." A
+/// which of `inline` or `durable` the child was admitted under, so a recovered
+/// child never derives a key nothing will resolve." A
 /// child admitted with a durable completion key that lands on a host issuing
 /// none would park on a key no resolver can reach, and a child admitted inline
 /// that suddenly acquires a key would defer where its opener expects a value.
@@ -283,10 +283,7 @@ pub async fn coordinate_tool_invocation<'run>(
     let may_defer = match group_child.as_ref().map(|child| &child.completion_routing) {
         None => context.attempt_may_defer(&call.tool_id, execution_grant.as_deref()),
         Some(crate::runtime::ToolChildCompletionRouting::Inline) => false,
-        Some(
-            crate::runtime::ToolChildCompletionRouting::Durable
-            | crate::runtime::ToolChildCompletionRouting::ProcessLifetime { .. },
-        ) => true,
+        Some(crate::runtime::ToolChildCompletionRouting::Durable) => true,
     };
 
     for attempt in 1..=max_attempts {
@@ -308,10 +305,7 @@ pub async fn coordinate_tool_invocation<'run>(
             };
             let honoured = match recorded {
                 crate::runtime::ToolChildCompletionRouting::Inline => observed == "not-needed",
-                crate::runtime::ToolChildCompletionRouting::Durable
-                | crate::runtime::ToolChildCompletionRouting::ProcessLifetime { .. } => {
-                    observed == "issued"
-                }
+                crate::runtime::ToolChildCompletionRouting::Durable => observed == "issued",
             };
             if !observed.is_empty() && !honoured {
                 abandon_to_open_buffers(context, triggers, captures);

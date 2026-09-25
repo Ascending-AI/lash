@@ -20,9 +20,11 @@ pub trait AwaitEventResolver: Send + Sync {
     /// Stable identity of the durable authority that minted keys accepted by
     /// this resolver. Durable turn-control composition uses this to prevent a
     /// host label from being paired with another owner's controller and keys.
-    fn await_event_authority_binding_id(&self) -> Option<String> {
-        None
-    }
+    ///
+    /// Every resolver answers explicitly: turn control and durable tool-child
+    /// completion refuse a resolver that names no authority, so a forwarding
+    /// layer must pass its inner answer through rather than inherit `None`.
+    fn await_event_authority_binding_id(&self) -> Option<String>;
 
     /// Acquire the authoritative session-execution lane a durable queued drain
     /// needs before it may claim work.
@@ -279,8 +281,8 @@ pub trait AwaitEventResolver: Send + Sync {
 
     /// Whether `scope` is fenced by a scope-exact retirement this resolver
     /// holds. Every admission path that runs effects for a scope consults it
-    /// before executing, so a retired scope is refused even where no journal
-    /// claim exists to refuse it (the in-process host). Resolvers whose
+    /// before executing, so a retired scope is refused even on a path that
+    /// makes no journal claim. Resolvers whose
     /// journal already refuses retired scopes at claim time may answer
     /// `false`.
     async fn await_event_scope_is_retired(

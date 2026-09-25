@@ -1,5 +1,5 @@
-//! The journaled-tier effect host for the cold-process crash matrix: a thin
-//! projection over the store's effect controller, which carries every
+//! The crash matrix's effect host: a thin projection over the fixture's
+//! journaled effect controller, which carries every
 //! capability the host lends (await events, group executors, bound group-child
 //! scopes) on the shared replay driver.
 

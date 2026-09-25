@@ -171,18 +171,6 @@ impl RuntimeSessionServices {
                     .process_wake_delivery_policy,
                 clock: Arc::clone(&services.current.host.core.clock),
             };
-            // The issuer is read from the installed tool-child host rather
-            // than `control.effect_host`: a bound session re-binds the latter
-            // to the store's turn-control authority while the children keep
-            // resolving on the host this issuer names (ADR 0099 §14).
-            let tool_child_completion_issuer = services
-                .current
-                .host
-                .core
-                .control
-                .tool_children
-                .as_ref()
-                .and_then(|host| host.tool_child_completion_issuer());
             let mut context = crate::RuntimeExecutionContext::new(
                 services.current.session_id.clone(),
                 Arc::clone(&dispatch),
@@ -213,9 +201,6 @@ impl RuntimeSessionServices {
                     .effect_host
                     .effect_group_closing(),
             );
-            if let Some(issuer) = tool_child_completion_issuer {
-                context = context.with_tool_child_completion_issuer(issuer);
-            }
             if let Some(invocation) = execution_context_for_runtime.causal_invocation.clone() {
                 context = context.with_parent_invocation(invocation);
             }

@@ -38,10 +38,9 @@ pub(super) async fn restate_handler_replay_retries_final_lash_commit_idempotentl
     );
     host.durability.attachment_store = Arc::new(
         lash_core::facade_support::SessionAttachmentStore::ephemeral(Arc::new(
-            DurableMemoryAttachmentStore::default(),
+            lash_core::facade_support::FileAttachmentStore::new(dir.path().join("attachments")),
         )),
     );
-    host.durability.process_env_store = Arc::new(DurableMemoryProcessEnvStore::default());
     let store = Arc::new(
         lash_sqlite_store::Store::open(&dir.path().join("session.db"))
             .await
@@ -155,10 +154,9 @@ pub(super) async fn restate_replay_lease_acquisition_takes_recorded_branch() {
     );
     host.durability.attachment_store = Arc::new(
         lash_core::facade_support::SessionAttachmentStore::ephemeral(Arc::new(
-            DurableMemoryAttachmentStore::default(),
+            lash_core::facade_support::FileAttachmentStore::new(dir.path().join("attachments")),
         )),
     );
-    host.durability.process_env_store = Arc::new(DurableMemoryProcessEnvStore::default());
 
     let store = Arc::new(
         lash_sqlite_store::Store::open(&dir.path().join("session.db"))
@@ -464,12 +462,9 @@ finish(await handle);
     );
     host.durability.attachment_store = Arc::new(
         lash_core::facade_support::SessionAttachmentStore::ephemeral(Arc::new(
-            DurableMemoryAttachmentStore::default(),
+            lash_core::facade_support::FileAttachmentStore::new(dir.path().join("attachments")),
         )),
     );
-    let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
-        Arc::new(DurableMemoryProcessEnvStore::default());
-    host.durability.process_env_store = Arc::clone(&process_env_store);
     host = host.with_process_engine_registration(
         lash_lashlang_runtime::lashlang_process_engine_registration(
             lash_lashlang_runtime::LashlangProcessEngine::new(
@@ -924,8 +919,9 @@ pub(super) async fn restate_workflow_submission_failure_cancels_the_row_it_regis
     let context = Arc::new(RecordingContext::default());
     context.fail_next_process_workflow_start();
     let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let env_store = Arc::new(lash_core::InMemoryProcessExecutionEnvStore::default());
+    let stores = memory_process_stores().await;
+    let registry = Arc::clone(&stores.registry);
+    let env_store = Arc::clone(&stores.env_store);
     let process_id = ProcessId::from("restate-start-failed-cancels");
     let spec = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::empty(),
@@ -936,8 +932,7 @@ pub(super) async fn restate_workflow_submission_failure_cancels_the_row_it_regis
     let injected_error = host
         .execute_effect(
             start_recovery_effect(&process_id, &spec),
-            registry_local_executor(registry.clone())
-                .with_process_env_store(env_store.clone() as Arc<dyn ProcessExecutionEnvStore>),
+            registry_local_executor(registry.clone()).with_process_env_store(env_store.clone()),
         )
         .await
         .expect_err("the submission failure must reach the caller as an error");
@@ -995,13 +990,12 @@ pub(super) async fn restate_failed_start_compensation_returns_the_registered_rec
     let context = Arc::new(RecordingContext::default());
     context.fail_next_process_workflow_start();
     let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    registry
-        .fail_next_cancel_request_for_testing(PluginError::Session(
-            "injected cancel-request write failure".to_string(),
-        ))
-        .await;
-    let env_store = Arc::new(lash_core::InMemoryProcessExecutionEnvStore::default());
+    let stores = memory_process_stores().await;
+    let registry = Arc::clone(&stores.registry);
+    registry.fail_next_cancel_request(PluginError::Session(
+        "injected cancel-request write failure".to_string(),
+    ));
+    let env_store = Arc::clone(&stores.env_store);
     let process_id = ProcessId::from("restate-start-failed-compensation-fails");
     let spec = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::empty(),
@@ -1011,8 +1005,7 @@ pub(super) async fn restate_failed_start_compensation_returns_the_registered_rec
     let outcome = host
         .execute_effect(
             start_recovery_effect(&process_id, &spec),
-            registry_local_executor(registry.clone())
-                .with_process_env_store(env_store.clone() as Arc<dyn ProcessExecutionEnvStore>),
+            registry_local_executor(registry.clone()).with_process_env_store(env_store.clone()),
         )
         .await
         .expect("a failed compensation write must return the record, not the error");
@@ -1047,23 +1040,20 @@ pub(super) async fn restate_failed_start_compensation_returns_the_registered_rec
 pub(super) async fn restate_external_ref_write_failure_preserves_inputs_for_exact_recovery() {
     let context = Arc::new(RecordingContext::default());
     let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    registry
-        .fail_next_external_ref_write_for_testing(PluginError::Session(
-            "injected external-ref write failure".to_string(),
-        ))
-        .await;
-    let env_store = Arc::new(lash_core::InMemoryProcessExecutionEnvStore::default());
+    let stores = memory_process_stores().await;
+    let registry = Arc::clone(&stores.registry);
+    registry.fail_next_external_ref_write(PluginError::Session(
+        "injected external-ref write failure".to_string(),
+    ));
+    let env_store = Arc::clone(&stores.env_store);
     let process_id = ProcessId::from("restate-start-recovery-external-ref");
     let spec = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::empty(),
         recovery_session_policy(),
     );
     let expected_ref = spec.stable_ref().expect("stable environment ref");
-    let executor = || {
-        registry_local_executor(registry.clone())
-            .with_process_env_store(env_store.clone() as Arc<dyn ProcessExecutionEnvStore>)
-    };
+    let executor =
+        || registry_local_executor(registry.clone()).with_process_env_store(env_store.clone());
 
     let injected_error = host
         .execute_effect(start_recovery_effect(&process_id, &spec), executor())
@@ -1114,8 +1104,9 @@ pub(super) async fn restate_ambiguous_submission_failure_leaves_the_row_for_reco
     let context = Arc::new(RecordingContext::default());
     context.fail_next_process_workflow_start_ambiguously();
     let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let env_store = Arc::new(lash_core::InMemoryProcessExecutionEnvStore::default());
+    let stores = memory_process_stores().await;
+    let registry = Arc::clone(&stores.registry);
+    let env_store = Arc::clone(&stores.env_store);
     let process_id = ProcessId::from("restate-start-ambiguous");
     let spec = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::empty(),
@@ -1125,8 +1116,7 @@ pub(super) async fn restate_ambiguous_submission_failure_leaves_the_row_for_reco
     let outcome = host
         .execute_effect(
             start_recovery_effect(&process_id, &spec),
-            registry_local_executor(registry.clone())
-                .with_process_env_store(env_store.clone() as Arc<dyn ProcessExecutionEnvStore>),
+            registry_local_executor(registry.clone()).with_process_env_store(env_store.clone()),
         )
         .await
         .expect("an ambiguous failure must return the record, not the error");
@@ -1166,27 +1156,24 @@ pub(super) async fn restate_ambiguous_submission_failure_leaves_the_row_for_reco
 pub(super) async fn restate_exact_retry_start_failure_does_not_cancel_the_first_attempts_row() {
     let context = Arc::new(RecordingContext::default());
     let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
-    let env_store = Arc::new(lash_core::InMemoryProcessExecutionEnvStore::default());
+    let stores = memory_process_stores().await;
+    let registry = Arc::clone(&stores.registry);
+    let env_store = Arc::clone(&stores.env_store);
     let process_id = ProcessId::from("restate-exact-retry-start-failure");
     let spec = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::empty(),
         recovery_session_policy(),
     );
-    let executor = || {
-        registry_local_executor(registry.clone())
-            .with_process_env_store(env_store.clone() as Arc<dyn ProcessExecutionEnvStore>)
-    };
+    let executor =
+        || registry_local_executor(registry.clone()).with_process_env_store(env_store.clone());
 
     // The first attempt reaches Restate and registers the row, but its
     // external-reference write fails, so the row it leaves is nonterminal with
     // no reference — exactly the shape the second attempt's compensation would
     // find terminalisable.
-    registry
-        .fail_next_external_ref_write_for_testing(PluginError::Session(
-            "injected external-ref write failure".to_string(),
-        ))
-        .await;
+    registry.fail_next_external_ref_write(PluginError::Session(
+        "injected external-ref write failure".to_string(),
+    ));
     let _ = host
         .execute_effect(start_recovery_effect(&process_id, &spec), executor())
         .await
@@ -1245,7 +1232,8 @@ pub(super) async fn restate_registration_conflict_refuses_without_cancelling_the
     // before that, so no compensation path can run.
     context.fail_next_process_workflow_start();
     let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
-    let registry = Arc::new(lash_core::TestLocalProcessRegistry::default());
+    let stores = memory_process_stores().await;
+    let registry = Arc::clone(&stores.registry);
     let process_id = ProcessId::from("restate-registration-conflict");
     let existing = registry
         .register_process(rerunnable_registration(process_id.as_str()))
@@ -1260,9 +1248,7 @@ pub(super) async fn restate_registration_conflict_refuses_without_cancelling_the
         .execute_effect(
             start_recovery_effect(&process_id, &spec),
             registry_local_executor(registry.clone())
-                .with_process_env_store(Arc::new(
-                    lash_core::InMemoryProcessExecutionEnvStore::default(),
-                ) as Arc<dyn ProcessExecutionEnvStore>),
+                .with_process_env_store(Arc::clone(&stores.env_store)),
         )
         .await
         .expect_err("a colliding registration is refused");

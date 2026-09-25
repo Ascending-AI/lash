@@ -6,7 +6,7 @@ async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
     let executions = Arc::new(AtomicUsize::new(0));
     let registry = process_registry();
     let store_factory: Arc<dyn lash_core::SessionStoreFactory> =
-        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new());
+        memory_session_store_factory().await;
     let env_ref = persist_recovery_env_ref().await;
     let registration =
         counting_tool_registration(process_id, lash_core::RecoveryContract::Rerunnable, env_ref);

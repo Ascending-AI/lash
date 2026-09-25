@@ -18,6 +18,7 @@ impl RuntimeScenarioContext {
             commit = commit.deferring_interrupted_turn_inputs(TurnId::from(turn_id), None);
             commit = lash_core::testing::store_fixtures::authorize_completion_deferral_for_test(
                 self.store(),
+                &self.turn_control,
                 &self.owner_and_lease().1.fence(),
                 commit,
             )

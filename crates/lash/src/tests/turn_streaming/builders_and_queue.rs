@@ -44,10 +44,8 @@ pub(super) async fn turn_run_uses_configured_effect_host_without_explicit_effect
 
 #[tokio::test]
 pub(super) async fn durable_configured_effect_host_scopes_plain_turn_entry_points() -> Result<()> {
-    let effect_host = Arc::new(DurableNoopEffectHost::default());
-    let host = Arc::clone(&effect_host);
-    let backend = DecoratedBackend::over_sqlite(memory_backend().await).effect_host(move |_| host);
-    let core = LashCore::standard_builder(Arc::new(backend), crate::TurnBudget::Unbounded)
+    let recorder = EffectRecorder::default();
+    let core = LashCore::standard_builder(recorder.backend().await, crate::TurnBudget::Unbounded)
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .without_queued_work()
@@ -91,7 +89,7 @@ pub(super) async fn durable_configured_effect_host_scopes_plain_turn_entry_point
 
     assert_eq!(run.assistant_message(), Some("echo: run"));
     assert_eq!(
-        effect_host.selected_scopes(),
+        recorder.scopes(),
         vec![
             lash_core::ExecutionScope::turn("durable-default-effect-host", "durable-stream-to"),
             lash_core::ExecutionScope::turn("durable-default-effect-host", "durable-run"),
@@ -102,8 +100,7 @@ pub(super) async fn durable_configured_effect_host_scopes_plain_turn_entry_point
             ),
         ]
     );
-    let effect_turn_ids = effect_host
-        .controller
+    let effect_turn_ids = recorder
         .invocations()
         .into_iter()
         .filter(|invocation| invocation.kind == lash_core::RuntimeEffectKind::LlmCall)
@@ -273,14 +270,18 @@ pub(super) async fn advanced_turn_id_precedence_prefers_builder_then_scope_fallb
 
 #[tokio::test]
 pub(super) async fn explicit_effect_controller_creates_turn_scope_internally() -> Result<()> {
-    let recorder = RecordingNativeEffectController::default();
+    let recorder = EffectRecorder::default();
     let core = standard_core().await;
     let session = core.session("explicit-handler-effects").open().await?;
+    let controller = recorder.controller_for(
+        &core,
+        lash_core::ExecutionScope::turn("explicit-handler-effects", "handler-turn"),
+    );
 
     session
         .turn(TurnInput::text("handler"))
         .turn_id("handler-turn")
-        .run_with_effects(&recorder)
+        .run_with_effects(controller.as_ref())
         .await?;
 
     let llm_invocation = recorder
@@ -432,7 +433,7 @@ pub(super) async fn all_queued_builder_families_begin_with_turn_started() -> Res
     .build(crate::testing::runtime_lease_owner())?;
     let session_id = "queued-builder-turn-starts";
     let session = core.session(session_id).open().await?;
-    let controller = RecordingNativeEffectController::default();
+    let recorder = EffectRecorder::default();
 
     session
         .durable()
@@ -460,7 +461,17 @@ pub(super) async fn all_queued_builder_families_begin_with_turn_started() -> Res
     let scoped_automatic = session
         .queued_turn()
         .turn_id("scoped-automatic-queued-turn")
-        .run_with_effects(&controller)
+        .run_with_effects(
+            recorder
+                .controller_for(
+                    &core,
+                    lash_core::ExecutionScope::queue_drain(
+                        session_id,
+                        "scoped-automatic-queued-turn",
+                    ),
+                )
+                .as_ref(),
+        )
         .await?
         .expect("scoped automatic queued turn");
     assert_turn_started_first(
@@ -526,7 +537,17 @@ pub(super) async fn all_queued_builder_families_begin_with_turn_started() -> Res
         .queued_turn()
         .batch_ids([scoped_selected.batch_id])
         .turn_id("scoped-selected-queued-turn")
-        .run_with_effects(&controller)
+        .run_with_effects(
+            recorder
+                .controller_for(
+                    &core,
+                    lash_core::ExecutionScope::queue_drain(
+                        session_id,
+                        "scoped-selected-queued-turn",
+                    ),
+                )
+                .as_ref(),
+        )
         .await?
         .turn
         .expect("scoped selected queued turn");
@@ -2305,7 +2326,7 @@ pub(super) async fn durable_application_read_survives_a_trimmed_live_replay_wind
 #[tokio::test]
 pub(super) async fn queued_turn_explicit_effects_create_queue_drain_scope_internally() -> Result<()>
 {
-    let recorder = RecordingNativeEffectController::default();
+    let recorder = EffectRecorder::default();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         memory_backend().await,
         crate::TurnBudget::Unbounded,
@@ -2315,6 +2336,10 @@ pub(super) async fn queued_turn_explicit_effects_create_queue_drain_scope_intern
     .without_queued_work()
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("queued-explicit-effects").open().await?;
+    let controller = recorder.controller_for(
+        &core,
+        lash_core::ExecutionScope::queue_drain("queued-explicit-effects", "handler-drain"),
+    );
     session
         .durable()
         .enqueue(TurnInput::text("queued handler"))
@@ -2324,7 +2349,7 @@ pub(super) async fn queued_turn_explicit_effects_create_queue_drain_scope_intern
     let output = session
         .queued_turn()
         .drain_id("handler-drain")
-        .run_with_effects(&recorder)
+        .run_with_effects(controller.as_ref())
         .await?
         .expect("queued turn should run");
 
@@ -2341,7 +2366,7 @@ pub(super) async fn queued_turn_explicit_effects_create_queue_drain_scope_intern
 #[tokio::test]
 pub(super) async fn selected_queued_turn_with_effects_preserves_batch_ids_and_scope() -> Result<()>
 {
-    let recorder = RecordingNativeEffectController::default();
+    let recorder = EffectRecorder::default();
     let backend = memory_backend().await;
     let store_factory = backend.session_store_factory();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
@@ -2386,7 +2411,14 @@ pub(super) async fn selected_queued_turn_with_effects_preserves_batch_ids_and_sc
             "absent-batch",
         ])
         .drain_id("selected-handler-drain")
-        .run_with_effects(&recorder)
+        .run_with_effects(
+            recorder
+                .controller_for(
+                    &core,
+                    lash_core::ExecutionScope::queue_drain(session_id, "selected-handler-drain"),
+                )
+                .as_ref(),
+        )
         .await?;
     assert_turn_started_first(
         &outcome.turn.expect("selected turn").activities,
@@ -2414,7 +2446,15 @@ pub(super) async fn selected_queued_turn_with_effects_preserves_batch_ids_and_sc
         .queued_turn()
         .batch_ids([receipt.batch_id.as_str(), "absent-batch"])
         .drain_id("selected-handler-drain")
-        .stream_to_with_effects(&events, &recorder)
+        .stream_to_with_effects(
+            &events,
+            recorder
+                .controller_for(
+                    &core,
+                    lash_core::ExecutionScope::queue_drain(session_id, "selected-handler-drain"),
+                )
+                .as_ref(),
+        )
         .await?;
     assert!(retry.settled_without_selected_turn());
     assert_eq!(recorder.invocations().len(), invocations.len());

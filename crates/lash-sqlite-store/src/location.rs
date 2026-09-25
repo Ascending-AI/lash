@@ -234,16 +234,6 @@ impl DatabaseLocation {
     pub(crate) fn identity(&self) -> &Arc<str> {
         &self.identity
     }
-
-    /// The binding a durable-core store's own turn-cancellation authority
-    /// answers to: `sqlite:<path as opened>` for a file, as every file catalog
-    /// has recorded it, and the backend's identity in memory.
-    pub(crate) fn store_authority_identity(&self) -> String {
-        match &self.target {
-            DatabaseTarget::File(path) => format!("sqlite:{}", path.to_string_lossy()),
-            DatabaseTarget::Memory(_) => self.identity.to_string(),
-        }
-    }
 }
 
 /// Refuse a path-taking constructor a spelling that is not a database file:

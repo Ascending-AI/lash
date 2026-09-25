@@ -282,9 +282,7 @@ struct SurfaceRunner {
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
     trigger_store: Arc<dyn TriggerStore>,
     effect_host: Arc<dyn EffectHost>,
-    /// `None` on the memory runner: it exercises no durable groups, and its
-    /// `book` alone keeps the fixed refusal strings identical.
-    groups: Option<GroupSurface>,
+    groups: GroupSurface,
     book: BTreeMap<u8, GroupBook>,
     group_outcomes: Vec<serde_json::Value>,
     /// The session-bound runtime store the scenario drives; the turn-park
@@ -371,6 +369,11 @@ struct LiteralFrameController {
 
 #[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for LiteralFrameController {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &lash_core::ExecutionScope,
@@ -386,10 +389,6 @@ impl lash_core::AwaitEventResolver for LiteralFrameController {
 
 #[async_trait::async_trait]
 impl lash_core::RuntimeEffectController for LiteralFrameController {
-    fn effect_journaling(&self) -> lash_core::EffectJournaling {
-        self.inner.controller().effect_journaling()
-    }
-
     async fn drive_independent_effect_work<'work>(
         &self,
         work: Vec<lash_core::IndependentEffectWork<'work>>,
@@ -438,10 +437,6 @@ impl lash_core::RuntimeEffectController for LiteralFrameController {
         executors: Arc<dyn lash_core::GroupExecutors>,
     ) -> Result<(), lash_core::RuntimeEffectControllerError> {
         self.inner.controller().register_group_executors(executors)
-    }
-
-    fn native_effect_groups_substrate(&self) -> Option<Arc<dyn std::any::Any + Send + Sync>> {
-        self.inner.controller().native_effect_groups_substrate()
     }
 
     fn group_child_scoped_controller(
@@ -1312,9 +1307,6 @@ impl SurfaceRunner {
     }
 
     fn record_group(&mut self, group: u8, op: &'static str, mut outcome: serde_json::Value) {
-        if self.groups.is_none() {
-            return;
-        }
         if let Some(fields) = outcome.as_object_mut() {
             fields.insert("op".to_string(), serde_json::json!(op));
             fields.insert("group".to_string(), serde_json::json!(group));
@@ -1322,9 +1314,8 @@ impl SurfaceRunner {
         self.group_outcomes.push(outcome);
     }
 
-    /// Send one command to the group's opener and record its reply. The
-    /// memory runner has no opener, so it answers `Ok` — the gate above
-    /// already filtered every refusal a backend would give.
+    /// Send one command to the group's opener and record its reply. The gate
+    /// above already filtered every refusal a backend would give.
     #[expect(
         clippy::expect_used,
         reason = "test support: the gate guarantees an opener's group is booked; a miss is a harness defect"
@@ -1335,10 +1326,7 @@ impl SurfaceRunner {
         op: &'static str,
         command: GroupOpCommand,
     ) -> Result<(), String> {
-        let Some(groups) = &mut self.groups else {
-            return Ok(());
-        };
-        let Some(opener) = groups.openers.get_mut(&group) else {
+        let Some(opener) = self.groups.openers.get_mut(&group) else {
             self.record_group(group, op, serde_json::json!({"error": "group_not_open"}));
             return Err(format!("effect group {group} is not open"));
         };
@@ -1368,9 +1356,8 @@ impl SurfaceRunner {
             );
             return Err(format!("effect group {group} opener crashed"));
         }
-        if let Some(groups) = &mut self.groups
-            && !groups.openers.contains_key(&group)
-        {
+        if !self.groups.openers.contains_key(&group) {
+            let groups = &mut self.groups;
             let opener = GroupOpener::spawn(
                 groups.backend.clone(),
                 Arc::clone(&groups.executors),
@@ -1395,8 +1382,8 @@ impl SurfaceRunner {
         // The open returns before its children finish claiming; wait until
         // every child's executor is entered so no claim write is in flight
         // when the observation runs.
-        if let Some(groups) = &self.groups {
-            let executors = Arc::clone(&groups.executors);
+        {
+            let executors = Arc::clone(&self.groups.executors);
             let key = group_key(group);
             for position in 0..children {
                 if !wait_group_child_started(&executors, &key, position).await {
@@ -1426,11 +1413,9 @@ impl SurfaceRunner {
 
     async fn group_release(&mut self, group: u8, position: u8) -> Result<(), String> {
         self.group_exists_gate(group, "effect_group_release")?;
-        if let Some(groups) = &self.groups {
-            groups
-                .executors
-                .release(&group_key(group), usize::from(position));
-        }
+        self.groups
+            .executors
+            .release(&group_key(group), usize::from(position));
         self.record_group(
             group,
             "effect_group_release",
@@ -1448,10 +1433,12 @@ impl SurfaceRunner {
 
     async fn group_release_both(&mut self, group: u8, a: u8, b: u8) -> Result<(), String> {
         self.group_exists_gate(group, "effect_group_release_both")?;
-        if let Some(groups) = &self.groups {
-            groups.executors.release(&group_key(group), usize::from(a));
-            groups.executors.release(&group_key(group), usize::from(b));
-        }
+        self.groups
+            .executors
+            .release(&group_key(group), usize::from(a));
+        self.groups
+            .executors
+            .release(&group_key(group), usize::from(b));
         self.record_group(
             group,
             "effect_group_release_both",
@@ -1473,10 +1460,6 @@ impl SurfaceRunner {
     /// Poll the durable journal until the child's settlement rank is
     /// allocated, bounded by `GROUP_OP_BOUND`.
     async fn wait_group_row_settled(&self, replay_key: &str) {
-        // A lane without groups opened none, so no row is owed.
-        if self.groups.is_none() {
-            return;
-        }
         let deadline = std::time::Instant::now() + GROUP_OP_BOUND;
         loop {
             if self
@@ -1526,12 +1509,8 @@ impl SurfaceRunner {
     /// token and a `RunToCompletion` close follows the release of every
     /// child — so `settled` is owed. A backend whose finalizer does not get
     /// there within the bound refuses the step, and that refusal diverges
-    /// from the memory runner's `Ok`.
+    /// from the other backend's `Ok`.
     async fn wait_group_lifecycle_settled(&mut self, group: u8) -> Result<(), String> {
-        // A lane without groups opened none, so no finalization is owed.
-        if self.groups.is_none() {
-            return Ok(());
-        }
         let deadline = std::time::Instant::now() + GROUP_OP_BOUND;
         loop {
             if self.reader.group_lifecycle_settled(&group_key(group)).await {
@@ -1611,9 +1590,7 @@ impl SurfaceRunner {
     )]
     async fn group_crash(&mut self, group: u8) -> Result<(), String> {
         self.group_gate(group, "effect_group_crash")?;
-        if let Some(groups) = &mut self.groups
-            && let Some(opener) = groups.openers.get_mut(&group)
-        {
+        if let Some(opener) = self.groups.openers.get_mut(&group) {
             opener.crash().await;
         }
         self.book
@@ -1633,10 +1610,7 @@ impl SurfaceRunner {
     /// opener's lease boundary rather than racing it.
     async fn group_drain(&mut self, group: u8) -> Result<(), String> {
         self.group_exists_gate(group, "effect_group_drain")?;
-        let Some(groups) = &self.groups else {
-            return Ok(());
-        };
-        let drain = groups.successor.group_drain();
+        let drain = self.groups.successor.group_drain();
         let key = group_key(group);
         let deadline = std::time::Instant::now() + GROUP_OP_BOUND;
         let outcome = loop {
@@ -1738,18 +1712,11 @@ async fn surface_runners(
     database_url: &str,
     clock: Arc<dyn Clock>,
 ) -> Vec<SurfaceRunner> {
-    // The memory lane's stores are one SQLite memory backend's. Its effect
-    // host stays the in-process one until the Restate test engine replaces it
-    // (FIG-3665); the effect surface is compared SQLite vs PostgreSQL only.
-    let memory = lash_sqlite_store::SqliteBackend::memory_with_clock(Arc::clone(&clock))
-        .await
-        .unwrap();
-    let memory_runtime: Arc<dyn RuntimePersistence> = Arc::new(memory.open_store().await.unwrap());
-    let memory_registry = memory.process_registry();
-    let memory_triggers = memory.trigger_store();
-    let memory_effect: Arc<dyn EffectHost> =
-        Arc::new(lash_core::facade_support::NativeEffectHost::default());
-
+    // Two runners: SQLite file and PostgreSQL. The generated surface drives
+    // effect operations (records, tool-intent batches, await resolution),
+    // so it has no storage-only memory runner; the store-only differentials
+    // keep their SQLite memory lanes. FIG-3667 and FIG-3668 delete these SQL
+    // effect surfaces.
     let sqlite_runtime_path = root.join("runtime.db");
     let sqlite_process_path = root.join("process.db");
     let sqlite_trigger_path = root.join("trigger.db");
@@ -1832,39 +1799,6 @@ async fn surface_runners(
 
     vec![
         SurfaceRunner {
-            name: "sqlite-memory",
-            scenario: StoreContractScenario::new(StoreContractHandles {
-                registry: memory_registry.clone(),
-                runtime: Arc::clone(&memory_runtime),
-            }),
-            process_registry: memory_registry,
-            process_env_store: memory.process_env_store(),
-            trigger_store: memory_triggers,
-            effect_host: memory_effect,
-            groups: None,
-            book: BTreeMap::new(),
-            group_outcomes: Vec::new(),
-            runtime: memory_runtime,
-            turn_park_loads: Vec::new(),
-            reader: SurfaceReader::Sqlite {
-                runtime_path: PathBuf::from(
-                    memory.database_uri(lash_sqlite_store::SqliteDatabase::DurableCore),
-                ),
-                process_path: PathBuf::from(
-                    memory.database_uri(lash_sqlite_store::SqliteDatabase::ProcessRegistry),
-                ),
-                trigger_path: PathBuf::from(
-                    memory.database_uri(lash_sqlite_store::SqliteDatabase::Triggers),
-                ),
-                effect_path: PathBuf::from(
-                    memory.database_uri(lash_sqlite_store::SqliteDatabase::EffectReplay),
-                ),
-                group_path: PathBuf::from(
-                    memory.database_uri(lash_sqlite_store::SqliteDatabase::EffectReplay),
-                ),
-            },
-        },
-        SurfaceRunner {
             name: "sqlite",
             scenario: StoreContractScenario::new(StoreContractHandles {
                 registry: sqlite_registry.clone(),
@@ -1874,7 +1808,7 @@ async fn surface_runners(
             process_env_store: memory_backend_env_store().await,
             trigger_store: sqlite_triggers,
             effect_host: sqlite_effect,
-            groups: Some(sqlite_groups),
+            groups: sqlite_groups,
             book: BTreeMap::new(),
             group_outcomes: Vec::new(),
             runtime: sqlite_runtime,
@@ -1897,7 +1831,7 @@ async fn surface_runners(
             process_env_store: Arc::new(storage.process_env_store()),
             trigger_store: postgres_triggers,
             effect_host: postgres_effect,
-            groups: Some(postgres_groups),
+            groups: postgres_groups,
             book: BTreeMap::new(),
             group_outcomes: Vec::new(),
             runtime: postgres_runtime,
@@ -2103,8 +2037,7 @@ async fn generated_cross_backend_surface_differential_agrees() {
     eprintln!(
         "cross-backend generated coverage is bounded: cases={cases} first_seed={runner_seed} \
          operations_per_case={OPS_PER_CASE}; omitted_seeds=all seeds outside the configured \
-         contiguous range; effect_await_backends=sqlite,postgres (the memory runner's \
-         in-process effect host has no durable journal)"
+         contiguous range; backends=sqlite,postgres"
     );
     for case_index in 0..cases {
         reset_postgres_surface(&storage).await;

@@ -1,8 +1,5 @@
 use super::*;
-use lash_core_execution::{
-    ProcessInput, ProcessProvenance, ProcessRegistration, RecoveryContract,
-    TestLocalProcessRegistry,
-};
+use lash_core_execution::{ProcessInput, ProcessProvenance, ProcessRegistration, RecoveryContract};
 
 // Literal byte order deliberately differs from en_US.utf8 punctuation handling.
 const IDS: [&str; 10] = ["!!a", "!z", "-a", "0", "A", "_a", "a", "a!", "a-", "~a"];
@@ -49,18 +46,16 @@ async fn ordered_ids(registry: &dyn ProcessRegistry) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn punctuation_worklist_pagination_matches_all_three_backends() {
+async fn punctuation_worklist_pagination_matches_both_backends() {
     let Some((_database_lock, storage)) = storage().await else {
         return;
     };
     reset(storage.pool()).await;
-    let memory = TestLocalProcessRegistry::default();
     let sqlite = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("SQLite registry")
         .process_registry();
     for (name, registry) in [
-        ("memory", &memory as &dyn ProcessRegistry),
         ("sqlite", sqlite.as_ref() as &dyn ProcessRegistry),
         (
             "postgres",

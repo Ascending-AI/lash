@@ -58,8 +58,7 @@ pub struct EffectGroupMembership {
 /// [`EffectHost::scoped_for_group_child`](super::executor::EffectHost::scoped_for_group_child)
 /// carries this pair, and every `execute_effect` it serves is admitted — or
 /// refused — under the substrate's own arbitration for *this* child: the SQL
-/// claim fences its insert on the minting replay row's commit state, the
-/// native controller serializes the admission against the group mutex, and the
+/// claim fences its insert on the minting replay row's commit state, and the
 /// Restate handler asks the serialized group index. The `caused_by` lineage a
 /// nested envelope happens to carry is deliberately not consulted: it names a
 /// parent, not the child whose §4 decision owns this admission.

@@ -60,12 +60,14 @@ fn direct_input(identity: &ReferenceIdentity) -> crate::TurnInput {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, I>(
+    stores: Arc<dyn crate::StoreSet>,
     make: F,
     make_invocation: I,
 ) where
     F: Fn(&str) -> Arc<dyn RuntimePersistence>,
-    I: Fn(&str) -> crate::ConformanceInvocation,
+    I: Fn(&str, crate::ExecutionScope) -> crate::ConformanceInvocation,
 {
+    let stores = stores.as_ref();
     let scenario = "direct-acceptance-after-store-commit";
     let identity = ReferenceIdentity::for_scenario(scenario);
     let point = TurnCrashPoint {
@@ -76,7 +78,7 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, I
     let control = SeamControl::default();
     let executions = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let acceptance_bodies = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let invocation = make_invocation(scenario);
+    let invocation = make_invocation(scenario, reference_turn_scope(&identity));
     let effect_controller: Arc<dyn RuntimeEffectController> = Arc::new(SeamEffectController {
         inner: invocation.controller_handle(),
         control: control.clone(),
@@ -84,6 +86,7 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, I
         journal_faults: invocation.effect_journal_faults(),
     });
     let mut runtime = Box::pin(build_runtime(
+        stores,
         SeamStore::wrap(counted(make(scenario), &acceptance_bodies), control.clone()),
         control.clone(),
         Arc::clone(&effect_controller),
@@ -133,6 +136,7 @@ pub async fn direct_turn_acceptance_crash_after_store_commit_admits_one_row<F, I
             journal_faults: successor_invocation.effect_journal_faults(),
         });
     let mut successor = Box::pin(build_runtime_with_lease_timings(
+        stores,
         SeamStore::wrap(
             counted(make(scenario), &acceptance_bodies),
             successor_control.clone(),

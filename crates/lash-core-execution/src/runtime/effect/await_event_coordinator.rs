@@ -290,8 +290,8 @@ pub trait AwaitEventBackend: Send + Sync {
     /// Sweep every unresolved non-turn-control promise of `session_id` to
     /// `terminal_json`.
     ///
-    /// This is `promise_semantics::cancel_sweep` applied set-wise: existing
-    /// terminals are immutable and turn-control promises are never swept, so
+    /// Existing terminals are immutable and turn-control promises are never
+    /// swept, so
     /// cancelling observation cannot manufacture a turn cancellation or
     /// terminal publication. The session stays usable afterwards.
     async fn cancel_session_promises(
@@ -315,59 +315,6 @@ pub struct AwaitEventCoordinator<B> {
     signing_secret: Arc<[u8]>,
     clock: Arc<dyn crate::Clock>,
     notifiers: Arc<Mutex<HashMap<String, Arc<Notify>>>>,
-}
-
-/// Thin resolver projection for a promise coordinator used without an effect
-/// replay journal (for example Native cancellation delegated to durable core).
-pub struct DirectAwaitEventResolver<B>(pub AwaitEventCoordinator<B>);
-
-#[async_trait::async_trait]
-impl<B: AwaitEventBackend> crate::AwaitEventResolver for DirectAwaitEventResolver<B> {
-    async fn await_event_key(
-        &self,
-        scope: &ExecutionScope,
-        wait: AwaitEventWaitIdentity,
-    ) -> Result<AwaitEventKey, RuntimeError> {
-        self.0.key_for(scope, wait).await
-    }
-
-    async fn resolve_await_event(
-        &self,
-        key: &AwaitEventKey,
-        resolution: Resolution,
-    ) -> Result<ResolveOutcome, RuntimeError> {
-        self.0.resolve(key, resolution).await
-    }
-
-    async fn peek_await_event(
-        &self,
-        key: &AwaitEventKey,
-    ) -> Result<Option<Resolution>, RuntimeError> {
-        self.0.peek(key).await
-    }
-
-    async fn await_await_event(
-        &self,
-        key: &AwaitEventKey,
-        cancel: CancellationToken,
-        deadline: Option<Instant>,
-    ) -> Result<Resolution, RuntimeError> {
-        self.0.await_resolution(key, cancel, deadline).await
-    }
-
-    async fn revoke_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        self.0.revoke_session(session_id).await
-    }
-
-    async fn cancel_await_events_for_session(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<(), RuntimeError> {
-        self.0.cancel_session(session_id).await
-    }
 }
 
 impl<B: AwaitEventBackend> AwaitEventCoordinator<B> {

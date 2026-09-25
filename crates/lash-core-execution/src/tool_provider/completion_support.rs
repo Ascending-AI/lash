@@ -13,7 +13,7 @@ pub(crate) enum AttemptCompletionSupport {
     /// [`ToolProvider::attempt_may_defer`](super::ToolProvider::attempt_may_defer)
     /// for this tool, so no key was reserved for it.
     NotDeclared,
-    /// The effect controller cannot route await events across process loss.
+    /// The effect controller issues no durable await-event keys.
     ControllerUnsupported,
 }
 
@@ -28,8 +28,8 @@ impl AttemptCompletionSupport {
                 "this tool did not declare deferred completion: implement ToolProvider::attempt_may_defer (or StaticToolExecute::attempt_may_defer) and return true for it, so the coordinator reserves a completion key before the attempt body runs",
             )),
             Self::ControllerUnsupported => Err(crate::RuntimeError::new(
-                crate::RuntimeErrorCode::ToolCompletionKeyProcessLifetime,
-                "completion keys require an effect controller with process-loss-safe await-event routing",
+                crate::RuntimeErrorCode::AwaitEventUnsupported,
+                "completion keys require an effect controller that issues durable await-event keys",
             )),
         }
     }

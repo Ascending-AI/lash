@@ -9,8 +9,8 @@ use std::sync::Arc;
 
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
-    EffectGroupHandle, EffectJournaling, ExecutionScope, GroupSettlement, LoserPolicy,
-    QueuedLaneAcquisition, QueuedLaneProbe, Resolution, ResolveOutcome, RuntimeEffectController,
+    EffectGroupHandle, ExecutionScope, GroupSettlement, LoserPolicy, QueuedLaneAcquisition,
+    QueuedLaneProbe, Resolution, ResolveOutcome, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
 };
@@ -208,10 +208,6 @@ where
         progress: &lash_core::SegmentProgress,
     ) -> Option<lash_core::BoundaryReason> {
         self.inner.wants_segment_boundary(progress)
-    }
-
-    fn effect_journaling(&self) -> EffectJournaling {
-        self.inner.effect_journaling()
     }
 
     async fn drive_independent_effect_work<'work>(

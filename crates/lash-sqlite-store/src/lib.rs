@@ -205,7 +205,6 @@ pub struct Store {
     /// The durable-core database this store is open on. Held so a store
     /// opened on a memory backend keeps its database alive.
     location: DatabaseLocation,
-    turn_cancellation_authority: Option<lash_core_execution::TurnCancellationAuthority>,
     turn_cancel_closure_owner: Option<lash_core_execution::TurnCancelClosureOwnerBinding>,
     session_id: Arc<OnceLock<SessionId>>,
     clock: Arc<dyn lash_core_execution::Clock>,
@@ -934,15 +933,11 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         *self
             .turn_cancel_closure_owner
             .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = (effect_host
-            .turn_control_authority_owner()
-            == lash_core_execution::TurnControlAuthorityOwner::EffectHost)
-            .then(|| {
-                lash_core_execution::TurnCancelClosureOwnerBinding::new(
-                    format!("sqlite-catalog:{catalog}"),
-                    Arc::clone(effect_host),
-                )
-            });
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) =
+            Some(lash_core_execution::TurnCancelClosureOwnerBinding::new(
+                format!("sqlite-catalog:{catalog}"),
+                Arc::clone(effect_host),
+            ));
         *self
             .effect_host
             .lock()

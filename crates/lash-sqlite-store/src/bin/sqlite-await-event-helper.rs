@@ -165,7 +165,15 @@ async fn run_turn_action(
         )
         .await?,
     );
-    lash_conformance::cold_process_real_turn_driver(store, controller, nonce, action, marker).await;
+    // Every port the law does not certify, on a store set the recovering
+    // process reopens at the same path.
+    let stores =
+        Arc::new(lash_sqlite_store::SqliteStoreSet::open(database.with_extension("stores")).await?)
+            as Arc<dyn lash_core_execution::StoreSet>;
+    lash_conformance::cold_process_real_turn_driver(
+        stores, store, controller, nonce, action, marker,
+    )
+    .await;
     Ok(())
 }
 

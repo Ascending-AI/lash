@@ -454,7 +454,7 @@ pub(super) async fn restate_turn_control_owner_is_stable_per_configured_authorit
     );
 
     let session_id = SessionId::from("restate-authority-reopen");
-    let store = lash_core::facade_support::InMemorySessionStore::default();
+    let store = memory_session_store(session_id.as_str()).await;
     let lease = store
         .try_claim_session_execution_lease(
             &session_id,

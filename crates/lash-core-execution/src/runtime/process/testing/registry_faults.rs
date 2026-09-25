@@ -21,15 +21,16 @@ use super::super::registry_delegate::{
 };
 
 /// Wraps a registry so a test can make its point reads of one process fail,
-/// miss, or answer a stale record, can hand its wake-delivery driver a claimed
-/// delivery the registry no longer holds, and can count how its callers read
-/// processes and leases.
+/// miss, or answer a stale record, can fail its lease, terminal,
+/// external-reference and cancellation writes, can hand its wake-delivery
+/// driver a claimed delivery the registry no longer holds, and can count how
+/// its callers read processes and leases.
 ///
-/// Only point reads are faulted —
+/// Reads are faulted at the point reads —
 /// [`get_process`](super::super::registry_concerns::ProcessQuery::get_process)
-/// and the exact-incarnation reads built on it — and only for callers that
-/// read through this decorator: the wrapped backend's own writes never see the
-/// faults. Every other operation forwards unchanged.
+/// and the exact-incarnation reads built on it — and every fault applies only
+/// to callers that go through this decorator: the wrapped backend's own
+/// writes never see the faults. Every other operation forwards unchanged.
 #[derive(Clone)]
 pub struct ProcessRegistryFaults {
     inner: Arc<dyn ProcessRegistry>,
@@ -53,6 +54,8 @@ struct ReadFaultPlan {
     lease_release_error: Option<crate::PluginError>,
     terminal_write_error: Option<crate::PluginError>,
     terminal_write_outcome: Option<crate::ProcessCompletionOutcome>,
+    external_ref_write_error: Option<crate::PluginError>,
+    cancel_request_write_error: Option<crate::PluginError>,
     worklist_page_reads: Vec<WorklistPageRead>,
     worklist_page_errors: Option<(usize, std::collections::VecDeque<crate::PluginError>)>,
     worklist_page_pause: Option<WorklistPagePause>,
@@ -170,6 +173,18 @@ impl ProcessRegistryFaults {
     /// The next fenced terminal write answers `outcome` without writing, once.
     pub fn set_process_terminal_write_outcome(&self, outcome: crate::ProcessCompletionOutcome) {
         self.faults.lock_recover().terminal_write_outcome = Some(outcome);
+    }
+
+    /// The next external-reference write fails with `error`, once, without
+    /// reaching the wrapped registry.
+    pub fn fail_next_external_ref_write(&self, error: crate::PluginError) {
+        self.faults.lock_recover().external_ref_write_error = Some(error);
+    }
+
+    /// The next cancellation request fails with `error`, once, without
+    /// reaching the wrapped registry.
+    pub fn fail_next_cancel_request(&self, error: crate::PluginError) {
+        self.faults.lock_recover().cancel_request_write_error = Some(error);
     }
 
     /// After `successful_reads` more worklist-page reads pass, the following
@@ -359,9 +374,15 @@ delegate_process_registrar!(
     registration | _faults,
     _process_id,
     forwarded | { forwarded.await },
-    event | _faults,
+    event | faults,
     _process_id,
-    forwarded | { forwarded.await }
+    forwarded | {
+        let injected = faults.faults.lock_recover().external_ref_write_error.take();
+        match injected {
+            Some(error) => Err(error),
+            None => forwarded.await,
+        }
+    }
 );
 
 delegate_process_observer_registry!(ProcessRegistryFaults, inner);
@@ -542,9 +563,14 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        self.inner
-            .request_process_cancel(process_ref, origin, requester, attribution)
-            .await
+        self.request_process_cancel_reporting_realization(
+            process_ref,
+            origin,
+            requester,
+            attribution,
+        )
+        .await
+        .map(|(record, _)| record)
     }
 
     async fn request_process_cancel_reporting_realization(
@@ -554,6 +580,10 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
     ) -> Result<(crate::ProcessRecord, crate::StoreRealization), crate::PluginError> {
+        let injected = self.faults.lock_recover().cancel_request_write_error.take();
+        if let Some(error) = injected {
+            return Err(error);
+        }
         self.inner
             .request_process_cancel_reporting_realization(
                 process_ref,

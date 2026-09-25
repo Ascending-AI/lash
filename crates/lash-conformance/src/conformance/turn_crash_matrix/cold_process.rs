@@ -148,10 +148,6 @@ impl ColdProcessTurnAction {
     fn is_cancel_crash(self) -> bool {
         Self::CANCEL_CRASH_ACTIONS.contains(&self)
     }
-
-    fn uses_store_owned_turn_control(self) -> bool {
-        self.is_cancel_crash() || self == Self::CancelRecover
-    }
 }
 
 /// The eight real-process cancellation closure cuts: immediately before and
@@ -233,8 +229,7 @@ pub fn cold_process_durable_recovery_expectation(scenario: &str) -> String {
 }
 
 pub fn cold_process_turn_scope(scenario: &str) -> crate::ExecutionScope {
-    let identity = ReferenceIdentity::for_scenario(scenario);
-    crate::ExecutionScope::queue_drain(identity.session_id, identity.turn_id.to_string())
+    reference_turn_scope(&ReferenceIdentity::for_scenario(scenario))
 }
 
 #[expect(
@@ -243,6 +238,7 @@ pub fn cold_process_turn_scope(scenario: &str) -> crate::ExecutionScope {
 )]
 async fn recover_turn_cancel_closure(
     store: Arc<dyn RuntimePersistence>,
+    effect_controller: Arc<dyn RuntimeEffectController>,
     identity: &ReferenceIdentity,
 ) {
     super::super::bind_conformance_session(&store, &identity.session_id).await;
@@ -270,10 +266,15 @@ async fn recover_turn_cancel_closure(
     })
     .await
     .expect("cancellation recovery lane becomes reclaimable");
-    let authority = crate::concrete_turn_cancellation_authority(
-        &store
-            .turn_cancellation_authority()
-            .expect("persistent backend exposes reopenable cancellation authority"),
+    // The effect controller owns the turn-control promises: the successor
+    // reopens the same authority over the same journal.
+    let authority = crate::TurnCancellationAuthority::new(
+        effect_controller
+            .await_event_authority_binding_id()
+            .expect("the journaled controller names its promise authority"),
+        Arc::new(InvocationEffectHost {
+            inner: effect_controller,
+        }) as Arc<dyn crate::AwaitEventResolver>,
     );
     let admitted_scope = crate::ExecutionScope::turn(&identity.session_id, &identity.turn_id);
     store
@@ -436,12 +437,14 @@ async fn recover_turn_cancel_closure(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn cold_process_real_turn_driver(
+    stores: Arc<dyn crate::StoreSet>,
     store: Arc<dyn RuntimePersistence>,
     effect_controller: Arc<dyn RuntimeEffectController>,
     scenario: &str,
     action: &str,
     external_effect_marker: Option<std::path::PathBuf>,
 ) {
+    let stores = stores.as_ref();
     let action = match action {
         "turn_provider_mid_stream" => ColdProcessTurnAction::ProviderInitialMidStream,
         "turn_provider_after_tool_mid_stream" => ColdProcessTurnAction::ProviderAfterToolMidStream,
@@ -469,16 +472,20 @@ pub async fn cold_process_real_turn_driver(
         "turn_cancel_recover" => ColdProcessTurnAction::CancelRecover,
         other => panic!("unknown cold-process real-turn action `{other}`"),
     };
-    let effect_controller: Arc<dyn RuntimeEffectController> =
-        if action.uses_store_owned_turn_control() {
-            Arc::new(StoreOwnedTurnControlController {
-                inner: effect_controller,
-            })
-        } else {
-            effect_controller
-        };
     let identity = ReferenceIdentity::for_scenario(scenario);
     let control = SeamControl::default();
+    // A cancellation cut lands on the controller's own turn-control
+    // promises, so the controller crosses the seam.
+    let effect_controller: Arc<dyn RuntimeEffectController> = if action.is_cancel_crash() {
+        Arc::new(SeamEffectController {
+            inner: effect_controller,
+            control: control.clone(),
+            executions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+            journal_faults: None,
+        })
+    } else {
+        effect_controller
+    };
     let recovers_existing_turn = matches!(
         action,
         ColdProcessTurnAction::Recover
@@ -489,8 +496,9 @@ pub async fn cold_process_real_turn_driver(
     if !recovers_existing_turn {
         seed_reference_ingress(&store, &identity, scenario).await;
         if action.is_cancel_crash() {
-            let host: Arc<dyn crate::EffectHost> =
-                Arc::new(crate::NativeEffectHost::new(Arc::clone(&effect_controller)));
+            let host: Arc<dyn crate::EffectHost> = Arc::new(InvocationEffectHost {
+                inner: Arc::clone(&effect_controller),
+            });
             let receipt = crate::TurnWorkDriver::for_session(
                 host,
                 identity.session_id.to_string(),
@@ -514,7 +522,7 @@ pub async fn cold_process_real_turn_driver(
             ));
         }
     } else if action == ColdProcessTurnAction::CancelRecover {
-        recover_turn_cancel_closure(store, &identity).await;
+        recover_turn_cancel_closure(store, effect_controller, &identity).await;
         return;
     } else if action == ColdProcessTurnAction::PeerReclaim {
         let owner =
@@ -672,6 +680,7 @@ pub async fn cold_process_real_turn_driver(
     let reader = Arc::clone(&store);
     let decorated = SeamStore::wrap(store, control.clone());
     let runtime = Box::pin(build_runtime(
+        stores,
         decorated,
         control.clone(),
         Arc::clone(&effect_controller),

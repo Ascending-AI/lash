@@ -1,13 +1,13 @@
 use super::*;
 
-/// The turn-driving laws' fixture: a fresh backend's effect host and
-/// process registry, a native process-work substrate over that registry, and a
-/// runner that scopes each turn on the same host.
+/// The turn-driving laws' fixture: a fresh backend, its effect host and store set, a
+/// native process-work substrate over its process registry, and a runner that
+/// scopes each turn on the same host.
 type SqliteTurnRunnerFixture = (
     TestBackend,
     &'static str,
     Arc<dyn EffectHost>,
-    Arc<dyn ProcessRegistry>,
+    Arc<dyn lash_core_execution::StoreSet>,
     Arc<dyn lash_core_execution::ProcessWorkSubstrate>,
     Arc<dyn lash_conformance::ConformanceTurnRunner>,
     fn(&'static str) -> std::future::Ready<()>,
@@ -21,11 +21,12 @@ async fn sqlite_turn_runner_fixture() -> SqliteTurnRunnerFixture {
         Arc::clone(&registry),
     )) as Arc<dyn lash_core_execution::ProcessWorkSubstrate>;
     let turn_runner = lash_conformance::HostTurnRunner::shared(Arc::clone(&effect_host));
+    let law_backend = backend.as_stores();
     (
         backend,
         "sqlite-turn-runner",
         effect_host,
-        registry,
+        law_backend,
         process_work,
         turn_runner,
         // The SQLite host owns no post-law assertion beyond the shared checks.

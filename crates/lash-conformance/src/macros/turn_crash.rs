@@ -1,14 +1,16 @@
 //! Registration macros for the level-one turn crash checks: the golden-trace
 //! drift check, the crash matrix and the FIG-3524 error-return sweep.
 //!
-//! The fixture yields `(guard, make, make_invocation, make_error_invocation)`:
-//! `make_invocation` drives the crash placements, and `make_error_invocation`
-//! — a `(scenario, scope)` factory — supplies the journaled controller the
-//! error-return sweep and the after-commit redrive law (FIG-3590) need on
-//! tiers that have an effect journal.
+//! The fixture yields `(guard, stores, make, make_invocation,
+//! make_error_invocation)`: `stores` supplies every port the law does not
+//! certify, `make_invocation` drives the crash placements, and
+//! `make_error_invocation` — a `(scenario, scope)` factory — supplies the
+//! controller whose journal faults the error-return sweep arms, which the
+//! after-commit redrive law (FIG-3590) also redrives.
 //!
-//! `turn_crash_matrix_tests!` registers all four. A tier that must defer the
-//! crash-and-recover laws but can still hold the trace registers
+//! `turn_crash_matrix_tests!` registers the trace and the three journaled
+//! laws, and `turn_crash_level_1_tests!` the level-one matrix. A tier that must
+//! defer the crash-and-recover laws but can still hold the trace registers
 //! `turn_crash_trace_tests!` and `turn_crash_recovery_tests!` instead, each
 //! with its own attributes, so a deferral names exactly the laws it parks.
 
@@ -19,9 +21,10 @@ macro_rules! __turn_crash_matrix_register {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_guard, make, _make_invocation, _make_error_invocation) = $fixture;
+            let (_guard, stores, make, make_invocation, _make_error_invocation) = $fixture;
             let _ = $label;
-            Box::pin($crate::registration_macro_support::$law(make)).await;
+            Box::pin($crate::registration_macro_support::$law(stores, make, make_invocation))
+                .await;
             $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
@@ -29,9 +32,10 @@ macro_rules! __turn_crash_matrix_register {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_guard, make, make_invocation, _make_error_invocation) = $fixture;
+            let (_guard, stores, make, make_invocation, _make_error_invocation) = $fixture;
             let _ = $label;
             Box::pin($crate::registration_macro_support::$law(
+                stores,
                 make,
                 make_invocation,
             ))
@@ -43,9 +47,10 @@ macro_rules! __turn_crash_matrix_register {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_guard, make, _make_invocation, make_journaled_invocation) = $fixture;
+            let (_guard, stores, make, _make_invocation, make_journaled_invocation) = $fixture;
             let _ = $label;
             Box::pin($crate::registration_macro_support::$law(
+                stores,
                 make,
                 make_journaled_invocation,
             ))
@@ -57,9 +62,10 @@ macro_rules! __turn_crash_matrix_register {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_guard, make, _make_invocation, make_error_invocation) = $fixture;
+            let (_guard, stores, make, _make_invocation, make_error_invocation) = $fixture;
             let _ = $label;
             Box::pin($crate::registration_macro_support::$law(
+                stores,
                 make,
                 make_error_invocation,
             ))
@@ -69,14 +75,15 @@ macro_rules! __turn_crash_matrix_register {
     };
 }
 
-/// Register the level-one turn crash checks: trace, matrix, error return and
-/// after-commit redrive.
+/// Register the turn crash checks a journaled engine runs in process: the
+/// golden-trace drift check, the direct-acceptance crash, the error-return
+/// sweep and the after-commit redrive. The level-one matrix registers on its
+/// own ([`turn_crash_level_1_tests!`]).
 #[macro_export]
 macro_rules! turn_crash_matrix_tests {
     ($(#[$attr:meta])* $fixture:block) => {
         $crate::turn_crash_matrix_tests!(@catalogue [$(#[$attr])*] $fixture; [
             (turn_crash_trace_drift_check, "turn-crash-trace-drift", trace),
-            (turn_crash_matrix_level_1, "turn-crash-matrix-level-1", matrix),
             (
                 direct_turn_acceptance_crash_after_store_commit_admits_one_row,
                 "turn-crash-direct-acceptance",
@@ -98,6 +105,17 @@ macro_rules! turn_crash_matrix_tests {
         $(
             $crate::__turn_crash_matrix_register!($attrs $fixture; $law, $label, $mode);
         )*
+    };
+}
+
+/// Register only the level-one crash matrix. Its crashes are simulated in
+/// process, so a tier whose crashed attempt keeps running work it cannot stop
+/// registers it with its own attributes.
+#[macro_export]
+macro_rules! turn_crash_level_1_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::__turn_crash_matrix_register!([$(#[$attr])*] $fixture;
+            turn_crash_matrix_level_1, "turn-crash-matrix-level-1", matrix);
     };
 }
 

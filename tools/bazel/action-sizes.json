@@ -62,13 +62,6 @@
     "peak_bytes": 561254400,
     "samples": 623
   },
-  "lash-internal-core-memory/lash_core_memory": {
-    "cpu_count": 2,
-    "memory_kb": 2097152,
-    "p95_cores": 1.57,
-    "peak_bytes": 807800832,
-    "samples": 1848
-  },
   "lash-internal-core-store/lash_core_store": {
     "cpu_count": 2,
     "memory_kb": 2097152,

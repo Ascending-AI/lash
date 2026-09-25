@@ -15,15 +15,6 @@ fn decode_binding_scope(
 
 #[async_trait::async_trait]
 impl TurnInputStore for Store {
-    fn turn_cancellation_authority(
-        &self,
-    ) -> Option<std::sync::Arc<dyn lash_core_execution::store::StoreTurnCancellationAuthority>>
-    {
-        self.turn_cancellation_authority
-            .clone()
-            .map(lash_core_execution::TurnCancellationAuthority::into_store_authority)
-    }
-
     async fn validate_turn_cancellation_binding(
         &self,
         session_id: &SessionId,

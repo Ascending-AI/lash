@@ -34,7 +34,8 @@ pub enum TurnCancelPeekIdentity {
 }
 
 impl TurnCancelPeekIdentity {
-    fn causal_identity(self) -> String {
+    /// The effect id the gate's journaled observation carries.
+    pub fn causal_identity(self) -> String {
         match self {
             Self::StartGate => "turn_cancel.start_gate".to_string(),
             Self::PostAbortGate => "turn_cancel.post_abort_gate".to_string(),
@@ -183,12 +184,9 @@ pub(crate) async fn await_terminal_from_resolver(
 /// Cooperative, exact-turn control compiled onto Lash's keyed-promise seam.
 ///
 /// `Requested` means the cancellation request won this driver's keyed-promise
-/// gate. On an native effect host that promise is process-local, so the driver
-/// only reaches owners in the same OS process. A durable effect-host deployment
-/// is required for another process or replayed owner to observe the request.
-/// The returned [`TurnCancelReceipt`] reports only the cancellation outcome.
-/// Hosts must use their configured effect-host topology when deciding whether
-/// an native receipt is cross-process proof.
+/// gate. The promise is journaled by the effect host, so another process or a
+/// replayed owner observes the request. The returned [`TurnCancelReceipt`]
+/// reports only the cancellation outcome.
 ///
 /// Lash asks the running or replayed owner to unwind and commit a cancelled
 /// result; it cannot guarantee that detached tasks, subprocesses, or
@@ -283,17 +281,7 @@ impl TurnWorkDriver {
                 record: None,
             });
         }
-        let store_authority = (self.effect_host.turn_control_authority_owner()
-            == crate::TurnControlAuthorityOwner::SessionStore)
-            .then(|| store.turn_cancellation_authority())
-            .flatten();
-        let store_resolver = store_authority.as_ref().map(|authority| {
-            crate::runtime::effect::executor::concrete_turn_cancellation_authority(authority)
-                .resolver()
-        });
-        let resolver: &dyn AwaitEventResolver = store_resolver
-            .as_ref()
-            .map_or(self.effect_host.as_ref(), |resolver| resolver.as_ref());
+        let resolver: &dyn AwaitEventResolver = self.effect_host.as_ref();
         let key = match cancel_gate_key(resolver, &request.address).await {
             Ok(key) => key,
             Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => {
@@ -575,18 +563,9 @@ impl TurnWorkDriver {
         if let Some(attach) = self.effect_host.turn_attach() {
             return attach.await_terminal(address).await;
         }
-        let store = self.store_for(address).await?;
-        let store_authority = (self.effect_host.turn_control_authority_owner()
-            == crate::TurnControlAuthorityOwner::SessionStore)
-            .then(|| store.turn_cancellation_authority())
-            .flatten();
-        let store_resolver = store_authority.as_ref().map(|authority| {
-            crate::runtime::effect::executor::concrete_turn_cancellation_authority(authority)
-                .resolver()
-        });
-        let resolver: &dyn AwaitEventResolver = store_resolver
-            .as_ref()
-            .map_or(self.effect_host.as_ref(), |resolver| resolver.as_ref());
+        // Refuses an address whose session does not exist before any wait.
+        self.store_for(address).await?;
+        let resolver: &dyn AwaitEventResolver = self.effect_host.as_ref();
         let key = terminal_key(resolver, address).await?;
         let resolution = resolver
             .await_await_event(&key, CancellationToken::new(), None)

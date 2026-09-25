@@ -236,8 +236,6 @@ fn drain_area_witnesses() {
     let _ = lash::persistence::SessionAttachmentStore::ephemeral;
     // W0053: lash::persistence::SessionAttachmentStore::get [function]
     let _ = lash::persistence::SessionAttachmentStore::get;
-    // W0054: lash::persistence::SessionAttachmentStore::in_memory [function]
-    let _ = lash::persistence::SessionAttachmentStore::in_memory;
     // W0055: lash::persistence::SessionAttachmentStore::manifest [function]
     let _ = lash::persistence::SessionAttachmentStore::manifest;
     // W0056: lash::persistence::SessionAttachmentStore::new [function]

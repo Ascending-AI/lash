@@ -98,9 +98,41 @@ ticket = "FIG-3561"
 reason = "the recording context cannot host effect groups; the crash matrix and error-return sweep move to the live Restate harness"
 
 [[deferred]]
+file = "crates/lash-restate/src/tests/conformance_and_poison.rs"
+claimant = "lash_restate::tests::conformance_and_poison"
+suite = "turn_crash_trace_tests"
+recipe = "parked"
+ticket = "FIG-3561"
+reason = "moved from active to parked by #2166: on main the trace law always drove the deleted native controller, so this leg never traced Restate; on its own controller the recording context cannot host the reference turn's effect group, and the crash laws run outside any handler, so the server double cannot host them until they run through a handler turn runner"
+
+[[deferred]]
 file = "crates/lash-postgres-store/tests/conformance/effect_host.rs"
 claimant = "conformance::effect_host"
 suite = "effect_group_close_race_tests"
 recipe = "parked"
 ticket = "FIG-3667"
 reason = "flakes Contended on the Postgres effect engine; the engine is deleted by FIG-3667"
+
+[[deferred]]
+file = "crates/lash-sqlite-store/tests/conformance/suite.rs"
+claimant = "conformance::suite"
+suite = "turn_crash_level_1_tests"
+recipe = "parked"
+ticket = "FIG-3668"
+reason = "the level-one matrix crashes in process, and the journaled SQLite engine's crashed attempt keeps renewing its effect lease; the native host it ran on is deleted, and the SIGKILL matrix covers this engine"
+
+[[deferred]]
+file = "crates/lash-sqlite-store/tests/conformance/suite.rs"
+claimant = "conformance_memory::suite"
+suite = "turn_crash_level_1_tests"
+recipe = "parked"
+ticket = "FIG-3668"
+reason = "the level-one matrix crashes in process, and the journaled SQLite engine's crashed attempt keeps renewing its effect lease; the native host it ran on is deleted, and the SIGKILL matrix covers this engine"
+
+[[deferred]]
+file = "crates/lash-postgres-store/tests/conformance/turn_crash.rs"
+claimant = "conformance::turn_crash"
+suite = "turn_crash_level_1_tests"
+recipe = "parked"
+ticket = "FIG-3667"
+reason = "the level-one matrix crashes in process, and the journaled PostgreSQL engine's crashed attempt keeps renewing its effect lease; the native host it ran on is deleted, and the SIGKILL matrix covers this engine"

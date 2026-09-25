@@ -10,6 +10,8 @@
 
 #[path = "conformance/turn_cancel_closure.rs"]
 mod turn_cancel_closure;
+#[path = "conformance/turn_crash.rs"]
+mod turn_crash;
 
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
@@ -29,8 +31,30 @@ lash_conformance::attachment_adoption_tests!({
         return;
     };
     reset(storage.pool()).await;
-    (database_lock, Arc::new(storage.session_store_factory()))
+    let bytes_root = tempfile::tempdir().expect("attachment bytes root");
+    let make_bytes = attachment_bytes(&bytes_root);
+    (
+        (database_lock, bytes_root),
+        Arc::new(storage.session_store_factory()),
+        make_bytes,
+    )
 });
+
+/// Fresh, empty attachment byte stores for the root-set laws, each a
+/// filesystem store in its own directory under `root`: PostgreSQL keeps no
+/// attachment bytes of its own.
+fn attachment_bytes(root: &tempfile::TempDir) -> lash_conformance::AttachmentBytesFactory {
+    let root = root.path().to_path_buf();
+    let next = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    Arc::new(move || {
+        let ordinal = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Arc::new(
+            lash_core_execution::facade_support::FileAttachmentStore::new(
+                root.join(format!("bytes-{ordinal}")),
+            ),
+        ) as Arc<dyn lash_core_execution::AttachmentStore>
+    })
+}
 
 use std::future::Future;
 #[path = "conformance/artifact_races.rs"]
@@ -114,7 +138,6 @@ fn postgres_conformance_invocation(
     lash_conformance::ConformanceInvocation::new(
         live,
         execution_scope,
-        lash_conformance::ConformanceEffectRedrive::ReplaysJournal,
         || {},
         move || {
             controller.start_replay();
@@ -130,6 +153,33 @@ async fn storage() -> Option<(SharedDatabaseLock, PostgresStorage)> {
         .await
         .expect("connect postgres");
     Some((database_lock, storage))
+}
+
+/// A PostgreSQL backend over `storage` for a law's runtime. PostgreSQL keeps
+/// no attachment bytes, so the backend pairs it with a filesystem byte store
+/// in a directory the returned guard keeps.
+/// The storage ports of a law over `storage`, with filesystem attachment
+/// bytes in a directory the caller keeps alive.
+fn pg_law_stores(
+    storage: &PostgresStorage,
+) -> (tempfile::TempDir, Arc<dyn lash_core_execution::StoreSet>) {
+    let attachments = tempfile::tempdir().expect("attachment directory");
+    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
+        storage,
+        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path())),
+    ));
+    (attachments, stores)
+}
+
+fn pg_law_backend(
+    storage: &PostgresStorage,
+) -> (tempfile::TempDir, Arc<dyn lash_core_execution::Backend>) {
+    let attachments = tempfile::tempdir().expect("attachment directory");
+    let backend = Arc::new(lash_postgres_store::PostgresBackend::new(
+        storage,
+        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path())),
+    ));
+    (attachments, backend)
 }
 
 async fn postgres_lineage_handles() -> Option<(SharedDatabaseLock, LineageConformanceHandles)> {
@@ -312,7 +362,12 @@ lash_conformance::runtime_persistence_reopenable_tests!({
                     .await
                     .expect("open explicit Postgres conformance store")
                     .expect("created Postgres conformance store exists");
-                ReopenableRuntimePersistence { open, reopen }
+                ReopenableRuntimePersistence {
+                    open,
+                    reopen,
+                    effect_host: Arc::new(open_storage.effect_host())
+                        as Arc<dyn lash_core_execution::EffectHost>,
+                }
             })
         },
         lash_conformance::RuntimePersistenceLeaseTiming::controlled(move |ms| {
@@ -445,145 +500,6 @@ lash_conformance::store_recovery_tests!({
         lash_conformance::StoreRecoveryLeaseTiming::Realtime,
     )
 });
-
-lash_conformance::turn_crash_matrix_tests!({
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres real-turn crash matrix: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    reset(storage.pool()).await;
-    let database_url = database_url().expect("configured Postgres database URL");
-    let error_return_database_url = database_url.clone();
-    (
-        _database_lock,
-        move |scenario: &str| {
-            let database_url = database_url.clone();
-            let storage = sync_await(async move {
-                PostgresStorage::connect(&database_url)
-                    .await
-                    .expect("construct fresh Postgres real-turn crash-matrix pool")
-            });
-            Arc::new(storage.session_store(format!("trace-derived-real-turn:{scenario}")))
-                as Arc<dyn RuntimePersistence>
-        },
-        |_: &str| lash_conformance::ConformanceInvocation::native(),
-        move |_: &str, scope: ExecutionScope| {
-            {
-                let database_url = error_return_database_url.clone();
-                // FIG-3524: the error-return sweep needs the journaled
-                // controller so the claim/finalize/renew placements arm real
-                // journal faults. The short renew interval lets a `renew`
-                // fault fire while the parked tool attempt is still open.
-                let storage = sync_await(async move {
-                    PostgresStorage::connect(&database_url)
-                        .await
-                        .expect("construct Postgres error-return journal pool")
-                });
-                let controller = PostgresRuntimeEffectController::with_options(
-                    &storage,
-                    scope.clone(),
-                    PostgresEffectReplayOptions {
-                        lease_timings: lash_core_execution::facade_support::LeaseTimings::new(
-                            std::time::Duration::from_secs(60),
-                            std::time::Duration::from_millis(50),
-                        )
-                        .expect("error-return effect lease timings"),
-                        ..PostgresEffectReplayOptions::default()
-                    },
-                );
-                postgres_conformance_invocation(controller.clone(), scope)
-                    .with_effect_journal_faults(controller.effect_journal_faults())
-            }
-        },
-    )
-});
-
-/// FIG-3571: a turn the pre-cutover build left in flight is refused, typed,
-/// before any effect when this build redrives it.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_pre_cutover_generation_turn_redrive_is_refused_before_any_effect_when_configured()
-{
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres pre-cutover generation law: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    reset(storage.pool()).await;
-    let database_url = database_url().expect("configured Postgres database URL");
-    Box::pin(
-        lash_conformance::pre_cutover_generation_turn_redrive_is_refused_before_any_effect(
-            |scenario| {
-                let database_url = database_url.clone();
-                let storage = sync_await(async move {
-                    PostgresStorage::connect(&database_url)
-                        .await
-                        .expect("construct fresh Postgres pre-cutover generation pool")
-                });
-                Arc::new(storage.session_store(format!("trace-derived-real-turn:{scenario}")))
-            },
-            |_| lash_conformance::ConformanceInvocation::native(),
-        ),
-    )
-    .await;
-}
-
-/// FIG-3619: a runtime already open on a session whose marker moves behind
-/// this build is refused, typed and terminal, at the turn-lane claim.
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_pre_cutover_generation_turn_claim_is_refused_typed_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!(
-            "skipping Postgres pre-cutover generation claim law: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    reset(storage.pool()).await;
-    let database_url = database_url().expect("configured Postgres database URL");
-    Box::pin(
-        lash_conformance::pre_cutover_generation_turn_claim_is_refused_typed(
-            |scenario| {
-                let database_url = database_url.clone();
-                let storage = sync_await(async move {
-                    PostgresStorage::connect(&database_url)
-                        .await
-                        .expect("construct fresh Postgres pre-cutover generation claim pool")
-                });
-                Arc::new(storage.session_store(format!("trace-derived-real-turn:{scenario}")))
-            },
-            |_| lash_conformance::ConformanceInvocation::native(),
-        ),
-    )
-    .await;
-}
-
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_held_turn_input_visibility_survives_claim_holder_crash_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!("skipping Postgres held-input crash law: LASH_POSTGRES_DATABASE_URL is not set");
-        return;
-    };
-    reset(storage.pool()).await;
-    let database_url = database_url().expect("configured Postgres database URL");
-    Box::pin(
-        lash_conformance::held_turn_input_visibility_survives_claim_holder_crash(
-            |scenario| {
-                let database_url = database_url.clone();
-                let storage = sync_await(async move {
-                    PostgresStorage::connect(&database_url)
-                        .await
-                        .expect("construct fresh Postgres held-input crash pool")
-                });
-                Arc::new(storage.session_store(format!("trace-derived-real-turn:{scenario}")))
-                    as Arc<dyn RuntimePersistence>
-            },
-            |_| lash_conformance::ConformanceInvocation::native(),
-        ),
-    )
-    .await;
-}
 
 lash_conformance::checkpoint_component_reopen_tests!({
     let Some((_database_lock, storage)) = storage().await else {
@@ -790,13 +706,20 @@ lash_conformance::store_maintenance_tests!({
     };
     let storage = Arc::new(storage);
     let make_storage = Arc::clone(&storage);
-    (database_lock, "postgres", move || {
-        let storage = Arc::clone(&make_storage);
-        sync_await(async move {
-            reset(storage.pool()).await;
-            Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>
-        })
-    })
+    let bytes_root = tempfile::tempdir().expect("attachment bytes root");
+    let make_bytes = attachment_bytes(&bytes_root);
+    (
+        (database_lock, bytes_root),
+        "postgres",
+        move || {
+            let storage = Arc::clone(&make_storage);
+            sync_await(async move {
+                reset(storage.pool()).await;
+                Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>
+            })
+        },
+        move || make_bytes(),
+    )
 });
 
 lash_conformance::store_maintenance_fault_tests!({
@@ -840,7 +763,31 @@ lash_conformance::session_store_factory_tests!({
                 as Arc<dyn lash_core_execution::store::ConformanceSessionStoreFactory>
         })
     };
-    (_database_lock, "postgres", None, make)
+    let attachments = Arc::new(tempfile::tempdir().expect("attachment directory"));
+    let attached_storage = Arc::clone(&storage);
+    let attached_root = Arc::clone(&attachments);
+    let make_attached = move || {
+        let storage = Arc::clone(&attached_storage);
+        let root = attached_root.path().join(uuid::Uuid::new_v4().to_string());
+        sync_await(async move {
+            reset(storage.pool()).await;
+            (
+                Arc::new(storage.session_store_factory())
+                    as Arc<dyn lash_core_execution::store::ConformanceSessionStoreFactory>,
+                Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(root))
+                    as Arc<dyn lash_core_execution::AttachmentStore>,
+            )
+        })
+    };
+    let effect_host = Arc::new(storage.effect_host()) as Arc<dyn lash_core_execution::EffectHost>;
+    (
+        (_database_lock, attachments),
+        "postgres",
+        None,
+        make,
+        make_attached,
+        effect_host,
+    )
 });
 
 lash_conformance::fresh_session_admission_tests!({
@@ -865,7 +812,8 @@ lash_conformance::observer_intent_tests!({
         return;
     };
     reset(storage.pool()).await;
-    (database_lock, Arc::new(storage.session_store_factory()))
+    let (attachments, backend) = pg_law_backend(&storage);
+    ((database_lock, attachments), backend)
 });
 
 lash_conformance::session_graph_append_tests!({
@@ -1372,7 +1320,8 @@ lash_conformance::process_prune_session_store_tests!({
     let factory = Arc::new(storage.session_store_factory_with_shared_process_registry())
         as Arc<dyn SessionStoreFactory>;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
-    (_database_lock, factory, registry)
+    let effect_host = Arc::new(storage.effect_host()) as Arc<dyn lash_core_execution::EffectHost>;
+    (_database_lock, factory, registry, effect_host)
 });
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -1968,34 +1917,6 @@ async fn postgres_effect_replay_satisfies_cold_process_crash_conformance_when_co
     );
 }
 
-#[tokio::test]
-async fn postgres_real_turn_satisfies_cold_process_crash_matrix_when_configured() {
-    let Some((_database_lock, storage)) = storage().await else {
-        eprintln!(
-            "skipping PostgreSQL cold-process real-turn matrix: LASH_POSTGRES_DATABASE_URL is not set"
-        );
-        return;
-    };
-    reset(storage.pool()).await;
-    let url = database_url().expect("configured PostgreSQL database URL");
-    let dir = tempfile::tempdir().expect("PostgreSQL cold-process real-turn tempdir");
-    cold_process_turn_parent::assert_real_turn_kill_recovery(
-        dir.path(),
-        |action, nonce, marker| {
-            let mut command = tokio::process::Command::new(lash_conformance::helper_executable(
-                "postgres-await-event-helper",
-            ));
-            command
-                .env("LASH_POSTGRES_DATABASE_URL", &url)
-                .arg(action)
-                .arg(nonce)
-                .arg(marker);
-            command
-        },
-    )
-    .await;
-}
-
 lash_conformance::effect_host_retirement_tests!({
     let Some((database_lock, storage)) = storage().await else {
         eprintln!(
@@ -2329,12 +2250,16 @@ lash_conformance::runtime_persistence_state_machine_tests!({
         return;
     };
     let storage = Arc::new(storage);
-    (database_lock, "postgres", move |_| {
+    let bytes_root = tempfile::tempdir().expect("attachment bytes root");
+    let make_bytes = attachment_bytes(&bytes_root);
+    ((database_lock, bytes_root), "postgres", move |_| {
         let storage = Arc::clone(&storage);
+        let attachments = make_bytes();
         async move {
             reset(storage.pool()).await;
             lash_conformance::RuntimePersistenceStateMachineHandles::create(
                 Arc::new(storage.session_store_factory_with_shared_process_registry()),
+                attachments,
                 true,
             )
             .await
@@ -2433,12 +2358,21 @@ lash_conformance::session_read_view_tests!({
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(
         1_800_000_000_000,
     ));
-    let factory = Arc::new(
-        storage
-            .session_store_factory()
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
+    let attachments = tempfile::tempdir().expect("attachment directory");
+    let backend: Arc<dyn lash_core_execution::Backend> = Arc::new(
+        lash_postgres_store::PostgresBackend::with_options_and_clock(
+            &storage,
+            Arc::new(
+                lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path()),
+            ),
+            lash_postgres_store::PostgresBackendOptions::default(),
+            Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
+        ),
     );
-    (_database_lock, factory, move || clock.advance(1))
+    let factory = backend.session_store_factory();
+    ((_database_lock, attachments), backend, factory, move || {
+        clock.advance(1)
+    })
 });
 
 lash_conformance::attachment_owner_degraded_tests!({
@@ -2446,9 +2380,14 @@ lash_conformance::attachment_owner_degraded_tests!({
         return;
     };
     reset(storage.pool()).await;
+    let attachments = tempfile::tempdir().expect("attachment root");
+    let bytes =
+        Arc::new(lash_core_execution::facade_support::FileAttachmentStore::new(attachments.path()))
+            as Arc<dyn lash_core_execution::AttachmentStore>;
     (
-        _database_lock,
+        (_database_lock, attachments),
         Arc::new(storage.session_store_factory()) as Arc<dyn SessionStoreFactory>,
+        bytes,
     )
 });
 

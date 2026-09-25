@@ -83,11 +83,12 @@ same contract natively. When a bound, a wait, or a redrive path is proposed
 inside lash-core, the first question is whether it belongs to the substrate —
 the answer decided FIG-526, and it will decide the next one.
 
-- lash-core never asks which tier it runs on. A behaviour difference is either
-  an operation on the effect seam or the single `EffectJournaling { Local,
-  Journaled }` fact on `RuntimeEffectController` (FIG-2226, PR #1946). The
-  only documented exception is `owns_commit_backpressure`: it is a property of
-  the engine, not a tier flag (FIG-3397 deleted `supports_concurrent_effects`). `scripts/check-substrate-boundary.sh` guards the retired names.
+- lash-core never asks which tier it runs on. A behaviour difference is an
+  operation on the effect seam. Every host journals its effects (ADR 0102, D1;
+  FIG-3585 deleted the `EffectJournaling` fact and its `Local` arm). The only
+  documented exception is `owns_commit_backpressure`: it is a property of the
+  engine, not a tier flag. `scripts/check-substrate-boundary.sh` guards the
+  retired names.
 - How a failed turn settles is not a tier question either (FIG-3575). The
   failure's code has a cause class, `RuntimeErrorCode::turn_failure_cause`:
   a code is terminal exactly when it is an outcome. An outcome, and any

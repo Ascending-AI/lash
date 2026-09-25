@@ -38,11 +38,14 @@ async fn sqlite_drain_end_world(retained: Retained) -> DrainEndWorld {
         registry: backend.process_registry() as Arc<dyn ProcessRegistry>,
         session_factory: backend.session_store_factory() as Arc<dyn SessionStoreFactory>,
         effect_host: lash_conformance::install_drain_end_executors(
-            backend.effect_host() as Arc<dyn EffectHost>
+            backend.effect_host() as Arc<dyn EffectHost>,
+            backend.process_env_store(),
         ),
         group_host: Some(lash_conformance::install_drain_end_executors(
             group_host as Arc<dyn EffectHost>,
+            backend.process_env_store(),
         )),
+        stores: backend.as_stores(),
     };
     // The store connections the world returns read and write the backend
     // for the whole law, not just for the factory call.

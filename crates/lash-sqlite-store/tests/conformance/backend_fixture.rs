@@ -51,6 +51,23 @@ pub(crate) fn durable_turn_scope(
     ExecutionScope::turn(&session_id, turn_id)
 }
 
+/// Fresh, empty attachment byte stores for the root-set laws, each a
+/// filesystem store in its own directory under `root`.
+pub(crate) fn attachment_bytes(
+    root: &tempfile::TempDir,
+) -> lash_conformance::AttachmentBytesFactory {
+    let root = root.path().to_path_buf();
+    let next = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    Arc::new(move || {
+        let ordinal = next.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        Arc::new(
+            lash_core_execution::facade_support::FileAttachmentStore::new(
+                root.join(format!("bytes-{ordinal}")),
+            ),
+        ) as Arc<dyn lash_core_execution::AttachmentStore>
+    })
+}
+
 pub(crate) fn system_clock() -> Arc<dyn lash_core_execution::Clock> {
     Arc::new(lash_core_execution::facade_support::SystemClock)
 }
@@ -99,6 +116,18 @@ impl TestBackend {
                 _dir: None,
             },
         }
+    }
+
+    /// This backend as the [`Backend`](lash_core_execution::Backend) a law's
+    /// runtime runs over.
+    /// The backend's storage ports alone, for a law that journals on an
+    /// effect host it is handed separately.
+    pub(crate) fn as_stores(&self) -> Arc<dyn lash_core_execution::StoreSet> {
+        Arc::new(self.backend.stores().clone())
+    }
+
+    pub(crate) fn as_backend(&self) -> Arc<dyn lash_core_execution::Backend> {
+        Arc::new(self.backend.clone())
     }
 
     /// [`Self::open`] from synchronous fixture code.

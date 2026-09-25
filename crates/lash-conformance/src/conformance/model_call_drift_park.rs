@@ -19,7 +19,6 @@ use crate::admit;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use lash_core::store::SessionCommitStore as _;
 use lash_sansio::{SessionId, TurnId};
 
 /// The model's one answer: a cell that finishes the turn.
@@ -148,6 +147,7 @@ fn attempt(
 pub async fn model_call_drift_parks_then_completes_once_restored(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
     protocol: Vec<Arc<dyn crate::facade_support::PluginFactory>>,
 ) {
@@ -172,15 +172,14 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
             }
         })
         .build();
-    let mut host = crate::LawBackend::in_process()
-        .with_effect_host(Arc::clone(&effect_host))
+    let mut host = crate::LawBackend::over_stores(stores.as_ref(), Arc::clone(&effect_host))
         .host_config(
             crate::CommitBudget::bounded(1024 * 1024, 512),
             crate::QueuedWorkBatchingConfig::new(1),
         );
     host.providers.provider_resolver =
         Arc::new(crate::SingleProviderResolver::new(model.into_handle()));
-    let store = Arc::new(crate::InMemorySessionStore::new());
+    let store = crate::conformance::law_session_store(stores.as_ref(), &session_id).await;
     let executions = Arc::new(AtomicUsize::new(0));
     let (result_tx, mut result_rx) = tokio::sync::mpsc::unbounded_channel();
 
@@ -188,11 +187,12 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
     // tool the prompt rendered, and the recorded model call still replays
     // with no provider request, finishing the turn.
     let served_session = SessionId::from(format!("{prefix}-model-served-session"));
-    let served_store = Arc::new(crate::InMemorySessionStore::new());
+    let served_store =
+        crate::conformance::law_session_store(stores.as_ref(), &served_session).await;
     let served = DriftParts {
         session_id: served_session.clone(),
         host: host.clone(),
-        store: Arc::clone(&served_store) as Arc<dyn crate::RuntimePersistence>,
+        store: Arc::clone(&served_store),
         probe: super::cell_binding_drift::Probe::Registered,
         executions: Arc::clone(&executions),
         protocol: protocol.clone(),
@@ -228,7 +228,7 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
     let parts = DriftParts {
         session_id: session_id.clone(),
         host,
-        store: Arc::clone(&store) as Arc<dyn crate::RuntimePersistence>,
+        store: Arc::clone(&store),
         probe: super::cell_binding_drift::Probe::Registered,
         executions,
         protocol,

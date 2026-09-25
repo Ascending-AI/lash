@@ -341,10 +341,6 @@ impl<T: StoreReplayHost> EffectHost for T {
 
 #[async_trait]
 impl<T: StoreReplayController> RuntimeEffectController for T {
-    fn effect_journaling(&self) -> crate::EffectJournaling {
-        crate::EffectJournaling::Journaled
-    }
-
     /// Concurrent: the store journal finds each recorded effect by its replay
     /// key, so the order the pieces commit in changes nothing a replay reads.
     async fn drive_independent_effect_work<'work>(

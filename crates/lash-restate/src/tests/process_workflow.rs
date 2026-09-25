@@ -100,7 +100,7 @@ pub(super) async fn cancel_redrives_successor_engine() {
         .run_registration_for_test(
             registration,
             ProcessExecutionContext::default(),
-            native_process_scope(&ProcessId::from("cancel-between-segments")),
+            process_scope(&ProcessId::from("cancel-between-segments")),
             1,
             Some(lash_core::SegmentHandover {
                 reason: lash_core::BoundaryReason::JournalBudget,
@@ -290,7 +290,7 @@ pub(super) async fn replay_divergence_mid_child_aborts_parent_without_terminaliz
             registration.clone(),
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+                Arc::new(lash_core::testing::UnavailableEffectController),
                 durable_admission(&ExecutionScope::process(process_id)),
             )
             .expect("divergence-aborted child scope"),
@@ -322,7 +322,7 @@ pub(super) async fn replay_divergence_mid_child_aborts_parent_without_terminaliz
             registration,
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+                Arc::new(lash_core::testing::UnavailableEffectController),
                 durable_admission(&ExecutionScope::process(process_id)),
             )
             .expect("rerun child scope"),
@@ -363,7 +363,7 @@ pub(super) async fn opaque_process_infrastructure_failure_does_not_become_termin
             registration.clone(),
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+                Arc::new(lash_core::testing::UnavailableEffectController),
                 durable_admission(&ExecutionScope::process(process_id)),
             )
             .expect("first child scope"),
@@ -386,7 +386,7 @@ pub(super) async fn opaque_process_infrastructure_failure_does_not_become_termin
             registration,
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
-                Arc::new(lash_core::facade_support::NativeRuntimeEffectController::default()),
+                Arc::new(lash_core::testing::UnavailableEffectController),
                 durable_admission(&ExecutionScope::process(process_id)),
             )
             .expect("rerun child scope"),
@@ -597,7 +597,6 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
             wake_target_session_id: Some(SessionId::from("wake-smoke")),
             tool_effect_id: Some("tool-smoke".to_string()),
             execution_scope_id: "task-smoke".to_string(),
-            effect_journaling: lash_core::EffectJournaling::Journaled,
         }]
     );
 
@@ -973,7 +972,7 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
     // tool now, so the worker that runs the parent has to serve it.
     let worker = recovery_worker_with_plugins_and_trace(
         Arc::clone(&registry),
-        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+        memory_session_store_factory().await,
         vec![Arc::new(
             lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
         )],

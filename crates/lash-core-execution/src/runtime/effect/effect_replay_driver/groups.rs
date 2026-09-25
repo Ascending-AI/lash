@@ -27,19 +27,16 @@
 //! handed, and reads every settled rank out of the journal. It does not need —
 //! and does not have — the first process's memory.
 //!
-//! # Three mechanisms, matching the in-memory reference host
+//! # Three mechanisms
 //!
-//! The native controller
-//! ([`NativeRuntimeEffectController`](crate::NativeRuntimeEffectController)) is
-//! the conformance definition of the contract's observable semantics, so this
-//! host is written to agree with it mechanism for mechanism:
+//! The contract's observable semantics are pinned by the effect-group
+//! conformance laws every engine runs, and three mechanisms carry them here:
 //!
 //! * **Children run on host-owned tasks.** Dropping the caller must not drop the
 //!   losers, because `RunToCompletion` says a losing promise keeps running.
 //! * **The rank is allocated at settlement by a single allocator.** Here that is
 //!   layer 1's single-row counter bump inside the child's own finalize
-//!   transaction (N1) rather than the native substrate's per-group lock, which is the
-//!   same discipline against the same defect.
+//!   transaction (N1).
 //! * **A settlement is served from the record, never re-raced.** Rank
 //!   `consumed + 1` is a `SELECT`; once decided it re-reads the same child,
 //!   which is what makes a replayed frame observe what the pre-crash frame did.

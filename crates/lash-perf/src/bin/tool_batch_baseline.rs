@@ -318,6 +318,7 @@ async fn run_sqlite(
     }
     let backend = lash_sqlite_store::SqliteBackend::open(&db_path).await?;
     let host = backend.effect_host() as Arc<dyn lash_core::EffectHost>;
+    let stores = Arc::new(backend.stores().clone()) as Arc<dyn lash_core::StoreSet>;
     let counter = SqliteJournalCounter {
         path: db_path.join(lash_sqlite_store::SqliteDatabase::EffectReplay.file_name()),
     };
@@ -330,6 +331,7 @@ async fn run_sqlite(
                 let measurement = lash_conformance::measure_tool_batch(
                     lash_sansio::SessionId::from(session.clone()),
                     Arc::clone(&host),
+                    Arc::clone(&stores),
                     None,
                     producer,
                     width,
@@ -364,6 +366,13 @@ async fn run_postgres(
     let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
     let storage = lash_postgres_store::PostgresStorage::connect(database.url()).await?;
     let host = Arc::new(storage.effect_host()) as Arc<dyn lash_core::EffectHost>;
+    // The measured turn writes no attachment bytes.
+    let stores = Arc::new(lash_postgres_store::PostgresStoreSet::new(
+        &storage,
+        Arc::new(lash_core::facade_support::FileAttachmentStore::new(
+            std::env::temp_dir().join("tool-batch-baseline-attachments"),
+        )),
+    )) as Arc<dyn lash_core::StoreSet>;
     let counter = PostgresJournalCounter {
         pool: storage.pool().clone(),
     };
@@ -376,6 +385,7 @@ async fn run_postgres(
                 let measurement = lash_conformance::measure_tool_batch(
                     lash_sansio::SessionId::from(session.clone()),
                     Arc::clone(&host),
+                    Arc::clone(&stores),
                     None,
                     producer,
                     width,
@@ -451,6 +461,9 @@ struct ToolBatchProbeImpl {
     /// The backend's effect host: the batch's effect group routes its
     /// children through the resolver the measured runtime installs here.
     host: Arc<lash_restate::RestateEffectHost>,
+    /// The backend's store set: every port the measured runtime takes
+    /// besides the effect host.
+    stores: Arc<dyn lash_core::StoreSet>,
     authority: lash_restate::RestateAuthorityId,
     producers: Vec<lash_conformance::ToolBatchProducer>,
 }
@@ -486,6 +499,7 @@ impl ToolBatchProbe for ToolBatchProbeImpl {
         let measurement = AssertUnwindSafe(lash_conformance::measure_tool_batch(
             session_id,
             host,
+            Arc::clone(&self.stores),
             Some(scoped),
             producer,
             request.width,
@@ -658,6 +672,7 @@ async fn run_restate(
         .bind(
             ToolBatchProbeImpl {
                 host: backend.effect_host(),
+                stores: Arc::clone(backend.stores()),
                 authority: authority.clone(),
                 producers: producers.to_vec(),
             }

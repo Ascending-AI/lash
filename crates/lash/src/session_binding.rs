@@ -32,15 +32,11 @@ impl BoundSession {
         process: ProcessWorkWiring,
         queued: Arc<dyn QueuedWorkSubstrate>,
         catalog: Arc<dyn SessionStoreFactory>,
-    ) -> Result<Self, lash_core::RuntimeError> {
-        let effect_host = lash_core::facade_support::bind_store_turn_control_authority(
-            Arc::clone(&env.core.control.effect_host),
-            store.as_ref(),
-        )?;
-        Ok(Self {
+    ) -> Self {
+        Self {
             session_id,
             store,
-            effect_host,
+            effect_host: Arc::clone(&env.core.control.effect_host),
             process,
             queued,
             backend: Arc::clone(env.core.backend()),
@@ -48,7 +44,7 @@ impl BoundSession {
             process_env_store: Arc::clone(&env.core.durability.process_env_store),
             process_engines: env.core.process_engines.clone(),
             catalog,
-        })
+        }
     }
 
     pub(crate) fn session_id(&self) -> &SessionId {

@@ -12,11 +12,11 @@ use std::sync::{Arc, OnceLock};
 
 use lash_core::{
     AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, CompletionKeyPreparation,
-    EffectGroupHandle, EffectHost, EffectJournaling, ExecutionScope, GroupExecutors,
-    GroupSettlement, LoserPolicy, Resolution, ResolveOutcome, RuntimeEffectCommand,
-    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectEnvelope,
-    RuntimeEffectGroup, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
-    RuntimeErrorCode, ScopedEffectController, ToolIntentOutcomeSink, ToolIntentPreparation,
+    EffectGroupHandle, EffectHost, ExecutionScope, GroupExecutors, GroupSettlement, LoserPolicy,
+    Resolution, ResolveOutcome, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError, RuntimeErrorCode,
+    ScopedEffectController, ToolIntentOutcomeSink, ToolIntentPreparation,
     facade_support::{RuntimeAwaitEventOptions, ToolChildHost},
 };
 
@@ -585,10 +585,6 @@ impl RuntimeEffectController for FencedRestateController {
         progress: &lash_core::SegmentProgress,
     ) -> Option<lash_core::BoundaryReason> {
         self.controller.wants_segment_boundary(progress)
-    }
-
-    fn effect_journaling(&self) -> EffectJournaling {
-        self.controller.effect_journaling()
     }
 
     fn register_group_executors(
@@ -1621,10 +1617,6 @@ impl RuntimeEffectController for RestateEffectHostController {
         _range: &lash_core::RecordedKeyRange,
     ) -> Result<lash_core::RecordedJournal, RuntimeEffectControllerError> {
         Ok(lash_core::RecordedJournal::Positional)
-    }
-
-    fn effect_journaling(&self) -> EffectJournaling {
-        EffectJournaling::Journaled
     }
 
     async fn execute_effect(

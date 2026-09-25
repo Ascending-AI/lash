@@ -73,10 +73,109 @@ fn recording_controller(
     })
 }
 
-impl AwaitEventResolver for RecordingEffectController {}
+#[async_trait]
+impl AwaitEventResolver for RecordingEffectController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.inner.await_event_authority_binding_id()
+    }
+
+    async fn prepare_completion_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
+        self.inner
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
+    }
+
+    async fn await_event_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+    ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
+        self.inner.await_event_key(scope, wait).await
+    }
+
+    async fn resolve_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        resolution: lash_core::Resolution,
+    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
+        self.inner.resolve_await_event(key, resolution).await
+    }
+
+    async fn peek_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
+        self.inner.peek_await_event(key).await
+    }
+
+    async fn await_await_event(
+        &self,
+        key: &lash_core::AwaitEventKey,
+        cancel: tokio_util::sync::CancellationToken,
+        deadline: Option<std::time::Instant>,
+    ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
+        self.inner.await_await_event(key, cancel, deadline).await
+    }
+
+    async fn revoke_await_events_for_session(
+        &self,
+        session_id: &lash_core::SessionId,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner.revoke_await_events_for_session(session_id).await
+    }
+
+    async fn cancel_await_events_for_session(
+        &self,
+        session_id: &lash_core::SessionId,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner.cancel_await_events_for_session(session_id).await
+    }
+
+    async fn retire_await_events_for_scope(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner.retire_await_events_for_scope(scope).await
+    }
+
+    async fn retire_await_events_for_scope_if_quiescent(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<bool, lash_core::RuntimeError> {
+        self.inner
+            .retire_await_events_for_scope_if_quiescent(scope)
+            .await
+    }
+
+    async fn reinstate_await_event_scope(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner.reinstate_await_event_scope(scope).await
+    }
+
+    async fn await_event_scope_is_retired(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<bool, lash_core::RuntimeError> {
+        self.inner.await_event_scope_is_retired(scope).await
+    }
+}
 
 #[async_trait]
 impl RuntimeEffectController for RecordingEffectController {
+    async fn read_recorded_journal(
+        &self,
+        range: &lash_core::RecordedKeyRange,
+    ) -> Result<lash_core::RecordedJournal, RuntimeEffectControllerError> {
+        self.inner.read_recorded_journal(range).await
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,

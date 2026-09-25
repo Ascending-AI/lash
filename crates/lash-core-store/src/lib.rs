@@ -137,7 +137,6 @@ pub(crate) use session_policy::SessionPolicy;
 pub(crate) use session_read_view::SessionReadView;
 pub(crate) use session_state::RuntimeSessionState;
 pub(crate) use tool_state::ToolState;
-pub(crate) use turn_control_binding::StoreTurnCancellationAuthority;
 pub(crate) use turn_control_vocabulary::{
     TurnAddress, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
     TurnCancelClosureSettlement, TurnCancelInputOutcome, TurnCancelIntentSnapshot,

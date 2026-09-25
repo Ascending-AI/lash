@@ -9,9 +9,10 @@
 /// signal-intent wake, the turn-cancel laws for tool calls running as
 /// effect-group children, and the presentation-divergence park law (FIG-3679).
 ///
-/// The fixture hands back a guard, a session prefix, the tier's effect host, a
-/// process registry, the process-work substrate, the tier's turn runner and a
-/// post-law verification handed the law's name. Restate runs each turn inside a live handler
+/// The fixture hands back a guard, a session prefix, the tier's effect host,
+/// the store set under test (whose session catalog and process registry the
+/// law's runtime uses), the process-work substrate, the tier's turn runner and
+/// a post-law verification handed the law's name. Restate runs each turn inside a live handler
 /// (`#[ignore]`d, deferred to `effect-group-conformance-e2e`).
 #[macro_export]
 macro_rules! turn_runner_tests {
@@ -39,7 +40,7 @@ macro_rules! tool_child_turn_cancel_tests {
 }
 
 /// Register the FIG-1293 migrated-tools crash-redrive law. The fixture hands
-/// back a guard, a prefix, the effect host, a process registry, the tier's
+/// back a guard, a prefix, the effect host, the store set under test, the tier's
 /// turn runner and the orchestration plugin factories (`spawn_agent`,
 /// `cancel_process`) from the crates above this one.
 #[macro_export]
@@ -52,8 +53,8 @@ macro_rules! migrated_tools_redrive_tests {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_guard, prefix, host, registry, runner, orchestration) = $fixture;
-            $crate::registration_macro_support::$law(prefix, host, registry, runner, orchestration)
+            let (_guard, prefix, host, stores, runner, orchestration) = $fixture;
+            $crate::registration_macro_support::$law(prefix, host, stores, runner, orchestration)
                 .await;
             $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
@@ -63,8 +64,8 @@ macro_rules! migrated_tools_redrive_tests {
 /// Register the model-call drift park law (FIG-3587): a model call replays
 /// from the journaled prompt, a recorded model call whose envelope drifted
 /// parks its turn, and restoring the surface finishes it. The fixture hands
-/// back a guard, a prefix, the tier's effect host, its
-/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) and the RLM
+/// back a guard, a prefix, the tier's effect host, the store set under test,
+/// its [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) and the RLM
 /// protocol plugin factories from the crates above this one.
 #[macro_export]
 macro_rules! model_call_drift_park_tests {
@@ -76,8 +77,8 @@ macro_rules! model_call_drift_park_tests {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_guard, prefix, host, runner, protocol) = $fixture;
-            $crate::registration_macro_support::$law(prefix, host, runner, protocol).await;
+            let (_guard, prefix, host, stores, runner, protocol) = $fixture;
+            $crate::registration_macro_support::$law(prefix, host, stores, runner, protocol).await;
             $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
@@ -87,8 +88,9 @@ macro_rules! model_call_drift_park_tests {
 /// against its journaled binding set, completing from the journal when the
 /// drifted tool's result was recorded and parking when it would reach the
 /// tool live. The fixture hands back a guard, a prefix, the tier's effect
-/// host, its [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) — which
-/// must read its journal's replay keys and cut a turn at a
+/// host, the store set under test, its
+/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) — which must read
+/// its journal's replay keys and cut a turn at a
 /// [`JournalCut`](crate::JournalCut) — and the RLM protocol plugin factories
 /// from the crates above this one.
 #[macro_export]
@@ -101,8 +103,8 @@ macro_rules! cell_binding_drift_tests {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_guard, prefix, host, runner, rlm) = $fixture;
-            $crate::registration_macro_support::$law(prefix, host, runner, rlm).await;
+            let (_guard, prefix, host, stores, runner, rlm) = $fixture;
+            $crate::registration_macro_support::$law(prefix, host, stores, runner, rlm).await;
             $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
@@ -115,8 +117,8 @@ macro_rules! __turn_runner_register {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
         async fn $law() {
-            let (_guard, prefix, host, registry, work, runner, verify) = $fixture;
-            $crate::registration_macro_support::$law(prefix, host, registry, work, runner).await;
+            let (_guard, prefix, host, stores, work, runner, verify) = $fixture;
+            $crate::registration_macro_support::$law(prefix, host, stores, work, runner).await;
             verify(stringify!($law)).await;
             $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
@@ -126,7 +128,8 @@ macro_rules! __turn_runner_register {
 /// Register the cross-tier tool-batch parallelism law (FIG-3400).
 ///
 /// The fixture hands back a guard, a session prefix, the tier's effect host,
-/// the product producers reachable on that tier and the tier's
+/// the store set under test, the product producers reachable on that tier and
+/// the tier's
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner). Every producer
 /// runs the same law, so "this tier overlaps a tool batch" is one statement
 /// per surface and not a family of look-alike tests. A handler-bound tier
@@ -141,7 +144,7 @@ macro_rules! tool_batch_parallelism_tests {
         $($attr)*
         #[tokio::test(flavor = "multi_thread", worker_threads = 8)]
         async fn $law() {
-            let (_guard, prefix, host, producers, runner) = $fixture;
+            let (_guard, prefix, host, stores, producers, runner) = $fixture;
             assert!(
                 !producers.is_empty(),
                 "a tier registers at least one product producer, or the law \
@@ -151,6 +154,7 @@ macro_rules! tool_batch_parallelism_tests {
                 $crate::registration_macro_support::$law(
                     prefix,
                     std::sync::Arc::clone(&host),
+                    std::sync::Arc::clone(&stores),
                     std::sync::Arc::clone(&runner),
                     producer,
                 )

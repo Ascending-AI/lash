@@ -9,6 +9,10 @@ struct DefaultBindingHost(Arc<dyn lash_core::EffectHost>);
 
 #[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for DefaultBindingHost {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.0.await_event_authority_binding_id()
+    }
+
     async fn await_event_key(
         &self,
         scope: &lash_core::ExecutionScope,
@@ -170,10 +174,7 @@ async fn turn_control_default_binding_active_gate_recognizes_host_cancel() {
         lash_core::AdmittedScope::unpinned(address.execution_scope()).unwrap(),
     );
     let binding = host.turn_control_binding(&scoped).await.unwrap();
-    let resolver = match binding {
-        lash_core::TurnControlBinding::HostOwned { resolver, .. }
-        | lash_core::TurnControlBinding::RunScoped { resolver, .. } => resolver,
-    };
+    let resolver = binding.resolver();
     let active = ActiveTurnControl::new(resolver, address.clone())
         .await
         .unwrap();

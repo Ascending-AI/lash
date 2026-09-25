@@ -18,9 +18,11 @@ lash_conformance::cancelled_turn_withheld_input_tests!({
         return;
     };
     reset(storage.pool()).await;
+    let (attachments, backend) = super::pg_law_backend(&storage);
     (
-        database_lock,
+        (database_lock, attachments),
         "postgres",
+        backend,
         Arc::new(storage.session_store(lash_conformance::CANCELLED_TURN_WITHHELD_INPUT_SESSION_ID))
             as Arc<dyn RuntimePersistence>,
     )

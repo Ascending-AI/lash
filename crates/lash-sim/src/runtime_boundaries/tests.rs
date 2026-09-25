@@ -6,10 +6,14 @@ fn event(kind: BoundaryKind, id: &str, payload: Value) -> BoundaryEvent {
     BoundaryEvent::new(id, "session-001", kind, 1, "test", payload)
 }
 
-fn harness() -> RuntimeBoundaryHarness {
+/// A harness over a SQLite memory backend's session catalog on the
+/// simulator clock.
+async fn harness() -> RuntimeBoundaryHarness {
     let clock = crate::clock::SimClock::new();
-    let factory: Arc<dyn SessionStoreFactory> =
-        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::with_clock(clock.clone()));
+    let backend = crate::backend::sim_memory_backend(clock.clone())
+        .await
+        .expect("sim memory backend");
+    let factory: Arc<dyn SessionStoreFactory> = backend.session_store_factory();
     RuntimeBoundaryHarness::new(factory, RuntimeEffectReplayStore::Memory, clock)
 }
 
@@ -21,7 +25,7 @@ async fn worker_failover_continuation_oracle_catches_a_store_that_fails_to_fence
     // fence nor continue the work. The failover-continuation oracle MUST catch
     // this — proving it bites on a real un-fencing path, not just synthetic
     // facts.
-    let mut harness = harness();
+    let mut harness = harness().await;
     let session = "worker-unfenced-session";
     let store = harness
         .store_for_session(&SessionId::from(session))
@@ -97,7 +101,7 @@ async fn worker_failover_continuation_oracle_catches_a_store_that_fails_to_fence
 
 #[tokio::test]
 async fn durable_effect_replays_through_runtime_effect_controller() {
-    let mut harness = harness();
+    let mut harness = harness().await;
     let payload = json!({
         "durable_key": "sleep/session-001/001",
         "result": {"completed": true},
@@ -139,7 +143,7 @@ async fn durable_effect_replays_through_runtime_effect_controller() {
 
 #[tokio::test]
 async fn durable_effect_observation_counts_a_second_real_local_execution() {
-    let mut harness = harness();
+    let mut harness = harness().await;
     let boundary = event(
         BoundaryKind::DurableEffect,
         "durable:duplicate-local-execution",
@@ -167,7 +171,7 @@ async fn durable_effect_observation_counts_a_second_real_local_execution() {
 
 #[tokio::test]
 async fn process_wake_uses_structural_source_identity_for_queued_work_claims() {
-    let mut harness = harness();
+    let mut harness = harness().await;
     let payload = json!({
         "session": "session-001",
         "process_id": "sim-process-session-001-001",
@@ -236,7 +240,7 @@ async fn process_lifecycle_boundary_drives_real_disposition_recovery() {
     // END TO END through the REAL DurableProcessWorker sweep: spawn / crash /
     // sweep / abandon-request produce the ADR 0019 verdicts, and both
     // lifecycle oracles pass on the real observation.
-    let mut harness = harness();
+    let mut harness = harness().await;
     let observed = harness
         .run_process_lifecycle(&event(
             BoundaryKind::ProcessLifecycle,
@@ -299,7 +303,7 @@ async fn process_lifecycle_boundary_drives_real_disposition_recovery() {
 
 #[tokio::test]
 async fn tool_boundary_uses_runtime_effect_controller_and_records_output() {
-    let mut harness = harness();
+    let mut harness = harness().await;
     let observed = harness
         .complete_tool(&event(
             BoundaryKind::Tool,
@@ -327,7 +331,7 @@ async fn tool_boundary_uses_runtime_effect_controller_and_records_output() {
 
 #[tokio::test]
 async fn exec_boundary_uses_runtime_effect_controller_and_preserves_exit_data() {
-    let mut harness = harness();
+    let mut harness = harness().await;
     let observed = harness
         .execute_code(&event(
             BoundaryKind::ExecCode,
@@ -363,7 +367,7 @@ async fn journaled_exec_boundary_matches_model_replay_projection() {
             "exit_code": 0,
         }),
     );
-    let mut live_harness = harness();
+    let mut live_harness = harness().await;
     let live = live_harness
         .execute_code(&boundary)
         .await
@@ -382,7 +386,7 @@ async fn journaled_exec_boundary_matches_model_replay_projection() {
 
 #[tokio::test]
 async fn worker_stale_completion_uses_runtime_session_lease_store() {
-    let mut harness = harness();
+    let mut harness = harness().await;
     let observed = harness
         .run_worker_stale_completion(&event(
             BoundaryKind::Worker,

@@ -19,18 +19,16 @@ use anyhow::{Context, Result, bail, ensure};
 use lash::persistence::SessionStoreFactory as _;
 use lash::provider::{LlmResponse, ProviderHandle};
 use lash::runtime::{
-    AwaitEventResolver, ExecutionScope, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeError,
+    AwaitEventResolver, RuntimeEffectController, RuntimeEffectControllerError,
+    RuntimeEffectEnvelope, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
 };
 use lash_core::{
-    AbandonWriter, AwaitEventKey, AwaitEventWaitIdentity, LeaseOwnerIdentity, ProcessAwaitOutput,
-    ProcessInput, ProcessListFilter, ProcessProvenance, ProcessRecord, ProcessRegistration,
-    ProcessRegistry, ProcessStarted, ProcessStatus, ProcessStatusFilter, RecoveryContract,
-    Resolution, ResolveOutcome, SessionScope, facade_support::NativeRuntimeEffectController,
+    AbandonWriter, LeaseOwnerIdentity, ProcessAwaitOutput, ProcessInput, ProcessListFilter,
+    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStarted,
+    ProcessStatus, ProcessStatusFilter, RecoveryContract, SessionScope,
 };
 use lash_postgres_store::PostgresStorage;
 use serde_json::{Value, json};
-use tokio_util::sync::CancellationToken;
 
 const GATE_TIMEOUT: Duration = Duration::from_secs(30);
 const TURN_SESSION_ID: &str = "graceful-drain-in-flight-turn";
@@ -340,18 +338,33 @@ impl StallingProvider {
     }
 }
 
-/// A controller-owned deterministic journal: active replay keys are the live
-/// effect journal, and successful local outcomes move to the completed set.
-/// This does not claim workflow-engine persistence; it proves the host waited
-/// for the in-flight effect it admitted before declaring the journal empty.
-#[derive(Default)]
+/// A deterministic journal over the deployment's own journaled controller:
+/// active replay keys are the live effect journal, and successful outcomes
+/// move to the completed set. It proves the host waited for the in-flight
+/// effect it admitted before declaring the journal empty.
 struct JournalController {
-    inline: NativeRuntimeEffectController,
+    inner: Arc<dyn RuntimeEffectController>,
     active: Mutex<BTreeSet<String>>,
     completed: Mutex<BTreeSet<String>>,
 }
 
 impl JournalController {
+    /// Journals one turn through the PostgreSQL deployment's effect host,
+    /// scoped to that turn.
+    fn for_turn(backend: &Arc<dyn lash::Backend>, session_id: &str, turn_id: &str) -> Result<Self> {
+        let scoped = backend
+            .effect_host()
+            .scoped_static(lash_core::AdmittedScope::turn(session_id, turn_id))?
+            .context("the PostgreSQL effect host lends a static controller")?;
+        Ok(Self {
+            inner: scoped
+                .owned_controller()
+                .context("a static controller is shared")?,
+            active: Mutex::new(BTreeSet::new()),
+            completed: Mutex::new(BTreeSet::new()),
+        })
+    }
+
     fn active(&self) -> Vec<String> {
         self.active.lock_recover().iter().cloned().collect()
     }
@@ -363,59 +376,149 @@ impl JournalController {
 
 #[async_trait::async_trait]
 impl AwaitEventResolver for JournalController {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.inner.await_event_authority_binding_id()
+    }
+
+    async fn prepare_completion_key(
+        &self,
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+        may_defer: bool,
+    ) -> Result<lash_core::CompletionKeyPreparation, lash_core::RuntimeError> {
+        self.inner
+            .prepare_completion_key(scope, wait, may_defer)
+            .await
+    }
+
     async fn await_event_key(
         &self,
-        scope: &ExecutionScope,
-        wait: AwaitEventWaitIdentity,
-    ) -> std::result::Result<AwaitEventKey, RuntimeError> {
-        self.inline.await_event_key(scope, wait).await
+        scope: &lash_core::ExecutionScope,
+        wait: lash_core::AwaitEventWaitIdentity,
+    ) -> Result<lash_core::AwaitEventKey, lash_core::RuntimeError> {
+        self.inner.await_event_key(scope, wait).await
     }
 
     async fn resolve_await_event(
         &self,
-        key: &AwaitEventKey,
-        resolution: Resolution,
-    ) -> std::result::Result<ResolveOutcome, RuntimeError> {
-        self.inline.resolve_await_event(key, resolution).await
+        key: &lash_core::AwaitEventKey,
+        resolution: lash_core::Resolution,
+    ) -> Result<lash_core::ResolveOutcome, lash_core::RuntimeError> {
+        self.inner.resolve_await_event(key, resolution).await
     }
 
     async fn peek_await_event(
         &self,
-        key: &AwaitEventKey,
-    ) -> std::result::Result<Option<Resolution>, RuntimeError> {
-        self.inline.peek_await_event(key).await
+        key: &lash_core::AwaitEventKey,
+    ) -> Result<Option<lash_core::Resolution>, lash_core::RuntimeError> {
+        self.inner.peek_await_event(key).await
     }
 
     async fn await_await_event(
         &self,
-        key: &AwaitEventKey,
-        cancel: CancellationToken,
+        key: &lash_core::AwaitEventKey,
+        cancel: tokio_util::sync::CancellationToken,
         deadline: Option<std::time::Instant>,
-    ) -> std::result::Result<Resolution, RuntimeError> {
-        self.inline.await_await_event(key, cancel, deadline).await
+    ) -> Result<lash_core::Resolution, lash_core::RuntimeError> {
+        self.inner.await_await_event(key, cancel, deadline).await
     }
 
     async fn revoke_await_events_for_session(
         &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<(), RuntimeError> {
-        self.inline
-            .revoke_await_events_for_session(session_id)
-            .await
+        session_id: &lash_core::SessionId,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner.revoke_await_events_for_session(session_id).await
     }
 
     async fn cancel_await_events_for_session(
         &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<(), RuntimeError> {
-        self.inline
-            .cancel_await_events_for_session(session_id)
+        session_id: &lash_core::SessionId,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner.cancel_await_events_for_session(session_id).await
+    }
+
+    async fn retire_await_events_for_scope(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner.retire_await_events_for_scope(scope).await
+    }
+
+    async fn retire_await_events_for_scope_if_quiescent(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<bool, lash_core::RuntimeError> {
+        self.inner
+            .retire_await_events_for_scope_if_quiescent(scope)
             .await
+    }
+
+    async fn reinstate_await_event_scope(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<(), lash_core::RuntimeError> {
+        self.inner.reinstate_await_event_scope(scope).await
+    }
+
+    async fn await_event_scope_is_retired(
+        &self,
+        scope: &lash_core::ExecutionScope,
+    ) -> Result<bool, lash_core::RuntimeError> {
+        self.inner.await_event_scope_is_retired(scope).await
     }
 }
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for JournalController {
+    fn owns_commit_backpressure(&self) -> bool {
+        self.inner.owns_commit_backpressure()
+    }
+
+    async fn drive_independent_effect_work<'work>(
+        &self,
+        work: Vec<lash_core::IndependentEffectWork<'work>>,
+    ) {
+        self.inner.drive_independent_effect_work(work).await;
+    }
+
+    fn wants_segment_boundary(
+        &self,
+        progress: &lash_core::SegmentProgress,
+    ) -> Option<lash_core::BoundaryReason> {
+        self.inner.wants_segment_boundary(progress)
+    }
+
+    fn register_group_executors(
+        &self,
+        executors: std::sync::Arc<dyn lash_core::GroupExecutors>,
+    ) -> Result<(), lash::runtime::RuntimeEffectControllerError> {
+        self.inner.register_group_executors(executors)
+    }
+
+    fn group_child_scoped_controller(
+        &self,
+        admitted: lash_core::AdmittedScope,
+        binding: lash_core::GroupChildBinding,
+    ) -> Result<Option<lash_core::ScopedEffectController<'static>>, lash_core::RuntimeError> {
+        self.inner.group_child_scoped_controller(admitted, binding)
+    }
+
+    async fn read_group_settlement(
+        &self,
+        group_key: &str,
+        rank: u64,
+    ) -> Result<Option<lash_core::RankedGroupSettlement>, lash::runtime::RuntimeEffectControllerError>
+    {
+        self.inner.read_group_settlement(group_key, rank).await
+    }
+
+    async fn read_recorded_journal(
+        &self,
+        range: &lash_core::RecordedKeyRange,
+    ) -> Result<lash_core::RecordedJournal, lash::runtime::RuntimeEffectControllerError> {
+        self.inner.read_recorded_journal(range).await
+    }
+
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
@@ -423,7 +526,7 @@ impl RuntimeEffectController for JournalController {
     ) -> std::result::Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let key = envelope.invocation.replay_key().to_owned();
         self.active.lock_recover().insert(key.clone());
-        let result = self.inline.execute_effect(envelope, local_executor).await;
+        let result = self.inner.execute_effect(envelope, local_executor).await;
         self.active.lock_recover().remove(&key);
         if result.is_ok() {
             self.completed.lock_recover().insert(key);
@@ -435,7 +538,7 @@ impl RuntimeEffectController for JournalController {
         &self,
         group: lash::runtime::RuntimeEffectGroup,
     ) -> Result<lash::runtime::EffectGroupHandle, lash::runtime::RuntimeEffectControllerError> {
-        self.inline.open_effect_group(group).await
+        self.inner.open_effect_group(group).await
     }
 
     async fn await_next_settlement(
@@ -443,7 +546,7 @@ impl RuntimeEffectController for JournalController {
         handle: &mut lash::runtime::EffectGroupHandle,
         cancel: lash::CancellationToken,
     ) -> Result<lash::runtime::GroupSettlement, lash::runtime::RuntimeEffectControllerError> {
-        self.inline.await_next_settlement(handle, cancel).await
+        self.inner.await_next_settlement(handle, cancel).await
     }
 
     async fn close_effect_group(
@@ -451,7 +554,7 @@ impl RuntimeEffectController for JournalController {
         handle: lash::runtime::EffectGroupHandle,
         disposition: lash::runtime::LoserPolicy,
     ) -> Result<(), lash::runtime::RuntimeEffectControllerError> {
-        self.inline.close_effect_group(handle, disposition).await
+        self.inner.close_effect_group(handle, disposition).await
     }
 
     async fn commit_group_child_final(
@@ -461,7 +564,7 @@ impl RuntimeEffectController for JournalController {
         lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
         lash::runtime::RuntimeEffectControllerError,
     > {
-        self.inline.commit_group_child_final(commit).await
+        self.inner.commit_group_child_final(commit).await
     }
 
     async fn await_group_child_drain_admission(
@@ -469,7 +572,7 @@ impl RuntimeEffectController for JournalController {
         group_key: &str,
         commit_seq: u64,
     ) -> Result<(), lash::runtime::RuntimeEffectControllerError> {
-        self.inline
+        self.inner
             .await_group_child_drain_admission(group_key, commit_seq)
             .await
     }
@@ -834,7 +937,18 @@ async fn graceful_drain(storage: &PostgresStorage) -> Result<()> {
     let trace_path = traces.path().join("graceful-drain.trace.jsonl");
     let core = core(storage, provider.handle.clone(), &attachments, &trace_path)?;
     let session = { core.session(TURN_SESSION_ID).open().await? };
-    let journal = Arc::new(JournalController::default());
+    let journal_backend: Arc<dyn lash::Backend> =
+        Arc::new(lash_postgres_store::PostgresBackend::new(
+            storage,
+            Arc::new(lash::persistence::FileAttachmentStore::new(
+                attachments.path().to_path_buf(),
+            )),
+        ));
+    let journal = Arc::new(JournalController::for_turn(
+        &journal_backend,
+        TURN_SESSION_ID,
+        "graceful-drain-in-flight",
+    )?);
     let task_journal = Arc::clone(&journal);
     let mut turn = tokio::spawn(async move {
         let output = session
@@ -1385,24 +1499,6 @@ mod tests {
                 .expect("an unwritten trace reads")
                 .is_empty()
         );
-    }
-
-    /// A controller that answers `Journaled` must also name the durable
-    /// authority that minted its await-event keys, or the runtime refuses the
-    /// turn with `invalid_turn_cancel_request` before it reaches the provider
-    /// (#1226). This fixture's journal wraps the in-process native controller
-    /// and owns no durable authority, so the two answers have to stay
-    /// coherent: claiming durable turn control here is what made the drain
-    /// flow fail with nothing but `provider effect did not enter`.
-    #[test]
-    fn the_drain_journal_never_claims_durable_turn_control_without_an_authority() {
-        let journal = JournalController::default();
-        if journal.effect_journaling() == lash_core::EffectJournaling::Journaled {
-            assert!(
-                journal.await_event_authority_binding_id().is_some(),
-                "a durable-journaled controller must name its await-event authority"
-            );
-        }
     }
 
     /// The in-flight gate must never outlive the turn it waits on. A turn that

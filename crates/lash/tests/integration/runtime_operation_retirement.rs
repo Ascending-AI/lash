@@ -676,6 +676,10 @@ struct RetirementFailsHost {
 
 #[async_trait::async_trait]
 impl lash_core::AwaitEventResolver for RetirementFailsHost {
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        self.inner.await_event_authority_binding_id()
+    }
+
     async fn prepare_completion_key(
         &self,
         scope: &ExecutionScope,

@@ -155,6 +155,9 @@ const SESSION_INGRESS_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const PARK_FEED_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-120-e242928e4/sqlite-expected.json",
 ];
+const NATIVE_CUT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-121-298e495cd/sqlite-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/sqlite-expected.json",
 ];
@@ -310,7 +313,7 @@ async fn sqlite_v32_session_relation_is_refused_before_row_decode() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 87"),
+        message.contains("supports schema version 88"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -335,7 +338,7 @@ async fn sqlite_v38_component_fixture_is_refused_before_hydration() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 87"),
+        message.contains("supports schema version 88"),
         "open refusal must name the current schema boundary: {message}"
     );
     assert!(
@@ -395,7 +398,7 @@ async fn sqlite_v73_envelope_database_is_refused_before_blob_decode() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 87"),
+        message.contains("supports schema version 88"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -443,7 +446,7 @@ async fn sqlite_v76_pending_input_database_is_refused_before_replay() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 87"),
+        message.contains("supports schema version 88"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -477,7 +480,7 @@ async fn sqlite_v77_catalog_without_attachment_blobs_is_refused() {
     };
     let message = open_error.to_string();
     assert!(
-        message.contains("supports schema version 87"),
+        message.contains("supports schema version 88"),
         "open refusal must name the current reject-and-recreate boundary: {message}"
     );
     assert!(
@@ -570,9 +573,8 @@ fn pin_release_stamp_instant(core_path: &Path, timestamp_ms: u64) {
 async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles {
     std::fs::create_dir_all(root).expect("create SQLite fixture root");
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(timestamp_ms));
-    // Durable core carries its own `await_event_meta` row, seeded by the schema
-    // with `randomblob(32)`. Pin it before anything is written, so that nothing
-    // the fixture seeds can be derived from a secret that changes per run.
+    // Prime the durable core so its release stamp can be pinned before
+    // anything is written.
     let core_path = root.join("durable-core.db");
     let priming_runtime = Store::open_with_clock(
         &core_path,
@@ -581,13 +583,6 @@ async fn open_handles(root: &Path, timestamp_ms: u64) -> fixture::FixtureHandles
     .await
     .expect("prime SQLite durable-core fixture schema");
     drop(priming_runtime);
-    rusqlite::Connection::open(&core_path)
-        .expect("open SQLite durable-core fixture for deterministic secret")
-        .execute(
-            "UPDATE await_event_meta SET signing_secret = ?1 WHERE singleton = 1",
-            rusqlite::params![fixture::FIXTURE_AWAIT_EVENT_SIGNING_SECRET.to_vec()],
-        )
-        .expect("install deterministic SQLite durable-core await-event signing secret");
     pin_release_stamp_instant(&core_path, timestamp_ms);
     let runtime = Arc::new(
         Store::open_with_clock(

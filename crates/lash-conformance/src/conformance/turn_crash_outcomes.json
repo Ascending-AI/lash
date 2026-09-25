@@ -1,204 +1,165 @@
 [
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "claim_session_execution_lease"}}, "placement": "boundary"},
-    "outcome": "No lease was acquired; a successor claims immediately and completes the durable turn once.",
-    "effect_executions_l1": 1
+    "outcome": "No lease was acquired; a successor claims immediately and completes the durable turn once."
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "claim_session_execution_lease"}}, "placement": "inside_call"},
-    "outcome": "The lost lease result expires; a successor polls, reclaims a higher generation, and completes once.",
-    "effect_executions_l1": 1
+    "outcome": "The lost lease result expires; a successor polls, reclaims a higher generation, and completes once."
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "load_queued_run_admission_head"}}, "placement": "boundary"},
-    "outcome": "The lease is held but no run is admitted. The successor reclaims the lane and admits the unchanged durable ingress.",
-    "effect_executions_l1": 1
+    "outcome": "The lease is held but no run is admitted. The successor reclaims the lane and admits the unchanged durable ingress."
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "begin_queued_run"}}, "placement": "boundary"},
-    "outcome": "No admission has committed. The successor admits the run before selecting any input or executing an effect.",
-    "effect_executions_l1": 1
+    "outcome": "No admission has committed. The successor admits the run before selecting any input or executing an effect."
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "begin_queued_run"}}, "placement": "inside_call"},
-    "outcome": "The admission committed but its response was lost. The successor resumes its durable identity and position before freezing the initial selection.",
-    "effect_executions_l1": 1
+    "outcome": "The admission committed but its response was lost. The successor resumes its durable identity and position before freezing the initial selection."
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "defer_orphaned_active_turn_inputs"}}, "placement": "boundary"},
-    "outcome": "No orphaned input exists in the reference prefix; the successor reclaims the lease and executes its durable ingress once.",
-    "effect_executions_l1": 1
+    "outcome": "No orphaned input exists in the reference prefix; the successor reclaims the lease and executes its durable ingress once."
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "select_queued_run"}}, "placement": "boundary"},
-    "outcome": "The admitted run has no frozen selection. The successor atomically selects its initial input and queued work.",
-    "effect_executions_l1": 1
+    "outcome": "The admitted run has no frozen selection. The successor atomically selects its initial input and queued work."
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "select_queued_run"}}, "placement": "inside_call"},
-    "outcome": "The ordered selection and claims committed before the response was lost. The successor resumes those exact members with rotated physical claims.",
-    "effect_executions_l1": 1
+    "outcome": "The ordered selection and claims committed before the response was lost. The successor resumes those exact members with rotated physical claims."
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "load_session_head_meta"}}, "placement": "boundary"},
-    "outcome": "No runtime progress was durable; the successor probes the same head and reclaims ingress.",
-    "effect_executions_l1": 1
+    "outcome": "No runtime progress was durable; the successor probes the same head and reclaims ingress."
   },
   {
     "point": {"operation": {"seam": "provider", "operation": {"kind": "initial_request"}}, "placement": "boundary"},
-    "outcome": "The provider request is replayed from durable input with no committed model progress.",
-    "effect_executions_l1": 1
+    "outcome": "The provider request is replayed from durable input with no committed model progress."
   },
   {
     "point": {"operation": {"seam": "provider", "operation": {"kind": "initial_mid_stream"}}, "placement": "provider_mid_stream"},
     "outcome": "Partial provider stream state is process-local and discarded; the request is replayed.",
-    "effect_executions_l1": 1,
     "level_2": {"exact": {"effect_executions": {"at_crash": 0, "after_recovery": 1}}}
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "renew_session_execution_lease"}}, "placement": "boundary"},
-    "outcome": "The current lease remains valid but unrenewed; after expiry a successor reclaims it and executes the effect once.",
-    "effect_executions_l1": 1
+    "outcome": "The current lease remains valid but unrenewed; after expiry a successor reclaims it and executes the effect once."
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "renew_session_execution_lease"}}, "placement": "inside_call"},
-    "outcome": "The renewed lease result was lost; the renewed deadline eventually expires and a successor reclaims the turn without duplicating pre-effect work.",
-    "effect_executions_l1": 1
+    "outcome": "The renewed lease result was lost; the renewed deadline eventually expires and a successor reclaims the turn without duplicating pre-effect work."
   },
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "group_open", "children": 1}}, "placement": "boundary"},
-    "outcome": "The group was not opened; the successor opens it and executes the child's external effect once.",
-    "effect_executions_l1": 1
+    "outcome": "The group was not opened; the successor opens it and executes the child's external effect once."
   },
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "group_open", "children": 1}}, "placement": "inside_call"},
-    "outcome": "The completed group-open result was lost before runtime progress; the receipt-less level-1 controller re-executes the external effect.",
-    "effect_executions_l1": 2
+    "outcome": "The completed group-open result was lost before runtime progress; the receipt-less level-1 controller re-executes the external effect."
   },
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "tool_attempt", "name": "trace_effect"}}, "placement": "boundary"},
-    "outcome": "The tool attempt has not crossed the external boundary; recovery executes it once.",
-    "effect_executions_l1": 1
+    "outcome": "The tool attempt has not crossed the external boundary; recovery executes it once."
   },
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "tool_attempt", "name": "trace_effect"}}, "placement": "after_external_effect_before_outcome"},
     "outcome": "The external effect completed inside the tool but no durable outcome was recorded; recovery MUST re-execute it under at-least-once semantics.",
-    "effect_executions_l1": 2,
     "level_2": {"exact": {"effect_executions": {"at_crash": 1, "after_recovery": 2}}}
   },
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "tool_attempt", "name": "trace_effect"}}, "placement": "inside_call"},
-    "outcome": "The controller call returned but runtime progress was not durable; the receipt-less level-1 controller re-executes the external effect.",
-    "effect_executions_l1": 2
+    "outcome": "The controller call returned but runtime progress was not durable; the receipt-less level-1 controller re-executes the external effect."
   },
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "group_settle"}}, "placement": "boundary"},
-    "outcome": "The settlement wait never ran; the child's effect already executed and the receipt-less level-1 recovery re-executes it.",
-    "effect_executions_l1": 2
+    "outcome": "The settlement wait never ran; the child's effect already executed and the receipt-less level-1 recovery re-executes it."
   },
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "group_settle"}}, "placement": "inside_call"},
-    "outcome": "The settlement read returned but its result was lost; the receipt-less level-1 recovery re-executes the child's external effect.",
-    "effect_executions_l1": 2
+    "outcome": "The settlement read returned but its result was lost; the receipt-less level-1 recovery re-executes the child's external effect."
   },
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "group_close"}}, "placement": "boundary"},
-    "outcome": "The group settled but was never closed; the receipt-less level-1 recovery re-executes the child's external effect.",
-    "effect_executions_l1": 2
+    "outcome": "The group settled but was never closed; the receipt-less level-1 recovery re-executes the child's external effect."
   },
   {
     "point": {"operation": {"seam": "effect", "operation": {"kind": "group_close"}}, "placement": "inside_call"},
-    "outcome": "The close result was lost; the receipt-less level-1 recovery re-executes the settled child's external effect.",
-    "effect_executions_l1": 2
+    "outcome": "The close result was lost; the receipt-less level-1 recovery re-executes the settled child's external effect."
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "claim_checkpoint_work", "checkpoint": "afterwork"}}, "placement": "boundary"},
-    "outcome": "Tool progress is not durable; active input and queued work remain reclaimable and the effect re-executes.",
-    "effect_executions_l1": 2
+    "outcome": "Tool progress is not durable; active input and queued work remain reclaimable and the effect re-executes."
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "claim_checkpoint_work", "checkpoint": "afterwork"}}, "placement": "inside_call"},
-    "outcome": "Checkpoint claims are pinned to the expired generation; the successor reclaims them and replays the uncommitted effect.",
-    "effect_executions_l1": 2
+    "outcome": "Checkpoint claims are pinned to the expired generation; the successor reclaims them and replays the uncommitted effect."
   },
   {
     "point": {"operation": {"seam": "provider", "operation": {"kind": "after_tool_request"}}, "placement": "boundary"},
-    "outcome": "No tool outcome or model continuation is durable; the whole model-tool prefix is replayed.",
-    "effect_executions_l1": 2
+    "outcome": "No tool outcome or model continuation is durable; the whole model-tool prefix is replayed."
   },
   {
     "point": {"operation": {"seam": "provider", "operation": {"kind": "after_tool_mid_stream"}}, "placement": "provider_mid_stream"},
     "outcome": "Partial post-tool provider output is discarded. Level 1 replays the receipt-less effect; level 2 reuses the durable outcome before replaying the request.",
-    "effect_executions_l1": 2,
     "level_2": {"exact": {"effect_executions": {"at_crash": 1, "after_recovery": 1}}}
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "claim_checkpoint_work", "checkpoint": "beforecompletion"}}, "placement": "boundary"},
-    "outcome": "The final checkpoint probe has not changed durable state; recovery replays the turn prefix.",
-    "effect_executions_l1": 2
+    "outcome": "The final checkpoint probe has not changed durable state; recovery replays the turn prefix."
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "claim_checkpoint_work", "checkpoint": "beforecompletion"}}, "placement": "inside_call"},
-    "outcome": "Any final checkpoint claims remain generation-reclaimable; no model or effect outcome was committed.",
-    "effect_executions_l1": 2
+    "outcome": "Any final checkpoint claims remain generation-reclaimable; no model or effect outcome was committed."
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "authorize_turn_cancel_closure"}}, "placement": "boundary"},
-    "outcome": "The completion closure is not yet authorized; recovery replays the uncommitted turn prefix.",
-    "effect_executions_l1": 2
+    "outcome": "The completion closure is not yet authorized; recovery replays the uncommitted turn prefix."
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "authorize_turn_cancel_closure"}}, "placement": "inside_call"},
-    "outcome": "The exact completion closure is durably authorized; recovery settles it under the same store authority before redriving unfinished ingress.",
-    "effect_executions_l1": 2
+    "outcome": "The exact completion closure is durably authorized; recovery settles it under the same store authority before redriving unfinished ingress."
   },
   {
     "point": {"operation": {"seam": "turn_control", "operation": {"kind": "resolve_base"}}, "placement": "boundary"},
-    "outcome": "The completion base gate is still open under the durable authorization; the successor settles the exact closure before replaying uncommitted ingress.",
-    "effect_executions_l1": 2
+    "outcome": "The completion base gate is still open under the durable authorization; the successor settles the exact closure before replaying uncommitted ingress."
   },
   {
     "point": {"operation": {"seam": "turn_control", "operation": {"kind": "resolve_base"}}, "placement": "inside_call"},
-    "outcome": "The completion base gate is sealed but input publication has not committed; recovery adopts the authorized winner and redrives the unfinished turn.",
-    "effect_executions_l1": 2
+    "outcome": "The completion base gate is sealed but input publication has not committed; recovery adopts the authorized winner and redrives the unfinished turn."
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "apply_turn_cancel_effects_and_consume"}}, "placement": "boundary"},
     "outcome": "The final current-head CAS has not landed; recovery replays the checkpoint prefix and atomically settles its durable ingress claims with the recovered terminal turn.",
-    "effect_executions_l1": 2,
     "level_2": {"exact": {"effect_executions": {"at_crash": 1, "after_recovery": 1}}}
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "apply_turn_cancel_effects_and_consume"}}, "placement": "inside_call"},
     "outcome": "The final CAS landed but its response was lost; the successor observes settled ingress and does not repeat the committed turn.",
-    "effect_executions_l1": 1,
     "level_2": {"exact": {"effect_executions": {"at_crash": 1, "after_recovery": 1}}}
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "pending_queued_run"}}, "placement": "boundary"},
-    "outcome": "The final commit settled the admission and ingress. The successor returns its receipt without repeating the committed turn.",
-    "effect_executions_l1": 1
+    "outcome": "The final commit settled the admission and ingress. The successor returns its receipt without repeating the committed turn."
   },
 
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "commit_final_head", "settles_queue": false, "settles_turn_input": false, "releases_lease": false}}, "placement": "boundary"},
-    "outcome": "The final commit settled the admission and ingress; only the drain-end receipt is missing. The successor resumes the settled run and returns its receipt without executing another effect; this drain owns no children, so its replay has no end to write.",
-    "effect_executions_l1": 1
+    "outcome": "The final commit settled the admission and ingress; only the drain-end receipt is missing. The successor resumes the settled run and returns its receipt without executing another effect; this drain owns no children, so its replay has no end to write."
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "commit_final_head", "settles_queue": false, "settles_turn_input": false, "releases_lease": false}}, "placement": "inside_call"},
-    "outcome": "The drain-end receipt committed but its response was lost; the owner still holds the lane. After reclaiming it, the successor resumes the settled run and returns the terminal receipt without executing another effect.",
-    "effect_executions_l1": 1
+    "outcome": "The drain-end receipt committed but its response was lost; the owner still holds the lane. After reclaiming it, the successor resumes the settled run and returns the terminal receipt without executing another effect."
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "release_session_execution_lease"}}, "placement": "boundary"},
-    "outcome": "The terminal receipt is durable but the owner still holds the lane. After reclaiming it, the successor returns the same receipt without executing another effect.",
-    "effect_executions_l1": 1
+    "outcome": "The terminal receipt is durable but the owner still holds the lane. After reclaiming it, the successor returns the same receipt without executing another effect."
   },
   {
     "point": {"operation": {"seam": "store", "operation": {"kind": "release_session_execution_lease"}}, "placement": "inside_call"},
-    "outcome": "The lane release committed but its response was lost. The successor acquires the free lane and returns the durable terminal receipt.",
-    "effect_executions_l1": 1
+    "outcome": "The lane release committed but its response was lost. The successor acquires the free lane and returns the durable terminal receipt."
   },
   {
     "scenario": "checkpoint_execute_finalize",
@@ -252,6 +213,13 @@
     "error_return": {
       "placement": "effect-journal-renew",
       "outcome": "A store error from the effect-lease renew is a missed renewal, not a lost lease (FIG-3512, LeaseTimings' two-miss budget): the renewal loop retries it while the tool keeps running, the tool completes and finalizes, and the injected error never reaches the caller. This supersedes the FIG-3528 unretried-abort ruling for this placement: a single renew error is retried by design, so the fail-stop law's retried branch applies.",
+      "violations": []
+    }
+  },
+  {
+    "error_return": {
+      "placement": "start-gate-peek-finalize",
+      "outcome": "An unretried store error from the effect journal's finalize of the start-gate cancel peek aborts the turn as a controller error (FIG-3528): the start gate is observed once (FIG-3647), so the typed error reaches the caller and no provider request, tool dispatch or durable commit follows.",
       "violations": []
     }
   }

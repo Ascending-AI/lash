@@ -365,7 +365,7 @@ impl SessionBuilder {
             ports.process.clone(),
             ports.queued_port(),
             resolved.catalog,
-        )?);
+        ));
         env = binding.apply_owner(env);
         let mut runtime = LashRuntime::from_environment_with_plugin_options(
             &env,
@@ -853,9 +853,8 @@ impl LashSession {
     /// Request cooperative cancellation of exactly one turn in this session.
     ///
     /// The request is compiled onto the deployment's keyed-promise control
-    /// seam. An native effect host is process-local; another process or a
-    /// replayed owner can observe the request only with a controller-owned
-    /// replay deployment. `origin` is opaque host-domain data that Lash records
+    /// seam, which every effect host journals, so another process or a
+    /// replayed owner observes the request. `origin` is opaque host-domain data that Lash records
     /// without interpretation. Detached effects are not guaranteed to stop.
     /// `turn_id` is routing identity, not authorization; hosts must authorize
     /// callers before invoking this API. Undelivered active-turn input is
@@ -883,9 +882,8 @@ impl LashSession {
     /// choosing how Lash handles active-turn input the turn did not deliver.
     ///
     /// The request is compiled onto the deployment's keyed-promise control
-    /// seam. An native effect host is process-local; another process or a
-    /// replayed owner can observe the request only with a controller-owned
-    /// replay deployment. `origin` is opaque host-domain data that Lash records
+    /// seam, which every effect host journals, so another process or a
+    /// replayed owner observes the request. `origin` is opaque host-domain data that Lash records
     /// without interpretation. Detached effects are not guaranteed to stop.
     /// `turn_id` is routing identity, not authorization; hosts must authorize
     /// callers before invoking this API. `undelivered` is first-writer-wins for

@@ -1,23 +1,18 @@
 use crate::ProcessId;
 use crate::SessionId;
 use std::collections::BTreeMap;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 
 use crate::plugin::PluginError;
 
-mod memory;
 mod mutation;
 mod router;
 #[cfg(test)]
 mod tests;
 
 use crate::runtime::process::identity_projection::project_process_payload_leaf;
-pub use memory::InMemoryTriggerStore;
-#[cfg(any(test, feature = "testing"))]
-pub use memory::RawTriggerStateForTesting;
-use mutation::apply_trigger_command;
 pub use mutation::{evaluate_trigger_mutation, evaluate_trigger_mutation_with_incarnation};
 use router::default_enabled;
 pub use router::*;

@@ -20,8 +20,8 @@ use lash_core::{
     LeaseOwnerIdentity, NativeProcessWork, NativeSubstrateConfig, NoQueuedWork, ProcessAwaitOutput,
     ProcessEngine, ProcessEngineRunContext, ProcessInfraError, ProcessInput, ProcessLease,
     ProcessLeaseClaimOutcome, ProcessRegistration, ProcessRegistry, ProcessRunOutcome,
-    ProcessStatus, ProcessWorkSubstrate, RecoveryContract, SessionPolicy, TestLocalProcessRegistry,
-    ToolCallOutput, TurnBudget, WorkCadencePolicy, WorkerSweepPolicy,
+    ProcessStatus, ProcessWorkSubstrate, RecoveryContract, SessionPolicy, ToolCallOutput,
+    TurnBudget, WorkCadencePolicy, WorkerSweepPolicy,
 };
 use lash_core_worker::{DurableProcessWorker, DurableProcessWorkerConfig, WorkerProcessWork};
 use serde_json::{Value, json};
@@ -200,7 +200,9 @@ impl AdmissionFaultSink {
 }
 
 struct ProcessAdmissionScenario {
-    raw_registry: Arc<TestLocalProcessRegistry>,
+    /// The scenario's registry: a SQLite memory store set's, behind the
+    /// fault decorator the terminal-write fault is armed on.
+    raw_registry: Arc<lash_core::testing::ProcessRegistryFaults>,
     registry: Arc<dyn ProcessRegistry>,
     process_work: NativeProcessWork,
     engine_started: Arc<tokio::sync::Notify>,
@@ -213,7 +215,12 @@ struct ProcessAdmissionScenario {
 
 impl ProcessAdmissionScenario {
     async fn new() -> Self {
-        let raw_registry = Arc::new(TestLocalProcessRegistry::default());
+        let raw_registry = Arc::new(lash_core::testing::ProcessRegistryFaults::new(
+            lash_sqlite_store::SqliteStoreSet::memory()
+                .await
+                .expect("open the scenario's SQLite memory store set")
+                .process_registry(),
+        ));
         let registry: Arc<dyn ProcessRegistry> = raw_registry.clone();
         let watched = watch_process_registry(registry);
         let registry = Arc::clone(watched.registry());
@@ -418,8 +425,7 @@ impl ProcessAdmissionScenario {
         self.raw_registry
             .set_process_terminal_write_error(Some(lash_core::PluginError::Session(
                 "injected native process admission terminal-write failure".to_string(),
-            )))
-            .await;
+            )));
         self.engine_release.add_permits(1);
         let fault = self.fault_sink.await_first().await;
         let ProcessWorkerFault::RecoveryBackendError {

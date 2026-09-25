@@ -96,7 +96,7 @@ pub(super) async fn run_invocation(
 ) -> Result<lash_core::ProcessRunOutcome, lash_core::PluginError> {
     let worker = recovery_worker_with_plugins(
         Arc::clone(&registry),
-        Arc::new(lash_core::facade_support::InMemorySessionStoreFactory::new()),
+        memory_session_store_factory().await,
         vec![counting_tool_plugin(Arc::clone(executions))],
     )
     .await;

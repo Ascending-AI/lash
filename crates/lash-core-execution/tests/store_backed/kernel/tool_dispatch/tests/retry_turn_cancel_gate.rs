@@ -21,7 +21,12 @@ struct RetrySleepShapeRecorder {
     sleeps: std::sync::Mutex<Vec<RetrySleepObservation>>,
 }
 
-impl crate::AwaitEventResolver for RetrySleepShapeRecorder {}
+impl crate::AwaitEventResolver for RetrySleepShapeRecorder {
+    /// A test double that mints keys under no durable authority.
+    fn await_event_authority_binding_id(&self) -> Option<String> {
+        None
+    }
+}
 
 #[async_trait::async_trait]
 impl crate::RuntimeEffectController for RetrySleepShapeRecorder {

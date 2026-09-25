@@ -86,6 +86,11 @@ pub(crate) async fn memory_process_registry() -> Arc<dyn lash_core::ProcessRegis
     memory_backend().await.process_registry()
 }
 
+/// A fresh memory backend's trigger store.
+pub(crate) async fn memory_trigger_store() -> Arc<dyn lash_core::TriggerStore> {
+    memory_backend().await.trigger_store()
+}
+
 /// Ports over a host the test built itself (a capturing or faulting layer),
 /// with a fresh memory backend's process-exec-env store beside it.
 pub(crate) async fn ports_over_host(

@@ -10,14 +10,14 @@ async fn controller_owned_non_tool_trigger_redrive_reemits_reserved_start_withou
     }
 
     #[async_trait::async_trait]
-    impl lash_core::AwaitEventResolver for ControllerOwnedTriggerEmitter {}
+    impl lash_core::AwaitEventResolver for ControllerOwnedTriggerEmitter {
+        fn await_event_authority_binding_id(&self) -> Option<String> {
+            self.native.await_event_authority_binding_id()
+        }
+    }
 
     #[async_trait::async_trait]
     impl RuntimeEffectController for ControllerOwnedTriggerEmitter {
-        fn effect_journaling(&self) -> lash_core::EffectJournaling {
-            lash_core::EffectJournaling::Journaled
-        }
-
         async fn execute_effect(
             &self,
             envelope: RuntimeEffectEnvelope,

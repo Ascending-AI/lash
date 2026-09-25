@@ -37,7 +37,7 @@ where
     TurnWorkDriver::for_session(
         Arc::new(RestateRuntimeEffectController::new_for_test(context)),
         SESSION,
-        Arc::new(lash_core::facade_support::InMemorySessionStore::default()),
+        sync_await(memory_session_store(SESSION)),
     )
 }
 
