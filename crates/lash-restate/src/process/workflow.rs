@@ -14,7 +14,6 @@ use lash_sansio::ProcessId;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use std::time::Duration;
 
 use lash_core::{
     AbandonEvidence, AbandonWriter, PluginError, ProcessAwaitOutput, ProcessExecutionContext,
@@ -71,7 +70,6 @@ pub(crate) struct LashProcessWorkflowImpl<R> {
     runner: Arc<R>,
     registry: Arc<dyn ProcessRegistry>,
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
-    segment_duration_cap: Option<Duration>,
     segment_effect_budget: super::SegmentEffectBudget,
     cancel_ingress: Option<RestateIngressClient>,
     authority_id: crate::RestateAuthorityId,
@@ -126,7 +124,6 @@ impl<R> LashProcessWorkflowImpl<R> {
             runner,
             registry,
             continuations,
-            segment_duration_cap: None,
             segment_effect_budget: Arc::new(|_| 10_000),
             cancel_ingress,
             authority_id,
@@ -135,11 +132,6 @@ impl<R> LashProcessWorkflowImpl<R> {
             #[cfg(test)]
             cancel_read_failures: std::sync::atomic::AtomicUsize::new(0),
         }
-    }
-
-    pub(crate) fn with_segment_duration_cap(mut self, cap: Duration) -> Self {
-        self.segment_duration_cap = Some(cap);
-        self
     }
 
     /// Attach the host's live trace observer to every process-segment
@@ -741,11 +733,8 @@ where
                     .await;
             }
         };
-        let mut options = RestateEffectControllerOptions::default()
+        let options = RestateEffectControllerOptions::default()
             .segment_effect_budget((self.segment_effect_budget)(&input.registration));
-        if let Some(cap) = self.segment_duration_cap {
-            options = options.segment_duration_cap(cap);
-        }
         let controller =
             RestateRuntimeEffectController::with_options(ctx, self.authority_id.clone(), options);
         let trace = self

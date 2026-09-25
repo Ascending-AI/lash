@@ -90,7 +90,7 @@ fn endpoint(
 ) -> restate_sdk::endpoint::Endpoint {
     backend
         // A bare worker serves processes under the default segment policy;
-        // `RestateProcessServing` sets a duration cap or effect budget.
+        // `RestateProcessServing` sets an effect budget.
         .endpoint_builder(RestateProcessServing::new(worker))
         .bind(lash_restate::turn_service(
             AgentTurnWorkflowImpl.serve(),

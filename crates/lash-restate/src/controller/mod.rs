@@ -70,7 +70,6 @@ struct RestateTraceObserver {
 #[derive(Clone)]
 pub struct RestateEffectControllerOptions {
     run_retry_policy: Option<RunRetryPolicy>,
-    segment_duration_cap: Option<Duration>,
     segment_effect_budget: u64,
     journaled_effect_byte_budget: Option<u64>,
     /// The §7 drain budget: on the SQL tiers it bounds how long group
@@ -86,7 +85,6 @@ impl Default for RestateEffectControllerOptions {
     fn default() -> Self {
         Self {
             run_retry_policy: None,
-            segment_duration_cap: None,
             segment_effect_budget: 10_000,
             journaled_effect_byte_budget: None,
             drain_budget: lash_core::EffectGroupDrainBudget::DEFAULT.duration(),
@@ -106,14 +104,6 @@ impl RestateEffectControllerOptions {
     /// serializable effect result.
     pub fn run_retry_policy(mut self, policy: RunRetryPolicy) -> Self {
         self.run_retry_policy = Some(policy);
-        self
-    }
-
-    /// Request a segment boundary once this handler incarnation has lived for
-    /// at least `cap`. The actual cut remains the engine's quiescent post-effect
-    /// point, shared with journal-budget boundaries.
-    pub fn segment_duration_cap(mut self, cap: Duration) -> Self {
-        self.segment_duration_cap = Some(cap);
         self
     }
 
@@ -173,7 +163,6 @@ impl fmt::Debug for RestateEffectControllerOptions {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RestateEffectControllerOptions")
             .field("run_retry_policy", &self.run_retry_policy)
-            .field("segment_duration_cap", &self.segment_duration_cap)
             .field("segment_effect_budget", &self.segment_effect_budget)
             .field(
                 "journaled_effect_byte_budget",
@@ -1013,7 +1002,6 @@ where
             self.emit_trace(None, || lash_trace::TraceEvent::DurableSegmentBoundary {
                 reason: match reason {
                     lash_core::BoundaryReason::JournalBudget => "journal_budget",
-                    lash_core::BoundaryReason::DurationCap => "duration_cap",
                 }
                 .to_string(),
                 effects_executed: progress.effects_executed,

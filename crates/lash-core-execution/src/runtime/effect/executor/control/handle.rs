@@ -10,7 +10,6 @@ pub struct SegmentProgress {
 #[serde(rename_all = "snake_case")]
 pub enum BoundaryReason {
     JournalBudget,
-    DurationCap,
 }
 
 /// Runtime-internal handle for effect-controller references carried through

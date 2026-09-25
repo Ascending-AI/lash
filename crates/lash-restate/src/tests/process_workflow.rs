@@ -36,7 +36,7 @@ pub(super) async fn persisted_handover_is_change_feed_and_event_invariant() {
             lash_core::PersistedSegmentHandover {
                 segment_ordinal: 1,
                 handover: lash_core::SegmentHandover {
-                    reason: lash_core::BoundaryReason::DurationCap,
+                    reason: lash_core::BoundaryReason::JournalBudget,
                     program_hash: "program-v1".to_string(),
                     engine_state: vec![9],
                 },

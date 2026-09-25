@@ -904,7 +904,6 @@ impl RestateProcessDeployment {
     ) -> LashProcessWorkflowImpl<RestateCoreProcessRunner> {
         let RestateProcessServing {
             worker,
-            segment_duration_cap,
             segment_effect_budget,
         } = serving;
         let mut workflow = LashProcessWorkflowImpl::new(
@@ -914,9 +913,6 @@ impl RestateProcessDeployment {
             self.ingress.clone(),
             self.authority_id.clone(),
         );
-        if let Some(cap) = segment_duration_cap {
-            workflow = workflow.with_segment_duration_cap(cap);
-        }
         if let Some(selector) = segment_effect_budget {
             workflow = workflow.with_segment_effect_budget(selector);
         }
@@ -931,7 +927,6 @@ impl RestateProcessDeployment {
 /// into one with the default policy.
 pub struct RestateProcessServing {
     worker: ProcessWorkerSource,
-    segment_duration_cap: Option<Duration>,
     segment_effect_budget: Option<SegmentEffectBudget>,
 }
 
@@ -940,8 +935,8 @@ pub struct RestateProcessServing {
 pub(crate) type SegmentEffectBudget = Arc<dyn Fn(&ProcessRegistration) -> u64 + Send + Sync>;
 
 impl RestateProcessServing {
-    /// Serve processes on `worker` under the default segment policy: no
-    /// wall-clock cap, and 10,000 completed effects per incarnation.
+    /// Serve processes on `worker` under the default segment policy: 10,000
+    /// completed effects per incarnation.
     pub fn new(worker: DurableProcessWorker) -> Self {
         Self::from_source(ProcessWorkerSource::Ready(worker))
     }
@@ -955,15 +950,8 @@ impl RestateProcessServing {
     fn from_source(worker: ProcessWorkerSource) -> Self {
         Self {
             worker,
-            segment_duration_cap: None,
             segment_effect_budget: None,
         }
-    }
-
-    /// End a segment once it has run for `cap`.
-    pub fn with_segment_duration_cap(mut self, cap: Duration) -> Self {
-        self.segment_duration_cap = Some(cap);
-        self
     }
 
     /// Select a deterministic completed-effect budget from immutable process
@@ -1036,7 +1024,6 @@ impl std::fmt::Debug for RestateProcessServing {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
             .debug_struct("RestateProcessServing")
-            .field("segment_duration_cap", &self.segment_duration_cap)
             .field(
                 "segment_effect_budget",
                 &self.segment_effect_budget.as_ref().map(|_| "selector"),
