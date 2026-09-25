@@ -7,6 +7,8 @@ mod execute_support;
 mod builtin_contract;
 #[path = "diagnostic_rendering.rs"]
 mod diagnostic_rendering;
+#[path = "execution_deadline.rs"]
+mod execution_deadline;
 #[path = "functions.rs"]
 mod functions;
 #[path = "intrinsic_fuel.rs"]

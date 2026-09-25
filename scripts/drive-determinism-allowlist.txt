@@ -126,6 +126,6 @@ crates/lashlang/src/runtime/projector.rs  |  futures_executor::block_on(self.pro
 crates/lashlang/src/runtime/value.rs  |  futures_executor::block_on(self.materialize_async())  |  1  # AC38
 crates/lashlang/src/runtime/value.rs  |  pub type ProjectedFuture<'a, T> = Pin<Box<dyn Future<Output = T> + Send + 'a>>;  |  1  # SB5
 crates/lashlang/src/runtime/vm/control.rs  |  .map(|_| (instruction.profile_tag(), Instant::now()));  |  1  # UNMAPPED
-crates/lashlang/src/runtime/vm/control.rs  |  active_started = Instant::now();  |  4  # VM1
+crates/lashlang/src/runtime/vm/control.rs  |  active_started = Instant::now();  |  3  # VM1
 crates/lashlang/src/runtime/vm/control.rs  |  let mut active_started = Instant::now();  |  1  # VM1
 crates/lashlang/src/runtime/vm/mod.rs  |  let start = self.profile.as_ref().map(|_| Instant::now());  |  1  # UNMAPPED
