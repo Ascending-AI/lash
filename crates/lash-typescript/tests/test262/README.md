@@ -8,10 +8,13 @@ the network (ADR 0062).
 
 ## Figures
 
-Each selected test has exactly one recorded outcome in `outcomes.tsv`. The
-figures — the selection size, the per-class counts, the pass rate and the
-per-code/owner tallies — are derived from that record, not pinned, so they
-cannot conflict in the merge queue. To print them, run:
+Each selected test has exactly one recorded outcome in
+`outcomes/<directory>.tsv` — one shard per top-level test directory
+(`built-ins`, `language`), so two lanes that change different directories
+never share a file (FIG-3727). The figures — the selection size, the
+per-class counts, the pass rate and the per-code/owner tallies — are derived
+from that record, not pinned, so they cannot conflict in the merge queue. To
+print them, run:
 
 ```sh
 python3 scripts/check_test262_ratchet.py --base origin/main
@@ -55,8 +58,8 @@ runs and changes only when the selection does.
 
 ## Outcomes and the ratchet
 
-`outcomes.tsv` records one outcome per selected test. There is no bare `fail`
-and no wildcard.
+The `outcomes/<directory>.tsv` shards record one outcome per selected test,
+sorted by path inside each file. There is no bare `fail` and no wildcard.
 
 - **`pass`:** the test runs and meets the specification. For a negative test of
   phase `parse`, this means the front end reports an early error
@@ -109,8 +112,10 @@ TEST262_BLESS=1 TEST262_EVIDENCE=/tmp/test262-evidence.tsv \
   kiln run //crates/lash-typescript:test262_full__test
 ```
 
-This rewrites `outcomes.tsv` from a full run and prints its tallies, and
-writes each divergence's and refusal's evidence to the evidence file:
+This rewrites every `outcomes/<directory>.tsv` shard from a full run and
+prints the record's tallies, and writes each divergence's and refusal's
+evidence to the evidence file. A shard whose directory selects no test is
+removed; bless twice and the second run diffs nothing.
 
 - a divergence keeps its recorded owner;
 - a new one is recorded as `UNTRIAGED`, which the record checks refuse until a

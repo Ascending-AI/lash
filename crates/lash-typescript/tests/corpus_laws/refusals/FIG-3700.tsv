@@ -1,0 +1,16 @@
+# Corpus programs the lens printer refuses, typed (FIG-3599). Each row names
+# the program, the exact refusal and why the printer cannot spell it. A row
+# whose program now round-trips, or whose refusal changed, fails the law
+# until it is deleted or corrected.
+# program id	refusal	reason
+differential:FIG-3700:10	cannot render a block in expression position as TypeScript	a built-in method name called on what may be a plain object lowers to a statement sequence (its run-time dispatch to the object's own method), which has no expression spelling
+differential:FIG-3700:12	cannot render a block in expression position as TypeScript	a built-in method name called on what may be a plain object lowers to a statement sequence (its run-time dispatch to the object's own method), which has no expression spelling
+differential:FIG-3700:13	cannot render a block in expression position as TypeScript	a built-in method name called on what may be a plain object lowers to a statement sequence (its run-time dispatch to the object's own method), which has no expression spelling
+differential:FIG-3700:14	cannot render a block in expression position as TypeScript	a built-in method name called on what may be a plain object lowers to a statement sequence (its run-time dispatch to the object's own method), which has no expression spelling
+differential:FIG-3700:15	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3700:3	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3700:5	cannot render a collection transform with extra arguments as TypeScript	a callback method called with more than its callback has no one-call spelling in the lens
+differential:FIG-3700:6	cannot render a block in expression position as TypeScript	an optional chain lowers to a statement sequence (its short circuit), which has no expression spelling
+differential:FIG-3700:7	cannot render a block in expression position as TypeScript	JSON.stringify with a toJSON hook lowers to a statement sequence (its guest traversal), which has no expression spelling
+differential:FIG-3700:8	cannot render a block in expression position as TypeScript	JSON.stringify with a replacer lowers to a statement sequence (its guest traversal), which has no expression spelling
+differential:FIG-3700:9	generated binding `__typescript_0_reference_base` has no authored TypeScript spelling	a member update pins its reference base in a generated slot, which has no authored spelling

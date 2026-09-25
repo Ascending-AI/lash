@@ -551,8 +551,8 @@ to: lower, admit, project, print through the lens, reparse and admit again,
 reaching the same `module_ref` and `source_identity`. A program the printer
 cannot spell is refused with a typed `TypeScriptSourceError`, and every
 refusal is a row of an explicit allowlist with its reason
-(`tests/corpus_laws/round_trip_refusals.tsv`); a row whose program now
-round-trips fails until it is deleted.
+(`tests/corpus_laws/refusals/<shard>.tsv`, one file per shard so lanes never
+share one); a row whose program now round-trips fails until it is deleted.
 
 **The artifact invariants** hold every admitted artifact of every corpus to:
 unique declarations, each lifted literal declared once; every compiled

@@ -6,9 +6,16 @@
 //! and `source_identity` as the original: the lens's text is the program, not
 //! a paraphrase of it. Where the printer cannot spell a program it refuses
 //! with a typed [`TypeScriptSourceError`], and every such refusal is a row of
-//! `round_trip_refusals.tsv` with its reason. The allowlist is a ratchet: a
-//! listed program that now round-trips, or a listed refusal that changed,
-//! fails until the row is deleted or corrected.
+//! a `refusals/<shard>.tsv` file with its reason (FIG-3727): a row lives in
+//! the file its id's shard names, so `differential:<shard>:<n>` rows and
+//! `<shard>:<n>` rows never share a file with another lane's. The allowlist
+//! is a ratchet: a listed program that now round-trips, or a listed refusal
+//! that changed, fails until the row is deleted or corrected.
+
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
 
 use std::collections::BTreeMap;
 
@@ -19,7 +26,35 @@ use lash_typescript::workflow_graph::{
 
 use super::corpora::{self, CorpusProgram};
 
-const REFUSALS: &str = include_str!("round_trip_refusals.tsv");
+/// Every `refusals/<shard>.tsv`, sorted by shard. Reading the directory is
+/// what lets a new `differential:<shard>:<n>` id join the allowlist without
+/// an edit to any shared file.
+fn refusal_shards() -> Vec<(String, String)> {
+    let directory =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/corpus_laws/refusals");
+    let mut names = std::fs::read_dir(&directory)
+        .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
+        .map(|entry| {
+            entry
+                .expect("a refusals entry")
+                .file_name()
+                .into_string()
+                .expect("UTF-8 refusals name")
+        })
+        .filter(|name| name.ends_with(".tsv"))
+        .collect::<Vec<_>>();
+    names.sort();
+    assert!(!names.is_empty(), "{} is empty", directory.display());
+    names
+        .into_iter()
+        .map(|name| {
+            let path = directory.join(&name);
+            let text = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+            (name.trim_end_matches(".tsv").to_owned(), text)
+        })
+        .collect()
+}
 
 /// Programs that break the law through an open lens defect, each with the
 /// ticket that owns it. A ratchet like the refusal rows: a listed program
@@ -106,21 +141,31 @@ fn readmits(
     })
 }
 
-/// `program id` → (refusal, reason).
-fn allowlist() -> BTreeMap<&'static str, (&'static str, &'static str)> {
+/// `program id` → (refusal, reason), the union of every shard. An id may
+/// appear in only one file: a `differential:<shard>:<n>` or `<shard>:<n>`
+/// row's file is `<shard>.tsv`.
+fn allowlist() -> BTreeMap<String, (String, String)> {
     let mut rows = BTreeMap::new();
-    for line in REFUSALS
-        .lines()
-        .filter(|line| !line.is_empty() && !line.starts_with('#'))
-    {
-        let [id, refusal, reason] = line.split('\t').collect::<Vec<_>>()[..] else {
-            panic!("malformed refusal row: {line}")
-        };
-        assert!(reason.len() > 10, "{id}: a refusal row gives its reason");
-        assert!(
-            rows.insert(id, (refusal, reason)).is_none(),
-            "{id} is listed twice"
-        );
+    for (shard, text) in refusal_shards() {
+        for line in text
+            .lines()
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+        {
+            let [id, refusal, reason] = line.split('\t').collect::<Vec<_>>()[..] else {
+                panic!("malformed refusal row: {line}")
+            };
+            assert!(
+                id.starts_with(&format!("{shard}:"))
+                    || id.starts_with(&format!("differential:{shard}:")),
+                "{id}: refusals/{shard}.tsv holds a row outside its shard"
+            );
+            assert!(reason.len() > 10, "{id}: a refusal row gives its reason");
+            assert!(
+                rows.insert(id.to_owned(), (refusal.to_owned(), reason.to_owned()))
+                    .is_none(),
+                "{id} is listed twice"
+            );
+        }
     }
     rows
 }
@@ -165,7 +210,11 @@ fn every_corpus_program_round_trips_or_is_an_allowlisted_refusal() {
             (Err(error), _) => failures.push(format!("{}: {error}", program.id)),
         }
     }
-    for id in allowlist.keys().chain(open_violations.keys()) {
+    for id in allowlist
+        .keys()
+        .map(String::as_str)
+        .chain(open_violations.keys().copied())
+    {
         failures.push(format!("{id}: the row names no corpus program"));
     }
     assert!(

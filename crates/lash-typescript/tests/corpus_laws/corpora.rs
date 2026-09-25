@@ -162,8 +162,24 @@ fn test262() -> Vec<CorpusProgram> {
             .map(str::to_owned)
             .collect::<Vec<_>>()
     };
-    let passing = rows("outcomes.tsv")
-        .into_iter()
+    // The outcome record's `outcomes/<shard>.tsv` files, read as one table.
+    let outcomes_directory = data_path("outcomes");
+    let mut outcome_files = std::fs::read_dir(&outcomes_directory)
+        .unwrap_or_else(|error| panic!("read {}: {error}", outcomes_directory.display()))
+        .map(|entry| entry.expect("an outcomes entry").path())
+        .filter(|path| path.extension().is_some_and(|extension| extension == "tsv"))
+        .collect::<Vec<_>>();
+    outcome_files.sort();
+    let passing = outcome_files
+        .iter()
+        .flat_map(|path| {
+            std::fs::read_to_string(path)
+                .unwrap_or_else(|error| panic!("read {}: {error}", path.display()))
+                .lines()
+                .filter(|line| !line.trim().is_empty() && !line.starts_with('#'))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        })
         .filter_map(|line| {
             let fields = line.split('\t').collect::<Vec<_>>();
             let [path, class, _qualifier] = fields.as_slice() else {

@@ -100,8 +100,11 @@ kiln run //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test -- \
 The cacheable test partition regenerates every session from its seed and
 requires it to be the one checked in, so a generator change is a deliberate
 corpus change, then runs it live and reloading between every pair of cells
-against Node's answer under the `closure-boundary` rule. Longer runs draw fresh
-seeds and ask Node live:
+against Node's answer under the `closure-boundary` rule. The generator draws
+its rejected cells from `tests/test262/census.tsv`'s probe list, so a census
+change can change what a seed draws: regenerate `generated.json` after one.
+Either drift check fails naming the exact regeneration command above
+(FIG-3727). Longer runs draw fresh seeds and ask Node live:
 
 ```console
 LASH_GENERATED_SEEDS=START..END kiln run //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test -- \

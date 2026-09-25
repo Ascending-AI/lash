@@ -1,0 +1,6 @@
+# Corpus programs the lens printer refuses, typed (FIG-3599). Each row names
+# the program, the exact refusal and why the printer cannot spell it. A row
+# whose program now round-trips, or whose refusal changed, fails the law
+# until it is deleted or corrected.
+# program id	refusal	reason
+codemode-parity:turn	generated binding `__typescript_pending_tool` has no authored TypeScript spelling	an unawaited tool call lowers to the pending-handle builtin, which the lens printer does not re-sugar

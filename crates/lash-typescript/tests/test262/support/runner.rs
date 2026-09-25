@@ -65,7 +65,7 @@ pub(crate) const INSTRUCTION_COST: &str = "instruction-cost";
 
 const UNEXPECTED_ABILITY: &str = "the Test262 host answers no host effect";
 
-/// The one outcome class a selected test has, as `outcomes.tsv` records it.
+/// The one outcome class a selected test has, as the record's shards record it.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) enum Outcome {
     /// It runs and meets the specification.
@@ -262,22 +262,62 @@ pub(crate) fn refusal_codes() -> BTreeSet<String> {
     codes
 }
 
-/// The recorded outcome of every selected test, from `outcomes.tsv`.
-pub(crate) fn recorded_outcomes() -> BTreeMap<String, Outcome> {
-    let rows = data_lines("outcomes.tsv", 3);
-    let outcomes = rows
-        .iter()
-        .map(|fields| {
-            let outcome = Outcome::parse(&fields[1], &fields[2])
-                .unwrap_or_else(|error| panic!("outcomes.tsv {}: {error}", fields[0]));
-            (fields[0].clone(), outcome)
+/// Every `outcomes/<shard>.tsv`, sorted by shard, as `(shard, rows)` (FIG-3727):
+/// one file per top-level test directory, so two lanes that touch different
+/// directories never share a file.
+fn outcome_shards() -> Vec<(String, Vec<Vec<String>>)> {
+    let directory = data_path("outcomes");
+    let mut names = std::fs::read_dir(&directory)
+        .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
+        .map(|entry| {
+            entry
+                .expect("an outcomes entry")
+                .file_name()
+                .into_string()
+                .expect("UTF-8 outcomes name")
         })
-        .collect::<BTreeMap<_, _>>();
-    assert_eq!(
-        outcomes.len(),
-        rows.len(),
-        "outcomes.tsv has a duplicate path"
-    );
+        .filter(|name| name.ends_with(".tsv"))
+        .collect::<Vec<_>>();
+    names.sort();
+    assert!(!names.is_empty(), "{} is empty", directory.display());
+    names
+        .into_iter()
+        .map(|name| {
+            (
+                name.trim_end_matches(".tsv").to_owned(),
+                data_lines(&format!("outcomes/{name}"), 3),
+            )
+        })
+        .collect()
+}
+
+/// The recorded outcome of every selected test, the union of every
+/// `outcomes/<shard>.tsv`. A row lives in the file its top-level directory
+/// names, sorted with the rest, so merges meet only on a real overlap.
+pub(crate) fn recorded_outcomes() -> BTreeMap<String, Outcome> {
+    let mut outcomes = BTreeMap::new();
+    for (shard, rows) in outcome_shards() {
+        let mut last = String::new();
+        for fields in &rows {
+            let path = fields[0].as_str();
+            assert_eq!(
+                path.split('/').nth(1).unwrap_or_default(),
+                shard,
+                "{path}: outcomes/{shard}.tsv holds a row outside its directory"
+            );
+            assert!(
+                path > last.as_str(),
+                "outcomes/{shard}.tsv rows are unsorted: {last} then {path}"
+            );
+            last = path.to_owned();
+            let outcome = Outcome::parse(&fields[1], &fields[2])
+                .unwrap_or_else(|error| panic!("outcomes/{shard}.tsv {path}: {error}"));
+            assert!(
+                outcomes.insert(path.to_owned(), outcome).is_none(),
+                "{path} has an outcome in two shards"
+            );
+        }
+    }
     outcomes
 }
 
@@ -690,11 +730,13 @@ pub(crate) fn compare(
         .collect()
 }
 
-/// Rewrites `outcomes.tsv` in the source tree from a full run, when
-/// `TEST262_BLESS` is set under `kiln run` (which exports
-/// `BUILD_WORKSPACE_DIRECTORY`). A divergence keeps its recorded owner or
-/// becomes `UNTRIAGED`, which the data checks refuse until a ticket owns it.
-/// Returns whether it blessed.
+/// Rewrites the `outcomes/<shard>.tsv` files in the source tree from a full
+/// run, when `TEST262_BLESS` is set under `kiln run` (which exports
+/// `BUILD_WORKSPACE_DIRECTORY`): one file per top-level test directory, and a
+/// shard file whose directory no longer selects a test is removed, like
+/// `generate.mjs` removes a table whose findings file is gone. A divergence
+/// keeps its recorded owner or becomes `UNTRIAGED`, which the data checks
+/// refuse until a ticket owns it. Returns whether it blessed.
 pub(crate) fn bless(
     paths: &[String],
     observed: &[Observed],
@@ -711,15 +753,42 @@ pub(crate) fn bless(
         .zip(observed)
         .map(|(path, observed)| (path.clone(), observed.outcome(recorded.get(path))))
         .collect::<BTreeMap<_, _>>();
-    let mut text = String::from("# test262-path\tclass\tqualifier\n");
+    let mut shards: BTreeMap<String, Vec<(&String, &Outcome)>> = BTreeMap::new();
     for (path, outcome) in &outcomes {
-        text.push_str(&format!(
-            "{path}\t{}\t{}\n",
-            outcome.class(),
-            outcome.detail()
-        ));
+        let shard = path.split('/').nth(1).expect("a test262 path's directory");
+        shards
+            .entry(shard.to_owned())
+            .or_default()
+            .push((path, outcome));
     }
-    std::fs::write(directory.join("outcomes.tsv"), text).expect("write outcomes.tsv");
+    for (shard, rows) in &shards {
+        let mut text = String::from("# test262-path\tclass\tqualifier\n");
+        for (path, outcome) in rows {
+            text.push_str(&format!(
+                "{path}\t{}\t{}\n",
+                outcome.class(),
+                outcome.detail()
+            ));
+        }
+        std::fs::write(
+            directory.join("outcomes").join(format!("{shard}.tsv")),
+            text,
+        )
+        .unwrap_or_else(|error| panic!("write outcomes/{shard}.tsv: {error}"));
+    }
+    for entry in std::fs::read_dir(directory.join("outcomes")).expect("read outcomes/") {
+        let entry = entry.expect("an outcomes entry");
+        let name = entry
+            .file_name()
+            .into_string()
+            .expect("UTF-8 outcomes name");
+        if let Some(shard) = name.strip_suffix(".tsv")
+            && !shards.contains_key(shard)
+        {
+            std::fs::remove_file(entry.path())
+                .unwrap_or_else(|error| panic!("remove stale outcomes/{name}: {error}"));
+        }
+    }
     eprintln!("{}", tally_lines(&outcomes));
     if let Ok(evidence_path) = std::env::var("TEST262_EVIDENCE") {
         let mut text = String::new();

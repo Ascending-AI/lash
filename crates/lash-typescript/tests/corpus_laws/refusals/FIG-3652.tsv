@@ -1,0 +1,22 @@
+# Corpus programs the lens printer refuses, typed (FIG-3599). Each row names
+# the program, the exact refusal and why the printer cannot spell it. A row
+# whose program now round-trips, or whose refusal changed, fails the law
+# until it is deleted or corrected.
+# program id	refusal	reason
+differential:FIG-3652:10	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+differential:FIG-3652:11	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3652:12	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+differential:FIG-3652:13	generated binding `__typescript_encode_uri_component` has no authored TypeScript spelling	a URI codec call lowers to its builtin, which the lens printer does not re-sugar
+differential:FIG-3652:14	cannot render a block in expression position as TypeScript	JSON.stringify lowers to a statement sequence (its toJSON checks), which has no expression spelling
+differential:FIG-3652:15	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
+differential:FIG-3652:16	generated binding `__typescript_regexp` has no authored TypeScript spelling	a regular expression literal lowers to the regexp builtin, which the lens printer does not re-sugar
+differential:FIG-3652:17	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3652:18	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3652:19	generated binding `__typescript_0_replace_input` has no authored TypeScript spelling	a string replace lowers through generated slots for its input, pattern and replacement, which have no authored spelling
+differential:FIG-3652:20	cannot render a block in expression position as TypeScript	Object.groupBy lowers to a statement sequence (its grouping loop), which has no expression spelling
+differential:FIG-3652:3	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3652:4	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3652:5	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3652:6	generated binding `__typescript_heap_instanceof` has no authored TypeScript spelling	`instanceof` lowers to a heap builtin, which the lens printer does not re-sugar
+differential:FIG-3652:7	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3652:9	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar

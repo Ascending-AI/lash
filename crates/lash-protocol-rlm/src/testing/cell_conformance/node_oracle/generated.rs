@@ -30,6 +30,13 @@ use super::node::{NodeCell, NodeOracle, NodeSession, sessions_directory};
 use super::round_trip::{self, NOT_A_DIALECT_VALUE, ROWS};
 use super::{Observation, PINNED_NODE, run_session};
 
+/// The one deliberate step that rewrites `generated.json`, spelled exactly so
+/// every drift failure names it. The generator draws its rejected cells from
+/// the census's probe list, so a census change can change what a seed draws:
+/// regenerate after one.
+const REGENERATE: &str = "kiln run //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test -- \
+     --ignored --exact testing::cell_conformance::node_oracle::generated::write_the_generated_corpus";
+
 const GENERATED: &str =
     include_str!("../../../../../lash-typescript/tests/differential/sessions/generated.json");
 const CENSUS: &str = include_str!("../../../../../lash-typescript/tests/test262/census.tsv");
@@ -274,7 +281,7 @@ fn check_shard(shard: u64) {
     let corpus = corpus();
     assert_eq!(
         corpus.seeds, BOUNDED_SEEDS,
-        "generated.json holds another bounded corpus; rerun write_the_generated_corpus"
+        "generated.json holds another bounded corpus; regenerate it with `{REGENERATE}`"
     );
     let mut failures = Vec::new();
     for stored in corpus
@@ -294,7 +301,7 @@ fn check_shard(shard: u64) {
                 });
         if drifted {
             failures.push(format!(
-                "seed {}: the generator no longer draws the checked-in session; rerun write_the_generated_corpus",
+                "seed {}: the generator no longer draws the checked-in session; regenerate generated.json with `{REGENERATE}`",
                 stored.seed
             ));
             continue;
@@ -517,14 +524,14 @@ fn every_value_type_round_trips_or_is_refused() {
             .find(|stored| stored.name == row.name)
         else {
             failures.push(format!(
-                "round-trip row `{}` has no Node answer in generated.json; rerun write_the_generated_corpus",
+                "round-trip row `{}` has no Node answer in generated.json; regenerate it with `{REGENERATE}`",
                 row.name
             ));
             continue;
         };
         if stored.create != row.create || stored.uses != row.uses {
             failures.push(format!(
-                "round-trip row `{}` changed since its Node answer; rerun write_the_generated_corpus",
+                "round-trip row `{}` changed since its Node answer; regenerate generated.json with `{REGENERATE}`",
                 row.name
             ));
             continue;
@@ -532,10 +539,9 @@ fn every_value_type_round_trips_or_is_refused() {
         failures.extend(round_trip::check(row, &stored.node));
     }
     if corpus.round_trip.len() != ROWS.len() {
-        failures.push(
-            "generated.json answers rows the law no longer has; rerun write_the_generated_corpus"
-                .to_string(),
-        );
+        failures.push(format!(
+            "generated.json answers rows the law no longer has; regenerate it with `{REGENERATE}`"
+        ));
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
 }

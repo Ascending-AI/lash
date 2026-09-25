@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import importlib.util
+import subprocess
 import unittest
+import unittest.mock
 from pathlib import Path
 
 sys_path = Path(__file__).with_name("check_test262_ratchet.py")
@@ -73,6 +75,50 @@ class RatchetTest(unittest.TestCase):
     def test_parse_reads_the_record_format(self):
         text = "# test262-path\tclass\tqualifier\na.js\tpass\t-\nb.js\tfail\tFIG-1\n"
         self.assertEqual(ratchet.parse(text), {"a.js": ("pass", "-"), "b.js": ("fail", "FIG-1")})
+
+    def test_parse_shards_unions_the_record_files(self):
+        outcomes = ratchet.parse_shards(
+            [
+                ("outcomes/built-ins.tsv", "a.js\tpass\t-\nb.js\tfail\tFIG-1\n"),
+                ("outcomes/language.tsv", "c.js\trefused\tTS_X\n"),
+            ]
+        )
+        self.assertEqual(
+            outcomes,
+            {
+                "a.js": ("pass", "-"),
+                "b.js": ("fail", "FIG-1"),
+                "c.js": ("refused", "TS_X"),
+            },
+        )
+
+    def test_a_path_in_two_shards_exits(self):
+        with self.assertRaises(SystemExit):
+            ratchet.parse_shards(
+                [
+                    ("outcomes/built-ins.tsv", "a.js\tpass\t-\n"),
+                    ("outcomes/language.tsv", "a.js\tfail\tFIG-1\n"),
+                ]
+            )
+
+    def test_outcome_paths_picks_up_both_record_layouts(self):
+        listed = lambda ref, *paths: subprocess.CompletedProcess(
+            args=[], returncode=0, stdout="\n".join(paths) + "\n"
+        )
+        with unittest.mock.patch.object(ratchet.subprocess, "run") as run:
+            run.return_value = listed("ref", "legacy/outcomes.tsv")
+            run.return_value.stdout = (
+                f"{ratchet.OUTCOMES_DIR}/built-ins.tsv\n{ratchet.OUTCOMES_DIR}/language.tsv\n"
+            )
+            self.assertEqual(
+                ratchet.outcome_paths("deadbeef"),
+                [f"{ratchet.OUTCOMES_DIR}/built-ins.tsv", f"{ratchet.OUTCOMES_DIR}/language.tsv"],
+            )
+            run.return_value.stdout = f"{ratchet.OUTCOMES}\n"
+            self.assertEqual(ratchet.outcome_paths("deadbeef"), [ratchet.OUTCOMES])
+            run.return_value.returncode = 1
+            run.return_value.stdout = ""
+            self.assertEqual(ratchet.outcome_paths("deadbeef"), [])
 
 
 if __name__ == "__main__":

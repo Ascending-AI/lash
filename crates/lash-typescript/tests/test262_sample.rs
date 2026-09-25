@@ -48,6 +48,19 @@ fn inventory_census_and_skip_register_are_exhaustive() {
         .iter()
         .map(|fields| ((fields[0].clone(), fields[1].clone()), fields[2].clone()))
         .collect::<BTreeMap<_, _>>();
+    // The census stays in the inventory's sorted-by-key order, so two lanes
+    // adding rows meet only on a real overlap (FIG-3727).
+    assert_eq!(
+        census_rows
+            .iter()
+            .map(|fields| (fields[0].as_str(), fields[1].as_str()))
+            .collect::<Vec<_>>(),
+        data_lines("inventory.tsv", 2)
+            .iter()
+            .map(|fields| (fields[0].as_str(), fields[1].as_str()))
+            .collect::<Vec<_>>(),
+        "census.tsv stays sorted by (kind, name): a row out of order conflicts on every merge"
+    );
     assert_eq!(
         census.keys().cloned().collect::<BTreeSet<_>>(),
         inventory,
@@ -188,7 +201,7 @@ fn every_selected_test_has_one_owned_outcome() {
     assert_eq!(
         outcomes.keys().cloned().collect::<BTreeSet<_>>(),
         selected,
-        "outcomes.tsv must name every vendored test exactly once"
+        "the outcomes shards must name every vendored test exactly once"
     );
     let names = runner::refusal_codes();
     let unshimmable = runner::unshimmable_includes();
