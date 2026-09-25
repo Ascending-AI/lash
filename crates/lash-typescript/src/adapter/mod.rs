@@ -200,6 +200,9 @@ pub(crate) struct Function {
     pub(crate) params: Vec<Pattern>,
     pub(crate) body: FunctionBody,
     pub(crate) is_async: bool,
+    /// An arrow has no receiver of its own: its `this` is its enclosing
+    /// function's (ECMA-262 lexical `this`).
+    pub(crate) is_arrow: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -1145,6 +1148,7 @@ impl Adapter<'_> {
             params,
             body: FunctionBody::Block(body),
             is_async: function.is_async,
+            is_arrow: false,
         })
     }
 
@@ -1279,6 +1283,7 @@ impl Adapter<'_> {
                     params,
                     body,
                     is_async: function.is_async,
+                    is_arrow: true,
                 })
             }
             swc::Expr::Unary(expr) => {

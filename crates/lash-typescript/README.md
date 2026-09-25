@@ -616,9 +616,15 @@ Unicode escapes, numeric separators, and hexadecimal/octal/binary literals.
 Annotations, interfaces, type aliases, generics, `as`, `satisfies`, and non-null
 assertions are erased. Enums lower to their `tsc` runtime object or const-enum
 literals; decorators and namespaces are parsed but reject as
-`TS_DECORATOR_UNSUPPORTED` and `TS_NAMESPACE_UNSUPPORTED`. `"use strict"` is an accepted no-op; functions see
-`this` as `undefined`, top-level `this` rejects, and `arguments` rejects with a
-rest-parameter replacement.
+`TS_DECORATOR_UNSUPPORTED` and `TS_NAMESPACE_UNSUPPORTED`. `"use strict"` is an accepted no-op. A function
+or method's `this` is its call's receiver (FIG-3700): the object of a member call
+(`o.f()`, `o[k]()`, `o?.f()`, `(o.f)()`, `o.f(...xs)`), a callback's `thisArg`
+(`map`, `filter`, `forEach`, `find`, `some`, `every`, `flatMap`, `Array.from`,
+and the `forEach` of `Map`, `Set` and `URLSearchParams`), the holder a JSON
+replacer or `toJSON` is called on, and `undefined` for a plain call. An arrow's
+`this` is its enclosing function's. Top-level `this` rejects, including through
+an arrow outside every function, and `arguments` rejects with a rest-parameter
+replacement.
 
 Iterator-returning `.entries()`, `.keys()`, and `.values()` calls, and
 `matchAll`, are accepted only when consumed directly by `for...of`, spread,
@@ -730,8 +736,12 @@ compose with the callback methods, so accumulating into an array inside
 data is host-dependent. Rewrite comparisons as
 `a < b ? -1 : a > b ? 1 : 0`; format numbers with `toFixed(digits)`.
 `String.normalize` also remains rejected because the pinned VM has no Unicode
-normalization database; normalize in a deterministic host tool. Missing
-methods reject with `TS_METHOD_UNSUPPORTED`.
+normalization database; normalize in a deterministic host tool. A built-in
+prototype method the surface does not carry rejects with
+`TS_METHOD_UNSUPPORTED`; any other method name calls the receiver's own
+property with the receiver as `this`, and calling one the receiver lacks fails
+as a call of `undefined` does. An own property wins over a built-in method of
+the same name (`o.toString()` calls `o`'s own `toString`).
 
 ## Source nesting budget
 

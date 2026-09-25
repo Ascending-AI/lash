@@ -331,6 +331,22 @@ export type Expr =
       };
     }
   | {
+      MethodCall: {
+        args: Expr[];
+        method: MethodKey;
+        receiver: Expr;
+        [k: string]: unknown;
+      };
+    }
+  | {
+      ThisCall: {
+        args: Expr[];
+        function: Expr;
+        this: Expr;
+        [k: string]: unknown;
+      };
+    }
+  | {
       FunctionCall: {
         args: Expr[];
         function: string;
@@ -451,6 +467,16 @@ export type StructuralRole =
     }
   | {
       kind: 'process_wrapper';
+    };
+/**
+ * The member an [`Expr::MethodCall`] reads its callee from.
+ */
+export type MethodKey =
+  | {
+      Field: string;
+    }
+  | {
+      Index: Expr;
     };
 export type UnaryOp = 'Negate' | 'Not';
 export type BinaryOp =
@@ -626,7 +652,7 @@ export interface WorkflowGraph {
   declarations?: WorkflowDeclaration[];
   facet_schema_version?: number | null;
   main: WorkflowSubgraph;
-  schema_version: 17;
+  schema_version: 18;
   /**
    * The definition identity of the admitted module artifact this graph projects ([`crate::ModuleArtifact::source_identity`]), which the module's traces carry too. A draft projected from source that has not been admitted claims no runtime identity and carries `None`. [`WORKFLOW_GRAPH_SCHEMA_VERSION`] identifies this document's wire shape, `facet_schema_version` identifies optional derived facts.
    */
@@ -704,6 +730,10 @@ export interface FunctionExpr {
   js_name?: string | null;
   name?: string | null;
   params?: string[];
+  /**
+   * The slot the call's receiver is bound to, for a function that reads it. A call through [`Expr::MethodCall`] or [`Expr::ThisCall`] binds the receiver it names; every other call binds `undefined`. A function without one (an arrow, or one that never reads its receiver) ignores the receiver entirely; an arrow reads its enclosing function's slot as an ordinary capture.
+   */
+  receiver?: string | null;
   [k: string]: unknown;
 }
 /**

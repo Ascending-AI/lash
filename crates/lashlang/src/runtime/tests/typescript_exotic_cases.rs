@@ -825,6 +825,7 @@ async fn map_for_each_callback_parks_and_resumes_through_the_shared_driver() {
     let callback = Expr::Function(Box::new(crate::FunctionExpr {
         name: None,
         js_name: None,
+        receiver: None,
         params: vec!["value".into(), "key".into(), "map".into()],
         captures: Vec::new(),
         body: Box::new(Expr::Block(vec![
@@ -1133,6 +1134,7 @@ async fn dynamic_calls_apply_ecma_arguments_and_rest_then_resume_inside_the_call
     let plain = Expr::Function(Box::new(crate::FunctionExpr {
         name: None,
         js_name: None,
+        receiver: None,
         params: vec!["first".into(), "second".into()],
         captures: Vec::new(),
         body: Box::new(Expr::Block(vec![
@@ -1147,6 +1149,7 @@ async fn dynamic_calls_apply_ecma_arguments_and_rest_then_resume_inside_the_call
     let rest = Expr::Function(Box::new(crate::FunctionExpr {
         name: None,
         js_name: None,
+        receiver: None,
         params: vec!["first".into(), "rest".into()],
         captures: Vec::new(),
         body: Box::new(Expr::Return(Box::new(Expr::Field {
@@ -1211,6 +1214,7 @@ async fn async_map_callbacks_park_before_and_after_work_and_replay_deterministic
     let callback = Expr::Function(Box::new(crate::FunctionExpr {
         name: None,
         js_name: None,
+        receiver: None,
         params: vec!["value".into(), "index".into(), "array".into()],
         captures: Vec::new(),
         body: Box::new(Expr::Block(vec![
@@ -1248,6 +1252,7 @@ async fn stored_per_iteration_closures_stay_inside_the_vm_across_calls_and_parks
     let callback = Expr::Function(Box::new(crate::FunctionExpr {
         name: None,
         js_name: None,
+        receiver: None,
         params: Vec::new(),
         captures: vec!["i".into()],
         body: Box::new(Expr::Block(vec![
@@ -1295,6 +1300,7 @@ async fn discarded_and_boolean_tested_closures_are_vm_internal_values() {
         Expr::Function(Box::new(crate::FunctionExpr {
             name: None,
             js_name: None,
+            receiver: None,
             params: Vec::new(),
             captures: Vec::new(),
             body: Box::new(Expr::Return(Box::new(Expr::Number(1.0)))),
@@ -1319,6 +1325,7 @@ async fn async_map_all_settled_wrapper_collects_throws_in_input_order_across_par
     let callback = Expr::Function(Box::new(crate::FunctionExpr {
         name: None,
         js_name: None,
+        receiver: None,
         params: vec!["value".into(), "index".into(), "array".into()],
         captures: Vec::new(),
         body: Box::new(Expr::Return(Box::new(Expr::Try(Box::new(
@@ -1455,6 +1462,7 @@ async fn nested_global_set_is_durable_across_function_park_and_state_restore() {
     let setter = Expr::Function(Box::new(crate::FunctionExpr {
         name: None,
         js_name: None,
+        receiver: None,
         params: Vec::new(),
         captures: Vec::new(),
         body: Box::new(Expr::Block(vec![
@@ -1513,6 +1521,7 @@ async fn global_get_reads_the_live_root_slot_across_function_park_and_state_rest
         Expr::Function(Box::new(crate::FunctionExpr {
             name: None,
             js_name: None,
+            receiver: None,
             params: Vec::new(),
             captures: Vec::new(),
             body: Box::new(Expr::Block(vec![
@@ -1593,6 +1602,7 @@ async fn global_set_does_not_weaken_closure_session_persistence_policy() {
     let closure = Expr::Function(Box::new(crate::FunctionExpr {
         name: None,
         js_name: None,
+        receiver: None,
         params: Vec::new(),
         captures: Vec::new(),
         body: Box::new(Expr::Return(Box::new(Expr::Null))),
@@ -1798,6 +1808,7 @@ async fn map_and_set_for_each_use_a_live_durable_cursor() {
     let map_callback = Expr::Function(Box::new(crate::FunctionExpr {
         name: None,
         js_name: None,
+        receiver: None,
         params: vec!["value".into(), "key".into(), "receiver".into()],
         captures: Vec::new(),
         body: Box::new(Expr::Block(vec![
@@ -1862,6 +1873,7 @@ async fn map_and_set_for_each_use_a_live_durable_cursor() {
     let set_callback = Expr::Function(Box::new(crate::FunctionExpr {
         name: None,
         js_name: None,
+        receiver: None,
         params: vec!["value".into(), "duplicate".into(), "receiver".into()],
         captures: Vec::new(),
         body: Box::new(Expr::Block(vec![

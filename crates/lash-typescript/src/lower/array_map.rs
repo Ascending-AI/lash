@@ -82,18 +82,50 @@ impl Lowerer {
                 None,
             ));
         };
+        let guard = super::array_callbacks::may_be_plain_object(object);
         let items = self.lower_expr(object)?;
         if function.is_async {
-            let callback = self.lower_expr(callback)?;
+            let lowered = self.lower_expr(callback)?;
             let callback = if settle {
-                settle_async_callback(callback, self.temporary("settled_reason"))
+                settle_async_callback(lowered.clone(), self.temporary("settled_reason"))
             } else {
-                callback
+                lowered.clone()
             };
-            return Ok(LashExpr::BuiltinCall {
-                name: "__typescript_async_map".into(),
-                args: vec![items, callback],
-            });
+            if !guard {
+                return Ok(LashExpr::BuiltinCall {
+                    name: "__typescript_async_map".into(),
+                    args: vec![items, callback],
+                });
+            }
+            // A plain object has no array `map`: `o.map(async f)` calls its
+            // own `map` with the function, decided at run time.
+            let receiver = self.temporary("map_receiver");
+            let variable = || LashExpr::Variable(receiver.as_str().into());
+            return Ok(LashExpr::Block(vec![
+                LashExpr::Assign {
+                    target: AssignTarget::variable(receiver.as_str().into()),
+                    expr: Box::new(items),
+                },
+                LashExpr::If {
+                    condition: Box::new(LashExpr::BuiltinCall {
+                        name: "__typescript_stdlib".into(),
+                        args: vec![
+                            LashExpr::String("Lash.OwnMethod".into()),
+                            variable(),
+                            LashExpr::String("map".into()),
+                        ],
+                    }),
+                    then_block: Box::new(LashExpr::MethodCall {
+                        receiver: Box::new(variable()),
+                        method: lashlang::MethodKey::Field("map".into()),
+                        args: vec![lowered],
+                    }),
+                    else_block: Box::new(LashExpr::BuiltinCall {
+                        name: "__typescript_async_map".into(),
+                        args: vec![variable(), callback],
+                    }),
+                },
+            ]));
         }
         match function.params.len() {
             1 => Ok(LashExpr::Map {
@@ -124,6 +156,7 @@ impl Lowerer {
                         function: Box::new(LashExpr::Function(Box::new(FunctionExpr {
                             name: None,
                             js_name: None,
+                            receiver: None,
                             params: vec![pair.as_str().into()],
                             captures: vec![wrapper.as_str().into()],
                             body: Box::new(LashExpr::Return(Box::new(LashExpr::Call {

@@ -30,8 +30,8 @@
 
 use lashlang::{
     AssignPathStep, AssignTarget, BinaryOp, Declaration, Expr, FunctionDecl, FunctionExpr,
-    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, ProcessDecl, ProcessLiteralExpr,
-    Program, ResourceRefExpr, StructuralRole, TypeExpr, UnaryOp,
+    JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, MethodKey, ProcessDecl,
+    ProcessLiteralExpr, Program, ResourceRefExpr, StructuralRole, TypeExpr, UnaryOp,
 };
 use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
@@ -39,8 +39,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use thiserror::Error;
 
 mod for_loop;
+mod templates;
 
 use for_loop::{classic_for, is_statement_body, var_initialization};
+use templates::{template_parts, template_text};
 
 #[cfg(test)]
 use std::cell::Cell;
@@ -122,6 +124,10 @@ struct Printer<'p> {
     /// innermost last. A `continue` in such a body lowers to the update
     /// followed by the jump, and prints back as the bare `continue`.
     continue_epilogues: RefCell<Vec<Option<Expr>>>,
+    /// The receiver slots of the functions printed so far. A read of one is
+    /// the source's `this`: the function that owns it prints first, and an
+    /// arrow inside it reads the same slot as a capture.
+    receivers: RefCell<BTreeSet<String>>,
 }
 
 impl Printer<'static> {
@@ -129,6 +135,7 @@ impl Printer<'static> {
         Self {
             lifted: BTreeMap::new(),
             continue_epilogues: RefCell::new(Vec::new()),
+            receivers: RefCell::new(BTreeSet::new()),
         }
     }
 }
@@ -147,6 +154,7 @@ impl<'p> Printer<'p> {
                 })
                 .collect(),
             continue_epilogues: RefCell::new(Vec::new()),
+            receivers: RefCell::new(BTreeSet::new()),
         }
     }
 
@@ -781,6 +789,9 @@ impl<'p> Printer<'p> {
             Expr::Bool(value) => Ok(value.to_string()),
             Expr::Number(value) => number_literal(*value),
             Expr::String(value) => Ok(string_literal(value.as_str())),
+            Expr::Variable(name) if self.receivers.borrow().contains(name.as_str()) => {
+                Ok("this".to_string())
+            }
             Expr::Variable(name) => self.identifier("variable", name.as_str()),
             Expr::List(items) => {
                 let items = items
@@ -892,6 +903,32 @@ impl<'p> Printer<'p> {
                     args.join(", ")
                 ))
             }
+            Expr::MethodCall {
+                receiver,
+                method,
+                args,
+            } => {
+                let args = args
+                    .iter()
+                    .map(|arg| self.expression(arg))
+                    .collect::<Result<Vec<_>, _>>()?;
+                let receiver = self.member_target(receiver)?;
+                Ok(match method {
+                    MethodKey::Field(field) => format!(
+                        "{receiver}.{}({})",
+                        self.identifier("method", field.as_str())?,
+                        args.join(", ")
+                    ),
+                    MethodKey::Index(key) => {
+                        format!("{receiver}[{}]({})", self.expression(key)?, args.join(", "))
+                    }
+                })
+            }
+            // Only generated code passes an explicit receiver (a callback's
+            // `thisArg`); the dialect has no `Function.prototype.call`.
+            Expr::ThisCall { .. } => Err(TypeScriptSourceError::Unrepresentable {
+                kind: "a call with an explicit receiver",
+            }),
             Expr::Function(function) => self.arrow(function),
             // An inline process body prints back as the authored async arrow
             // in its argument position, which re-parses to the same literal.
@@ -1129,6 +1166,27 @@ impl<'p> Printer<'p> {
         if let Some(name) = &function.name {
             return self.named_function(name.as_str(), function);
         }
+        // A function that reads its receiver is a `function` form: an arrow's
+        // `this` is its enclosing function's.
+        if let Some(receiver) = &function.receiver {
+            self.receivers.borrow_mut().insert(receiver.to_string());
+            let params = function
+                .params
+                .iter()
+                .map(|param| self.identifier("function parameter", param.as_str()))
+                .collect::<Result<Vec<_>, _>>()?;
+            let mut bound = function.params.iter().map(ToString::to_string).collect();
+            return Ok(format!(
+                "{}function ({}) {}",
+                if awaits_in_own_body(&function.body) {
+                    "async "
+                } else {
+                    ""
+                },
+                params.join(", "),
+                self.rooted_block(&function.body, 0, &mut bound)?
+            ));
+        }
         let params = function
             .params
             .iter()
@@ -1159,6 +1217,9 @@ impl<'p> Printer<'p> {
     /// bound inside it, so an arrow (which has none) would lower to a
     /// different function.
     fn named_function(&self, name: &str, function: &FunctionExpr) -> Printed {
+        if let Some(receiver) = &function.receiver {
+            self.receivers.borrow_mut().insert(receiver.to_string());
+        }
         let params = function
             .params
             .iter()
@@ -1193,6 +1254,7 @@ impl<'p> Printer<'p> {
             | Expr::BuiltinCall { .. }
             | Expr::FunctionCall { .. }
             | Expr::Call { .. }
+            | Expr::MethodCall { .. }
             | Expr::Field { .. }
             | Expr::Index { .. } => self.expression(expression),
             _ => Ok(format!("({})", self.expression(expression)?)),
@@ -1314,64 +1376,6 @@ fn suppresses_named_evaluation(target: &AssignTarget, expr: &Expr) -> bool {
         && matches!(expr, Expr::Function(function)
             if function.name.is_none()
                 && function.js_name.as_deref() != Some(target.root.as_str()))
-}
-
-/// A template literal's text and holes, from the chain it lowers to:
-/// `q0 + e0 + q1 + … + en + qn+1`, left-nested, a string at every even
-/// position. Printed back as the template, the chain lowers identically, and
-/// its nesting costs one level rather than one per term.
-fn template_parts(expression: &Expr) -> Option<(Vec<&str>, Vec<&Expr>)> {
-    let mut rights = Vec::new();
-    let mut current = expression;
-    while let Expr::JavaScriptBinary {
-        left,
-        op: JavaScriptBinaryOp::Add,
-        right,
-    } = current
-    {
-        rights.push(right.as_ref());
-        current = left;
-    }
-    let Expr::String(first) = current else {
-        return None;
-    };
-    if rights.is_empty() || rights.len() % 2 != 0 {
-        return None;
-    }
-    rights.reverse();
-    let mut quasis = vec![first.as_str()];
-    let mut holes = Vec::with_capacity(rights.len() / 2);
-    for pair in rights.chunks(2) {
-        let [hole, Expr::String(quasi)] = pair else {
-            return None;
-        };
-        holes.push(*hole);
-        quasis.push(quasi.as_str());
-    }
-    Some((quasis, holes))
-}
-
-/// A template literal's raw text for `value`: the characters whose raw form
-/// would read back differently (a backtick, a backslash, `${`, a carriage
-/// return and the other controls) are escaped.
-fn template_text(value: &str) -> String {
-    let mut out = String::with_capacity(value.len());
-    let mut characters = value.chars().peekable();
-    while let Some(character) = characters.next() {
-        match character {
-            '`' => out.push_str("\\`"),
-            '\\' => out.push_str("\\\\"),
-            '$' if characters.peek() == Some(&'{') => out.push_str("\\$"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            control if control.is_control() => {
-                out.push_str(&format!("\\u{{{:x}}}", u32::from(control)));
-            }
-            other => out.push(other),
-        }
-    }
-    out
 }
 
 /// The authored target spelling, assignment operator (`=`, or `op=` for an

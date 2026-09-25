@@ -7,7 +7,7 @@
 
 use lashlang::{
     AssignPathStep, AssignTarget, Expr as LashExpr, FunctionExpr, JavaScriptBinaryOp,
-    JavaScriptUnaryOp,
+    JavaScriptUnaryOp, MethodKey,
 };
 
 use super::{GENERATED_BINDING_PREFIX, Lowerer};
@@ -159,11 +159,10 @@ impl Lowerer {
                 condition: Box::new(stdlib("__jsonHasOwnToJSON", vec![current_value()])),
                 then_block: Box::new(assign(
                     &current,
-                    LashExpr::Call {
-                        function: Box::new(LashExpr::Field {
-                            target: Box::new(current_value()),
-                            field: "toJSON".into(),
-                        }),
+                    // `value.toJSON(key)`: the value is the hook's receiver.
+                    LashExpr::MethodCall {
+                        receiver: Box::new(current_value()),
+                        method: MethodKey::Field("toJSON".into()),
                         args: vec![variable(&key)],
                     },
                 )),
@@ -171,7 +170,10 @@ impl Lowerer {
             },
             assign(
                 &current,
-                LashExpr::Call {
+                // SerializeJSONProperty calls the replacer with the holder as
+                // its receiver.
+                LashExpr::ThisCall {
+                    this: Box::new(variable(&holder)),
                     function: Box::new(variable(&replacer_name)),
                     args: vec![variable(&key), current_value()],
                 },
@@ -200,6 +202,7 @@ impl Lowerer {
         let transformer = LashExpr::Function(Box::new(FunctionExpr {
             name: Some(transform.as_str().into()),
             js_name: None,
+            receiver: None,
             params: vec![holder.as_str().into(), key.as_str().into()],
             captures: vec![
                 replacer_name.as_str().into(),
@@ -216,6 +219,7 @@ impl Lowerer {
         let identity = LashExpr::Function(Box::new(FunctionExpr {
             name: None,
             js_name: None,
+            receiver: None,
             params: vec![identity_key.into(), identity_value.as_str().into()],
             captures: Vec::new(),
             body: Box::new(variable(&identity_value)),
@@ -289,6 +293,7 @@ impl Lowerer {
                 LashExpr::Function(Box::new(FunctionExpr {
                     name: None,
                     js_name: None,
+                    receiver: None,
                     params: vec![format!("{GENERATED_BINDING_PREFIX}ignored").into()],
                     captures: vec![input.as_str().into(), transform.as_str().into()],
                     body: Box::new(worker_body),
@@ -359,9 +364,8 @@ impl Lowerer {
     /// the keys the reviver did not return `undefined` for.
     ///
     /// The call runs under the same single-shot `Map` driver as the stringify
-    /// replacer, so a throwing reviver propagates as itself. `this` is not
-    /// bound — the guest call mechanism that carries a receiver is FIG-3700's,
-    /// and a reviver that reads `this` still sees `undefined`.
+    /// replacer, so a throwing reviver propagates as itself. The reviver runs
+    /// with the holder as its receiver, as InternalizeJSONProperty specifies.
     pub(super) fn lower_json_parse(
         &mut self,
         text: &Expr,
@@ -476,7 +480,8 @@ impl Lowerer {
                 then_block: Box::new(record_branch),
                 else_block: Box::new(LashExpr::Undefined),
             },
-            LashExpr::Return(Box::new(LashExpr::Call {
+            LashExpr::Return(Box::new(LashExpr::ThisCall {
+                this: Box::new(variable(&holder)),
                 function: Box::new(variable(&reviver_name)),
                 args: vec![variable(&key), val_value()],
             })),
@@ -484,6 +489,7 @@ impl Lowerer {
         let internalize_fn = LashExpr::Function(Box::new(FunctionExpr {
             name: Some(internalize.as_str().into()),
             js_name: None,
+            receiver: None,
             params: vec![holder.as_str().into(), key.as_str().into()],
             captures: vec![reviver_name.as_str().into()],
             body: Box::new(internalize_body),
@@ -509,6 +515,7 @@ impl Lowerer {
                 LashExpr::Function(Box::new(FunctionExpr {
                     name: None,
                     js_name: None,
+                    receiver: None,
                     params: vec![format!("{GENERATED_BINDING_PREFIX}ignored").into()],
                     captures: vec![parsed.as_str().into(), internalize.as_str().into()],
                     body: Box::new(worker_body),

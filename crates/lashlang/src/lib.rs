@@ -36,7 +36,7 @@ pub use ast::{
     CatchClause, Declaration, Expr, ExprFolder, ExprVisitor, FunctionDecl, FunctionExpr,
     FunctionParam, InvalidAst, JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp,
     LIFTED_PROCESS_NAME_PREFIX, LabelMetadata, ListComprehensionClause, MAX_AST_NESTING_DEPTH,
-    NestingTooDeep, ProcessDecl, ProcessLiteralExpr, ProcessOrigin, ProcessParam,
+    MethodKey, NestingTooDeep, ProcessDecl, ProcessLiteralExpr, ProcessOrigin, ProcessParam,
     ProcessSignalDecl, ProcessSignature, ProcessSignatureError, ProcessType, Program,
     ResourceRefExpr, SourceLanguage, StructuralRole, TryExpr, TypeDecl, TypeExpr, TypeField,
     UnaryOp, UnionMembers, check_ast_nesting_depth, fold_expr_children, format_type_expr,
@@ -152,7 +152,7 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// an explicitly empty one. A v21 stream is refused.
 /// v23 (FIG-3655): the continuation's heap-object wire carries a closure's
 /// own `name` and `length`. A v22 stream is refused.
-pub const BYTECODE_FORMAT_VERSION: u32 = 23;
+pub const BYTECODE_FORMAT_VERSION: u32 = 24;
 pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{
     LashlangBranchSite, LashlangEffectFailure, LashlangExecutionCallSite, LashlangExecutionChild,

@@ -34,9 +34,17 @@ impl Lowerer {
                 }
             }
             Expr::Member {
+                object,
                 property: MemberProperty::Field(method),
                 ..
-            } => method.clone(),
+            } => {
+                // A method of the program's own objects is not a builtin: it
+                // takes the dynamic path with its receiver.
+                if self.is_own_method_call(object, method) {
+                    return Ok(None);
+                }
+                method.clone()
+            }
             _ => return Ok(None),
         };
         // Distinct per call site, and spelled with a NUL no source can write.
@@ -101,4 +109,41 @@ fn splice_applied_arguments(
 fn mentions_marker(expr: &LashExpr, markers: &[String]) -> bool {
     matches!(expr, LashExpr::String(value) if markers.iter().any(|marker| value.as_str() == marker))
         || expr.children().any(|child| mentions_marker(child, markers))
+}
+
+impl Lowerer {
+    /// `object.method(...args)` for a method of the program's own objects:
+    /// the receiver is evaluated once, the callee is read from it, and the
+    /// runtime argument list is applied with the receiver bound.
+    pub(super) fn lower_method_spread_call(
+        &mut self,
+        object: &Expr,
+        property: &MemberProperty,
+        args: &[CallArg],
+    ) -> Result<LashExpr, Diagnostic> {
+        let receiver = self.temporary("method_receiver");
+        let receiver_value = self.lower_expr(object)?;
+        let variable = || LashExpr::Variable(receiver.as_str().into());
+        let function = match property {
+            MemberProperty::Field(field) => LashExpr::Field {
+                target: Box::new(variable()),
+                field: field.as_str().into(),
+            },
+            MemberProperty::Index(key) => LashExpr::Index {
+                target: Box::new(variable()),
+                index: Box::new(self.lower_expr(key)?),
+            },
+        };
+        let arguments = self.lower_argument_list(args)?;
+        Ok(LashExpr::Block(vec![
+            LashExpr::Assign {
+                target: AssignTarget::variable(receiver.as_str().into()),
+                expr: Box::new(receiver_value),
+            },
+            LashExpr::BuiltinCall {
+                name: "__typescript_call_method_dynamic".into(),
+                args: vec![variable(), function, arguments],
+            },
+        ]))
+    }
 }

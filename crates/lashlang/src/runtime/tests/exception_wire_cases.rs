@@ -754,6 +754,7 @@ async fn the_handler_chain_holds_across_control_flow_shapes() {
         let callback = Expr::Function(Box::new(crate::FunctionExpr {
             name: None,
             js_name: None,
+            receiver: None,
             params: vec!["item".into()],
             captures: Vec::new(),
             body: Box::new(exception_try(

@@ -42,6 +42,26 @@ entry that promises a refusal now carries an executable probe that must fire
 it, checked against the text of this register. See entry 5 and "Conformance
 evidence" below.
 
+Amended 2026-09-24 (FIG-3700, decision 42): **function receivers are exact.**
+The dialect already admitted object-literal methods and `this` inside function
+bodies, and lowered that `this` to `undefined`, a silent divergence in accepted
+code. A non-arrow function's `this` is now its call's receiver, as ECMA-262's
+OrdinaryCallBindThis gives it in strict code: the object a member call reads
+the callee from (`o.f()`, `o[k]()`, optional chains, parenthesized members,
+spread arguments), a builtin callback's `thisArg`, the holder of a JSON
+replacer or `toJSON` call, and `undefined` for a plain call. An arrow's `this`
+is lexical: it is its enclosing function's. Top-level `this` still rejects
+(`TS_THIS_UNSUPPORTED`), and so does `this` in an arrow outside every function,
+which reads the same top-level value. A member call on a name that is not a
+built-in prototype method calls the receiver's own property, and an own
+property wins over a built-in method of the same name. The IR carries the
+receiver as data — `FunctionExpr.receiver`, `Expr::MethodCall` and
+`Expr::ThisCall` — and the VM binds it into an ordinary frame slot, only in a
+function that reads it, so roots, collection, suspension and snapshots carry it
+unchanged. The bytecode, VM ABI, VM continuation and semantic-hash versions move
+together; a continuation from before receivers is refused by its format
+version.
+
 Amended 2026-09-24 (FIG-3706, decision 43): classic `for` is ECMA-262's
 ForStatement in every form. The head may be `let`, `const`, `var`, an
 expression or empty; the condition and the update may be any expression or

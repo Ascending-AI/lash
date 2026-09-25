@@ -241,6 +241,7 @@ typescript	direct-eval
 typescript	enum
 typescript	exotic-own-properties
 typescript	function-constructor
+typescript	function-receivers
 typescript	function-redeclaration
 typescript	generics
 typescript	instanceof-arbitrary

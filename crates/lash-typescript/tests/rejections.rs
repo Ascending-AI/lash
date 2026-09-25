@@ -211,11 +211,6 @@ rejection_test!(
     "'x'.missing();",
     Code::MethodUnsupported
 );
-rejection_test!(
-    rejects_unknown_method_on_bound_receiver,
-    "const s = 'a,b'; s.notAMethod(',');",
-    Code::MethodUnsupported
-);
 
 #[test]
 fn shadowed_module_root_names_the_shadowing_binding() {
@@ -241,35 +236,19 @@ fn shadowed_module_root_names_the_shadowing_binding() {
         "local binding `text` shadows module `text`; rename the binding or call the module before binding"
     );
 
+    // A built-in name the surface does not carry keeps the method diagnostic
+    // on an ordinary local; any other name is a method of the program's own
+    // objects (see receivers.rs).
     for ordinary_source in [
-        "const s = 'a,b'; s.notAMethod(',');",
-        "function f(items) { return items.notAMethod(); }",
+        "const s = 'a,b'; s.anchor('x');",
+        "function f(items) { return items.copyWithin(0, 1); }",
     ] {
         let ordinary = lash_typescript::link(ordinary_source, &environment)
             .expect_err("an ordinary local should keep the method diagnostic");
-        assert_eq!(ordinary.code, Code::MethodUnsupported);
-        assert_eq!(
-            ordinary.message,
-            "method `notAMethod` is not in the TypeScript runtime surface"
-        );
+        assert_eq!(ordinary.code, Code::MethodUnsupported, "{ordinary_source}");
     }
 }
 
-rejection_test!(
-    rejects_unknown_method_on_chained_receiver,
-    "'abc'.repeat(2).notAMethod(10, 'x');",
-    Code::MethodUnsupported
-);
-rejection_test!(
-    rejects_unknown_method_on_computed_receiver,
-    "const xs = [['a']]; xs[0].notAMethod();",
-    Code::MethodUnsupported
-);
-rejection_test!(
-    rejects_unknown_method_under_await,
-    "const s = 'a'; await s.notAMethod();",
-    Code::MethodUnsupported
-);
 // `defineProcess` is not a construct any more (FIG-2999): a process is an
 // uncalled `const`-bound async arrow, so the retired spelling is an unbound
 // name like any other.

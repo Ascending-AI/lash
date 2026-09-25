@@ -848,13 +848,13 @@ pub(super) fn typescript_method_diagnostics_consult_the_link_time_module_catalog
         "local binding `text` shadows module `text`; rename the binding or call the module before binding"
     );
 
-    let ordinary_source = "const s = 'a,b'; s.notAMethod(',');";
+    let ordinary_source = "const s = 'a,b'; s.anchor(',');";
     let ordinary = lash_typescript::parse_cell(ordinary_source, &environment)
         .expect_err("an ordinary local method remains unsupported");
     let ordinary = refine_typescript_method_diagnostic(ordinary_source, &environment, ordinary);
     assert_eq!(
         ordinary.message,
-        "method `notAMethod` is not in the TypeScript runtime surface"
+        "method `anchor` is not in the TypeScript runtime surface"
     );
 }
 static EXECUTION_BOUND_EXHAUSTION_MODE: std::sync::Mutex<()> = std::sync::Mutex::new(());

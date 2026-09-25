@@ -466,6 +466,7 @@ fn process_wrapper(params: &[lashlang::ProcessParam], body: Expr) -> Expr {
         Expr::Function(Box::new(lashlang::FunctionExpr {
             name: None,
             js_name: None,
+            receiver: None,
             params: params.iter().map(|param| param.name.clone()).collect(),
             captures: Vec::new(),
             body: Box::new(body),

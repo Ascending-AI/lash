@@ -16,6 +16,7 @@ fn decoded_snapshots_validate_closure_metadata_when_paired_with_a_program() {
             expr: Box::new(Expr::Function(Box::new(FunctionExpr {
                 name: None,
                 js_name: None,
+                receiver: None,
                 params: Vec::new(),
                 captures: vec!["captured".into()],
                 body: Box::new(Expr::Variable("captured".into())),
@@ -1543,6 +1544,7 @@ fn a_restored_real_closure_does_not_reject_a_different_program() {
             expr: Box::new(Expr::Function(Box::new(FunctionExpr {
                 name: None,
                 js_name: None,
+                receiver: None,
                 params: Vec::new(),
                 captures: vec!["captured".into()],
                 body: Box::new(Expr::Variable("captured".into())),

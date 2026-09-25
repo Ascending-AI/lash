@@ -117,6 +117,32 @@ impl<H: ExecutionHost> Vm<'_, H> {
         {
             values = self.applied_stdlib_arguments(values)?;
         }
+        // An authored member call on a plain object: the object's own
+        // property is the method (ECMA-262 GetValue, then Call with the object
+        // as `this`). The lowerer calls a built-in method name through here
+        // only for an authored member call, and a generated helper never
+        // reaches a plain-object receiver: every lowering that runs one first
+        // routes a plain object to its own method (`Lash.OwnMethod`).
+        if let [Value::String(method), receiver, arguments @ ..] = values.as_slice()
+            && crate::ecma_stdlib::is_instance_method(method.as_str())
+            && let Some(resolved) = self.plain_object_method(receiver, method.as_str())?
+        {
+            let name = method.to_string();
+            let receiver = receiver.clone();
+            let arguments = arguments.to_vec();
+            return self.call_plain_object_method(resolved, &name, receiver, arguments);
+        }
+        // Whether a lowering that runs a built-in method as generated code must
+        // instead call the receiver's own member: see above.
+        if let [Value::String(selector), receiver, Value::String(method)] = values.as_slice()
+            && selector.as_str() == "Lash.OwnMethod"
+        {
+            let own = self
+                .plain_object_method(receiver, method.as_str())?
+                .is_some();
+            self.stack.push(Value::Bool(own));
+            return Ok(());
+        }
         if let [Value::String(method), value] = values.as_slice()
             && method.as_str() == "__jsonContainerKind"
         {

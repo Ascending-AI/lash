@@ -110,7 +110,9 @@ pub fn execution_site_descriptor(expr: &Expr) -> Option<(ExecutionNodeKind, Cow<
         Expr::If { .. } => (BRANCH_EXECUTION_SITE_KIND, Cow::Borrowed("if")),
         Expr::For { .. } => (LOOP_EXECUTION_SITE_KIND, Cow::Borrowed("for")),
         Expr::While { .. } => (LOOP_EXECUTION_SITE_KIND, Cow::Borrowed("while")),
-        Expr::Call { .. } => (ExecutionNodeKind::Call, Cow::Borrowed("function call")),
+        Expr::Call { .. } | Expr::MethodCall { .. } | Expr::ThisCall { .. } => {
+            (ExecutionNodeKind::Call, Cow::Borrowed("function call"))
+        }
         _ => return None,
     })
 }
@@ -161,6 +163,8 @@ pub(crate) fn label_attaches_to_concrete_node(expr: &Expr) -> bool {
         | Expr::BuiltinCall { .. }
         | Expr::Function(_)
         | Expr::Call { .. }
+        | Expr::MethodCall { .. }
+        | Expr::ThisCall { .. }
         | Expr::FunctionCall { .. }
         | Expr::Map { .. }
         | Expr::Try(_)
@@ -217,6 +221,8 @@ pub fn is_pure_expr(expr: &Expr) -> bool {
         // call frame and may allocate, so it is treated like any other call
         // wherever purity means "safe to skip, duplicate, or reorder".
         Expr::Call { .. }
+        | Expr::MethodCall { .. }
+        | Expr::ThisCall { .. }
         | Expr::FunctionCall { .. }
         | Expr::Map { .. }
         | Expr::Try(_)
