@@ -591,7 +591,13 @@ impl LashRuntime {
                     .await;
                 self.abandon_turn_input_claims_after_local_abort(&err, &pending_turn_input_claims)
                     .await;
-                Box::pin(self.record_turn_park_after_abort(&err, &trace_turn_id)).await;
+                // The park names the logical root the controller runs
+                // under, never this physical turn (D2 §1.3).
+                let root = finish_scoped_effect_controller
+                    .execution_scope()
+                    .logical_root()
+                    .unwrap_or_else(|| trace_turn_id.clone());
+                Box::pin(self.record_turn_park_after_abort(&err, &root)).await;
                 return Err(err);
             }
         };

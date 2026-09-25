@@ -34,6 +34,7 @@ fn park_write(
         turn_id: TurnId::from(turn_id),
         reason,
         at_ms,
+        engine: None,
     }
 }
 

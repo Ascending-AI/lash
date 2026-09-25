@@ -122,21 +122,6 @@ pub(crate) enum ToolExecutionRoute {
     },
 }
 
-/// The logical root an admitted scope runs under: a turn scope is its root's
-/// own; a queue drain names its queued root by its drain id until queued roots
-/// run under turn scopes (FIG-3600 S8).
-fn logical_root_of(scope: &crate::ExecutionScope) -> Option<crate::TurnId> {
-    match scope {
-        crate::ExecutionScope::Turn { turn_id, .. } => Some(turn_id.clone()),
-        crate::ExecutionScope::QueueDrain { drain_id, .. } => {
-            Some(crate::TurnId::from(drain_id.as_str()))
-        }
-        crate::ExecutionScope::Process { .. }
-        | crate::ExecutionScope::SessionDelete { .. }
-        | crate::ExecutionScope::RuntimeOperation { .. } => None,
-    }
-}
-
 /// Integrator class 3 sealed, controller-free environment for a recorded leaf attempt.
 #[derive(Clone)]
 pub struct AttemptContext<'run> {
@@ -192,7 +177,7 @@ impl<'run> AttemptContext<'run> {
     /// scope it was recorded in (FIG-3607 item 6): never a live read. `None`
     /// outside a session turn (a process body, a runtime operation).
     pub fn logical_root(&self) -> Option<crate::TurnId> {
-        logical_root_of(self.parent_scope.scope())
+        self.parent_scope.scope().logical_root()
     }
 
     /// The start context a child start declared by this attempt draws its
@@ -740,7 +725,11 @@ impl<'run> ToolContext<'run> {
     /// of its effect controller (FIG-3607 item 6): never a live read. `None`
     /// outside a session turn (a process body, a runtime operation).
     pub fn logical_root(&self) -> Option<crate::TurnId> {
-        logical_root_of(self.effect_controller.scoped().admitted_scope().scope())
+        self.effect_controller
+            .scoped()
+            .admitted_scope()
+            .scope()
+            .logical_root()
     }
 
     pub(crate) fn install_prederived_completion_key(&self, key: Option<crate::AwaitEventKey>) {

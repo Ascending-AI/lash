@@ -130,8 +130,8 @@ pub use maintenance::{
 pub use park::{
     EnginePark, ParkCancelCause, ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage,
     ParkId, ParkReason, ParkReasonCode, ParkSummary, ProcessPark, ProcessParkKey, ProcessParkQuery,
-    ProcessParkWrite, TurnPark, TurnParkQuery, TurnParkTarget, TurnParkWrite, UnparkCause,
-    UnsettledTurnCounts,
+    ProcessParkWrite, StoredTurnParkHead, TurnPark, TurnParkQuery, TurnParkTarget, TurnParkWrite,
+    TurnParkWriteDecision, UnparkCause, UnsettledTurnCounts, decide_turn_park_write,
 };
 pub use pending_follow_on::{
     DEFAULT_MAX_FOLLOW_ON_RECOVERIES, FollowOnBlocked, FollowOnClaim, FollowOnRecovery,

@@ -39,12 +39,17 @@
 mod admission;
 mod close;
 mod control;
+mod park;
 mod reconcile;
 mod root;
 mod turn_config;
 
 pub use control::apply_control_intent;
-pub use reconcile::{ReconcileReport, reconcile_drive_request, reconcile_session_work};
+pub use park::StoreParkRecovery;
+pub use reconcile::{
+    ReconcileParts, ReconcileProcesses, drain_hand_over_slot, reconcile_drive_request,
+    reconcile_once, reconcile_parent_end_plans_slot, reconcile_session_drives,
+};
 pub(crate) use turn_config::provider_binding_unavailable;
 pub use turn_config::{validate_route, validate_route_with};
 

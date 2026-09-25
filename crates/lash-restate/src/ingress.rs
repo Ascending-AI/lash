@@ -851,9 +851,13 @@ impl RestateAdminClient {
             .await
     }
 
-    /// Forcefully kill an invocation. This is intended for test/dev cleanup
-    /// after graceful cancellation has failed.
-    pub async fn kill_invocation_for_test_cleanup(
+    /// Kill an invocation: it stops for good, with no compensation and no
+    /// further attempt, and the kill propagates to the calls it is waiting
+    /// on. The release half of an operator's cancel or fork of a parked root
+    /// ([`SessionControlEngine::release_root`](lash_core::engine::SessionControlEngine::release_root)),
+    /// run after the store recorded the root's end; never proof of a lash
+    /// outcome (ADR 0104 O4).
+    pub async fn kill_invocation(
         &self,
         invocation_id: &RestateInvocationId,
     ) -> Result<(), RestateHttpError> {

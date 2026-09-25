@@ -15,7 +15,7 @@
 use serde::{Deserialize, Serialize};
 
 use super::context::EpochMs;
-use crate::store::{BlobRef, ParkReason, StoreError};
+use crate::store::BlobRef;
 pub use crate::store::{ParkId, RootTerminalWrite, SessionHeadRef, TurnCommitId};
 use crate::{
     AttachmentId, BatchId, FrameNodeId, InputId, NodeId, PluginState, ProtocolTurnOptions,
@@ -155,40 +155,4 @@ pub struct CommittedAttachments {
     pub committed: Vec<AttachmentId>,
     /// Upload intents the commit adopts.
     pub adopted_intents: Vec<String>,
-}
-
-/// The work a park names.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ParkedWorkRef {
-    pub session: SessionId,
-    pub root: TurnId,
-}
-
-/// The engine's own reference to a stalled execution. Opaque to lash.
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-#[serde(transparent)]
-pub struct EngineParkRef(String);
-
-impl EngineParkRef {
-    pub fn new(reference: impl Into<String>) -> Self {
-        Self(reference.into())
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-/// The recovery writer for a park the workflow cannot record itself, for
-/// example when a nondeterministic workflow task stops it before `RecordPark`.
-/// Its idempotency key is the root and the park id, the same as `RecordPark`'s,
-/// so the two writers converge. Park reconciliation is its only caller.
-#[async_trait::async_trait]
-pub trait ParkRecoveryWriter: Send + Sync {
-    async fn record_engine_park(
-        &self,
-        root: &ParkedWorkRef,
-        reason: ParkReason,
-        engine: EngineParkRef,
-    ) -> Result<ParkId, StoreError>;
 }

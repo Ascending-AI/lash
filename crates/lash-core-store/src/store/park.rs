@@ -82,6 +82,97 @@ pub struct TurnParkWrite {
     pub reason: ParkReason,
     /// Host-clock epoch milliseconds at which the refusal was recorded.
     pub at_ms: u64,
+    /// The engine's handle on the stopped execution, when the engine parked
+    /// the root itself (its retry loop ran out, recorded by reconcile): the
+    /// handle a redrive resumes and a cancel releases. `None` from the
+    /// execution's own park write, which keeps any handle already stored.
+    pub engine: Option<EnginePark>,
+}
+
+impl TurnParkWrite {
+    /// The park the aborting execution itself writes for `root`: no engine
+    /// handle.
+    #[must_use]
+    pub fn refusal(session_id: SessionId, root: TurnId, reason: ParkReason, at_ms: u64) -> Self {
+        Self {
+            session_id,
+            turn_id: root,
+            reason,
+            at_ms,
+            engine: None,
+        }
+    }
+}
+
+/// The stored park a [`TurnParkWrite`] is decided against: the session's
+/// current park, as its transaction read it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoredTurnParkHead {
+    /// The root the stored park names.
+    pub root: TurnId,
+    /// The engine handle the stored park carries.
+    pub engine: Option<EnginePark>,
+    /// Whether the stored park's `resume_intent` names a redrive that is
+    /// still open (pending, or failed and retryable): its engine half has
+    /// not resumed the execution yet.
+    pub redrive_open: bool,
+    /// Whether the stored park names a `resume_intent` at all.
+    pub redrive_requested: bool,
+}
+
+/// What a [`TurnParkWrite`] does to the session's park (D2 §1.3), decided in
+/// the write's own transaction after the root's terminal evidence was found
+/// absent (P2 refuses before this).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TurnParkWriteDecision {
+    /// No park: open one.
+    Open,
+    /// Another root's park: close it `Superseded`, then open this root's.
+    Supersede,
+    /// The same root refused again, or its engine stopped again after a
+    /// redrive resumed it: keep `park_id` and `since_ms`, refresh the reason,
+    /// count the attempt, clear `resume_intent` (P3), and store the write's
+    /// engine handle if it carries one.
+    Repark,
+    /// The engine stopped the root's execution and the root already holds
+    /// a park without a handle: keep its reason and attempts, store the
+    /// handle (P4, `AttachedToExisting`).
+    AttachEngine,
+    /// Nothing to write: the park already carries this handle and no
+    /// redrive ran since, or a redrive is still on its way to resuming it.
+    Unchanged,
+}
+
+/// Decide `write` against the session's stored park `stored`.
+#[must_use]
+pub fn decide_turn_park_write(
+    stored: Option<&StoredTurnParkHead>,
+    write: &TurnParkWrite,
+) -> TurnParkWriteDecision {
+    let Some(stored) = stored else {
+        return TurnParkWriteDecision::Open;
+    };
+    if stored.root != write.turn_id {
+        return TurnParkWriteDecision::Supersede;
+    }
+    let Some(engine) = write.engine.as_ref() else {
+        // The execution itself refused again.
+        return TurnParkWriteDecision::Repark;
+    };
+    if stored.redrive_open {
+        // A redrive owns the stopped execution until it resumes it.
+        return TurnParkWriteDecision::Unchanged;
+    }
+    if stored.redrive_requested {
+        // A redrive resumed the execution, and the engine stopped it again
+        // without the execution refusing first.
+        return TurnParkWriteDecision::Repark;
+    }
+    match stored.engine.as_ref() {
+        None => TurnParkWriteDecision::AttachEngine,
+        Some(stored) if stored == engine => TurnParkWriteDecision::Unchanged,
+        Some(_) => TurnParkWriteDecision::Repark,
+    }
 }
 
 /// The stored parked state of one session's turn.
@@ -102,6 +193,14 @@ pub struct TurnPark {
     pub last_refused_ms: u64,
     /// Refusals of this turn since it parked (1 on the first park).
     pub attempts: u32,
+    /// The engine's handle on the stopped execution, once reconcile recorded
+    /// one: what a redrive resumes and a cancel or fork releases.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub engine: Option<EnginePark>,
+    /// The redrive requested since this park last refused, if any. A re-park
+    /// of the same root clears it (P3), so an operator can redrive again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub resume_intent: Option<super::ControlIntentId>,
 }
 
 /// Why a turn parked. Each arm carries the refusal's operator-facing message:
@@ -766,6 +865,8 @@ impl TurnPark {
         since_ms: u64,
         last_refused_ms: u64,
         attempts: u32,
+        engine_ref: Option<String>,
+        resume_intent: Option<u64>,
     ) -> Result<Self, crate::StoreError> {
         let reason: ParkReason = serde_json::from_str(reason_json).map_err(|error| {
             crate::StoreError::StoredDataCorrupt {
@@ -793,6 +894,8 @@ impl TurnPark {
             since_ms,
             last_refused_ms,
             attempts,
+            engine: engine_ref.map(EnginePark::new),
+            resume_intent: resume_intent.map(super::ControlIntentId::from_sequence),
         })
     }
 }
