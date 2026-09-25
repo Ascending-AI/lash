@@ -721,3 +721,64 @@ pub async fn admit_session_state_generation(
         Err(error) => Err(error),
     }
 }
+
+/// Records the park of the turn a durable engine redelivered to a build whose
+/// generation gate refused its session (FIG-3735), and returns it. `store` is
+/// the refused session's own store, opened without admission (a catalog's
+/// [`open_existing_store_by_id`](SessionStoreFactory::open_existing_store_by_id)).
+///
+/// The gate refuses before any effect, so a redrive meets `refusal` before it
+/// issues its first command. A turn the refused session holds in flight for
+/// `admitted` — a begun, unsettled queued run for a queue-drain scope, an
+/// accepted input bound to the turn for a direct turn scope — was driven by
+/// an earlier execution, whose journal already holds commands the refused
+/// redrive cannot replay. Its handler must not return, or fail terminally,
+/// where that journal holds its next command: the turn parks, typed
+/// ([`ParkReason::SessionStateGenerationRefused`](crate::store::ParkReason::SessionStateGenerationRefused)),
+/// keeps its claims for a build of its own generation, and its handler ends
+/// the attempt as every parked turn does. A scope with nothing in flight
+/// returns `None`: nothing ran before the refusal, and the refusal is the
+/// turn's terminal answer.
+pub async fn park_turn_refused_by_generation(
+    store: &dyn crate::store::RuntimePersistence,
+    admitted: &crate::AdmittedScope,
+    refusal: crate::SessionStateVersionRefusal,
+    at_ms: u64,
+) -> Result<Option<crate::store::TurnPark>, crate::StoreError> {
+    let scope = admitted.scope();
+    let session_id = match scope {
+        crate::ExecutionScope::QueueDrain { session_id, .. }
+        | crate::ExecutionScope::Turn { session_id, .. } => session_id,
+        _ => return Ok(None),
+    };
+    let in_flight = match scope {
+        crate::ExecutionScope::QueueDrain { .. } => store
+            .queued_run(scope)
+            .await?
+            .is_some_and(|run| run.terminal.is_none()),
+        crate::ExecutionScope::Turn { turn_id, .. } => store
+            .list_pending_turn_inputs(session_id)
+            .await?
+            .iter()
+            .any(|read| {
+                matches!(
+                    &read.input.state,
+                    crate::TurnInputState::Accepted(ingress) if ingress.turn_id == *turn_id
+                )
+            }),
+        _ => false,
+    };
+    if !in_flight {
+        return Ok(None);
+    }
+    let park = store
+        .record_turn_park(&crate::store::TurnParkWrite {
+            session_id: session_id.clone(),
+            turn_id: TurnId::from(scope.id()),
+            reason: crate::store::ParkReason::session_state_generation_refused(refusal),
+            at_ms,
+        })
+        .await?;
+    crate::operational_metrics::record_work_parked("turn", park.reason.code().as_str());
+    Ok(Some(park))
+}

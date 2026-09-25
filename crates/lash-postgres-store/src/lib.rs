@@ -515,7 +515,12 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // the checkpoint of the head a session's latest turn was admitted on, which
 // garbage collection keeps as a checkpoint root. Component-129 catalogs lack
 // the column and are rejected and recreated.
-const SCHEMA_VERSION: i32 = 130;
+// Version 131 (FIG-3735) extends `lash_turn_parks.reason_json` with the
+// `session_state_generation_refused` reason, the park of an in-flight turn
+// whose redrive the session-state generation gate refused, which an older
+// build cannot decode. No relation changes; component-130 catalogs are
+// rejected and recreated.
+const SCHEMA_VERSION: i32 = 131;
 
 #[derive(Clone)]
 pub struct PostgresStorage {

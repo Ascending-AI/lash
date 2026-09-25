@@ -126,14 +126,6 @@ reason = "moved from active to parked by #2166: on main the trace law always dro
 [[deferred]]
 file = "crates/lash-restate/src/tests/turn_crash_on_the_double.rs"
 claimant = "lash_restate::tests::turn_crash_on_the_double"
-suite = "turn_crash_generation_redrive_tests"
-recipe = "parked"
-ticket = "FIG-3735"
-reason = "the redrive of a pre-cutover turn is refused before any effect, but the refused execution returns where the crashed execution's journal holds its next command, so Restate reports a journal mismatch and retries the invocation instead of ending it"
-
-[[deferred]]
-file = "crates/lash-restate/src/tests/turn_crash_on_the_double.rs"
-claimant = "lash_restate::tests::turn_crash_on_the_double"
 suite = "turn_crash_cancel_closure_tests"
 recipe = "parked"
 ticket = "FIG-3736"

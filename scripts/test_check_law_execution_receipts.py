@@ -531,8 +531,6 @@ class ParkedEntryTests(unittest.TestCase):
                 "--skip",
                 "tests::conformance_and_poison::turn_crash_trace_drift_check",
                 "--skip",
-                "tests::turn_crash_on_the_double::pre_cutover_generation_turn_redrive_is_refused_before_any_effect",
-                "--skip",
                 "tests::turn_crash_on_the_double::turn_cancel_closure_recovers_from_a_crash_at_every_cut",
             ],
         )
@@ -650,7 +648,7 @@ class RealTreeTests(unittest.TestCase):
         errors: list[str] = []
         manifest_set = MODULE.manifest_check(errors)
         self.assertEqual(errors, [])
-        self.assertEqual(len(manifest_set), 19)
+        self.assertEqual(len(manifest_set), 18)
         self.assertIn(
             (
                 "crates/lash-restate/src/tests/conformance_and_poison.rs",

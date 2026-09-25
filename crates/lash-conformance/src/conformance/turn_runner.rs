@@ -171,6 +171,23 @@ pub trait ConformanceTurnRunner: Send + Sync {
     /// replay of the handler on Restate.
     async fn run_turn(&self, admitted: crate::AdmittedScope, attempt: ConformanceTurnAttempt);
 
+    /// Runs `attempt` on every retry the tier's engine gives a turn that
+    /// parks on each run, until the engine rests the turn, and returns how
+    /// many times it ran. A parked turn leaves its execution open (see
+    /// [`ConformanceTurnEnd`]); nothing in process retries it, so there it
+    /// runs once. On Restate every retry of the open invocation re-runs it,
+    /// and the turn handler's retry policy pauses the invocation after its
+    /// attempt budget: the runner returns once the invocation is paused, and
+    /// panics when a run settled instead of parking.
+    async fn run_parking_turn_until_rested(
+        &self,
+        admitted: crate::AdmittedScope,
+        attempt: ConformanceTurnAttempt,
+    ) -> usize {
+        self.run_turn(admitted, attempt).await;
+        1
+    }
+
     /// Runs one turn across a crash: `crashing` must panic before its turn
     /// commits, and the tier then redelivers the same turn to `redrive` the
     /// way it recovers a crashed turn — a fresh driver over the same host in
