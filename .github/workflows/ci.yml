@@ -1983,6 +1983,14 @@ jobs:
             bazel: true
             restate: true
             runner: ubuntu-24.04
+          - name: server-double
+            recipe: server-double-e2e
+            node: false
+            artifact: none
+            browser: false
+            bazel: true
+            restate: true
+            runner: ubuntu-24.04
           - name: workflow-graph-roundtrip
             recipe: workflow-graph-integration-verify
             node: true

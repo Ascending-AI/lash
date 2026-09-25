@@ -41,19 +41,24 @@ impl State {
                 "cannot process command {command} (command index {command_index}) because of a failed precondition: {reason}"
             )
         };
-        let resolve = |service: &str, handler: &str, key: &str, command: &str| match sh
-            .catalog()
-            .resolve(service, handler)
-        {
-            Ok(spec) if !spec.kind.is_keyed() && !key.is_empty() => Err(failed(
-                command,
-                format!("the service {service} is not keyed but a key was given"),
-            )),
-            Ok(_) => Ok(()),
-            Err(_) => Err(failed(
-                command,
-                format!("the service handler {service}/{handler} was not found"),
-            )),
+        let resolve = |service: &str, handler: &str, key: &str, command: &str| {
+            let Some(deployment) = sh.route(service) else {
+                return Err(failed(
+                    command,
+                    format!("the service handler {service}/{handler} was not found"),
+                ));
+            };
+            match deployment.catalog.resolve(service, handler) {
+                Ok(spec) if !spec.kind.is_keyed() && !key.is_empty() => Err(failed(
+                    command,
+                    format!("the service {service} is not keyed but a key was given"),
+                )),
+                Ok(_) => Ok(()),
+                Err(_) => Err(failed(
+                    command,
+                    format!("the service handler {service}/{handler} was not found"),
+                )),
+            }
         };
         match frame.ty {
             MessageType::CallCommand => {

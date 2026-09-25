@@ -1098,7 +1098,11 @@ class RestateSuiteSelectionTests(unittest.TestCase):
 
     def test_the_registry_derives_the_suite_owners(self) -> None:
         self.assertEqual(
-            {"crates/lash-restate", "examples/agent-workbench"},
+            {
+                "crates/lash-restate",
+                "crates/lash-restate-test",
+                "examples/agent-workbench",
+            },
             set(ci_plan.restate_suite_dirs()),
         )
 
@@ -1210,7 +1214,12 @@ class RestateSuiteSelectionTests(unittest.TestCase):
         ]
         legs = job["strategy"]["matrix"]["include"]
         self.assertEqual(
-            {"agent-service", "agent-workbench", "effect-group-conformance"},
+            {
+                "agent-service",
+                "agent-workbench",
+                "effect-group-conformance",
+                "server-double",
+            },
             {leg["name"] for leg in legs if leg["restate"]},
         )
         # A leg the selection leaves off runs only its explanation step.
@@ -2066,7 +2075,7 @@ class WorkflowRegistrationTests(unittest.TestCase):
         self.assertEqual(["process-operations"],
                          [leg["name"] for leg in consumer["strategy"]["matrix"]["include"]])
         self.assertEqual({"agent-service", "agent-workbench", "effect-group-conformance",
-                          "workflow-graph-roundtrip", "version-bump-recreation",
+                          "server-double", "workflow-graph-roundtrip", "version-bump-recreation",
                           "session-lease-triage", "slack-clone-full-host"},
                          {leg["name"] for leg in other["strategy"]["matrix"]["include"]})
         self.assertFalse(any("worker binaries" in step.get("name", "") for step in other["steps"]))
