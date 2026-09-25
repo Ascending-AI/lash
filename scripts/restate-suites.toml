@@ -28,7 +28,7 @@
 label = "//crates/lash-restate:lash-restate__unit_test"
 cwd = "crates/lash-restate"
 filters = ["live_effect_group_sdk_preconditions", "tests::conformance_and_poison::"]
-# Parked deferred-law invocations (scripts/deferred-law-invocations.toml).
+# Parked deferred-law invocations (scripts/deferred-laws/*.toml).
 parked_crate = "lash_restate"
 endpoints = ["EG_RESTATE_ENDPOINT", "EG0_RESTATE_ENDPOINT"]
 shards = 3

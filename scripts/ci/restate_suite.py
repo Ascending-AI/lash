@@ -406,7 +406,7 @@ def load_suite(name: str) -> Suite:
 
 
 def parked_skips(crate: str) -> list[str]:
-    """Deferred-law invocations parked in scripts/deferred-law-invocations.toml."""
+    """Deferred-law invocations parked in scripts/deferred-laws/ shards."""
     output = subprocess.run(
         [sys.executable, str(ROOT / "scripts" / "check_law_execution_receipts.py"), "--parked-skips", crate],
         cwd=ROOT,

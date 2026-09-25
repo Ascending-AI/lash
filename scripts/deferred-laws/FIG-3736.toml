@@ -1,0 +1,16 @@
+# Deferred conformance laws (FIG-3472), sharded so two changes never queue on
+# one file. The checker merges every `*.toml` in `scripts/deferred-laws/`; a
+# new deferred invocation adds a shard named for the recipe that runs it, or
+# for the ticket that brings a parked invocation back (`FIG-<n>.toml`).
+#
+# A row whose recipe is "parked" runs nowhere yet: it must name the `ticket`
+# (FIG-n) that brings the invocation back and the `reason` it is parked, and
+# no other row may carry either field.
+
+[[deferred]]
+file = "crates/lash-restate/src/tests/turn_crash_on_the_double.rs"
+claimant = "lash_restate::tests::turn_crash_on_the_double"
+suite = "turn_crash_cancel_closure_tests"
+recipe = "parked"
+ticket = "FIG-3736"
+reason = "seven of the eight closure cuts recover; a crash inside the store write that applies the input effects and consumes the authorization leaves it committed but unjournaled, and the redrive, reading the committed state, diverges from its journal"
