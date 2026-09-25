@@ -19,23 +19,30 @@ pub(super) struct AgentContractExecution {
     pub(super) checkpoint_writes: Vec<CheckpointWriteEvent>,
 }
 
-/// The contract world's backend: a SQLite memory backend on `clock`,
-/// observed when a checkpoint collector is installed, with `effect_layer` over
-/// its host when a boundary test supplies one.
-async fn contract_backend(
-    clock: Arc<crate::clock::SimClock>,
-    effect_layer: Option<Arc<dyn lash_core::testing::EffectLayer>>,
-) -> Result<Arc<dyn lash::persistence::LashlangArtifactBackend>, FixedScriptRunnerError> {
+/// The seed of every fixed contract's server double.
+const CONTRACT_SEED: u64 = 0x5eed_c047;
+
+/// The contract world: a sim engine and the backend its cores run on,
+/// observed when a checkpoint collector is installed.
+async fn contract_world() -> Result<
+    (
+        crate::backend::SimEngine,
+        Arc<dyn lash::persistence::LashlangArtifactBackend>,
+    ),
+    FixedScriptRunnerError,
+> {
     let collector = CONTRACT_CHECKPOINT_COLLECTOR.with(|slot| slot.borrow().clone());
-    let mut backend =
-        crate::backend::DecoratedBackend::over(crate::backend::sim_memory_backend(clock).await?);
+    let engine = crate::backend::SimEngine::new(CONTRACT_SEED).await?;
+    let mut backend = crate::backend::DecoratedBackend::over_engine(&engine);
     if let Some(collector) = collector {
         backend = backend.observing(collector);
     }
-    if let Some(layer) = effect_layer {
-        backend = backend.with_effect_layer(layer);
-    }
-    Ok(Arc::new(backend))
+    Ok((engine, Arc::new(backend)))
+}
+
+/// A turn build that submits `prompt` as text.
+fn contract_turn(prompt: &'static str) -> crate::backend::SimTurnBuild {
+    Arc::new(move |session: &lash::LashSession| Ok(session.turn(lash::TurnInput::text(prompt))))
 }
 
 fn observe_contract_checkpoints<T>(
@@ -426,7 +433,7 @@ finish(result);
 
 async fn agent_failed_child_preserves_failure_graph_execution()
 -> Result<Value, FixedScriptRunnerError> {
-    let (core, graph_store) = agent_process_contract_core_with_options(
+    let (core, graph_store, engine) = agent_process_contract_core_with_options(
         "lash_runtime agent failed child graph",
         vec![
             r#"<typescript>
@@ -457,13 +464,16 @@ await task.fail({ reason: "parent observed child failure" });
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let events = Arc::new(RuntimeProofRecordingEvents::default());
-    let result = session
-        .turn(lash::TurnInput::text(
-            "Spawn a child that fails and preserve its execution graph.",
-        ))
-        .stream_to(events.as_ref())
-        .await
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let result = engine
+        .run_turn(
+            &session,
+            "sim-agent-failed-child-turn",
+            events.clone(),
+            contract_turn("Spawn a child that fails and preserve its execution graph."),
+        )
+        .await?
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
+        .result;
     session
         .refresh_background_graph()
         .await
@@ -593,9 +603,8 @@ async fn facade_final_value_execution_inner(
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
     process_surface: ProcessSurface,
 ) -> Result<Value, FixedScriptRunnerError> {
-    let clock = crate::clock::SimClock::new();
     let events = Arc::new(RuntimeProofRecordingEvents::default());
-    let backend = contract_backend(clock, None).await?;
+    let (engine, backend) = contract_world().await?;
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -627,18 +636,24 @@ async fn facade_final_value_execution_inner(
     let core = builder
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    engine.serve_processes(&core)?;
     let session = core
         .session(session_id)
         .open()
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let result = session
-        .turn(lash::TurnInput::text(prompt))
-        .require_finish()
+    let result = engine
+        .run_turn(
+            &session,
+            format!("{session_id}-turn"),
+            events.clone(),
+            Arc::new(move |session: &lash::LashSession| {
+                session.turn(lash::TurnInput::text(prompt)).require_finish()
+            }),
+        )
+        .await?
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
-        .stream_to(events.as_ref())
-        .await
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        .result;
     let final_value = result.final_value().cloned().ok_or_else(|| {
         FixedScriptRunnerError::Assertion(format!(
             "{provider_kind} finished without TurnFinish::FinalValue: {:?}",
@@ -723,7 +738,7 @@ async fn facade_agent_process_execution_with_options(
     install_subagents: bool,
     max_turns: Option<usize>,
 ) -> Result<Value, FixedScriptRunnerError> {
-    let (core, graph_store) = agent_process_contract_core_with_options(
+    let (core, graph_store, engine) = agent_process_contract_core_with_options(
         provider_kind,
         provider_responses,
         tools,
@@ -737,11 +752,16 @@ async fn facade_agent_process_execution_with_options(
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let events = Arc::new(RuntimeProofRecordingEvents::default());
-    let result = session
-        .turn(lash::TurnInput::text(prompt))
-        .stream_to(events.as_ref())
-        .await
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let result = engine
+        .run_turn(
+            &session,
+            format!("{session_id}-turn"),
+            events.clone(),
+            contract_turn(prompt),
+        )
+        .await?
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
+        .result;
     session
         .refresh_background_graph()
         .await
@@ -763,22 +783,7 @@ async fn facade_agent_durable_input_execution() -> Result<Value, FixedScriptRunn
     let (key_tx, mut key_rx) =
         tokio::sync::oneshot::channel::<Result<lash_core::AwaitEventKey, String>>();
     let tools = Arc::new(ContractDurableInputTools::new(key_tx));
-    facade_agent_durable_input_execution_with(
-        Arc::clone(&tools),
-        tools as Arc<dyn lash_core::ToolProvider>,
-        None,
-        &mut key_rx,
-    )
-    .await
-}
-
-async fn facade_agent_durable_input_execution_with(
-    tools: Arc<ContractDurableInputTools>,
-    registered_tools: Arc<dyn lash_core::ToolProvider>,
-    effect_layer: Option<Arc<dyn lash_core::testing::EffectLayer>>,
-    key_rx: &mut tokio::sync::oneshot::Receiver<Result<lash_core::AwaitEventKey, String>>,
-) -> Result<Value, FixedScriptRunnerError> {
-    let (core, graph_store) = agent_process_contract_core_with_effect_layer(
+    let (core, graph_store, engine) = agent_process_contract_core_with_options(
         "lash_runtime agent durable input",
         vec![
             r#"<typescript>
@@ -794,8 +799,9 @@ finish(result.answer);
 finish({ recovered: true });
 </typescript>"#,
         ],
-        Some(registered_tools),
-        effect_layer,
+        Some(Arc::clone(&tools) as Arc<dyn lash_core::ToolProvider>),
+        false,
+        None,
     )
     .await?;
     let session = core
@@ -804,18 +810,22 @@ finish({ recovered: true });
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let events = Arc::new(RuntimeProofRecordingEvents::default());
+    let turn_engine = engine.clone();
     let turn_session = session.clone();
-    let turn_events = Arc::clone(&events);
+    let turn_events: Arc<dyn lash::TurnActivitySink> = events.clone();
     let turn = tokio::spawn(async move {
-        turn_session
-            .turn(lash::TurnInput::text(
-                "Start a process that asks for durable input.",
-            ))
-            .stream_to(turn_events.as_ref())
-            .await
+        turn_engine
+            .run_turn(
+                &turn_session,
+                "sim-agent-durable-input-turn",
+                turn_events,
+                contract_turn("Start a process that asks for durable input."),
+            )
+            .await?
+            .map(|output| output.result)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
     });
-    let key = wait_for_contract_durable_input_key(key_rx).await?;
+    let key = wait_for_contract_durable_input_key(&mut key_rx).await?;
     // The input request is what must still be open: the turn's own
     // `start_process` call completes as soon as the process is admitted, and
     // whether its event lands before the key does is scheduling, not
@@ -877,22 +887,13 @@ finish({ recovered: true });
     .await
 }
 
-async fn agent_process_contract_core_with_effect_layer(
-    provider_kind: &'static str,
-    provider_responses: Vec<&'static str>,
-    tools: Option<Arc<dyn lash_core::ToolProvider>>,
-    effect_layer: Option<Arc<dyn lash_core::testing::EffectLayer>>,
-) -> Result<(lash::LashCore, Arc<lash::tracing::TraceLashlangGraphStore>), FixedScriptRunnerError> {
-    agent_process_contract_core_with_options_and_effect_layer(
-        provider_kind,
-        provider_responses,
-        tools,
-        false,
-        None,
-        effect_layer,
-    )
-    .await
-}
+/// A contract core, the Lashlang graph store its executions trace into, and
+/// the engine it serves its processes on.
+type ContractCore = (
+    lash::LashCore,
+    Arc<lash::tracing::TraceLashlangGraphStore>,
+    crate::backend::SimEngine,
+);
 
 async fn agent_process_contract_core_with_options(
     provider_kind: &'static str,
@@ -900,34 +901,9 @@ async fn agent_process_contract_core_with_options(
     tools: Option<Arc<dyn lash_core::ToolProvider>>,
     install_subagents: bool,
     max_turns: Option<usize>,
-) -> Result<(lash::LashCore, Arc<lash::tracing::TraceLashlangGraphStore>), FixedScriptRunnerError> {
-    agent_process_contract_core_with_options_and_effect_layer(
-        provider_kind,
-        provider_responses,
-        tools,
-        install_subagents,
-        max_turns,
-        None,
-    )
-    .await
-}
-
-// Full specification of the simulator's facade-level process harness. An
-// effect layer over the backend's host is injectable so boundary tests can
-// observe the same production execution path without creating a parallel
-// runner.
-#[allow(clippy::too_many_arguments)]
-async fn agent_process_contract_core_with_options_and_effect_layer(
-    provider_kind: &'static str,
-    provider_responses: Vec<&'static str>,
-    tools: Option<Arc<dyn lash_core::ToolProvider>>,
-    install_subagents: bool,
-    max_turns: Option<usize>,
-    effect_layer: Option<Arc<dyn lash_core::testing::EffectLayer>>,
-) -> Result<(lash::LashCore, Arc<lash::tracing::TraceLashlangGraphStore>), FixedScriptRunnerError> {
-    let clock = crate::clock::SimClock::new();
+) -> Result<ContractCore, FixedScriptRunnerError> {
     let graph_store = Arc::new(lash::tracing::TraceLashlangGraphStore::default());
-    let backend = contract_backend(clock, effect_layer).await?;
+    let (engine, backend) = contract_world().await?;
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -969,7 +945,8 @@ async fn agent_process_contract_core_with_options_and_effect_layer(
     let core = builder
         .build(crate::sim_process_owner())
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    Ok((core, graph_store))
+    engine.serve_processes(&core)?;
+    Ok((core, graph_store, engine))
 }
 
 fn agent_contract_subagents_plugin() -> Arc<dyn lash_core::facade_support::PluginFactory> {
@@ -1489,5 +1466,5 @@ fn normalize_contract_tool_output(value: Value) -> Value {
 }
 
 #[cfg(test)]
-#[path = "agent_contracts_effect_boundary_tests.rs"]
-mod effect_boundary_tests;
+#[path = "agent_contracts_payload_tests.rs"]
+mod payload_tests;

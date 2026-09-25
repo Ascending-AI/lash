@@ -7,8 +7,6 @@ mod clock;
 pub mod content_oracle;
 mod lease;
 #[cfg(test)]
-mod native_substrate_scenarios;
-#[cfg(test)]
 mod oracle_coverage_tests;
 #[cfg(test)]
 mod recorded_reality;
@@ -22,7 +20,6 @@ pub mod backend_contention;
 pub mod generator;
 pub mod minimize;
 pub mod oracles;
-pub mod postgres_replay;
 mod postgres_test_isolation;
 pub mod provider;
 pub mod provider_mutations;
@@ -35,11 +32,9 @@ pub mod runner;
 pub mod runtime_boundaries;
 pub mod runtime_contracts;
 pub mod runtime_providers;
-mod runtime_replay;
 pub mod scheduler;
 pub mod slow_alive;
 pub mod sqlite_faults;
-pub mod sqlite_replay;
 pub mod stack_policy;
 pub mod state_checker;
 pub mod store;
@@ -67,8 +62,8 @@ fn sim_process_owner() -> lash_core::LeaseOwnerIdentity {
 }
 
 pub use artifacts::{
-    FixedScriptManifest, FixedScriptProof, FixedScriptSummary, GeneratedPostgresReplayReport,
-    GeneratedSimProfileReport, ScriptHashManifest,
+    FixedScriptManifest, FixedScriptProof, FixedScriptSummary, GeneratedSimProfileReport,
+    ScriptHashManifest,
 };
 pub use provider::{
     ProviderWireChunkPayload, ProviderWireEndpoint, ProviderWireEvent, ProviderWireProvenance,
@@ -77,8 +72,8 @@ pub use provider::{
 };
 pub use recording::{ProviderRecordingConfig, RecordingLlmHttpTransport};
 pub use runner::{
-    FIXED_SCRIPT_PROFILE, run_fixed_script_profile, run_generated_postgres_replay_for_seeds,
-    run_generated_sim_profile, run_generated_sim_profile_for_seeds,
+    FIXED_SCRIPT_PROFILE, run_fixed_script_profile, run_generated_sim_profile,
+    run_generated_sim_profile_for_seeds,
 };
 pub use stack_policy::{PRODUCT_STACK_BUDGET_BYTES, SIM_HARNESS_STACK_LIMIT_BYTES};
 

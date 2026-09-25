@@ -29,10 +29,9 @@ The gate has explicit lanes instead of an implicit pile of local commands:
   deterministic-simulation paths.
 - `broad`: bounded broad evidence. It runs a full-profile generated simulation
   under explicit seed/boundary budgets, Postgres conformance when an env URL or
-  Docker bootstrap is available, generated SQLite/Postgres dynamic backend
-  reruns, static model replay evidence for generated/minimized traces, backend
-  contention evidence, and targeted mutation. It is not a true full confidence
-  claim.
+  Docker bootstrap is available, static model replay evidence for
+  generated/minimized traces, backend contention evidence, and targeted
+  mutation. It is not a true full confidence claim.
 - `full`: true full confidence. It includes broad semantics and full
   cargo-mutants over the same critical crates; the lane refuses non-full
   mutation scopes.

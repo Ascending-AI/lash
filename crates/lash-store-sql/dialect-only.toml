@@ -29,20 +29,11 @@
 
 # Production sources that may name an owned table in SQL although they own no
 # statements. Each one needs a reason; the list is not a place to park work.
-[[exempt]]
-path = "crates/lash-sim/src/postgres_replay.rs"
-reason = """
-Deterministic-simulation harness: one TRUNCATE naming every table in the
-PostgreSQL schema to reset a replay database between runs. It belongs to no
-family and names all sixty tables, so it cannot be owned by one.
-"""
-
 # A path ending in `/` exempts a subtree.
 [[exempt]]
 path = "runbooks/restate-postgres-workers/"
 reason = """
-Out-of-runtime operational harness, the same class as the lash-sim replay
-harness above: the runbook workers assert against a provisioned schema from
+Out-of-runtime operational harness: the runbook workers assert against a provisioned schema from
 outside the runtime — version-bump probes, process assertions, worker
 environment checks — rather than persisting anything lash reads back. Its
 statements are observations of a database lash already wrote, so binding them

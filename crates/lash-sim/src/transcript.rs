@@ -485,9 +485,9 @@ mod tests {
     /// coverage of real boundary shapes lives in the scenario harnesses.
     #[tokio::test]
     async fn process_cutover_reports_retarget_discard_and_pruned_await_as_information() {
-        let backend = crate::backend::memory_backend()
+        let backend = lash_sqlite_store::SqliteStoreSet::memory()
             .await
-            .expect("SQLite memory backend");
+            .expect("SQLite memory store set");
         let registry = backend.process_registry();
         let process_id = "transcript-process";
         registry
@@ -613,9 +613,9 @@ mod tests {
     }
 
     async fn changed_component_commit(collector: CheckpointWriteCollector) -> CheckpointWriteEvent {
-        let backend = crate::backend::memory_backend()
+        let backend = lash_sqlite_store::SqliteStoreSet::memory()
             .await
-            .expect("SQLite memory backend");
+            .expect("SQLite memory store set");
         let factory =
             ObservedSessionStoreFactory::new(backend.session_store_factory(), collector.clone());
         let store = factory

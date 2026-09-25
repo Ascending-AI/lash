@@ -2,6 +2,14 @@ use super::*;
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 
+/// The seed of the fixed runtime proofs' server doubles.
+pub(super) const RUNTIME_PROOF_SEED: u64 = 0x5eed_7001;
+
+/// A turn build that submits `prompt` as text.
+fn text_turn(prompt: &'static str) -> crate::backend::SimTurnBuild {
+    Arc::new(move |session: &lash::LashSession| Ok(session.turn(lash::TurnInput::text(prompt))))
+}
+
 pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, FixedScriptRunnerError>
 {
     let script = runtime_script_for_text(OPENAI_COMPATIBLE, "Runtime scripted answer.")
@@ -10,8 +18,8 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
     let (provider_handle, model, provider_kind) =
         runtime_provider_components(OPENAI_COMPATIBLE, &transport)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let backend = crate::backend::memory_backend().await?;
-    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    let engine = crate::backend::SimEngine::new(RUNTIME_PROOF_SEED).await?;
+    let core = lash::LashCore::standard_builder(engine.backend(), lash::TurnBudget::Unbounded)
         .without_queued_work()
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -25,10 +33,14 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
         .open()
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let output = session
-        .turn(lash::TurnInput::text("Run the scripted runtime proof."))
-        .run()
-        .await
+    let output = engine
+        .run_turn(
+            &session,
+            "sim-runtime-turn",
+            Arc::new(RuntimeProofRecordingEvents::default()),
+            text_turn("Run the scripted runtime proof."),
+        )
+        .await?
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let assistant_message = output.assistant_message().unwrap_or_default().to_string();
     let runtime_ok = output.is_success()
@@ -121,8 +133,8 @@ pub(super) async fn run_live_turn_facts(
     let (provider_handle, model, provider_kind) =
         runtime_provider_components(provider_kind, &transport)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let backend = crate::backend::memory_backend().await?;
-    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    let engine = crate::backend::SimEngine::new(seed).await?;
+    let core = lash::LashCore::standard_builder(engine.backend(), lash::TurnBudget::Unbounded)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -140,12 +152,17 @@ pub(super) async fn run_live_turn_facts(
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
 
     let events = Arc::new(RuntimeProofRecordingEvents::default());
+    let turn_engine = engine.clone();
     let turn_session = session.clone();
-    let turn_events = Arc::clone(&events);
+    let turn_events: Arc<dyn lash::TurnActivitySink> = events.clone();
     let turn = tokio::spawn(async move {
-        turn_session
-            .turn(lash::TurnInput::text("Run the live provider failure turn."))
-            .stream_to(turn_events.as_ref())
+        turn_engine
+            .run_turn(
+                &turn_session,
+                "sim-live-failure-turn",
+                turn_events,
+                text_turn("Run the live provider failure turn."),
+            )
             .await
     });
 
@@ -213,11 +230,14 @@ pub(super) async fn run_live_turn_facts(
         }
     }
 
-    let result = turn.await.map_err(|err| {
-        FixedScriptRunnerError::Runtime(format!(
-            "live provider failure turn task failed to join: {err}"
-        ))
-    })?;
+    let result = turn
+        .await
+        .map_err(|err| {
+            FixedScriptRunnerError::Runtime(format!(
+                "live provider failure turn task failed to join: {err}"
+            ))
+        })??
+        .map(|output| output.result);
 
     let streamed_prose_deltas = events.assistant_prose_delta_count().await;
     // COMMITTED output is the durable turn result + session transcript, NOT
@@ -264,47 +284,22 @@ fn committed_transcript_contains(session: &lash::LashSession, needle: &str) -> b
 /// The proof's input prompt.
 pub(super) const PENDING_TOOL_PROMPT: &str = "use async tool";
 
-/// Starts the proof's turn where the backend runs turns and hands back its
-/// completion: in the calling process on an in-process backend, inside an
-/// engine handler on a Restate backend.
-pub(super) type PendingToolTurnDriver = Box<
-    dyn FnOnce(
-            lash::LashSession,
-            Arc<RuntimeProofRecordingEvents>,
-        ) -> tokio::task::JoinHandle<Result<lash::TurnReport, String>>
-        + Send,
->;
-
-/// The proof on the SQLite memory backend, its turn driven in process.
+/// The proof on a server double under [`RUNTIME_PROOF_SEED`].
 pub(super) async fn prove_pending_tool_completion_through_turn()
 -> Result<PendingToolCompletionProof, FixedScriptRunnerError> {
-    let backend = crate::backend::memory_backend().await?;
-    prove_pending_tool_completion_on(
-        backend,
-        0x5eed_7001,
-        Box::new(|session, events| {
-            tokio::spawn(async move {
-                session
-                    .turn(lash::TurnInput::text(PENDING_TOOL_PROMPT))
-                    .stream_to(events.as_ref())
-                    .await
-                    .map_err(|err| err.to_string())
-            })
-        }),
-    )
-    .await
+    let engine = crate::backend::SimEngine::new(RUNTIME_PROOF_SEED).await?;
+    prove_pending_tool_completion_on(&engine, RUNTIME_PROOF_SEED).await
 }
 
 /// A turn parks on a pending tool until the boundary scheduler, seeded by
 /// `seed`, delivers the tool's resolution; the turn then finishes.
 pub(super) async fn prove_pending_tool_completion_on(
-    backend: Arc<dyn lash::Backend>,
+    engine: &crate::backend::SimEngine,
     seed: u64,
-    drive_turn: PendingToolTurnDriver,
 ) -> Result<PendingToolCompletionProof, FixedScriptRunnerError> {
     let (key_tx, key_rx) = tokio::sync::oneshot::channel();
     let events = Arc::new(RuntimeProofRecordingEvents::default());
-    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
+    let core = lash::LashCore::standard_builder(engine.backend(), lash::TurnBudget::Unbounded)
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -323,7 +318,24 @@ pub(super) async fn prove_pending_tool_completion_on(
         .open()
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let turn = drive_turn(session.clone(), Arc::clone(&events));
+    let turn = {
+        let engine = engine.clone();
+        let session = session.clone();
+        let events: Arc<dyn lash::TurnActivitySink> = events.clone();
+        tokio::spawn(async move {
+            engine
+                .run_turn(
+                    &session,
+                    "sim-pending-tool-turn",
+                    events,
+                    text_turn(PENDING_TOOL_PROMPT),
+                )
+                .await
+                .map_err(|err| err.to_string())?
+                .map(|output| output.result)
+                .map_err(|err| err.to_string())
+        })
+    };
 
     let key = key_rx.await.map_err(|_| {
         FixedScriptRunnerError::Runtime("pending tool did not send completion key".to_string())
@@ -518,7 +530,8 @@ impl lash::TurnActivitySink for RuntimeProofRecordingEvents {
 pub(super) async fn prove_final_value_semantic_channel()
 -> Result<FinalValueSemanticProof, FixedScriptRunnerError> {
     let events = Arc::new(RuntimeProofRecordingEvents::default());
-    let backend = crate::backend::memory_backend().await?;
+    let engine = crate::backend::SimEngine::new(RUNTIME_PROOF_SEED).await?;
+    let backend = engine.backend();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -546,13 +559,20 @@ pub(super) async fn prove_final_value_semantic_channel()
         .open()
         .await
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-    let result = session
-        .turn(lash::TurnInput::text("produce a semantic final value"))
-        .require_finish()
+    let result = engine
+        .run_turn(
+            &session,
+            "sim-final-value-turn",
+            events.clone(),
+            Arc::new(|session: &lash::LashSession| {
+                session
+                    .turn(lash::TurnInput::text("produce a semantic final value"))
+                    .require_finish()
+            }),
+        )
+        .await?
         .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
-        .stream_to(events.as_ref())
-        .await
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        .result;
     let final_value = result.final_value().cloned().ok_or_else(|| {
         FixedScriptRunnerError::Assertion(format!(
             "final-value proof finished without TurnFinish::FinalValue: {:?}",

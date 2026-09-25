@@ -89,9 +89,10 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
         let provider = OpenAiCompatibleProvider::new("test-key", OPENROUTER_BASE_URL)
             .with_compat(OpenAiCompat::openrouter())
             .with_transport(capture.clone());
-        let backend = crate::backend::memory_backend()
+        let engine = crate::backend::SimEngine::new(0x5eed_7002)
             .await
-            .expect("SQLite memory backend");
+            .expect("sim engine");
+        let backend = engine.backend();
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -126,10 +127,17 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
             .await
             .expect("RLM prefix-stability session");
 
-        let output = session
-            .turn(lash::TurnInput::text("inspect"))
-            .run()
+        let output = engine
+            .run_turn(
+                &session,
+                "prefix-stability-turn",
+                Arc::new(super::runtime_proofs::RuntimeProofRecordingEvents::default()),
+                Arc::new(|session: &lash::LashSession| {
+                    Ok(session.turn(lash::TurnInput::text("inspect")))
+                }),
+            )
             .await
+            .expect("RLM prefix-stability handler")
             .expect("RLM prefix-stability turn");
         assert!(
             output.is_success(),
@@ -184,9 +192,9 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
 
 #[tokio::test]
 async fn attachment_owner_sweep_is_deterministic_across_memory_and_sqlite() {
-    let memory = crate::backend::memory_backend()
+    let memory = lash_sqlite_store::SqliteStoreSet::memory()
         .await
-        .expect("SQLite memory backend");
+        .expect("SQLite memory store set");
     lash_conformance::attachment_reference_lifecycle_with_store(
         memory.session_store_factory(),
         memory.attachment_store(),
@@ -1333,18 +1341,13 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
         );
     }
     for fixture in &report.generated_backend_regression_fixtures {
-        assert_eq!(fixture.status, "generated_cross_backend_valid_trace");
+        assert_eq!(fixture.status, "generated_runtime_valid_trace");
         assert!(tmp.path().join(&fixture.trace_path).exists());
         assert!(tmp.path().join(&fixture.package_path).exists());
         assert_eq!(fixture.replay_backends, vec!["model"]);
         assert_eq!(
             fixture.static_backend_replay_policy,
             "not_claimed_for_generated_scheduler_traces"
-        );
-        assert!(
-            tmp.path()
-                .join(&fixture.source_sqlite_replay_report_path)
-                .exists()
         );
         assert!(
             fixture
@@ -1429,7 +1432,6 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
             .source_trace_paths
             .iter()
             .chain(package.positive.replay_report_paths.iter())
-            .chain(package.positive.sqlite_replay_report_paths.iter())
         {
             assert!(
                 tmp.path().join(path).exists(),
@@ -1608,17 +1610,10 @@ fn generated_sim_profile_writes_trace_replay_and_provider_artifacts() {
         assert!(tmp.path().join(&replay.minimized_trace_path).exists());
         assert!(tmp.path().join(&replay.failure_package_path).exists());
         assert!(tmp.path().join(&replay.minimize_report_path).exists());
-        assert!(tmp.path().join(&replay.sqlite_database_path).exists());
-        assert!(tmp.path().join(&replay.sqlite_replay_report_path).exists());
         assert!(
             replay
                 .replay_command
                 .contains("lash-sim --locked -- replay")
-        );
-        assert!(
-            replay
-                .sqlite_replay_command
-                .contains("lash-sim --locked -- replay-sqlite")
         );
     }
 

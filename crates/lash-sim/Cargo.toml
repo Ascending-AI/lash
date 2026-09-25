@@ -34,6 +34,7 @@ lash-provider-google = { workspace = true }
 lash-provider-openai = { workspace = true }
 lash-protocol-rlm = { workspace = true, features = ["testing"] }
 lash-protocol-standard = { workspace = true }
+lash-restate-test = { workspace = true }
 lash-postgres-store = { workspace = true, features = ["testing"] }
 lash-rlm-types = { workspace = true }
 lash-sqlite-store = { workspace = true, features = ["testing"] }
@@ -46,7 +47,6 @@ tempfile = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time"] }
 
 [dev-dependencies]
-lash-restate-test.workspace = true
 lash-s3-store = { workspace = true, features = ["testing"] }
 lash-conformance.workspace = true
 insta = "1"

@@ -43,8 +43,8 @@ COPIED = (
     # The manifest exempts this subtree, and the gate checks it is really there.
     "runbooks/restate-postgres-workers/src",
 )
-# The manifest's exempted sources, which the gate checks still exist.
-COPIED_FILES = ("crates/lash-sim/src/postgres_replay.rs",)
+# The manifest's exempted single-file sources, which the gate checks still exist.
+COPIED_FILES: tuple[str, ...] = ()
 
 
 class SeededTree:
@@ -555,7 +555,7 @@ class StoreSqlOwnershipGateTests(unittest.TestCase):
         self.tree.substitute(
             "crates/lash-store-sql/dialect-only.toml",
             '[[connection]]\npath = "crates/lash-sqlite-store/src/connection_sql.rs"',
-            '[[connection]]\npath = "crates/lash-sim/src/postgres_replay.rs"\n'
+            '[[connection]]\npath = "crates/lash-sim/src/lib.rs"\n'
             'reason = "invented"\n\n'
             '[[connection]]\npath = "crates/lash-sqlite-store/src/connection_sql.rs"',
         )

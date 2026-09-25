@@ -3,7 +3,6 @@ use lash_sansio::SessionId;
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash_core::StoreError;
-use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 use crate::runtime_boundaries::EFFECT_SCOPE_ID;
@@ -28,100 +27,6 @@ pub use lash_core::testing::checkpoint_observer::{
     CheckpointComponentWrite, CheckpointComponentWriteKind, CheckpointStateWrite,
     CheckpointWriteCollector, CheckpointWriteEvent, ObservedSessionStoreFactory,
 };
-
-/// Honest checkpoint-evidence split for a static backend replay.
-///
-/// `recorded_runtime` is the generation-time expectation for session turns the
-/// backend lane really re-executes. `observed_runtime` is what the replayed
-/// backend actually committed and must equal that expectation. `carried` covers
-/// projector-owned boundaries (contract proofs and suspend fixtures) that the
-/// static backend lane does not execute.
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct BackendCheckpointReplayEvidence {
-    pub semantic: String,
-    pub recorded_runtime: Vec<CheckpointWriteEvent>,
-    pub observed_runtime: Vec<CheckpointWriteEvent>,
-    pub carried: Vec<CheckpointWriteEvent>,
-}
-
-impl BackendCheckpointReplayEvidence {
-    pub fn for_trace(
-        trace: &crate::trace::SimulationTrace,
-        observed_runtime: Vec<CheckpointWriteEvent>,
-    ) -> Result<Self, String> {
-        // Additive compatibility for promoted v1 traces recorded before
-        // checkpoint evidence existed: observe and report backend commits, but
-        // do not compare/project them into an old summary that has no baseline.
-        if trace.durable_writes.is_empty() {
-            return Ok(Self {
-                semantic: "observe_runtime_uncompared_legacy_trace".to_string(),
-                recorded_runtime: Vec::new(),
-                observed_runtime,
-                carried: Vec::new(),
-            });
-        }
-        let replayed_sessions = trace
-            .events
-            .iter()
-            .filter(|event| {
-                event.kind == BoundaryKind::Ingress && event.payload.get("suspend_kind").is_none()
-            })
-            .map(|event| event.actor_alias.as_str())
-            .collect::<BTreeSet<_>>();
-        let (recorded_runtime, carried): (Vec<_>, Vec<_>) =
-            trace.durable_writes.iter().cloned().partition(|write| {
-                write.attribution.is_none()
-                    && replayed_sessions.contains(write.attributed_session())
-            });
-        // Runtime replay uses different provider input wording and allocates
-        // fresh graph ids/timestamps. The independent checker validates each
-        // backend's submitted rows against that backend's accepted raw rows and
-        // read model; this older cross-backend evidence compares only the stable
-        // checkpoint seam (components, revisions, and usage totals).
-        let stable_recorded_runtime = recorded_runtime
-            .iter()
-            .cloned()
-            .map(without_checkpoint_state)
-            .collect::<Vec<_>>();
-        let stable_observed_runtime = observed_runtime
-            .iter()
-            .cloned()
-            .map(without_checkpoint_state)
-            .collect::<Vec<_>>();
-        if stable_recorded_runtime != stable_observed_runtime {
-            return Err(format!(
-                "backend checkpoint writes diverged; recorded={}; observed={}",
-                serde_json::to_string(&stable_recorded_runtime)
-                    .unwrap_or_else(|_| "<unserializable>".to_string()),
-                serde_json::to_string(&stable_observed_runtime)
-                    .unwrap_or_else(|_| "<unserializable>".to_string())
-            ));
-        }
-        Ok(Self {
-            semantic: "observe_runtime_turn_commits_compare_to_recorded_carry_projector_owned"
-                .to_string(),
-            recorded_runtime: stable_recorded_runtime,
-            observed_runtime: stable_observed_runtime,
-            carried,
-        })
-    }
-
-    pub fn summary_writes(&self) -> Vec<CheckpointWriteEvent> {
-        if self.semantic == "observe_runtime_uncompared_legacy_trace" {
-            return Vec::new();
-        }
-        self.observed_runtime
-            .iter()
-            .chain(&self.carried)
-            .cloned()
-            .collect()
-    }
-}
-
-fn without_checkpoint_state(mut write: CheckpointWriteEvent) -> CheckpointWriteEvent {
-    write.state = None;
-    write
-}
 
 pub fn backend_fault_observation(
     session: Value,

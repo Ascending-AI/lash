@@ -255,9 +255,9 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
                           "write_full_lane_prerequisites", "write_postgres_effect_history_status",
                           "write_restate_postgres_workers_e2e_lane_status"],
             "generated": ["run_sim_generated_lane"],
-            "minimizer": ["run_minimizer_fixture_suite", "run_focused_sqlite_seed_tail_repro"],
+            "minimizer": ["run_minimizer_fixture_suite"],
             "backends": ["run_local_backend_conformance", "run_backend_contention_evidence",
-                         "run_current_postgres_trace_replay_evidence", "run_postgres_conformance"],
+                         "run_current_postgres_contention_evidence", "run_postgres_conformance"],
             "workers": ["run_restate_postgres_workers_e2e"],
             "coverage": ["run_coverage_blind_spots"],
             "mutation-core": ["run_lash_core_direct_model_mutation_evidence",
@@ -417,7 +417,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         # The key -> path map is the gate's, not a second copy: a row names a
         # key and nothing else, so two rows cannot disagree about a path.
         artifact_paths = shell_assoc_array(gate, "confidence_artifact_paths")
-        self.assertEqual(17, len(artifact_paths), artifact_paths)
+        self.assertEqual(15, len(artifact_paths), artifact_paths)
         for key, path in artifact_paths.items():
             self.assertRegex(key, r"^[a-z0-9_]+$")
             self.assertRegex(path, r"^[a-z0-9./-]+\.json$")
@@ -458,7 +458,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             self.assertTrue(description, raw_row)
             for key in filter(None, raw_artifacts.split(",")):
                 # A row carries keys only. The path is not representable here,
-                # so the 146 declarations cannot disagree about 17 paths.
+                # so the declarations cannot disagree about 15 paths.
                 self.assertNotIn("=", key, raw_row)
                 self.assertIn(key, artifact_paths, raw_row)
                 self.assertIn(key, declaration_keys, key)

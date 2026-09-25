@@ -17,9 +17,8 @@ the replay evidence. The `run` command has two modes:
 
 - `--mode evidence` (default): every seed writes trace/replay/minimize
   artifacts plus a best-effort review transcript (`.trace.txt`, with path and
-  SHA-256 recorded when present), and re-runs through a serialized in-memory
-  reference and the real `lash-sqlite-store` backend for cross-backend
-  equivalence. Roughly minutes per seed; this is the bounded evidence lane.
+  SHA-256 recorded when present). Roughly minutes per seed; this is the
+  bounded evidence lane.
 - `--mode search`: every seed runs live with the full oracle set plus an
   in-memory determinism replay; nothing is persisted per passing seed. A
   failing seed writes a complete reproducibility package under
@@ -85,9 +84,11 @@ bound, not a discovered runtime invariant violation.
   proptest strategies live behind the `proptest-support` feature of
   `lash-llm-transport`, with chunk-split invariance properties over the SSE
   framing layer and the Anthropic/Google stream parsers.
-- Selected generated traces replay through real Lash SQLite session
-  persistence via `SqliteSessionStoreFactory`, with durable peer stores and
-  reopened-session evidence in the replay report.
+- The fixed runtime proofs, the agent contracts and the provider, feedback
+  and logical-turn laws run each turn where a deployment runs one: inside a
+  handler of lash-restate's engine on the in-process Restate server double
+  (`lash-restate-test`), under the scenario's seed with serial scheduling
+  (`backend::SimEngine`). SQLite and PostgreSQL appear only as stores.
 - The real SQLite transaction wrapper has a production-absent, `testing`
   feature-gated fault controller. `lash-sim backend-faults` deterministically
   injects aborts after `BEGIN IMMEDIATE` and before commit, a commit-boundary
@@ -97,9 +98,6 @@ bound, not a discovered runtime invariant violation.
   reproduction package before the command exits. The same command derives an
   explicit two-arm plan from the generated workload and records zero-, single-,
   paired-, and repeat-run evidence for its bounded composition oracle.
-- Full-lane Postgres trace replay is implemented as `lash-sim replay-postgres
-  <trace> --out <artifact-root>`, gated by `LASH_POSTGRES_DATABASE_URL` or the
-  confidence gate's Docker bootstrap, and writes replay/divergence artifacts.
 - Generated traces are produced by `lash-sim.generated-workload.v10`, a
   deterministic state-machine generator over sessions, provider scripts,
   queued ingress, cancellation, triggers, observer reconnects, backend
@@ -178,18 +176,13 @@ The deferred cross-backend suites run in their named service gates.
   with package guards preventing protocol/agent contracts from sharing the
   same backing verdict or high-risk selected evidence while still retaining
   the 13 real per-behavior mini-oracles.
-- Two regression fixtures are promoted under `crates/lash-sim/replays/`, and
-  the promotion metadata is explicit that neither is a discovered product
+- One regression fixture is promoted under `crates/lash-sim/replays/`, and
+  the promotion metadata is explicit that it is not a discovered product
   bug. The `queued-active-turn-cancel-race` fixture is a generated
   fast-random DST trace promoted as a deterministic regression GUARD that
   pins the active-turn queued-input/cancel contract; its package manifest
   records `historical_production_regression: false`, so it guards against
-  future regressions rather than recording one found in production.
-  Separately, the broad/full lane's cross-backend comparison surfaced a
-  behavioral divergence on the active-turn-cancel shape which, on
-  investigation, was a replay-FIDELITY gap in the harness's own SQLite
-  re-drive — NOT a product bug (see Known limitations). It is retained as the
-  `cross-backend-sqlite-active-turn-divergence` regression fixture. No
+  future regressions rather than recording one found in production. No
   product regression has been discovered by this lane to date.
 - Generator substance is real: the fast profile is genuinely seed-random,
   provider mutations have distinct executable behaviors, queued-ingress mode
@@ -199,8 +192,7 @@ The deferred cross-backend suites run in their named service gates.
   could not, rejecting its stale completion
   (`sim.oracle.worker-failover-continues-work.v1`). The abstract model no
   longer fabricates worker fencing: it carries the real reclaim/fence facts
-  produced by the live lease store, re-verified by the SQLite/Postgres
-  backend replays.
+  produced by the live lease store.
 - Failure capture is a first-class contract: a generated seed whose oracle
   fails persists the full reproducibility package under
   `failures/seed-<hex>/` before the run aborts, in both evidence and search
@@ -230,21 +222,6 @@ its small fixed evidence budget; it never runs the search lane.
 
 ## Known limitations
 
-- The cross-backend SQLite comparison once appeared to diverge on the
-  active-turn-cancel shape. Investigation (the backend-equivalence test
-  `crates/lash-sim/tests/cross_backend_active_turn_divergence.rs`, which
-  drives two real cores — in-memory vs lash-sqlite-store — over an un-gated
-  transport) showed the real stores commit IDENTICAL output across the
-  active-turn enqueue / cancel / claim / complete orderings. The apparent
-  divergence was a replay-FIDELITY gap in the harness's OWN cross-backend
-  re-drive: the old path re-drove a recorded trace in fixed order with
-  provider exchanges gated to the original in-memory run's recorded exchange
-  counts, which deadlocked on the active-turn enqueue and could surface an
-  extra exchange / empty output. The lane no longer runs that separate gated
-  re-drive; it re-runs the SAME workload through the SAME scheduler-driven
-  driver, parameterized only by the store factory
-  (`replay_workload_on_sqlite`), comparing observable Lash state. No product
-  fix was needed — there was no product bug.
 - No real discovered product regression has been promoted under
   `crates/lash-sim/replays/` yet; the plan's done-line keeps that criterion
   open until the search fleet finds one.

@@ -5,10 +5,7 @@ pub struct SimCli {
 pub enum SimCommand {
     FixedScripts(Vec<String>),
     Run(Vec<String>),
-    RunPostgres(Vec<String>),
     Replay(Vec<String>),
-    ReplaySqlite(Vec<String>),
-    ReplayPostgres(Vec<String>),
     BackendContention(Vec<String>),
     BackendFaults(Vec<String>),
     StackProbe(Vec<String>),
@@ -27,10 +24,7 @@ impl SimCli {
         let command = match command.as_str() {
             "fixed-scripts" => SimCommand::FixedScripts(rest),
             "run" => SimCommand::Run(rest),
-            "run-postgres" => SimCommand::RunPostgres(rest),
             "replay" => SimCommand::Replay(rest),
-            "replay-sqlite" => SimCommand::ReplaySqlite(rest),
-            "replay-postgres" => SimCommand::ReplayPostgres(rest),
             "backend-contention" => SimCommand::BackendContention(rest),
             // `sqlite-faults` predates the PostgreSQL lane and stays a working
             // alias: the confidence gate and the README both invoke it by name.

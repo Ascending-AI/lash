@@ -26,12 +26,11 @@ case "$LASH_CONFIDENCE_STAGE" in
   generated) run_sim_generated_lane ;;
   minimizer)
     run_minimizer_fixture_suite
-    run_focused_sqlite_seed_tail_repro
     ;;
   backends)
     run_local_backend_conformance
     run_backend_contention_evidence
-    run_current_postgres_trace_replay_evidence
+    run_current_postgres_contention_evidence
     run_postgres_conformance
     ;;
   workers) run_restate_postgres_workers_e2e ;;

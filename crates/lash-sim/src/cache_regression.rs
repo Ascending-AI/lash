@@ -143,9 +143,10 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
         })
         .build()
         .into_handle();
-    let backend = crate::backend::memory_backend()
+    let engine = crate::backend::SimEngine::new(0x5eed_7004)
         .await
-        .expect("SQLite memory backend");
+        .expect("sim engine");
+    let backend = engine.backend();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -172,12 +173,19 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
         .open()
         .await
         .expect("RLM cache regression session");
-    session
-        .turn(lash::TurnInput::text("increment a bound value twice"))
-        .require_finish()
-        .expect("finish-required RLM turn")
-        .run()
+    engine
+        .run_turn(
+            &session,
+            "cache-regression-turn",
+            Arc::new(crate::backend::DiscardedTurnActivity),
+            Arc::new(|session: &lash::LashSession| {
+                session
+                    .turn(lash::TurnInput::text("increment a bound value twice"))
+                    .require_finish()
+            }),
+        )
         .await
+        .expect("RLM cache regression handler")
         .expect("RLM cache regression turn");
 
     captures.lock_recover().clone()

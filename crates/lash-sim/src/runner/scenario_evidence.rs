@@ -394,7 +394,6 @@ pub(super) fn scenario_positive_evidence(
     }
     let mut source_trace_paths = Vec::new();
     let mut replay_report_paths = Vec::new();
-    let mut sqlite_replay_report_paths = Vec::new();
     for alias in &source_trace_aliases {
         let replay = replay_lookup.get(alias).ok_or_else(|| {
             FixedScriptRunnerError::Assertion(format!(
@@ -404,7 +403,6 @@ pub(super) fn scenario_positive_evidence(
         })?;
         source_trace_paths.push(replay.trace_path.clone());
         replay_report_paths.push(replay.replay_report_path.clone());
-        sqlite_replay_report_paths.push(replay.sqlite_replay_report_path.clone());
     }
     let verdict = verdicts
         .iter()
@@ -419,7 +417,6 @@ pub(super) fn scenario_positive_evidence(
         source_trace_aliases: source_trace_aliases.into_iter().collect(),
         source_trace_paths,
         replay_report_paths,
-        sqlite_replay_report_paths,
         selected_boundary_ids: selected_boundary_ids.into_iter().collect(),
         selected_event_count: selected_evidence.len(),
         oracle_status: verdict.status.clone(),
