@@ -125,6 +125,12 @@ pub struct ApplyConfigPatch {
     /// Exact session-config wire generation. The patch and the head row share
     /// one schema because they carry the same durable policy facts.
     pub schema_version: u32,
+    /// The `config_revision` of the session config the submitter wrote this
+    /// patch against. Application is a compare-and-set: the patch applies only
+    /// when this equals the running revision at the drain, and every applied
+    /// patch advances that revision by exactly one (ADR 0101 §12). Required on
+    /// the wire: a patch written before the contract existed does not decode.
+    pub base_config_revision: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub provider_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -152,6 +158,7 @@ impl Default for ApplyConfigPatch {
     fn default() -> Self {
         Self {
             schema_version: crate::store::SESSION_HEAD_META_SCHEMA_VERSION,
+            base_config_revision: 0,
             provider_id: None,
             model: None,
             prompt: None,
@@ -163,8 +170,16 @@ impl Default for ApplyConfigPatch {
     }
 }
 impl ApplyConfigPatch {
-    pub fn between(previous: &crate::SessionPolicy, next: &crate::SessionPolicy) -> Self {
+    /// The patch that carries `next` over `previous`, written against
+    /// `base_config_revision` — the `config_revision` the submitter read when
+    /// it computed `next`.
+    pub fn between(
+        previous: &crate::SessionPolicy,
+        next: &crate::SessionPolicy,
+        base_config_revision: u64,
+    ) -> Self {
         Self {
+            base_config_revision,
             provider_id: (previous.provider_id != next.provider_id)
                 .then(|| next.provider_id.clone()),
             model: (previous.model != next.model).then(|| next.model.clone()),
@@ -218,12 +233,26 @@ impl ApplyConfigPatch {
             && self.protocol_turn_options.is_none()
     }
 
-    /// Publish every settled field to resident session state.
+    /// Publish every settled field to resident session state under the
+    /// config-revision compare-and-set (ADR 0101 §12).
     ///
+    /// The patch applies only when `base_config_revision` equals the state's
+    /// `config_revision`: a mismatch returns [`StaleConfigRevision`] and
+    /// changes nothing, however valid the patch. An applied patch advances the
+    /// revision by exactly one, even when its overlay restates current values.
     /// Policy-homed fields land through [`Self::apply_to`]; the protocol turn
     /// options land on their runtime-state home. Both publications happen only
     /// after the durable head accepted the same values.
-    pub fn apply_to_state(&self, state: &mut crate::RuntimeSessionState) {
+    pub fn apply_to_state(
+        &self,
+        state: &mut crate::RuntimeSessionState,
+    ) -> Result<(), StaleConfigRevision> {
+        if self.base_config_revision != state.config_revision {
+            return Err(StaleConfigRevision {
+                base: self.base_config_revision,
+                head: state.config_revision,
+            });
+        }
         self.apply_to(&mut state.policy);
         if let Some(access) = self.tool_access.as_ref() {
             state.authority.tool_access = access.clone();
@@ -231,7 +260,23 @@ impl ApplyConfigPatch {
         if let Some(options) = self.protocol_turn_options.as_ref() {
             state.protocol_turn_options = options.clone();
         }
+        state.config_revision = state.config_revision.saturating_add(1);
+        Ok(())
     }
+}
+
+/// An `ApplyConfigPatch`'s `base_config_revision` did not match the running
+/// `config_revision` of the state it was presented to: the patch was written
+/// against a config the session no longer has, so nothing was applied.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, thiserror::Error)]
+#[error(
+    "stale session config patch: written against revision {base}, but the running revision is {head}"
+)]
+pub struct StaleConfigRevision {
+    /// The revision the submitter wrote the patch against.
+    pub base: u64,
+    /// The revision the session's config actually carried.
+    pub head: u64,
 }
 
 /// A recorded provider pin that does not match the live request.
