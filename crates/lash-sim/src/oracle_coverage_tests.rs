@@ -13,8 +13,8 @@
 
 use crate::generator::{default_max_boundaries, generate_workload};
 use crate::oracles::{
-    generated_final_value_semantic_channel, ingress_sessions_opened, lease_time_monotonic,
-    observer_convergence, provider_transport_mutation_classified, provider_turn_interleaving_depth,
+    generated_final_value_semantic_channel, ingress_sessions_opened, observer_convergence,
+    provider_transport_mutation_classified, provider_turn_interleaving_depth,
     runtime_session_graph_contract,
 };
 use crate::state_checker::checkpoint_state_consistency;
@@ -37,7 +37,7 @@ fn declared() -> WorkloadExpectations {
 }
 
 fn empty_summary() -> AbstractWorldSummary {
-    AbstractWorldSummary::with_digest(0, 0, Vec::new(), Vec::new(), Vec::new())
+    AbstractWorldSummary::with_digest(0, 0, Vec::new(), Vec::new())
 }
 
 fn assert_absent_class(verdict: &OracleVerdict, oracle_id: &str, declared: usize) {
@@ -84,10 +84,6 @@ fn every_workload_profile_declares_every_guarded_observation_class() {
         );
         assert!(
             declared.transport_mutation_count > 0,
-            "`{profile}`: {declared:?}"
-        );
-        assert!(
-            declared.lease_time_boundary_count > 0,
             "`{profile}`: {declared:?}"
         );
     }
@@ -142,7 +138,7 @@ fn provider_turn_interleaving_fails_when_no_declared_session_ran_a_turn() {
 /// pass. A declared single-session workload that still observed nothing fails.
 #[test]
 fn provider_turn_interleaving_exemption_is_not_granted_to_an_empty_run() {
-    let declared = WorkloadExpectations::new(vec!["session-001".to_string()], 4, 0, 0);
+    let declared = WorkloadExpectations::new(vec!["session-001".to_string()], 4, 0);
     let verdict = provider_turn_interleaving_depth(&[], &declared);
     assert_absent_class(
         &verdict,
@@ -159,17 +155,6 @@ fn provider_transport_mutation_fails_when_declared_mutations_never_landed() {
         &verdict,
         "sim.oracle.provider-transport-mutation-classified.v1",
         declared.transport_mutation_count,
-    );
-}
-
-#[test]
-fn lease_time_monotonic_fails_when_declared_lease_boundaries_never_landed() {
-    let declared = declared();
-    let verdict = lease_time_monotonic(&[], &declared);
-    assert_absent_class(
-        &verdict,
-        "sim.oracle.lease-time-monotonic.v1",
-        declared.lease_time_boundary_count,
     );
 }
 
@@ -205,7 +190,6 @@ fn an_undeclared_workload_imposes_no_coverage_floor() {
 
     assert_eq!(undeclared.session_count(), 0);
     assert!(ingress_sessions_opened(&empty_summary(), &undeclared).is_passed());
-    assert!(lease_time_monotonic(&[], &undeclared).is_passed());
     assert!(
         undeclared
             .sessions_missing_from(std::iter::empty())

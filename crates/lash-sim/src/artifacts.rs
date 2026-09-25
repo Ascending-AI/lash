@@ -531,19 +531,11 @@ pub(crate) fn model_only_boundary_reviews() -> Vec<ModelOnlyBoundaryReview> {
     vec![
         ModelOnlyBoundaryReview {
             boundary_kind: "durable_effect",
-            status: "runtime_effect_controller_backed_with_reviewed_host_history_ceiling",
-            production_abstraction_used: "RuntimeEffectEnvelope, RuntimeEffectCommand::ToolAttempt, RuntimeEffectLocalExecutor::testing, SqliteRuntimeEffectController, and PostgresRuntimeEffectController",
-            model_only_scope: "workflow-host crash history outside store-backed effect replay remains excluded; generated memory runs execute production runtime effect replay controllers, while Postgres conformance/contention lanes cover native Postgres replay storage in lash_runtime_effect_replay",
+            status: "engine_handler_backed_crash_redrive",
+            production_abstraction_used: "RuntimeEffectEnvelope, RuntimeEffectCommand::ToolAttempt and RuntimeEffectLocalExecutor on the scoped controller of a lash-restate handler, on the in-process Restate server double",
+            model_only_scope: "the effect body is a scripted no-network outcome; the first attempt dies after the engine records the effect and the server replays the invocation into a redrive",
             oracle_id: "sim.oracle.durable-effect-exactly-once.v1",
-            artifact_evidence: "durable-effect observations include runtime_effect.controller=sqlite_runtime_effect_controller or postgres_runtime_effect_controller, local_executor_called false on replay, first completion, replay for the same durable key",
-        },
-        ModelOnlyBoundaryReview {
-            boundary_kind: "worker",
-            status: "runtime_session_and_process_registry_backed_with_reviewed_worker_task_ceiling",
-            production_abstraction_used: "SessionExecutionLeaseStore claim/reclaim/renew/release plus ProcessRegistry claim_process_lease and complete_process_with_lease",
-            model_only_scope: "DurableProcessWorker task body launch remains excluded; generated memory runs execute production ProcessRegistry fencing, while Postgres backend contention covers the session-lease boundary",
-            oracle_id: "sim.oracle.worker-stale-completion-rejected.v1",
-            artifact_evidence: "worker observed payload records session lease takeover plus process_stale_completion_rejected=true, process_stale_output_absent=true, process_terminal_writer=successor, and process_terminal_event_count=1",
+            artifact_evidence: "durable-effect observations carry runtime_effect.controller=restate_runtime_effect_controller, local_executor_called=true, redrive_local_executor_called=false, and redrive_served_recorded_result=true",
         },
         ModelOnlyBoundaryReview {
             boundary_kind: "backend_failure",
@@ -565,25 +557,17 @@ pub(crate) fn model_only_boundary_reviews() -> Vec<ModelOnlyBoundaryReview> {
             boundary_kind: "tool",
             status: "runtime_effect_controller_backed_with_reviewed_tool_provider_ceiling",
             production_abstraction_used: "RuntimeEffectEnvelope, RuntimeEffectCommand::ToolAttempt, RuntimeEffectLocalExecutor, ToolAttemptLaunch, ToolCallRecord, and ToolCallOutput",
-            model_only_scope: "app-specific ToolProvider implementation bodies remain excluded; generated memory runs execute the production runtime effect-controller boundary with scripted no-network tool outcomes",
+            model_only_scope: "app-specific ToolProvider implementation bodies remain excluded; generated runs execute the attempt on a lash-restate handler's scoped controller with scripted no-network tool outcomes",
             oracle_id: "sim.oracle.tool-boundary-observed.v1",
-            artifact_evidence: "tool events carry runtime_effect.controller=sqlite_runtime_effect_controller or postgres_runtime_effect_controller, runtime_tool_record, and runtime_tool_output",
+            artifact_evidence: "tool events carry runtime_effect.controller=restate_runtime_effect_controller, runtime_tool_record, and runtime_tool_output",
         },
         ModelOnlyBoundaryReview {
             boundary_kind: "exec_code",
             status: "runtime_effect_controller_backed_with_reviewed_kernel_launch_ceiling",
             production_abstraction_used: "RuntimeEffectEnvelope, RuntimeEffectCommand::ExecCode, RuntimeEffectLocalExecutor, RuntimeEffectOutcome::ExecCode, and ExecResponse",
-            model_only_scope: "host kernel process launch remains excluded; generated memory runs pass the boundary through the production runtime effect controller with scripted ExecResponse outcomes that launch no kernel process. ExecCode replays by re-execution on every host (ADR 0103), so on the SQLite and Postgres controllers this boundary is a direct local-executor call that writes no journal row and is re-run, never served, on replay",
+            model_only_scope: "host kernel process launch remains excluded; generated runs pass the boundary through a lash-restate handler's scoped controller with scripted ExecResponse outcomes that launch no kernel process. ExecCode replays by re-execution (ADR 0103)",
             oracle_id: "sim.oracle.exec-code-observed.v1",
-            artifact_evidence: "exec-code events carry runtime_effect.controller=sqlite_runtime_effect_controller or postgres_runtime_effect_controller, runtime_effect_outcome from the local executor on every pass, and exit-code data",
-        },
-        ModelOnlyBoundaryReview {
-            boundary_kind: "process_wake",
-            status: "runtime_persistence_queued_work_backed_with_reviewed_process_body_ceiling",
-            production_abstraction_used: "process_wake_delivery, QueuedWorkBatchDraft, QueuedWorkPayload::process_wake, QueuedWorkStore::enqueue_queued_work, and claim_ready_queued_work_by_batch_ids",
-            model_only_scope: "the eventual process body that consumes the wake remains excluded; generated memory runs and Postgres backend contention enqueue or claim wake-adjacent queued work through real queued-work/session-lease backend paths",
-            oracle_id: "sim.oracle.process-wake-observed.v1",
-            artifact_evidence: "process wake events include runtime_process_wake, structural runtime_queued_work source identity, claimed_once=true, and duplicate claimed_once=false receiver evidence from real queued-work claims",
+            artifact_evidence: "exec-code events carry runtime_effect.controller=restate_runtime_effect_controller, runtime_effect_outcome from the local executor, and exit-code data",
         },
     ]
 }

@@ -2949,7 +2949,6 @@ dependencies = [
  "insta",
  "lash-internal-conformance",
  "lash-internal-core",
- "lash-internal-core-worker",
  "lash-internal-lashlang-runtime",
  "lash-internal-llm-transport",
  "lash-internal-plugin-process-controls",

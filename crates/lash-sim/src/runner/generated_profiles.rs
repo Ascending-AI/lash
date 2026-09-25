@@ -342,6 +342,16 @@ async fn run_generated_evidence_profile(
         std::fs::write(&minimize_report_path, serde_json::to_vec_pretty(&minimize)?)?;
         let minimize_report_sha256 = file_sha256(&minimize_report_path)?;
         let minimized_trace_sha256 = file_sha256(&minimize.minimized_trace_path)?;
+        // The serial lane: the same workload twice on a server double that
+        // runs one attempt at a time. One seed must reach one outcome through
+        // one grant order, with no stall.
+        let serial_first = run_serial_lane(generate_workload(seed, profile, boundary_limit)?)?;
+        let serial_second = run_serial_lane(generate_workload(seed, profile, boundary_limit)?)?;
+        let serial_verdict = serial_engine_determinism(seed, &serial_first, &serial_second);
+        if !serial_verdict.is_passed() {
+            return Err(FixedScriptRunnerError::Assertion(serial_verdict.message));
+        }
+        oracle_verdicts.push(serial_verdict);
         replay_reports.push(GeneratedReplayArtifact {
             seed,
             trace_path: relative_path(artifact_root, &trace_path),

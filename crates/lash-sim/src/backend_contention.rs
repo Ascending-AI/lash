@@ -581,7 +581,6 @@ async fn stale_owner_ttl_preserves_live_successor(
             "stale_completion_refusal": "SessionExecutionLeaseReleaseRefused",
             "fencing_token_advanced": live_lease.fencing_token > stale_lease.fencing_token,
             "scope": "session_execution_lease_only",
-            "worker_process_terminal_oracle": "evaluated by RuntimeBoundaryHarness against ProcessRegistry::complete_process_with_lease",
         }),
     })
 }

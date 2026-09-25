@@ -19,11 +19,13 @@
 //!   the attempt holds the turn again. A request issued outside a closure
 //!   (a watch the handler polls beside its work, say) frees the turn only
 //!   when the handler is blocked on its input, as any other holder;
-//! * another attempt is ready and the holder has applied no frame for
-//!   [`STALL`] of wall time while not blocked on the server: the fallback for
-//!   waits the server cannot see, such as
-//!   an ingress request issued from a task the handler spawned (a task
-//!   does not inherit the task-local).
+//! * another attempt is ready, or an outside request waits to land, and the
+//!   holder has applied no frame for [`STALL`] of wall time while not
+//!   blocked on the server: the fallback for waits the server cannot see,
+//!   such as an ingress request issued from a task the handler spawned (a
+//!   task does not inherit the task-local). A waiting outside request lands
+//!   before the stalled holder gets the turn back, since the holder may be
+//!   waiting on it.
 //!
 //! The next turn goes to the attempt that became ready first: attempts become
 //! ready in the order the server started them or delivered to them, under
@@ -272,12 +274,15 @@ impl State {
         let blocked_on_server = attempt.probe.is_idle()
             && invocation.pending_runs.is_empty()
             && !attempt.has_held_work();
-        // A stalled holder is preempted only for someone else: alone, it
-        // keeps the turn and the trace does not depend on how long it took.
-        let others_ready = serial
-            .ready
-            .iter()
-            .any(|ready| *ready != turn && self.is_live(*ready));
+        // A stalled holder is preempted only for someone else — another
+        // ready attempt, or an outside request waiting to land (the holder
+        // may wait on work that request unblocks): alone, it keeps the turn
+        // and the trace does not depend on how long it took.
+        let others_ready = !serial.external.is_empty()
+            || serial
+                .ready
+                .iter()
+                .any(|ready| *ready != turn && self.is_live(*ready));
         if blocked_on_server {
             Yield::Done
         } else if others_ready && serial.progress.elapsed() >= STALL {
@@ -297,6 +302,10 @@ impl State {
         let verdict = serial
             .holder
             .map(|turn| (turn, self.holder_yields(&serial, turn)));
+        // A holder stalled while an outside request waits gives the turn up
+        // to that request first: it lands before any attempt is granted.
+        let stalled_for_outside =
+            matches!(verdict, Some((_, Yield::Stalled))) && !serial.external.is_empty();
         if let Some((turn, verdict)) = verdict
             && verdict != Yield::Keep
         {
@@ -320,7 +329,7 @@ impl State {
         if serial.holder.is_none()
             && !serial.landing
             && !serial.external.is_empty()
-            && !serial.ready.iter().any(|turn| self.is_live(*turn))
+            && (stalled_for_outside || !serial.ready.iter().any(|turn| self.is_live(*turn)))
         {
             // Between turns: let the next outside request in once nothing
             // can move without it — or once nothing has moved for a stall.
@@ -329,7 +338,7 @@ impl State {
             if (blocked || stalled)
                 && let Some((_, admit)) = serial.external.pop_first()
             {
-                if !blocked {
+                if !blocked && !stalled_for_outside {
                     self.stats.stall_preemptions += 1;
                 }
                 if admit.send(()).is_ok() {
@@ -338,7 +347,7 @@ impl State {
                 }
             }
         }
-        if serial.holder.is_none() {
+        if serial.holder.is_none() && !(stalled_for_outside && serial.landing) {
             while let Some(turn) = serial.ready.pop_front() {
                 let (key, number) = turn;
                 let Status::Running(attempt) = &mut self.invocations[key.0].status else {

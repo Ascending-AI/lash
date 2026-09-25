@@ -12,7 +12,7 @@ use crate::scheduler::{BoundaryEvent, BoundaryKind, QueuedIngressMode, next_seed
 use crate::trace::{StableAliases, WorkloadExpectations};
 use lash_core::testing::adversarial_text::{TextBudget, adversarial_count, adversarial_text};
 
-pub const GENERATOR_VERSION: &str = "lash-sim.generated-workload.v10";
+pub const GENERATOR_VERSION: &str = "lash-sim.generated-workload.v11";
 pub const WORKLOAD_FAMILY: &str = "deterministic-runtime-state-machine";
 const ACTIVE_TURN_QUEUE_OFFSET: u64 = 15;
 pub const VALID_WORKLOAD_PROFILES: &[&str] = &[
@@ -81,7 +81,6 @@ impl GeneratedWorkload {
                 .filter_map(Value::as_str)
                 .filter(|mutation| is_transport_provider_mutation(mutation))
                 .count(),
-            self.boundary_count(BoundaryKind::LeaseTime),
         )
         .with_completion_counts(
             crate::oracles::SCHEDULER_OWNED_RUNTIME_COMPLETION_ORACLE_KINDS
@@ -283,11 +282,7 @@ struct SessionPlan {
     provider_mutation_count: usize,
     tool_count: usize,
     exec_code_count: usize,
-    process_wake_count: usize,
-    process_lifecycle_count: usize,
     durable_effect_count: usize,
-    worker_stale_count: usize,
-    lease_time_count: usize,
     observer_reconnect_count: usize,
 }
 
@@ -310,11 +305,7 @@ impl SessionPlan {
             provider_mutation_count: 0,
             tool_count: 0,
             exec_code_count: 0,
-            process_wake_count: 0,
-            process_lifecycle_count: 0,
             durable_effect_count: 0,
-            worker_stale_count: 0,
-            lease_time_count: 0,
             observer_reconnect_count: 0,
         }
     }
@@ -368,29 +359,9 @@ impl SessionPlan {
         self.exec_code_count
     }
 
-    fn next_process_wake(&mut self) -> usize {
-        self.process_wake_count += 1;
-        self.process_wake_count
-    }
-
-    fn next_process_lifecycle(&mut self) -> usize {
-        self.process_lifecycle_count += 1;
-        self.process_lifecycle_count
-    }
-
     fn next_durable_effect(&mut self) -> usize {
         self.durable_effect_count += 1;
         self.durable_effect_count
-    }
-
-    fn next_worker_stale(&mut self) -> usize {
-        self.worker_stale_count += 1;
-        self.worker_stale_count
-    }
-
-    fn next_lease_time(&mut self) -> usize {
-        self.lease_time_count += 1;
-        self.lease_time_count
     }
 
     fn next_observer_reconnect(&mut self) -> usize {
@@ -459,27 +430,9 @@ enum PlannedOperation {
         exec_index: usize,
         exit_code: i64,
     },
-    ProcessWake {
-        session: usize,
-        wake_index: usize,
-        process_index: usize,
-    },
-    ProcessLifecycle {
-        session: usize,
-        lifecycle_index: usize,
-    },
     DurableEffect {
         session: usize,
         durable_index: usize,
-        replay: bool,
-    },
-    WorkerStaleCompletion {
-        session: usize,
-        worker_index: usize,
-    },
-    LeaseTime {
-        session: usize,
-        lease_index: usize,
     },
 }
 
@@ -520,7 +473,6 @@ impl StateMachinePlanner {
         if self.profile_kind != WorkloadProfile::Fast {
             self.plan_provider_turn_with_observer(provider_error_repair_session);
         }
-        self.plan_lease_time(provider_error_repair_session);
 
         for session in 1..self.sessions.len() {
             self.plan_provider_turn_with_observer(session);
@@ -528,7 +480,6 @@ impl StateMachinePlanner {
             if self.profile_kind != WorkloadProfile::Fast {
                 self.plan_provider_turn_with_observer(session);
             }
-            self.plan_lease_time(session);
         }
         if self.sessions.len() > 1 {
             let next_turn_session = 1;
@@ -561,13 +512,8 @@ impl StateMachinePlanner {
         self.plan_provider_mutation(secondary, transport_mutation);
         self.plan_tool(primary);
         self.plan_exec_code(primary, 0);
-        let process_wake = self.plan_process_wake(primary);
-        self.plan_duplicate_process_wake(primary, process_wake);
-        self.plan_durable_effect_pair(primary);
-        self.plan_worker_stale_completion(secondary);
-        // One disposition-driven recovery scenario per workload: spawn / crash /
-        // sweep / abandon-request against a real DurableProcessWorker (ADR 0019).
-        self.plan_process_lifecycle(secondary);
+        self.plan_durable_effect(primary);
+        self.plan_durable_effect(secondary);
     }
 
     fn plan_extra_transitions(&mut self, max_boundaries: usize) {
@@ -576,7 +522,7 @@ impl StateMachinePlanner {
         while self.sessions.len() + self.operations.len() < target {
             let remaining = target - self.sessions.len() - self.operations.len();
             let session = self.next_usize() % self.sessions.len();
-            match self.next_usize() % 13 {
+            match self.next_usize() % 10 {
                 0 if remaining >= 2 && self.can_plan_provider_turn(session) => {
                     self.plan_provider_turn_with_observer(session);
                 }
@@ -607,17 +553,12 @@ impl StateMachinePlanner {
                     };
                     self.plan_exec_code(session, exit_code);
                 }
-                7 => {
-                    self.plan_process_wake(session);
-                }
-                8 if remaining >= 2 => self.plan_durable_effect_pair(session),
-                9 => self.plan_worker_stale_completion(session),
-                10 => self.plan_lease_time(session),
-                11 => self.plan_observer_reconnect(session),
+                7 => self.plan_durable_effect(session),
+                8 => self.plan_observer_reconnect(session),
                 _ if remaining >= 2 && self.can_plan_provider_turn(session) => {
                     self.plan_provider_turn_with_observer(session);
                 }
-                _ => self.plan_lease_time(session),
+                _ => self.plan_trigger(session),
             }
         }
     }
@@ -738,61 +679,11 @@ impl StateMachinePlanner {
         });
     }
 
-    fn plan_process_wake(&mut self, session: usize) -> usize {
-        let wake_index = self.sessions[session].next_process_wake();
-        self.operations.push(PlannedOperation::ProcessWake {
-            session,
-            wake_index,
-            process_index: wake_index,
-        });
-        wake_index
-    }
-
-    fn plan_process_lifecycle(&mut self, session: usize) {
-        let lifecycle_index = self.sessions[session].next_process_lifecycle();
-        self.operations.push(PlannedOperation::ProcessLifecycle {
-            session,
-            lifecycle_index,
-        });
-    }
-
-    fn plan_duplicate_process_wake(&mut self, session: usize, process_index: usize) {
-        let wake_index = self.sessions[session].next_process_wake();
-        self.operations.push(PlannedOperation::ProcessWake {
-            session,
-            wake_index,
-            process_index,
-        });
-    }
-
-    fn plan_durable_effect_pair(&mut self, session: usize) {
+    fn plan_durable_effect(&mut self, session: usize) {
         let durable_index = self.sessions[session].next_durable_effect();
         self.operations.push(PlannedOperation::DurableEffect {
             session,
             durable_index,
-            replay: false,
-        });
-        self.operations.push(PlannedOperation::DurableEffect {
-            session,
-            durable_index,
-            replay: true,
-        });
-    }
-
-    fn plan_worker_stale_completion(&mut self, session: usize) {
-        let worker_index = self.sessions[session].next_worker_stale();
-        self.operations
-            .push(PlannedOperation::WorkerStaleCompletion {
-                session,
-                worker_index,
-            });
-    }
-
-    fn plan_lease_time(&mut self, session: usize) {
-        let lease_index = self.sessions[session].next_lease_time();
-        self.operations.push(PlannedOperation::LeaseTime {
-            session,
-            lease_index,
         });
     }
 
@@ -1166,103 +1057,27 @@ impl StateMachinePlanner {
                     }),
                 )
             }
-            PlannedOperation::ProcessWake {
-                session,
-                wake_index,
-                process_index,
-            } => {
-                let session = &self.sessions[session];
-                BoundaryEvent::new(
-                    format!("{}:process-wake:{wake_index:03}", session.alias),
-                    session.alias.clone(),
-                    BoundaryKind::ProcessWake,
-                    at,
-                    "process.wake.delivery",
-                    json!({
-                        "session": session.alias.clone(),
-                        "process_id": format!("sim-process-{}-{process_index:03}", session.alias),
-                        "sequence": 1,
-                    }),
-                )
-            }
-            PlannedOperation::ProcessLifecycle {
-                session,
-                lifecycle_index,
-            } => {
-                let session = &self.sessions[session];
-                BoundaryEvent::new(
-                    format!("{}:process-lifecycle:{lifecycle_index:03}", session.alias),
-                    session.alias.clone(),
-                    BoundaryKind::ProcessLifecycle,
-                    at,
-                    "process.lifecycle.recovery",
-                    json!({
-                        "session": session.alias.clone(),
-                    }),
-                )
-            }
             PlannedOperation::DurableEffect {
                 session,
                 durable_index,
-                replay,
             } => {
                 let session = &self.sessions[session];
-                let mode = if replay { "replay" } else { "first" };
                 BoundaryEvent::new(
-                    format!("{}:durable-effect:{durable_index:03}:{mode}", session.alias),
+                    format!("{}:durable-effect:{durable_index:03}", session.alias),
                     session.alias.clone(),
                     BoundaryKind::DurableEffect,
                     at,
-                    if replay {
-                        "durable.sleep.replay"
-                    } else {
-                        "durable.sleep.complete"
-                    },
+                    "durable.sleep.crash-redrive",
                     json!({
                         "session": session.alias.clone(),
                         "durable_key": format!("sleep/{}/{durable_index:03}", session.alias),
-                        "result": if replay {
-                            json!({ "completed": false, "wake_tick": 0 })
-                        } else {
-                            json!({ "completed": true, "wake_tick": at })
-                        },
+                        "result": { "completed": true, "wake_tick": at },
+                        "redrive_result": { "completed": false, "wake_tick": 0 },
                         "runtime_effect": {
                             "kind": "sleep",
                             "effect_id": format!("effect/sleep/{}/{durable_index:03}", session.alias),
                             "duration_ms": 1
                         },
-                    }),
-                )
-            }
-            PlannedOperation::WorkerStaleCompletion {
-                session,
-                worker_index,
-            } => {
-                let session = &self.sessions[session];
-                BoundaryEvent::new(
-                    format!("worker-{worker_index:03}:stale-completion"),
-                    format!("worker-{worker_index:03}"),
-                    BoundaryKind::Worker,
-                    at,
-                    "worker.stale-completion-rejected",
-                    json!({
-                        "session": session.alias.clone(),
-                    }),
-                )
-            }
-            PlannedOperation::LeaseTime {
-                session,
-                lease_index,
-            } => {
-                let session = &self.sessions[session];
-                BoundaryEvent::new(
-                    format!("{}:lease-time:{lease_index:03}", session.alias),
-                    session.alias.clone(),
-                    BoundaryKind::LeaseTime,
-                    at,
-                    "lease.clock.advance",
-                    json!({
-                        "tick": at,
                     }),
                 )
             }
@@ -1552,15 +1367,11 @@ mod tests {
             BoundaryKind::Tool,
             BoundaryKind::ExecCode,
             BoundaryKind::DurableEffect,
-            BoundaryKind::ProcessWake,
-            BoundaryKind::ProcessLifecycle,
-            BoundaryKind::Worker,
             BoundaryKind::Observer,
             BoundaryKind::Cancellation,
             BoundaryKind::Trigger,
             BoundaryKind::BackendFailure,
             BoundaryKind::ProviderMutation,
-            BoundaryKind::LeaseTime,
         ] {
             assert!(
                 workload

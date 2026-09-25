@@ -280,30 +280,10 @@ pub(super) fn write_generated_backend_regression_fixtures(
             predicate: trace_has_trigger_wakeup_route,
         },
         BackendRegressionSpec {
-            fixture_id: "duplicate-process-wake-idempotency",
-            required_boundary_kinds: &["process_wake"],
-            semantic_oracles: &[
-                "sim.oracle.state-machine-semantic-invariants.v1",
-                "sim.oracle.process-wake-observed.v1",
-            ],
-            regression_contract: "duplicate process wake deliveries share structural process/event identity, claim queued work once, and keep receiver idempotency evidence backed by generated dynamic replay",
-            predicate: trace_has_duplicate_process_wake_idempotency,
-        },
-        BackendRegressionSpec {
-            fixture_id: "worker-stale-completion-fenced",
-            required_boundary_kinds: &["worker"],
-            semantic_oracles: &[
-                "sim.oracle.state-machine-semantic-invariants.v1",
-                "sim.oracle.scenario-mini.runtime.stale-lease-commit-rejected.v1",
-            ],
-            regression_contract: "worker A loses its process lease to worker B; A's stale terminal output is rejected and absent, while B terminalizes the process exactly once",
-            predicate: trace_has_worker_stale_completion,
-        },
-        BackendRegressionSpec {
             fixture_id: "durable-effect-crash-reopen-replay",
             required_boundary_kinds: &["durable_effect"],
             semantic_oracles: &["sim.oracle.state-machine-semantic-invariants.v1"],
-            regression_contract: "durable effect first execution calls the local executor once and crash/reopen-style replay returns stored history without re-executing",
+            regression_contract: "a durable effect's first attempt runs the local executor once, dies after the engine recorded it, and the redrive is served the recorded result without re-executing",
             predicate: trace_has_durable_effect_replay,
         },
         BackendRegressionSpec {
