@@ -148,10 +148,13 @@ impl RuntimeTurnDriver<'_> {
             }
         }
         if let Some(call_record) = call_record {
-            event_tx.activity(
-                TurnActivityId::new(call_record.call_id.0.clone()),
-                TurnEvent::ModelCallRecorded {
-                    record: call_record.clone(),
+            self.turn_observations.observe(
+                event_tx,
+                crate::engine::ObservedEvent::Activity {
+                    correlation_id: Some(TurnActivityId::new(call_record.call_id.0.clone())),
+                    event: TurnEvent::ModelCallRecorded {
+                        record: call_record.clone(),
+                    },
                 },
             );
             self.llm_calls.push(call_record);
@@ -216,6 +219,7 @@ impl RuntimeTurnDriver<'_> {
                 let prose_projector = self.session.plugins().assistant_prose_projector();
                 emit_semantic_response_parts(
                     event_tx,
+                    &mut self.turn_observations,
                     response,
                     prose_projector.as_deref(),
                     &ReasoningPublicationState::from_published_blocks(reasoning_published),
@@ -270,12 +274,21 @@ impl RuntimeTurnDriver<'_> {
                     let applications = claim.applications.clone();
                     let accepted_turn_inputs = claim.accepted_turn_inputs();
                     self.pending_turn_input_claims.push(claim);
-                    send_turn_input_applications(event_tx, applications);
+                    send_turn_input_applications(
+                        event_tx,
+                        &mut self.turn_observations,
+                        applications,
+                    );
                     if !accepted_turn_inputs.is_empty() {
-                        event_tx.session(SessionStreamEvent::InjectedTurnInputAccepted {
-                            inputs: accepted_turn_inputs,
-                            checkpoint,
-                        });
+                        self.turn_observations.observe(
+                            event_tx,
+                            crate::engine::ObservedEvent::Session(
+                                SessionStreamEvent::InjectedTurnInputAccepted {
+                                    inputs: accepted_turn_inputs,
+                                    checkpoint,
+                                },
+                            ),
+                        );
                     }
                 }
                 // FIG-635: the step boundary. The checkpoint commit above is
@@ -502,27 +515,33 @@ impl RuntimeTurnDriver<'_> {
             Ok(invocation) => invocation,
             Err(err) => {
                 let message = err.to_string();
-                event_tx.activity(
-                    code_correlation_id.clone(),
-                    TurnEvent::CodeBlockStarted {
-                        language: language.clone(),
-                        code: code.clone(),
-                        graph_key: None,
+                self.turn_observations.observe(
+                    event_tx,
+                    crate::engine::ObservedEvent::Activity {
+                        correlation_id: Some(code_correlation_id.clone()),
+                        event: TurnEvent::CodeBlockStarted {
+                            language: language.clone(),
+                            code: code.clone(),
+                            graph_key: None,
+                        },
                     },
                 );
-                event_tx.activity(
-                    code_correlation_id.clone(),
-                    TurnEvent::CodeBlockCompleted {
-                        language: language.clone(),
-                        output: String::new(),
-                        error: Some(crate::CellFailure::new(
-                            crate::CellFailureKind::Host,
-                            message,
-                        )),
-                        success: false,
-                        duration_ms: 0,
-                        tool_call_ids: Vec::new(),
-                        graph_key: None,
+                self.turn_observations.observe(
+                    event_tx,
+                    crate::engine::ObservedEvent::Activity {
+                        correlation_id: Some(code_correlation_id.clone()),
+                        event: TurnEvent::CodeBlockCompleted {
+                            language: language.clone(),
+                            output: String::new(),
+                            error: Some(crate::CellFailure::new(
+                                crate::CellFailureKind::Host,
+                                message,
+                            )),
+                            success: false,
+                            duration_ms: 0,
+                            tool_call_ids: Vec::new(),
+                            graph_key: None,
+                        },
                     },
                 );
                 Self::fail_or_abort_runtime_effect_controller(machine, err)?;
@@ -531,15 +550,22 @@ impl RuntimeTurnDriver<'_> {
         };
         let graph_key = Some(foreground_effect_graph_key(&invocation));
         let cell_key = invocation.replay_key().to_string();
-        event_tx.activity(
-            code_correlation_id.clone(),
-            TurnEvent::CodeBlockStarted {
-                language: language.clone(),
-                code: code.clone(),
-                graph_key: graph_key.clone(),
+        // The cell's own observation lane: every CodeBlock* event this driver
+        // publishes for the cell sequences under the cell's replay key.
+        let mut code_observations = crate::engine::ObservationCursor::new(
+            crate::engine::ReplayKey::new(format!("{cell_key}:code")),
+        );
+        code_observations.observe(
+            event_tx,
+            crate::engine::ObservedEvent::Activity {
+                correlation_id: Some(code_correlation_id.clone()),
+                event: TurnEvent::CodeBlockStarted {
+                    language: language.clone(),
+                    code: code.clone(),
+                    graph_key: graph_key.clone(),
+                },
             },
         );
-        let exec_created_at = self.host.core.clock.now();
         let result = match self
             .invoke_turn_exec_effect(
                 machine,
@@ -553,25 +579,25 @@ impl RuntimeTurnDriver<'_> {
             Ok(result) => result,
             Err(err) => {
                 let message = err.to_string();
-                event_tx.activity(
-                    code_correlation_id.clone(),
-                    TurnEvent::CodeBlockCompleted {
-                        language: language.clone(),
-                        output: String::new(),
-                        error: Some(crate::CellFailure::new(
-                            crate::CellFailureKind::Host,
-                            message,
-                        )),
-                        success: false,
-                        duration_ms: self
-                            .host
-                            .core
-                            .clock
-                            .now()
-                            .saturating_duration_since(exec_created_at)
-                            .as_millis() as u64,
-                        tool_call_ids: Vec::new(),
-                        graph_key: graph_key.clone(),
+                // The observation-only duration is not read from the clock:
+                // the drive decides nothing from it, so it reports 0 rather
+                // than take a live timestamp (FIG-3672 P6b).
+                code_observations.observe(
+                    event_tx,
+                    crate::engine::ObservedEvent::Activity {
+                        correlation_id: Some(code_correlation_id.clone()),
+                        event: TurnEvent::CodeBlockCompleted {
+                            language: language.clone(),
+                            output: String::new(),
+                            error: Some(crate::CellFailure::new(
+                                crate::CellFailureKind::Host,
+                                message,
+                            )),
+                            success: false,
+                            duration_ms: 0,
+                            tool_call_ids: Vec::new(),
+                            graph_key: graph_key.clone(),
+                        },
                     },
                 );
                 // A cell that aborted may have stopped for the turn's
@@ -620,44 +646,44 @@ impl RuntimeTurnDriver<'_> {
         };
         match &result {
             Ok(output) => {
-                event_tx.activity(
-                    code_correlation_id.clone(),
-                    TurnEvent::CodeBlockCompleted {
-                        language: language.clone(),
-                        output: join_observations(&output.observations),
-                        error: output.error.clone(),
-                        success: output.error.is_none(),
-                        duration_ms: output.duration_ms,
-                        tool_call_ids: output
-                            .calls
-                            .iter()
-                            .filter_map(|call| call.host_record.as_ref())
-                            .filter_map(|record| record.call_id.clone())
-                            .collect(),
-                        graph_key: graph_key.clone(),
+                code_observations.observe(
+                    event_tx,
+                    crate::engine::ObservedEvent::Activity {
+                        correlation_id: Some(code_correlation_id.clone()),
+                        event: TurnEvent::CodeBlockCompleted {
+                            language: language.clone(),
+                            output: join_observations(&output.observations),
+                            error: output.error.clone(),
+                            success: output.error.is_none(),
+                            duration_ms: output.duration_ms,
+                            tool_call_ids: output
+                                .calls
+                                .iter()
+                                .filter_map(|call| call.host_record.as_ref())
+                                .filter_map(|record| record.call_id.clone())
+                                .collect(),
+                            graph_key: graph_key.clone(),
+                        },
                     },
                 );
             }
             Err(error) => {
-                event_tx.activity(
-                    code_correlation_id.clone(),
-                    TurnEvent::CodeBlockCompleted {
-                        language: language.clone(),
-                        output: String::new(),
-                        error: Some(crate::CellFailure::new(
-                            crate::CellFailureKind::Host,
-                            error.message.clone(),
-                        )),
-                        success: false,
-                        duration_ms: self
-                            .host
-                            .core
-                            .clock
-                            .now()
-                            .saturating_duration_since(exec_created_at)
-                            .as_millis() as u64,
-                        tool_call_ids: Vec::new(),
-                        graph_key: graph_key.clone(),
+                code_observations.observe(
+                    event_tx,
+                    crate::engine::ObservedEvent::Activity {
+                        correlation_id: Some(code_correlation_id.clone()),
+                        event: TurnEvent::CodeBlockCompleted {
+                            language: language.clone(),
+                            output: String::new(),
+                            error: Some(crate::CellFailure::new(
+                                crate::CellFailureKind::Host,
+                                error.message.clone(),
+                            )),
+                            success: false,
+                            duration_ms: 0,
+                            tool_call_ids: Vec::new(),
+                            graph_key: graph_key.clone(),
+                        },
                     },
                 );
             }

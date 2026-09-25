@@ -59,7 +59,7 @@ mod tests {
     }
 
     async fn granted_call_context(
-        event_tx: tokio::sync::mpsc::Sender<crate::SessionStreamEvent>,
+        observer: Arc<dyn crate::engine::ObservationSink>,
     ) -> (crate::RuntimeExecutionContext<'static>, Arc<AtomicUsize>) {
         let executions = Arc::new(AtomicUsize::default());
         let orchestrating =
@@ -115,8 +115,7 @@ mod tests {
             ),
             session_id: SessionId::from("granted-call-session"),
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-            event_tx,
-            turn_activity_tx: None,
+            observer,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&attachment_store),
@@ -152,8 +151,8 @@ mod tests {
 
     #[tokio::test]
     async fn scalar_granted_call_never_orchestrates() {
-        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
-        let (context, orchestration_executions) = granted_call_context(event_tx).await;
+        let (context, orchestration_executions) =
+            granted_call_context(crate::engine::NullObservationSink::arc()).await;
 
         let reply = context
             .call_command_tool(
@@ -180,8 +179,8 @@ mod tests {
 
     #[tokio::test]
     async fn batch_granted_call_never_orchestrates() {
-        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
-        let (context, orchestration_executions) = granted_call_context(event_tx).await;
+        let (context, orchestration_executions) =
+            granted_call_context(crate::engine::NullObservationSink::arc()).await;
 
         let replies = context
             .call_tool_batch(vec![
@@ -237,7 +236,7 @@ mod tests {
 
     #[tokio::test]
     async fn batch_failures_before_dispatch_emit_ordered_per_call_lifecycle_pairs() {
-        let (turn_tx, mut turn_rx) = tokio::sync::mpsc::channel(8);
+        let (turn_tx, mut turn_rx) = tokio::sync::mpsc::unbounded_channel();
         let trace_sink = Arc::new(ToolLifecycleTraceSink::default());
         let erased_trace_sink: Arc<dyn lash_trace::TraceSink> = trace_sink.clone();
         let tracing = crate::session::RuntimeExecutionTracing::new(
@@ -245,9 +244,11 @@ mod tests {
             lash_trace::TraceContext::default(),
             lash_trace::TraceContext::default(),
         );
-        let context = batch_failure_context(Arc::new(BatchFailureEffectController))
-            .with_turn_event_sender(turn_tx)
-            .with_tracing(Some(tracing));
+        let context = batch_failure_context(
+            Arc::new(BatchFailureEffectController),
+            crate::engine::ChannelObservationSink::new(None, Some(turn_tx)),
+        )
+        .with_tracing(Some(tracing));
 
         context
             .call_tool_batch(vec![
@@ -324,8 +325,8 @@ mod tests {
     }
 
     struct StartEventTranscriptSink {
-        stream_rx: Mutex<tokio::sync::mpsc::Receiver<crate::SessionStreamEvent>>,
-        turn_rx: Mutex<tokio::sync::mpsc::Receiver<crate::TurnActivity>>,
+        stream_rx: Mutex<tokio::sync::mpsc::UnboundedReceiver<crate::SessionStreamEvent>>,
+        turn_rx: Mutex<tokio::sync::mpsc::UnboundedReceiver<crate::TurnActivity>>,
         lines: Mutex<Vec<&'static str>>,
     }
 
@@ -373,9 +374,13 @@ mod tests {
 
     #[tokio::test]
     async fn start_event_transcript_preserves_stream_trace_activity_order() {
-        let (event_tx, event_rx) = tokio::sync::mpsc::channel(1);
-        let (turn_tx, turn_rx) = tokio::sync::mpsc::channel(1);
-        let (context, _) = granted_call_context(event_tx).await;
+        let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (turn_tx, turn_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (context, _) = granted_call_context(crate::engine::ChannelObservationSink::new(
+            Some(event_tx),
+            Some(turn_tx),
+        ))
+        .await;
         let sink = Arc::new(StartEventTranscriptSink {
             stream_rx: Mutex::new(event_rx),
             turn_rx: Mutex::new(turn_rx),
@@ -387,9 +392,7 @@ mod tests {
             lash_trace::TraceContext::default(),
             lash_trace::TraceContext::default(),
         );
-        let context = context
-            .with_tracing(Some(tracing))
-            .with_turn_event_sender(turn_tx);
+        let context = context.with_tracing(Some(tracing));
 
         crate::emit_tool_call_started(
             &context,
@@ -397,8 +400,7 @@ mod tests {
             "granted_orchestration_probe",
             serde_json::json!({ "probe": true }),
             crate::TurnActivityId::new("tool:start-order"),
-        )
-        .await;
+        );
 
         let activity = sink
             .turn_rx
@@ -521,6 +523,7 @@ mod tests {
 
     fn batch_failure_context(
         controller: Arc<BatchFailureEffectController>,
+        observer: Arc<dyn crate::engine::ObservationSink>,
     ) -> crate::RuntimeExecutionContext<'static> {
         let provider: Arc<dyn crate::ToolProvider> = Arc::new(BatchFailureTools);
         let plugins =
@@ -534,7 +537,6 @@ mod tests {
         let tool_catalog = plugins
             .resolved_tool_catalog(&SessionId::from("session"))
             .expect("tool catalog");
-        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
         let attachment_store: Arc<crate::SessionAttachmentStore> =
             Arc::new(crate::SessionAttachmentStore::unavailable());
         let dispatch = crate::tool_dispatch::ToolDispatchContext {
@@ -560,8 +562,7 @@ mod tests {
             ),
             session_id: SessionId::from("session"),
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-            event_tx,
-            turn_activity_tx: None,
+            observer,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&attachment_store),
@@ -582,7 +583,10 @@ mod tests {
 
     #[tokio::test]
     async fn failed_group_formation_returns_empty_settlement_order() {
-        let context = batch_failure_context(Arc::new(BatchFailureEffectController));
+        let context = batch_failure_context(
+            Arc::new(BatchFailureEffectController),
+            crate::engine::NullObservationSink::arc(),
+        );
         let replies = context
             .call_tool_batch(vec![ToolInvocation::new(
                 "call",

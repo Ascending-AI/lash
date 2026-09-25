@@ -118,10 +118,6 @@ pub(super) fn lent() -> ToolDispatchContext<'static> {
 fn lent_with_direct_completions(
     direct_completions: crate::DirectCompletionClient<'static>,
 ) -> ToolDispatchContext<'static> {
-    let (event_tx, event_rx) = tokio::sync::mpsc::channel(1);
-    // Held for the test's lifetime, so the sender never reports a closed
-    // channel for a reason unrelated to what is asserted.
-    std::mem::forget(event_rx);
     let mut other_tool = manifest("opener-tool");
     other_tool.retry_policy = ToolRetryPolicy::Never;
     ToolDispatchContext {
@@ -151,8 +147,7 @@ fn lent_with_direct_completions(
         execution_env_spec: spec(9),
         session_id: SessionId::from("opener-session"),
         agent_frame_id: FrameNodeId::new("opener-frame").expect("a valid frame id"),
-        event_tx,
-        turn_activity_tx: None,
+        observer: Arc::new(crate::engine::NullObservationSink),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),
@@ -415,7 +410,7 @@ fn everything_not_on_the_checklist_is_the_lent_value() {
         &child.attachment_source_policy
     ));
     assert!(Arc::ptr_eq(&lent.clock, &child.clock));
-    assert!(lent.event_tx.same_channel(&child.event_tx));
+    assert!(Arc::ptr_eq(&lent.observer, &child.observer));
 }
 
 /// §3's ruling stated as a negative: a group child holds no runtime execution
@@ -1335,11 +1330,6 @@ async fn run_nested_batch(recorder: Arc<IssueOrderRecorder>) -> Vec<crate::ToolI
     .expect("a valid child scope");
     let mut request = request();
     let mut lent = lent();
-    // Every nested call emits its stream start on the lent channel; `lent()`'s
-    // one-slot channel would block the second call's send.
-    let (event_tx, event_rx) = tokio::sync::mpsc::channel(64);
-    std::mem::forget(event_rx);
-    lent.event_tx = event_tx;
     lent.tools = Arc::new(EchoLeafTools);
     // The child's nested calls are admitted against its recorded surface.
     request.session.tool_surface = vec![crate::ToolDefinition {

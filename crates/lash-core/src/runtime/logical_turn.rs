@@ -357,13 +357,16 @@ impl LogicalTurnStart {
 }
 
 impl LashRuntime {
-    async fn emit_physical_turn_start(
-        turn_events: &dyn TurnActivitySink,
+    fn emit_physical_turn_start(
+        observer: &TurnObserver,
+        scoped_effect_controller: &ScopedEffectController<'_>,
         turn_id: &TurnId,
         claims: &LogicalTurnClaims,
         announce_queued_work: bool,
     ) {
-        super::turn_loop::emit_turn_started_to_sink(turn_events, turn_id).await;
+        let mut cursor =
+            super::turn_loop::turn_observation_cursor(scoped_effect_controller, turn_id, "start");
+        super::turn_loop::emit_turn_started(observer, &mut cursor, turn_id);
         if !announce_queued_work {
             // Work withheld from a terminal checkpoint already announced its
             // start at the boundary that claimed it (FIG-3157).
@@ -371,14 +374,14 @@ impl LashRuntime {
         }
         for claim in &claims.queued {
             let work = claim.materialize_queued_turn_work();
-            super::turn_loop::emit_queued_work_started_to_sink(
-                turn_events,
+            super::turn_loop::emit_queued_work_started(
+                observer,
+                &mut cursor,
                 turn_id,
                 crate::QueuedWorkClaimBoundary::Idle,
                 claim,
                 work.turn_causes,
-            )
-            .await;
+            );
         }
     }
 
@@ -529,11 +532,11 @@ impl LashRuntime {
             };
             Self::emit_physical_turn_start(
                 observer,
+                &scoped_effect_controller,
                 &turn_trace_turn_id,
                 &claims,
                 announce_queued_work,
-            )
-            .await;
+            );
             announce_queued_work = true;
             let at_queued_frame_limit = self.queued_run.as_ref().is_some_and(|run| {
                 run.position.physical_ordinal >= MAX_AGENT_FRAME_SWITCHES as u64
@@ -976,11 +979,11 @@ impl LashRuntime {
                 let terminal_stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
                 Self::emit_physical_turn_start(
                     observer,
+                    &scoped_effect_controller,
                     &terminal_trace_turn_id,
                     &next_claims,
                     true,
-                )
-                .await;
+                );
                 let terminal_result = Box::pin(self.finish_logical_turn_error(
                         LogicalTurnErrorContext {
                             message: format!(

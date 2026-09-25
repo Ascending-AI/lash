@@ -74,8 +74,6 @@ mod tests {
     /// A context for the child: the opener's when lent, the deployment's when
     /// a source builds it. Only its tools matter here.
     fn context(tools: Arc<CountingTools>) -> ToolDispatchContext<'static> {
-        let (event_tx, event_rx) = tokio::sync::mpsc::channel(64);
-        std::mem::forget(event_rx);
         ToolDispatchContext {
             plugins: crate::support::plugin_host(Vec::new())
                 .build_session(SESSION)
@@ -100,8 +98,7 @@ mod tests {
             execution_env_spec: spec(),
             session_id: SessionId::from(SESSION),
             agent_frame_id: FrameNodeId::new("frame").expect("a valid frame id"),
-            event_tx,
-            turn_activity_tx: None,
+            observer: crate::engine::NullObservationSink::arc(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),

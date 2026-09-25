@@ -97,6 +97,12 @@ pub(super) struct RuntimeTurnDriver<'a> {
     /// fires it at the same point; the children record what they observed in
     /// their own settlements. No drive code reads it (FIG-3672 P9).
     pub(super) children_stop: CancellationToken,
+    /// The turn-scope observation cursor: every host-facing emission the
+    /// driver makes outside an effect body sequences under the turn scope's
+    /// journal key, so no two emissions share an identity (ADR 0105 §1). An
+    /// effect body's emissions key under that effect's invocation replay key
+    /// instead.
+    pub(super) turn_observations: crate::engine::ObservationCursor,
 }
 
 impl RuntimeTurnDriver<'_> {

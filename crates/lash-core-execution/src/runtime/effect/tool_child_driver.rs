@@ -607,7 +607,7 @@ enum InstalledContextSource {
 
 struct ResolvedChildContext {
     context: LiveOpenerContext,
-    recorder: Option<ChildStreamRecorder>,
+    recorder: Option<Arc<ChildStreamRecorder>>,
     /// Set on a built context: fires when the child reached a session service
     /// only its opener's turn can serve.
     refusal: Option<SessionServicesRefusal>,
@@ -1043,7 +1043,7 @@ async fn run_tool_child<'run>(
         .extend(dispatch.trigger_outcomes.drain());
     settlement.usage.extend(usage_ledger.take());
     if let Some(recorder) = resolved.recorder {
-        let mut stream = recorder.finish().await;
+        let mut stream = recorder.finish();
         // What the child's own journaled record holds is referenced, not
         // recorded twice (see `RecordedChildStream::settle_against`).
         if let Ok(record) = serde_json::to_value(&outcome.record) {

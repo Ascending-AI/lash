@@ -96,7 +96,10 @@ fn provider_drain_never_waits_on_the_host() {
     let (host_tx, host_rx) = TurnObserver::unread();
     let drained = AtomicUsize::new(0);
     let mut drain = Box::pin(async {
-        let mut forwarder = ProviderHostForwarder::new(&host_tx);
+        let mut forwarder = ProviderHostForwarder::new(
+            &host_tx,
+            crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new("test:stream")),
+        );
         while let Some(LlmStreamEvent::Delta { text, .. }) = provider_rx.recv().await {
             drained.fetch_add(1, Ordering::Relaxed);
             forwarder.forward_delta(
@@ -133,7 +136,10 @@ fn provider_drain_never_waits_on_the_host() {
 #[test]
 fn every_delta_is_published_on_both_lanes_in_order() {
     let (host_tx, mut host_rx) = TurnObserver::unread();
-    let mut forwarder = ProviderHostForwarder::new(&host_tx);
+    let mut forwarder = ProviderHostForwarder::new(
+        &host_tx,
+        crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new("test:stream")),
+    );
 
     for chunk in ["alpha", "beta", "gamma"] {
         forwarder.forward_delta(
@@ -175,7 +181,10 @@ fn every_delta_is_published_on_both_lanes_in_order() {
 #[test]
 fn interleaved_correlations_and_classes_remain_distinct() {
     let (host_tx, mut host_rx) = TurnObserver::unread();
-    let mut forwarder = ProviderHostForwarder::new(&host_tx);
+    let mut forwarder = ProviderHostForwarder::new(
+        &host_tx,
+        crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new("test:stream")),
+    );
     for (class, correlation, content) in [
         (ProviderDeltaClass::AssistantProse, "A", "a1"),
         (ProviderDeltaClass::AssistantProse, "B", "b"),

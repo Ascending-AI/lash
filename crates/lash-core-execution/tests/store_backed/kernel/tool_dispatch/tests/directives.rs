@@ -267,10 +267,10 @@ async fn terminal_conflict_is_an_observable_composition_event() {
         fixed_before_tool_factory("deny", policy_denial()),
         fixed_before_tool_factory("allow", successful_short_circuit()),
     ]);
-    let (event_tx, mut events) = mpsc::channel(8);
+    let (event_tx, mut events) = mpsc::unbounded_channel();
     let session_graph = Arc::new(RecordingSessionGraph::default());
     let mut context = exact_dispatch_context_with_plugins(plugins).await;
-    context.event_tx = event_tx;
+    context.observer = crate::engine::ChannelObservationSink::new(Some(event_tx), None);
     context.session_graph = session_graph.clone();
 
     let _ = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" })).await;
@@ -317,10 +317,10 @@ async fn reinspection_does_not_emit_a_self_conflict() {
             .into(),
         ),
     ]);
-    let (event_tx, mut events) = mpsc::channel(8);
+    let (event_tx, mut events) = mpsc::unbounded_channel();
     let session_graph = Arc::new(RecordingSessionGraph::default());
     let mut context = exact_dispatch_context_with_plugins(plugins).await;
-    context.event_tx = event_tx;
+    context.observer = crate::engine::ChannelObservationSink::new(Some(event_tx), None);
     context.session_graph = session_graph.clone();
 
     let output = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
@@ -548,9 +548,9 @@ async fn reinspection_rehonors_terminals_without_reapplying_side_effects() {
         .into(),
     );
     let plugins = before_tool_plugin_stack(vec![auditor, replacer]);
-    let (event_tx, mut events) = mpsc::channel(8);
+    let (event_tx, mut events) = mpsc::unbounded_channel();
     let mut context = exact_dispatch_context_with_plugins(plugins).await;
-    context.event_tx = event_tx;
+    context.observer = crate::engine::ChannelObservationSink::new(Some(event_tx), None);
 
     let output = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
         .await
@@ -890,9 +890,9 @@ async fn after_tool_reinspection_does_not_reapply_side_effects() {
     );
     let replacer = fixed_after_tool_factory("replacer", vec![successful_replacement("replaced")]);
     let plugins = after_tool_plugin_stack(vec![auditor, replacer]);
-    let (event_tx, mut events) = mpsc::channel(8);
+    let (event_tx, mut events) = mpsc::unbounded_channel();
     let mut context = exact_dispatch_context_with_plugins(plugins).await;
-    context.event_tx = event_tx;
+    context.observer = crate::engine::ChannelObservationSink::new(Some(event_tx), None);
 
     let output = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
         .await
@@ -923,10 +923,10 @@ async fn after_tool_reinspection_does_not_emit_a_self_conflict() {
         fixed_after_tool_factory("policy", vec![policy_denial()]),
         fixed_after_tool_factory("replacer", vec![successful_replacement("replaced")]),
     ]);
-    let (event_tx, mut events) = mpsc::channel(8);
+    let (event_tx, mut events) = mpsc::unbounded_channel();
     let session_graph = Arc::new(RecordingSessionGraph::default());
     let mut context = exact_dispatch_context_with_plugins(plugins).await;
-    context.event_tx = event_tx;
+    context.observer = crate::engine::ChannelObservationSink::new(Some(event_tx), None);
     context.session_graph = session_graph.clone();
 
     let output = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
@@ -990,10 +990,10 @@ async fn after_tool_same_plugin_terminals_tighten_without_self_conflict() {
             successful_replacement("last"),
         ],
     )]);
-    let (event_tx, mut events) = mpsc::channel(8);
+    let (event_tx, mut events) = mpsc::unbounded_channel();
     let session_graph = Arc::new(RecordingSessionGraph::default());
     let mut context = exact_dispatch_context_with_plugins(plugins).await;
-    context.event_tx = event_tx;
+    context.observer = crate::engine::ChannelObservationSink::new(Some(event_tx), None);
     context.session_graph = session_graph.clone();
 
     let output = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
@@ -1019,10 +1019,10 @@ async fn after_tool_terminal_conflict_has_bounded_identity_evidence() {
         fixed_after_tool_factory("deny", vec![policy_denial()]),
         fixed_after_tool_factory("allow", vec![successful_replacement("allowed")]),
     ]);
-    let (event_tx, mut events) = mpsc::channel(8);
+    let (event_tx, mut events) = mpsc::unbounded_channel();
     let session_graph = Arc::new(RecordingSessionGraph::default());
     let mut context = exact_dispatch_context_with_plugins(plugins).await;
-    context.event_tx = event_tx;
+    context.observer = crate::engine::ChannelObservationSink::new(Some(event_tx), None);
     context.session_graph = session_graph.clone();
 
     let _ = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" })).await;

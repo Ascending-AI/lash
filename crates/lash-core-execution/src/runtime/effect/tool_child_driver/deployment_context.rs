@@ -57,8 +57,6 @@ use std::sync::Arc;
 
 use lash_sansio::sync::MutexExt;
 
-use tokio::sync::{mpsc, oneshot};
-
 use super::super::recorded_stream::{RecordedChildStream, RecordedChildStreamBuilder};
 use super::super::tool_child::ToolChildRequest;
 use crate::ScopedEffectController;
@@ -132,78 +130,72 @@ impl std::fmt::Debug for DeploymentToolChildContext {
 /// Records the stream events a reconstructed child emits, for its settlement
 /// to carry.
 ///
-/// The child's context gets the two senders. A collector task moves every
-/// event into a bounded [`RecordedChildStream`] as it arrives, so a busy child
-/// never blocks on a full channel. [`finish`](Self::finish) is called once the
-/// child's drive has returned: every send the drive made has completed by
-/// then, so the collector drains what is still buffered and hands the stream
-/// back.
-///
-/// Order is kept within each channel, not across the two: the collector reads
-/// whichever channel has an event. A live opener's two channels make the same
-/// promise, since their consumers read them independently.
+/// The child's dispatch points its [`ObservationSink`] here: observation is
+/// synchronous, so there is no channel to pin and no collector task to
+/// await — every `observe` pushes into a bounded
+/// [`RecordedChildStreamBuilder`] in program order, and [`Self::finish`]
+/// hands the stream back once the child's drive has returned. A session
+/// event's projected activity is recorded ahead of it, in the same order and
+/// with the same `{key}#{ordinal}` id the live opener's observer publishes.
 pub(super) struct ChildStreamRecorder {
-    session_tx: mpsc::Sender<crate::SessionStreamEvent>,
-    activity_tx: mpsc::Sender<crate::TurnActivity>,
-    finish: oneshot::Sender<()>,
-    collected: tokio::task::JoinHandle<RecordedChildStream>,
+    stream: std::sync::Mutex<RecordedChildStreamBuilder>,
 }
 
 impl ChildStreamRecorder {
-    pub(super) fn start() -> Self {
-        let (session_tx, mut session_rx) = mpsc::channel::<crate::SessionStreamEvent>(64);
-        let (activity_tx, mut activity_rx) = mpsc::channel::<crate::TurnActivity>(64);
-        let (finish, mut finished) = oneshot::channel::<()>();
-        let collected = crate::task::spawn(async move {
-            let mut stream = RecordedChildStreamBuilder::default();
-            loop {
-                tokio::select! {
-                    event = session_rx.recv(), if !session_rx.is_closed() => {
-                        if let Some(event) = event {
-                            stream.push_session(&event);
-                        }
-                    }
-                    activity = activity_rx.recv(), if !activity_rx.is_closed() => {
-                        if let Some(activity) = activity {
-                            stream.push_activity(&activity);
-                        }
-                    }
-                    _ = &mut finished => break,
-                }
-            }
-            while let Ok(event) = session_rx.try_recv() {
-                stream.push_session(&event);
-            }
-            while let Ok(activity) = activity_rx.try_recv() {
-                stream.push_activity(&activity);
-            }
-            stream.finish()
-        });
-        Self {
-            session_tx,
-            activity_tx,
-            finish,
-            collected,
-        }
+    pub(super) fn start() -> Arc<Self> {
+        Arc::new(Self {
+            stream: std::sync::Mutex::new(RecordedChildStreamBuilder::default()),
+        })
     }
 
-    /// Points `dispatch`'s stream channels at this recorder.
-    pub(super) fn attach(&self, dispatch: &mut ToolDispatchContext<'static>) {
-        dispatch.event_tx = self.session_tx.clone();
-        dispatch.turn_activity_tx = Some(self.activity_tx.clone());
+    /// Points `dispatch`'s observation sink at this recorder.
+    pub(super) fn attach(self: &Arc<Self>, dispatch: &mut ToolDispatchContext<'static>) {
+        dispatch.observer = Arc::clone(self) as Arc<dyn crate::engine::ObservationSink>;
     }
 
     /// Every event the child emitted, once its drive has returned.
-    pub(super) async fn finish(self) -> RecordedChildStream {
-        let Self {
-            session_tx,
-            activity_tx,
-            finish,
-            collected,
-        } = self;
-        drop((session_tx, activity_tx));
-        let _ = finish.send(());
-        collected.await.unwrap_or_default()
+    pub(super) fn finish(&self) -> RecordedChildStream {
+        std::mem::take(&mut *self.stream.lock_recover()).finish()
+    }
+}
+
+impl crate::engine::ObservationSink for ChildStreamRecorder {
+    fn observe(&self, observation: crate::engine::DriveObservation) {
+        let crate::engine::DriveObservation {
+            key,
+            ordinal,
+            event,
+        } = observation;
+        let id = crate::TurnActivityId::new(format!("{key}#{ordinal}"));
+        let mut stream = self.stream.lock_recover();
+        match event {
+            crate::engine::ObservedEvent::Session(event) => {
+                if let Some(projected) = crate::engine::activity_projection(&event) {
+                    stream.push_activity(&crate::TurnActivity {
+                        id: id.clone(),
+                        correlation_id: id,
+                        event: projected,
+                    });
+                }
+                stream.push_session(&event);
+            }
+            crate::engine::ObservedEvent::Activity {
+                correlation_id,
+                event,
+            } => {
+                stream.push_activity(&crate::TurnActivity {
+                    correlation_id: correlation_id.unwrap_or_else(|| id.clone()),
+                    id,
+                    event,
+                });
+            }
+            crate::engine::ObservedEvent::RecordedSession(event) => {
+                stream.push_session(&event);
+            }
+            crate::engine::ObservedEvent::RecordedActivity(activity) => {
+                stream.push_activity(&activity);
+            }
+        }
     }
 }
 

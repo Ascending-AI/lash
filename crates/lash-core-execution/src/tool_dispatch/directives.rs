@@ -27,13 +27,17 @@ enum EqualStrengthResolution {
 pub(super) struct BeforeToolDirectiveFold {
     args: serde_json::Value,
     terminal: Option<ToolTerminal>,
+    /// One emission lane per directive application, keyed under the
+    /// dispatch's observation base (ADR 0105 §1).
+    observations: crate::engine::ObservationCursor,
 }
 
 impl BeforeToolDirectiveFold {
-    pub(super) fn new(args: serde_json::Value) -> Self {
+    pub(super) fn new(context: &ToolDispatchContext<'_>, args: serde_json::Value) -> Self {
         Self {
             args,
             terminal: None,
+            observations: context.observation_cursor("directives:before"),
         }
     }
 
@@ -55,7 +59,9 @@ impl BeforeToolDirectiveFold {
                     )
                     .await
                     {
-                        Ok(action) => apply_ambient_action(context, action).await,
+                        Ok(action) => {
+                            apply_ambient_action(context, &mut self.observations, action).await
+                        }
                         Err(error) => {
                             self.fold_terminal(
                                 context,
@@ -108,6 +114,7 @@ impl BeforeToolDirectiveFold {
             context,
             "before_tool_call",
             &mut self.terminal,
+            &mut self.observations,
             candidate,
             EqualStrengthResolution::PluginId,
         )
@@ -127,13 +134,14 @@ pub async fn apply_before_tool_directives(
     args: serde_json::Value,
     directives: Vec<PluginOwned<BeforeToolCallPluginDirective>>,
 ) -> BeforeToolDirectiveOutcome {
-    let mut fold = BeforeToolDirectiveFold::new(args);
+    let mut fold = BeforeToolDirectiveFold::new(context, args);
     fold.apply(context, directives).await;
     fold.finish()
 }
 
 async fn emit_terminal_conflict(
     context: &ToolDispatchContext<'_>,
+    observations: &mut crate::engine::ObservationCursor,
     hook_name: &'static str,
     later_plugin_id: &str,
     winner: &ToolTerminal,
@@ -162,15 +170,16 @@ async fn emit_terminal_conflict(
             "failed to emit tool-call directive conflict trace"
         );
     }
-    let _ = context
-        .event_tx
-        .try_send(crate::SessionStreamEvent::PluginEvent {
+    observations.observe(
+        context.observer.as_ref(),
+        crate::engine::ObservedEvent::Session(crate::SessionStreamEvent::PluginEvent {
             plugin_id: later_plugin_id.to_string(),
             event: crate::PluginRuntimeEvent::Custom {
                 name: format!("{hook_name}.directive_conflict"),
                 payload,
             },
-        });
+        }),
+    );
 }
 
 pub(super) async fn apply_after_tool_directives(
@@ -179,6 +188,7 @@ pub(super) async fn apply_after_tool_directives(
     directives: Vec<PluginOwned<AfterToolCallPluginDirective>>,
 ) -> ToolOutcome {
     let mut terminal = None;
+    let mut observations = context.observation_cursor("directives:after");
     for emitted in directives {
         let plugin_id = emitted.plugin_id;
         match emitted.value {
@@ -192,7 +202,7 @@ pub(super) async fn apply_after_tool_directives(
                 )
                 .await
                 {
-                    Ok(action) => apply_ambient_action(context, action).await,
+                    Ok(action) => apply_ambient_action(context, &mut observations, action).await,
                     Err(error) => {
                         let result = match error {
                             AmbientDirectiveError::EmitTrace(error) => {
@@ -202,6 +212,7 @@ pub(super) async fn apply_after_tool_directives(
                         fold_after_tool_terminal(
                             context,
                             &mut terminal,
+                            &mut observations,
                             ToolTerminal {
                                 plugin_id,
                                 kind: ToolTerminalKind::DeniedShortCircuit,
@@ -221,6 +232,7 @@ pub(super) async fn apply_after_tool_directives(
                 fold_after_tool_terminal(
                     context,
                     &mut terminal,
+                    &mut observations,
                     ToolTerminal {
                         plugin_id,
                         kind,
@@ -233,6 +245,7 @@ pub(super) async fn apply_after_tool_directives(
                 fold_after_tool_terminal(
                     context,
                     &mut terminal,
+                    &mut observations,
                     ToolTerminal {
                         plugin_id,
                         kind: ToolTerminalKind::AbortTurn,
@@ -249,10 +262,19 @@ pub(super) async fn apply_after_tool_directives(
     terminal.map_or(result, |terminal| terminal.result)
 }
 
-async fn apply_ambient_action(context: &ToolDispatchContext<'_>, action: AmbientDirectiveAction) {
+async fn apply_ambient_action(
+    context: &ToolDispatchContext<'_>,
+    observations: &mut crate::engine::ObservationCursor,
+    action: AmbientDirectiveAction,
+) {
     match action {
         AmbientDirectiveAction::EmitRuntimeEvents { plugin_id, events } => {
-            crate::plugin::emit_plugin_runtime_events(&context.event_tx, &plugin_id, events).await;
+            crate::plugin::observe_plugin_runtime_events(
+                observations,
+                context.observer.as_ref(),
+                &plugin_id,
+                events,
+            );
         }
         AmbientDirectiveAction::None => {}
     }
@@ -261,12 +283,14 @@ async fn apply_ambient_action(context: &ToolDispatchContext<'_>, action: Ambient
 async fn fold_after_tool_terminal(
     context: &ToolDispatchContext<'_>,
     terminal: &mut Option<ToolTerminal>,
+    observations: &mut crate::engine::ObservationCursor,
     candidate: ToolTerminal,
 ) {
     fold_tool_terminal(
         context,
         "after_tool_call",
         terminal,
+        observations,
         candidate,
         EqualStrengthResolution::FirstEmitted,
     )
@@ -277,6 +301,7 @@ async fn fold_tool_terminal(
     context: &ToolDispatchContext<'_>,
     hook_name: &'static str,
     terminal: &mut Option<ToolTerminal>,
+    observations: &mut crate::engine::ObservationCursor,
     candidate: ToolTerminal,
     equal_strength: EqualStrengthResolution,
 ) {
@@ -298,7 +323,15 @@ async fn fold_tool_terminal(
         (current, candidate)
     };
     if winner.plugin_id != ignored.plugin_id {
-        emit_terminal_conflict(context, hook_name, &later_plugin_id, &winner, &ignored).await;
+        emit_terminal_conflict(
+            context,
+            observations,
+            hook_name,
+            &later_plugin_id,
+            &winner,
+            &ignored,
+        )
+        .await;
     }
     if let Some(denial) = displaced_denial {
         winner.result = denial;

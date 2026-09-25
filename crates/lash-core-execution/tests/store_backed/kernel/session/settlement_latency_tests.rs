@@ -245,7 +245,6 @@ fn probe_context_with(
     let tool_catalog = plugins
         .resolved_tool_catalog(&SessionId::from("session"))
         .expect("tool catalog");
-    let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
     let attachment_store: Arc<crate::SessionAttachmentStore> =
         Arc::new(crate::SessionAttachmentStore::unavailable());
     let dispatch = crate::tool_dispatch::ToolDispatchContext {
@@ -276,8 +275,7 @@ fn probe_context_with(
         ),
         session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-        event_tx,
-        turn_activity_tx: None,
+        observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::clone(&attachment_store),

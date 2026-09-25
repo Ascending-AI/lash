@@ -176,48 +176,29 @@ impl LiveOpenerContext {
         }
     }
 
-    /// Captures the context with its event sender replaced.
+    /// Captures the context with its observation sink replaced.
     ///
-    /// A turn's dispatch context carries the *per-phase* event channel, which
-    /// the phase closes — and whose forwarder it awaits — when the phase ends.
-    /// Registered as-is, the capture would pin that sender for the opener's
-    /// whole life and the phase forwarder would wait on a channel that never
-    /// closes. The sender lent to children is therefore a channel whose
-    /// lifetime is the registration's, owned by whoever registered the opener.
+    /// The sink lent to children is owned by whoever registers the opener and
+    /// shares the registration's lifetime: the turn path lends a sink gated
+    /// on the registration's `ended` token, so a child that outlives its
+    /// entry stops publishing into the turn's observer (ADR 0105 §1 —
+    /// observation is synchronous; there is no channel to pin or forwarder
+    /// to await).
     ///
     /// `lent_controller` is the same lend [`Self::capture`] takes.
     #[must_use]
-    pub fn capture_with_event_sender(
+    pub fn capture_with_observer(
         dispatch: &crate::tool_dispatch::ToolDispatchContext<'_>,
         lent_controller: crate::ScopedEffectController<'static>,
-        event_tx: tokio::sync::mpsc::Sender<crate::SessionStreamEvent>,
+        observer: Arc<dyn crate::engine::ObservationSink>,
         cancellation: CancellationToken,
     ) -> Self {
         let mut dispatch = dispatch.lend_static(lent_controller);
-        dispatch.event_tx = event_tx;
+        dispatch.observer = observer;
         Self {
             dispatch: Arc::new(dispatch),
             cancellation,
         }
-    }
-
-    /// Lends the turn's `TurnActivity` channel to the captured dispatch.
-    ///
-    /// Same per-phase-sender reasoning as the event sender
-    /// [`Self::capture_with_event_sender`] replaces: the channel lent here is
-    /// the registration-owned one the opener's forwarder feeds, so a child's
-    /// nested calls surface their `ToolCallStarted`/`ToolCallCompleted`
-    /// activities on the turn stream after the phase that opened them has
-    /// ended.
-    #[must_use]
-    pub fn with_turn_activity_sender(
-        mut self,
-        turn_activity_tx: tokio::sync::mpsc::Sender<crate::TurnActivity>,
-    ) -> Self {
-        if let Some(dispatch) = Arc::get_mut(&mut self.dispatch) {
-            dispatch.turn_activity_tx = Some(turn_activity_tx);
-        }
-        self
     }
 
     /// The opener's dispatch context, for the driver to rebind against one
@@ -302,28 +283,43 @@ impl LiveOpenerRegistry {
         opener: EffectOpener,
         context: LiveOpenerContext,
     ) -> (LiveOpenerGuard, CancellationToken) {
+        let ended = CancellationToken::new();
+        let guard = self.register_with_token(opener, context, ended.clone());
+        (guard, ended)
+    }
+
+    /// [`Self::register`] with the caller supplying the entry's `ended` token.
+    ///
+    /// Callers that build a context whose observation sink is gated on the
+    /// registration's lifetime need the token before the context exists:
+    /// create it, lend it to the gated sink via
+    /// [`LiveOpenerContext::capture_with_observer`], then hand both here.
+    /// Cancelling the token deregisters the entry exactly as dropping the
+    /// returned guard would.
+    pub fn register_with_token(
+        self: &Arc<Self>,
+        opener: EffectOpener,
+        context: LiveOpenerContext,
+        ended: CancellationToken,
+    ) -> LiveOpenerGuard {
         let generation = {
             let mut next = self.next_generation.lock_recover();
             *next = next.saturating_add(1);
             *next
         };
-        let ended = CancellationToken::new();
         self.openers.lock_recover().insert(
             opener.clone(),
             LiveOpenerEntry {
                 generation,
                 context,
-                _ended: ended.clone().drop_guard(),
+                _ended: ended.drop_guard(),
             },
         );
-        (
-            LiveOpenerGuard {
-                registry: Arc::clone(self),
-                opener,
-                generation,
-            },
-            ended,
-        )
+        LiveOpenerGuard {
+            registry: Arc::clone(self),
+            opener,
+            generation,
+        }
     }
 
     /// The live context for `opener`, or `None` when this host is not running

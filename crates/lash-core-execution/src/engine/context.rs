@@ -6,7 +6,7 @@ use std::pin::Pin;
 use futures_util::future::FusedFuture;
 use serde::{Deserialize, Serialize};
 
-use crate::{SessionStreamEvent, TurnActivityId, TurnEvent};
+use crate::{SessionStreamEvent, TurnActivity, TurnActivityId, TurnEvent};
 
 /// What an engine supplies to drive code, implemented once per engine.
 ///
@@ -155,6 +155,74 @@ pub enum ObservedEvent {
         correlation_id: Option<TurnActivityId>,
         event: TurnEvent,
     },
+    /// A session event already in its emitted form: a sink publishes it
+    /// verbatim, with no projected activity — the projection was emitted as
+    /// an activity where the event was first observed.
+    RecordedSession(SessionStreamEvent),
+    /// A turn activity already carrying its recorded identity; a sink
+    /// publishes it verbatim. A recorded stream replays these — their ids
+    /// were minted where they were recorded and are not re-derived.
+    RecordedActivity(TurnActivity),
+}
+
+/// The application-facing activity a session event projects to, if any.
+/// Sinks apply it on `ObservedEvent::Session` so a low-level event and its
+/// semantic twin stay tied to one observation identity.
+pub fn activity_projection(event: &SessionStreamEvent) -> Option<TurnEvent> {
+    match event {
+        SessionStreamEvent::TokenUsage {
+            protocol_iteration,
+            usage,
+            cumulative,
+        } => Some(TurnEvent::Usage {
+            protocol_iteration: *protocol_iteration,
+            usage: usage.clone(),
+            cumulative: cumulative.clone(),
+        }),
+        SessionStreamEvent::LlmRequest {
+            protocol_iteration, ..
+        } => Some(TurnEvent::ModelRequestStarted {
+            protocol_iteration: *protocol_iteration,
+        }),
+        SessionStreamEvent::RetryStatus {
+            wait_seconds,
+            attempt,
+            max_attempts,
+            reason,
+            ..
+        } => Some(TurnEvent::RetryStatus {
+            wait_seconds: *wait_seconds,
+            attempt: *attempt,
+            max_attempts: *max_attempts,
+            reason: reason.clone(),
+        }),
+        SessionStreamEvent::PluginEvent { plugin_id, event } => Some(TurnEvent::PluginRuntime {
+            plugin_id: plugin_id.clone(),
+            event: event.clone(),
+        }),
+        SessionStreamEvent::InjectedMessagesCommitted {
+            messages,
+            checkpoint,
+        } => Some(TurnEvent::QueuedMessagesCommitted {
+            messages: messages.clone(),
+            checkpoint: *checkpoint,
+        }),
+        SessionStreamEvent::Error { message, .. } => Some(TurnEvent::Error {
+            message: message.clone(),
+        }),
+        SessionStreamEvent::TurnOutcome {
+            outcome: crate::TurnOutcome::Finished(crate::TurnFinish::FinalValue { value }),
+        } => Some(TurnEvent::FinalValue {
+            value: value.clone(),
+        }),
+        SessionStreamEvent::TurnOutcome {
+            outcome: crate::TurnOutcome::Finished(crate::TurnFinish::ToolValue { tool_name, value }),
+        } => Some(TurnEvent::ToolValue {
+            tool_name: tool_name.clone(),
+            value: value.clone(),
+        }),
+        _ => None,
+    }
 }
 
 /// Epoch milliseconds read from [`EngineContext::now_ms`]. Every deadline in a

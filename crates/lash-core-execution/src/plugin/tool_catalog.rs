@@ -1,7 +1,6 @@
 use crate::SessionId;
 use lash_sansio::ToolCallOutput;
 use serde::Serialize;
-use tokio::sync::mpsc;
 
 use super::*;
 
@@ -75,13 +74,16 @@ pub struct TurnFinalization {
     pub events: Vec<crate::SessionStreamEvent>,
 }
 
-pub async fn emit_plugin_runtime_events(
-    event_tx: &mpsc::Sender<crate::SessionStreamEvent>,
+/// Publishes a plugin's runtime events as session observations under
+/// `cursor`'s lane — synchronous, never awaited (ADR 0105 §1).
+pub fn observe_plugin_runtime_events(
+    cursor: &mut crate::engine::ObservationCursor,
+    observer: &dyn crate::engine::ObservationSink,
     plugin_id: &str,
     events: Vec<PluginRuntimeEvent>,
 ) {
     for event in plugin_runtime_session_events(plugin_id, events) {
-        crate::session_model::send_event(event_tx, event).await;
+        cursor.observe(observer, crate::engine::ObservedEvent::Session(event));
     }
 }
 

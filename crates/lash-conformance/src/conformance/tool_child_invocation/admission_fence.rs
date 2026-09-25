@@ -201,21 +201,20 @@ fn register_fence_opener(
         .scoped_static(admitted)
         .expect("the host lends a scoped controller")
         .expect("this host hands out owned scoped controllers");
-    let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(64);
-    let context = crate::runtime::effect::LiveOpenerContext::capture_with_event_sender(
+    let ended = tokio_util::sync::CancellationToken::new();
+    let gate = {
+        let ended = ended.clone();
+        move || !ended.is_cancelled()
+    };
+    let context = crate::runtime::effect::LiveOpenerContext::capture_with_observer(
         &dispatch,
         lent_controller,
-        event_tx,
+        crate::engine::GatedObservationSink::new(gate, crate::engine::NullObservationSink::arc()),
         cooperative,
     );
-    let (guard, ended) = installed.openers().register(opener, context);
-    crate::task::spawn(async move {
-        tokio::select! {
-            _ = ended.cancelled() => {}
-            _ = async { while event_rx.recv().await.is_some() {} } => {}
-        }
-    });
-    guard
+    installed
+        .openers()
+        .register_with_token(opener, context, ended)
 }
 
 /// A single-child group whose one member runs the orchestrating lane. Returns

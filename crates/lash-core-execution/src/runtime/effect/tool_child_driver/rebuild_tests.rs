@@ -123,9 +123,7 @@ async fn a_max_depth_subagent_cannot_spawn_through_a_nested_batch_on_either_path
             spawned: AtomicUsize::new(0),
         });
         let mut serving = lent();
-        let (event_tx, event_rx) = tokio::sync::mpsc::channel(64);
-        std::mem::forget(event_rx);
-        serving.event_tx = event_tx;
+        serving.observer = crate::engine::NullObservationSink::arc();
         serving.tools = Arc::clone(&tools) as Arc<dyn crate::ToolProvider>;
         // Both paths serve the subagent's own plugins: the opener's, or ones
         // built from the request.

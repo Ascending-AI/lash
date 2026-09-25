@@ -361,7 +361,6 @@ fn tool_context_with_provider<'run>(
     catalog: Vec<lash_core::ToolDefinition>,
     bind_direct_client_to_attempt: bool,
 ) -> lash_core::ToolContext<'run> {
-    let (event_tx, _event_rx) = tokio::sync::mpsc::channel(4);
     let plugins = lash_core::testing::test_plugin_host(Vec::new())
         .build_session(SESSION)
         .expect("build attempt-atomicity plugin session");
@@ -412,8 +411,7 @@ fn tool_context_with_provider<'run>(
         ),
         session_id: SessionId::from(SESSION.to_string()),
         agent_frame_id: lash_core::FrameNodeId::new("test-frame").unwrap(),
-        event_tx,
-        turn_activity_tx: None,
+        observer: lash_core::engine::NullObservationSink::arc(),
         checkpoint_messages: lash_core::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: lash_core::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::new(

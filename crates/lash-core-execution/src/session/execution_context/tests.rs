@@ -70,7 +70,6 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
     let plugins = crate::plugin::PluginHost::empty()
         .build_session("session")
         .expect("plugin session");
-    let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
     let dispatch = Arc::new(ToolDispatchContext {
         plugins,
         tools: Arc::new(NoopTools),
@@ -96,8 +95,7 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
         ),
         session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-        event_tx,
-        turn_activity_tx: None,
+        observer: std::sync::Arc::new(crate::engine::NullObservationSink),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),
@@ -137,7 +135,6 @@ fn test_execution_context_with_env_store(
     let plugins = crate::plugin::PluginHost::empty()
         .build_session("session")
         .expect("plugin session");
-    let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
     let dispatch = Arc::new(ToolDispatchContext {
         plugins,
         tools: Arc::new(NoopTools),
@@ -163,8 +160,7 @@ fn test_execution_context_with_env_store(
         ),
         session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-        event_tx,
-        turn_activity_tx: None,
+        observer: std::sync::Arc::new(crate::engine::NullObservationSink),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),

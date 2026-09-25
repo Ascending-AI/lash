@@ -261,7 +261,6 @@ impl OpenerDeployment {
         let plugins = PluginHost::new(self.plugin_factories.clone())
             .build_session(&self.session_id)
             .expect("the side's plugin session builds");
-        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
         let completion_log = Arc::clone(&self.completion_log);
         let canned = self.completion_canned.clone();
         Arc::new(ToolDispatchContext {
@@ -289,8 +288,7 @@ impl OpenerDeployment {
             execution_env_spec: self.env_spec.clone(),
             session_id: self.session_id.clone(),
             agent_frame_id: self.agent_frame_id.clone(),
-            event_tx,
-            turn_activity_tx: None,
+            observer: lash_core::engine::NullObservationSink::arc(),
             checkpoint_messages: CheckpointMessageBuffer::default(),
             trigger_outcomes: ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&self.attachment_store),
@@ -323,24 +321,24 @@ impl OpenerDeployment {
             .scoped_static(self.admitted_scope.clone())
             .expect("the host lends a scoped controller")
             .expect("this host hands out owned scoped controllers");
-        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel(64);
-        let context = LiveOpenerContext::capture_with_event_sender(
+        let ended = CancellationToken::new();
+        let gate = {
+            let ended = ended.clone();
+            move || !ended.is_cancelled()
+        };
+        let context = LiveOpenerContext::capture_with_observer(
             &dispatch,
             lent_controller,
-            event_tx,
+            lash_core::engine::GatedObservationSink::new(
+                gate,
+                lash_core::engine::NullObservationSink::arc(),
+            ),
             cooperative.clone(),
         );
-        let (guard, ended) = installed
-            .openers()
-            .register(self.opener.clone(), context.clone());
-        // The registration owns the sender's lifetime: the forwarder ends
-        // when the entry leaves the registry, exactly as the turn path's does.
-        tokio::spawn(async move {
-            tokio::select! {
-                _ = ended.cancelled() => {}
-                _ = async { while event_rx.recv().await.is_some() {} } => {}
-            }
-        });
+        let guard =
+            installed
+                .openers()
+                .register_with_token(self.opener.clone(), context.clone(), ended);
         (guard, context)
     }
 }
@@ -382,8 +380,7 @@ fn axis_value(
             format!("definitions:{}", deployment.process_definitions.is_some())
         }
         RebindField::ProcessEngines => format!("engines:{}", deployment.tag),
-        RebindField::EventTx => format!("event-tx:{}", deployment.tag),
-        RebindField::TurnActivityTx => format!("turn-activity-tx:{}", deployment.tag),
+        RebindField::Observer => format!("observer:{}", deployment.tag),
         RebindField::AttachmentStore => {
             format!("{:p}", Arc::as_ptr(&deployment.attachment_store))
         }

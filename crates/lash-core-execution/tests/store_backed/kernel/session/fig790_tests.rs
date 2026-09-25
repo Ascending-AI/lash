@@ -482,7 +482,6 @@ async fn fig790_process_await_context(
     let plugins = crate::support::plugin_host(Vec::new())
         .build_session("fig790-session")
         .expect("FIG-790 plugin session");
-    let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
     let attachment_store = Arc::new(crate::SessionAttachmentStore::unavailable());
     let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
         plugins,
@@ -507,8 +506,7 @@ async fn fig790_process_await_context(
         ),
         session_id: SessionId::from("fig790-session"),
         agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-        event_tx,
-        turn_activity_tx: None,
+        observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::clone(&attachment_store),

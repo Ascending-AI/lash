@@ -38,10 +38,10 @@ impl<'run> RuntimeTurnDriver<'run> {
         {
             return;
         }
-        let (session_event_tx, session_event_rx) = mpsc::channel::<SessionStreamEvent>(1);
-        drop(session_event_rx);
-        let context = match self.execution_context(
-            session_event_tx,
+        // Group recovery's emissions have no host lane — the old code dropped
+        // the channel receiver outright — so the context observes nowhere.
+        let context = match self.execution_context_observing(
+            crate::engine::NullObservationSink::arc(),
             event_tx,
             Arc::new(crate::ChronologicalProjection::default()),
         ) {
@@ -137,11 +137,11 @@ impl<'run> RuntimeTurnDriver<'run> {
         {
             return Ok(());
         }
-        let (session_event_tx, session_event_rx) = mpsc::channel::<SessionStreamEvent>(1);
-        drop(session_event_rx);
+        // The closing pass's emissions have no host lane: the old code
+        // dropped the channel receiver outright.
         let context = self
-            .execution_context(
-                session_event_tx,
+            .execution_context_observing(
+                crate::engine::NullObservationSink::arc(),
                 event_tx,
                 Arc::new(crate::ChronologicalProjection::default()),
             )

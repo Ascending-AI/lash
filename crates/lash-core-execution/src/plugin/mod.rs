@@ -111,7 +111,7 @@ pub use tool_catalog::{
 };
 pub use tool_catalog::{
     AmbientDirectiveAction, AmbientDirectiveError, PluginTerminalStrength,
-    emit_plugin_runtime_events, interpret_ambient_directive, plugin_runtime_session_events,
+    interpret_ambient_directive, observe_plugin_runtime_events, plugin_runtime_session_events,
 };
 pub(crate) fn builtin_plugin_factories() -> Vec<Arc<dyn PluginFactory>> {
     // Protocol plugins must be registered by the embedder before calling

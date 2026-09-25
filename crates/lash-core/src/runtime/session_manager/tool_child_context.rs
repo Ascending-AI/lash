@@ -12,8 +12,8 @@ impl RuntimeSessionServices {
     /// plugin session and pinned tool surface, its session services, its
     /// process, trigger and attachment wiring, its provider. The child's
     /// recorded facts are bound over it by the tool-child driver's rebind, and
-    /// its stream channels are replaced by the driver's recorder, so the
-    /// channel given here is never read. `lent_controller` fills the
+    /// its observer is replaced by the driver's recorder, so the observer
+    /// given here is never read. `lent_controller` fills the
     /// controller slots the rebind replaces.
     pub(in crate::runtime) fn tool_child_dispatch(
         self: &Arc<Self>,
@@ -29,8 +29,8 @@ impl RuntimeSessionServices {
             self.direct_completion_client(effect_controller.clone_scoped(), None);
         let state = self.current.snapshot.to_runtime_state();
         let execution_env_spec = state.process_execution_env_spec(&self.current.policy);
-        // Never read: the driver points the stream at its recorder.
-        let (event_tx, _event_rx) = tokio::sync::mpsc::channel::<crate::SessionStreamEvent>(1);
+        // Never read: the driver points the observer at its recorder.
+        let observer = crate::engine::NullObservationSink::arc();
         Ok(crate::tool_dispatch::ToolDispatchContext {
             plugins: Arc::clone(&self.current.plugins),
             tools: Arc::clone(&tool_surface.registry) as Arc<dyn crate::ToolProvider>,
@@ -53,8 +53,7 @@ impl RuntimeSessionServices {
                     "a tool child's session has no initialized agent frame".to_string(),
                 )
             })?,
-            event_tx,
-            turn_activity_tx: None,
+            observer,
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&self.current.host.core.durability.attachment_store),

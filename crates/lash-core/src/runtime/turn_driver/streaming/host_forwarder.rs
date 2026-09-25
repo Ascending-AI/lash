@@ -42,11 +42,17 @@ impl ProviderDeltaClass {
 /// stalls on host throughput.
 pub(super) struct ProviderHostForwarder<'a> {
     event_tx: &'a TurnObserver,
+    /// The provider call's observation lane: every event the stream forwards
+    /// sequences under the call's replay key (ADR 0105 §1).
+    cursor: crate::engine::ObservationCursor,
 }
 
 impl<'a> ProviderHostForwarder<'a> {
-    pub(super) fn new(event_tx: &'a TurnObserver) -> Self {
-        Self { event_tx }
+    pub(super) fn new(
+        event_tx: &'a TurnObserver,
+        cursor: crate::engine::ObservationCursor,
+    ) -> Self {
+        Self { event_tx, cursor }
     }
 
     pub(super) fn forward_delta(
@@ -60,11 +66,17 @@ impl<'a> ProviderHostForwarder<'a> {
         }
         let correlation_id = TurnActivityId::new(block.id.clone());
         let text = Arc::from(content.as_str());
-        self.event_tx.publish(RuntimeStreamEvent::Session(
-            class.session_event(content, block.clone()),
-        ));
-        self.event_tx
-            .activity(correlation_id, class.turn_event(text, block));
+        self.cursor.observe(
+            self.event_tx,
+            crate::engine::ObservedEvent::Session(class.session_event(content, block.clone())),
+        );
+        self.cursor.observe(
+            self.event_tx,
+            crate::engine::ObservedEvent::Activity {
+                correlation_id: Some(correlation_id),
+                event: class.turn_event(text, block),
+            },
+        );
     }
 
     /// A provider-minted block opened: emit the boundary on both projections.
@@ -74,14 +86,19 @@ impl<'a> ProviderHostForwarder<'a> {
         block: StreamBlockIdentity,
     ) {
         let kind = class.block_kind();
-        self.event_tx
-            .session(SessionStreamEvent::StreamBlockStarted {
+        self.cursor.observe(
+            self.event_tx,
+            crate::engine::ObservedEvent::Session(SessionStreamEvent::StreamBlockStarted {
                 kind,
                 block: block.clone(),
-            });
-        self.event_tx.activity(
-            TurnActivityId::new(block.id.clone()),
-            TurnEvent::StreamBlockStarted { kind, block },
+            }),
+        );
+        self.cursor.observe(
+            self.event_tx,
+            crate::engine::ObservedEvent::Activity {
+                correlation_id: Some(TurnActivityId::new(block.id.clone())),
+                event: TurnEvent::StreamBlockStarted { kind, block },
+            },
         );
     }
 
@@ -93,31 +110,43 @@ impl<'a> ProviderHostForwarder<'a> {
         text: String,
     ) {
         let kind = class.block_kind();
-        self.event_tx
-            .session(SessionStreamEvent::StreamBlockCompleted {
+        self.cursor.observe(
+            self.event_tx,
+            crate::engine::ObservedEvent::Session(SessionStreamEvent::StreamBlockCompleted {
                 kind,
                 block: block.clone(),
                 content: text.clone(),
-            });
-        self.event_tx.activity(
-            TurnActivityId::new(block.id.clone()),
-            TurnEvent::StreamBlockCompleted {
-                kind,
-                block,
-                text: text.into(),
+            }),
+        );
+        self.cursor.observe(
+            self.event_tx,
+            crate::engine::ObservedEvent::Activity {
+                correlation_id: Some(TurnActivityId::new(block.id.clone())),
+                event: TurnEvent::StreamBlockCompleted {
+                    kind,
+                    block,
+                    text: text.into(),
+                },
             },
         );
     }
 
     pub(super) fn send_semantic_session_event(&mut self, event: SessionStreamEvent) {
-        self.event_tx.session(event);
+        self.cursor
+            .observe(self.event_tx, crate::engine::ObservedEvent::Session(event));
     }
 
     pub(super) fn send_semantic_turn_activity(
         &mut self,
-        correlation_id: TurnActivityId,
+        correlation_id: Option<TurnActivityId>,
         event: TurnEvent,
     ) {
-        self.event_tx.activity(correlation_id, event);
+        self.cursor.observe(
+            self.event_tx,
+            crate::engine::ObservedEvent::Activity {
+                correlation_id,
+                event,
+            },
+        );
     }
 }
