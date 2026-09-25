@@ -590,6 +590,7 @@ tables = [
     "deleted_sessions",
     "usage_deltas",
     "release_stamp",
+    "fleet_format",
     "checkpoint_blob_refs",
 ]
 statement_prefixes = [
@@ -605,6 +606,7 @@ statement_prefixes = [
     "deleted_session",
     "usage_delta",
     "release_stamp",
+    "fleet_format",
     "checkpoint_blob_ref",
 ]
 shared = [
@@ -616,6 +618,7 @@ shared = [
     "crates/lash-store-sql/src/session/meta.rs",
     "crates/lash-store-sql/src/session/meta_pending_observer_intents.rs",
     "crates/lash-store-sql/src/session/node_anchors.rs",
+    "crates/lash-store-sql/src/session/fleet_format.rs",
     "crates/lash-store-sql/src/session/release_stamp.rs",
     "crates/lash-store-sql/src/session/sessions.rs",
     "crates/lash-store-sql/src/session/turn_commits.rs",
@@ -756,6 +759,7 @@ runtime_turn_commits = "crates/lash-store-sql/src/session/turn_commits.rs"
 deleted_sessions = "crates/lash-store-sql/src/session/deleted_sessions.rs"
 usage_deltas = "crates/lash-store-sql/src/session/usage_deltas.rs"
 release_stamp = "crates/lash-store-sql/src/session/release_stamp.rs"
+fleet_format = "crates/lash-store-sql/src/session/fleet_format.rs"
 checkpoint_blob_refs = "crates/lash-store-sql/src/session/checkpoint_blob_refs.rs"
 [families.turn_ingress.table_modules]
 queued_runs = "crates/lash-store-sql/src/turn_ingress/queued_runs.rs"
@@ -2548,6 +2552,52 @@ reason = """
 The stamp's singleton key is the integer `1` on SQLite and `TRUE` on
 PostgreSQL, and the write instant is the opening host's clock there and the
 server's `clock_timestamp()` here. Nothing about this row renders identically.
+"""
+
+[[dialect_only]]
+statement = "fleet_format.select_is_writable"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = """
+A host-provisioned PostgreSQL deployment can admit a role holding nothing but
+`SELECT`, so whether the row is writable is asked of the catalog before the
+provision is attempted — a refused `INSERT` would poison the admitting
+transaction. SQLite opens a file it may write by definition and has no
+privilege question. Like its release-stamp twin, this is one of the statements
+that spells the `lash_` prefix rather than rendering it: `to_regclass` and
+`has_table_privilege` take the relation as *text*, and the renderer rewrites
+table tokens, not the contents of a string literal.
+"""
+
+[[dialect_only]]
+statement = "fleet_format.select_fleet_format"
+backends = ["sqlite", "postgres"]
+kind = "boolean representation"
+reason = """
+The row's singleton key is the integer `1` on SQLite and `TRUE` on PostgreSQL,
+so the read forks on the flag alone.
+"""
+
+[[dialect_only]]
+statement = "fleet_format.upsert"
+backends = ["sqlite"]
+kind = "operation exists on one backend only"
+reason = """
+A single-process SQLite deployment finalizes the fleet format on open (ADR
+0106 §1): the open transaction writes this build's own generation
+unconditionally, so the statement is an upsert. PostgreSQL provisions only —
+see `fleet_format.insert_if_absent` — because its row belongs to the fleet,
+not to whichever build opens first.
+"""
+
+[[dialect_only]]
+statement = "fleet_format.insert_if_absent"
+backends = ["postgres"]
+kind = "operation exists on one backend only"
+reason = """
+PostgreSQL provisions the row and never rewrites it at open: a worker joining
+mid-upgrade keeps the fleet's recorded generation until `finalize-upgrade`
+(FIG-3800) moves it, so the write is an insert-if-absent, not an upsert.
 """
 
 [[dialect_only]]

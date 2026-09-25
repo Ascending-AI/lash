@@ -5,13 +5,8 @@ use lash_conformance::{ReleaseStampDeployment, release_stamp_conformance};
 use lash_core_execution::{StoreError, StorePreflight, StoreSchemaStatus};
 use lash_postgres_store::{PostgresStorePreflight, SchemaCheck};
 
+use crate::harness::ScratchSchema;
 use crate::support::database_url;
-
-#[allow(dead_code)]
-#[path = "schema_drift/harness.rs"]
-mod harness;
-
-use harness::ScratchSchema;
 
 struct PostgresDeployment {
     scratch: ScratchSchema,

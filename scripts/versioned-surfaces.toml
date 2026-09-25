@@ -376,6 +376,18 @@ paths = [
 symbols = ["EFFECT_SCHEMA", "AWAIT_EVENT_TABLES", "SCOPE_RETIREMENT_TABLE"]
 elide = "sql_idempotent_index"
 
+[[surface]]
+constant = "FLEET_FORMAT_VERSION"
+constant_path = "crates/lash-core-store/src/store/fleet_format.rs"
+upgrade = "migrate"
+description = "fleet-format row `format_version` (ADR 0106 §1 `F`): the durable-format generation every writer in the fleet emits"
+outside_manifest = "store-resident stamp: recorded in the fleet-format row and read from the deployment through StorePreflight::schema_status, not reported from the build"
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/store/fleet_format.rs"]
+symbols = ["FLEET_FORMAT_VERSION", "FleetFormat", "FleetFormatState"]
+
 # The durable lifecycle JSON the `runtime_effect_group.lifecycle` column
 # carries (ADR 0099 section 7, FIG-3410): `{"type":"live"}`,
 # `{"type":"closing","disposition":..,"finalized":0..3}`,

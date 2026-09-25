@@ -19,6 +19,7 @@ impl PostgresSessionStoreFactory {
         PostgresSessionStore {
             pool: self.pool.clone(),
             clock: Arc::clone(&self.clock),
+            fleet_format: self.fleet_format,
             session_id,
             turn_cancel_closure_owner: self.turn_cancel_closure_owner_binding(),
             #[cfg(any(test, feature = "testing"))]
@@ -70,6 +71,7 @@ impl PostgresSessionStoreFactory {
             &meta,
             crate::session_meta::SessionMetaWrite::Insert,
             created_at_ms,
+            self.fleet_format,
         )
         .await?;
         tx.commit().await.map_err(store_sqlx_error)?;

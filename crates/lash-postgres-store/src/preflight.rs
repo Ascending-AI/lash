@@ -190,6 +190,7 @@ impl StorePreflight for PostgresStorePreflight {
             Some(_) => StoreSchemaVerdict::Matches,
         };
         let release = crate::release_stamp::read(&self.pool).await;
+        let fleet_format = crate::fleet_format::read(&self.pool).await;
         Ok(StoreSchemaStatus {
             databases: vec![StoreSchemaDatabase {
                 name: COMPONENT_DATABASE_NAME.to_string(),
@@ -198,6 +199,7 @@ impl StorePreflight for PostgresStorePreflight {
                 verdict,
             }],
             release,
+            fleet_format,
         })
     }
 

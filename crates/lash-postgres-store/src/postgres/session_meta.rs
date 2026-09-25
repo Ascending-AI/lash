@@ -97,6 +97,7 @@ pub(crate) async fn write_session_meta_tx(
     meta: &SessionMeta,
     mode: SessionMetaWrite,
     created_at_ms: u64,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<bool, StoreError> {
     let stored = SessionMetaCodec::encode(SESSION_META_CODEC, meta)?;
     let sql = match mode {
@@ -122,7 +123,10 @@ pub(crate) async fn write_session_meta_tx(
         .bind(stored.source_session_id.as_deref())
         .bind(&stored.source_node_id)
         .bind(i64::try_from(created_at_ms).unwrap_or(i64::MAX))
-        .bind(lash_core_execution::store::CURRENT_SESSION_STATE_VERSION as i32)
+        .bind(
+            fleet_format.writer_version(lash_core_execution::store::CURRENT_SESSION_STATE_VERSION)
+                as i32,
+        )
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;

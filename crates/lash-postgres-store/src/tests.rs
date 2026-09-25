@@ -323,6 +323,7 @@ async fn attachment_unwired_process_registry_factory_warns() {
             .connect_lazy("postgres://localhost/unused")
             .unwrap(),
         catalog_id: Arc::from("unused.public"),
+        fleet_format: lash_core_execution::FleetFormat::current(),
     };
     for path in [
         "PostgresStorage::session_store_factory",

@@ -380,3 +380,8 @@ note = "live host cursor: peers accept [N-1, N]; [[unregistered]] in the registr
 constant = "JOURNAL_IDENTITY_VERSION"
 constant_path = "crates/lash-sansio/src/effect_identity.rs"
 note = "hash-domain identity tag (the *_FAMILY_VERSION class under another name); [[unregistered]] in the registry, declared here because ADR 0106 names its upgrade law"
+
+[[surface]]
+constant = "FLEET_FORMAT_VERSION"
+constant_path = "crates/lash-core-store/src/store/fleet_format.rs"
+note = "the coordinate every durable format migrates under: writers emit the recorded generation until finalize-upgrade (FIG-3800) advances it"

@@ -22,6 +22,7 @@ mod error;
 pub mod fencing;
 #[cfg(test)]
 mod fencing_tests;
+mod fleet_format;
 mod fork_plan;
 mod graph_commit;
 mod lease_timings;
@@ -102,6 +103,7 @@ pub use fencing::{
     require_single_writer_head_publication, turn_input_claimability,
     unclaimed_turn_input_is_settleable, wake_delivery_claim_verdict,
 };
+pub use fleet_format::{FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState};
 pub use fork_plan::{ForkLineageAncestor, ForkNodeFacts, ForkPlan};
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 pub use load::{

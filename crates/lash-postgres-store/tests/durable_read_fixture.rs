@@ -320,7 +320,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 135);
+    assert_eq!(PostgresStorage::schema_version(), 136);
     let fixture_database_url = fixture_database_url(&database_url);
     // The committed dump was captured at the previous component; advance it
     // the way a deployment does (FIG-3816).
@@ -694,6 +694,12 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .execute(&pool)
         .await
         .expect("create the migration ledger from the authoritative DDL");
+    // Component 136 (FIG-3796) adds the fleet-format table the same way; its
+    // row is provisioned by the first open, not by the refresh.
+    sqlx::raw_sql(schema_table_ddl("lash_fleet_format"))
+        .execute(&pool)
+        .await
+        .expect("create the fleet-format table from the authoritative DDL");
     sqlx::query(
         "UPDATE lash_schema_versions
             SET version = $1

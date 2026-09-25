@@ -267,7 +267,8 @@ impl SessionCommitStore for PostgresSessionStore {
         &self,
         commit: RuntimeCommit,
     ) -> Result<RuntimeCommitReceipt, StoreError> {
-        let planner = lash_core_execution::store::RuntimeCommitPlanner::prepare(commit)?;
+        let planner =
+            lash_core_execution::store::RuntimeCommitPlanner::prepare(commit, self.fleet_format)?;
         let commit = planner.commit();
         self.bind_session_id(&commit.session_id)?;
         let now = self.clock.timestamp_ms();
@@ -362,6 +363,7 @@ impl SessionCommitStore for PostgresSessionStore {
                         &direct_meta,
                         crate::session_meta::SessionMetaWrite::Insert,
                         now,
+                        self.fleet_format,
                     )
                     .await?;
                     if let Some(completion) = replay.release_session_execution_lease() {
@@ -519,6 +521,7 @@ impl SessionCommitStore for PostgresSessionStore {
             &direct_meta,
             crate::session_meta::SessionMetaWrite::Insert,
             now,
+            self.fleet_format,
         )
         .await?;
         let actual_revision = existing.as_ref().map_or(0, |meta| meta.head_revision);
@@ -526,7 +529,9 @@ impl SessionCommitStore for PostgresSessionStore {
             let placeholder = SessionHeadMeta::assemble(
                 &commit.session_id,
                 SessionHeadPayload {
-                    schema_version: lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                    schema_version: self.fleet_format.writer_version(
+                        lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                    ),
                     session_id: commit.session_id.clone(),
                     config: commit.config.clone(),
                     current_frame_node_id: None,
@@ -1068,6 +1073,7 @@ impl SessionCommitStore for PostgresSessionStore {
             &meta,
             crate::session_meta::SessionMetaWrite::Insert,
             created_at_ms,
+            self.fleet_format,
         )
         .await?;
         if inserted {
@@ -1111,6 +1117,7 @@ impl SessionCommitStore for PostgresSessionStore {
             &meta,
             crate::session_meta::SessionMetaWrite::Replace,
             created_at_ms,
+            self.fleet_format,
         )
         .await?;
         tx.commit().await.map_err(store_sqlx_error)

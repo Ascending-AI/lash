@@ -230,6 +230,12 @@ pub(super) async fn fork_at_in_catalog(
     let request = request.clone();
     conn.write_flow(move |tx| {
         let outcome: Result<lash_core_execution::ForkSessionReceipt, lash_core_execution::StoreError> = (|| {
+            // The catalog carries the fleet-format row the ADR has every
+            // writer consult; this transaction writes durable head/meta rows,
+            // so it reads the deployment's generation rather than a build
+            // constant.
+            let fleet_format =
+                crate::fleet_format::read_recorded(tx).map_err(sqlite_error)?;
             // Keep the fork fences in the shared order: exists -> deleted ->
             // retained -> live -> frame.
             let exists = tx
@@ -382,7 +388,9 @@ pub(super) async fn fork_at_in_catalog(
             let meta = lash_core_execution::store::SessionHeadMeta::assemble(
                 &request.session_id,
                 lash_core_execution::store::SessionHeadPayload {
-                    schema_version: lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                    schema_version: fleet_format.writer_version(
+                        lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                    ),
                     session_id: request.session_id.clone(),
                     config,
                     current_frame_node_id: Some({
@@ -441,6 +449,7 @@ pub(super) async fn fork_at_in_catalog(
                 &session_meta,
                 crate::session_meta::SessionMetaWrite::Insert,
                 created_at_ms,
+                fleet_format,
             )?;
             Ok(lash_core_execution::ForkSessionReceipt {
                 session_id: request.session_id,

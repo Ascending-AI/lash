@@ -602,6 +602,15 @@ CREATE TABLE IF NOT EXISTS release_stamp (
     schema_versions     TEXT NOT NULL,
     written_at_epoch_ms INTEGER NOT NULL
 );
+
+-- The fleet-format row (ADR 0106 §1 `F`): the durable-format generation every
+-- writer in the fleet emits. A single-process SQLite deployment finalizes on
+-- open, so the schema-open transaction pins this row to the build's own
+-- format. PostgreSQL carries the same singleton as `lash_fleet_format`.
+CREATE TABLE IF NOT EXISTS fleet_format (
+    singleton           INTEGER PRIMARY KEY CONSTRAINT ck_fleet_format_singleton CHECK (singleton = 1),
+    format_version      INTEGER NOT NULL
+);
 ";
 
 /// Canonical schema version. There is no migration chain — older databases
@@ -937,7 +946,12 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// `agent_frame_task` payload is gone and `runtime_turn_commits.result_json`
 /// carries receipt schema 2. A pre-94 database is rejected at open and
 /// recreated; it is not migrated.
-pub(crate) const SCHEMA_VERSION: i32 = 94;
+/// Bumped to 95 for FIG-3796: the catalog gains `fleet_format`, the
+/// deployment's own fleet-format row of ADR 0106 §1, recording the
+/// durable-format generation every writer in the fleet emits. A pre-95
+/// database has no such table and, under the reject-and-recreate policy, is
+/// refused at open rather than midwifed one.
+pub(crate) const SCHEMA_VERSION: i32 = 95;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
@@ -1682,16 +1696,16 @@ fn prepare_versioned_schema_at_version<'connection>(
     let user_version: i32 = tx.query_row("PRAGMA user_version", [], |row| row.get(0))?;
     if user_version == schema_version {
         apply_schema(&tx)?;
-        stamp_writing_release(&tx, database)?;
+        stamp_deployment_metadata(&tx, database)?;
         return Ok(tx);
     }
     if user_version == 0 && !has_user_schema_objects(&tx)? {
         apply_schema(&tx)?;
         tx.pragma_update(None, "user_version", schema_version)?;
-        stamp_writing_release(&tx, database)?;
+        stamp_deployment_metadata(&tx, database)?;
         return Ok(tx);
     }
-    let writing_release = release_stamp_holder(database)
+    let writing_release = deployment_metadata_holder(database)
         .then(|| crate::release_stamp::read_release(&tx))
         .flatten();
     Err(rusqlite::Error::SqliteFailure(
@@ -1705,18 +1719,23 @@ fn prepare_versioned_schema_at_version<'connection>(
     ))
 }
 
-/// Whether this database is the one that carries the deployment's release stamp.
+/// Whether this database is the one that carries the deployment's own
+/// metadata rows: the release stamp and the fleet-format row.
 ///
 /// The four SQLite databases share one trust domain and are opened together, so
 /// one stamp describes the deployment. The durable core carries it: it is the
 /// database every deployment has.
-pub(crate) fn release_stamp_holder(database: SqliteDatabase) -> bool {
+pub(crate) fn deployment_metadata_holder(database: SqliteDatabase) -> bool {
     database == SqliteDatabase::DurableCore
 }
 
-fn stamp_writing_release(tx: &Transaction<'_>, database: SqliteDatabase) -> rusqlite::Result<()> {
-    if release_stamp_holder(database) {
+fn stamp_deployment_metadata(
+    tx: &Transaction<'_>,
+    database: SqliteDatabase,
+) -> rusqlite::Result<()> {
+    if deployment_metadata_holder(database) {
         crate::release_stamp::write(tx)?;
+        crate::fleet_format::write(tx)?;
     }
     Ok(())
 }

@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 135.
+-- lash-postgres-store schema, component version 136.
 --
 -- Generated artifact. These bytes are exactly the DDL `lash migrate`
 -- executes to provision a database; `PostgresStorage::schema_ddl()` returns
@@ -40,6 +40,16 @@ CREATE TABLE IF NOT EXISTS lash_migrations (
     started_at_ms BIGINT NOT NULL,
     finished_at_ms BIGINT,
     PRIMARY KEY (phase, migration)
+);
+
+-- The durable-format generation every writer in the fleet emits (ADR 0106
+-- §1 `F`). The first open provisions the row; later opens read the recorded
+-- generation and keep writing it until `finalize-upgrade` (FIG-3800) moves it.
+-- One row, like the other deployment-scoped singletons in this schema.
+CREATE TABLE IF NOT EXISTS lash_fleet_format (
+    singleton BOOLEAN PRIMARY KEY DEFAULT TRUE,
+    format_version INTEGER NOT NULL,
+    CONSTRAINT ck_fleet_format_singleton CHECK (singleton)
 );
 
 CREATE TABLE IF NOT EXISTS lash_blobs (
@@ -850,7 +860,7 @@ CREATE TABLE IF NOT EXISTS lash_catalog_identity (
 -- transactional clock rows, and the catalog identity. `gen_random_uuid()` is
 -- core PostgreSQL, so the identity needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 135)
+VALUES ('lash-postgres-store', 136)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

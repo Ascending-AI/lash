@@ -69,6 +69,7 @@ const TABLE_REGISTRY: &[TablePair] = &[
     pair("blobs", "lash_blobs"),
     pair("checkpoint_blob_refs", "lash_checkpoint_blob_refs"),
     pair("deleted_sessions", "lash_deleted_sessions"),
+    pair("fleet_format", "lash_fleet_format"),
     pair("fork_lineage", "lash_fork_lineage"),
     pair("graph_nodes", "lash_graph_nodes"),
     TablePair {

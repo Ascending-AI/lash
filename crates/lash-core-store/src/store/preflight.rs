@@ -395,6 +395,14 @@ pub struct StoreSchemaStatus {
     /// crate versions actually has. It rides on the same report because it is
     /// read on the same read-only pass.
     pub release: StoreReleaseState,
+    /// The durable-format generation the store's writers emit, when the store
+    /// records one (ADR 0106 §1 `F`).
+    ///
+    /// A row that reads back here is the one the schema-open transaction
+    /// seeded and durable writers consult for their writer version; a
+    /// deployment opened only by builds that predate the row reports
+    /// [`super::FleetFormatState::Unrecorded`].
+    pub fleet_format: super::FleetFormatState,
 }
 
 impl StoreSchemaStatus {
@@ -434,6 +442,7 @@ impl StoreSchemaStatus {
 impl std::fmt::Display for StoreSchemaStatus {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         writeln!(f, "release: {}", self.release)?;
+        writeln!(f, "fleet format: {}", self.fleet_format)?;
         for database in &self.databases {
             match &database.verdict {
                 StoreSchemaVerdict::Matches => {
@@ -691,6 +700,7 @@ pub trait StorePreflight: Send + Sync {
 
 #[cfg(test)]
 mod tests {
+    use super::super::FleetFormatState;
     use super::*;
 
     fn database(name: &str, verdict: StoreSchemaVerdict) -> StoreSchemaDatabase {
@@ -740,6 +750,7 @@ mod tests {
         // yes over a database nobody could read.
         let status = StoreSchemaStatus {
             release: StoreReleaseState::Unstamped,
+            fleet_format: FleetFormatState::Unrecorded,
             databases: vec![
                 database("durable core", StoreSchemaVerdict::Matches),
                 database(
@@ -759,6 +770,7 @@ mod tests {
     fn a_refusal_outranks_an_undecided_database_without_hiding_it() {
         let status = StoreSchemaStatus {
             release: StoreReleaseState::Unstamped,
+            fleet_format: FleetFormatState::Unrecorded,
             databases: vec![
                 database("durable core", StoreSchemaVerdict::Mismatch { found: 36 }),
                 database(
@@ -782,6 +794,7 @@ mod tests {
     fn conformance_names_every_refusing_database_and_only_those() {
         let status = StoreSchemaStatus {
             release: StoreReleaseState::Unstamped,
+            fleet_format: FleetFormatState::Unrecorded,
             databases: vec![
                 database("durable core", StoreSchemaVerdict::Matches),
                 database(
@@ -810,6 +823,7 @@ mod tests {
     fn an_empty_deployment_is_ready() {
         let status = StoreSchemaStatus {
             release: StoreReleaseState::Unstamped,
+            fleet_format: FleetFormatState::Unrecorded,
             databases: Vec::new(),
         };
         assert_eq!(status.outcome(), StoreSchemaOutcome::Ready);
@@ -932,6 +946,7 @@ mod tests {
     fn the_report_names_the_writing_release() {
         let status = StoreSchemaStatus {
             release: StoreReleaseState::Stamped(stamp("0.4.1")),
+            fleet_format: FleetFormatState::Unrecorded,
             databases: vec![database("durable core", StoreSchemaVerdict::Matches)],
         };
         let rendered = status.to_string();
@@ -943,6 +958,7 @@ mod tests {
 
         let unstamped = StoreSchemaStatus {
             release: StoreReleaseState::Unstamped,
+            fleet_format: FleetFormatState::Unrecorded,
             databases: Vec::new(),
         };
         assert!(
@@ -955,6 +971,7 @@ mod tests {
     fn rendering_names_the_found_and_expected_versions() {
         let status = StoreSchemaStatus {
             release: StoreReleaseState::Unstamped,
+            fleet_format: FleetFormatState::Unrecorded,
             databases: vec![database(
                 "durable core",
                 StoreSchemaVerdict::Mismatch { found: 36 },
