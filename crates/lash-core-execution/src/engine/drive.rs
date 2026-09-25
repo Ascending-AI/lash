@@ -53,6 +53,14 @@ pub fn drive_seal_replay_key(admitted: &Admitted) -> String {
     format!("drive-seal:{}", admitted.admission().as_str())
 }
 
+/// The replay key of a root's scope close, inside the root's scope: one
+/// close per root, whichever admission ran it, so a redrive of a root that
+/// already closed replays the recorded close.
+#[must_use]
+pub fn drive_close_root_replay_key(root: &TurnId) -> String {
+    format!("drive-close:{}", root.as_str())
+}
+
 /// How one admitted root ended.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "root_outcome", rename_all = "snake_case")]
@@ -66,14 +74,20 @@ pub enum RootOutcome {
     /// The work admission named was answered by another driver or withdrawn
     /// before the root claimed it, so nothing ran.
     Ceded { root: TurnId },
+    /// The engine released the root's execution for good (an operator's
+    /// cancel or fork killed it, or it ended terminally without a lash
+    /// outcome). The drive goes on to its next admission, which reads what
+    /// the store decided about the root.
+    Released { root: TurnId },
 }
 
 impl RootOutcome {
     pub fn root(&self) -> &TurnId {
         match self {
-            Self::Committed { root, .. } | Self::Refused { root, .. } | Self::Ceded { root } => {
-                root
-            }
+            Self::Committed { root, .. }
+            | Self::Refused { root, .. }
+            | Self::Ceded { root }
+            | Self::Released { root } => root,
         }
     }
 }
@@ -92,10 +106,18 @@ pub enum DriveStop {
     /// execution cannot read. It is parked or abandoned, never re-run.
     SubstrateLost { root: TurnId },
     /// The root admission named already has its terminal (ADR 0105 L-S6).
-    RootTerminal { root: TurnId, by: TurnCommitId },
+    RootTerminal {
+        root: TurnId,
+        kind: crate::store::RootTerminalKind,
+        commit: Option<TurnCommitId>,
+    },
     /// A pending follow-on of `root` holds the session and admission could
     /// not resume it (ADR 0101 §3, FIG-3542).
     Blocked { root: TurnId },
+    /// Admission named `root` again after the engine released its execution
+    /// in this drive: the store still owes it work nothing will run. The
+    /// drive stops rather than spin on it.
+    RootAborted { root: TurnId },
 }
 
 /// What one drive of a session did: the roots it ran, in order, and why it

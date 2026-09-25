@@ -775,6 +775,22 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
         self.inner.turn_park_feed(after, limit).await
     }
 
+    async fn root_terminal(
+        &self,
+        session_id: &crate::SessionId,
+        root: &crate::TurnId,
+    ) -> std::result::Result<Option<crate::store::RootTerminal>, StoreError> {
+        self.inner.root_terminal(session_id, root).await
+    }
+
+    async fn list_open_control_intents(
+        &self,
+        after: Option<crate::store::ControlIntentId>,
+        limit: std::num::NonZeroUsize,
+    ) -> std::result::Result<Vec<crate::store::ControlIntent>, StoreError> {
+        self.inner.list_open_control_intents(after, limit).await
+    }
+
     async fn compact_turn_park_feed(
         &self,
         through: crate::store::TurnParkFeedCursor,

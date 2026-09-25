@@ -326,8 +326,7 @@ impl LashRuntime {
                     format!(
                         "accepted turn input `{accepted_id}` waits behind parked root `{}` \
                          (park {}); it is driven once that park is resolved",
-                        park.root,
-                        park.park.as_str()
+                        park.root, park.park
                     ),
                 )));
             }

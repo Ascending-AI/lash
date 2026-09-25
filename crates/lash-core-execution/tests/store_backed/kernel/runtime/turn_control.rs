@@ -159,6 +159,26 @@ mod tests {
             })
         }
 
+        async fn root_terminal(
+            &self,
+            _session_id: &crate::SessionId,
+            _root: &crate::TurnId,
+        ) -> std::result::Result<Option<crate::store::RootTerminal>, crate::StoreError> {
+            Err(crate::StoreError::UnsupportedStoreOperation {
+                operation: "SessionStoreFactory::root_terminal",
+            })
+        }
+
+        async fn list_open_control_intents(
+            &self,
+            _after: Option<crate::store::ControlIntentId>,
+            _limit: std::num::NonZeroUsize,
+        ) -> std::result::Result<Vec<crate::store::ControlIntent>, crate::StoreError> {
+            Err(crate::StoreError::UnsupportedStoreOperation {
+                operation: "SessionStoreFactory::list_open_control_intents",
+            })
+        }
+
         async fn compact_turn_park_feed(
             &self,
             _through: crate::store::TurnParkFeedCursor,

@@ -34,9 +34,11 @@ pub use queued_run::{
     BeginQueuedRun, QueuedRunAdmission, QueuedRunCommit, QueuedRunMember, QueuedRunOrigin,
     QueuedRunPosition, QueuedRunProgress, QueuedRunRequest, QueuedRunTerminal, SelectedQueuedRun,
 };
+mod control_intent;
 mod drive_fence;
 mod realization;
 mod retention;
+mod root;
 pub mod runtime_commit;
 mod runtime_commit_plan;
 mod semantic_boundary;
@@ -78,6 +80,9 @@ pub use commit_budget::{CommitBudget, CommitBudgetLimit};
 pub use commit_identity::{
     APPEND_REQUEST_IDENTITY_ENCODING_VERSION, OperationId, RuntimeCommitReceiptDecision,
     decide_runtime_commit_receipt, derive_history_node_id,
+};
+pub use control_intent::{
+    CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
 };
 pub use drive_fence::{
     AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence,
@@ -131,6 +136,11 @@ pub use retention::{
     FACADE_PLUGIN_COMMAND_OPERATION_TAG, FACADE_PLUGIN_TASK_OPERATION_TAG, FacadePluginOperation,
     PLUGIN_OPERATION_STATE_RECEIPT_KEY, RetentionBound, RetentionReport,
     is_facade_minted_operation_id, mint_facade_operation_id, plugin_operation_receipt_storage_key,
+};
+pub use root::{
+    InMemoryRootLedger, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
+    RootTerminalWrite, RootTerminalWriteDecision, StoredRootTerminal, TurnCommitId,
+    decide_root_terminal_write, root_binding_conflict, settled_queued_root_cause,
 };
 pub use runtime_commit::{
     AppendRequestIdentity, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,

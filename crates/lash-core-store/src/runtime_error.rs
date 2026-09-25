@@ -1564,6 +1564,7 @@ impl RuntimeEffectControllerError {
                 | RuntimeEffectKind::LoadExecutionEnv
                 | RuntimeEffectKind::AdmitDrive
                 | RuntimeEffectKind::SealDriveAdmission
+                | RuntimeEffectKind::CloseRootScope
         ) || self.code == RuntimeErrorCode::TransientCancelWatch
         {
             self.journal_disposition

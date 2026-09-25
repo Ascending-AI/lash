@@ -190,11 +190,13 @@ pub enum AdmitVerdict {
     /// The root started under a history this execution cannot read. It is
     /// parked or abandoned, never re-run.
     SubstrateLost { root: TurnId },
-    /// The root already has a terminal: a later execution adopts it
-    /// (ADR 0105 law L-S6).
+    /// The root already has terminal evidence: a later execution adopts it
+    /// instead of running the root again (ADR 0105 law L-S6). `commit` names
+    /// the head commit that ended it, when one did.
     RootTerminal {
         root: TurnId,
-        by: super::commit::TurnCommitId,
+        kind: crate::store::RootTerminalKind,
+        commit: Option<super::commit::TurnCommitId>,
     },
     /// No work is pending.
     Idle,
@@ -400,5 +402,5 @@ impl DriveRequestId {
 pub struct ParkRef {
     pub session: SessionId,
     pub root: TurnId,
-    pub park: super::commit::ParkId,
+    pub park: crate::store::ParkId,
 }

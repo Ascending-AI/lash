@@ -26,6 +26,7 @@ mod commands;
 mod commit;
 mod context;
 mod contracts;
+mod control;
 mod drive;
 mod groups;
 /// The determinism harness every slice that makes the drive deterministic
@@ -33,6 +34,9 @@ mod groups;
 #[cfg(any(test, feature = "testing"))]
 pub mod testing;
 
+pub use crate::store::{
+    ControlIntentId, ControlIntentKind, RootTerminal, RootTerminalCause, RootTerminalKind,
+};
 pub use admission::{
     AdmissionId, AdmitRequest, AdmitVerdict, Admitted, AdmittedWork, CancelGate, ChildOutcome,
     ChildStart, DriveAdmission, DriveContext, DriveFence, DriveRequestId, FenceSource, Fenced,
@@ -46,8 +50,8 @@ pub use commands::{
 pub use commit::{
     CancellationSettlement, CommitTurnOutcome, CommittedAttachments, CommittedGraphNode,
     DurableTurnState, EngineParkRef, ExecutionStateUpdate, IngressSettlement, ParkId,
-    ParkRecoveryWriter, ParkedWorkRef, RecordedPluginStates, SessionGraphDelta, SessionHeadRef,
-    TurnCommitId, TurnCommitRequest, TurnTerminalEvidence, UsageDelta,
+    ParkRecoveryWriter, ParkedWorkRef, RecordedPluginStates, RootTerminalWrite, SessionGraphDelta,
+    SessionHeadRef, TurnCommitId, TurnCommitRequest, UsageDelta,
 };
 pub use context::{
     Disposed, Disposition, DriveObservation, DurableOp, EngineContext, EngineFault, EngineRetry,
@@ -57,9 +61,10 @@ pub use contracts::{
     BuildGeneration, ChangeId, DriveHandover, DriveRequest, Never, PendingResolution,
     RecordedVersion, ResolveAck, RootProgress, TurnSegmentHandover, UnresolvedChild, VersionRange,
 };
+pub use control::{NoScopeClose, ScopeCloseSink};
 pub use drive::{
     DriveAbort, DriveOutcome, DriveStop, RootOutcome, admission_body, drive_admission_replay_key,
-    drive_admission_scope, drive_root_scope, drive_seal_replay_key,
+    drive_admission_scope, drive_close_root_replay_key, drive_root_scope, drive_seal_replay_key,
 };
 pub use groups::{DriveGroups, GroupClosed, GroupKey};
 

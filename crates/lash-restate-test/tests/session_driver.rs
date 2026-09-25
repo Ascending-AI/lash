@@ -263,6 +263,7 @@ fn committed_roots(outcome: &DriveOutcome) -> Vec<String> {
                 panic!("root {root} was refused: {verdict:?}")
             }
             RootOutcome::Ceded { root } => panic!("root {root} ceded"),
+            RootOutcome::Released { root } => panic!("root {root} was released"),
         })
         .collect()
 }
