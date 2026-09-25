@@ -64,6 +64,31 @@ lash_rust_unit_test(
     version = "0.0.0-dev",
 )
 
+lash_rust_binary(
+    name = "monty_comparison__example",
+    crate_features = [
+        "testing",
+    ],
+    crate_name = "monty_comparison",
+    crate_root = "examples/monty_comparison.rs",
+    declared_features = [
+        "testing",
+    ],
+    data_exclude = [
+        "tests/test262/test/**/*.js",
+    ],
+    exec_properties = sized_exec_properties("lash-internal-typescript", "monty_comparison"),
+    extra_compile_data = [],
+    include_dev_deps = True,
+    library = ":lash-typescript",
+    library_crate_name = "lash_typescript",
+    manifest_dir = "crates/lash-typescript",
+    package_name = "lash-internal-typescript",
+    rustc_env = {},
+    tags = [],
+    version = "0.0.0-dev",
+)
+
 lash_rust_integration_test(
     name = "integration__test",
     crate_features = [
