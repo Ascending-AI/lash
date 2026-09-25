@@ -145,23 +145,15 @@ pub(super) const GRAMMAR: &[Grammar] = &[
     URL_SEARCH_PARAMS,
 ];
 
-/// The census, read for its rejected rows: a generated rejected cell is a
-/// census probe, which must reject with exactly the diagnostic its row names.
-const CENSUS: &str = include_str!("../../../../../lash-typescript/tests/test262/census.tsv");
-
 /// The census's rejected rows whose probe the dialect refuses statically, as
-/// `(diagnostic, probe)`.
-fn static_rejections() -> Vec<(&'static str, &'static str)> {
-    CENSUS
-        .lines()
-        .filter(|line| !line.starts_with('#'))
-        .filter_map(|line| {
-            let columns = line.split('\t').collect::<Vec<_>>();
-            (columns.len() == 5
-                && columns[2] == "rejected"
-                && !columns[4].starts_with("probe-exempt:"))
-            .then(|| (columns[3], columns[4]))
-        })
+/// `(diagnostic, probe)`, in the census's row order — the generator draws
+/// from the list by index, so the sharded `census/` directory is read back in
+/// the collation order the pre-shard `census.tsv` held (FIG-3727).
+fn static_rejections() -> Vec<(String, String)> {
+    super::node::census_rows()
+        .into_iter()
+        .filter(|columns| columns[2] == "rejected" && !columns[4].starts_with("probe-exempt:"))
+        .map(|columns| (columns[3].clone(), columns[4].clone()))
         .filter(|(diagnostic, probe)| {
             super::link_rejection(probe, BTreeSet::new(), BTreeSet::new())
                 .is_some_and(|(code, _)| code == *diagnostic)
@@ -429,7 +421,7 @@ impl Generator {
     /// static rejection, so it is not drawn.
     fn rejected_cell(&mut self) -> GeneratedCell {
         let rows = static_rejections();
-        let (diagnostic, probe) = *self.prng.pick(&rows);
+        let (diagnostic, probe) = self.prng.pick(&rows).clone();
         GeneratedCell {
             statements: vec![probe.to_string()],
             reject: Some(diagnostic.to_string()),

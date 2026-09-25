@@ -1,0 +1,16 @@
+# test262-path	class	qualifier
+test/built-ins/Array/prototype/flat/array-like-objects.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/flat/bound-function-call.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/flat/call-with-boolean.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/flat/empty-array-elements.js	pass	-
+test/built-ins/Array/prototype/flat/empty-object-elements.js	pass	-
+test/built-ins/Array/prototype/flat/length.js	pass	-
+test/built-ins/Array/prototype/flat/name.js	pass	-
+test/built-ins/Array/prototype/flat/non-numeric-depth-should-not-throw.js	pass	-
+test/built-ins/Array/prototype/flat/non-object-ctor-throws.js	refused	TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED
+test/built-ins/Array/prototype/flat/null-undefined-elements.js	pass	-
+test/built-ins/Array/prototype/flat/null-undefined-input-throws.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/flat/positive-infinity.js	pass	-
+test/built-ins/Array/prototype/flat/prop-desc.js	pass	-
+test/built-ins/Array/prototype/flat/proxy-access-count.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/flat/symbol-object-create-null-depth-throws.js	refused	TS_METHOD_UNSUPPORTED

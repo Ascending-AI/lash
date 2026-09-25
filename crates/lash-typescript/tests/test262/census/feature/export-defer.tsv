@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	export-defer	rejected	TS_IMPORT_EXPORT_UNSUPPORTED	probe-exempt:deferred-export syntax does not parse in the pinned SWC, so the probe would pin TS_SYNTAX_ERROR rather than the ruling

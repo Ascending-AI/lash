@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Symbol	skip	ticket-ruling:FIG-1413:Symbol — symbols are unforgeable identities with no serialized form, so a durable record keyed by one could not be written down or resumed	-

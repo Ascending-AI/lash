@@ -1,0 +1,17 @@
+# test262-path	class	qualifier
+test/built-ins/Array/prototype/reverse/S15.4.4.8_A1_T1.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/reverse/S15.4.4.8_A1_T2.js	refused	TS_SPARSE_ARRAY_UNSUPPORTED
+test/built-ins/Array/prototype/reverse/S15.4.4.8_A2_T1.js	fail	FIG-3700
+test/built-ins/Array/prototype/reverse/S15.4.4.8_A2_T2.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/reverse/S15.4.4.8_A2_T3.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/prototype/reverse/S15.4.4.8_A3_T3.js	fail	FIG-3700
+test/built-ins/Array/prototype/reverse/S15.4.4.8_A4_T1.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/Array/prototype/reverse/S15.4.4.8_A4_T2.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/Array/prototype/reverse/array-has-one-entry.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/reverse/call-with-boolean.js	refused	TS_INSTANCEOF_UNSUPPORTED
+test/built-ins/Array/prototype/reverse/get_if_present_with_delete.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/reverse/length-exceeding-integer-limit-with-object.js	refused	TS_ACCESSOR_UNSUPPORTED
+test/built-ins/Array/prototype/reverse/length-exceeding-integer-limit-with-proxy.js	refused	TS_ACCESSOR_UNSUPPORTED
+test/built-ins/Array/prototype/reverse/length.js	pass	-
+test/built-ins/Array/prototype/reverse/name.js	pass	-
+test/built-ins/Array/prototype/reverse/prop-desc.js	pass	-

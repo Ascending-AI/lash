@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	source-phase-imports-module-source	rejected	TS_IMPORT_EXPORT_UNSUPPORTED	import source mod from 'mod';

@@ -1,0 +1,19 @@
+{
+  "name": "undefined",
+  "create": "const value = [undefined, { gone: undefined, kept: 1 }];",
+  "uses": "console.log(value[0] === undefined, value.length, 'gone' in value[1], Object.keys(value[1]));",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "true 2 true [\"gone\",\"kept\"]"
+      ],
+      "probes": {}
+    }
+  ]
+}

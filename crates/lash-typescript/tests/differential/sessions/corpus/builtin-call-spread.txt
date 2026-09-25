@@ -1,0 +1,11 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/builtin-call-spread.json.
+
+session builtin-call-spread
+about a spread argument to a builtin function passes the array's items (FIG-3627)
+probe items
+cell
+const items = [3, 1];
+console.log(Math.max(...items), Math.min(...items, 0), String.fromCharCode(...[104, 105]));
+end

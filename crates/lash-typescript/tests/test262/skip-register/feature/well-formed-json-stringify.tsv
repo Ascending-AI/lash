@@ -1,0 +1,2 @@
+# test262-path	excluding-census-row
+test/built-ins/JSON/stringify/value-string-escape-unicode.js	feature:well-formed-json-stringify

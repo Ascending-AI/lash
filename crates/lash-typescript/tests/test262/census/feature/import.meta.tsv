@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	import.meta	rejected	TS_META_PROPERTY_UNSUPPORTED	const u = import.meta.url;

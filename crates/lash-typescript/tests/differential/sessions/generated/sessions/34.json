@@ -1,0 +1,149 @@
+{
+  "seed": 34,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "count",
+    "delta",
+    "field",
+    "gamma",
+    "i",
+    "item",
+    "kappa",
+    "lambda",
+    "phi",
+    "rho",
+    "shared1",
+    "sigma"
+  ],
+  "cells": [
+    {
+      "source": "for (let i = 0; i < 3; i++) {\n  console.log((5 >= i));\n  if ((11 !== (2 ** 2))) { break; }\n}\nconst rho = (item, step = 2) => 8.5 + step;\nconsole.log(rho(7));\nlet lambda = new TypeError('  pad ');\nlet kappa = new Map(Object.entries({ z: 4.5, y: 4.5 }));\nfor (const field in { ...{ d: !true } }) {\n  console.log(field);\n  kappa.set('zz', 2);\n}\nfinish((-2));\n",
+      "node": {
+        "outcome": "finish",
+        "finish": -2,
+        "prints": [
+          "true",
+          "10.5",
+          "d"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "item": "unbound",
+          "kappa": "object {}",
+          "lambda": "object {}",
+          "phi": "unbound",
+          "rho": "function undefined",
+          "shared1": "unbound",
+          "sigma": "unbound"
+        },
+        "closures": [
+          "rho"
+        ]
+      }
+    },
+    {
+      "source": "kappa.set('Lash', 12);\nfunction alpha(count) {\n  return count;\n}\nconsole.log(alpha((kappa.size + Number.parseInt('b.c' + '7', 10))));\nkappa.set('x', 6);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "NaN"
+        ],
+        "probes": {
+          "alpha": "function undefined",
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "item": "unbound",
+          "kappa": "object {}",
+          "lambda": "object {}",
+          "phi": "unbound",
+          "rho": "function undefined",
+          "shared1": "unbound",
+          "sigma": "unbound"
+        },
+        "closures": [
+          "alpha",
+          "rho"
+        ]
+      }
+    },
+    {
+      "source": "{\n  const lambda = new Set([5, 6, 5]);\n  console.log(lambda.size, lambda.has(1), [...lambda.union(new Set([7]))], lambda instanceof Set);\n  if (false) {\n    const beta = new TypeError('zz');\n    console.log(beta.name, beta.message, String(beta), beta instanceof Error);\n  } else {\n    const lambda = new Date(Date.UTC(2024, 6, 15));\n    kappa.delete('hi');\n  }\n  const phi = { h: 8 };\n}\nfunction chi(count) {\n  kappa.set('ab', 6);\n  return count;\n}\nconsole.log(chi(2));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2 false [5,6,7] true",
+          "2"
+        ],
+        "probes": {
+          "alpha": "function undefined",
+          "beta": "unbound",
+          "chi": "function undefined",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "item": "unbound",
+          "kappa": "object {}",
+          "lambda": "object {}",
+          "phi": "unbound",
+          "rho": "function undefined",
+          "shared1": "unbound",
+          "sigma": "unbound"
+        },
+        "closures": [
+          "alpha",
+          "chi",
+          "rho"
+        ]
+      }
+    },
+    {
+      "source": "globalThis.shared1 = [String(11)];\nconsole.log(shared1, shared1.includes(((4 ** 2)).toFixed(1)));\ntry {\n  console.warn((((2 >>> 6) ** 2) < 1), false);\n  const { a: delta, b: sigma = 0 } = { a: '  pad ', b: 9 };\n  throw new TypeError('  pad ', { cause: 1 });\n} catch {\n  console.log('caught');\n}\nshared1.pop();\nswitch (Number.parseInt('ab' + '7', 10) % 3) {\n  case 0: {\n    const { a: alpha, b: gamma = 0 } = { a: 'ab', b: Math.sign((10 ** 2)) };\n    break;\n  }\n  case 1: {\n    console.log(lambda, 0, shared1);\n  }\n  default: {\n    kappa.set('ab', 7.5);\n  }\n}\nshared1.splice(0, 1);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[\"11\"] false",
+          "true false",
+          "caught"
+        ],
+        "probes": {
+          "alpha": "function undefined",
+          "beta": "unbound",
+          "chi": "function undefined",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "item": "unbound",
+          "kappa": "object {}",
+          "lambda": "object {}",
+          "phi": "unbound",
+          "rho": "function undefined",
+          "shared1": "object []",
+          "sigma": "unbound"
+        },
+        "closures": [
+          "alpha",
+          "chi",
+          "rho"
+        ]
+      }
+    }
+  ]
+}

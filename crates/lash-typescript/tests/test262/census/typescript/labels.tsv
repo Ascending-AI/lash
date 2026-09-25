@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	labels	rejected	TS_LABEL_UNSUPPORTED	outer: while (true) { break outer; }

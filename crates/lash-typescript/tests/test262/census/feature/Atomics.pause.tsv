@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Atomics.pause	skip	ticket-ruling:FIG-1413:Atomics.pause	-

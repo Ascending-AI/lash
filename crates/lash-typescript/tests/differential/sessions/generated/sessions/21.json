@@ -1,0 +1,90 @@
+{
+  "seed": 21,
+  "probe": [
+    "beta",
+    "delta",
+    "entry",
+    "field",
+    "i",
+    "j",
+    "psi",
+    "turn1",
+    "value",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "let psi = { ['e']: 12, ['b']: 'x', ['c']: true };\nif (false) {\n  let beta = { c: [], b: [], f: false };\n  console.info((beta instanceof Object));\n}\nfor (let i = 0; i < 2; i++) {\n  for (const field in psi) {\n    console.log(field);\n    console.log(i, true, i);\n  }\n  for (let j = 0; j < 3; j++) {\n    psi.b = `${i}:${'x'}`.trim();\n  }\n}\nconst zeta = psi;\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "e",
+          "0 true 0",
+          "b",
+          "0 true 0",
+          "c",
+          "0 true 0",
+          "e",
+          "1 true 1",
+          "b",
+          "1 true 1",
+          "c",
+          "1 true 1"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "i": "unbound",
+          "j": "unbound",
+          "psi": "object {\"e\":12,\"b\":\"1:x\",\"c\":true}",
+          "turn1": "unbound",
+          "value": "unbound",
+          "zeta": "object {\"e\":12,\"b\":\"1:x\",\"c\":true}"
+        }
+      }
+    },
+    {
+      "source": "psi.b = Object.keys(zeta).join('');\n{\n  console.log(zeta, 'zz', true);\n  console.log(psi);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "{\"e\":12,\"b\":\"ebc\",\"c\":true} zz true",
+          "{\"e\":12,\"b\":\"ebc\",\"c\":true}"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "i": "unbound",
+          "j": "unbound",
+          "psi": "object {\"e\":12,\"b\":\"ebc\",\"c\":true}",
+          "turn1": "unbound",
+          "value": "unbound",
+          "zeta": "object {\"e\":12,\"b\":\"ebc\",\"c\":true}"
+        }
+      }
+    },
+    {
+      "source": "const delta = ['hi'.length, 6];\nzeta.e = 3;\nfor (const entry of []) {\n  let turn1 = 0;\n  while (turn1 < 2) {\n    turn1++;\n    psi.c = (delta.findLastIndex((value) => value < 6) >= 0);\n    const beta = new Error('x');\n    console.log(beta.name, beta.message, String(beta), beta instanceof Error);\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "beta": "unbound",
+          "delta": "object [2,6]",
+          "entry": "unbound",
+          "field": "unbound",
+          "i": "unbound",
+          "j": "unbound",
+          "psi": "object {\"e\":3,\"b\":\"ebc\",\"c\":true}",
+          "turn1": "unbound",
+          "value": "unbound",
+          "zeta": "object {\"e\":3,\"b\":\"ebc\",\"c\":true}"
+        }
+      }
+    }
+  ]
+}

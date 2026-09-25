@@ -1,0 +1,27 @@
+# test262-path	class	qualifier
+test/language/reserved-words/await-script.js	pass	-
+test/language/reserved-words/ident-name-global-property-accessor.js	refused	TS_ACCESSOR_UNSUPPORTED
+test/language/reserved-words/ident-name-global-property-memberexpr-str.js	pass	-
+test/language/reserved-words/ident-name-global-property-memberexpr.js	pass	-
+test/language/reserved-words/ident-name-global-property-prop-name.js	pass	-
+test/language/reserved-words/ident-name-keyword-accessor.js	refused	TS_ACCESSOR_UNSUPPORTED
+test/language/reserved-words/ident-name-keyword-memberexpr-str.js	pass	-
+test/language/reserved-words/ident-name-keyword-memberexpr.js	pass	-
+test/language/reserved-words/ident-name-keyword-prop-name.js	pass	-
+test/language/reserved-words/ident-name-reserved-word-literal-accessor.js	refused	TS_ACCESSOR_UNSUPPORTED
+test/language/reserved-words/ident-name-reserved-word-literal-memberexpr-str.js	pass	-
+test/language/reserved-words/ident-name-reserved-word-literal-memberexpr.js	pass	-
+test/language/reserved-words/ident-name-reserved-word-literal-prop-name.js	pass	-
+test/language/reserved-words/ident-reference-false-escaped.js	pass	-
+test/language/reserved-words/ident-reference-false.js	pass	-
+test/language/reserved-words/ident-reference-null-escaped.js	pass	-
+test/language/reserved-words/ident-reference-null.js	pass	-
+test/language/reserved-words/ident-reference-true-escaped.js	pass	-
+test/language/reserved-words/ident-reference-true.js	pass	-
+test/language/reserved-words/label-ident-false-escaped.js	pass	-
+test/language/reserved-words/label-ident-false.js	pass	-
+test/language/reserved-words/label-ident-null-escaped.js	pass	-
+test/language/reserved-words/label-ident-null.js	pass	-
+test/language/reserved-words/label-ident-true-escaped.js	pass	-
+test/language/reserved-words/label-ident-true.js	pass	-
+test/language/reserved-words/unreserved-words.js	harness	binding-collision

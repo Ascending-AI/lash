@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Uint16Array	skip	ticket-ruling:FIG-1413:Uint16Array	-

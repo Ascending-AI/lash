@@ -1,0 +1,48 @@
+{
+  "id": "process-literal-binding",
+  "about": "a top-level uncalled async arrow is a function value, and lifts to a process in lash",
+  "probe": [
+    "worker"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const worker = async () => {\n  return 1;\n};\nconsole.log(typeof worker);\n",
+      "reject": null,
+      "deviation": "process-literal-is-a-process-value",
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "function"
+        ],
+        "probes": {
+          "worker": "function undefined"
+        },
+        "closures": [
+          "worker"
+        ]
+      },
+      "lash": {
+        "resident": {
+          "outcome": "normal",
+          "prints": [
+            "object"
+          ],
+          "probes": {
+            "worker": "object {\"$lash_process\":true,\"process_name\":\"__process_<hash>\",\"module_ref\":\"lashlang:v2:blake3:<hash>\",\"process_ref\":{\"component\":\"<hash>\",\"pos\":0},\"host_requirements_ref\":\"lashlang-host-requirements:v2:blake3:<hash>\"}"
+          }
+        },
+        "restart": {
+          "outcome": "normal",
+          "prints": [
+            "object"
+          ],
+          "probes": {
+            "worker": "object {\"$lash_process\":true,\"process_name\":\"__process_<hash>\",\"module_ref\":\"lashlang:v2:blake3:<hash>\",\"process_ref\":{\"component\":\"<hash>\",\"pos\":0},\"host_requirements_ref\":\"lashlang-host-requirements:v2:blake3:<hash>\"}"
+          }
+        }
+      }
+    }
+  ]
+}

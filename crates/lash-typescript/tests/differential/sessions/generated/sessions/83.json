@@ -1,0 +1,107 @@
+{
+  "seed": 83,
+  "probe": [
+    "beta",
+    "count",
+    "delta",
+    "field",
+    "iota",
+    "item",
+    "omega",
+    "psi",
+    "rest",
+    "rho",
+    "tau",
+    "value",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "for (const field in { h: 8, f: !false, g: 3 }) {\n  console.log(field);\n}\nconst zeta = 'x';\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "h",
+          "f",
+          "g"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "omega": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "rho": "unbound",
+          "tau": "unbound",
+          "value": "unbound",
+          "zeta": "string \"x\""
+        }
+      }
+    },
+    {
+      "source": "const rho = (item, ...rest) => item + rest.length;\nconsole.log(rho((8 - (2 << 4.5))));\nfunction beta(count) {\n  const omega = (value, ...rest) => count + rest.length;\n  return omega(count);\n}\nconsole.log(beta(beta(1)));\nconsole.info(7.5, zeta, zeta);\nconsole.log(10, zeta);\nswitch (11 % 3) {\n  case 0: {\n    console.log(zeta, !(zeta.includes('a') && zeta.includes('a')));\n    break;\n  }\n  case 1: {\n    let omega = [((true ? 5 : 3)).toFixed(1)];\n    switch (zeta.indexOf('b') % 3) {\n      case 0: {\n        omega.push(...['a,b', 'x']);\n        break;\n      }\n      default: {\n        let delta = omega;\n      }\n    }\n    break;\n  }\n  default: {\n    {\n      console.log(zeta, zeta);\n    }\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "-24",
+          "1",
+          "7.5 x x",
+          "10 x",
+          "x x"
+        ],
+        "probes": {
+          "beta": "function undefined",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "omega": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "rho": "function undefined",
+          "tau": "unbound",
+          "value": "unbound",
+          "zeta": "string \"x\""
+        },
+        "closures": [
+          "beta",
+          "rho"
+        ]
+      }
+    },
+    {
+      "source": "var psi = [zeta, 'x'.slice(0, 2)];\n{\n  if (false) {\n    let iota = `${psi.length}:${zeta}`;\n  } else {\n    const tau = new URL('https://example.com/q?x=1');\n    console.log(tau.href, tau.pathname, tau.searchParams.get('x'), tau.origin);\n    console.log(false, zeta, 8);\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "https://example.com/q?x=1 /q 1 https://example.com",
+          "false x 8"
+        ],
+        "probes": {
+          "beta": "function undefined",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "omega": "unbound",
+          "psi": "object [\"x\",\"x\"]",
+          "rest": "unbound",
+          "rho": "function undefined",
+          "tau": "unbound",
+          "value": "unbound",
+          "zeta": "string \"x\""
+        },
+        "closures": [
+          "beta",
+          "rho"
+        ]
+      }
+    }
+  ]
+}

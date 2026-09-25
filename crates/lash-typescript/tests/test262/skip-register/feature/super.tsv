@@ -1,0 +1,19 @@
+# test262-path	excluding-census-row
+test/language/eval-code/direct/super-call-arrow.js	feature:super
+test/language/eval-code/direct/super-call-fn.js	feature:super
+test/language/eval-code/direct/super-call-method.js	feature:super
+test/language/eval-code/direct/super-call.js	feature:super
+test/language/eval-code/direct/super-prop-arrow.js	feature:super
+test/language/eval-code/direct/super-prop-dot-no-home.js	feature:super
+test/language/eval-code/direct/super-prop-expr-no-home-no-eval.js	feature:super
+test/language/eval-code/direct/super-prop-expr-no-home.js	feature:super
+test/language/eval-code/direct/super-prop-method.js	feature:super
+test/language/eval-code/direct/super-prop.js	feature:super
+test/language/eval-code/indirect/super-call.js	feature:super
+test/language/eval-code/indirect/super-prop.js	feature:super
+test/language/expressions/object/method-definition/name-super-prop-body.js	feature:super
+test/language/expressions/object/method-definition/name-super-prop-param.js	feature:super
+test/language/global-code/super-call-arrow.js	feature:super
+test/language/global-code/super-call.js	feature:super
+test/language/global-code/super-prop-arrow.js	feature:super
+test/language/global-code/super-prop.js	feature:super

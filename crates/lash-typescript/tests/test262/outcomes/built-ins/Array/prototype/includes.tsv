@@ -1,0 +1,22 @@
+# test262-path	class	qualifier
+test/built-ins/Array/prototype/includes/call-with-boolean.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/includes/fromIndex-equal-or-greater-length-returns-false.js	pass	-
+test/built-ins/Array/prototype/includes/fromIndex-infinity.js	pass	-
+test/built-ins/Array/prototype/includes/fromIndex-minus-zero.js	pass	-
+test/built-ins/Array/prototype/includes/length-boundaries.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/includes/length-zero-returns-false.js	pass	-
+test/built-ins/Array/prototype/includes/length.js	pass	-
+test/built-ins/Array/prototype/includes/name.js	pass	-
+test/built-ins/Array/prototype/includes/no-arg.js	pass	-
+test/built-ins/Array/prototype/includes/prop-desc.js	pass	-
+test/built-ins/Array/prototype/includes/return-abrupt-get-length.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/includes/return-abrupt-get-prop.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/includes/return-abrupt-tointeger-fromindex.js	pass	-
+test/built-ins/Array/prototype/includes/return-abrupt-tonumber-length.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/includes/samevaluezero.js	pass	-
+test/built-ins/Array/prototype/includes/sparse.js	pass	-
+test/built-ins/Array/prototype/includes/this-is-not-object.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/includes/tointeger-fromindex.js	pass	-
+test/built-ins/Array/prototype/includes/tolength-length.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/includes/using-fromindex.js	pass	-
+test/built-ins/Array/prototype/includes/values-are-not-cached.js	refused	TS_METHOD_UNSUPPORTED

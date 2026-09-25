@@ -1,0 +1,46 @@
+{
+  "id": "generated-temporaries",
+  "about": "member assignment, callbacks, destructuring and process literals bind only authored names",
+  "probe": [
+    "box",
+    "doubled",
+    "v",
+    "p",
+    "r1",
+    "r2",
+    "head",
+    "tail",
+    "index",
+    "value",
+    "total"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const box = { value: 1 };\nbox.value = 2;\nbox.value += 3;\nconst doubled = [1, 2].map((v) => v * 2).filter((v) => v > 2);\nconst { p, q: [r1, r2] } = { p: 1, q: [2, 3] };\nconst [head, ...tail] = [4, 5, 6];\nlet total = 0;\nfor (const [index, value] of [[0, 10], [1, 20]]) {\n  total = total + index + value;\n}\nconsole.log(box.value, doubled, p, r1, r2, head, tail, total);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "5 [4] 1 2 3 4 [5,6] 31"
+        ],
+        "probes": {
+          "box": "object {\"value\":5}",
+          "doubled": "object [4]",
+          "v": "unbound",
+          "p": "number 1",
+          "r1": "number 2",
+          "r2": "number 3",
+          "head": "number 4",
+          "tail": "object [5,6]",
+          "index": "unbound",
+          "value": "unbound",
+          "total": "number 31"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

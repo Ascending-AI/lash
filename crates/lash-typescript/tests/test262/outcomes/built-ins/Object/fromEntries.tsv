@@ -1,0 +1,12 @@
+# test262-path	class	qualifier
+test/built-ins/Object/fromEntries/empty-iterable.js	pass	-
+test/built-ins/Object/fromEntries/key-order.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/fromEntries/length.js	pass	-
+test/built-ins/Object/fromEntries/name.js	pass	-
+test/built-ins/Object/fromEntries/prototype.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/fromEntries/requires-argument.js	refused	TS_EXPRESSION_UNSUPPORTED
+test/built-ins/Object/fromEntries/simple-properties.js	pass	-
+test/built-ins/Object/fromEntries/string-entry-object-succeeds.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/fromEntries/string-entry-primitive-throws.js	pass	-
+test/built-ins/Object/fromEntries/string-entry-string-object-succeeds.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Object/fromEntries/uses-define-semantics.js	refused	TS_METHOD_UNSUPPORTED

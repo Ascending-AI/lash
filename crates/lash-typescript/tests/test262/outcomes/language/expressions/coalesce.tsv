@@ -1,0 +1,23 @@
+# test262-path	class	qualifier
+test/language/expressions/coalesce/abrupt-is-a-short-circuit.js	pass	-
+test/language/expressions/coalesce/cannot-chain-head-with-logical-and.js	pass	-
+test/language/expressions/coalesce/cannot-chain-head-with-logical-or.js	pass	-
+test/language/expressions/coalesce/cannot-chain-tail-with-logical-and.js	pass	-
+test/language/expressions/coalesce/cannot-chain-tail-with-logical-or.js	pass	-
+test/language/expressions/coalesce/chainable-if-parenthesis-covered-logical-and.js	pass	-
+test/language/expressions/coalesce/chainable-if-parenthesis-covered-logical-or.js	pass	-
+test/language/expressions/coalesce/chainable-with-bitwise-and.js	pass	-
+test/language/expressions/coalesce/chainable-with-bitwise-or.js	pass	-
+test/language/expressions/coalesce/chainable-with-bitwise-xor.js	pass	-
+test/language/expressions/coalesce/chainable.js	pass	-
+test/language/expressions/coalesce/follows-null.js	pass	-
+test/language/expressions/coalesce/follows-undefined.js	pass	-
+test/language/expressions/coalesce/short-circuit-number-0.js	pass	-
+test/language/expressions/coalesce/short-circuit-number-42.js	pass	-
+test/language/expressions/coalesce/short-circuit-number-empty-string.js	pass	-
+test/language/expressions/coalesce/short-circuit-number-false.js	pass	-
+test/language/expressions/coalesce/short-circuit-number-object.js	pass	-
+test/language/expressions/coalesce/short-circuit-number-string.js	pass	-
+test/language/expressions/coalesce/short-circuit-number-symbol.js	refused	TS_METHOD_UNSUPPORTED
+test/language/expressions/coalesce/short-circuit-number-true.js	pass	-
+test/language/expressions/coalesce/short-circuit-prevents-evaluation.js	pass	-

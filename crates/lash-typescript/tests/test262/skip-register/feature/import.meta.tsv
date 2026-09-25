@@ -1,0 +1,6 @@
+# test262-path	excluding-census-row
+test/language/expressions/import.meta/syntax/goal-async-function-params-or-body.js	feature:import.meta
+test/language/expressions/import.meta/syntax/goal-async-generator-params-or-body.js	feature:import.meta
+test/language/expressions/import.meta/syntax/goal-function-params-or-body.js	feature:import.meta
+test/language/expressions/import.meta/syntax/goal-generator-params-or-body.js	feature:import.meta
+test/language/expressions/import.meta/syntax/goal-script.js	feature:import.meta

@@ -1,0 +1,91 @@
+{
+  "seed": 92,
+  "probe": [
+    "alpha",
+    "chi",
+    "delta",
+    "field",
+    "gamma",
+    "item",
+    "omega",
+    "sigma",
+    "step",
+    "tau",
+    "total",
+    "value"
+  ],
+  "cells": [
+    {
+      "source": "const [chi, ...tau] = [((4 % 0) * 11), 8, 1];\nif ([[chi], [2]].flat().includes(2)) {\n  const gamma = (value) => 1;\n  console.log(gamma(0));\n  tau.pop();\n} else {\n  {\n    const omega = new URL('https://example.com/a/b?x=1');\n    console.log(omega.href, omega.pathname, omega.searchParams.get('x'), omega.origin);\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "number null",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "item": "unbound",
+          "omega": "unbound",
+          "sigma": "unbound",
+          "step": "unbound",
+          "tau": "object [8]",
+          "total": "unbound",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "for (const field in tau) {\n  console.log(field);\n  console.info(chi);\n}\nconst alpha = new TypeError('hi');\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "0",
+          "NaN"
+        ],
+        "probes": {
+          "alpha": "object {}",
+          "chi": "number null",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "item": "unbound",
+          "omega": "unbound",
+          "sigma": "unbound",
+          "step": "unbound",
+          "tau": "object [8]",
+          "total": "unbound",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "for (let step = 0; step < 3; step++) {\n  console.log(step, 'x', 9);\n}\nvar sigma = tau;\nconst delta = /(?<first>[a-z])(b)?/.exec('Lash');\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "0 x 9",
+          "1 x 9",
+          "2 x 9"
+        ],
+        "probes": {
+          "alpha": "object {}",
+          "chi": "number null",
+          "delta": "object [\"a\",\"a\",null]",
+          "field": "unbound",
+          "gamma": "unbound",
+          "item": "unbound",
+          "omega": "unbound",
+          "sigma": "object [8]",
+          "step": "unbound",
+          "tau": "object [8]",
+          "total": "unbound",
+          "value": "unbound"
+        }
+      }
+    }
+  ]
+}

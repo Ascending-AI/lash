@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	well-formed-json-stringify	rejected	TS_LONE_SURROGATE_LITERAL_UNSUPPORTED	JSON.stringify('\ud800');

@@ -1,0 +1,19 @@
+{
+  "name": "string",
+  "create": "const value = 'héllo 😀 line\\nbreak';",
+  "uses": "console.log(value.length, [...value].length, value.at(-1), value.split('\\n')[1], JSON.stringify(value));",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "19 18 k break \"héllo 😀 line\\nbreak\""
+      ],
+      "probes": {}
+    }
+  ]
+}

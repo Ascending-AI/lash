@@ -1,0 +1,32 @@
+{
+  "id": "global-this-read-past-a-parameter",
+  "about": "a parameter of the same name does not answer a globalThis read (FIG-3620)",
+  "probe": [
+    "shadowed",
+    "pick"
+  ],
+  "deviations": [
+    "closure-boundary"
+  ],
+  "cells": [
+    {
+      "source": "globalThis.shadowed = \"global\";\nfunction pick(shadowed) { return [shadowed, globalThis.shadowed]; }\nconsole.log(pick(\"param\"));\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[\"param\",\"global\"]"
+        ],
+        "probes": {
+          "shadowed": "string \"global\"",
+          "pick": "function undefined"
+        },
+        "closures": [
+          "pick"
+        ]
+      }
+    }
+  ]
+}

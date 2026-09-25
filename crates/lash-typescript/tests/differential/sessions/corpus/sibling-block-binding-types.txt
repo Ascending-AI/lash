@@ -1,0 +1,18 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/sibling-block-binding-types.json.
+
+session sibling-block-binding-types
+about sibling blocks may declare one name with values of different types (FIG-3631)
+probe label
+cell
+if (true) {
+  let label = 1;
+} else {
+  let label = true;
+}
+{
+  let label = 'x';
+  console.log(label);
+}
+end

@@ -1,0 +1,25 @@
+{
+  "id": "finish-after-bindings",
+  "about": "a finished cell keeps the bindings it made before finishing",
+  "probe": [
+    "made"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const made = [1];\nfinish(made.length);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "finish",
+        "prints": [],
+        "finish": 1,
+        "probes": {
+          "made": "object [1]"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

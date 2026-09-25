@@ -1,0 +1,15 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/global-this-past-a-block-binding.json.
+
+session global-this-past-a-block-binding
+about a top-level block binding is not the global of the same name, so a globalThis write in the block creates a separate global (FIG-3620)
+probe blocked
+cell
+{
+  let blocked = 1;
+  globalThis.blocked = 2;
+  console.log(blocked, globalThis.blocked);
+}
+console.log(blocked);
+end

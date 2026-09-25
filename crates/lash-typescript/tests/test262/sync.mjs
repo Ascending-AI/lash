@@ -3,7 +3,7 @@
 // Derives the executable Test262 selection from the pinned upstream checkout
 // and the census, and vendors it. Nothing here is hand-picked: a test is
 // selected exactly when every census row it touches is `accepted` (see
-// README.md, "Selection"). `inventory` refreshes only inventory.tsv; `sync`
+// README.md, "Selection"). `inventory` refreshes only the `inventory/` shards; `sync`
 // rewrites every derived file and the vendored tree; `check` rewrites nothing
 // and fails when any derived file or vendored byte differs from what `sync`
 // would write.
@@ -62,6 +62,75 @@ function rows(path, columns) {
       if (fields.length !== columns) throw new Error(`${path}: malformed row: ${line}`);
       return fields;
     });
+}
+
+// A sharded record table is a directory of `*.tsv` files, named by the path
+// under it (`census/feature/Temporal.tsv` is shard `feature/Temporal`), so
+// two lanes that touch different rows never share a file (FIG-3727).
+function tableFiles(directory) {
+  const files = [];
+  for (const name of readdirSync(directory).sort()) {
+    const path = join(directory, name);
+    if (statSync(path).isDirectory()) files.push(...tableFiles(path));
+    else if (name.endsWith(".tsv")) files.push(path);
+  }
+  return files;
+}
+
+// `shardOf` maps a row's fields to the shard it must live in, so a
+// hand-edited row dropped into the wrong file is caught here.
+function tableRows(table, columns, shardOf) {
+  const directory = join(root, table);
+  if (!existsSync(directory) || !statSync(directory).isDirectory()) {
+    throw new Error(`${directory} is not a sharded table directory`);
+  }
+  return tableFiles(directory).flatMap((path) => {
+    const shard = relative(directory, path).replaceAll("\\", "/").replace(/\.tsv$/, "");
+    return rows(path, columns).map((fields) => {
+      if (shardOf(fields) !== shard) {
+        throw new Error(`${path}: row belongs in shard ${shardOf(fields)}`);
+      }
+      return fields;
+    });
+  });
+}
+
+// `wanted` maps a shard name to its row lines; `sync` rewrites the table and
+// removes stale shards, `check` verifies all of it byte for byte.
+function compareOrWriteShards(table, header, wanted) {
+  const directory = join(root, table);
+  const expected = new Map(
+    [...wanted].map(([shard, lines]) => [`${shard}.tsv`, header + lines.join("\n") + "\n"]),
+  );
+  const existing = existsSync(directory) ? tableFiles(directory) : [];
+  if (mode === "check") {
+    for (const [name, contents] of expected) {
+      const path = join(directory, name);
+      if (!existsSync(path) || readFileSync(path, "utf8") !== contents) {
+        throw new Error(`${path} is stale; run sync mode`);
+      }
+    }
+    const stale = existing.filter(
+      (path) => !expected.has(relative(directory, path).replaceAll("\\", "/")),
+    );
+    if (stale.length) {
+      throw new Error(`${table}/ holds stale shards ${stale.slice(0, 5).join(", ")}; run sync mode`);
+    }
+    return;
+  }
+  for (const [name, contents] of expected) {
+    const path = join(directory, name);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, contents);
+  }
+  for (const path of existing.filter(
+    (path) => !expected.has(relative(directory, path).replaceAll("\\", "/")),
+  )) {
+    unlinkSync(path);
+  }
+  for (const directoryPath of walkDirectories(directory).reverse()) {
+    if (readdirSync(directoryPath).length === 0) rmdirSync(directoryPath);
+  }
 }
 
 function frontmatter(code) {
@@ -196,17 +265,22 @@ const typescriptNames = [
   "unresolvable-references",
   "with",
   "source-size",
+  // Further dialect rulings recorded straight in the census; an inventory row
+  // each keeps census and inventory the same set (FIG-3662 and later).
+  "array-literal-elisions",
+  "cyclic-heap-value",
+  "date-parse-non-iso",
+  "regexp-nesting",
+  "regexp-operand-coercion",
 ];
-const inventory =
-  [
-    ...directoryNames.map((name) => ["directory", name]),
-    ...featureNames.map((name) => ["feature", name]),
-    ...flagNames.map((name) => ["flag", name]),
-    ...typescriptNames.map((name) => ["typescript", name]),
-  ]
-    .sort(([kindA, nameA], [kindB, nameB]) => kindA.localeCompare(kindB) || nameA.localeCompare(nameB))
-    .map((fields) => fields.join("\t"))
-    .join("\n") + "\n";
+const inventory = [
+  ...directoryNames.map((name) => ["directory", name]),
+  ...featureNames.map((name) => ["feature", name]),
+  ...flagNames.map((name) => ["flag", name]),
+  ...typescriptNames.map((name) => ["typescript", name]),
+].sort(
+  ([kindA, nameA], [kindB, nameB]) => kindA.localeCompare(kindB) || nameA.localeCompare(nameB),
+);
 
 function compareOrWrite(path, contents) {
   if (mode === "check") {
@@ -218,15 +292,23 @@ function compareOrWrite(path, contents) {
   }
 }
 
-compareOrWrite(join(root, "inventory.tsv"), inventory);
+// The inventory is one row per file, `inventory/<kind>/<name>.tsv`: a new
+// feature is a new file, never a shared edit (FIG-3727).
+compareOrWriteShards(
+  "inventory",
+  "# kind\tname\n",
+  new Map(inventory.map(([kind, name]) => [`${kind}/${name}`, [`${kind}\t${name}`]])),
+);
 if (mode === "inventory") process.exit(0);
 
-const censusRows = rows(join(root, "census.tsv"), 5);
+// `census/<kind>/<name>.tsv` holds exactly the row it is named for (FIG-3727):
+// a ruling on one feature edits one file.
+const censusRows = tableRows("census", 5, ([kind, name]) => `${kind}/${name}`);
 const census = new Map(censusRows.map(([kind, name, status, reason]) => [`${kind}:${name}`, { status, reason }]));
-const inventoryKeys = new Set(inventory.trimEnd().split("\n").map((line) => line.replace("\t", ":")));
-if (census.size !== censusRows.length) throw new Error("census.tsv has duplicate entries");
+const inventoryKeys = new Set(inventory.map(([kind, name]) => `${kind}:${name}`));
+if (census.size !== censusRows.length) throw new Error("census/ has duplicate entries");
 if (census.size !== inventoryKeys.size || [...inventoryKeys].some((key) => !census.has(key))) {
-  throw new Error("census.tsv does not exactly cover inventory.tsv; classify every row before syncing");
+  throw new Error("census/ does not exactly cover inventory/; classify every row before syncing");
 }
 
 const allTests = walk(join(source, "test"))
@@ -296,10 +378,16 @@ for (const [, paths] of [...strata].sort(([a], [b]) => a.localeCompare(b))) {
 }
 sample.sort();
 
-compareOrWrite(
-  join(root, "skip-register.tsv"),
-  "# test262-path\texcluding-census-row\n" + skips.map((row) => row.join("\t")).join("\n") + "\n",
-);
+// The skip register shards by the census row that excludes its paths —
+// `skip-register/feature/Temporal.tsv` — so a census change rewrites only
+// its own shard, and the shards hold exactly the paths their row names.
+const skipShards = new Map();
+for (const [testPath, rule] of skips) {
+  const shard = rule.replace(":", "/");
+  if (!skipShards.has(shard)) skipShards.set(shard, []);
+  skipShards.get(shard).push(`${testPath}\t${rule}`);
+}
+compareOrWriteShards("skip-register", "# test262-path\texcluding-census-row\n", skipShards);
 compareOrWrite(join(root, "sample.tsv"), "# test262-path\n" + sample.join("\n") + "\n");
 compareOrWrite(join(root, "upstream-test-count.txt"), `${allTests.length}\n`);
 

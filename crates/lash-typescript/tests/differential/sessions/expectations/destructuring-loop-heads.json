@@ -1,0 +1,34 @@
+{
+  "id": "destructuring-loop-heads",
+  "about": "destructured loop-head bindings end with their loop",
+  "probe": [
+    "rows",
+    "id",
+    "first",
+    "sum"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const rows = [{ id: 1, tags: [\"a\"] }, { id: 2, tags: [\"b\"] }];\nlet sum = 0;\nfor (const { id, tags: [first] } of rows) {\n  sum = sum + id;\n  console.log(first);\n}\nconsole.log(sum);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "a",
+          "b",
+          "3"
+        ],
+        "probes": {
+          "rows": "object [{\"id\":1,\"tags\":[\"a\"]},{\"id\":2,\"tags\":[\"b\"]}]",
+          "id": "unbound",
+          "first": "unbound",
+          "sum": "number 3"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

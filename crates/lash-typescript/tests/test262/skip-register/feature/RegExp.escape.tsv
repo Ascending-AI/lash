@@ -1,0 +1,21 @@
+# test262-path	excluding-census-row
+test/built-ins/RegExp/escape/cross-realm.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/escaped-control-characters.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/escaped-lineterminator.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/escaped-otherpunctuators.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/escaped-solidus-character-mixed.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/escaped-solidus-character-simple.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/escaped-surrogates.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/escaped-syntax-characters-mixed.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/escaped-syntax-characters-simple.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/escaped-utf16encodecodepoint.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/escaped-whitespace.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/initial-char-escape.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/is-function.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/length.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/name.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/non-string-inputs.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/not-a-constructor.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/not-escaped-underscore.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/not-escaped.js	feature:RegExp.escape
+test/built-ins/RegExp/escape/prop-desc.js	feature:RegExp.escape

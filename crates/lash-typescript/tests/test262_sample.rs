@@ -34,30 +34,42 @@ mod runner;
 use ingest::data_path;
 use runner::{Host, Outcome, data_lines};
 
+/// One `(kind, name)` row per file under `census/` and `inventory/`: the file
+/// `feature/Temporal.tsv` holds exactly the `feature\tTemporal` row, so a new
+/// row is a new file and two lanes never share one (FIG-3727). The shard
+/// name is the sorted order — the union of the tables is the union of their
+/// files.
 #[test]
 fn inventory_census_and_skip_register_are_exhaustive() {
-    let inventory = data_lines("inventory.tsv", 2)
+    let owned_rows = |table: &str, columns: usize| -> Vec<Vec<String>> {
+        let mut rows = Vec::new();
+        for (shard, shard_rows) in runner::data_files(table, columns) {
+            assert_eq!(
+                shard_rows.len(),
+                1,
+                "{table}/{shard}.tsv is one file per row"
+            );
+            let fields = &shard_rows[0];
+            assert_eq!(
+                format!("{}/{}", fields[0], fields[1]),
+                shard,
+                "{table}/{shard}.tsv holds a row other than its own {fields:?}"
+            );
+            rows.push(fields.clone());
+        }
+        rows
+    };
+    let inventory = owned_rows("inventory", 2)
         .into_iter()
         .map(|fields| (fields[0].clone(), fields[1].clone()))
         .collect::<BTreeSet<_>>();
-    let census_rows = data_lines("census.tsv", 5);
+    let census_rows = owned_rows("census", 5);
     let census = census_rows
         .iter()
         .map(|fields| ((fields[0].clone(), fields[1].clone()), fields[2].clone()))
         .collect::<BTreeMap<_, _>>();
-    // The census stays in the inventory's sorted-by-key order, so two lanes
-    // adding rows meet only on a real overlap (FIG-3727).
-    assert_eq!(
-        census_rows
-            .iter()
-            .map(|fields| (fields[0].as_str(), fields[1].as_str()))
-            .collect::<Vec<_>>(),
-        data_lines("inventory.tsv", 2)
-            .iter()
-            .map(|fields| (fields[0].as_str(), fields[1].as_str()))
-            .collect::<Vec<_>>(),
-        "census.tsv stays sorted by (kind, name): a row out of order conflicts on every merge"
-    );
+    // The same files, so the same keys: the census covers the inventory
+    // exactly, and each row sits in the file its key names (FIG-3727).
     assert_eq!(
         census.keys().cloned().collect::<BTreeSet<_>>(),
         inventory,
@@ -103,8 +115,27 @@ fn inventory_census_and_skip_register_are_exhaustive() {
 
     // Every excluded upstream path names the census row that excludes it, and
     // that row is not accepted; the selection and the exclusions partition
-    // the upstream tree.
-    let skip_rows = data_lines("skip-register.tsv", 2);
+    // the upstream tree. The register shards by the excluding row —
+    // `skip-register/feature/Temporal.tsv` holds the paths `feature:Temporal`
+    // excludes — so a census change touches only its own shard (FIG-3727).
+    let mut skip_rows = Vec::new();
+    for (shard, shard_rows) in runner::data_files("skip-register", 2) {
+        let row_key = shard.replace('/', ":");
+        let mut last = String::new();
+        for fields in &shard_rows {
+            assert_eq!(
+                fields[1], row_key,
+                "skip-register/{shard}.tsv holds a row {fields:?} another row excludes"
+            );
+            assert!(
+                fields[0].as_str() > last.as_str(),
+                "skip-register/{shard}.tsv rows are unsorted: {last} then {}",
+                fields[0]
+            );
+            last = fields[0].clone();
+        }
+        skip_rows.extend(shard_rows);
+    }
     let skipped = skip_rows
         .iter()
         .map(|fields| fields[0].as_str())
@@ -229,7 +260,7 @@ fn every_selected_test_has_one_owned_outcome() {
     }
     // A refusal is only as good as the ruling behind it: each code the
     // selection shows must be the diagnostic a rejected census row names.
-    let census_codes = data_lines("census.tsv", 5)
+    let census_codes = data_lines("census", 5)
         .into_iter()
         .filter(|fields| fields[2] == "rejected")
         .map(|fields| fields[3].clone())
@@ -391,7 +422,7 @@ fn typescript_type_syntax_status_is_pinned() {
 fn rejected_census_rows_name_the_diagnostic_that_fires() {
     let mut probed = 0;
     let mut exempt = 0;
-    for fields in data_lines("census.tsv", 5)
+    for fields in data_lines("census", 5)
         .into_iter()
         .filter(|fields| fields[2] == "rejected")
     {

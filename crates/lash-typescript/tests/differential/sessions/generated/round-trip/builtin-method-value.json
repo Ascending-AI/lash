@@ -1,0 +1,19 @@
+{
+  "name": "builtin-method-value",
+  "create": "const value = 'x'.includes;",
+  "uses": "console.log(typeof value, value.name, value.length, value === 'y'.includes, String(value));",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "function includes 1 true function includes() { [native code] }"
+      ],
+      "probes": {}
+    }
+  ]
+}

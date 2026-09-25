@@ -4,7 +4,7 @@
 # Bazel's generated module lock records the complete pinned dependency graph.
 MODULE.bazel.lock
 
-# The generated Test262 outcome record, one `outcomes/<directory>.tsv` shard per
-# top-level test directory (FIG-3646, FIG-3727), ratcheted by
-# scripts/check_test262_ratchet.py.
+# The generated Test262 outcome record: `outcomes/**/*.tsv` shards, one per
+# test directory cut as deep as the tree is hot (FIG-3646, FIG-3727),
+# ratcheted by scripts/check_test262_ratchet.py.
 crates/lash-typescript/tests/test262/outcomes/*.tsv

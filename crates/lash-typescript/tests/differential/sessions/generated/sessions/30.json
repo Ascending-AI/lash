@@ -1,0 +1,168 @@
+{
+  "seed": 30,
+  "probe": [
+    "beta",
+    "chi",
+    "delta",
+    "entry",
+    "field",
+    "i",
+    "index",
+    "kappa",
+    "lambda",
+    "omega",
+    "phi",
+    "problem",
+    "psi",
+    "rho",
+    "sigma",
+    "slot",
+    "step",
+    "tau",
+    "theta",
+    "turn1",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "{\n  let turn1 = 0;\n  while (turn1 < 2) {\n    turn1++;\n    const psi = { h: 3, c: ('ab'.length !== Array.from({ length: 3 }, (slot, index) => index * 2).length) };\n  }\n  const tau = /a(b*)/g;\n  for (const entry of [Math.round(8.5), Array.from({ length: 0 }, (slot, index) => index * 2).length]) {\n    const rho = /(?<first>[a-z])(b)?/.exec('x');\n    console.log(rho?.[0] ?? 'none', rho?.index ?? -1, rho?.groups?.first ?? '-', rho === null);\n    tau.lastIndex = 0;\n  }\n}\n{\n  for (const entry of ['ab', 'hi']) {\n    let kappa = { c: false, b: ((4 !== 7.5) ? 5 : 2) };\n    const phi = String(4).replaceAll('b', 'B');\n  }\n}\nlet chi = true;\nconst sigma = { a: [] };\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "x 0 x false",
+          "x 0 x false"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "boolean true",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "i": "unbound",
+          "index": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "sigma": "object {\"a\":[]}",
+          "slot": "unbound",
+          "step": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "switch ('  pad '.indexOf('b') % 3) {\n  case 0: {\n    const lambda = new TypeError('hi');\n    console.log(lambda.name, lambda.message, String(lambda), lambda instanceof Error);\n    if ([[5.5], [2]].flat().includes(2)) {\n      console.info(8, (3 === 0));\n      sigma.a.push(Number.parseInt('a,b'.toUpperCase() + '7', 10));\n    }\n  }\n  case 1: {\n    let sigma = (typeof 3).includes('a');\n    sigma = (1 === (11 + 9));\n    break;\n  }\n  default: {\n    let omega = sigma;\n  }\n}\nfor (const field in sigma) {\n  console.log(field);\n  let beta = true;\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "a"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "boolean true",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "i": "unbound",
+          "index": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "sigma": "object {\"a\":[]}",
+          "slot": "unbound",
+          "step": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "for (const field in sigma) {\n  console.log(field);\n}\nfor (const entry of ['  pad '.toUpperCase()]) {\n  let rho = /(?<first>[a-z])(b)?/.exec('hi');\n  const psi = entry;\n  if ((('b.c' + 'b.c') === psi.padStart(5, '*'))) { continue; }\n}\nfor (const entry of [5, (false ? 6 : 11), '  pad '.indexOf('b')]) {\n  console.warn((typeof 0).slice(0, 2), sigma);\n  try {\n    sigma.a.push(7);\n    throw new TypeError('b.c');\n  } catch (problem) {\n    console.log(problem.name, problem.message, problem instanceof RangeError);\n  }\n}\n{\n  const kappa = new Set([5, 0, 5]);\n  console.log(kappa.size, kappa.has(1), [...kappa.union(new Set([7]))], kappa instanceof Set);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "a",
+          "nu {\"a\":[]}",
+          "TypeError b.c false",
+          "nu {\"a\":[7]}",
+          "TypeError b.c false",
+          "nu {\"a\":[7,7]}",
+          "TypeError b.c false",
+          "2 false [5,0,7] true"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "boolean true",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "i": "unbound",
+          "index": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "sigma": "object {\"a\":[7,7,7]}",
+          "slot": "unbound",
+          "step": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "{\n  sigma.d = '  pad ';\n  console.warn((sigma instanceof Array));\n  console.log({ ...sigma, z: 0 }, JSON.stringify(sigma).padStart(5, '*'), (sigma?.d).padEnd(4, '.'));\n}\nif (('g' in sigma)) {\n  sigma.d = 'Lash';\n}\nswitch ((-11) % 3) {\n  case 0: {\n    for (const entry of ['b.c'.trimEnd(), 'hi']) {\n      const chi = new URL('https://example.com/q?x=1');\n      console.log(chi.href, chi.pathname, chi.searchParams.get('x'), chi.origin);\n    }\n    {\n      console.info({ ...sigma, z: 0 }, Object.keys(sigma).join(''));\n    }\n    break;\n  }\n  case 1: {\n    console.warn({ ...sigma, z: 0 }, sigma);\n    {\n      const theta = new URL('https://example.com/p?x=1');\n      console.log(theta.href, theta.pathname, theta.searchParams.get('x'), theta.origin);\n      const beta = new Date(1126025289000);\n      let zeta = `${Math.min(3, Array.from({ length: 3 }, (slot, index) => index * 2).length)}:${'x'}`;\n    }\n    break;\n  }\n  default: {\n    for (let step = 0; step < 3; step++) {\n      sigma.d = `${step}:${'zz'}`;\n    }\n  }\n}\nconst delta = true;\nfor (let i = 0; i < 1; i++) {\n  for (let i = 0; i < 2; i++) {\n    sigma.a.push(1);\n    const omega = new URL('https://example.com/a/b?x=1');\n    console.log(omega.href, omega.pathname, omega.searchParams.get('x'), omega.origin);\n  }\n  console.info(chi);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "false",
+          "{\"a\":[7,7,7],\"d\":\"  pad \",\"z\":0} {\"a\":[7,7,7],\"d\":\"  pad \"}   pad ",
+          "https://example.com/a/b?x=1 /a/b 1 https://example.com",
+          "https://example.com/a/b?x=1 /a/b 1 https://example.com",
+          "true"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "boolean true",
+          "delta": "boolean true",
+          "entry": "unbound",
+          "field": "unbound",
+          "i": "unbound",
+          "index": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "sigma": "object {\"a\":[7,7,7,1,1],\"d\":\"2:zz\"}",
+          "slot": "unbound",
+          "step": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    }
+  ]
+}

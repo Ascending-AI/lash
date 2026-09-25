@@ -241,12 +241,12 @@ lash_rust_integration_test(
 
 filegroup(
     name = "session_oracle_corpus",
-    srcs = [
+    srcs = glob([
         "README.md",
-        "tests/differential/sessions/expectations.json",
-        "tests/differential/sessions/generated.json",
-        "tests/test262/census.tsv",
-    ],
+        "tests/differential/sessions/expectations/**",
+        "tests/differential/sessions/generated/**",
+        "tests/test262/census/**",
+    ]),
 )
 
 load("//tools/bazel:test_batch.bzl", "lash_batch_test")

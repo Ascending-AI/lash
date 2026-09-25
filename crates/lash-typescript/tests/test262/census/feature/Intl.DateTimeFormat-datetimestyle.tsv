@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Intl.DateTimeFormat-datetimestyle	skip	ticket-ruling:FIG-1413:Intl.DateTimeFormat-datetimestyle	-

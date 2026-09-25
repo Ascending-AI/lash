@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	constructor-arity	rejected	TS_CONSTRUCTOR_UNSUPPORTED	new Map(1, 2);

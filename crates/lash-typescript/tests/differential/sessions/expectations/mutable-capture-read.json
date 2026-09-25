@@ -1,0 +1,32 @@
+{
+  "id": "mutable-capture-read",
+  "about": "a closure made before its binding is reassigned reads the binding, not a copy (FIG-3707)",
+  "probe": [
+    "x",
+    "f"
+  ],
+  "deviations": [
+    "closure-boundary"
+  ],
+  "cells": [
+    {
+      "source": "let x = 1;\nconst f = () => x;\nx = 2;\nconsole.log(f());\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2"
+        ],
+        "probes": {
+          "x": "number 2",
+          "f": "function undefined"
+        },
+        "closures": [
+          "f"
+        ]
+      }
+    }
+  ]
+}

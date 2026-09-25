@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	DataView.prototype.getFloat64	skip	ticket-ruling:FIG-1413:DataView.prototype.getFloat64	-

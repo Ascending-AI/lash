@@ -1,0 +1,13 @@
+# test262-path	excluding-census-row
+test/built-ins/Error/isError/bigints.js	feature:Error.isError
+test/built-ins/Error/isError/error-subclass.js	feature:Error.isError
+test/built-ins/Error/isError/errors-other-realm.js	feature:Error.isError
+test/built-ins/Error/isError/errors.js	feature:Error.isError
+test/built-ins/Error/isError/fake-errors.js	feature:Error.isError
+test/built-ins/Error/isError/is-a-constructor.js	feature:Error.isError
+test/built-ins/Error/isError/name.js	feature:Error.isError
+test/built-ins/Error/isError/non-error-objects-other-realm.js	feature:Error.isError
+test/built-ins/Error/isError/non-error-objects.js	feature:Error.isError
+test/built-ins/Error/isError/primitives.js	feature:Error.isError
+test/built-ins/Error/isError/prop-desc.js	feature:Error.isError
+test/built-ins/Error/isError/symbols.js	feature:Error.isError

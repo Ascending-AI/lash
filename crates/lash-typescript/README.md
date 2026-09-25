@@ -240,7 +240,7 @@ code points.
 
 Test262 runs every upstream test the census accepts at a pinned commit through
 the same lower → link → compile → heap VM path as a real cell. Each selected
-test has one ratcheted outcome in `tests/test262/outcomes/<directory>.tsv` —
+test has one ratcheted outcome in `tests/test262/outcomes/**/*.tsv` —
 `pass`, `refused <TS_* code>`, `fail <ticket>` or `harness <capability>` — and the
 figures are derived from that record rather than restated here:
 `python3 scripts/check_test262_ratchet.py --base <base>` prints the current

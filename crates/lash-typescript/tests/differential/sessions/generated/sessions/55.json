@@ -1,0 +1,100 @@
+{
+  "seed": 55,
+  "probe": [
+    "beta",
+    "delta",
+    "i",
+    "index",
+    "iota",
+    "item",
+    "kappa",
+    "phi",
+    "sigma",
+    "slot",
+    "step",
+    "turn1",
+    "value"
+  ],
+  "cells": [
+    {
+      "source": "{\n  const iota = new Set([10, 8, 10]);\n  console.log(iota.size, iota.has(1), [...iota.union(new Set([7]))], iota instanceof Set);\n}\nlet turn1 = 0;\nwhile (turn1 < 2) {\n  turn1++;\n  {\n    console.log('  pad ');\n    let sigma = ['ab', 'ab'];\n  }\n  var delta = new RangeError('ab');\n}\nconsole.log(turn1, true, delta);\nfor (let i = 0; i < 3; i++) {\n  var beta = [Math.round(2), Number.parseInt('zz' + '7', 10), 'Lash'.indexOf('b')];\n  console.log(!(i).toFixed(1).includes('a'), 'ab', delta);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2 false [10,8,7] true",
+          "  pad ",
+          "  pad ",
+          "2 true RangeError: ab",
+          "true ab RangeError: ab",
+          "true ab RangeError: ab",
+          "true ab RangeError: ab"
+        ],
+        "probes": {
+          "beta": "object [2,null,-1]",
+          "delta": "object {}",
+          "i": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "kappa": "unbound",
+          "phi": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "step": "unbound",
+          "turn1": "number 2",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "var kappa = ['  pad '.padStart(5, '*').replace(/[a-z]/g, '_'), (typeof 11), (Array.from({ length: 0 }, (slot, index) => index * 2).length).toFixed(1)];\nbeta[0] = (beta.at(-1) ?? 0);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "beta": "object [-1,null,-1]",
+          "delta": "object {}",
+          "i": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "kappa": "object [\"  ___ \",\"number\",\"0.0\"]",
+          "phi": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "step": "unbound",
+          "turn1": "number 2",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "console.info(kappa, (-turn1), turn1);\nconsole.log(turn1, turn1);\nconsole.info((beta.findLastIndex((value) => value < value) >= 0), turn1);\nfor (let step = 0; step < 2; step++) {\n  const iota = (item) => item;\n  console.log(iota(turn1));\n}\nconst phi = ['a,b', `${turn1}:${'hi'.slice(0, 2)}`, 'a,b'];\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[\"  ___ \",\"number\",\"0.0\"] -2 2",
+          "2 2",
+          "false 2",
+          "2",
+          "2"
+        ],
+        "probes": {
+          "beta": "object [-1,null,-1]",
+          "delta": "object {}",
+          "i": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "kappa": "object [\"  ___ \",\"number\",\"0.0\"]",
+          "phi": "object [\"a,b\",\"2:hi\",\"a,b\"]",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "step": "unbound",
+          "turn1": "number 2",
+          "value": "unbound"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "id": "parentheses-end-an-optional-chain",
+  "about": "in (a?.b).c the short circuit ends at the parenthesis, so .c reads undefined (FIG-3608)",
+  "probe": [
+    "none"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const none = null;\nconsole.log((none?.b).c);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "throw",
+        "prints": [],
+        "error": "TypeError",
+        "probes": {
+          "none": "object null"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

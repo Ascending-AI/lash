@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	arraybuffer-transfer	skip	ticket-ruling:FIG-1413:arraybuffer-transfer	-

@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	closed-shape-field-guard	rejected	TS_LINK_ERROR	const o = { a: 1 }; const c = o.c;

@@ -1,0 +1,192 @@
+{
+  "seed": 88,
+  "probe": [
+    "alpha",
+    "beta",
+    "count",
+    "delta",
+    "gamma",
+    "index",
+    "item",
+    "lambda",
+    "left",
+    "omega",
+    "phi",
+    "problem",
+    "rho",
+    "right",
+    "sigma",
+    "slot",
+    "tau",
+    "theta",
+    "total",
+    "turn1",
+    "turn2",
+    "turn3",
+    "turn4",
+    "value",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "const sigma = [2, 0, `${11}:${'zz'}`.length];\nlet turn1 = 0;\ndo {\n  turn1++;\n  {\n    console.log(Math.max(Math.min(...sigma, 1), turn1), 'zz'.replace(/[a-z]/g, '_'));\n    sigma.unshift(turn1);\n  }\n  try {\n    const lambda = JSON.parse(JSON.stringify(sigma));\n    throw new TypeError('b.c', { cause: 1 });\n  } catch (problem) {\n    console.log(problem.name, problem.message, problem instanceof RangeError);\n  }\n} while (turn1 < 3);\nlet theta = false;\ntheta = ('hi'.replaceAll('b', 'B') === (5.5).toFixed(1));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1 __",
+          "TypeError b.c false",
+          "2 __",
+          "TypeError b.c false",
+          "3 __",
+          "TypeError b.c false"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "lambda": "unbound",
+          "left": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "rho": "unbound",
+          "right": "unbound",
+          "sigma": "object [3,2,1,2,0,5]",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "boolean false",
+          "total": "unbound",
+          "turn1": "number 3",
+          "turn2": "unbound",
+          "turn3": "unbound",
+          "turn4": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const { a: rho, b: beta = 0 } = { a: 'zz', b: Math.max(...sigma, 1) };\nlet phi = rho;\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "number 5",
+          "count": "unbound",
+          "delta": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "lambda": "unbound",
+          "left": "unbound",
+          "omega": "unbound",
+          "phi": "string \"zz\"",
+          "problem": "unbound",
+          "rho": "string \"zz\"",
+          "right": "unbound",
+          "sigma": "object [3,2,1,2,0,5]",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "boolean false",
+          "total": "unbound",
+          "turn1": "number 3",
+          "turn2": "unbound",
+          "turn3": "unbound",
+          "turn4": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "sigma.splice(0, 1);\ntry {\n  const gamma = [phi.slice(0, 2), rho, JSON.stringify(rho)];\n  throw new SyntaxError('zz');\n} catch {\n  console.log('caught');\n}\nconsole.log((rho === `${8}:${phi.toLowerCase()}`), phi.indexOf('b'));\n{\n  console.info(turn1, theta);\n  sigma[0] = Array.from({ length: 0 }, (slot, index) => index * 2).length;\n  sigma.sort((left, right) => (String(left) < String(right) ? 1 : String(left) > String(right) ? -1 : 0));\n}\nif (true) {\n  let turn2 = 0;\n  do {\n    turn2++;\n    const delta = new Date(2668164304000);\n    console.log(delta.toISOString(), delta.getUTCDay(), delta.getTime() > 0, delta instanceof Date);\n    sigma.sort((left, right) => (String(left) < String(right) ? 1 : String(left) > String(right) ? -1 : 0));\n  } while (turn2 < 2);\n  {\n    const zeta = new Map([['b', 11], ['a', 0]]);\n    console.log(zeta.size, zeta.get('a'), zeta.has('hi'), [...zeta.keys()], zeta instanceof Map);\n  }\n} else {\n  console.info(sigma.reduce((total, item) => total + item, 0), Number.parseInt((phi.indexOf('b')).toFixed(1) + '7', 10));\n  {\n    console.log(phi, turn1);\n    const zeta = JSON.parse(JSON.stringify(sigma));\n    const tau = (value) => 0.5;\n    console.log(tau(10));\n  }\n}\nfunction omega(count) {\n  return count <= 1 ? 1 : count + omega(count - 1);\n}\nconsole.log(omega(1));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "caught",
+          "false -1",
+          "3 false",
+          "2054-07-20T12:45:04.000Z 1 true true",
+          "2054-07-20T12:45:04.000Z 1 true true",
+          "2 0 false [\"b\",\"a\"] true",
+          "1"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "number 5",
+          "count": "unbound",
+          "delta": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "lambda": "unbound",
+          "left": "unbound",
+          "omega": "function undefined",
+          "phi": "string \"zz\"",
+          "problem": "unbound",
+          "rho": "string \"zz\"",
+          "right": "unbound",
+          "sigma": "object [5,2,1,0,0]",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "boolean false",
+          "total": "unbound",
+          "turn1": "number 3",
+          "turn2": "unbound",
+          "turn3": "unbound",
+          "turn4": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "omega"
+        ]
+      }
+    },
+    {
+      "source": "let turn3 = 0;\nwhile (turn3 < 3) {\n  turn3++;\n  sigma.push(10);\n}\nsigma.reverse();\nsigma.unshift(3);\nlet turn4 = 0;\nwhile (turn4 < 1) {\n  turn4++;\n  var alpha = 1;\n}\nconsole.warn(rho, !(theta || false), rho);\nfinish(JSON.stringify(sigma).slice(0, 2));\n",
+      "node": {
+        "outcome": "finish",
+        "finish": "[3",
+        "prints": [
+          "zz true zz"
+        ],
+        "probes": {
+          "alpha": "number 1",
+          "beta": "number 5",
+          "count": "unbound",
+          "delta": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "lambda": "unbound",
+          "left": "unbound",
+          "omega": "function undefined",
+          "phi": "string \"zz\"",
+          "problem": "unbound",
+          "rho": "string \"zz\"",
+          "right": "unbound",
+          "sigma": "object [3,10,10,10,0,0,1,2,5]",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "boolean false",
+          "total": "unbound",
+          "turn1": "number 3",
+          "turn2": "unbound",
+          "turn3": "number 3",
+          "turn4": "number 1",
+          "value": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "omega"
+        ]
+      }
+    }
+  ]
+}

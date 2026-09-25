@@ -1,0 +1,28 @@
+{
+  "id": "caught-runtime-fault",
+  "about": "a caught runtime fault is an Error of the fault's class",
+  "probe": [
+    "nothing",
+    "error"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "try {\n  const nothing = null;\n  console.log(nothing.field);\n} catch (error) {\n  console.log(error.name, error instanceof Error, error instanceof TypeError);\n}\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "TypeError true true"
+        ],
+        "probes": {
+          "nothing": "unbound",
+          "error": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

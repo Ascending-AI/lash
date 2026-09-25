@@ -1,0 +1,35 @@
+{
+  "id": "function-name-shadowed-in-its-body",
+  "about": "a function body may declare a binding of the function's own name (FIG-3608)",
+  "probe": [
+    "named",
+    "arrow",
+    "scale"
+  ],
+  "deviations": [
+    "closure-boundary"
+  ],
+  "cells": [
+    {
+      "source": "function named() {\n  let named = 1;\n  return named;\n}\nconst arrow = (scale) => {\n  const arrow = scale * 2;\n  return arrow;\n};\nconsole.log(named(), arrow(3));\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1 6"
+        ],
+        "probes": {
+          "named": "function undefined",
+          "arrow": "function undefined",
+          "scale": "unbound"
+        },
+        "closures": [
+          "named",
+          "arrow"
+        ]
+      }
+    }
+  ]
+}

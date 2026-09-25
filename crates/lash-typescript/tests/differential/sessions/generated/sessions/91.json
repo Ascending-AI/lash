@@ -1,0 +1,136 @@
+{
+  "seed": 91,
+  "probe": [
+    "beta",
+    "chi",
+    "delta",
+    "field",
+    "index",
+    "iota",
+    "j",
+    "kappa",
+    "lambda",
+    "n",
+    "omega",
+    "phi",
+    "psi",
+    "rest",
+    "rho",
+    "shared1",
+    "sigma",
+    "slot",
+    "step",
+    "tau",
+    "theta"
+  ],
+  "cells": [
+    {
+      "source": "for (const field in { g: 'Lash'.replaceAll('b', 'B'), h: false }) {\n  console.log(field);\n  const [omega, ...tau] = [(12 << (false ? 4.5 : 3)), 3.5, 7];\n}\nfor (let step = 0; step < 3; step++) {\n  const { a: rho, b: lambda = 0 } = { a: (typeof step), b: 6 };\n  const sigma = step;\n  if (false) { break; }\n}\nconst theta = new URL('https://example.com/q?x=1');\nlet iota = 'zz';\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "g",
+          "h"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "iota": "string \"zz\"",
+          "j": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "rho": "unbound",
+          "shared1": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "step": "unbound",
+          "tau": "unbound",
+          "theta": "object \"https://example.com/q?x=1\""
+        }
+      }
+    },
+    {
+      "source": "const psi = (n, ...rest) => 5 + rest.length;\nconsole.log(psi((7 - 9)));\nconsole.log(theta, iota);\nconst kappa = (n, step = 2) => (false ? n : 6) + step;\nconsole.log(kappa(Number.parseInt('zz' + '7', 10)));\nlet beta = { a: [iota.indexOf('b'), 8, (11 + 5)], c: [Number.parseInt('b.c' + '7', 10), 0, Math.max(5.5, 6)] };\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "5",
+          "https://example.com/q?x=1 zz",
+          "8"
+        ],
+        "probes": {
+          "beta": "object {\"a\":[-1,8,16],\"c\":[null,0,6]}",
+          "chi": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "iota": "string \"zz\"",
+          "j": "unbound",
+          "kappa": "function undefined",
+          "lambda": "unbound",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "psi": "function undefined",
+          "rest": "unbound",
+          "rho": "unbound",
+          "shared1": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "step": "unbound",
+          "tau": "unbound",
+          "theta": "object \"https://example.com/q?x=1\""
+        },
+        "closures": [
+          "kappa",
+          "psi"
+        ]
+      }
+    },
+    {
+      "source": "theta.hash = 'h';\nbeta.c.push(('Lash'.length % Array.from({ length: 1 }, (slot, index) => index * 2).length));\n{\n  const chi = new URLSearchParams({ q: 'a b', r: '+' });\n  console.log(chi.toString(), chi.get('b'), chi.getAll('b'), chi.size, chi.has('q'));\n  const [delta, ...tau] = [7, 8, iota.indexOf('b')];\n  switch (delta % 3) {\n    case 0: {\n      console.log(delta, iota);\n      tau[0] = 1;\n      break;\n    }\n    case 1: {\n      console.warn(beta);\n      break;\n    }\n    default: {\n      console.log(false, 'Lash', 12);\n    }\n  }\n}\nfor (let j = 0; j < 3; j++) {\n  const { a: sigma, b: phi = 0 } = { a: iota.slice(0, 2), b: Math.sign((1 % 2)) };\n  theta.pathname = '/p' + 'hi'.length;\n}\nglobalThis.shared1 = JSON.parse(JSON.stringify(beta));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "q=a+b&r=%2B null [] 2 true",
+          "{\"a\":[-1,8,16],\"c\":[null,0,6,0]}"
+        ],
+        "probes": {
+          "beta": "object {\"a\":[-1,8,16],\"c\":[null,0,6,0]}",
+          "chi": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "iota": "string \"zz\"",
+          "j": "unbound",
+          "kappa": "function undefined",
+          "lambda": "unbound",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "psi": "function undefined",
+          "rest": "unbound",
+          "rho": "unbound",
+          "shared1": "object {\"a\":[-1,8,16],\"c\":[null,0,6,0]}",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "step": "unbound",
+          "tau": "unbound",
+          "theta": "object \"https://example.com/p2?x=1#h\""
+        },
+        "closures": [
+          "kappa",
+          "psi"
+        ]
+      }
+    }
+  ]
+}

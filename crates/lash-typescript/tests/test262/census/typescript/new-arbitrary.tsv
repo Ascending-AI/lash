@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	new-arbitrary	rejected	TS_NEW_UNSUPPORTED	function F() { } const o = new F();

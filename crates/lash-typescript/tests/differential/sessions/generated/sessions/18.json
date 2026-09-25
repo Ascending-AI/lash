@@ -1,0 +1,120 @@
+{
+  "seed": 18,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "count",
+    "delta",
+    "field",
+    "iota",
+    "kappa",
+    "lambda",
+    "phi",
+    "psi",
+    "rest",
+    "theta",
+    "turn1",
+    "value",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "for (const field in { g: 'b.c', d: [7] }) {\n  console.log(field);\n}\nlet alpha = (-1);\nlet turn1 = 0;\nwhile (turn1 < 1) {\n  turn1++;\n  {\n    const alpha = new URL('https://example.com/a/b?x=1');\n    console.log(alpha.href, alpha.pathname, alpha.searchParams.get('x'), alpha.origin);\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "g",
+          "d",
+          "https://example.com/a/b?x=1 /a/b 1 https://example.com"
+        ],
+        "probes": {
+          "alpha": "number -1",
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "iota": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "theta": "unbound",
+          "turn1": "number 1",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "console.log(alpha, `${alpha}:${'b.c'.trim()}`, Math.max(alpha, 8));\nfor (const field in { a: false, h: 'Lash', f: 'b.c'.toLowerCase() }) {\n  console.log(field);\n}\nconst { a: chi, b: theta = 0 } = { a: String(9), b: 8 };\n{\n  const iota = new Map([['b', 12], ['a', 0]]);\n  console.log(iota.size, iota.get('a'), iota.has('b.c'), [...iota.keys()], iota instanceof Map);\n  console.log(chi, chi.trimStart());\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "-1 -1:b.c 8",
+          "a",
+          "h",
+          "f",
+          "2 0 false [\"b\",\"a\"] true",
+          "9 9"
+        ],
+        "probes": {
+          "alpha": "number -1",
+          "beta": "unbound",
+          "chi": "string \"9\"",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "iota": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "theta": "number 8",
+          "turn1": "number 1",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "{\n  const iota = new Set([10, 2, 10]);\n  console.log(iota.size, iota.has(1), [...iota.union(new Set([7]))], iota instanceof Set);\n}\nvar kappa = { f: false, g: (chi + chi), a: true };\nswitch ((Number.parseInt(chi + '7', 10) % 0.5) % 3) {\n  case 0: {\n    for (const field in kappa) {\n      console.log(field);\n    }\n  }\n  case 1: {\n    switch (6 % 3) {\n      case 0: {\n        const psi = (value, step = 2) => Math.min(2, 6) + step;\n        console.log(psi(Math.floor(5)));\n        const lambda = (String(1) + chi);\n        break;\n      }\n      default: {\n        let zeta = [[turn1], [2]].flat().includes(2);\n      }\n    }\n    break;\n  }\n  default: {\n    let phi = { a: theta, h: 'x'.includes('a') };\n  }\n}\nkappa.f = true;\nswitch (theta % 3) {\n  case 0: {\n    let beta = JSON.parse(JSON.stringify(kappa));\n    const { a: chi, b: iota = 0 } = { a: Object.keys(kappa).join(''), b: (6 & 5.5) };\n    break;\n  }\n  case 1: {\n    kappa.g = chi;\n    const psi = (value, ...rest) => 6 + rest.length;\n    console.log(psi(((-turn1) % 'hi'.length)));\n    break;\n  }\n  default: {\n    {\n      console.info(kappa, [[theta], [2]].flat().includes(2), kappa);\n    }\n  }\n}\nfunction delta(count) {\n  const delta = (count).toFixed(1);\n  return (10 >>> Number.parseInt(chi + '7', 10));\n}\nconsole.log(delta(1.5));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2 false [10,2,7] true",
+          "f",
+          "g",
+          "a",
+          "4",
+          "{\"f\":true,\"g\":\"99\",\"a\":true} true {\"f\":true,\"g\":\"99\",\"a\":true}",
+          "5"
+        ],
+        "probes": {
+          "alpha": "number -1",
+          "beta": "unbound",
+          "chi": "string \"9\"",
+          "count": "unbound",
+          "delta": "function undefined",
+          "field": "unbound",
+          "iota": "unbound",
+          "kappa": "object {\"f\":true,\"g\":\"99\",\"a\":true}",
+          "lambda": "unbound",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "theta": "number 8",
+          "turn1": "number 1",
+          "value": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "delta"
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,48 @@
+{
+  "id": "for-of-appends-during-the-loop",
+  "about": "a for...of loop visits what its body appends, and stops short of what it removes (FIG-3625)",
+  "probe": [
+    "queue",
+    "seen",
+    "item"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const queue = [1];\nconst seen = [];\nfor (const item of queue) {\n  seen.push(item);\n  if (item < 4) {\n    queue.push(item * 2);\n  }\n}\nconsole.log(seen, queue);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[1,2,4] [1,2,4]"
+        ],
+        "probes": {
+          "queue": "object [1,2,4]",
+          "seen": "object [1,2,4]",
+          "item": "unbound"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "for (const item of queue) {\n  queue.pop();\n  seen.push(item);\n}\nconsole.log(seen, queue);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[1,2,4,1,2] [1]"
+        ],
+        "probes": {
+          "queue": "object [1]",
+          "seen": "object [1,2,4,1,2]",
+          "item": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

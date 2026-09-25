@@ -1,0 +1,88 @@
+{
+  "seed": 78,
+  "probe": [
+    "beta",
+    "chi",
+    "entry",
+    "iota",
+    "item",
+    "psi",
+    "sigma",
+    "theta",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "const beta = (item) => item;\nconsole.log(beta(5));\nlet zeta = 'b.c';\nthrow new RangeError('b.c');\n",
+      "node": {
+        "outcome": "throw",
+        "error": "RangeError",
+        "prints": [
+          "5"
+        ],
+        "probes": {
+          "beta": "function undefined",
+          "chi": "unbound",
+          "entry": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "psi": "unbound",
+          "sigma": "unbound",
+          "theta": "unbound",
+          "zeta": "string \"b.c\""
+        },
+        "closures": [
+          "beta"
+        ]
+      }
+    },
+    {
+      "source": "let theta = { d: `${4}:${zeta.split(',').reverse().join('|')}`, b: 8 };\ntheta.b *= 1;\nconsole.info(zeta);\nif ((false || [[3.5], [2]].flat().includes(2))) {\n  for (const entry of zeta) {\n    console.log(entry, theta);\n    theta.b -= 5;\n  }\n} else {\n  let iota = 1;\n  {\n    const sigma = new Error('Lash');\n    console.log(sigma.name, sigma.message, String(sigma), sigma instanceof Error);\n  }\n}\nvar psi = [9, (4 | 2)];\nlet chi = JSON.parse(JSON.stringify(theta));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "b.c",
+          "b {\"d\":\"4:b.c\",\"b\":8}",
+          ". {\"d\":\"4:b.c\",\"b\":3}",
+          "c {\"d\":\"4:b.c\",\"b\":-2}"
+        ],
+        "probes": {
+          "beta": "function undefined",
+          "chi": "object {\"d\":\"4:b.c\",\"b\":-7}",
+          "entry": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "psi": "object [9,6]",
+          "sigma": "unbound",
+          "theta": "object {\"d\":\"4:b.c\",\"b\":-7}",
+          "zeta": "string \"b.c\""
+        },
+        "closures": [
+          "beta"
+        ]
+      }
+    },
+    {
+      "source": "const x = Math.extra();\n",
+      "reject": "TS_METHOD_UNSUPPORTED",
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "beta": "function undefined",
+          "chi": "object {\"d\":\"4:b.c\",\"b\":-7}",
+          "entry": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "psi": "object [9,6]",
+          "sigma": "unbound",
+          "theta": "object {\"d\":\"4:b.c\",\"b\":-7}",
+          "zeta": "string \"b.c\""
+        },
+        "closures": [
+          "beta"
+        ]
+      }
+    }
+  ]
+}

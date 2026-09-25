@@ -1,0 +1,26 @@
+{
+  "id": "tdz-within-a-cell",
+  "about": "a read of a let before its declaration, which the dialect refuses statically",
+  "probe": [
+    "early",
+    "before"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const before = 1;\nconsole.log(typeof early);\nlet early = 2;\n",
+      "reject": "TS_TEMPORAL_DEAD_ZONE",
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "early": "unbound",
+          "before": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

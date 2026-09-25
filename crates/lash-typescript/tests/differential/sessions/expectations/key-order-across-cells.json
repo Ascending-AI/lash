@@ -1,0 +1,43 @@
+{
+  "id": "key-order-across-cells",
+  "about": "an object's property order is its insertion order, in every later cell",
+  "probe": [
+    "ordered",
+    "nested"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const ordered = { zeta: 1, alpha: 2, mid: 3 };\nconst nested = { b: { y: 1, x: 2 }, a: [{ q: 1, p: 2 }] };\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "ordered": "object {\"zeta\":1,\"alpha\":2,\"mid\":3}",
+          "nested": "object {\"b\":{\"y\":1,\"x\":2},\"a\":[{\"q\":1,\"p\":2}]}"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "ordered.beta = 4;\nconsole.log(Object.keys(ordered), JSON.stringify(nested));\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[\"zeta\",\"alpha\",\"mid\",\"beta\"] {\"b\":{\"y\":1,\"x\":2},\"a\":[{\"q\":1,\"p\":2}]}"
+        ],
+        "probes": {
+          "ordered": "object {\"zeta\":1,\"alpha\":2,\"mid\":3,\"beta\":4}",
+          "nested": "object {\"b\":{\"y\":1,\"x\":2},\"a\":[{\"q\":1,\"p\":2}]}"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

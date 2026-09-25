@@ -1,0 +1,55 @@
+{
+  "seed": 29,
+  "probe": [
+    "entry",
+    "field",
+    "kappa",
+    "phi",
+    "problem",
+    "shared1"
+  ],
+  "cells": [
+    {
+      "source": "for (const field in { g: 5, h: !true, f: [11, 8, 1] }) {\n  console.log(field);\n  const kappa = new Error('b.c');\n  console.log(kappa.name, kappa.message, String(kappa), kappa instanceof Error);\n}\nglobalThis.shared1 = ['zz'];\nshared1.reverse();\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "g",
+          "Error b.c Error: b.c true",
+          "h",
+          "Error b.c Error: b.c true",
+          "f",
+          "Error b.c Error: b.c true"
+        ],
+        "probes": {
+          "entry": "unbound",
+          "field": "unbound",
+          "kappa": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "shared1": "object [\"zz\"]"
+        }
+      }
+    },
+    {
+      "source": "console.warn(shared1, shared1);\nshared1.sort();\nconst phi = ('ab'.padStart(5, '*').includes('a') ? Number.parseInt((typeof 6) + '7', 10) : 9);\nconsole.warn(shared1);\ntry {\n  shared1.push(JSON.stringify(phi));\n} catch (problem) {\n  console.log(problem.name, problem.message, problem instanceof RangeError);\n} finally {\n  for (const entry of shared1) {\n    console.warn(7, phi, phi);\n    if (((-7) < Math.min(phi, phi))) { break; }\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[\"zz\"] [\"zz\"]",
+          "[\"zz\"]",
+          "7 NaN NaN",
+          "7 NaN NaN"
+        ],
+        "probes": {
+          "entry": "unbound",
+          "field": "unbound",
+          "kappa": "unbound",
+          "phi": "number null",
+          "problem": "unbound",
+          "shared1": "object [\"zz\",\"null\"]"
+        }
+      }
+    }
+  ]
+}

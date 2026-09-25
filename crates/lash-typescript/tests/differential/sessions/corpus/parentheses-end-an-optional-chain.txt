@@ -1,0 +1,11 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/parentheses-end-an-optional-chain.json.
+
+session parentheses-end-an-optional-chain
+about in (a?.b).c the short circuit ends at the parenthesis, so .c reads undefined (FIG-3608)
+probe none
+cell
+const none = null;
+console.log((none?.b).c);
+end

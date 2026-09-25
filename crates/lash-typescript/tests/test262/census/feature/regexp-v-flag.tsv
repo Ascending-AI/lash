@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	regexp-v-flag	rejected	TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED	const r = /a/v;

@@ -1,0 +1,9 @@
+# test262-path	excluding-census-row
+test/built-ins/String/prototype/isWellFormed/length.js	feature:String.prototype.isWellFormed
+test/built-ins/String/prototype/isWellFormed/name.js	feature:String.prototype.isWellFormed
+test/built-ins/String/prototype/isWellFormed/not-a-constructor.js	feature:String.prototype.isWellFormed
+test/built-ins/String/prototype/isWellFormed/prop-desc.js	feature:String.prototype.isWellFormed
+test/built-ins/String/prototype/isWellFormed/return-abrupt-from-this.js	feature:String.prototype.isWellFormed
+test/built-ins/String/prototype/isWellFormed/returns-boolean.js	feature:String.prototype.isWellFormed
+test/built-ins/String/prototype/isWellFormed/to-string-primitive.js	feature:String.prototype.isWellFormed
+test/built-ins/String/prototype/isWellFormed/to-string.js	feature:String.prototype.isWellFormed

@@ -1,0 +1,136 @@
+{
+  "seed": 12,
+  "probe": [
+    "alpha",
+    "count",
+    "entry",
+    "gamma",
+    "i",
+    "iota",
+    "lambda",
+    "local",
+    "n",
+    "omega",
+    "phi",
+    "psi",
+    "rho",
+    "shared1",
+    "sigma",
+    "step",
+    "tau"
+  ],
+  "cells": [
+    {
+      "source": "globalThis.shared1 = 0;\nconsole.log(4, shared1);\nconst tau = (n) => { const local = 0; return 7; };\nconsole.log(tau(shared1));\nconst { a: alpha, b: lambda = 0 } = { a: (`${shared1}:${'ab'}` + 'x'.split(',').reverse().join('|')), b: shared1 };\nfor (let i = 0; i < 1; i++) {\n  let sigma = /a(b*)/g;\n}\nfor (let step = 0; step < 3; step++) {\n  for (const entry of alpha) {\n    const phi = JSON.stringify(lambda).toLowerCase();\n    const psi = /(?<first>[a-z])(b)?/.exec('  pad ');\n    console.log(psi?.[0] ?? 'none', psi?.index ?? -1, psi?.groups?.first ?? '-', psi === null);\n  }\n  const { a: tau, b: rho = 0 } = { a: 'hi', b: 12 };\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "4 0",
+          "7",
+          "p 2 p false",
+          "p 2 p false",
+          "p 2 p false",
+          "p 2 p false",
+          "p 2 p false",
+          "p 2 p false",
+          "p 2 p false",
+          "p 2 p false",
+          "p 2 p false",
+          "p 2 p false",
+          "p 2 p false",
+          "p 2 p false",
+          "p 2 p false",
+          "p 2 p false",
+          "p 2 p false"
+        ],
+        "probes": {
+          "alpha": "string \"0:abx\"",
+          "count": "unbound",
+          "entry": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "iota": "unbound",
+          "lambda": "number 0",
+          "local": "unbound",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "shared1": "number 0",
+          "sigma": "unbound",
+          "step": "unbound",
+          "tau": "function undefined"
+        },
+        "closures": [
+          "tau"
+        ]
+      }
+    },
+    {
+      "source": "const gamma = { b: 6.5 };\nconsole.warn(shared1);\ngamma.b = 6;\nfunction iota(count) {\n  return count <= 1 ? 1 : count + iota(count - 1);\n}\nconsole.log(iota(1));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "0",
+          "1"
+        ],
+        "probes": {
+          "alpha": "string \"0:abx\"",
+          "count": "unbound",
+          "entry": "unbound",
+          "gamma": "object {\"b\":6}",
+          "i": "unbound",
+          "iota": "function undefined",
+          "lambda": "number 0",
+          "local": "unbound",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "shared1": "number 0",
+          "sigma": "unbound",
+          "step": "unbound",
+          "tau": "function undefined"
+        },
+        "closures": [
+          "iota",
+          "tau"
+        ]
+      }
+    },
+    {
+      "source": "console.log(lambda, alpha, alpha);\ngamma.b += 0;\nif (!(shared1 !== 4.5)) {\n  for (const entry of alpha) {\n    const omega = new RegExp('[a-z]+', 'i');\n    console.log(omega.test('hi'), omega.source, omega.flags, omega.lastIndex, String(omega));\n    omega.lastIndex = 0;\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "0 0:abx 0:abx"
+        ],
+        "probes": {
+          "alpha": "string \"0:abx\"",
+          "count": "unbound",
+          "entry": "unbound",
+          "gamma": "object {\"b\":6}",
+          "i": "unbound",
+          "iota": "function undefined",
+          "lambda": "number 0",
+          "local": "unbound",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "shared1": "number 0",
+          "sigma": "unbound",
+          "step": "unbound",
+          "tau": "function undefined"
+        },
+        "closures": [
+          "iota",
+          "tau"
+        ]
+      }
+    }
+  ]
+}

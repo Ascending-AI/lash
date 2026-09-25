@@ -1,0 +1,15 @@
+# test262-path	class	qualifier
+test/built-ins/Array/prototype/find/array-altered-during-loop.js	pass	-
+test/built-ins/Array/prototype/find/call-with-boolean.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/find/length.js	pass	-
+test/built-ins/Array/prototype/find/name.js	pass	-
+test/built-ins/Array/prototype/find/predicate-call-parameters.js	pass	-
+test/built-ins/Array/prototype/find/predicate-call-this-strict.js	pass	-
+test/built-ins/Array/prototype/find/predicate-called-for-each-array-property.js	pass	-
+test/built-ins/Array/prototype/find/predicate-is-not-callable-throws.js	pass	-
+test/built-ins/Array/prototype/find/predicate-not-called-on-empty-array.js	pass	-
+test/built-ins/Array/prototype/find/prop-desc.js	pass	-
+test/built-ins/Array/prototype/find/return-abrupt-from-predicate-call.js	pass	-
+test/built-ins/Array/prototype/find/return-abrupt-from-property.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/find/return-abrupt-from-this-length.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/find/return-abrupt-from-this.js	refused	TS_METHOD_UNSUPPORTED

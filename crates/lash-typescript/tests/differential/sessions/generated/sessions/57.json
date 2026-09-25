@@ -1,0 +1,82 @@
+{
+  "seed": 57,
+  "probe": [
+    "beta",
+    "chi",
+    "error",
+    "field",
+    "iota",
+    "kappa",
+    "omega",
+    "phi",
+    "tau",
+    "theta"
+  ],
+  "cells": [
+    {
+      "source": "const phi = { ...{ d: [], c: (7).toFixed(1).length }, g: 'b.c'.padStart(5, '*').replaceAll('b', 'B') };\nfor (const field in phi) {\n  console.log(field);\n}\nconsole.log(11);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "d",
+          "c",
+          "g",
+          "11"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "iota": "unbound",
+          "kappa": "unbound",
+          "omega": "unbound",
+          "phi": "object {\"d\":[],\"c\":3,\"g\":\"**B.c\"}",
+          "tau": "unbound",
+          "theta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "phi.d.push(3);\n{\n  if ([[11], [2]].flat().includes(2)) {\n    const tau = 'b.c';\n  }\n}\nphi.d.push((3 * 2));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "beta": "unbound",
+          "chi": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "iota": "unbound",
+          "kappa": "unbound",
+          "omega": "unbound",
+          "phi": "object {\"d\":[3,6],\"c\":3,\"g\":\"**B.c\"}",
+          "tau": "unbound",
+          "theta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "let chi = { e: 7 };\nconst kappa = { ['e']: 'b.c'.replaceAll('b', 'B').split(',').reverse().join('|'), ['a']: 'zz' };\n{\n  try {\n    const theta = { ['e']: (4.5 !== (12 * 8)), ['f']: 2 };\n    chi = { ...{ e: 2 } };\n  } catch (error) {\n    console.log(error.name, error.message, error instanceof RangeError);\n  } finally {\n    console.info(!(8 === 10), chi, 2);\n  }\n  try {\n    chi = { e: 7 };\n    const omega = new RegExp('[a-z]+', 'i');\n  } catch {\n    console.log('caught');\n  } finally {\n    const iota = /(?<first>[a-z])(b)?/.exec('hi');\n    console.log(iota?.[0] ?? 'none', iota?.index ?? -1, iota?.groups?.first ?? '-', iota === null);\n  }\n  const beta = { h: [3, (false ? 1 : 9)], e: [5, 9, 6], b: false };\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "true {\"e\":2} 2",
+          "h 0 h false"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "object {\"e\":7}",
+          "error": "unbound",
+          "field": "unbound",
+          "iota": "unbound",
+          "kappa": "object {\"e\":\"B.c\",\"a\":\"zz\"}",
+          "omega": "unbound",
+          "phi": "object {\"d\":[3,6],\"c\":3,\"g\":\"**B.c\"}",
+          "tau": "unbound",
+          "theta": "unbound"
+        }
+      }
+    }
+  ]
+}

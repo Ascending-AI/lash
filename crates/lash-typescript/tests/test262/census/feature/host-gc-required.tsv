@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	host-gc-required	skip	ticket-ruling:FIG-1413:host-gc-required	-

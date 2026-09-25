@@ -1,0 +1,8 @@
+# test262-path	class	qualifier
+test/language/identifier-resolution/S10.2.2_A1_T1.js	pass	-
+test/language/identifier-resolution/S10.2.2_A1_T2.js	pass	-
+test/language/identifier-resolution/S10.2.2_A1_T3.js	pass	-
+test/language/identifier-resolution/S10.2.2_A1_T4.js	pass	-
+test/language/identifier-resolution/S11.1.2_A1_T1.js	refused	TS_THIS_UNSUPPORTED
+test/language/identifier-resolution/S11.1.2_A1_T2.js	refused	TS_THIS_UNSUPPORTED
+test/language/identifier-resolution/assign-to-global-undefined.js	refused	TS_UNKNOWN_BINDING

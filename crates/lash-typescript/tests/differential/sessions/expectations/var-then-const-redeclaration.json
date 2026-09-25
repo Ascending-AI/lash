@@ -1,0 +1,59 @@
+{
+  "id": "var-then-const-redeclaration",
+  "about": "a later cell declares a const over an earlier cell's var",
+  "probe": [
+    "earlier"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "var earlier = \"var\";\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "earlier": "string \"var\""
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "const earlier = \"const\";\nconsole.log(earlier);\n",
+      "reject": null,
+      "deviation": "cross-cell-redeclaration",
+      "defect": null,
+      "node": {
+        "outcome": "throw",
+        "prints": [],
+        "error": "SyntaxError",
+        "probes": {
+          "earlier": "string \"var\""
+        },
+        "closures": []
+      },
+      "lash": {
+        "resident": {
+          "outcome": "normal",
+          "prints": [
+            "const"
+          ],
+          "probes": {
+            "earlier": "string \"const\""
+          }
+        },
+        "restart": {
+          "outcome": "normal",
+          "prints": [
+            "const"
+          ],
+          "probes": {
+            "earlier": "string \"const\""
+          }
+        }
+      }
+    }
+  ]
+}

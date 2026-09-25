@@ -1,0 +1,19 @@
+{
+  "name": "date",
+  "create": "const value = new Date(Date.UTC(2024, 1, 29, 12, 30));",
+  "uses": "console.log(value.toISOString(), value.getUTCDay(), value.getTime(), value instanceof Date);",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "2024-02-29T12:30:00.000Z 4 1709209800000 true"
+      ],
+      "probes": {}
+    }
+  ]
+}

@@ -9,8 +9,9 @@ the network (ADR 0062).
 ## Figures
 
 Each selected test has exactly one recorded outcome in
-`outcomes/<directory>.tsv` — one shard per top-level test directory
-(`built-ins`, `language`), so two lanes that change different directories
+`outcomes/<directory>.tsv` — one shard per test directory, cut as deep as
+the tree is hot (`built-ins/Array/prototype` sits beside
+`language/identifiers`), so two lanes that change different directories
 never share a file (FIG-3727). The figures — the selection size, the
 per-class counts, the pass rate and the per-code/owner tallies — are derived
 from that record, not pinned, so they cannot conflict in the merge queue. To
@@ -28,7 +29,7 @@ output.
 The selection is derived, never hand-picked. `sync.mjs` selects an upstream
 test exactly when every census row it touches is `accepted`. The rows it
 checks, in order (the first one that is not accepted names the exclusion in
-`skip-register.tsv`):
+the `skip-register/<kind>/<name>.tsv` shard of that census row):
 
 1. **The test's top-level directory.** `annexB`, `intl402`, `staging` and
    `harness` are skipped.
@@ -58,8 +59,8 @@ runs and changes only when the selection does.
 
 ## Outcomes and the ratchet
 
-The `outcomes/<directory>.tsv` shards record one outcome per selected test,
-sorted by path inside each file. There is no bare `fail` and no wildcard.
+The `outcomes/**/*.tsv` shards record one outcome per selected test, sorted
+by path inside each file. There is no bare `fail` and no wildcard.
 
 - **`pass`:** the test runs and meets the specification. For a negative test of
   phase `parse`, this means the front end reports an early error
@@ -114,10 +115,11 @@ TEST262_BLESS=1 TEST262_EVIDENCE=/tmp/test262-evidence.tsv \
   kiln run //crates/lash-typescript:test262_full__test
 ```
 
-This rewrites every `outcomes/<directory>.tsv` shard from a full run and
-prints the record's tallies, and writes each divergence's and refusal's
-evidence to the evidence file. A shard whose directory selects no test is
-removed; bless twice and the second run diffs nothing.
+This rewrites every `outcomes/**/*.tsv` shard from a full run and prints
+the record's tallies, and writes each divergence's and refusal's evidence to
+the evidence file. A shard whose directory selects no test is removed, and
+an emptied directory goes with it; bless twice and the second run diffs
+nothing.
 
 - a divergence keeps its recorded owner;
 - a new one is recorded as `UNTRIAGED`, which the record checks refuse until a
@@ -199,7 +201,10 @@ node crates/lash-typescript/tests/test262/sync.mjs inventory /path/to/test262
 
 Then, in order:
 
-1. Review `inventory.tsv` and classify every changed row in `census.tsv`.
+1. Review `inventory/` — one `inventory/<kind>/<name>.tsv` file per row — and
+   classify every changed row under `census/`: each ruling lives in the
+   `census/<kind>/<name>.tsv` file it names, so two lanes' rulings never
+   share a file.
 2. Regenerate the selection:
 
    ```sh
@@ -211,7 +216,8 @@ Then, in order:
 
 The script refuses a checkout whose commit differs from the pin. `check` is
 non-mutating. It regenerates every derived file in memory and fails on any
-difference, byte for byte: the inventory, skip register, sample and count, the
-vendored tests, the harness files and the license. The Rust checks also
-restate the selection rule over the vendored files themselves, so no
-selected test can touch a census row that is not accepted.
+difference, byte for byte: the `inventory/` and `skip-register/` shards, the
+sample and count files, the vendored tests, the harness files and the
+license. The Rust checks also restate the selection rule over the vendored
+files themselves, so no selected test can touch a census row that is not
+accepted.

@@ -1,0 +1,19 @@
+{
+  "name": "closure-assigned-global",
+  "create": "let value = 0;\n[1, 2, 3].forEach((n) => { value += n; });",
+  "uses": "console.log(value, value * 2);",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "6 12"
+      ],
+      "probes": {}
+    }
+  ]
+}

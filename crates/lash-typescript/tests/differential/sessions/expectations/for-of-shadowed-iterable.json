@@ -1,0 +1,29 @@
+{
+  "id": "for-of-shadowed-iterable",
+  "about": "a for...of body may declare a binding of its iterable's name (FIG-3625)",
+  "probe": [
+    "items",
+    "item"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const items = [1, 2];\nfor (const item of items) {\n  const items = [item];\n  console.log(items.length);\n}\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1",
+          "1"
+        ],
+        "probes": {
+          "items": "object [1,2]",
+          "item": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

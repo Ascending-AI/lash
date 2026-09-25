@@ -1,0 +1,61 @@
+{
+  "seed": 33,
+  "probe": [
+    "alpha",
+    "beta",
+    "count",
+    "gamma",
+    "iota",
+    "kappa",
+    "phi",
+    "sigma",
+    "theta",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "const [theta, ...phi] = [6, 3, (1 >>> Math.max(7, 11))];\nlet beta = ['a,b', '  pad ', 'x'.split(',').reverse().join('|').slice(0, 2)];\nconst { a: alpha, b: sigma = 0 } = { a: JSON.stringify(theta).slice(0, 2), b: (-theta) };\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "alpha": "string \"6\"",
+          "beta": "object [\"a,b\",\"  pad \",\"x\"]",
+          "count": "unbound",
+          "gamma": "unbound",
+          "iota": "unbound",
+          "kappa": "unbound",
+          "phi": "object [3,0]",
+          "sigma": "number -6",
+          "theta": "number 6",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "function gamma(count) {\n  const iota = alpha;\n  return (!false ? iota.indexOf('b') : iota.indexOf('b'));\n}\nconsole.log(gamma(sigma));\nconst kappa = [];\nconsole.log(sigma, sigma, theta);\nlet zeta = Math.max(9, sigma);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "-1",
+          "-6 -6 6"
+        ],
+        "probes": {
+          "alpha": "string \"6\"",
+          "beta": "object [\"a,b\",\"  pad \",\"x\"]",
+          "count": "unbound",
+          "gamma": "function undefined",
+          "iota": "unbound",
+          "kappa": "object []",
+          "phi": "object [3,0]",
+          "sigma": "number -6",
+          "theta": "number 6",
+          "zeta": "number 9"
+        },
+        "closures": [
+          "gamma"
+        ]
+      }
+    }
+  ]
+}

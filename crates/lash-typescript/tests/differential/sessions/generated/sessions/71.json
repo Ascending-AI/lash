@@ -1,0 +1,36 @@
+{
+  "seed": 71,
+  "probe": [
+    "delta",
+    "kappa",
+    "rho"
+  ],
+  "cells": [
+    {
+      "source": "var delta = 3;\nlet kappa = { f: false, e: [(delta ^ delta)] };\nlet rho = false;\nthrow new Error('  pad ');\n",
+      "node": {
+        "outcome": "throw",
+        "error": "Error",
+        "prints": [],
+        "probes": {
+          "delta": "number 3",
+          "kappa": "object {\"f\":false,\"e\":[0]}",
+          "rho": "boolean false"
+        }
+      }
+    },
+    {
+      "source": "const c = 1; c = 2; // tsc TS2588\n",
+      "reject": "TS_ASSIGN_CONST",
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "delta": "number 3",
+          "kappa": "object {\"f\":false,\"e\":[0]}",
+          "rho": "boolean false"
+        }
+      }
+    }
+  ]
+}

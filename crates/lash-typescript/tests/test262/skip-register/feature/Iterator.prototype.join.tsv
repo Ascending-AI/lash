@@ -1,0 +1,19 @@
+# test262-path	excluding-census-row
+test/built-ins/Iterator/prototype/join/closes-on-contents-coercion-exception.js	feature:Iterator.prototype.join
+test/built-ins/Iterator/prototype/join/closes-on-separator-coercion-exception.js	feature:Iterator.prototype.join
+test/built-ins/Iterator/prototype/join/contents-nullish.js	feature:Iterator.prototype.join
+test/built-ins/Iterator/prototype/join/contents-tostring.js	feature:Iterator.prototype.join
+test/built-ins/Iterator/prototype/join/descriptor.js	feature:Iterator.prototype.join
+test/built-ins/Iterator/prototype/join/does-not-close-on-iterator-error.js	feature:Iterator.prototype.join
+test/built-ins/Iterator/prototype/join/does-not-close-on-iterator-exhaustion.js	feature:Iterator.prototype.join
+test/built-ins/Iterator/prototype/join/does-not-close-on-iterator-protocol-violation.js	feature:Iterator.prototype.join
+test/built-ins/Iterator/prototype/join/does-not-close-on-next-getter-error.js	feature:Iterator.prototype.join
+test/built-ins/Iterator/prototype/join/length.js	feature:Iterator.prototype.join
+test/built-ins/Iterator/prototype/join/name.js	feature:Iterator.prototype.join
+test/built-ins/Iterator/prototype/join/next-lookup-after-separator-tostring.js	feature:Iterator.prototype.join
+test/built-ins/Iterator/prototype/join/not-a-constructor.js	feature:Iterator.prototype.join
+test/built-ins/Iterator/prototype/join/receiver-not-object.js	feature:Iterator.prototype.join
+test/built-ins/Iterator/prototype/join/results-empty-separator.js	feature:Iterator.prototype.join
+test/built-ins/Iterator/prototype/join/results-no-separator.js	feature:Iterator.prototype.join
+test/built-ins/Iterator/prototype/join/results-nonempty-separator.js	feature:Iterator.prototype.join
+test/built-ins/Iterator/prototype/join/separator-tostring.js	feature:Iterator.prototype.join

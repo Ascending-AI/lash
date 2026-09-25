@@ -1,0 +1,37 @@
+{
+  "id": "collection-methods-through-aliases",
+  "about": "a Map, Set or URLSearchParams not written as one (an alias, a field) iterates as itself (FIG-3608)",
+  "probe": [
+    "out",
+    "map",
+    "alias",
+    "box",
+    "value",
+    "key"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const out = [];\n{\n  const map = new Map([['k', 1], ['j', 2]]);\n  const alias = map;\n  alias.forEach((value, key) => { out.push(key + value); });\n  const box = { set: new Set([4, 5]), params: new URLSearchParams('a=1') };\n  box.set.forEach((value) => { out.push(value * 2); });\n  box.params.forEach((value, key) => { out.push(key); });\n  console.log([...alias.keys()], [...alias.values()], [...box.params.entries()]);\n}\nconsole.log(out);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[\"k\",\"j\"] [1,2] [[\"a\",\"1\"]]",
+          "[\"k1\",\"j2\",8,10,\"a\"]"
+        ],
+        "probes": {
+          "out": "object [\"k1\",\"j2\",8,10,\"a\"]",
+          "map": "unbound",
+          "alias": "unbound",
+          "box": "unbound",
+          "value": "unbound",
+          "key": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

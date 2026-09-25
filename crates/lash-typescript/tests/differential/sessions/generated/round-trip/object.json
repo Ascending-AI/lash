@@ -1,0 +1,19 @@
+{
+  "name": "object",
+  "create": "const value = { a: 1, b: [true, null], c: { d: 'x' } };",
+  "uses": "value.a = 2;\nvalue.b.push(false);\nconsole.log(Object.keys(value), value.c.d, JSON.stringify(value));",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "[\"a\",\"b\",\"c\"] x {\"a\":2,\"b\":[true,null,false],\"c\":{\"d\":\"x\"}}"
+      ],
+      "probes": {}
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/generated-temporaries.json.
+
+session generated-temporaries
+about member assignment, callbacks, destructuring and process literals bind only authored names
+probe box doubled v p r1 r2 head tail index value total
+cell
+const box = { value: 1 };
+box.value = 2;
+box.value += 3;
+const doubled = [1, 2].map((v) => v * 2).filter((v) => v > 2);
+const { p, q: [r1, r2] } = { p: 1, q: [2, 3] };
+const [head, ...tail] = [4, 5, 6];
+let total = 0;
+for (const [index, value] of [[0, 10], [1, 20]]) {
+  total = total + index + value;
+}
+console.log(box.value, doubled, p, r1, r2, head, tail, total);
+end

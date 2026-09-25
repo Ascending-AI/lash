@@ -1,0 +1,43 @@
+{
+  "id": "durable-shared-identity",
+  "about": "two session paths to one object stay one object after a reload (FIG-3608)",
+  "probe": [
+    "shared",
+    "pair"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const shared = { count: 1 };\nconst pair = { left: shared, right: shared };\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "shared": "object {\"count\":1}",
+          "pair": "object {\"left\":{\"count\":1},\"right\":{\"count\":1}}"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "pair.left.count = 2;\nconsole.log(pair.right.count, shared.count);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2 2"
+        ],
+        "probes": {
+          "shared": "object {\"count\":2}",
+          "pair": "object {\"left\":{\"count\":2},\"right\":{\"count\":2}}"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

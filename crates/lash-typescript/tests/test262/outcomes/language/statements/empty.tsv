@@ -1,0 +1,3 @@
+# test262-path	class	qualifier
+test/language/statements/empty/S12.3_A1.js	pass	-
+test/language/statements/empty/cptn-value.js	refused	TS_EVAL_UNSUPPORTED

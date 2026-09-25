@@ -1,0 +1,27 @@
+{
+  "id": "global-this-past-a-block-binding",
+  "about": "a top-level block binding is not the global of the same name, so a globalThis write in the block creates a separate global (FIG-3620)",
+  "probe": [
+    "blocked"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "{\n  let blocked = 1;\n  globalThis.blocked = 2;\n  console.log(blocked, globalThis.blocked);\n}\nconsole.log(blocked);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1 2",
+          "2"
+        ],
+        "probes": {
+          "blocked": "number 2"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

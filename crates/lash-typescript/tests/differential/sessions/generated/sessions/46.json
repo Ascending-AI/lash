@@ -1,0 +1,157 @@
+{
+  "seed": 46,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "count",
+    "delta",
+    "entry",
+    "field",
+    "gamma",
+    "kappa",
+    "phi",
+    "psi",
+    "rho",
+    "sigma",
+    "tau",
+    "turn1",
+    "value",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "switch (2 % 3) {\n  case 0: {\n    const beta = ('Lash'.toUpperCase() === 'b.c');\n    break;\n  }\n  default: {\n    let turn1 = 0;\n    while (turn1 < 1) {\n      turn1++;\n      const chi = { b: 6, a: [], g: (turn1 - turn1) };\n      const phi = false;\n    }\n  }\n}\nfunction gamma(count) {\n  return Math.floor(Math.max(count, 10));\n}\nconsole.log(gamma(('Lash'.indexOf('b') | 12)));\nfor (const entry of []) {\n  let phi = 0;\n  try {\n    let zeta = ['hi'.split(',').reverse().join('|'), 'a,b'];\n    const kappa = new Date(Date.UTC(2024, 3, 25));\n    console.log(kappa.toISOString(), kappa.getUTCDay(), kappa.getTime() > 0, kappa instanceof Date);\n    throw new Error('Lash');\n  } catch {\n    console.log('caught');\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "10"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "function undefined",
+          "kappa": "unbound",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "tau": "unbound",
+          "turn1": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "gamma"
+        ]
+      }
+    },
+    {
+      "source": "class A { static #m() { } }\n",
+      "reject": "TS_CLASS_UNSUPPORTED",
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "function undefined",
+          "kappa": "unbound",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "tau": "unbound",
+          "turn1": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "gamma"
+        ]
+      }
+    },
+    {
+      "source": "const delta = (value, step = 2) => value + step;\nconsole.log(delta(10));\nfunction tau(count) {\n  return 6;\n}\nconsole.log(tau(String(0).length));\nfor (const field in { ...{ a: [] }, b: 'zz', e: '  pad ' }) {\n  console.log(field);\n}\nlet psi = 'zz'.includes('a');\nfunction sigma(count) {\n  var alpha = 5;\n  return 2;\n}\nconsole.log(sigma(0.5));\nlet rho = [((10 === 4) ? 11 : 5), 1];\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "12",
+          "6",
+          "a",
+          "b",
+          "e",
+          "2"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "function undefined",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "function undefined",
+          "kappa": "unbound",
+          "phi": "unbound",
+          "psi": "boolean false",
+          "rho": "object [5,1]",
+          "sigma": "function undefined",
+          "tau": "function undefined",
+          "turn1": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "delta",
+          "gamma",
+          "sigma",
+          "tau"
+        ]
+      }
+    },
+    {
+      "source": "Error.isError(new Error('x'));\n",
+      "reject": "TS_METHOD_UNSUPPORTED",
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "function undefined",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "function undefined",
+          "kappa": "unbound",
+          "phi": "unbound",
+          "psi": "boolean false",
+          "rho": "object [5,1]",
+          "sigma": "function undefined",
+          "tau": "function undefined",
+          "turn1": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "delta",
+          "gamma",
+          "sigma",
+          "tau"
+        ]
+      }
+    }
+  ]
+}

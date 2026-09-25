@@ -1,0 +1,143 @@
+{
+  "seed": 17,
+  "probe": [
+    "alpha",
+    "chi",
+    "entry",
+    "field",
+    "gamma",
+    "i",
+    "j",
+    "kappa",
+    "lambda",
+    "phi",
+    "psi",
+    "rho",
+    "sigma",
+    "step",
+    "tau",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "for (const entry of ['zz'.length, 8, 7]) {\n  console.info(entry, 'x'.indexOf('b'));\n}\nconst lambda = 'zz';\nfor (let j = 0; j < 1; j++) {\n  {\n    const zeta = new Set([9, 7, 9]);\n    console.log(zeta.size, zeta.has(1), [...zeta.union(new Set([7]))], zeta instanceof Set);\n    zeta.add(7);\n    zeta.delete(2);\n  }\n  let phi = { a: true, e: j };\n}\nconst sigma = { c: String(3).length, a: 'Lash', e: true };\nfor (const field in sigma) {\n  console.log(field);\n}\nconst rho = false;\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2 -1",
+          "8 -1",
+          "7 -1",
+          "2 false [9,7] true",
+          "c",
+          "a",
+          "e"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "j": "unbound",
+          "kappa": "unbound",
+          "lambda": "string \"zz\"",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rho": "boolean false",
+          "sigma": "object {\"c\":1,\"a\":\"Lash\",\"e\":true}",
+          "step": "unbound",
+          "tau": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "if (true) {\n  let alpha = !(lambda.split(',').reverse().join('|') === ('Lash' + lambda));\n  const gamma = /(?<head>[a-z])(?<tail>[a-z]*)/;\n  console.log(gamma.test('Lash'), gamma.source, gamma.flags, gamma.lastIndex, String(gamma));\n} else {\n  {\n    console.warn(0);\n  }\n  console.log(sigma, lambda);\n}\nlet chi = Math.floor(Number.parseInt(sigma.a + '7', 10));\nfor (let step = 0; step < 3; step++) {\n  for (let i = 0; i < 2; i++) {\n    sigma.h = 'ab'.includes('a');\n  }\n  if (rho) { break; }\n}\nfor (const field in sigma) {\n  console.log(field);\n}\nconst [kappa, ...psi] = [(8 << Math.min(chi, chi)), (-7), chi];\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "true (?<head>[a-z])(?<tail>[a-z]*)  0 /(?<head>[a-z])(?<tail>[a-z]*)/",
+          "c",
+          "a",
+          "e",
+          "h"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "number null",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "j": "unbound",
+          "kappa": "number 8",
+          "lambda": "string \"zz\"",
+          "phi": "unbound",
+          "psi": "object [-7,null]",
+          "rho": "boolean false",
+          "sigma": "object {\"c\":1,\"a\":\"Lash\",\"e\":true,\"h\":true}",
+          "step": "unbound",
+          "tau": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "console.log(rho);\nfor (let step = 0; step < 3; step++) {\n  sigma.h = false;\n  {\n    var tau = step;\n    let phi = { a: lambda.indexOf('b'), c: String(0) };\n  }\n}\nfor (const field in psi) {\n  console.log(field);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "false",
+          "0",
+          "1"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "number null",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "j": "unbound",
+          "kappa": "number 8",
+          "lambda": "string \"zz\"",
+          "phi": "unbound",
+          "psi": "object [-7,null]",
+          "rho": "boolean false",
+          "sigma": "object {\"c\":1,\"a\":\"Lash\",\"e\":true,\"h\":false}",
+          "step": "unbound",
+          "tau": "number 2",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "console.log(psi, chi, kappa);\nfor (let step = 0; step < 3; step++) {\n  psi.reverse();\n  sigma.a = 'Lash'.replace(/[a-z]/g, '_').split(',').reverse().join('|');\n  if ((Math.round(kappa) === Math.max(...psi, 1))) { break; }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[-7,null] NaN 8"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "chi": "number null",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "j": "unbound",
+          "kappa": "number 8",
+          "lambda": "string \"zz\"",
+          "phi": "unbound",
+          "psi": "object [null,-7]",
+          "rho": "boolean false",
+          "sigma": "object {\"c\":1,\"a\":\"L___\",\"e\":true,\"h\":false}",
+          "step": "unbound",
+          "tau": "number 2",
+          "zeta": "unbound"
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,12 @@
+# test262-path	class	qualifier
+test/language/rest-parameters/array-pattern.js	pass	-
+test/language/rest-parameters/arrow-function.js	pass	-
+test/language/rest-parameters/expected-argument-count.js	pass	-
+test/language/rest-parameters/no-alias-arguments.js	pass	-
+test/language/rest-parameters/object-pattern.js	pass	-
+test/language/rest-parameters/position-invalid.js	pass	-
+test/language/rest-parameters/rest-index.js	pass	-
+test/language/rest-parameters/rest-parameters-apply.js	refused	TS_METHOD_UNSUPPORTED
+test/language/rest-parameters/rest-parameters-call.js	refused	TS_METHOD_UNSUPPORTED
+test/language/rest-parameters/rest-parameters-produce-an-array.js	pass	-
+test/language/rest-parameters/with-new-target.js	refused	TS_CLASS_UNSUPPORTED

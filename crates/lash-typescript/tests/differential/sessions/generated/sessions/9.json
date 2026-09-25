@@ -1,0 +1,108 @@
+{
+  "seed": 9,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "field",
+    "item",
+    "key",
+    "n",
+    "omega",
+    "rest",
+    "rho",
+    "step",
+    "tau",
+    "theta",
+    "turn1",
+    "value"
+  ],
+  "cells": [
+    {
+      "source": "for (let step = 0; step < 2; step++) {\n  if (true) {\n    const rho = (n, ...rest) => n + rest.length;\n    console.log(rho(6));\n    const tau = [step];\n  } else {\n    const beta = [0];\n  }\n}\nfor (let step = 0; step < 1; step++) {\n  console.log((typeof 6));\n  for (const field in { ['h']: 9 }) {\n    console.log(field);\n  }\n}\nif (false) {\n  console.log(true, false, (2 < 3));\n  let turn1 = 0;\n  while (turn1 < 2) {\n    turn1++;\n    let theta = { c: false, h: Number.parseInt(('b.c' + 'ab') + '7', 10), a: 'ab' };\n    console.log(turn1, turn1);\n  }\n} else {\n  console.info((true ? 0 : 6), 'Lash', `${5}:${('hi' + 'ab'.slice(0, 2))}`);\n  console.log(true, 4.5, (-0));\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "6",
+          "6",
+          "number",
+          "h",
+          "0 Lash 5:hiab",
+          "true 4.5 0"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "field": "unbound",
+          "item": "unbound",
+          "key": "unbound",
+          "n": "unbound",
+          "omega": "unbound",
+          "rest": "unbound",
+          "rho": "unbound",
+          "step": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const omega = { d: 4 };\nconst chi = new Map([['b', 2], ['a', 6]]);\nif ([[(false ? 2 : 10)], [2]].flat().includes(2)) {\n  const chi = (item, ...rest) => 'ab'.indexOf('b') + rest.length;\n  console.log(chi((1.5 ** 2)));\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "object {}",
+          "field": "unbound",
+          "item": "unbound",
+          "key": "unbound",
+          "n": "unbound",
+          "omega": "object {\"d\":4}",
+          "rest": "unbound",
+          "rho": "unbound",
+          "step": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "for (const field in omega) {\n  console.log(field);\n  {\n    console.log(((7.5 % 9) + Math.min(2.5, (9 - 12))), field, field);\n  }\n}\nomega.d = '  pad '.length;\nomega.a = ((6.5 ** 2) * (10 >>> 9));\n{\n  for (const [key, value] of chi) {\n    omega.d -= 10;\n    const alpha = (n, step = 2) => omega.d + step;\n    console.log(alpha(8));\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "d",
+          "4.5 d d",
+          "-2",
+          "-12"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "object {}",
+          "field": "unbound",
+          "item": "unbound",
+          "key": "unbound",
+          "n": "unbound",
+          "omega": "object {\"d\":-14,\"a\":0}",
+          "rest": "unbound",
+          "rho": "unbound",
+          "step": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "value": "unbound"
+        }
+      }
+    }
+  ]
+}

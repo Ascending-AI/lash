@@ -1,0 +1,120 @@
+{
+  "seed": 4,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "delta",
+    "entry",
+    "error",
+    "field",
+    "index",
+    "iota",
+    "j",
+    "kappa",
+    "omega",
+    "phi",
+    "sigma",
+    "slot",
+    "turn1",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "for (const entry of [String(6), '  pad ']) {\n  let kappa = (entry instanceof Error);\n  if (true) { break; }\n}\nlet turn1 = 0;\nwhile (turn1 < 2) {\n  turn1++;\n  for (const entry of ['Lash'.replaceAll('b', 'B'), 'hi'.toUpperCase(), (turn1).toFixed(1)]) {\n    console.log(entry, turn1, 6);\n  }\n  {\n    console.log('a,b');\n    var chi = (('Lash' === 'b.c') ? Array.from({ length: 1 }, (slot, index) => index * 2).length : (false ? turn1 : (turn1 * turn1)));\n    const kappa = { a: JSON.stringify(turn1).split(',').reverse().join('|') };\n  }\n}\nfor (const field in { d: [chi, turn1], e: 'ab'.split(',').reverse().join('|'), h: [[3], [2]].flat().includes(2) }) {\n  console.log(field);\n}\n{\n  const sigma = new Set([12, 9, 12]);\n  console.log(sigma.size, sigma.has(1), [...sigma.union(new Set([7]))], sigma instanceof Set);\n}\nconst zeta = 'ab';\nconst beta = new URL('https://example.com/a/b?x=1');\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "Lash 1 6",
+          "HI 1 6",
+          "1.0 1 6",
+          "a,b",
+          "Lash 2 6",
+          "HI 2 6",
+          "2.0 2 6",
+          "a,b",
+          "d",
+          "e",
+          "h",
+          "2 false [12,9,7] true"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "object \"https://example.com/a/b?x=1\"",
+          "chi": "number 4",
+          "delta": "unbound",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "j": "unbound",
+          "kappa": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "turn1": "number 2",
+          "zeta": "string \"ab\""
+        }
+      }
+    },
+    {
+      "source": "var delta = 'b.c';\nconsole.log(zeta);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "ab"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "object \"https://example.com/a/b?x=1\"",
+          "chi": "number 4",
+          "delta": "string \"b.c\"",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "j": "unbound",
+          "kappa": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "turn1": "number 2",
+          "zeta": "string \"ab\""
+        }
+      }
+    },
+    {
+      "source": "for (let j = 0; j < 1; j++) {\n  const omega = /(?<first>[a-z])(b)?/.exec('zz');\n  console.log(omega?.[0] ?? 'none', omega?.index ?? -1, omega?.groups?.first ?? '-', omega === null);\n}\nswitch (chi % 3) {\n  case 0: {\n    const omega = /(?<head>[a-z])(?<tail>[a-z]*)/;\n    console.log(omega.test('b.c'), omega.source, omega.flags, omega.lastIndex, String(omega));\n    let alpha = omega;\n    break;\n  }\n  case 1: {\n    const iota = [];\n    break;\n  }\n  default: {\n    try {\n      beta.hash = 'h';\n      let omega = new URL('https://example.com/a/b?x=1');\n    } catch (error) {\n      console.log(error.name, error.message, error instanceof RangeError);\n    } finally {\n      let phi = { ...{ g: true }, f: 6 };\n    }\n  }\n}\nif (true) {\n  let omega = ('b.c' + zeta).split(',').reverse().join('|').slice(0, 2);\n} else {\n  beta.hash = 'h';\n}\nthrow new RangeError('Lash');\n",
+      "node": {
+        "outcome": "throw",
+        "error": "RangeError",
+        "prints": [
+          "z 0 z false"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "object \"https://example.com/a/b?x=1\"",
+          "chi": "number 4",
+          "delta": "string \"b.c\"",
+          "entry": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "j": "unbound",
+          "kappa": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "turn1": "number 2",
+          "zeta": "string \"ab\""
+        }
+      }
+    }
+  ]
+}

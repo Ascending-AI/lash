@@ -1,0 +1,99 @@
+{
+  "seed": 86,
+  "probe": [
+    "beta",
+    "count",
+    "delta",
+    "entry",
+    "field",
+    "index",
+    "iota",
+    "item",
+    "j",
+    "kappa",
+    "omega",
+    "phi",
+    "psi",
+    "rest",
+    "rho",
+    "sigma",
+    "slot",
+    "tau",
+    "theta"
+  ],
+  "cells": [
+    {
+      "source": "function psi(count) {\n  const iota = (item, ...rest) => item + rest.length;\n  return (typeof count).length;\n}\nconsole.log(psi(9));\nfor (let j = 0; j < 1; j++) {\n  const [omega, ...theta] = [(1 % Array.from({ length: 1 }, (slot, index) => index * 2).length), 2, 7];\n  for (const entry of theta) {\n    theta.pop();\n    let tau = [j];\n  }\n}\nfunction beta(count) {\n  return count <= 1 ? 1 : count + beta(count - 1);\n}\nconsole.log(beta(1));\nconsole.warn(true);\nconst { a: rho, b: kappa = 0 } = { a: 'b.c', b: 10 };\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "6",
+          "1",
+          "true"
+        ],
+        "probes": {
+          "beta": "function undefined",
+          "count": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "j": "unbound",
+          "kappa": "number 10",
+          "omega": "unbound",
+          "phi": "unbound",
+          "psi": "function undefined",
+          "rest": "unbound",
+          "rho": "string \"b.c\"",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "unbound"
+        },
+        "closures": [
+          "beta",
+          "psi"
+        ]
+      }
+    },
+    {
+      "source": "let sigma = { b: 'ab', a: 7.5, h: ('  pad '.trim() === rho) };\nfor (const field in sigma) {\n  console.log(field);\n  const delta = new Set([1, 11, 1]);\n}\nconsole.log((kappa === kappa));\nsigma = { b: rho, a: (kappa ** 2), h: (kappa instanceof Array) };\nlet phi = [Math.round(kappa), Number.parseInt(rho + '7', 10)];\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "b",
+          "a",
+          "h",
+          "true"
+        ],
+        "probes": {
+          "beta": "function undefined",
+          "count": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "j": "unbound",
+          "kappa": "number 10",
+          "omega": "unbound",
+          "phi": "object [10,null]",
+          "psi": "function undefined",
+          "rest": "unbound",
+          "rho": "string \"b.c\"",
+          "sigma": "object {\"b\":\"b.c\",\"a\":100,\"h\":false}",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "unbound"
+        },
+        "closures": [
+          "beta",
+          "psi"
+        ]
+      }
+    }
+  ]
+}

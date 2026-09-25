@@ -1,0 +1,80 @@
+{
+  "seed": 93,
+  "probe": [
+    "beta",
+    "chi",
+    "delta",
+    "entry",
+    "gamma",
+    "i",
+    "iota",
+    "j",
+    "lambda",
+    "tau"
+  ],
+  "cells": [
+    {
+      "source": "var iota = new Map(Object.entries({ z: 3, y: 0 }));\nconsole.info([...iota.entries()], [...iota.entries()]);\niota.set('ab', 3);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[[\"z\",3],[\"y\",0]] [[\"z\",3],[\"y\",0]]"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "iota": "object {}",
+          "j": "unbound",
+          "lambda": "unbound",
+          "tau": "unbound"
+        }
+      }
+    },
+    {
+      "source": "console.log(12, true);\niota.set('x', 2);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "12 true"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "iota": "object {}",
+          "j": "unbound",
+          "lambda": "unbound",
+          "tau": "unbound"
+        }
+      }
+    },
+    {
+      "source": "{\n  iota.delete('zz');\n  for (let i = 0; i < 2; i++) {\n    iota.delete('zz');\n  }\n  iota.set('a,b', 6);\n}\nconst { a: lambda, b: tau = 0 } = { a: 'hi'.split(',').reverse().join('|'), b: 6 };\nfor (let j = 0; j < 3; j++) {\n  if (true) {\n    let gamma = /(?<first>[a-z])(b)?/.exec('  pad ');\n  } else {\n    let chi = { d: 'zz' };\n  }\n  for (const entry of lambda) {\n    iota.set('b.c', 'x'.padStart(5, '*').length);\n    const delta = 6.5;\n  }\n}\n{\n  const beta = new Set([7, 0, 7]);\n  console.log(beta.size, beta.has(1), [...beta.union(new Set([7]))], beta instanceof Set);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2 false [7,0] true"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "iota": "object {}",
+          "j": "unbound",
+          "lambda": "string \"hi\"",
+          "tau": "number 6"
+        }
+      }
+    }
+  ]
+}

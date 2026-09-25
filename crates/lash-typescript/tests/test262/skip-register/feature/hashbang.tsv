@@ -1,0 +1,7 @@
+# test262-path	excluding-census-row
+test/language/comments/hashbang/eval-indirect.js	feature:hashbang
+test/language/comments/hashbang/eval.js	feature:hashbang
+test/language/comments/hashbang/function-body.js	feature:hashbang
+test/language/comments/hashbang/function-constructor.js	feature:hashbang
+test/language/comments/hashbang/no-line-separator.js	feature:hashbang
+test/language/comments/hashbang/statement-block.js	feature:hashbang

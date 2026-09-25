@@ -1,0 +1,19 @@
+{
+  "name": "url",
+  "create": "const value = new URL('https://user@example.com:8080/a/b?x=1#frag');",
+  "uses": "value.pathname = '/c';\nconsole.log(value.href, value.port, value.searchParams.get('x'), value instanceof URL);",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "https://user@example.com:8080/c?x=1#frag 8080 1 true"
+      ],
+      "probes": {}
+    }
+  ]
+}

@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	unresolvable-references	rejected	TS_UNKNOWN_BINDING	const x = notDeclaredAnywhere;

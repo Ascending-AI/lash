@@ -1,0 +1,26 @@
+{
+  "id": "sibling-block-binding-types",
+  "about": "sibling blocks may declare one name with values of different types (FIG-3631)",
+  "probe": [
+    "label"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "if (true) {\n  let label = 1;\n} else {\n  let label = true;\n}\n{\n  let label = 'x';\n  console.log(label);\n}\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "x"
+        ],
+        "probes": {
+          "label": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

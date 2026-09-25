@@ -1,0 +1,60 @@
+{
+  "id": "global-object-and-lexical-binding",
+  "about": "a write through globalThis creates a global object property that a let of the same name shadows",
+  "probe": [
+    "counter"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "let counter = 1;\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "counter": "number 1"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "globalThis.counter = counter + 1;\nconsole.log(counter);\n",
+      "reject": null,
+      "deviation": "global-object-aliases-lexical-bindings",
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1"
+        ],
+        "probes": {
+          "counter": "number 1"
+        },
+        "closures": []
+      },
+      "lash": {
+        "resident": {
+          "outcome": "normal",
+          "prints": [
+            "2"
+          ],
+          "probes": {
+            "counter": "number 2"
+          }
+        },
+        "restart": {
+          "outcome": "normal",
+          "prints": [
+            "2"
+          ],
+          "probes": {
+            "counter": "number 2"
+          }
+        }
+      }
+    }
+  ]
+}

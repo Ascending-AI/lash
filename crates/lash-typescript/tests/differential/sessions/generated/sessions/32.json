@@ -1,0 +1,73 @@
+{
+  "seed": 32,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "delta",
+    "entry",
+    "field",
+    "gamma",
+    "index",
+    "kappa",
+    "n",
+    "omega",
+    "rho",
+    "slot"
+  ],
+  "cells": [
+    {
+      "source": "var kappa = 7;\n{\n  const omega = new RangeError('b.c');\n  console.log(omega.name, omega.message, String(omega), omega instanceof Error);\n  const delta = (n, step = 2) => kappa + step;\n  console.log(delta(6));\n  const alpha = (5 - 6);\n}\nlet gamma = ((false ? Math.max(kappa, 7) : 0)).toFixed(1);\nswitch (5 % 3) {\n  case 0: {\n    for (const field in { a: Array.from({ length: 0 }, (slot, index) => index * 2).length, c: (kappa * 5) }) {\n      console.log(field);\n    }\n    break;\n  }\n  default: {\n    const beta = { a: [kappa] };\n  }\n}\nconsole.log(kappa, gamma, true);\nconsole.log(kappa);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "RangeError b.c RangeError: b.c true",
+          "9",
+          "7 0.0 true",
+          "7"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "string \"0.0\"",
+          "index": "unbound",
+          "kappa": "number 7",
+          "n": "unbound",
+          "omega": "unbound",
+          "rho": "unbound",
+          "slot": "unbound"
+        }
+      }
+    },
+    {
+      "source": "for (const field in { d: '  pad '.padStart(5, '*'), a: gamma.split(',').reverse().join('|') }) {\n  console.log(field);\n}\nlet chi = ['ab'];\nif ((kappa instanceof Error)) {\n  for (const entry of chi) {\n    chi.pop();\n    const rho = { ...{ f: [entry.indexOf('b'), Math.floor(kappa), kappa] }, e: 5 };\n    if (!(rho instanceof Error)) { break; }\n  }\n  chi.splice(0, 1);\n}\nchi.splice(0, 1);\nfinish(chi.join('-').replace(/[a-z]/g, '_'));\n",
+      "node": {
+        "outcome": "finish",
+        "finish": "",
+        "prints": [
+          "d",
+          "a"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "object []",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "string \"0.0\"",
+          "index": "unbound",
+          "kappa": "number 7",
+          "n": "unbound",
+          "omega": "unbound",
+          "rho": "unbound",
+          "slot": "unbound"
+        }
+      }
+    }
+  ]
+}

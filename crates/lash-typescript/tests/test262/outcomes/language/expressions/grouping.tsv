@@ -1,0 +1,8 @@
+# test262-path	class	qualifier
+test/language/expressions/grouping/S11.1.6_A1.js	refused	TS_EVAL_UNSUPPORTED
+test/language/expressions/grouping/S11.1.6_A2_T1.js	pass	-
+test/language/expressions/grouping/S11.1.6_A3_T1.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/grouping/S11.1.6_A3_T2.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/grouping/S11.1.6_A3_T3.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/grouping/S11.1.6_A3_T4.js	pass	-
+test/language/expressions/grouping/S11.1.6_A3_T7.js	pass	-

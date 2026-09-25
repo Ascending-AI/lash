@@ -1,0 +1,190 @@
+{
+  "seed": 56,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "count",
+    "delta",
+    "entry",
+    "field",
+    "gamma",
+    "iota",
+    "item",
+    "kappa",
+    "n",
+    "omega",
+    "phi",
+    "psi",
+    "rest",
+    "rho",
+    "sigma",
+    "tau",
+    "theta",
+    "turn1",
+    "value",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "switch (5 % 3) {\n  case 0: {\n    let turn1 = 0;\n    while (turn1 < 2) {\n      turn1++;\n      let chi = 7;\n      const tau = new URL('https://example.com/p?x=1');\n      console.log(tau.href, tau.pathname, tau.searchParams.get('x'), tau.origin);\n    }\n    try {\n      console.info(((typeof 3) + 'a,b'));\n      const iota = (value, ...rest) => 9.5 + rest.length;\n      console.log(iota(7.5));\n    } catch {\n      console.log('caught');\n    }\n    break;\n  }\n  case 1: {\n    const omega = new Set([8, 7, 8]);\n    console.log(omega.size, omega.has(1), [...omega.union(new Set([7]))], omega instanceof Set);\n  }\n  default: {\n    let tau = /(?<first>[a-z])(b)?/.exec('b.c');\n  }\n}\nfor (const field in { d: 9.5, e: [1, 9, 6], a: 'hi' }) {\n  console.log(field);\n  const rho = (n) => Number.parseInt(field.slice(0, 2) + '7', 10);\n  console.log(rho(field.indexOf('b')));\n}\nlet zeta = Number.parseInt('a,b' + '7', 10);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "d",
+          "NaN",
+          "e",
+          "NaN",
+          "a",
+          "NaN"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "kappa": "unbound",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "value": "unbound",
+          "zeta": "number null"
+        }
+      }
+    },
+    {
+      "source": "console.log('zz');\nconst sigma = (value, step = 2) => 'b.c'.indexOf('b') + step;\nconsole.log(sigma((Number.parseInt('x' + '7', 10) + 11)));\nfor (const entry of [Number.parseInt('a,b' + '7', 10)]) {\n  const { a: beta, b: iota = 0 } = { a: 'hi', b: Number.parseInt('  pad '.trim() + '7', 10) };\n}\nlet phi = [4];\nconsole.log(zeta);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "zz",
+          "2",
+          "NaN"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "kappa": "unbound",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "object [4]",
+          "psi": "unbound",
+          "rest": "unbound",
+          "rho": "unbound",
+          "sigma": "function undefined",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "value": "unbound",
+          "zeta": "number null"
+        },
+        "closures": [
+          "sigma"
+        ]
+      }
+    },
+    {
+      "source": "{\n  phi.splice(0, 1);\n  let gamma = phi;\n}\nconst psi = (value, step = 2) => Math.floor(5) + step;\nconsole.log(psi(Number.parseInt((zeta).toFixed(1) + '7', 10)));\nvar delta = (phi.join('-').slice(0, 2) === ('Lash' + 'hi').split(',').reverse().join('|'));\nfor (const entry of phi) {\n  const alpha = ('x'.slice(0, 2).trimStart() + JSON.stringify(delta));\n}\nfunction theta(count) {\n  const alpha = { b: (psi(count) >> 10), g: 'x'.padStart(5, '*').length, h: ((typeof count) + phi.join('-')) };\n  return Number.parseInt('hi'.replace(/[a-z]/g, '_') + '7', 10);\n}\nconsole.log(theta(zeta));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "7",
+          "NaN"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "boolean false",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "kappa": "unbound",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "object []",
+          "psi": "function undefined",
+          "rest": "unbound",
+          "rho": "unbound",
+          "sigma": "function undefined",
+          "tau": "unbound",
+          "theta": "function undefined",
+          "turn1": "unbound",
+          "value": "unbound",
+          "zeta": "number null"
+        },
+        "closures": [
+          "psi",
+          "sigma",
+          "theta"
+        ]
+      }
+    },
+    {
+      "source": "function kappa(count) {\n  return zeta;\n}\nconsole.log(kappa(zeta));\nconsole.warn(delta, delta, phi.join('-'));\nphi.push(...[0, zeta]);\nif (delta) {\n  console.log((Math.sign(8) % (0 ** 2)));\n}\nconsole.info(delta);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "NaN",
+          "false false ",
+          "false"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "boolean false",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "kappa": "function undefined",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "object [0,null]",
+          "psi": "function undefined",
+          "rest": "unbound",
+          "rho": "unbound",
+          "sigma": "function undefined",
+          "tau": "unbound",
+          "theta": "function undefined",
+          "turn1": "unbound",
+          "value": "unbound",
+          "zeta": "number null"
+        },
+        "closures": [
+          "kappa",
+          "psi",
+          "sigma",
+          "theta"
+        ]
+      }
+    }
+  ]
+}

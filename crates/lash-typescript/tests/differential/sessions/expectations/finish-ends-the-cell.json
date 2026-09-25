@@ -1,0 +1,25 @@
+{
+  "id": "finish-ends-the-cell",
+  "about": "finish ends the cell with its value after earlier statements ran",
+  "probe": [
+    "answer"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const answer = 41 + 1;\nfinish(answer);\nconsole.log(\"unreachable\");\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "finish",
+        "prints": [],
+        "finish": 42,
+        "probes": {
+          "answer": "number 42"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

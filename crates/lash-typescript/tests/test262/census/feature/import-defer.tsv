@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	import-defer	rejected	TS_IMPORT_EXPORT_UNSUPPORTED	import defer * as ns from 'mod';

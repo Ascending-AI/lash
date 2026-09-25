@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Error.isError	rejected	TS_METHOD_UNSUPPORTED	Error.isError(new Error('x'));

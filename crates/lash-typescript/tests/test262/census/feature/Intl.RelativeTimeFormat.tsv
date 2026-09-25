@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Intl.RelativeTimeFormat	skip	ticket-ruling:FIG-1413:Intl.RelativeTimeFormat	-

@@ -1,0 +1,45 @@
+{
+  "id": "shadowing",
+  "about": "a block shadow neither leaks nor overwrites the session global it shadows",
+  "probe": [
+    "shade"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "let shade = \"outer\";\n{\n  let shade = \"inner\";\n  console.log(shade);\n}\nconsole.log(shade);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "inner",
+          "outer"
+        ],
+        "probes": {
+          "shade": "string \"outer\""
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "{\n  const shade = \"block\";\n  console.log(shade);\n}\nif (shade === \"outer\") {\n  let shade = \"arm\";\n  console.log(shade);\n}\nconsole.log(shade);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "block",
+          "arm",
+          "outer"
+        ],
+        "probes": {
+          "shade": "string \"outer\""
+        },
+        "closures": []
+      }
+    }
+  ]
+}

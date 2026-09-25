@@ -1,0 +1,170 @@
+{
+  "seed": 27,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "count",
+    "delta",
+    "index",
+    "item",
+    "kappa",
+    "lambda",
+    "n",
+    "omega",
+    "phi",
+    "rest",
+    "rho",
+    "scaled",
+    "sigma",
+    "slot",
+    "tau",
+    "theta",
+    "value"
+  ],
+  "cells": [
+    {
+      "source": "console.log(Array.from({ length: 0 }, (slot, index) => index * 2).length, '  pad '.includes('a'));\nfunction sigma(count) {\n  const lambda = false;\n  return 'Lash'.indexOf('b');\n}\nconsole.log(sigma((-sigma(10))));\nvar kappa = true;\nlet chi = [(5 << 'x'.length)];\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "0 true",
+          "-1"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "object [10]",
+          "count": "unbound",
+          "delta": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "kappa": "boolean true",
+          "lambda": "unbound",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "rest": "unbound",
+          "rho": "unbound",
+          "scaled": "unbound",
+          "sigma": "function undefined",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "value": "unbound"
+        },
+        "closures": [
+          "sigma"
+        ]
+      }
+    },
+    {
+      "source": "function phi(count) {\n  var delta = new Map(Object.entries({ z: 7, y: 7 }));\n  return (true ? (count % count) : Math.abs(4));\n}\nconsole.log(phi(4));\nif (chi.some((value) => value > value)) {\n  if (kappa) {\n    chi.reverse();\n    chi.push(...[11, 8]);\n  } else {\n    globalThis.kappa = (chi.findLastIndex((value) => value < value) >= 0);\n    chi.push(...[(Number.parseInt('hi' + '7', 10) << (0 - 5)), 8]);\n  }\n} else {\n  chi[0] = 0;\n}\nconst [tau, ...omega] = [3, 3.5, (1 - 12)];\nomega.forEach((value) => { chi.push(value); });\nif (false) {\n  {\n    omega.push(...[chi.length, 0]);\n  }\n  let tau = { c: kappa, b: ('  pad '.toUpperCase() === 'zz'), g: [6, 'b.c'.length, Math.round(10)] };\n} else {\n  switch (6 % 3) {\n    case 0: {\n      console.log(omega, chi);\n      break;\n    }\n    case 1: {\n      const tau = (n, step = 2) => 5 + step;\n      console.log(tau(11));\n      omega[0] = 0;\n      break;\n    }\n    default: {\n      chi.reverse();\n    }\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "0",
+          "[3.5,-11] [0,3.5,-11]"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "object [0,3.5,-11]",
+          "count": "unbound",
+          "delta": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "kappa": "boolean true",
+          "lambda": "unbound",
+          "n": "unbound",
+          "omega": "object [3.5,-11]",
+          "phi": "function undefined",
+          "rest": "unbound",
+          "rho": "unbound",
+          "scaled": "unbound",
+          "sigma": "function undefined",
+          "slot": "unbound",
+          "tau": "number 3",
+          "theta": "unbound",
+          "value": "unbound"
+        },
+        "closures": [
+          "phi",
+          "sigma"
+        ]
+      }
+    },
+    {
+      "source": "eval('1');\n",
+      "reject": "TS_EVAL_UNSUPPORTED",
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "object [0,3.5,-11]",
+          "count": "unbound",
+          "delta": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "kappa": "boolean true",
+          "lambda": "unbound",
+          "n": "unbound",
+          "omega": "object [3.5,-11]",
+          "phi": "function undefined",
+          "rest": "unbound",
+          "rho": "unbound",
+          "scaled": "unbound",
+          "sigma": "function undefined",
+          "slot": "unbound",
+          "tau": "number 3",
+          "theta": "unbound",
+          "value": "unbound"
+        },
+        "closures": [
+          "phi",
+          "sigma"
+        ]
+      }
+    },
+    {
+      "source": "switch (3 % 3) {\n  case 0: {\n    switch (0 % 3) {\n      case 0: {\n        console.log(omega);\n        chi.push(1);\n        break;\n      }\n      default: {\n        omega.push(tau);\n      }\n    }\n    break;\n  }\n  case 1: {\n    {\n      console.log(chi);\n    }\n    break;\n  }\n  default: {\n    chi.forEach((value) => { omega.push(value); });\n  }\n}\nconst alpha = (item, ...rest) => omega.length + rest.length;\nconsole.log(alpha(7));\n{\n  globalThis.kappa = (('  pad ' + 'b.c') === 'b.c');\n  const theta = 'b.c'.replaceAll('b', 'B');\n  const rho = (item) => { const scaled = Math.min(8.5, (-tau)); return alpha(8); };\n  console.log(rho(Math.min((omega.at(-1) ?? 0), tau)));\n}\nlet beta = /(?<first>[a-z])(b)?/.exec('hi');\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[3.5,-11]",
+          "2",
+          "2"
+        ],
+        "probes": {
+          "alpha": "function undefined",
+          "beta": "object [\"h\",\"h\",null]",
+          "chi": "object [0,3.5,-11,1]",
+          "count": "unbound",
+          "delta": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "kappa": "boolean false",
+          "lambda": "unbound",
+          "n": "unbound",
+          "omega": "object [3.5,-11]",
+          "phi": "function undefined",
+          "rest": "unbound",
+          "rho": "unbound",
+          "scaled": "unbound",
+          "sigma": "function undefined",
+          "slot": "unbound",
+          "tau": "number 3",
+          "theta": "unbound",
+          "value": "unbound"
+        },
+        "closures": [
+          "alpha",
+          "phi",
+          "sigma"
+        ]
+      }
+    }
+  ]
+}

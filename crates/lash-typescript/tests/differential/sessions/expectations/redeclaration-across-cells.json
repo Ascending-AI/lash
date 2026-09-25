@@ -1,0 +1,59 @@
+{
+  "id": "redeclaration-across-cells",
+  "about": "a later cell declares a name an earlier cell's let bound",
+  "probe": [
+    "again"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "let again = 1;\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "again": "number 1"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "let again = 2;\nconsole.log(again);\n",
+      "reject": null,
+      "deviation": "cross-cell-redeclaration",
+      "defect": null,
+      "node": {
+        "outcome": "throw",
+        "prints": [],
+        "error": "SyntaxError",
+        "probes": {
+          "again": "number 1"
+        },
+        "closures": []
+      },
+      "lash": {
+        "resident": {
+          "outcome": "normal",
+          "prints": [
+            "2"
+          ],
+          "probes": {
+            "again": "number 2"
+          }
+        },
+        "restart": {
+          "outcome": "normal",
+          "prints": [
+            "2"
+          ],
+          "probes": {
+            "again": "number 2"
+          }
+        }
+      }
+    }
+  ]
+}

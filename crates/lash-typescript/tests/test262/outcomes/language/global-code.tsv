@@ -1,0 +1,27 @@
+# test262-path	class	qualifier
+test/language/global-code/S10.1.7_A1_T1.js	refused	TS_DELETE_NON_REFERENCE_UNSUPPORTED
+test/language/global-code/block-decl-strict.js	refused	TS_UNKNOWN_BINDING
+test/language/global-code/decl-func-dup.js	refused	TS_FUNCTION_REDECLARATION_UNSUPPORTED
+test/language/global-code/decl-func.js	refused	TS_THIS_UNSUPPORTED
+test/language/global-code/decl-lex-configurable-global.js	refused	TS_TEMPORAL_DEAD_ZONE
+test/language/global-code/decl-lex-restricted-global.js	refused	TS_RESERVED_IDENTIFIER
+test/language/global-code/decl-lex.js	refused	TS_CLASS_UNSUPPORTED
+test/language/global-code/decl-var.js	refused	TS_THIS_UNSUPPORTED
+test/language/global-code/export.js	refused	TS_IMPORT_EXPORT_UNSUPPORTED
+test/language/global-code/import.js	refused	TS_IMPORT_EXPORT_UNSUPPORTED
+test/language/global-code/return.js	pass	-
+test/language/global-code/script-decl-func-dups.js	refused	TS_UNKNOWN_BINDING
+test/language/global-code/script-decl-func-err-non-configurable.js	refused	TS_METHOD_UNSUPPORTED
+test/language/global-code/script-decl-func-err-non-extensible.js	refused	TS_METHOD_UNSUPPORTED
+test/language/global-code/script-decl-func.js	refused	TS_THIS_UNSUPPORTED
+test/language/global-code/script-decl-lex-lex.js	refused	TS_CLASS_UNSUPPORTED
+test/language/global-code/script-decl-lex-restricted-global.js	refused	TS_METHOD_UNSUPPORTED
+test/language/global-code/script-decl-lex-var-declared-via-eval.js	refused	TS_EVAL_UNSUPPORTED
+test/language/global-code/script-decl-lex-var.js	refused	TS_UNKNOWN_BINDING
+test/language/global-code/script-decl-lex.js	refused	TS_METHOD_UNSUPPORTED
+test/language/global-code/script-decl-var-collision.js	refused	TS_CLASS_UNSUPPORTED
+test/language/global-code/script-decl-var-err.js	refused	TS_METHOD_UNSUPPORTED
+test/language/global-code/script-decl-var.js	refused	TS_THIS_UNSUPPORTED
+test/language/global-code/switch-case-decl-strict.js	refused	TS_UNKNOWN_BINDING
+test/language/global-code/switch-dflt-decl-strict.js	refused	TS_UNKNOWN_BINDING
+test/language/global-code/yield-strict.js	pass	-

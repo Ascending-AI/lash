@@ -1,0 +1,13 @@
+# test262-path	class	qualifier
+test/language/expressions/unary-minus/11.4.7-4-1.js	pass	-
+test/language/expressions/unary-minus/S11.4.7_A1.js	refused	TS_EVAL_UNSUPPORTED
+test/language/expressions/unary-minus/S11.4.7_A2.1_T1.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/unary-minus/S11.4.7_A2.1_T2.js	refused	TS_UNKNOWN_BINDING
+test/language/expressions/unary-minus/S11.4.7_A2.2_T1.js	pass	-
+test/language/expressions/unary-minus/S11.4.7_A3_T1.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/unary-minus/S11.4.7_A3_T2.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/unary-minus/S11.4.7_A3_T3.js	refused	TS_NEW_UNSUPPORTED
+test/language/expressions/unary-minus/S11.4.7_A3_T4.js	pass	-
+test/language/expressions/unary-minus/S11.4.7_A3_T5.js	refused	TS_FUNCTION_STRING_COERCION
+test/language/expressions/unary-minus/S11.4.7_A4.1.js	pass	-
+test/language/expressions/unary-minus/S11.4.7_A4.2.js	pass	-

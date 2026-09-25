@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	WeakMap	skip	ticket-ruling:FIG-1413:WeakMap — weak references answer to a garbage collector's timing, which is exactly the nondeterminism a replayable journal cannot carry	-

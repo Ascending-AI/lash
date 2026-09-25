@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	proxy-missing-checks	skip	ticket-ruling:FIG-1413:proxy-missing-checks	-

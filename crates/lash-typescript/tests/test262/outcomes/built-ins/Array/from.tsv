@@ -1,0 +1,25 @@
+# test262-path	class	qualifier
+test/built-ins/Array/from/Array.from-descriptor.js	pass	-
+test/built-ins/Array/from/Array.from-name.js	pass	-
+test/built-ins/Array/from/Array.from_arity.js	pass	-
+test/built-ins/Array/from/Array.from_forwards-length-for-array-likes.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/from/array-like-has-length-but-no-indexes-with-values.js	pass	-
+test/built-ins/Array/from/calling-from-valid-1-onlyStrict.js	pass	-
+test/built-ins/Array/from/calling-from-valid-2.js	pass	-
+test/built-ins/Array/from/elements-added-after.js	pass	-
+test/built-ins/Array/from/elements-deleted-after.js	refused	TS_THIS_UNSUPPORTED
+test/built-ins/Array/from/elements-updated-after.js	pass	-
+test/built-ins/Array/from/from-array.js	pass	-
+test/built-ins/Array/from/from-string.js	pass	-
+test/built-ins/Array/from/items-is-arraybuffer.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/from/items-is-null-throws.js	pass	-
+test/built-ins/Array/from/mapfn-is-not-callable-typeerror.js	pass	-
+test/built-ins/Array/from/mapfn-throws-exception.js	pass	-
+test/built-ins/Array/from/source-array-boundary.js	refused	TS_THIS_UNSUPPORTED
+test/built-ins/Array/from/source-object-constructor.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/from/source-object-length-set-elem-prop-err.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/from/source-object-length-set-elem-prop-non-writable.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/from/source-object-length.js	pass	-
+test/built-ins/Array/from/source-object-missing.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/from/source-object-without.js	pass	-
+test/built-ins/Array/from/this-null.js	refused	TS_METHOD_UNSUPPORTED

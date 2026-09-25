@@ -1,0 +1,110 @@
+{
+  "seed": 45,
+  "probe": [
+    "chi",
+    "count",
+    "gamma",
+    "iota",
+    "item",
+    "lambda",
+    "problem",
+    "psi",
+    "sigma",
+    "step",
+    "tau",
+    "value",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "function sigma(count) {\n  return count <= 1 ? 1 : count + sigma(count - 1);\n}\nconsole.log(sigma(5));\nconst lambda = (item) => 12;\nconsole.log(lambda((false ? lambda(4) : 'Lash'.indexOf('b'))));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "15",
+          "12"
+        ],
+        "probes": {
+          "chi": "unbound",
+          "count": "unbound",
+          "gamma": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "lambda": "function undefined",
+          "problem": "unbound",
+          "psi": "unbound",
+          "sigma": "function undefined",
+          "step": "unbound",
+          "tau": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "lambda",
+          "sigma"
+        ]
+      }
+    },
+    {
+      "source": "for (let step = 0; step < 2; step++) {\n  const zeta = (value) => 6;\n  console.log(zeta(step));\n  const chi = { d: 'b.c', h: 'zz', f: 'hi' };\n}\n{\n  const lambda = new Date(3457572918000);\n  console.log(lambda.toISOString(), lambda.getUTCDay(), lambda.getTime() > 0, lambda instanceof Date);\n  const iota = lambda;\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "6",
+          "6",
+          "2079-07-26T04:55:18.000Z 3 true true"
+        ],
+        "probes": {
+          "chi": "unbound",
+          "count": "unbound",
+          "gamma": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "lambda": "function undefined",
+          "problem": "unbound",
+          "psi": "unbound",
+          "sigma": "function undefined",
+          "step": "unbound",
+          "tau": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "lambda",
+          "sigma"
+        ]
+      }
+    },
+    {
+      "source": "if (false) {\n  let zeta = { c: ((0 ** 2)).toFixed(1), h: 'ab'.padStart(5, '*'), a: String(Number.parseInt('hi' + '7', 10)) };\n} else {\n  let zeta = 'x';\n}\nconsole.log('  pad '.toUpperCase().includes('a'), true, (false ? (-7) : 'zz'.indexOf('b')));\nfunction gamma(count) {\n  return count <= 1 ? 1 : count + gamma(count - 1);\n}\nconsole.log(gamma(1));\nlet tau = (4 ^ (3 % 12));\ntry {\n  let iota = { g: (8 * 'b.c'.length), a: String((true ? tau : 10)) };\n  throw new Error('ab');\n} catch (problem) {\n  console.log(problem.name, problem.message, problem instanceof RangeError);\n} finally {\n  {\n    let psi = tau;\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "false true -1",
+          "1",
+          "Error ab false"
+        ],
+        "probes": {
+          "chi": "unbound",
+          "count": "unbound",
+          "gamma": "function undefined",
+          "iota": "unbound",
+          "item": "unbound",
+          "lambda": "function undefined",
+          "problem": "unbound",
+          "psi": "unbound",
+          "sigma": "function undefined",
+          "step": "unbound",
+          "tau": "number 7",
+          "value": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "gamma",
+          "lambda",
+          "sigma"
+        ]
+      }
+    }
+  ]
+}

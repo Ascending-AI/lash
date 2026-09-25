@@ -1,0 +1,5 @@
+# test262-path	class	qualifier
+test/built-ins/NaN/15.1.1.1-0.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/NaN/S15.1.1.1_A1.js	pass	-
+test/built-ins/NaN/S15.1.1.1_A4.js	refused	TS_THIS_UNSUPPORTED
+test/built-ins/NaN/prop-desc.js	refused	TS_THIS_UNSUPPORTED

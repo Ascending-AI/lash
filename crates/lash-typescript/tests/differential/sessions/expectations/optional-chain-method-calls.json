@@ -1,0 +1,28 @@
+{
+  "id": "optional-chain-method-calls",
+  "about": "a method called inside an optional chain is the value's method (FIG-3608)",
+  "probe": [
+    "data",
+    "none"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const data = { list: [3, 1], text: 'ab' };\nconst none = null;\nconsole.log(data?.text.toUpperCase(), data?.list.includes(1), (data?.text).padEnd(4, '.'), none?.text.toUpperCase());\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "AB true ab.. undefined"
+        ],
+        "probes": {
+          "data": "object {\"list\":[3,1],\"text\":\"ab\"}",
+          "none": "object null"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

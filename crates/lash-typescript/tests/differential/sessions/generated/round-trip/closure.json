@@ -1,0 +1,19 @@
+{
+  "name": "closure",
+  "create": "const base = 10;\nconst value = (n) => n + base;",
+  "uses": "console.log(value(1));",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "11"
+      ],
+      "probes": {}
+    }
+  ]
+}

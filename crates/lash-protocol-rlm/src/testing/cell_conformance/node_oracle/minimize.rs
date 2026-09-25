@@ -9,7 +9,7 @@
 //! for every candidate, so a candidate Node rejects (a statement another one
 //! needed) is simply not smaller.
 //!
-//! The result is printed in `corpus.txt`'s format with lash's answer stated,
+//! The result is printed in the corpus's format with lash's answer stated,
 //! ready for its `about` line and its register or open-defect name.
 
 use std::collections::BTreeSet;
@@ -145,7 +145,7 @@ pub(super) fn minimize(
     corpus_row(seed, &best, &answers, mode, &last)
 }
 
-/// `session` as a `corpus.txt` row whose last cell states lash's answer in
+/// `session` as a corpus row whose last cell states lash's answer in
 /// `mode`, with its register or open-defect name left to write.
 fn corpus_row(
     seed: u64,

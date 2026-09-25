@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	source-size	rejected	TS_SOURCE_TOO_LARGE	repeat:65537:;

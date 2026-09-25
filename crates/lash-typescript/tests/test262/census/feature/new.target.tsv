@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	new.target	rejected	TS_META_PROPERTY_UNSUPPORTED	function f() { return new.target; }

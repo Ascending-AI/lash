@@ -1,0 +1,21 @@
+{
+  "name": "object-insertion-order",
+  "create": "const value = { zeta: 1, alpha: { two: 2, one: 1 }, 10: 'ten', 2: 'two' };",
+  "uses": "value.zeta = 3;\nconsole.log(Object.keys(value), JSON.stringify(value));\nfor (const key in value.alpha) {\n  console.log(key);\n}",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "[\"2\",\"10\",\"zeta\",\"alpha\"] {\"2\":\"two\",\"10\":\"ten\",\"zeta\":3,\"alpha\":{\"two\":2,\"one\":1}}",
+        "two",
+        "one"
+      ],
+      "probes": {}
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+# test262-path	excluding-census-row
+test/built-ins/Number/S9.3.1_A2_U180E.js	feature:u180e
+test/built-ins/Number/S9.3.1_A3_T1_U180E.js	feature:u180e
+test/built-ins/Number/S9.3.1_A3_T2_U180E.js	feature:u180e
+test/built-ins/RegExp/character-class-escape-non-whitespace-u180e.js	feature:u180e
+test/built-ins/RegExp/dotall/with-dotall-unicode.js	feature:u180e
+test/built-ins/RegExp/dotall/with-dotall.js	feature:u180e
+test/built-ins/RegExp/dotall/without-dotall-unicode.js	feature:u180e
+test/built-ins/RegExp/dotall/without-dotall.js	feature:u180e
+test/built-ins/RegExp/u180e.js	feature:u180e
+test/built-ins/String/prototype/toLocaleLowerCase/Final_Sigma_U180E.js	feature:u180e
+test/built-ins/String/prototype/toLowerCase/Final_Sigma_U180E.js	feature:u180e
+test/built-ins/String/prototype/trim/u180e.js	feature:u180e
+test/built-ins/parseFloat/S15.1.2.3_A2_T10_U180E.js	feature:u180e
+test/built-ins/parseInt/S15.1.2.2_A2_T10_U180E.js	feature:u180e
+test/language/comments/mongolian-vowel-separator-multi.js	feature:u180e
+test/language/comments/mongolian-vowel-separator-single-eval.js	feature:u180e
+test/language/comments/mongolian-vowel-separator-single.js	feature:u180e
+test/language/expressions/template-literal/mongolian-vowel-separator-eval.js	feature:u180e
+test/language/expressions/template-literal/mongolian-vowel-separator.js	feature:u180e
+test/language/literals/regexp/mongolian-vowel-separator-eval.js	feature:u180e
+test/language/literals/regexp/mongolian-vowel-separator.js	feature:u180e
+test/language/literals/string/mongolian-vowel-separator-eval.js	feature:u180e
+test/language/literals/string/mongolian-vowel-separator.js	feature:u180e
+test/language/white-space/mongolian-vowel-separator-eval.js	feature:u180e
+test/language/white-space/mongolian-vowel-separator.js	feature:u180e

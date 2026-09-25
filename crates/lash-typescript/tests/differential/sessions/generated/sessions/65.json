@@ -1,0 +1,149 @@
+{
+  "seed": 65,
+  "probe": [
+    "alpha",
+    "beta",
+    "delta",
+    "entry",
+    "field",
+    "index",
+    "iota",
+    "item",
+    "j",
+    "kappa",
+    "lambda",
+    "local",
+    "omega",
+    "phi",
+    "psi",
+    "rho",
+    "scaled",
+    "sigma",
+    "slot",
+    "tau",
+    "theta",
+    "turn1",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "let beta = ('  pad ' === 'b.c');\n{\n  const zeta = new URL('https://example.com/a/b?x=1');\n  console.log(zeta.href, zeta.pathname, zeta.searchParams.get('x'), zeta.origin);\n  var psi = zeta;\n}\nconst delta = (item) => { const local = (0 << item); return local; };\nconsole.log(delta((delta(9.5) ** 2)));\nconst alpha = ('a,b' === 'Lash'.padStart(5, '*').split(',').reverse().join('|'));\nif ((alpha instanceof Map)) {\n  console.log('hi');\n} else {\n  for (let j = 0; j < 1; j++) {\n    beta = 'x'.padStart(5, '*').includes('a');\n    let sigma = [2.5, j, Array.from({ length: 1 }, (slot, index) => index * 2).length];\n  }\n}\nlet lambda = 12;\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "https://example.com/a/b?x=1 /a/b 1 https://example.com",
+          "0"
+        ],
+        "probes": {
+          "alpha": "boolean false",
+          "beta": "boolean false",
+          "delta": "function undefined",
+          "entry": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "j": "unbound",
+          "kappa": "unbound",
+          "lambda": "number 12",
+          "local": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "psi": "object \"https://example.com/a/b?x=1\"",
+          "rho": "unbound",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "delta"
+        ]
+      }
+    },
+    {
+      "source": "const rho = (item) => { const scaled = lambda; return (-Number.parseInt('  pad ' + '7', 10)); };\nconsole.log(rho(Array.from({ length: 3 }, (slot, index) => index * 2).length));\nif (psi.search.includes('a')) {\n  switch (lambda % 3) {\n    case 0: {\n      psi.hash = 'h';\n      console.log(true);\n    }\n    case 1: {\n      console.warn(beta, beta, beta);\n      const phi = new RangeError('hi');\n      console.log(phi.name, phi.message, String(phi), phi instanceof Error);\n      break;\n    }\n    default: {\n      const beta = new Set([7, 12, 7]);\n    }\n  }\n  for (const entry of [9, 6]) {\n    console.log(psi, (typeof lambda));\n    if ('a,b'.includes('a')) { continue; }\n  }\n} else {\n  psi.pathname = '/p' + 'b.c'.length;\n  for (let j = 0; j < 1; j++) {\n    let theta = Math.max(rho(6), j);\n    psi.pathname = '/p' + 'Lash'.length;\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "NaN"
+        ],
+        "probes": {
+          "alpha": "boolean false",
+          "beta": "boolean false",
+          "delta": "function undefined",
+          "entry": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "j": "unbound",
+          "kappa": "unbound",
+          "lambda": "number 12",
+          "local": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "psi": "object \"https://example.com/p4?x=1\"",
+          "rho": "function undefined",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "delta",
+          "rho"
+        ]
+      }
+    },
+    {
+      "source": "var tau = new Map(Object.entries({ z: 2, y: 8 }));\nfor (const field in { c: lambda }) {\n  console.log(field);\n  {\n    const iota = new Error('ab');\n    console.log(iota.name, iota.message, String(iota), iota instanceof Error);\n    console.log((typeof (tau.size ** 2)));\n  }\n}\nlet turn1 = 0;\ndo {\n  turn1++;\n  if (false) {\n    let phi = tau;\n    console.warn([...phi.entries()]);\n  }\n  switch (2.5 % 3) {\n    case 0: {\n      console.warn(beta, alpha);\n    }\n    case 1: {\n      console.log(turn1, lambda);\n    }\n    default: {\n      tau.set('hi', ((7 ** 2) ** 2));\n    }\n  }\n} while (turn1 < 1);\nfor (const entry of [turn1]) {\n  console.log('zz');\n  if ((`${lambda}:${'zz'}` === 'Lash')) {\n    const kappa = false;\n    psi.searchParams.append('k', 'hi');\n  } else {\n    globalThis.psi = new URL('https://example.com/a/b?x=1');\n    globalThis.psi = new URL('https://example.com/p?x=1');\n  }\n}\nconst omega = (item) => Math.floor(lambda);\nconsole.log(omega(11));\npsi.hash = 'h';\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "c",
+          "Error ab Error: ab true",
+          "number",
+          "zz",
+          "12"
+        ],
+        "probes": {
+          "alpha": "boolean false",
+          "beta": "boolean false",
+          "delta": "function undefined",
+          "entry": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "j": "unbound",
+          "kappa": "unbound",
+          "lambda": "number 12",
+          "local": "unbound",
+          "omega": "function undefined",
+          "phi": "unbound",
+          "psi": "object \"https://example.com/p?x=1#h\"",
+          "rho": "function undefined",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "object {}",
+          "theta": "unbound",
+          "turn1": "number 1",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "delta",
+          "omega",
+          "rho"
+        ]
+      }
+    }
+  ]
+}

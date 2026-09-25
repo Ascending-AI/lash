@@ -1,0 +1,21 @@
+# test262-path	class	qualifier
+test/language/comments/S7.4_A1_T1.js	refused	TS_THIS_UNSUPPORTED
+test/language/comments/S7.4_A1_T2.js	pass	-
+test/language/comments/S7.4_A2_T1.js	refused	TS_THIS_UNSUPPORTED
+test/language/comments/S7.4_A2_T2.js	pass	-
+test/language/comments/S7.4_A3.js	pass	-
+test/language/comments/S7.4_A4_T1.js	pass	-
+test/language/comments/S7.4_A4_T2.js	pass	-
+test/language/comments/S7.4_A4_T3.js	pass	-
+test/language/comments/S7.4_A4_T4.js	pass	-
+test/language/comments/S7.4_A4_T5.js	pass	-
+test/language/comments/S7.4_A4_T6.js	pass	-
+test/language/comments/S7.4_A4_T7.js	pass	-
+test/language/comments/S7.4_A5.js	refused	TS_EVAL_UNSUPPORTED
+test/language/comments/S7.4_A6.js	refused	TS_EVAL_UNSUPPORTED
+test/language/comments/multi-line-asi-carriage-return.js	pass	-
+test/language/comments/multi-line-asi-line-feed.js	pass	-
+test/language/comments/multi-line-asi-line-separator.js	pass	-
+test/language/comments/multi-line-asi-paragraph-separator.js	pass	-
+test/language/comments/multi-line-html-close-extra.js	pass	-
+test/language/comments/single-line-html-close-without-lt.js	pass	-

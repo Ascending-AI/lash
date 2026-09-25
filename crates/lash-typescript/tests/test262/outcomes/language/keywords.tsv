@@ -1,0 +1,26 @@
+# test262-path	class	qualifier
+test/language/keywords/ident-ref-break.js	pass	-
+test/language/keywords/ident-ref-case.js	pass	-
+test/language/keywords/ident-ref-catch.js	pass	-
+test/language/keywords/ident-ref-continue.js	pass	-
+test/language/keywords/ident-ref-default.js	pass	-
+test/language/keywords/ident-ref-delete.js	pass	-
+test/language/keywords/ident-ref-do.js	pass	-
+test/language/keywords/ident-ref-else.js	pass	-
+test/language/keywords/ident-ref-finally.js	pass	-
+test/language/keywords/ident-ref-for.js	pass	-
+test/language/keywords/ident-ref-function.js	pass	-
+test/language/keywords/ident-ref-if.js	pass	-
+test/language/keywords/ident-ref-in.js	pass	-
+test/language/keywords/ident-ref-instanceof.js	pass	-
+test/language/keywords/ident-ref-new.js	pass	-
+test/language/keywords/ident-ref-return.js	pass	-
+test/language/keywords/ident-ref-switch.js	pass	-
+test/language/keywords/ident-ref-this.js	pass	-
+test/language/keywords/ident-ref-throw.js	pass	-
+test/language/keywords/ident-ref-try.js	pass	-
+test/language/keywords/ident-ref-typeof.js	pass	-
+test/language/keywords/ident-ref-var.js	pass	-
+test/language/keywords/ident-ref-void.js	pass	-
+test/language/keywords/ident-ref-while.js	pass	-
+test/language/keywords/ident-ref-with.js	pass	-

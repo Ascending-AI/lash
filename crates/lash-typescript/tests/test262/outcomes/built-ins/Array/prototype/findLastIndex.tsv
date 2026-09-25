@@ -1,0 +1,16 @@
+# test262-path	class	qualifier
+test/built-ins/Array/prototype/findLastIndex/array-altered-during-loop.js	pass	-
+test/built-ins/Array/prototype/findLastIndex/call-with-boolean.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/findLastIndex/length.js	pass	-
+test/built-ins/Array/prototype/findLastIndex/maximum-index.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/findLastIndex/name.js	pass	-
+test/built-ins/Array/prototype/findLastIndex/predicate-call-parameters.js	pass	-
+test/built-ins/Array/prototype/findLastIndex/predicate-call-this-strict.js	pass	-
+test/built-ins/Array/prototype/findLastIndex/predicate-called-for-each-array-property.js	pass	-
+test/built-ins/Array/prototype/findLastIndex/predicate-is-not-callable-throws.js	pass	-
+test/built-ins/Array/prototype/findLastIndex/predicate-not-called-on-empty-array.js	pass	-
+test/built-ins/Array/prototype/findLastIndex/prop-desc.js	pass	-
+test/built-ins/Array/prototype/findLastIndex/return-abrupt-from-predicate-call.js	pass	-
+test/built-ins/Array/prototype/findLastIndex/return-abrupt-from-property.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/findLastIndex/return-abrupt-from-this-length.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/findLastIndex/return-abrupt-from-this.js	refused	TS_METHOD_UNSUPPORTED

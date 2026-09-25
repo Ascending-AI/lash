@@ -1,0 +1,26 @@
+{
+  "id": "unbraced-switch-case",
+  "about": "a declaration directly in a switch case ends with the switch",
+  "probe": [
+    "label"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "switch (1) {\n  case 1:\n    const label = \"one\";\n    console.log(label);\n    break;\n}\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "one"
+        ],
+        "probes": {
+          "label": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

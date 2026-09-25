@@ -1,0 +1,19 @@
+{
+  "name": "map",
+  "create": "const value = new Map([['b', 2], ['a', { n: 1 }]]);",
+  "uses": "value.set('c', 3);\nconsole.log(value.size, value.get('a').n, [...value.keys()], value instanceof Map);",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "3 1 [\"b\",\"a\",\"c\"] true"
+      ],
+      "probes": {}
+    }
+  ]
+}

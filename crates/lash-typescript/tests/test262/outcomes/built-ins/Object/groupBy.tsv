@@ -1,0 +1,14 @@
+# test262-path	class	qualifier
+test/built-ins/Object/groupBy/callback-arg.js	pass	-
+test/built-ins/Object/groupBy/callback-throws.js	pass	-
+test/built-ins/Object/groupBy/emptyList.js	pass	-
+test/built-ins/Object/groupBy/evenOdd.js	pass	-
+test/built-ins/Object/groupBy/groupLength.js	pass	-
+test/built-ins/Object/groupBy/invalid-callback.js	pass	-
+test/built-ins/Object/groupBy/invalid-iterable.js	pass	-
+test/built-ins/Object/groupBy/invalid-property-key.js	pass	-
+test/built-ins/Object/groupBy/length.js	pass	-
+test/built-ins/Object/groupBy/name.js	pass	-
+test/built-ins/Object/groupBy/null-prototype.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/groupBy/string.js	pass	-
+test/built-ins/Object/groupBy/toPropertyKey.js	pass	-

@@ -1,0 +1,19 @@
+{
+  "name": "boolean",
+  "create": "const value = [true, false];",
+  "uses": "console.log(value[0] && !value[1], typeof value[1]);",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "true boolean"
+      ],
+      "probes": {}
+    }
+  ]
+}

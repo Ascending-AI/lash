@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	symbols-as-weakmap-keys	skip	ticket-ruling:FIG-1413:symbols-as-weakmap-keys	-

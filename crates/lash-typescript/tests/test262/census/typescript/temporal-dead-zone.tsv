@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	temporal-dead-zone	rejected	TS_TEMPORAL_DEAD_ZONE	const x = x;

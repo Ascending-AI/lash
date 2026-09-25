@@ -1,0 +1,34 @@
+{
+  "id": "per-iteration-bindings",
+  "about": "each iteration of a let/const loop has its own binding, which a closure captures",
+  "probe": [
+    "fns",
+    "i",
+    "f"
+  ],
+  "deviations": [
+    "closure-boundary"
+  ],
+  "cells": [
+    {
+      "source": "const fns = [];\nfor (let i = 0; i < 3; i++) {\n  fns.push(() => i);\n}\nconsole.log(fns.map((f) => f()));\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[0,1,2]"
+        ],
+        "probes": {
+          "fns": "object [null,null,null]",
+          "i": "unbound",
+          "f": "unbound"
+        },
+        "closures": [
+          "fns"
+        ]
+      }
+    }
+  ]
+}

@@ -215,25 +215,91 @@ impl ExecutionHost for Host {
     }
 }
 
-pub(crate) fn data_lines(relative: &str, columns: usize) -> Vec<Vec<String>> {
-    let path = data_path(relative);
-    let contents = std::fs::read_to_string(&path)
-        .unwrap_or_else(|error| panic!("could not read {}: {error}", path.display()));
-    contents
-        .lines()
-        .enumerate()
-        .filter(|(_, line)| !line.trim().is_empty() && !line.starts_with('#'))
-        .map(|(line_index, line)| {
-            let fields = line.split('\t').map(str::to_owned).collect::<Vec<_>>();
-            assert_eq!(
-                fields.len(),
-                columns,
-                "{}:{} must have {columns} tab-separated columns",
-                path.display(),
-                line_index + 1
-            );
-            fields
+/// Every `.tsv` file under `directory`, recursively, sorted by path.
+fn tsv_files(directory: &Path, into: &mut Vec<std::path::PathBuf>) {
+    let mut entries = std::fs::read_dir(directory)
+        .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
+        .map(|entry| entry.expect("a directory entry").path())
+        .collect::<Vec<_>>();
+    entries.sort();
+    for entry in entries {
+        if entry.is_dir() {
+            tsv_files(&entry, into);
+        } else if entry
+            .extension()
+            .is_some_and(|extension| extension == "tsv")
+        {
+            into.push(entry);
+        }
+    }
+}
+
+/// Every directory under `directory`, recursively (excluding it itself).
+fn collect_directories(directory: &Path, into: &mut Vec<std::path::PathBuf>) {
+    for entry in std::fs::read_dir(directory)
+        .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
+    {
+        let entry = entry.expect("a directory entry").path();
+        if entry.is_dir() {
+            into.push(entry.clone());
+            collect_directories(&entry, into);
+        }
+    }
+}
+
+/// One record table's shard files as `(shard, rows)`, sorted by shard. The
+/// table may be one `.tsv` file (its shard is its file stem) or a directory
+/// of `*.tsv` shards, named by their path under the directory without the
+/// suffix (so `census/feature/Map.tsv`'s shard is `feature/Map`). A row's
+/// shard is each table's own law, which the readers check.
+pub(crate) fn data_files(relative: &str, columns: usize) -> Vec<(String, Vec<Vec<String>>)> {
+    let root = data_path(relative);
+    let mut paths = Vec::new();
+    if root.is_dir() {
+        tsv_files(&root, &mut paths);
+        assert!(!paths.is_empty(), "{relative}: the record table is empty");
+    } else {
+        paths.push(root.clone());
+    }
+    paths
+        .into_iter()
+        .map(|path| {
+            let shard = path
+                .strip_prefix(&root)
+                .unwrap_or(&path)
+                .with_extension("")
+                .to_str()
+                .expect("UTF-8 record shard name")
+                .to_owned();
+            let contents = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("could not read {}: {error}", path.display()));
+            let rows = contents
+                .lines()
+                .enumerate()
+                .filter(|(_, line)| !line.trim().is_empty() && !line.starts_with('#'))
+                .map(|(line_index, line)| {
+                    let fields = line.split('\t').map(str::to_owned).collect::<Vec<_>>();
+                    assert_eq!(
+                        fields.len(),
+                        columns,
+                        "{}:{} must have {columns} tab-separated columns",
+                        path.display(),
+                        line_index + 1
+                    );
+                    fields
+                })
+                .collect();
+            (shard, rows)
         })
+        .collect()
+}
+
+/// The union of a record table's rows: one `*.tsv` file or a directory of
+/// shards read through [`data_files`].
+pub(crate) fn data_lines(relative: &str, columns: usize) -> Vec<Vec<String>> {
+    data_files(relative, columns)
+        .into_iter()
+        .flat_map(|(_, rows)| rows)
         .collect()
 }
 
@@ -272,48 +338,85 @@ pub(crate) fn refusal_codes() -> BTreeSet<String> {
     codes
 }
 
-/// Every `outcomes/<shard>.tsv`, sorted by shard, as `(shard, rows)` (FIG-3727):
-/// one file per top-level test directory, so two lanes that touch different
-/// directories never share a file.
+/// The row budget of one `outcomes` shard (FIG-3727): parallel lanes collide
+/// on a file, not a directory, so the shards cut the record as deep as the
+/// test tree is hot — `built-ins/Array/prototype/reduce.tsv` sits next to
+/// `language/identifiers.tsv` — while staying small enough that two changes
+/// almost never meet in one file. Roughly, not exactly: a directory's own
+/// tests cannot shard deeper than their directory.
+const SHARD_ROWS: usize = 1500;
+
+/// The count of tests under each directory prefix of the record's paths,
+/// below `test/`: `built-ins` counts every `test/built-ins/...` test,
+/// `built-ins/Array` the ones under it, and so on.
+fn subtree_counts<'a>(paths: impl Iterator<Item = &'a str>) -> BTreeMap<String, usize> {
+    let mut counts: BTreeMap<String, usize> = BTreeMap::new();
+    for path in paths {
+        let directory = path
+            .strip_prefix("test/")
+            .expect("a test262 path")
+            .rsplit_once('/')
+            .map_or("", |(directory, _)| directory);
+        let mut prefix = String::new();
+        for component in directory.split('/') {
+            if !prefix.is_empty() {
+                prefix.push('/');
+            }
+            prefix.push_str(component);
+            *counts.entry(prefix.clone()).or_default() += 1;
+        }
+    }
+    counts
+}
+
+/// The shard `path`'s row lives in: the shallowest directory prefix of the
+/// path, below `test/`, holding at most [`SHARD_ROWS`] tests — and the path's
+/// own directory when no prefix is small enough.
+fn shard_of(path: &str, counts: &BTreeMap<String, usize>) -> String {
+    let directory = path
+        .strip_prefix("test/")
+        .expect("a test262 path")
+        .rsplit_once('/')
+        .map_or("", |(directory, _)| directory);
+    let mut shard = String::new();
+    for component in directory.split('/') {
+        if !shard.is_empty() {
+            shard.push('/');
+        }
+        shard.push_str(component);
+        if counts.get(shard.as_str()).copied().unwrap_or(0) <= SHARD_ROWS {
+            return shard;
+        }
+    }
+    shard
+}
+
+/// Every `outcomes/**/*.tsv`, sorted by shard, as `(shard, rows)` (FIG-3727):
+/// a row lives in the file named by [`shard_of`], so two lanes that touch
+/// different directories never share a file.
 fn outcome_shards() -> Vec<(String, Vec<Vec<String>>)> {
-    let directory = data_path("outcomes");
-    let mut names = std::fs::read_dir(&directory)
-        .unwrap_or_else(|error| panic!("read {}: {error}", directory.display()))
-        .map(|entry| {
-            entry
-                .expect("an outcomes entry")
-                .file_name()
-                .into_string()
-                .expect("UTF-8 outcomes name")
-        })
-        .filter(|name| name.ends_with(".tsv"))
-        .collect::<Vec<_>>();
-    names.sort();
-    assert!(!names.is_empty(), "{} is empty", directory.display());
-    names
-        .into_iter()
-        .map(|name| {
-            (
-                name.trim_end_matches(".tsv").to_owned(),
-                data_lines(&format!("outcomes/{name}"), 3),
-            )
-        })
-        .collect()
+    data_files("outcomes", 3)
 }
 
 /// The recorded outcome of every selected test, the union of every
-/// `outcomes/<shard>.tsv`. A row lives in the file its top-level directory
-/// names, sorted with the rest, so merges meet only on a real overlap.
+/// `outcomes/**/*.tsv`. A row lives in the file [`shard_of`] names, sorted
+/// with the rest, so merges meet only on a real overlap.
 pub(crate) fn recorded_outcomes() -> BTreeMap<String, Outcome> {
+    let shards = outcome_shards();
+    let counts = subtree_counts(
+        shards
+            .iter()
+            .flat_map(|(_, rows)| rows.iter().map(|fields| fields[0].as_str())),
+    );
     let mut outcomes = BTreeMap::new();
-    for (shard, rows) in outcome_shards() {
+    for (shard, rows) in &shards {
         let mut last = String::new();
-        for fields in &rows {
+        for fields in rows {
             let path = fields[0].as_str();
             assert_eq!(
-                path.split('/').nth(1).unwrap_or_default(),
-                shard,
-                "{path}: outcomes/{shard}.tsv holds a row outside its directory"
+                shard_of(path, &counts),
+                *shard,
+                "{path}: outcomes/{shard}.tsv holds a row outside its shard"
             );
             assert!(
                 path > last.as_str(),
@@ -775,13 +878,13 @@ pub(crate) fn compare(
         .collect()
 }
 
-/// Rewrites the `outcomes/<shard>.tsv` files in the source tree from a full
+/// Rewrites the `outcomes/**/*.tsv` shards in the source tree from a full
 /// run, when `TEST262_BLESS` is set under `kiln run` (which exports
-/// `BUILD_WORKSPACE_DIRECTORY`): one file per top-level test directory, and a
-/// shard file whose directory no longer selects a test is removed, like
-/// `generate.mjs` removes a table whose findings file is gone. A divergence
-/// keeps its recorded owner or becomes `UNTRIAGED`, which the data checks
-/// refuse until a ticket owns it. Returns whether it blessed.
+/// `BUILD_WORKSPACE_DIRECTORY`): one file per [`shard_of`] key, and a shard
+/// file whose tests are no longer selected is removed, like `generate.mjs`
+/// removes a table whose findings file is gone. A divergence keeps its
+/// recorded owner or becomes `UNTRIAGED`, which the data checks refuse until
+/// a ticket owns it. Returns whether it blessed.
 pub(crate) fn bless(
     paths: &[String],
     observed: &[Observed],
@@ -798,14 +901,15 @@ pub(crate) fn bless(
         .zip(observed)
         .map(|(path, observed)| (path.clone(), observed.outcome(recorded.get(path))))
         .collect::<BTreeMap<_, _>>();
+    let counts = subtree_counts(outcomes.keys().map(String::as_str));
     let mut shards: BTreeMap<String, Vec<(&String, &Outcome)>> = BTreeMap::new();
     for (path, outcome) in &outcomes {
-        let shard = path.split('/').nth(1).expect("a test262 path's directory");
         shards
-            .entry(shard.to_owned())
+            .entry(shard_of(path, &counts))
             .or_default()
             .push((path, outcome));
     }
+    let outcomes_directory = directory.join("outcomes");
     for (shard, rows) in &shards {
         let mut text = String::from("# test262-path\tclass\tqualifier\n");
         for (path, outcome) in rows {
@@ -815,23 +919,39 @@ pub(crate) fn bless(
                 outcome.detail()
             ));
         }
-        std::fs::write(
-            directory.join("outcomes").join(format!("{shard}.tsv")),
-            text,
-        )
-        .unwrap_or_else(|error| panic!("write outcomes/{shard}.tsv: {error}"));
+        let file = outcomes_directory.join(format!("{shard}.tsv"));
+        std::fs::create_dir_all(file.parent().expect("a shard's directory"))
+            .unwrap_or_else(|error| panic!("create {}: {error}", file.display()));
+        std::fs::write(&file, text)
+            .unwrap_or_else(|error| panic!("write {}: {error}", file.display()));
     }
-    for entry in std::fs::read_dir(directory.join("outcomes")).expect("read outcomes/") {
-        let entry = entry.expect("an outcomes entry");
-        let name = entry
-            .file_name()
-            .into_string()
-            .expect("UTF-8 outcomes name");
-        if let Some(shard) = name.strip_suffix(".tsv")
-            && !shards.contains_key(shard)
+    let mut existing = Vec::new();
+    tsv_files(&outcomes_directory, &mut existing);
+    for file in existing {
+        let shard = file
+            .strip_prefix(&outcomes_directory)
+            .expect("a file under outcomes/")
+            .with_extension("")
+            .to_str()
+            .expect("UTF-8 outcomes shard name")
+            .replace('\\', "/");
+        if !shards.contains_key(shard.as_str()) {
+            std::fs::remove_file(&file)
+                .unwrap_or_else(|error| panic!("remove stale {}: {error}", file.display()));
+        }
+    }
+    // Drop directories left empty so a re-shard leaves no skeleton behind.
+    let mut directories = Vec::new();
+    collect_directories(&outcomes_directory, &mut directories);
+    directories.sort_by_key(|directory| std::cmp::Reverse(directory.components().count()));
+    for directory in directories {
+        if std::fs::read_dir(&directory)
+            .expect("read an outcomes directory")
+            .next()
+            .is_none()
         {
-            std::fs::remove_file(entry.path())
-                .unwrap_or_else(|error| panic!("remove stale outcomes/{name}: {error}"));
+            std::fs::remove_dir(&directory)
+                .unwrap_or_else(|error| panic!("remove {}: {error}", directory.display()));
         }
     }
     eprintln!("{}", tally_lines(&outcomes));

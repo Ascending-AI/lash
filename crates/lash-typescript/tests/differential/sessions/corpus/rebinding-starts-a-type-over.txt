@@ -1,0 +1,13 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/rebinding-starts-a-type-over.json.
+
+session rebinding-starts-a-type-over
+about a name bound two ways by a branch takes a value of a third type (FIG-3631)
+probe flag value
+cell
+const flag = [1].length > 0;
+let value = flag ? 1 : true;
+value = 'x';
+console.log(value);
+end

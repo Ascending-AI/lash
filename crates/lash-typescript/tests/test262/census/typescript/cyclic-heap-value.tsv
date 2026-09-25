@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	cyclic-heap-value	rejected	TS_CYCLIC_VALUE_UNSUPPORTED	const a = []; a.push(a);

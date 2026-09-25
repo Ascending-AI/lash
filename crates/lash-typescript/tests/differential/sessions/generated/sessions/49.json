@@ -1,0 +1,88 @@
+{
+  "seed": 49,
+  "probe": [
+    "beta",
+    "chi",
+    "delta",
+    "entry",
+    "gamma",
+    "item",
+    "kappa",
+    "lambda",
+    "local",
+    "omega",
+    "phi",
+    "problem",
+    "psi",
+    "tau",
+    "theta",
+    "turn1"
+  ],
+  "cells": [
+    {
+      "source": "const chi = (item) => { const local = Math.min(2, item); return (Math.abs(local) ** 2); };\nconsole.log(chi(Math.abs(Math.round(5.5))));\n{\n  const theta = new Map([['b', 6], ['a', 1]]);\n  console.log(theta.size, theta.get('a'), theta.has('hi'), [...theta.keys()], theta instanceof Map);\n  const lambda = (item) => 3;\n  console.log(lambda(11));\n  theta.delete('zz');\n}\nconst beta = String(3);\nlet turn1 = 0;\nwhile (turn1 < 1) {\n  turn1++;\n  switch (10 % 3) {\n    case 0: {\n      console.log(turn1, 6, turn1);\n      const psi = ['zz'.slice(0, 2).replaceAll('b', 'B'), beta.split(',').reverse().join('|').trimEnd(), '  pad '];\n    }\n    case 1: {\n      const tau = new URL('https://example.com/q?x=1');\n      console.log(tau.href, tau.pathname, tau.searchParams.get('x'), tau.origin);\n      tau.hash = 'h';\n      break;\n    }\n    default: {\n      console.info(turn1, 7);\n    }\n  }\n  try {\n    console.info((String(turn1) === 'Lash'.padStart(5, '*')));\n  } catch (problem) {\n    console.log(problem.name, problem.message, problem instanceof RangeError);\n  }\n}\nlet gamma = { c: (turn1 instanceof Map), g: [[(true ? 9 : turn1)], [2]].flat().includes(2), a: false };\ngamma.a = true;\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "4",
+          "2 1 false [\"b\",\"a\"] true",
+          "3",
+          "https://example.com/q?x=1 /q 1 https://example.com",
+          "false"
+        ],
+        "probes": {
+          "beta": "string \"3\"",
+          "chi": "function undefined",
+          "delta": "unbound",
+          "entry": "unbound",
+          "gamma": "object {\"c\":false,\"g\":true,\"a\":true}",
+          "item": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "local": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "number 1"
+        },
+        "closures": [
+          "chi"
+        ]
+      }
+    },
+    {
+      "source": "for (const entry of beta) {\n  console.log(String(11), gamma);\n  switch (6 % 3) {\n    case 0: {\n      let lambda = gamma;\n      console.log(gamma);\n      break;\n    }\n    default: {\n      gamma.g = false;\n    }\n  }\n  if ((('Lash' === 'hi') || true)) { continue; }\n}\nlet phi = gamma;\nif (true) {\n  const psi = ['x'];\n  const [kappa, ...lambda] = [Math.abs(psi.length), turn1, 10];\n}\nswitch (6 % 3) {\n  case 0: {\n    gamma.a = ((1 - turn1) < 9.5);\n    break;\n  }\n  default: {\n    let phi = new Set([4, 0, 4]);\n  }\n}\nconst omega = phi;\nlet delta = ['Lash', beta];\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "11 {\"c\":false,\"g\":true,\"a\":true}",
+          "{\"c\":false,\"g\":true,\"a\":true}"
+        ],
+        "probes": {
+          "beta": "string \"3\"",
+          "chi": "function undefined",
+          "delta": "object [\"Lash\",\"3\"]",
+          "entry": "unbound",
+          "gamma": "object {\"c\":false,\"g\":true,\"a\":true}",
+          "item": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "local": "unbound",
+          "omega": "object {\"c\":false,\"g\":true,\"a\":true}",
+          "phi": "object {\"c\":false,\"g\":true,\"a\":true}",
+          "problem": "unbound",
+          "psi": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "number 1"
+        },
+        "closures": [
+          "chi"
+        ]
+      }
+    }
+  ]
+}

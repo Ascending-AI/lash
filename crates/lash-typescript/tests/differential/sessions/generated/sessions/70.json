@@ -1,0 +1,112 @@
+{
+  "seed": 70,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "delta",
+    "entry",
+    "gamma",
+    "index",
+    "iota",
+    "item",
+    "kappa",
+    "lambda",
+    "n",
+    "omega",
+    "phi",
+    "problem",
+    "psi",
+    "rho",
+    "shared2",
+    "slot",
+    "step",
+    "theta",
+    "total",
+    "turn1",
+    "turn3",
+    "value",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "if (true) {\n  const [beta, ...rho] = [8, 12, (true ? 10 : 12)];\n}\nconsole.log(false, false, false);\nfor (const entry of []) {\n  let zeta = true;\n}\nif ((!false || false)) {\n  const psi = (value, step = 2) => value + step;\n  console.log(psi(Number.parseInt('hi'.slice(0, 2) + '7', 10)));\n  for (let step = 0; step < 3; step++) {\n    console.log(step, 'ab');\n  }\n} else {\n  let omega = [Math.abs('  pad '.indexOf('b'))];\n  try {\n    let kappa = new Date(834305288000);\n    const beta = omega;\n    throw new Error('ab', { cause: 1 });\n  } catch (problem) {\n    console.log(problem.name, problem.message, problem instanceof RangeError);\n  }\n}\nlet iota = true;\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "false false false",
+          "NaN",
+          "0 ab",
+          "1 ab",
+          "2 ab"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "iota": "boolean true",
+          "item": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "shared2": "unbound",
+          "slot": "unbound",
+          "step": "unbound",
+          "theta": "unbound",
+          "total": "unbound",
+          "turn1": "unbound",
+          "turn3": "unbound",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "let turn1 = 0;\nwhile (turn1 < 1) {\n  turn1++;\n  let gamma = [Math.round((-turn1)), 2, turn1];\n  {\n    const beta = (n) => gamma.reduce((total, item) => total + item, 0);\n    console.log(beta(1));\n    console.warn(turn1);\n  }\n}\nglobalThis.shared2 = 7;\nconst { a: delta, b: alpha = 0 } = { a: '  pad ', b: 5 };\nlet turn3 = 0;\nwhile (turn3 < 3) {\n  turn3++;\n  switch (6 % 3) {\n    case 0: {\n      let lambda = [];\n      const chi = '  pad ';\n      break;\n    }\n    default: {\n      const delta = new URL('https://example.com/p?x=1');\n    }\n  }\n}\nconst [theta, ...phi] = [((turn3 === alpha) ? Array.from({ length: 0 }, (slot, index) => index * 2).length : 0), 1, 1];\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2",
+          "1"
+        ],
+        "probes": {
+          "alpha": "number 5",
+          "beta": "unbound",
+          "chi": "unbound",
+          "delta": "string \"  pad \"",
+          "entry": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "iota": "boolean true",
+          "item": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "n": "unbound",
+          "omega": "unbound",
+          "phi": "object [1,1]",
+          "problem": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "shared2": "number 7",
+          "slot": "unbound",
+          "step": "unbound",
+          "theta": "number 0",
+          "total": "unbound",
+          "turn1": "number 1",
+          "turn3": "number 3",
+          "value": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    }
+  ]
+}

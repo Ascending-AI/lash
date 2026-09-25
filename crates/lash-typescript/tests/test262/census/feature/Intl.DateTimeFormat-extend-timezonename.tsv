@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Intl.DateTimeFormat-extend-timezonename	skip	ticket-ruling:FIG-1413:Intl.DateTimeFormat-extend-timezonename	-

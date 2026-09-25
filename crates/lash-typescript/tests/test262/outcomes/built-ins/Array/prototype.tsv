@@ -1,0 +1,6 @@
+# test262-path	class	qualifier
+test/built-ins/Array/prototype/constructor.js	pass	-
+test/built-ins/Array/prototype/exotic-array.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/Array/prototype/length.js	pass	-
+test/built-ins/Array/prototype/prop-desc.js	pass	-
+test/built-ins/Array/prototype/proto.js	refused	TS_METHOD_UNSUPPORTED

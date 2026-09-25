@@ -6,12 +6,12 @@
 //! pins) under one cell-to-Script mapping (`realm.mjs`): each cell a
 //! successive classic Script in one realm.
 //!
-//! * [`corpus`] (FIG-3599): the hand-written sessions of `corpus.txt`, whose
-//!   answers `generate.mjs` checks in as `expectations.json`.
+//! * [`corpus`] (FIG-3599): the hand-written sessions of `corpus/`, whose
+//!   answers `generate.mjs` checks in under `expectations/`.
 //! * [`generated`] (FIG-3608): sessions drawn by the seeded [`generator`]
 //!   from the dialect's accepted grammar, and the rows of the snapshot
 //!   [`round_trip`] law, whose answers the [`node`] oracle service checks in
-//!   as `generated.json`. Longer runs ask Node live, and every divergence is
+//!   under `generated/`. Longer runs ask Node live, and every divergence is
 //!   [`minimize`]d into a corpus row.
 //!
 //! This module runs a session through the production RLM executor, once

@@ -1,0 +1,69 @@
+{
+  "seed": 39,
+  "probe": [
+    "alpha",
+    "beta",
+    "field",
+    "n",
+    "omega",
+    "psi",
+    "rest",
+    "sigma",
+    "step",
+    "tau",
+    "theta",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "let omega = 'b.c';\nconsole.log(11, true, (0 ** 2));\nfor (const field in { a: [5, 4] }) {\n  console.log(field);\n  switch (4 % 3) {\n    case 0: {\n      let zeta = { c: [12, 5, Number.parseInt(omega + '7', 10)], d: Math.min(field.indexOf('b'), 5) };\n      const beta = zeta;\n      break;\n    }\n    default: {\n      omega += 'hi';\n    }\n  }\n}\nvar psi = { c: 'Lash'.replace(/[a-z]/g, '_') };\nlet theta = [omega];\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "11 true 0",
+          "a"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "field": "unbound",
+          "n": "unbound",
+          "omega": "string \"b.chi\"",
+          "psi": "object {\"c\":\"L___\"}",
+          "rest": "unbound",
+          "sigma": "unbound",
+          "step": "unbound",
+          "tau": "unbound",
+          "theta": "object [\"b.chi\"]",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "{\n  const sigma = (n, ...rest) => (true ? 9 : (-10)) + rest.length;\n  console.log(sigma(7));\n  for (let step = 0; step < 2; step++) {\n    const tau = new Map(Object.entries({ z: 9, y: 1 }));\n    console.log(tau.size, tau.get('a'), tau.has('zz'), [...tau.keys()], tau instanceof Map);\n    const alpha = { d: (8).toFixed(1).length };\n  }\n  psi.c = '  pad ';\n}\nfor (const field in theta) {\n  console.log(field);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "9",
+          "2 undefined false [\"z\",\"y\"] true",
+          "2 undefined false [\"z\",\"y\"] true",
+          "0"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "field": "unbound",
+          "n": "unbound",
+          "omega": "string \"b.chi\"",
+          "psi": "object {\"c\":\"  pad \"}",
+          "rest": "unbound",
+          "sigma": "unbound",
+          "step": "unbound",
+          "tau": "unbound",
+          "theta": "object [\"b.chi\"]",
+          "zeta": "unbound"
+        }
+      }
+    }
+  ]
+}

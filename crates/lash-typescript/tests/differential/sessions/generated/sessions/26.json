@@ -1,0 +1,182 @@
+{
+  "seed": 26,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "delta",
+    "error",
+    "field",
+    "gamma",
+    "i",
+    "item",
+    "kappa",
+    "local",
+    "omega",
+    "problem",
+    "rest",
+    "rho",
+    "scaled",
+    "sigma",
+    "tau",
+    "theta",
+    "turn1",
+    "turn2",
+    "value"
+  ],
+  "cells": [
+    {
+      "source": "const { a: rho, b: delta = 0 } = { a: ('hi' + 'a,b'), b: 3 };\ntry {\n  console.warn(true, delta);\n  let turn1 = 0;\n  while (turn1 < 3) {\n    turn1++;\n    const theta = `${4.5}:${JSON.stringify(rho)}`;\n    console.log(delta, (typeof 8));\n  }\n  throw new RangeError('a,b');\n} catch (problem) {\n  console.log(problem.name, problem.message, problem instanceof RangeError);\n} finally {\n  let turn2 = 0;\n  do {\n    turn2++;\n    let gamma = { d: (('Lash' + rho) === 'a,b'), b: rho.toLowerCase().padStart(5, '*') };\n    gamma = { d: false, b: rho };\n  } while (turn2 < 2);\n}\ntry {\n  for (const field in { h: 9, c: rho, e: 'hi'.trim() }) {\n    console.log(field);\n    let kappa = { d: 'x' };\n  }\n} catch (error) {\n  console.log(error.name, error.message, error instanceof RangeError);\n}\nfor (let i = 0; i < 3; i++) {\n  if (((delta * delta) >= Math.sign(i))) {\n    let rho = new URL('https://example.com/p?x=1');\n  }\n}\nconsole.warn([[delta], [2]].flat().includes(2));\nconsole.info(true);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "true 3",
+          "3 number",
+          "3 number",
+          "3 number",
+          "RangeError a,b true",
+          "h",
+          "c",
+          "e",
+          "true",
+          "true"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "delta": "number 3",
+          "error": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "item": "unbound",
+          "kappa": "unbound",
+          "local": "unbound",
+          "omega": "unbound",
+          "problem": "unbound",
+          "rest": "unbound",
+          "rho": "string \"hia,b\"",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "turn2": "unbound",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "console.log(rho);\n{\n  const omega = new URL('https://example.com/p?x=1');\n  console.log(omega.href, omega.pathname, omega.searchParams.get('x'), omega.origin);\n  omega.searchParams.append('k', 'a,b');\n}\nconst tau = { b: [(-10), (2 & 7), 4], e: 7, f: 2 };\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "hia,b",
+          "https://example.com/p?x=1 /p 1 https://example.com"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "delta": "number 3",
+          "error": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "item": "unbound",
+          "kappa": "unbound",
+          "local": "unbound",
+          "omega": "unbound",
+          "problem": "unbound",
+          "rest": "unbound",
+          "rho": "string \"hia,b\"",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "tau": "object {\"b\":[-10,2,4],\"e\":7,\"f\":2}",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "turn2": "unbound",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const o = { m() { super.x; } };\n",
+      "reject": "TS_SUPER_UNSUPPORTED",
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "delta": "number 3",
+          "error": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "item": "unbound",
+          "kappa": "unbound",
+          "local": "unbound",
+          "omega": "unbound",
+          "problem": "unbound",
+          "rest": "unbound",
+          "rho": "string \"hia,b\"",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "tau": "object {\"b\":[-10,2,4],\"e\":7,\"f\":2}",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "turn2": "unbound",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const beta = (value, step = 2) => 1 + step;\nconsole.log(beta(rho.length));\nconst alpha = (item, ...rest) => 11 + rest.length;\nconsole.log(alpha(Math.min((-4), 1)));\nlet chi = { d: Object.hasOwn(tau, 'a'), e: Object.hasOwn(tau, 'h'), a: (delta).toFixed(1) };\n{\n  try {\n    const alpha = JSON.parse(JSON.stringify(chi));\n    chi.d = (alpha instanceof Date);\n    throw new SyntaxError('zz');\n  } catch (error) {\n    console.log(error.name, error.message, error instanceof RangeError);\n  } finally {\n    const omega = (value) => { const scaled = 8; return 6; };\n    console.log(omega(('  pad '.length % Math.floor(delta))));\n  }\n}\nconst sigma = (value) => { const local = (12 & 2.5); return ((7.5 - delta) ^ Number.parseInt(rho + '7', 10)); };\nconsole.log(sigma(6));\nfor (const field in chi) {\n  console.log(field);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "3",
+          "11",
+          "SyntaxError zz false",
+          "6",
+          "4",
+          "d",
+          "e",
+          "a"
+        ],
+        "probes": {
+          "alpha": "function undefined",
+          "beta": "function undefined",
+          "chi": "object {\"d\":false,\"e\":false,\"a\":\"3.0\"}",
+          "delta": "number 3",
+          "error": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "item": "unbound",
+          "kappa": "unbound",
+          "local": "unbound",
+          "omega": "unbound",
+          "problem": "unbound",
+          "rest": "unbound",
+          "rho": "string \"hia,b\"",
+          "scaled": "unbound",
+          "sigma": "function undefined",
+          "tau": "object {\"b\":[-10,2,4],\"e\":7,\"f\":2}",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "turn2": "unbound",
+          "value": "unbound"
+        },
+        "closures": [
+          "alpha",
+          "beta",
+          "sigma"
+        ]
+      }
+    }
+  ]
+}

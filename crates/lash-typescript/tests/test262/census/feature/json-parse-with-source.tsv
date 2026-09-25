@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	json-parse-with-source	skip	ticket-ruling:FIG-1413:json-parse-with-source	-

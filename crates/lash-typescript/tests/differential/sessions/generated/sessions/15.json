@@ -1,0 +1,161 @@
+{
+  "seed": 15,
+  "probe": [
+    "beta",
+    "chi",
+    "count",
+    "delta",
+    "field",
+    "gamma",
+    "index",
+    "item",
+    "lambda",
+    "omega",
+    "psi",
+    "rest",
+    "rho",
+    "shared2",
+    "slot",
+    "theta",
+    "turn1",
+    "turn3"
+  ],
+  "cells": [
+    {
+      "source": "for (const field in { e: 'zz', d: 'Lash'.split(',').reverse().join('|'), f: [] }) {\n  console.log(field);\n  let chi = [[7], [2]].flat().includes(2);\n}\nlet turn1 = 0;\nwhile (turn1 < 1) {\n  turn1++;\n  const theta = new URL('https://example.com/a/b?x=1');\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "e",
+          "d",
+          "f"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "rho": "unbound",
+          "shared2": "unbound",
+          "slot": "unbound",
+          "theta": "unbound",
+          "turn1": "number 1",
+          "turn3": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const c = 1; c = 2; // tsc TS2588\n",
+      "reject": "TS_ASSIGN_CONST",
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "psi": "unbound",
+          "rest": "unbound",
+          "rho": "unbound",
+          "shared2": "unbound",
+          "slot": "unbound",
+          "theta": "unbound",
+          "turn1": "number 1",
+          "turn3": "unbound"
+        }
+      }
+    },
+    {
+      "source": "let psi = { ['d']: [(4 ** 2)] };\nfor (const field in psi) {\n  console.log(field);\n  let delta = [String(Math.abs(0)), field.trimEnd().replaceAll('b', 'B')];\n}\nconst omega = psi;\nfinish((-turn1));\n",
+      "node": {
+        "outcome": "finish",
+        "finish": -1,
+        "prints": [
+          "d"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "lambda": "unbound",
+          "omega": "object {\"d\":[16]}",
+          "psi": "object {\"d\":[16]}",
+          "rest": "unbound",
+          "rho": "unbound",
+          "shared2": "unbound",
+          "slot": "unbound",
+          "theta": "unbound",
+          "turn1": "number 1",
+          "turn3": "unbound"
+        }
+      }
+    },
+    {
+      "source": "globalThis.shared2 = false;\nlet turn3 = 0;\nwhile (turn3 < 3) {\n  turn3++;\n  {\n    const lambda = new URLSearchParams({ q: 'a b', r: '+' });\n    const rho = new Set([9, 0, 9]);\n    console.log(rho.size, rho.has(1), [...rho.union(new Set([7]))], rho instanceof Set);\n  }\n  {\n    console.log(omega);\n    const lambda = (item, step = 2) => (turn1 ** 2) + step;\n    console.log(lambda('Lash'.length));\n    const delta = (item, ...rest) => ([[6], [2]].flat().includes(2) ? 1.5 : turn3) + rest.length;\n    console.log(delta((lambda(1) + 5)));\n  }\n}\nconsole.info(Math.min(3.5, Array.from({ length: 3 }, (slot, index) => index * 2).length), (Math.max(Math.max(turn1, turn1), 11) !== Number.parseInt(String(5) + '7', 10)));\n{\n  const lambda = new Map([['b', 5], ['a', 10]]);\n  console.log(lambda.size, lambda.get('a'), lambda.has('ab'), [...lambda.keys()], lambda instanceof Map);\n  console.log([...lambda.entries()], 'b.c', 'zz');\n  let gamma = ['zz', '  pad ', String(1.5)];\n}\nfunction beta(count) {\n  return count <= 1 ? 1 : count + beta(count - 1);\n}\nconsole.log(beta(6));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2 false [9,0,7] true",
+          "{\"d\":[16]}",
+          "3",
+          "1.5",
+          "2 false [9,0,7] true",
+          "{\"d\":[16]}",
+          "3",
+          "1.5",
+          "2 false [9,0,7] true",
+          "{\"d\":[16]}",
+          "3",
+          "1.5",
+          "3 true",
+          "2 10 false [\"b\",\"a\"] true",
+          "[[\"b\",5],[\"a\",10]] b.c zz",
+          "21"
+        ],
+        "probes": {
+          "beta": "function undefined",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "lambda": "unbound",
+          "omega": "object {\"d\":[16]}",
+          "psi": "object {\"d\":[16]}",
+          "rest": "unbound",
+          "rho": "unbound",
+          "shared2": "boolean false",
+          "slot": "unbound",
+          "theta": "unbound",
+          "turn1": "number 1",
+          "turn3": "number 3"
+        },
+        "closures": [
+          "beta"
+        ]
+      }
+    }
+  ]
+}

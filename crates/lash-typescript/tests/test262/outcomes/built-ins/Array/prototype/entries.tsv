@@ -1,0 +1,7 @@
+# test262-path	class	qualifier
+test/built-ins/Array/prototype/entries/iteration-mutable.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/entries/iteration.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/entries/length.js	pass	-
+test/built-ins/Array/prototype/entries/name.js	pass	-
+test/built-ins/Array/prototype/entries/prop-desc.js	pass	-
+test/built-ins/Array/prototype/entries/return-abrupt-from-this.js	refused	TS_METHOD_UNSUPPORTED

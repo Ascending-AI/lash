@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+flag	noStrict	skip	ticket-ruling:FIG-3646:the dialect is strict-mode only (ADR 0062: every cell is one strict script), and Test262 forbids running a noStrict test in strict mode	-

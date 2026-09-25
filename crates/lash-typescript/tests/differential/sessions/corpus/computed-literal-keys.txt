@@ -1,0 +1,12 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/computed-literal-keys.json.
+
+session computed-literal-keys
+about a computed key that is a string literal is that key, so a later field write links (FIG-3608)
+probe keyed
+cell
+const keyed = { ['q']: 1, r: 2 };
+keyed.q = 7;
+console.log(keyed.q, keyed);
+end

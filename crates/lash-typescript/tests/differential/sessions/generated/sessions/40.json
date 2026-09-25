@@ -1,0 +1,69 @@
+{
+  "seed": 40,
+  "probe": [
+    "chi",
+    "count",
+    "delta",
+    "field",
+    "iota",
+    "kappa",
+    "phi",
+    "step",
+    "tau",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "for (const field in { e: 'b.c', c: 'x' }) {\n  console.log(field);\n  const delta = ((-0.5) < Math.max(field.indexOf('b'), 4));\n}\nfunction tau(count) {\n  const kappa = ['ab', `${'x'.indexOf('b')}:${`${count}:${'Lash'}`}`, 'x'];\n  const zeta = /(?<first>[a-z])(b)?/.exec('a,b');\n  return 8;\n}\nconsole.log(tau(9));\nif (false) {\n  let phi = /(?<first>[a-z])(b)?/.exec('a,b');\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "e",
+          "c",
+          "8"
+        ],
+        "probes": {
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "iota": "unbound",
+          "kappa": "unbound",
+          "phi": "unbound",
+          "step": "unbound",
+          "tau": "function undefined",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "tau"
+        ]
+      }
+    },
+    {
+      "source": "{\n  const phi = new URL('https://example.com/q?x=1');\n  console.log(phi.href, phi.pathname, phi.searchParams.get('x'), phi.origin);\n  for (let step = 0; step < 2; step++) {\n    phi.hash = 'h';\n  }\n  if (true) {\n    phi.searchParams.append('k', 'a,b');\n    const chi = new URL('https://example.com/p?x=1');\n    console.log(chi.href, chi.pathname, chi.searchParams.get('x'), chi.origin);\n  }\n}\nconst iota = { h: [12, 12, Number.parseInt('Lash' + '7', 10)], g: 'b.c'.includes('a'), d: [Math.round(5)] };\n{\n  console.warn(iota);\n  {\n    const delta = iota;\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "https://example.com/q?x=1 /q 1 https://example.com",
+          "https://example.com/p?x=1 /p 1 https://example.com",
+          "{\"h\":[12,12,null],\"g\":false,\"d\":[5]}"
+        ],
+        "probes": {
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "iota": "object {\"h\":[12,12,null],\"g\":false,\"d\":[5]}",
+          "kappa": "unbound",
+          "phi": "unbound",
+          "step": "unbound",
+          "tau": "function undefined",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "tau"
+        ]
+      }
+    }
+  ]
+}

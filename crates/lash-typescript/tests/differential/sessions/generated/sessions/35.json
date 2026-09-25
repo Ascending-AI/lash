@@ -1,0 +1,84 @@
+{
+  "seed": 35,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "delta",
+    "entry",
+    "field",
+    "gamma",
+    "i",
+    "kappa",
+    "lambda",
+    "phi",
+    "problem",
+    "psi",
+    "sigma"
+  ],
+  "cells": [
+    {
+      "source": "var beta = { b: 'ab', d: 'Lash', h: (typeof 10) };\nif ([[1], [2]].flat().includes(2)) {\n  try {\n    let delta = { h: true, g: false };\n    throw new SyntaxError('hi');\n  } catch {\n    console.log('caught');\n  }\n  beta.d = JSON.stringify({ ...beta, z: 9 });\n} else {\n  console.info(5, beta, beta);\n}\nconsole.log({ ...beta, z: 0 }, { ...beta, z: 0 }, (4 - (-11)));\nfor (let i = 0; i < 3; i++) {\n  {\n    console.log(false, beta);\n    let kappa = beta;\n  }\n  for (const field in beta) {\n    console.log(field);\n    let alpha = new URLSearchParams('b=2&a=1&b=3');\n  }\n}\nlet psi = ['hi'.indexOf('b'), (8 % 11)];\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "caught",
+          "{\"b\":\"ab\",\"d\":\"{\\\"b\\\":\\\"ab\\\",\\\"d\\\":\\\"Lash\\\",\\\"h\\\":\\\"number\\\",\\\"z\\\":9}\",\"h\":\"number\",\"z\":0} {\"b\":\"ab\",\"d\":\"{\\\"b\\\":\\\"ab\\\",\\\"d\\\":\\\"Lash\\\",\\\"h\\\":\\\"number\\\",\\\"z\\\":9}\",\"h\":\"number\",\"z\":0} 15",
+          "false {\"b\":\"ab\",\"d\":\"{\\\"b\\\":\\\"ab\\\",\\\"d\\\":\\\"Lash\\\",\\\"h\\\":\\\"number\\\",\\\"z\\\":9}\",\"h\":\"number\"}",
+          "b",
+          "d",
+          "h",
+          "false {\"b\":\"ab\",\"d\":\"{\\\"b\\\":\\\"ab\\\",\\\"d\\\":\\\"Lash\\\",\\\"h\\\":\\\"number\\\",\\\"z\\\":9}\",\"h\":\"number\"}",
+          "b",
+          "d",
+          "h",
+          "false {\"b\":\"ab\",\"d\":\"{\\\"b\\\":\\\"ab\\\",\\\"d\\\":\\\"Lash\\\",\\\"h\\\":\\\"number\\\",\\\"z\\\":9}\",\"h\":\"number\"}",
+          "b",
+          "d",
+          "h"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "object {\"b\":\"ab\",\"d\":\"{\\\"b\\\":\\\"ab\\\",\\\"d\\\":\\\"Lash\\\",\\\"h\\\":\\\"number\\\",\\\"z\\\":9}\",\"h\":\"number\"}",
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "object [-1,8]",
+          "sigma": "unbound"
+        }
+      }
+    },
+    {
+      "source": "try {\n  for (let i = 0; i < 1; i++) {\n    const alpha = [Object.keys(beta).join('')];\n  }\n  throw new Error('zz');\n} catch (problem) {\n  console.log(problem.name, problem.message, problem instanceof RangeError);\n}\nfor (const entry of psi) {\n  const { a: delta, b: chi = 0 } = { a: 'zz'.replaceAll('b', 'B'), b: 1 };\n}\n{\n  switch (0 % 3) {\n    case 0: {\n      const sigma = JSON.parse(JSON.stringify(psi));\n      break;\n    }\n    case 1: {\n      let lambda = new Set([6, 9, 6]);\n      break;\n    }\n    default: {\n      const phi = new URL('https://example.com/a/b?x=1');\n      console.log(phi.href, phi.pathname, phi.searchParams.get('x'), phi.origin);\n    }\n  }\n  let gamma = new TypeError('ab');\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "Error zz false"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "object {\"b\":\"ab\",\"d\":\"{\\\"b\\\":\\\"ab\\\",\\\"d\\\":\\\"Lash\\\",\\\"h\\\":\\\"number\\\",\\\"z\\\":9}\",\"h\":\"number\"}",
+          "chi": "unbound",
+          "delta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "gamma": "unbound",
+          "i": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "object [-1,8]",
+          "sigma": "unbound"
+        }
+      }
+    }
+  ]
+}

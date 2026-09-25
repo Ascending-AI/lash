@@ -1,0 +1,15 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/exotic-values-are-not-arrays.json.
+
+session exotic-values-are-not-arrays
+about Array.isArray and instanceof Array answer for every exotic without crossing the host boundary (FIG-3608)
+probe tags link match
+cell
+{
+  const tags = new Set([1]);
+  const link = new URL('https://example.com/');
+  const match = /(a)/.exec('a');
+  console.log(Array.isArray(tags), link instanceof Array, new Date(0) instanceof Array, /a/ instanceof Array, Array.isArray(match));
+}
+end

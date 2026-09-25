@@ -1,8 +1,10 @@
 # The Node session oracle
 
-`expectations.json` is a checked-in Node.js v25.2.1 oracle snapshot of the
-sessions in `corpus.txt`: ordered cells, each run as a successive classic
-Script in one realm (`vm.createContext` plus `vm.Script`), so top-level
+The `expectations/` directory is a checked-in Node.js v25.2.1 oracle
+snapshot of the sessions in `corpus/` — one `corpus/<id>.txt` per session,
+one `expectations/<id>.json` answer per session and `meta.json`, so two
+sessions never share a file (FIG-3727). A session's cells run as successive
+classic Scripts in one realm (`vm.createContext` plus `vm.Script`), so top-level
 `let`/`const`/`class` live in the realm's global lexical environment and
 `var`/function declarations on its global object, as ECMA-262 specifies. The
 lash side runs every session through the production RLM executor, live and
@@ -22,8 +24,8 @@ The generator refuses any Node other than the stamped version and pins
 `TZ=UTC` itself. The mapping below is written once, in code, in `realm.mjs`,
 which both this corpus and the generated sessions are answered through.
 
-Where a Rust caller starts `oracle.mjs` (writing `generated.json`, the
-longer live runs), the binary resolves as: `LASH_NODE` when set, else the
+Where a Rust caller starts `oracle.mjs` (writing the `generated/` tree,
+the longer live runs), the binary resolves as: `LASH_NODE` when set, else the
 mise-installed pinned Node at
 `~/.local/share/mise/installs/node/25.2.1/bin/node` when present (`kiln
 run`'s Bazel environment has no `node` on `PATH`), else `node` from `PATH`,
@@ -85,8 +87,8 @@ slot or a block binding that reaches the session fails even unprobed.
 
 ## Generated sessions (FIG-3608)
 
-The hand-written corpus checks the divergences someone thought of.
-`generated.json` checks sessions nobody wrote: a seeded generator
+The hand-written corpus checks the divergences someone thought of. The
+`generated/` shard tree checks sessions nobody wrote: a seeded generator
 (`crates/lash-protocol-rlm/src/testing/cell_conformance/node_oracle/generator.rs`)
 draws multi-cell sessions from the dialect's accepted grammar — bindings at
 every scope, shadowing, closures, every loop form, the exotic built-ins,
@@ -96,9 +98,11 @@ Every construct names the census row (which must be `accepted`) or the WHATWG
 URL surface it draws from, and every cell is also plain JavaScript, so Node
 runs it as written. The generator is a pure function of its seed.
 
-The bounded corpus is the first seeds; `generated.json` holds each session
-with Node's answer, written through the oracle service `oracle.mjs` by one
-deliberate, byte-identical step:
+The bounded corpus is the first seeds; `generated/` holds each session with
+Node's answer — `meta.json`, one `sessions/<seed>.json` per session and one
+`round-trip/<name>.json` per round-trip row, so two seeds or rows never
+share a file (FIG-3727) — written through the oracle service `oracle.mjs` by
+one deliberate, byte-identical step:
 
 ```console
 kiln run //crates/lash-protocol-rlm:lash-protocol-rlm__unit_test -- \
@@ -109,8 +113,9 @@ The cacheable test partition regenerates every session from its seed and
 requires it to be the one checked in, so a generator change is a deliberate
 corpus change, then runs it live and reloading between every pair of cells
 against Node's answer under the `closure-boundary` rule. The generator draws
-its rejected cells from `tests/test262/census.tsv`'s probe list, so a census
-change can change what a seed draws: regenerate `generated.json` after one.
+its rejected cells from the `tests/test262/census/` shards' probe list, so a
+census change can change what a seed draws: regenerate `generated/` after
+one.
 Either drift check fails naming the exact regeneration command above
 (FIG-3727). Longer runs draw fresh seeds and ask Node live:
 
@@ -133,7 +138,7 @@ For every value type the dialect accepts, a value created in one cell, stored
 in a session global, reloaded from the durable snapshot and used in the next
 cell behaves as if it had never been stored: as the same code in a single
 cell, which must itself be Node's answer (the round-trip rows of
-`generated.json`). The rows cover every heap object kind the VM has, which
+`generated/`). The rows cover every heap object kind the VM has, which
 `lashlang::testing::heap_object_kinds` names by an exhaustive match, and the
 primitives. A type that cannot round-trip is refused with a named diagnostic;
 a row whose law fails today is pinned by the open defect or registered

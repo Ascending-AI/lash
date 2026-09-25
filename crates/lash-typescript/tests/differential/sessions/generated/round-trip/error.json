@@ -1,0 +1,19 @@
+{
+  "name": "error",
+  "create": "const value = new RangeError('out of range', { cause: 'why' });",
+  "uses": "console.log(value.name, value.message, value.cause, String(value), value instanceof RangeError, value instanceof Error);",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "RangeError out of range why RangeError: out of range true true"
+      ],
+      "probes": {}
+    }
+  ]
+}

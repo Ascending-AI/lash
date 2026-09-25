@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Symbol.unscopables	skip	ticket-ruling:FIG-1413:Symbol.unscopables	-

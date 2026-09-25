@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	Promise.prototype.finally	rejected	TS_METHOD_UNSUPPORTED	const p: any = 1; p.finally(() => { });

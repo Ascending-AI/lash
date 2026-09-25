@@ -1,0 +1,8 @@
+# test262-path	class	qualifier
+test/built-ins/Object/setPrototypeOf/length.js	pass	-
+test/built-ins/Object/setPrototypeOf/name.js	pass	-
+test/built-ins/Object/setPrototypeOf/o-not-obj-coercible.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/setPrototypeOf/property-descriptor.js	pass	-
+test/built-ins/Object/setPrototypeOf/set-failure-cycle.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/setPrototypeOf/set-failure-non-extensible.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/setPrototypeOf/success.js	refused	TS_METHOD_UNSUPPORTED

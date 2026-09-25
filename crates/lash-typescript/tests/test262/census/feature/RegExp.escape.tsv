@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	RegExp.escape	rejected	TS_METHOD_UNSUPPORTED	RegExp.escape('a');

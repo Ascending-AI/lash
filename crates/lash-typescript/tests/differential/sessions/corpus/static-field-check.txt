@@ -1,0 +1,11 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/static-field-check.json.
+
+session static-field-check
+about reading a field an object literal's type lacks, which the linker refuses as TypeScript does
+probe shape
+cell reject TS_LINK_ERROR
+const shape = { a: 1 };
+console.log(shape.missing);
+end

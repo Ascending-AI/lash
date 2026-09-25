@@ -1,0 +1,52 @@
+{
+  "id": "global-this-read-of-a-lexical-binding",
+  "about": "a function reads a top-level let through globalThis, which the dialect aliases to the binding's session slot (FIG-3620)",
+  "probe": [
+    "level",
+    "readLevel"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "let level = 1;\nfunction readLevel() { return globalThis.level; }\nconsole.log(readLevel());\n",
+      "reject": null,
+      "deviation": "global-object-aliases-lexical-bindings",
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "undefined"
+        ],
+        "probes": {
+          "level": "number 1",
+          "readLevel": "function undefined"
+        },
+        "closures": [
+          "readLevel"
+        ]
+      },
+      "lash": {
+        "resident": {
+          "outcome": "normal",
+          "prints": [
+            "1"
+          ],
+          "probes": {
+            "level": "number 1",
+            "readLevel": "dropped"
+          }
+        },
+        "restart": {
+          "outcome": "normal",
+          "prints": [
+            "1"
+          ],
+          "probes": {
+            "level": "number 1",
+            "readLevel": "dropped"
+          }
+        }
+      }
+    }
+  ]
+}

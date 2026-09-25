@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	super	rejected	TS_SUPER_UNSUPPORTED	const o = { m() { super.x; } };

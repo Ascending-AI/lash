@@ -1,0 +1,8 @@
+# test262-path	class	qualifier
+test/built-ins/isNaN/S15.1.2.4_A2.6.js	pass	-
+test/built-ins/isNaN/S15.1.2.4_A2.7.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/isNaN/prop-desc.js	refused	TS_THIS_UNSUPPORTED
+test/built-ins/isNaN/return-abrupt-from-tonumber-number.js	pass	-
+test/built-ins/isNaN/return-false-not-nan-numbers.js	pass	-
+test/built-ins/isNaN/return-true-nan.js	pass	-
+test/built-ins/isNaN/tonumber-operations.js	refused	TS_EXPRESSION_UNSUPPORTED

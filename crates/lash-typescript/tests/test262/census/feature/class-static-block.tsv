@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	class-static-block	rejected	TS_CLASS_UNSUPPORTED	class A { static { } }

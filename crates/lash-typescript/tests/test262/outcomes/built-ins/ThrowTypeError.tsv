@@ -1,0 +1,14 @@
+# test262-path	class	qualifier
+test/built-ins/ThrowTypeError/extensible.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/ThrowTypeError/forbidden-arguments.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/ThrowTypeError/forbidden-caller.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/ThrowTypeError/frozen.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/ThrowTypeError/is-function.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/ThrowTypeError/length.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/ThrowTypeError/name.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/ThrowTypeError/property-order.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/ThrowTypeError/prototype.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/ThrowTypeError/throws-type-error.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/ThrowTypeError/unique-per-realm-function-proto.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/ThrowTypeError/unique-per-realm-non-simple.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/ThrowTypeError/unique-per-realm-unmapped-args.js	refused	TS_METHOD_UNSUPPORTED

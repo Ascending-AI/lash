@@ -1,0 +1,18 @@
+# test262-path	class	qualifier
+test/language/destructuring/binding/initialization-requires-object-coercible-null.js	pass	-
+test/language/destructuring/binding/initialization-requires-object-coercible-undefined.js	pass	-
+test/language/destructuring/binding/initialization-returns-normal-completion-for-empty-objects.js	pass	-
+test/language/destructuring/binding/syntax/array-elements-with-initializer.js	pass	-
+test/language/destructuring/binding/syntax/array-elements-with-object-patterns.js	pass	-
+test/language/destructuring/binding/syntax/array-elements-without-initializer.js	pass	-
+test/language/destructuring/binding/syntax/array-pattern-with-elisions.js	pass	-
+test/language/destructuring/binding/syntax/array-pattern-with-no-elements.js	pass	-
+test/language/destructuring/binding/syntax/array-rest-elements.js	pass	-
+test/language/destructuring/binding/syntax/destructuring-array-parameters-function-arguments-length.js	refused	TS_GENERATOR_UNSUPPORTED
+test/language/destructuring/binding/syntax/destructuring-object-parameters-function-arguments-length.js	refused	TS_GENERATOR_UNSUPPORTED
+test/language/destructuring/binding/syntax/object-pattern-with-no-property-list.js	pass	-
+test/language/destructuring/binding/syntax/property-list-bindings-elements.js	pass	-
+test/language/destructuring/binding/syntax/property-list-followed-by-a-single-comma.js	pass	-
+test/language/destructuring/binding/syntax/property-list-single-name-bindings.js	pass	-
+test/language/destructuring/binding/syntax/property-list-with-property-list.js	pass	-
+test/language/destructuring/binding/syntax/recursive-array-and-object-patterns.js	refused	TS_FUNCTION_REDECLARATION_UNSUPPORTED

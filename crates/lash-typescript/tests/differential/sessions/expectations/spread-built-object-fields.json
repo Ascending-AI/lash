@@ -1,0 +1,28 @@
+{
+  "id": "spread-built-object-fields",
+  "about": "an object literal built by a spread is open, so its fields read and write as in JavaScript (FIG-3626)",
+  "probe": [
+    "base",
+    "copy"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const base = { a: 1 };\nconst copy = { ...base, b: 2 };\ncopy.a = 3;\ncopy.c = 4;\nconsole.log(copy, copy.missing);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "{\"a\":3,\"b\":2,\"c\":4} undefined"
+        ],
+        "probes": {
+          "base": "object {\"a\":1}",
+          "copy": "object {\"a\":3,\"b\":2,\"c\":4}"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

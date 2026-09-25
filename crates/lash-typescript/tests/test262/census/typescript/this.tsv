@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	this	rejected	TS_THIS_UNSUPPORTED	const x = this;

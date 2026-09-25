@@ -1,0 +1,139 @@
+{
+  "seed": 74,
+  "probe": [
+    "beta",
+    "delta",
+    "field",
+    "i",
+    "item",
+    "key",
+    "omega",
+    "phi",
+    "problem",
+    "psi",
+    "scaled",
+    "sigma",
+    "turn1",
+    "turn2",
+    "value"
+  ],
+  "cells": [
+    {
+      "source": "try {\n  console.warn(false, 1);\n  const sigma = [('b.c' + 'Lash'.split(',').reverse().join('|'))];\n} catch (problem) {\n  console.log(problem.name, problem.message, problem instanceof RangeError);\n}\nconsole.warn(![[3], [2]].flat().includes(2), String(12), ((-9) !== ('ab'.length % 2)));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "false 1",
+          "false 12 true"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "i": "unbound",
+          "item": "unbound",
+          "key": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "turn1": "unbound",
+          "turn2": "unbound",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "import defer * as ns from 'mod';\n",
+      "reject": "TS_IMPORT_EXPORT_UNSUPPORTED",
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "beta": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "i": "unbound",
+          "item": "unbound",
+          "key": "unbound",
+          "omega": "unbound",
+          "phi": "unbound",
+          "problem": "unbound",
+          "psi": "unbound",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "turn1": "unbound",
+          "turn2": "unbound",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const phi = { b: [(7 ** 2)], g: (-0), f: 'b.c'.indexOf('b') };\nconsole.log(phi, phi);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "{\"b\":[49],\"g\":0,\"f\":0} {\"b\":[49],\"g\":0,\"f\":0}"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "i": "unbound",
+          "item": "unbound",
+          "key": "unbound",
+          "omega": "unbound",
+          "phi": "object {\"b\":[49],\"g\":0,\"f\":0}",
+          "problem": "unbound",
+          "psi": "unbound",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "turn1": "unbound",
+          "turn2": "unbound",
+          "value": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const omega = (item) => { const scaled = ((true && true) ? 10 : 11); return 12; };\nconsole.log(omega(phi?.g));\nconst delta = new URLSearchParams({ q: 'a b', r: '+' });\nphi.f += 10;\nlet turn1 = 0;\ndo {\n  turn1++;\n  for (const [key, value] of delta) {\n    console.info(key);\n    let psi = /a(b*)/g;\n    if (false) { break; }\n  }\n  for (let i = 0; i < 3; i++) {\n    const psi = { ...{ c: delta.toString() }, a: [], e: true };\n  }\n} while (turn1 < 3);\n{\n  let turn2 = 0;\n  while (turn2 < 3) {\n    turn2++;\n    phi.h = true;\n  }\n  for (const field in phi) {\n    console.log(field);\n    const beta = { ...{ c: [(3 * 7)] } };\n  }\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "12",
+          "q",
+          "r",
+          "q",
+          "r",
+          "q",
+          "r",
+          "b",
+          "g",
+          "f",
+          "h"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "delta": "object {}",
+          "field": "unbound",
+          "i": "unbound",
+          "item": "unbound",
+          "key": "unbound",
+          "omega": "function undefined",
+          "phi": "object {\"b\":[49],\"g\":0,\"f\":10,\"h\":true}",
+          "problem": "unbound",
+          "psi": "unbound",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "turn1": "number 3",
+          "turn2": "unbound",
+          "value": "unbound"
+        },
+        "closures": [
+          "omega"
+        ]
+      }
+    }
+  ]
+}

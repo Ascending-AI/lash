@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	accessors	rejected	TS_ACCESSOR_UNSUPPORTED	const o = { get x() { return 1; } };

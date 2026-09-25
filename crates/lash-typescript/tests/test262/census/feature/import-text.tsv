@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	import-text	rejected	TS_IMPORT_EXPORT_UNSUPPORTED	import text from 'mod' with { type: 'text' };

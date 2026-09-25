@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	regexp-nesting	rejected	TS_REGEX_PATTERN_NESTING_LIMIT	const r = /((((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))))/;

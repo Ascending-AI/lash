@@ -1,0 +1,68 @@
+{
+  "seed": 52,
+  "probe": [
+    "chi",
+    "delta",
+    "field",
+    "index",
+    "iota",
+    "kappa",
+    "omega",
+    "phi",
+    "psi",
+    "rho",
+    "slot",
+    "value",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "const { a: chi, b: delta = 0 } = { a: 'zz'.replace(/[a-z]/g, '_').padStart(5, '*'), b: 8 };\nlet zeta = ((typeof delta) + `${11}:${chi}`);\nconst [psi, ...iota] = [11, 8, zeta.length];\nconst [omega, ...rho] = [Math.round(Math.min(psi, psi)), delta, 6];\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "chi": "string \"***__\"",
+          "delta": "number 8",
+          "field": "unbound",
+          "index": "unbound",
+          "iota": "object [8,14]",
+          "kappa": "unbound",
+          "omega": "number 11",
+          "phi": "unbound",
+          "psi": "number 11",
+          "rho": "object [8,6]",
+          "slot": "unbound",
+          "value": "unbound",
+          "zeta": "string \"number11:***__\""
+        }
+      }
+    },
+    {
+      "source": "switch (psi % 3) {\n  case 0: {\n    if (!!false) {\n      rho.pop();\n      rho.pop();\n    } else {\n      let phi = 8;\n    }\n    break;\n  }\n  case 1: {\n    iota.forEach((value) => { rho.push(value); });\n    break;\n  }\n  default: {\n    if (true) {\n      iota.push(Math.max(9, Array.from({ length: 3 }, (slot, index) => index * 2).length));\n      iota.sort();\n    } else {\n      let kappa = { e: 4, d: JSON.stringify(omega), c: (Math.min(delta, omega) * zeta.length) };\n    }\n  }\n}\nfor (const field in iota) {\n  console.log(field);\n}\nrho.unshift(Math.min(...iota, 1));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "0",
+          "1",
+          "2"
+        ],
+        "probes": {
+          "chi": "string \"***__\"",
+          "delta": "number 8",
+          "field": "unbound",
+          "index": "unbound",
+          "iota": "object [14,8,9]",
+          "kappa": "unbound",
+          "omega": "number 11",
+          "phi": "unbound",
+          "psi": "number 11",
+          "rho": "object [1,8,6]",
+          "slot": "unbound",
+          "value": "unbound",
+          "zeta": "string \"number11:***__\""
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,118 @@
+{
+  "seed": 37,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "count",
+    "delta",
+    "field",
+    "item",
+    "j",
+    "kappa",
+    "lambda",
+    "phi",
+    "problem",
+    "rest",
+    "sigma",
+    "tau"
+  ],
+  "cells": [
+    {
+      "source": "try {\n  for (let j = 0; j < 3; j++) {\n    const phi = new URL('https://example.com/a/b?x=1');\n    console.log(phi.href, phi.pathname, phi.searchParams.get('x'), phi.origin);\n    phi.hash = 'h';\n  }\n  let delta = new Map(Object.entries({ z: 9, y: 4 }));\n} catch (problem) {\n  console.log(problem.name, problem.message, problem instanceof RangeError);\n}\nconst lambda = (item, ...rest) => 1 + rest.length;\nconsole.log(lambda(lambda((0 ** 2))));\nfor (const field in { ['e']: true, ['g']: true }) {\n  console.log(field);\n}\n{\n  const lambda = new Date(Date.UTC(2024, 8, 4));\n  console.log(lambda.toISOString(), lambda.getUTCDay(), lambda.getTime() > 0, lambda instanceof Date);\n  var kappa = new URLSearchParams({ q: 'a b', r: '+' });\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "https://example.com/a/b?x=1 /a/b 1 https://example.com",
+          "https://example.com/a/b?x=1 /a/b 1 https://example.com",
+          "https://example.com/a/b?x=1 /a/b 1 https://example.com",
+          "1",
+          "e",
+          "g",
+          "2024-09-04T00:00:00.000Z 3 true true"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "item": "unbound",
+          "j": "unbound",
+          "kappa": "object {}",
+          "lambda": "function undefined",
+          "phi": "unbound",
+          "problem": "unbound",
+          "rest": "unbound",
+          "sigma": "unbound",
+          "tau": "unbound"
+        },
+        "closures": [
+          "lambda"
+        ]
+      }
+    },
+    {
+      "source": "globalThis.kappa = new URLSearchParams({ q: 'a b', r: '+' });\nkappa.sort();\nconst alpha = ['  pad ', 'b.c', 'hi'];\nfor (const field in alpha) {\n  console.log(field);\n}\nkappa.set('a', 'ab');\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "0",
+          "1",
+          "2"
+        ],
+        "probes": {
+          "alpha": "object [\"  pad \",\"b.c\",\"hi\"]",
+          "beta": "unbound",
+          "chi": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "item": "unbound",
+          "j": "unbound",
+          "kappa": "object {}",
+          "lambda": "function undefined",
+          "phi": "unbound",
+          "problem": "unbound",
+          "rest": "unbound",
+          "sigma": "unbound",
+          "tau": "unbound"
+        },
+        "closures": [
+          "lambda"
+        ]
+      }
+    },
+    {
+      "source": "const { a: tau, b: chi = 0 } = { a: 'b.c', b: 2 };\nvar sigma = [(4).toFixed(1)];\nfunction beta(count) {\n  return count <= 1 ? 1 : count + beta(count - 1);\n}\nconsole.log(beta(3));\nkappa.append('k', '  pad ');\nalpha.push(...[tau.toLowerCase(), tau]);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "6"
+        ],
+        "probes": {
+          "alpha": "object [\"  pad \",\"b.c\",\"hi\",\"b.c\",\"b.c\"]",
+          "beta": "function undefined",
+          "chi": "number 2",
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "item": "unbound",
+          "j": "unbound",
+          "kappa": "object {}",
+          "lambda": "function undefined",
+          "phi": "unbound",
+          "problem": "unbound",
+          "rest": "unbound",
+          "sigma": "object [\"4.0\"]",
+          "tau": "string \"b.c\""
+        },
+        "closures": [
+          "beta",
+          "lambda"
+        ]
+      }
+    }
+  ]
+}

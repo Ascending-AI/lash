@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	dynamic-import	rejected	TS_DYNAMIC_IMPORT_UNSUPPORTED	const m = import('mod');

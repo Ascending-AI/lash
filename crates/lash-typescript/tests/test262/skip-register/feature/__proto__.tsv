@@ -1,0 +1,12 @@
+# test262-path	excluding-census-row
+test/built-ins/Object/prototype/__proto__/get-fn-name.js	feature:__proto__
+test/built-ins/Object/prototype/__proto__/get-ordinary-obj.js	feature:__proto__
+test/built-ins/Object/prototype/__proto__/get-to-obj-abrupt.js	feature:__proto__
+test/built-ins/Object/prototype/__proto__/prop-desc.js	feature:__proto__
+test/built-ins/Object/prototype/__proto__/set-cycle-shadowed.js	feature:__proto__
+test/built-ins/Object/prototype/__proto__/set-cycle.js	feature:__proto__
+test/built-ins/Object/prototype/__proto__/set-fn-name.js	feature:__proto__
+test/built-ins/Object/prototype/__proto__/set-immutable.js	feature:__proto__
+test/built-ins/Object/prototype/__proto__/set-non-extensible.js	feature:__proto__
+test/built-ins/Object/prototype/__proto__/set-non-obj-coercible.js	feature:__proto__
+test/built-ins/Object/prototype/__proto__/set-ordinary-obj.js	feature:__proto__

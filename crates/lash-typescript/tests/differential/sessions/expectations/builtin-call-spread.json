@@ -1,0 +1,26 @@
+{
+  "id": "builtin-call-spread",
+  "about": "a spread argument to a builtin function passes the array's items (FIG-3627)",
+  "probe": [
+    "items"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const items = [3, 1];\nconsole.log(Math.max(...items), Math.min(...items, 0), String.fromCharCode(...[104, 105]));\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "3 0 hi"
+        ],
+        "probes": {
+          "items": "object [3,1]"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+# test262-path	class	qualifier
+test/built-ins/Object/assign/ObjectOverride-sameproperty.js	pass	-
+test/built-ins/Object/assign/OnlyOneArgument.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/assign/Override-notstringtarget.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/assign/Override.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/assign/Source-Null-Undefined.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Object/assign/Source-String.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Object/assign/Target-Boolean.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/assign/Target-Null.js	pass	-
+test/built-ins/Object/assign/Target-Number.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/assign/Target-Object.js	pass	-
+test/built-ins/Object/assign/Target-String.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/assign/Target-Undefined.js	pass	-
+test/built-ins/Object/assign/assign-descriptor.js	pass	-
+test/built-ins/Object/assign/assign-length.js	pass	-
+test/built-ins/Object/assign/assignment-to-readonly-property-of-target-must-throw-a-typeerror-exception.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/assign/invoked-as-ctor.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Object/assign/name.js	pass	-
+test/built-ins/Object/assign/source-get-attr-error.js	refused	TS_ACCESSOR_UNSUPPORTED
+test/built-ins/Object/assign/source-non-enum.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/assign/strings-and-symbol-order.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/assign/target-Array.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Object/assign/target-is-sealed-existing-accessor-property.js	refused	TS_ACCESSOR_UNSUPPORTED
+test/built-ins/Object/assign/target-is-sealed-existing-data-property.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/assign/target-set-not-writable.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/assign/target-set-user-error.js	refused	TS_METHOD_UNSUPPORTED

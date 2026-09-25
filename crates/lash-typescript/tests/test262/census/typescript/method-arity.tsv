@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	method-arity	rejected	TS_METHOD_UNSUPPORTED	[1].map();

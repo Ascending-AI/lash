@@ -1,0 +1,21 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/if-arm-and-bare-block.json.
+
+session if-arm-and-bare-block
+about a const in an if arm or a bare block ends with its block (FIG-3571 phase-1 leak `armed`)
+probe flag armed scratch
+cell
+const flag = true;
+if (flag) {
+  const armed = "yes";
+  console.log(armed);
+} else {
+  const armed = "no";
+  console.log(armed);
+}
+{
+  const scratch = 7;
+  console.log(scratch);
+}
+end

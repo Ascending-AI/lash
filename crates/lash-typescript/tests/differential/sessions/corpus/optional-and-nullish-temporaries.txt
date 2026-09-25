@@ -1,0 +1,13 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/optional-and-nullish-temporaries.json.
+
+session optional-and-nullish-temporaries
+about optional chaining and nullish coalescing bind only authored names
+probe deep got missing
+cell
+const deep = JSON.parse('{"a":{"b":1}}');
+const got = deep?.a?.b ?? 0;
+const missing = deep?.x?.y ?? "none";
+console.log(got, missing);
+end

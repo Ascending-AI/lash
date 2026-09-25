@@ -1,0 +1,14 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/redeclaration-across-cells.json.
+
+session redeclaration-across-cells
+about a later cell declares a name an earlier cell's let bound
+probe again
+cell
+let again = 1;
+cell deviation cross-cell-redeclaration
+let again = 2;
+console.log(again);
+lash {"outcome":"normal","prints":["2"],"probes":{"again":"number 2"}}
+end

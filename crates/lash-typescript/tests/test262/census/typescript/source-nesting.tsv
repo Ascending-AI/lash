@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	source-nesting	rejected	TS_SOURCE_NESTING_LIMIT	const x = [[[[[[[[[[[[[[[[[[[[[[[[[[[[[[1]]]]]]]]]]]]]]]]]]]]]]]]]]]]]];

@@ -1,0 +1,108 @@
+{
+  "seed": 19,
+  "probe": [
+    "count",
+    "delta",
+    "field",
+    "gamma",
+    "index",
+    "iota",
+    "j",
+    "kappa",
+    "omega",
+    "psi",
+    "shared1",
+    "sigma",
+    "slot",
+    "tau",
+    "theta",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "globalThis.shared1 = ('  pad '.length !== 7);\nfor (const field in { d: 1 }) {\n  console.log(field);\n  let omega = 'hi';\n}\nconst sigma = 3;\nconst gamma = { d: 'a,b'.padStart(5, '*') };\nlet kappa = { e: JSON.stringify({ ...gamma, z: sigma }).length, g: [(sigma - 5)], b: true };\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "d"
+        ],
+        "probes": {
+          "count": "unbound",
+          "delta": "unbound",
+          "field": "unbound",
+          "gamma": "object {\"d\":\"**a,b\"}",
+          "index": "unbound",
+          "iota": "unbound",
+          "j": "unbound",
+          "kappa": "object {\"e\":19,\"g\":[-2],\"b\":true}",
+          "omega": "unbound",
+          "psi": "unbound",
+          "shared1": "boolean true",
+          "sigma": "number 3",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "for (let j = 0; j < 2; j++) {\n  const kappa = gamma;\n}\nvar iota = true;\nconsole.log('x', (2 !== Math.sign((2 ** 2))));\nconst [delta, ...tau] = [JSON.stringify(sigma).length, sigma, sigma];\nconst { a: zeta, b: theta = 0 } = { a: 'a,b'.trimStart(), b: kappa.e };\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "x true"
+        ],
+        "probes": {
+          "count": "unbound",
+          "delta": "number 1",
+          "field": "unbound",
+          "gamma": "object {\"d\":\"**a,b\"}",
+          "index": "unbound",
+          "iota": "boolean true",
+          "j": "unbound",
+          "kappa": "object {\"e\":19,\"g\":[-2],\"b\":true}",
+          "omega": "unbound",
+          "psi": "unbound",
+          "shared1": "boolean true",
+          "sigma": "number 3",
+          "slot": "unbound",
+          "tau": "object [3,3]",
+          "theta": "number 19",
+          "zeta": "string \"a,b\""
+        }
+      }
+    },
+    {
+      "source": "function psi(count) {\n  tau.pop();\n  return (Math.max(...tau, 1) ** 2);\n}\nconsole.log(psi(Array.from({ length: 0 }, (slot, index) => index * 2).length));\nconsole.log(11, kappa, kappa);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "9",
+          "11 {\"e\":19,\"g\":[-2],\"b\":true} {\"e\":19,\"g\":[-2],\"b\":true}"
+        ],
+        "probes": {
+          "count": "unbound",
+          "delta": "number 1",
+          "field": "unbound",
+          "gamma": "object {\"d\":\"**a,b\"}",
+          "index": "unbound",
+          "iota": "boolean true",
+          "j": "unbound",
+          "kappa": "object {\"e\":19,\"g\":[-2],\"b\":true}",
+          "omega": "unbound",
+          "psi": "function undefined",
+          "shared1": "boolean true",
+          "sigma": "number 3",
+          "slot": "unbound",
+          "tau": "object [3]",
+          "theta": "number 19",
+          "zeta": "string \"a,b\""
+        },
+        "closures": [
+          "psi"
+        ]
+      }
+    }
+  ]
+}

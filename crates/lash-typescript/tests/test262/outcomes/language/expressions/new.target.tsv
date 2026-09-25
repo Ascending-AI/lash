@@ -1,0 +1,3 @@
+# test262-path	class	qualifier
+test/language/expressions/new.target/escaped-new.js	pass	-
+test/language/expressions/new.target/escaped-target.js	refused	TS_META_PROPERTY_UNSUPPORTED

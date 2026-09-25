@@ -1,0 +1,175 @@
+{
+  "seed": 87,
+  "probe": [
+    "alpha",
+    "beta",
+    "chi",
+    "delta",
+    "entry",
+    "gamma",
+    "i",
+    "index",
+    "iota",
+    "item",
+    "lambda",
+    "omega",
+    "psi",
+    "sigma",
+    "slot",
+    "tau",
+    "turn1",
+    "turn2",
+    "turn3",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "let turn1 = 0;\nwhile (turn1 < 1) {\n  turn1++;\n  {\n    const sigma = ((turn1 * 0)).toFixed(1);\n    console.log((turn1 < 4), 1, false);\n  }\n  const delta = { e: [9.5, Math.round(turn1), (true ? 7.5 : turn1)] };\n}\n{\n  let turn2 = 0;\n  while (turn2 < 2) {\n    turn2++;\n    var gamma = 1.5;\n  }\n}\nconst chi = (item, step = 2) => Math.abs((item ** 2)) + step;\nconsole.log(chi(gamma));\nlet psi = '  pad '.toLowerCase();\n{\n  const psi = [];\n  console.log(gamma, true);\n  console.log(Array.from({ length: 1 }, (slot, index) => index * 2).length);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "true 1 false",
+          "4.25",
+          "1.5 true",
+          "1"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "chi": "function undefined",
+          "delta": "unbound",
+          "entry": "unbound",
+          "gamma": "number 1.5",
+          "i": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "psi": "string \"  pad \"",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "turn1": "number 1",
+          "turn2": "unbound",
+          "turn3": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "chi"
+        ]
+      }
+    },
+    {
+      "source": "console.log(gamma, gamma, 3);\n{\n  {\n    console.log(turn1);\n    const sigma = false;\n  }\n  for (const entry of ['b.c', psi]) {\n    const psi = new Set([7, 8.5, 7]);\n  }\n  for (let i = 0; i < 2; i++) {\n    console.log(true, turn1, i);\n    console.log(gamma, i);\n  }\n}\nlet alpha = { f: 0, e: 'a,b' };\nalpha = { ['f']: Math.round(gamma), ['e']: psi.toLowerCase() };\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1.5 1.5 3",
+          "1",
+          "true 1 0",
+          "1.5 0",
+          "true 1 1",
+          "1.5 1"
+        ],
+        "probes": {
+          "alpha": "object {\"f\":2,\"e\":\"  pad \"}",
+          "beta": "unbound",
+          "chi": "function undefined",
+          "delta": "unbound",
+          "entry": "unbound",
+          "gamma": "number 1.5",
+          "i": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "psi": "string \"  pad \"",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "turn1": "number 1",
+          "turn2": "unbound",
+          "turn3": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "chi"
+        ]
+      }
+    },
+    {
+      "source": "for (const entry of psi) {\n  if (entry.slice(0, 2).includes('a')) {\n    alpha.e = 'zz';\n    globalThis.gamma = 0;\n  } else {\n    alpha.e = 'b.c'.padStart(5, '*');\n    const omega = { d: 3, c: Object.hasOwn(alpha, 'g') };\n  }\n  if (!true) { continue; }\n}\nconsole.log(2);\nconsole.warn(alpha, gamma, false);\nvar tau = new URL('https://example.com/p?x=1');\nconsole.info(2);\nglobalThis.gamma = (Math.floor(gamma) * 0);\nthrow new RangeError('b.c');\n",
+      "node": {
+        "outcome": "throw",
+        "error": "RangeError",
+        "prints": [
+          "2",
+          "{\"f\":2,\"e\":\"**b.c\"} 0 false",
+          "2"
+        ],
+        "probes": {
+          "alpha": "object {\"f\":2,\"e\":\"**b.c\"}",
+          "beta": "unbound",
+          "chi": "function undefined",
+          "delta": "unbound",
+          "entry": "unbound",
+          "gamma": "number 0",
+          "i": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "lambda": "unbound",
+          "omega": "unbound",
+          "psi": "string \"  pad \"",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "object \"https://example.com/p?x=1\"",
+          "turn1": "number 1",
+          "turn2": "unbound",
+          "turn3": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "chi"
+        ]
+      }
+    },
+    {
+      "source": "const [zeta, ...lambda] = [6, turn1, 7];\nconsole.info(psi, lambda);\n{\n  const iota = /a(b*)/g;\n  console.log(iota.test('hi'), iota.source, iota.flags, iota.lastIndex, String(iota));\n}\nvar beta = [(lambda.length).toFixed(1), psi.replaceAll('b', 'B'), `${turn1}:${String(3)}`];\nlet turn3 = 0;\nwhile (turn3 < 3) {\n  turn3++;\n  globalThis.gamma = Math.max(Number.parseInt(psi + '7', 10), alpha.f);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "  pad  [1,7]",
+          "false a(b*) g 0 /a(b*)/g"
+        ],
+        "probes": {
+          "alpha": "object {\"f\":2,\"e\":\"**b.c\"}",
+          "beta": "object [\"2.0\",\"  pad \",\"1:3\"]",
+          "chi": "function undefined",
+          "delta": "unbound",
+          "entry": "unbound",
+          "gamma": "number null",
+          "i": "unbound",
+          "index": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "lambda": "object [1,7]",
+          "omega": "unbound",
+          "psi": "string \"  pad \"",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "object \"https://example.com/p?x=1\"",
+          "turn1": "number 1",
+          "turn2": "unbound",
+          "turn3": "number 3",
+          "zeta": "number 6"
+        },
+        "closures": [
+          "chi"
+        ]
+      }
+    }
+  ]
+}

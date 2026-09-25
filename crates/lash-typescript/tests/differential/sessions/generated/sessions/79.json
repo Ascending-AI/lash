@@ -1,0 +1,103 @@
+{
+  "seed": 79,
+  "probe": [
+    "beta",
+    "chi",
+    "entry",
+    "error",
+    "gamma",
+    "iota",
+    "item",
+    "kappa",
+    "psi",
+    "rho",
+    "scaled",
+    "sigma",
+    "tau",
+    "theta",
+    "turn1",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "if (true) {\n  let turn1 = 0;\n  while (turn1 < 1) {\n    turn1++;\n    const beta = new Map([['b', 6], ['a', 5.5]]);\n    console.log(beta.size, beta.get('a'), beta.has('Lash'), [...beta.keys()], beta instanceof Map);\n  }\n  const sigma = [((typeof turn1) + (turn1).toFixed(1)), 'a,b', (typeof turn1)];\n} else {\n  console.warn(false, 'Lash'.replace(/[a-z]/g, '_'), (0 !== 12));\n}\nlet chi = (3 * 4);\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2 5.5 false [\"b\",\"a\"] true"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "number 12",
+          "entry": "unbound",
+          "error": "unbound",
+          "gamma": "unbound",
+          "iota": "unbound",
+          "item": "unbound",
+          "kappa": "unbound",
+          "psi": "unbound",
+          "rho": "unbound",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const iota = { ['f']: false, ['a']: chi, ['c']: false };\nlet kappa = new Error('ab');\nswitch ((3.5 % chi) % 3) {\n  case 0: {\n    iota.a = Math.sign('b.c'.indexOf('b'));\n    break;\n  }\n  case 1: {\n    if (false) {\n      let psi = { g: [[(chi % 3)], [2]].flat().includes(2), a: true, b: iota.a };\n    } else {\n      kappa = new RangeError('hi');\n    }\n    for (const entry of []) {\n      iota.c = true;\n      const gamma = (item) => { const scaled = (false ? 8 : chi); return Number.parseInt((typeof item) + '7', 10); };\n      console.log(gamma(chi));\n      if (true) { continue; }\n    }\n    break;\n  }\n  default: {\n    let tau = JSON.parse(JSON.stringify(iota));\n  }\n}\nvar rho = '  pad '.includes('a');\niota.f = rho;\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "beta": "unbound",
+          "chi": "number 12",
+          "entry": "unbound",
+          "error": "unbound",
+          "gamma": "unbound",
+          "iota": "object {\"f\":true,\"a\":12,\"c\":false}",
+          "item": "unbound",
+          "kappa": "object {}",
+          "psi": "unbound",
+          "rho": "boolean true",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "tau": "unbound",
+          "theta": "unbound",
+          "turn1": "unbound",
+          "zeta": "unbound"
+        }
+      }
+    },
+    {
+      "source": "const [zeta, ...theta] = [9.5, 0, 9];\ntheta.splice(0, 1);\ntheta.push(10);\n{\n  iota.a = chi;\n  try {\n    iota.a = 5;\n  } catch (error) {\n    console.log(error.name, error.message, error instanceof RangeError);\n  }\n}\ntheta.unshift(Math.max(...theta, 1));\nconsole.log(kappa);\nthrow new Error('zz');\n",
+      "node": {
+        "outcome": "throw",
+        "error": "Error",
+        "prints": [
+          "Error: ab"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "chi": "number 12",
+          "entry": "unbound",
+          "error": "unbound",
+          "gamma": "unbound",
+          "iota": "object {\"f\":true,\"a\":5,\"c\":false}",
+          "item": "unbound",
+          "kappa": "object {}",
+          "psi": "unbound",
+          "rho": "boolean true",
+          "scaled": "unbound",
+          "sigma": "unbound",
+          "tau": "unbound",
+          "theta": "object [10,9,10]",
+          "turn1": "unbound",
+          "zeta": "number 9.5"
+        }
+      }
+    }
+  ]
+}

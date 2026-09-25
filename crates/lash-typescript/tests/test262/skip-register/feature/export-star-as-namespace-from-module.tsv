@@ -1,0 +1,5 @@
+# test262-path	excluding-census-row
+test/language/expressions/dynamic-import/namespace/await-ns-get-nested-namespace-dflt-direct.js	feature:export-star-as-namespace-from-module
+test/language/expressions/dynamic-import/namespace/await-ns-get-nested-namespace-props-nrml.js	feature:export-star-as-namespace-from-module
+test/language/expressions/dynamic-import/namespace/promise-then-ns-get-nested-namespace-dflt-direct.js	feature:export-star-as-namespace-from-module
+test/language/expressions/dynamic-import/namespace/promise-then-ns-get-nested-namespace-props-nrml.js	feature:export-star-as-namespace-from-module

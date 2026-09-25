@@ -1,0 +1,12 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/finish-ends-the-cell.json.
+
+session finish-ends-the-cell
+about finish ends the cell with its value after earlier statements ran
+probe answer
+cell
+const answer = 41 + 1;
+finish(answer);
+console.log("unreachable");
+end

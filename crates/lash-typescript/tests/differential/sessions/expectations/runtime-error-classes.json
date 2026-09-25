@@ -1,0 +1,25 @@
+{
+  "id": "runtime-error-classes",
+  "about": "an uncaught error reports its class",
+  "probe": [
+    "value"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const value = null;\nconsole.log(value.missing);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "throw",
+        "prints": [],
+        "error": "TypeError",
+        "probes": {
+          "value": "object null"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

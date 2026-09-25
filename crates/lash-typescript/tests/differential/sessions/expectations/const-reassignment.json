@@ -1,0 +1,24 @@
+{
+  "id": "const-reassignment",
+  "about": "assigning a const in the cell that declared it",
+  "probe": [
+    "fixed"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const fixed = 1;\nfixed = 2;\n",
+      "reject": "TS_ASSIGN_CONST",
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "fixed": "unbound"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

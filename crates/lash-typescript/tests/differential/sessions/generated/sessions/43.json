@@ -1,0 +1,186 @@
+{
+  "seed": 43,
+  "probe": [
+    "beta",
+    "count",
+    "delta",
+    "error",
+    "field",
+    "index",
+    "item",
+    "lambda",
+    "local",
+    "omega",
+    "phi",
+    "psi",
+    "rest",
+    "rho",
+    "sigma",
+    "slot",
+    "tau",
+    "theta",
+    "turn1",
+    "zeta"
+  ],
+  "cells": [
+    {
+      "source": "function phi(count) {\n  let tau = 'b.c'.replace(/[a-z]/g, '_');\n  let phi = { g: [(count & count), (-12), 9], a: [] };\n  return count;\n}\nconsole.log(phi(Math.min(11, Math.floor(9))));\nlet psi = new RangeError('zz');\ntry {\n  const psi = (item) => (Number.parseInt('x' + '7', 10) ** 2);\n  console.log(psi(9));\n  throw new SyntaxError('x');\n} catch (error) {\n  console.log(error.name, error.message, error instanceof RangeError);\n}\nconsole.log(psi, psi);\nconst theta = (item) => { const local = Array.from({ length: 2 }, (slot, index) => index * 2).length; return 4; };\nconsole.log(theta(((true ? 1 : 8) << 1)));\nfinish('ab'.split(',').reverse().join('|'));\n",
+      "node": {
+        "outcome": "finish",
+        "finish": "ab",
+        "prints": [
+          "9",
+          "NaN",
+          "SyntaxError x false",
+          "RangeError: zz RangeError: zz",
+          "4"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "count": "unbound",
+          "delta": "unbound",
+          "error": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "lambda": "unbound",
+          "local": "unbound",
+          "omega": "unbound",
+          "phi": "function undefined",
+          "psi": "object {}",
+          "rest": "unbound",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "function undefined",
+          "turn1": "unbound",
+          "zeta": "unbound"
+        },
+        "closures": [
+          "phi",
+          "theta"
+        ]
+      }
+    },
+    {
+      "source": "for (const field in { c: false, g: 'Lash' }) {\n  console.log(field);\n}\nfunction delta(count) {\n  return count <= 1 ? 1 : count + delta(count - 1);\n}\nconsole.log(delta(6));\n{\n  const beta = new URLSearchParams({ q: 'a b', r: '+' });\n  console.log(beta.toString(), beta.get('b'), beta.getAll('b'), beta.size, beta.has('q'));\n  {\n    let lambda = { c: '  pad ' };\n  }\n  console.info('a,b');\n}\nconst zeta = new Map([['b', 2], ['a', 1]]);\nfunction omega(count) {\n  let tau = zeta.size;\n  return 12;\n}\nconsole.log(omega((0 >> (7.5 & 2))));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "c",
+          "g",
+          "21",
+          "q=a+b&r=%2B null [] 2 true",
+          "a,b",
+          "12"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "count": "unbound",
+          "delta": "function undefined",
+          "error": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "lambda": "unbound",
+          "local": "unbound",
+          "omega": "function undefined",
+          "phi": "function undefined",
+          "psi": "object {}",
+          "rest": "unbound",
+          "rho": "unbound",
+          "sigma": "unbound",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "function undefined",
+          "turn1": "unbound",
+          "zeta": "object {}"
+        },
+        "closures": [
+          "delta",
+          "omega",
+          "phi",
+          "theta"
+        ]
+      }
+    },
+    {
+      "source": "const sigma = psi;\nlet turn1 = 0;\nwhile (turn1 < 1) {\n  turn1++;\n  zeta.set('hi', Math.abs(0));\n}\nconsole.info(String(Number.parseInt('  pad ' + '7', 10)).includes('a'));\n{\n  const lambda = new RegExp('[a-z]+', 'i');\n  console.log(lambda.test('zz'), lambda.source, lambda.flags, lambda.lastIndex, String(lambda));\n}\nconst rho = (item, ...rest) => ((-9) % zeta.size) + rest.length;\nconsole.log(rho(11));\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "true",
+          "true [a-z]+ i 0 /[a-z]+/i",
+          "0"
+        ],
+        "probes": {
+          "beta": "unbound",
+          "count": "unbound",
+          "delta": "function undefined",
+          "error": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "lambda": "unbound",
+          "local": "unbound",
+          "omega": "function undefined",
+          "phi": "function undefined",
+          "psi": "object {}",
+          "rest": "unbound",
+          "rho": "function undefined",
+          "sigma": "object {}",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "function undefined",
+          "turn1": "number 1",
+          "zeta": "object {}"
+        },
+        "closures": [
+          "delta",
+          "omega",
+          "phi",
+          "rho",
+          "theta"
+        ]
+      }
+    },
+    {
+      "source": "const x = arguments;\n",
+      "reject": "TS_ARGUMENTS_UNSUPPORTED",
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "beta": "unbound",
+          "count": "unbound",
+          "delta": "function undefined",
+          "error": "unbound",
+          "field": "unbound",
+          "index": "unbound",
+          "item": "unbound",
+          "lambda": "unbound",
+          "local": "unbound",
+          "omega": "function undefined",
+          "phi": "function undefined",
+          "psi": "object {}",
+          "rest": "unbound",
+          "rho": "function undefined",
+          "sigma": "object {}",
+          "slot": "unbound",
+          "tau": "unbound",
+          "theta": "function undefined",
+          "turn1": "number 1",
+          "zeta": "object {}"
+        },
+        "closures": [
+          "delta",
+          "omega",
+          "phi",
+          "rho",
+          "theta"
+        ]
+      }
+    }
+  ]
+}

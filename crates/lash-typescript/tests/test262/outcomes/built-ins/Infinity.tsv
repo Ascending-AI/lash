@@ -1,0 +1,5 @@
+# test262-path	class	qualifier
+test/built-ins/Infinity/15.1.1.2-0.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Infinity/S15.1.1.2_A1.js	pass	-
+test/built-ins/Infinity/S15.1.1.2_A4.js	refused	TS_THIS_UNSUPPORTED
+test/built-ins/Infinity/prop-desc.js	refused	TS_THIS_UNSUPPORTED

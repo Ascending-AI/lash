@@ -190,7 +190,7 @@ named constructs the dialect has since accepted — `var`, destructuring,
 methods, regular expressions, computed properties, array-literal elisions,
 parameter defaults and rest, compound assignment, and classic `for` in every
 form — so it is a map, not the source of truth: the census
-(`tests/test262/census.tsv`) and the crate README carry the executable list,
+(`tests/test262/census/`) and the crate README carry the executable list,
 and the refusals the pinned `tsc --strict` shares are ADR 0064's strictness
 table. Identifiers beginning with `__typescript_` are reserved for the
 lowerer's generated bindings.

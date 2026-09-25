@@ -1,0 +1,23 @@
+# test262-path	class	qualifier
+test/language/statements/continue/12.7-1.js	pass	-
+test/language/statements/continue/S12.7_A1_T1.js	pass	-
+test/language/statements/continue/S12.7_A1_T2.js	pass	-
+test/language/statements/continue/S12.7_A1_T3.js	pass	-
+test/language/statements/continue/S12.7_A1_T4.js	pass	-
+test/language/statements/continue/S12.7_A5_T1.js	pass	-
+test/language/statements/continue/S12.7_A5_T2.js	pass	-
+test/language/statements/continue/S12.7_A5_T3.js	pass	-
+test/language/statements/continue/S12.7_A6.js	pass	-
+test/language/statements/continue/S12.7_A7.js	refused	TS_LABEL_UNSUPPORTED
+test/language/statements/continue/S12.7_A8_T1.js	pass	-
+test/language/statements/continue/S12.7_A8_T2.js	pass	-
+test/language/statements/continue/S12.7_A9_T1.js	refused	TS_LABEL_UNSUPPORTED
+test/language/statements/continue/S12.7_A9_T2.js	refused	TS_LABEL_UNSUPPORTED
+test/language/statements/continue/labeled-continue.js	refused	TS_LABEL_UNSUPPORTED
+test/language/statements/continue/line-terminators.js	refused	TS_LABEL_UNSUPPORTED
+test/language/statements/continue/nested-let-bound-for-loops-inner-continue.js	pass	-
+test/language/statements/continue/nested-let-bound-for-loops-labeled-continue.js	refused	TS_LABEL_UNSUPPORTED
+test/language/statements/continue/nested-let-bound-for-loops-outer-continue.js	pass	-
+test/language/statements/continue/no-label-continue.js	pass	-
+test/language/statements/continue/shadowing-loop-variable-in-same-scope-as-continue.js	pass	-
+test/language/statements/continue/simple-and-labeled.js	refused	TS_LABEL_UNSUPPORTED

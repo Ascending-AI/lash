@@ -10,7 +10,7 @@
 //! * live, with one resident state;
 //! * reloaded, restarting through the durable snapshot between the cells;
 //! * and the single-cell reference itself must be Node's answer (from
-//!   `generated.json`), so "as if never stored" is JavaScript's meaning, not
+//!   the `generated/` tree), so "as if never stored" is JavaScript's meaning, not
 //!   whatever lash does in one cell.
 //!
 //! Every heap object kind has a row, or the stated reason no program builds

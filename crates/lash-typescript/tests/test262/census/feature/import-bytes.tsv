@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	import-bytes	rejected	TS_IMPORT_EXPORT_UNSUPPORTED	import bytes from 'mod' with { type: 'bytes' };

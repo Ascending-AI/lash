@@ -1,0 +1,16 @@
+# One session of the Node session oracle's corpus (FIG-3599); the
+# format and the cell mapping are README.md's, and ../generate.mjs
+# answers this file's cells under ../expectations/global-this-read-past-a-local.json.
+
+session global-this-read-past-a-local
+about a function local of the same name does not answer a globalThis read (FIG-3620)
+probe depth measure
+deviation closure-boundary
+cell
+globalThis.depth = 1;
+function measure() {
+  const depth = 9;
+  return [depth, globalThis.depth];
+}
+console.log(measure());
+end

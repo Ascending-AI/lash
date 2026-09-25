@@ -1,0 +1,32 @@
+{
+  "id": "function-locals",
+  "about": "a function's parameters and locals are never session globals",
+  "probe": [
+    "scale",
+    "factor",
+    "local",
+    "result"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const factor = 3;\nconst result = [1, 2].map((scale) => {\n  const local = scale * factor;\n  return local;\n});\nconsole.log(result);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "[3,6]"
+        ],
+        "probes": {
+          "scale": "unbound",
+          "factor": "number 3",
+          "local": "unbound",
+          "result": "object [3,6]"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

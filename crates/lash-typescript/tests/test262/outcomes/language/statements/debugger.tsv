@@ -1,0 +1,3 @@
+# test262-path	class	qualifier
+test/language/statements/debugger/expression.js	pass	-
+test/language/statements/debugger/statement.js	refused	TS_DEBUGGER_UNSUPPORTED

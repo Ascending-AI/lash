@@ -1,0 +1,60 @@
+{
+  "id": "closure-written-global-persists",
+  "about": "a closure assigns a top-level binding, and the next cell reads the value it left, live and after a reload (FIG-3707)",
+  "probe": [
+    "n",
+    "bump",
+    "total",
+    "by",
+    "v"
+  ],
+  "deviations": [
+    "closure-boundary"
+  ],
+  "cells": [
+    {
+      "source": "let n = 0;\nconst bump = (by) => { n = n + by; };\nbump(2);\nbump(3);\nconsole.log(n);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "5"
+        ],
+        "probes": {
+          "n": "number 5",
+          "bump": "function undefined",
+          "total": "unbound",
+          "by": "unbound",
+          "v": "unbound"
+        },
+        "closures": [
+          "bump"
+        ]
+      }
+    },
+    {
+      "source": "let total = 0;\n[1, 2, 3].forEach((v) => { total += v * n; });\nconsole.log(n, total);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "5 30"
+        ],
+        "probes": {
+          "n": "number 5",
+          "bump": "function undefined",
+          "total": "number 30",
+          "by": "unbound",
+          "v": "unbound"
+        },
+        "closures": [
+          "bump"
+        ]
+      }
+    }
+  ]
+}

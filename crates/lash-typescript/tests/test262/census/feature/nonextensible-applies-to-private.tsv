@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+feature	nonextensible-applies-to-private	skip	ticket-ruling:FIG-1413:nonextensible-applies-to-private	-

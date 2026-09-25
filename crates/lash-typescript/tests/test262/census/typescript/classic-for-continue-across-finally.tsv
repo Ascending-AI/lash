@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	classic-for-continue-across-finally	rejected	TS_FOR_UNSUPPORTED	for (let i = 0; i < 2; i++) { try { continue; } finally { } }

@@ -1,0 +1,45 @@
+{
+  "id": "global-object-names",
+  "about": "a name written through globalThis is a session global a bare name reads",
+  "probe": [
+    "fresh",
+    "old"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "globalThis.fresh = 1;\nvar old = 1;\nglobalThis.old = 2;\nconsole.log(fresh, old);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "1 2"
+        ],
+        "probes": {
+          "fresh": "number 1",
+          "old": "number 2"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "console.log(fresh + old);\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "3"
+        ],
+        "probes": {
+          "fresh": "number 1",
+          "old": "number 2"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

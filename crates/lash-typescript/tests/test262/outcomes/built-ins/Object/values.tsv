@@ -1,0 +1,17 @@
+# test262-path	class	qualifier
+test/built-ins/Object/values/exception-during-enumeration.js	refused	TS_ACCESSOR_UNSUPPORTED
+test/built-ins/Object/values/exception-not-object-coercible.js	pass	-
+test/built-ins/Object/values/function-length.js	pass	-
+test/built-ins/Object/values/function-name.js	pass	-
+test/built-ins/Object/values/function-property-descriptor.js	pass	-
+test/built-ins/Object/values/getter-adding-key.js	refused	TS_ACCESSOR_UNSUPPORTED
+test/built-ins/Object/values/getter-making-future-key-nonenumerable.js	refused	TS_ACCESSOR_UNSUPPORTED
+test/built-ins/Object/values/getter-removing-future-key.js	refused	TS_ACCESSOR_UNSUPPORTED
+test/built-ins/Object/values/inherited-properties-omitted.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
+test/built-ins/Object/values/order-after-define-property.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/values/primitive-booleans.js	pass	-
+test/built-ins/Object/values/primitive-numbers.js	pass	-
+test/built-ins/Object/values/primitive-strings.js	pass	-
+test/built-ins/Object/values/return-order.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Object/values/tamper-with-global-object.js	refused	TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED
+test/built-ins/Object/values/tamper-with-object-keys.js	pass	-

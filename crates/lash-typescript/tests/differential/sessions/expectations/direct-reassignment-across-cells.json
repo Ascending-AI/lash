@@ -1,0 +1,38 @@
+{
+  "id": "direct-reassignment-across-cells",
+  "about": "assigning an earlier cell's let without declaring it, which the dialect refuses statically",
+  "probe": [
+    "tally"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "let tally = 1;\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "tally": "number 1"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "tally = tally + 1;\nconsole.log(tally);\n",
+      "reject": "TS_ASSIGN_CONST",
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "rejected",
+        "prints": [],
+        "probes": {
+          "tally": "number 1"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

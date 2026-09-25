@@ -1,0 +1,78 @@
+{
+  "id": "exotic-globals",
+  "about": "every exotic built-in bound at the top level stays live, and mutable, in later cells",
+  "probe": [
+    "seen",
+    "tags",
+    "when",
+    "pattern",
+    "site",
+    "query",
+    "first"
+  ],
+  "deviations": [],
+  "cells": [
+    {
+      "source": "const seen = new Map([[\"a\", 1]]);\nconst tags = new Set([\"x\"]);\nconst when = new Date(Date.UTC(2020, 0, 2, 3, 4, 5));\nconst pattern = /a(b+)/g;\nconst site = new URL(\"https://example.com/a?x=1\");\nconst query = new URLSearchParams(\"a=1&b=2\");\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "seen": "object {}",
+          "tags": "object {}",
+          "when": "object \"2020-01-02T03:04:05.000Z\"",
+          "pattern": "object {}",
+          "site": "object \"https://example.com/a?x=1\"",
+          "query": "object {}",
+          "first": "unbound"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "seen.set(\"b\", 2);\ntags.add(\"y\");\nconst first = pattern.exec(\"abbxab\");\nsite.searchParams.append(\"y\", \"2\");\nquery.set(\"a\", \"3\");\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [],
+        "probes": {
+          "seen": "object {}",
+          "tags": "object {}",
+          "when": "object \"2020-01-02T03:04:05.000Z\"",
+          "pattern": "object {}",
+          "site": "object \"https://example.com/a?x=1&y=2\"",
+          "query": "object {}",
+          "first": "object [\"abb\",\"bb\"]"
+        },
+        "closures": []
+      }
+    },
+    {
+      "source": "console.log(seen.size, seen.get(\"b\"), tags.has(\"y\"), when.toISOString(), pattern.lastIndex, first[1], first.index, site.href, query.toString());\n",
+      "reject": null,
+      "deviation": null,
+      "defect": null,
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "2 2 true 2020-01-02T03:04:05.000Z 3 bb 0 https://example.com/a?x=1&y=2 a=3&b=2"
+        ],
+        "probes": {
+          "seen": "object {}",
+          "tags": "object {}",
+          "when": "object \"2020-01-02T03:04:05.000Z\"",
+          "pattern": "object {}",
+          "site": "object \"https://example.com/a?x=1&y=2\"",
+          "query": "object {}",
+          "first": "object [\"abb\",\"bb\"]"
+        },
+        "closures": []
+      }
+    }
+  ]
+}

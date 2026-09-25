@@ -1,0 +1,19 @@
+{
+  "name": "class-instance",
+  "create": "class Point {\n  constructor(x) {\n    this.x = x;\n  }\n}\nconst value = new Point(1);",
+  "uses": "console.log(value.x);",
+  "node": [
+    {
+      "outcome": "normal",
+      "prints": [],
+      "probes": {}
+    },
+    {
+      "outcome": "normal",
+      "prints": [
+        "1"
+      ],
+      "probes": {}
+    }
+  ]
+}

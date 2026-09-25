@@ -1,0 +1,68 @@
+{
+  "seed": 44,
+  "probe": [
+    "alpha",
+    "beta",
+    "entry",
+    "field",
+    "iota",
+    "kappa",
+    "lambda",
+    "phi",
+    "psi",
+    "step",
+    "theta",
+    "turn1"
+  ],
+  "cells": [
+    {
+      "source": "let turn1 = 0;\nwhile (turn1 < 3) {\n  turn1++;\n  for (const entry of [4, 'ab'.length, turn1]) {\n    const theta = (((turn1 - turn1) >= 0) && true);\n    if (theta) { break; }\n  }\n}\nfor (const field in { d: [[turn1], [2]].flat().includes(2) }) {\n  console.log(field);\n  if ((field instanceof Date)) {\n    const psi = { d: [], a: ((turn1 === 10) ? 1 : (turn1 ^ 0)), h: 'x' };\n  } else {\n    let theta = { ['f']: true, ['h']: false };\n    const alpha = (`${11}:${'b.c'}`.slice(0, 2) === '  pad ');\n  }\n}\nconsole.log((7).toFixed(1), turn1, ('b.c'.replaceAll('b', 'B') + `${(false ? turn1 : 2)}:${'zz'}`));\nfinish(turn1);\n",
+      "node": {
+        "outcome": "finish",
+        "finish": 3,
+        "prints": [
+          "d",
+          "7.0 3 B.c2:zz"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "unbound",
+          "entry": "unbound",
+          "field": "unbound",
+          "iota": "unbound",
+          "kappa": "unbound",
+          "lambda": "unbound",
+          "phi": "unbound",
+          "psi": "unbound",
+          "step": "unbound",
+          "theta": "unbound",
+          "turn1": "number 3"
+        }
+      }
+    },
+    {
+      "source": "for (const entry of [turn1]) {\n  const kappa = (`${4}:${'  pad '}` === 'x'.slice(0, 2));\n}\nvar beta = String(10);\nswitch (0 % 3) {\n  case 0: {\n    for (let step = 0; step < 1; step++) {\n      console.log(beta, turn1);\n    }\n    break;\n  }\n  default: {\n    switch (2 % 3) {\n      case 0: {\n        console.log((typeof turn1).trimEnd().length, turn1);\n        break;\n      }\n      case 1: {\n        let phi = Number.parseInt(beta.trimEnd() + '7', 10);\n        const theta = beta;\n        break;\n      }\n      default: {\n        let iota = /(?<first>[a-z])(b)?/.exec('ab');\n      }\n    }\n  }\n}\nconst lambda = { f: [], d: false, b: beta };\n{\n  const lambda = new Error('Lash');\n  console.log(lambda.name, lambda.message, String(lambda), lambda instanceof Error);\n}\n",
+      "node": {
+        "outcome": "normal",
+        "prints": [
+          "10 3",
+          "Error Lash Error: Lash true"
+        ],
+        "probes": {
+          "alpha": "unbound",
+          "beta": "string \"10\"",
+          "entry": "unbound",
+          "field": "unbound",
+          "iota": "unbound",
+          "kappa": "unbound",
+          "lambda": "object {\"f\":[],\"d\":false,\"b\":\"10\"}",
+          "phi": "unbound",
+          "psi": "unbound",
+          "step": "unbound",
+          "theta": "unbound",
+          "turn1": "number 3"
+        }
+      }
+    }
+  ]
+}

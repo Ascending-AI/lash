@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	async-array-callbacks	skip	registered-deviation:TS_ASYNC_MAP_SEQUENTIAL_V1	-
