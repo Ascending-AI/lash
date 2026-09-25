@@ -168,7 +168,7 @@ struct LinkedTestProcess {
 
 impl LinkedTestProcess {
     async fn new(
-        artifact_store: &dyn lash_lashlang_runtime::LashlangArtifactStore,
+        artifact_store: &lash_lashlang_runtime::LashlangArtifacts,
         program: lashlang::Program,
         process_name: &str,
     ) -> Self {
@@ -384,17 +384,13 @@ impl crate::plugins::SessionPlugin for EngineSessionPlugin {
     }
 }
 
-fn process_test_core(
-    backend: Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>,
-) -> Result<LashCore> {
+fn process_test_core(backend: Arc<dyn lash_core::Backend>) -> Result<LashCore> {
     process_test_builder(backend)
         .without_queued_work()
         .build(crate::testing::runtime_lease_owner())
 }
 
-fn process_test_builder(
-    backend: Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>,
-) -> crate::core::LashCoreBuilder {
+fn process_test_builder(backend: Arc<dyn lash_core::Backend>) -> crate::core::LashCoreBuilder {
     let provider = mock_provider();
     let provider_id = provider.kind().to_string();
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
@@ -1057,14 +1053,13 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
 #[tokio::test]
 async fn host_owned_processes_run_without_application_session() -> Result<()> {
     let backend = memory_backend().await;
-    let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
-        backend.process_env_store();
+    let artifact_store = lash_lashlang_runtime::LashlangArtifacts::new(backend.process_env_store());
     let trigger_store: Arc<dyn lash_core::TriggerStore> = backend.trigger_store();
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
     let process_env_store = backend.process_env_store();
     let core = process_test_core(backend.clone())?;
     let process = LinkedTestProcess::new(
-        artifact_store.as_ref(),
+        &artifact_store,
         // process main() signals { ready: any } {
         //   value = wait_signal("ready")
         //   finish value
@@ -1186,8 +1181,7 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
 #[tokio::test]
 async fn session_trigger_process_visibility_conformance() -> Result<()> {
     let backend = memory_backend().await;
-    let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
-        backend.process_env_store();
+    let artifact_store = lash_lashlang_runtime::LashlangArtifacts::new(backend.process_env_store());
     let trigger_store: Arc<dyn lash_core::TriggerStore> = backend.trigger_store();
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
     let core = process_test_core(backend.clone())?;
@@ -1195,7 +1189,7 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
         persist_process_env_ref(core.env.core.durability.process_env_store.as_ref()).await;
     let session_id = "session-trigger-visibility";
     let process = LinkedTestProcess::new(
-        artifact_store.as_ref(),
+        &artifact_store,
         // process main() signals { ready: any } {
         //   value = wait_signal("ready")
         //   finish value
@@ -1299,11 +1293,10 @@ async fn session_trigger_process_visibility_conformance() -> Result<()> {
 #[tokio::test]
 async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> Result<()> {
     let backend = memory_backend().await;
-    let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
-        backend.process_env_store();
+    let artifact_store = lash_lashlang_runtime::LashlangArtifacts::new(backend.process_env_store());
     let core = process_test_core(backend.clone())?;
     let process = LinkedTestProcess::new(
-        artifact_store.as_ref(),
+        &artifact_store,
         // process main() signals { ready: string } {
         //   value = wait_signal("ready")
         //   finish value
@@ -1402,11 +1395,10 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
 #[tokio::test]
 async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
     let backend = memory_backend().await;
-    let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
-        backend.process_env_store();
+    let artifact_store = lash_lashlang_runtime::LashlangArtifacts::new(backend.process_env_store());
     let core = process_test_core(backend.clone())?;
     let process = LinkedTestProcess::new(
-        artifact_store.as_ref(),
+        &artifact_store,
         // process main() signals { ready: any } {
         //   first = wait_signal("ready")
         //   second = wait_signal("ready")
@@ -1529,12 +1521,11 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
 #[tokio::test]
 async fn process_starts_and_awaits_child_process() -> Result<()> {
     let backend = memory_backend().await;
-    let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
-        backend.process_env_store();
+    let artifact_store = lash_lashlang_runtime::LashlangArtifacts::new(backend.process_env_store());
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
     let core = process_test_core(backend.clone())?;
     let process = LinkedTestProcess::new(
-        artifact_store.as_ref(),
+        &artifact_store,
         // process child() { finish { from: "child" } }
         // process main() {
         //   handle = start child()
@@ -1618,13 +1609,12 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
 #[tokio::test]
 async fn process_children_inherit_session_chain_provenance() -> Result<()> {
     let backend = memory_backend().await;
-    let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
-        backend.process_env_store();
+    let artifact_store = lash_lashlang_runtime::LashlangArtifacts::new(backend.process_env_store());
     let core = process_test_core(backend.clone())?;
     let session_id = "chain-session";
     let process_id = "chain-parent";
     let process = LinkedTestProcess::new(
-        artifact_store.as_ref(),
+        &artifact_store,
         // process child() { finish { from: "child" } }
         // process main() {
         //   handle = start child()
@@ -1706,14 +1696,13 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
 #[tokio::test]
 async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Result<()> {
     let backend = memory_backend().await;
-    let artifact_store: Arc<dyn lash_lashlang_runtime::LashlangArtifactStore> =
-        backend.process_env_store();
+    let artifact_store = lash_lashlang_runtime::LashlangArtifacts::new(backend.process_env_store());
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
     let core = process_test_core(backend.clone())?;
     let session_id = "process-outlives-session";
     let process_id = "outliving-process";
     let process = LinkedTestProcess::new(
-        artifact_store.as_ref(),
+        &artifact_store,
         // process main() signals { ready: any } {
         //   value = wait_signal("ready")
         //   finish { resumed: value }
@@ -1869,20 +1858,22 @@ impl SwitchableArtifactStore {
 }
 
 #[async_trait::async_trait]
-impl lash_lashlang_runtime::LashlangArtifactStore for SwitchableArtifactStore {
-    fn durability_tier(&self) -> lashlang::DurabilityTier {
-        lashlang::DurabilityTier::Durable
+impl lash_core::ModuleArtifactStore for SwitchableArtifactStore {
+    fn durability_tier(&self) -> lash_core::DurabilityTier {
+        lash_core::DurabilityTier::Durable
     }
 
     async fn publish_module_artifact(
         &self,
         owner: &lash_core::ArtifactOwner,
-        artifact: &lashlang::ModuleArtifact,
-    ) -> std::result::Result<(), lashlang::ArtifactStoreError> {
-        lash_lashlang_runtime::LashlangArtifactStore::publish_module_artifact(
+        module_ref: &str,
+        bytes: &[u8],
+    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
+        lash_core::ModuleArtifactStore::publish_module_artifact(
             self.inner.as_ref(),
             owner,
-            artifact,
+            module_ref,
+            bytes,
         )
         .await
     }
@@ -1890,9 +1881,9 @@ impl lash_lashlang_runtime::LashlangArtifactStore for SwitchableArtifactStore {
     async fn retain_module_artifact(
         &self,
         owner: &lash_core::ArtifactOwner,
-        module_ref: &lashlang::ModuleRef,
-    ) -> std::result::Result<(), lashlang::ArtifactStoreError> {
-        lash_lashlang_runtime::LashlangArtifactStore::retain_module_artifact(
+        module_ref: &str,
+    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
+        lash_core::ModuleArtifactStore::retain_module_artifact(
             self.inner.as_ref(),
             owner,
             module_ref,
@@ -1904,9 +1895,9 @@ impl lash_lashlang_runtime::LashlangArtifactStore for SwitchableArtifactStore {
         &self,
         from: &lash_core::ArtifactOwner,
         to: &lash_core::ArtifactOwner,
-        module_ref: &lashlang::ModuleRef,
-    ) -> std::result::Result<(), lashlang::ArtifactStoreError> {
-        lash_lashlang_runtime::LashlangArtifactStore::transfer_module_artifact(
+        module_ref: &str,
+    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
+        lash_core::ModuleArtifactStore::transfer_module_artifact(
             self.inner.as_ref(),
             from,
             to,
@@ -1918,9 +1909,9 @@ impl lash_lashlang_runtime::LashlangArtifactStore for SwitchableArtifactStore {
     async fn release_module_artifact(
         &self,
         owner: &lash_core::ArtifactOwner,
-        module_ref: &lashlang::ModuleRef,
-    ) -> std::result::Result<(), lashlang::ArtifactStoreError> {
-        lash_lashlang_runtime::LashlangArtifactStore::release_module_artifact(
+        module_ref: &str,
+    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
+        lash_core::ModuleArtifactStore::release_module_artifact(
             self.inner.as_ref(),
             owner,
             module_ref,
@@ -1931,31 +1922,23 @@ impl lash_lashlang_runtime::LashlangArtifactStore for SwitchableArtifactStore {
     async fn retire_module_artifact_owner(
         &self,
         owner: &lash_core::ArtifactOwner,
-    ) -> std::result::Result<(), lashlang::ArtifactStoreError> {
-        lash_lashlang_runtime::LashlangArtifactStore::retire_module_artifact_owner(
-            self.inner.as_ref(),
-            owner,
-        )
-        .await
+    ) -> std::result::Result<(), lash_core::ArtifactStoreError> {
+        lash_core::ModuleArtifactStore::retire_module_artifact_owner(self.inner.as_ref(), owner)
+            .await
     }
 
     async fn get_module_artifact(
         &self,
-        module_ref: &lashlang::ModuleRef,
-    ) -> std::result::Result<Option<Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError>
-    {
+        module_ref: &str,
+    ) -> std::result::Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
         if self.unavailable.load(std::sync::atomic::Ordering::SeqCst) {
             self.failed_reads
                 .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            return Err(lashlang::ArtifactStoreError::Backend(
+            return Err(lash_core::ArtifactStoreError::Backend(
                 "simulated durable artifact store outage".to_string(),
             ));
         }
-        lash_lashlang_runtime::LashlangArtifactStore::get_module_artifact(
-            self.inner.as_ref(),
-            module_ref,
-        )
-        .await
+        lash_core::ModuleArtifactStore::get_module_artifact(self.inner.as_ref(), module_ref).await
     }
 }
 
@@ -1969,8 +1952,7 @@ async fn durable_admission_core(
     let provider_id = provider.kind().to_string();
     // The switchable store decorates the backend's own, so the core and its
     // RLM factory still share one substrate.
-    let backend =
-        DecoratedBackend::over_lashlang(backend).lashlang_artifact_store(move |_| artifact_store);
+    let backend = DecoratedBackend::over(backend).module_artifacts(move |_| artifact_store);
     let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
         lash_protocol_rlm::RlmProtocolPluginConfig::builder()
             .channel(lash_protocol_rlm::RlmChannel::Cell)
@@ -2026,7 +2008,7 @@ async fn wait_for_worker_fault(
 }
 
 fn process_test_core_with_sink(
-    backend: Arc<dyn lash_lashlang_runtime::LashlangArtifactBackend>,
+    backend: Arc<dyn lash_core::Backend>,
     sink: Arc<dyn lash_core::facade_support::ProcessEventSink>,
 ) -> Result<LashCore> {
     process_test_builder(backend)
@@ -2049,7 +2031,7 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
     );
     let artifact_store = Arc::new(SwitchableArtifactStore::new(backend.process_env_store()));
     let process = LinkedTestProcess::new(
-        artifact_store.as_ref(),
+        &lash_lashlang_runtime::LashlangArtifacts::new(Arc::clone(&artifact_store) as _),
         // process main() -> str { finish "redriven" }
         b::module(
             vec![b::process_returning(

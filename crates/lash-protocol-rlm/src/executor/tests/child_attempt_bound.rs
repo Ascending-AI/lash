@@ -9,29 +9,32 @@ use super::*;
 /// exists to stop. A missing artifact would not do: that is a terminal
 /// producer failure and never retries.
 struct UnreadableArtifactStore {
-    inner: Arc<dyn lashlang::LashlangArtifactStore>,
+    inner: Arc<dyn lash_core::ModuleArtifactStore>,
     reads: Arc<std::sync::atomic::AtomicUsize>,
 }
 
 #[async_trait::async_trait]
-impl lashlang::LashlangArtifactStore for UnreadableArtifactStore {
-    fn durability_tier(&self) -> lashlang::DurabilityTier {
+impl lash_core::ModuleArtifactStore for UnreadableArtifactStore {
+    fn durability_tier(&self) -> lash_core::DurabilityTier {
         self.inner.durability_tier()
     }
 
     async fn publish_module_artifact(
         &self,
         owner: &lash_core::ArtifactOwner,
-        artifact: &lashlang::ModuleArtifact,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        self.inner.publish_module_artifact(owner, artifact).await
+        module_ref: &str,
+        bytes: &[u8],
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        self.inner
+            .publish_module_artifact(owner, module_ref, bytes)
+            .await
     }
 
     async fn retain_module_artifact(
         &self,
         owner: &lash_core::ArtifactOwner,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+        module_ref: &str,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
         self.inner.retain_module_artifact(owner, module_ref).await
     }
 
@@ -39,8 +42,8 @@ impl lashlang::LashlangArtifactStore for UnreadableArtifactStore {
         &self,
         from: &lash_core::ArtifactOwner,
         to: &lash_core::ArtifactOwner,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+        module_ref: &str,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
         self.inner
             .transfer_module_artifact(from, to, module_ref)
             .await
@@ -49,25 +52,25 @@ impl lashlang::LashlangArtifactStore for UnreadableArtifactStore {
     async fn release_module_artifact(
         &self,
         owner: &lash_core::ArtifactOwner,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+        module_ref: &str,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
         self.inner.release_module_artifact(owner, module_ref).await
     }
 
     async fn retire_module_artifact_owner(
         &self,
         owner: &lash_core::ArtifactOwner,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+    ) -> Result<(), lash_core::ArtifactStoreError> {
         self.inner.retire_module_artifact_owner(owner).await
     }
 
     async fn get_module_artifact(
         &self,
-        _module_ref: &lashlang::ModuleRef,
-    ) -> Result<Option<Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError> {
+        _module_ref: &str,
+    ) -> Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
         self.reads
             .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        Err(lashlang::ArtifactStoreError::Backend(
+        Err(lash_core::ArtifactStoreError::Backend(
             "injected deterministic artifact read failure".to_string(),
         ))
     }
@@ -87,7 +90,7 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
     const PINNED: u32 = 5;
     const CHANGED: u32 = 10;
 
-    let published: Arc<dyn lashlang::LashlangArtifactStore> =
+    let published: lashlang::LashlangArtifacts =
         crate::testing::fresh_memory_artifact_store().await;
     let backend = memory_backend().await;
     let registry = backend.process_registry();
@@ -106,7 +109,7 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
     };
 
     let run = |host_default: u32| {
-        let published = Arc::clone(&published);
+        let published = published.clone();
         let registry = registry.clone();
         let process_env_store = Arc::clone(&process_env_store);
         let surface = surface.clone();
@@ -224,14 +227,13 @@ pub(super) async fn a_redrive_after_the_host_default_moved_reregisters_the_recor
 pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_the_bound() {
     const MAX_ATTEMPTS: u32 = 2;
 
-    let published: Arc<dyn lashlang::LashlangArtifactStore> =
+    let published: lashlang::LashlangArtifacts =
         crate::testing::fresh_memory_artifact_store().await;
     let reads = Arc::new(std::sync::atomic::AtomicUsize::new(0));
-    let worker_store: Arc<dyn lashlang::LashlangArtifactStore> =
-        Arc::new(UnreadableArtifactStore {
-            inner: Arc::clone(&published),
-            reads: Arc::clone(&reads),
-        });
+    let worker_store = lashlang::LashlangArtifacts::new(Arc::new(UnreadableArtifactStore {
+        inner: Arc::clone(published.store()),
+        reads: Arc::clone(&reads),
+    }));
     let backend = memory_backend().await;
     let registry = backend.process_registry();
     let process_env_store = backend.process_env_store();
@@ -256,7 +258,7 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
     .with_process_engine_registration(
         lash_lashlang_runtime::lashlang_process_engine_registration(
             lash_lashlang_runtime::LashlangProcessEngine::new(
-                Arc::clone(&worker_store),
+                worker_store.clone(),
                 process_engine_surface(surface.clone()),
             ),
         ),
@@ -311,7 +313,7 @@ pub(super) async fn engine_started_child_failing_every_attempt_is_abandoned_at_t
                 "#
             .to_string(),
         },
-        Arc::clone(&published),
+        published.clone(),
         surface.clone(),
         None,
         RlmProjectedBindings::default(),

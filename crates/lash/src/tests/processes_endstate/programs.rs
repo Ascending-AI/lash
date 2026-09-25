@@ -9,7 +9,7 @@ use super::LinkedTestProcess;
 
 impl LinkedTestProcess {
     pub(super) async fn new_with_catalog(
-        artifact_store: &dyn lash_lashlang_runtime::LashlangArtifactStore,
+        artifact_store: &lash_lashlang_runtime::LashlangArtifacts,
         program: lashlang::Program,
         process_name: &str,
         catalog: lashlang::LashlangHostCatalog,

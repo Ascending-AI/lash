@@ -153,11 +153,10 @@ impl lash_core_execution::StoreSet for PostgresStoreSet {
     fn attachment_store(&self) -> Arc<dyn AttachmentStore> {
         PostgresStoreSet::attachment_store(self)
     }
-}
 
-#[cfg(feature = "lashlang")]
-impl lashlang::LashlangArtifactStoreSet for PostgresStoreSet {
-    fn lashlang_artifact_store(&self) -> Arc<dyn lashlang::LashlangArtifactStore> {
+    /// The store that keeps the process execution environments keeps the
+    /// Lashlang module artifacts too.
+    fn module_artifacts(&self) -> Arc<dyn lash_core_execution::ModuleArtifactStore> {
         PostgresStoreSet::process_env_store(self)
     }
 }

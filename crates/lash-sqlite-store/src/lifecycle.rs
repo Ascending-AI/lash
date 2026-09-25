@@ -154,9 +154,6 @@ impl Store {
             turn_cancel_closure_owner,
             session_id: Arc::new(OnceLock::new()),
             clock,
-            #[cfg(feature = "lashlang")]
-            artifact_cache: Mutex::new(BTreeMap::new()),
-            #[cfg(feature = "lashlang")]
             artifact_publication_pause: Mutex::new(None),
             options,
             commit_count: AtomicU64::new(commit_count_entropy_seed()),
@@ -177,9 +174,6 @@ impl Store {
             turn_cancel_closure_owner: None,
             session_id: Arc::new(OnceLock::new()),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
-            #[cfg(feature = "lashlang")]
-            artifact_cache: Mutex::new(BTreeMap::new()),
-            #[cfg(feature = "lashlang")]
             artifact_publication_pause: Mutex::new(None),
             options: StoreOptions::default(),
             commit_count: AtomicU64::new(commit_count_entropy_seed()),

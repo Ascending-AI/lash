@@ -260,7 +260,7 @@ struct Backend {
     name: &'static str,
     /// The one substrate every core of the phase runs on, its RLM factory's
     /// Lashlang artifacts included.
-    backend: Arc<dyn lash::persistence::LashlangArtifactBackend>,
+    backend: Arc<dyn lash::Backend>,
     factory: Arc<dyn SessionStoreFactory>,
     /// Held so the SQLite root outlives the phase.
     _scratch: tempfile::TempDir,

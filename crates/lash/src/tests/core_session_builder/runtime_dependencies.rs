@@ -113,6 +113,10 @@ impl lash_core::Backend for MisboundBackend {
         self.inner.attachment_store()
     }
 
+    fn module_artifacts(&self) -> Arc<dyn lash_core::ModuleArtifactStore> {
+        self.inner.module_artifacts()
+    }
+
     fn process_work(&self) -> Option<lash_core::ProcessWorkWiring> {
         self.inner.process_work()
     }
@@ -423,7 +427,7 @@ impl lash_core::ProcessWorkSubstrate for NoopProcessWork {
 /// A backend that runs its processes in `NoopProcessWork`, wired over the
 /// backend's own registry.
 async fn backend_with_external_process_work() -> DecoratedBackend {
-    DecoratedBackend::over_sqlite(memory_backend().await).process_work(|registry| {
+    DecoratedBackend::over(memory_backend().await).process_work(|registry| {
         lash_core::ProcessWorkWiring::new(
             lash_core::facade_support::watch_process_registry(registry),
             Arc::new(NoopProcessWork),
@@ -714,7 +718,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         lash_core::Backend::process_registry(sqlite.as_ref()),
     ));
     let fault_registry = Arc::clone(&registry) as Arc<dyn lash_core::ProcessRegistry>;
-    let backend = DecoratedBackend::over_sqlite(sqlite).process_registry(move |_| fault_registry);
+    let backend = DecoratedBackend::over(sqlite).process_registry(move |_| fault_registry);
     let factory = lash_core::Backend::session_store_factory(&backend);
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         Arc::new(backend),

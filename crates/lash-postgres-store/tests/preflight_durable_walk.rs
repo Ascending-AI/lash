@@ -94,8 +94,6 @@ async fn an_unprovisioned_database_reports_not_scanned_rather_than_erroring() {
 
 #[tokio::test]
 async fn module_artifact_surface_reads_the_persisted_json() {
-    use lashlang::LashlangArtifactStore;
-
     let Some(database_url) = database_url() else {
         eprintln!("skipping module artifact preflight walk: database URL is not set");
         return;
@@ -114,8 +112,7 @@ async fn module_artifact_surface_reads_the_persisted_json() {
         lashlang::Expr::Finish(Box::new(lashlang::Expr::String("done".into()))),
     ]))
     .expect("a one-statement module forms an artifact");
-    storage
-        .lashlang_artifact_store()
+    lashlang::LashlangArtifacts::new(std::sync::Arc::new(storage.lashlang_artifact_store()))
         .publish_module_artifact(
             &lash_core_execution::ArtifactOwner::host("postgres-preflight-test"),
             &artifact,

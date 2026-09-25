@@ -871,30 +871,6 @@
     },
     {
       "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-core-effect:lash-core-effect__fv_acf2157d",
-      "package": "lash-internal-core-effect"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-core-effect:lash-core-effect__fv_acf2157d",
-      "package": "lash-internal-core-effect"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-core-effect:lash-core-effect__fv_acf2157d",
-      "package": "lash-internal-core-effect"
-    },
-    {
-      "features": [
         "default",
         "perf-witness"
       ],
@@ -1005,7 +981,7 @@
         "default"
       ],
       "kind": "test",
-      "label": "//crates/lash-core-execution:effect_model__test__fv_a33c7fd4",
+      "label": "//crates/lash-core-execution:effect_model__test__fv_981024b5",
       "package": "lash-internal-core-execution"
     },
     {
@@ -1804,32 +1780,8 @@
       "features": [
         "default"
       ],
-      "kind": "lib",
-      "label": "//crates/lash-core-execution:lash-core-execution__fv_ee24c6f8",
-      "package": "lash-internal-core-execution"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-core-execution:lash-core-execution__fv_ee24c6f8",
-      "package": "lash-internal-core-execution"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-core-execution:lash-core-execution__fv_ee24c6f8",
-      "package": "lash-internal-core-execution"
-    },
-    {
-      "features": [
-        "default"
-      ],
       "kind": "bin",
-      "label": "//crates/lash-core-execution:process_event_schema_generator__bin__fv_a33c7fd4",
+      "label": "//crates/lash-core-execution:process_event_schema_generator__bin__fv_981024b5",
       "package": "lash-internal-core-execution"
     },
     {
@@ -1837,7 +1789,7 @@
         "default"
       ],
       "kind": "test",
-      "label": "//crates/lash-core-execution:process_model__test__fv_a33c7fd4",
+      "label": "//crates/lash-core-execution:process_model__test__fv_981024b5",
       "package": "lash-internal-core-execution"
     },
     {
@@ -2762,30 +2714,6 @@
     },
     {
       "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f",
-      "package": "lash-internal-core-ids"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f",
-      "package": "lash-internal-core-ids"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-core-ids:lash-core-ids__fv_931d5a5f",
-      "package": "lash-internal-core-ids"
-    },
-    {
-      "features": [
         "default",
         "otel-trace"
       ],
@@ -2984,30 +2912,6 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-core-llm:lash-core-llm",
-      "package": "lash-internal-core-llm"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2",
-      "package": "lash-internal-core-llm"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2",
-      "package": "lash-internal-core-llm"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-core-llm:lash-core-llm__fv_528e44d2",
       "package": "lash-internal-core-llm"
     },
     {
@@ -4842,30 +4746,6 @@
     },
     {
       "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-core-store:lash-core-store__fv_c25f2930",
-      "package": "lash-internal-core-store"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-core-store:lash-core-store__fv_c25f2930",
-      "package": "lash-internal-core-store"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-core-store:lash-core-store__fv_c25f2930",
-      "package": "lash-internal-core-store"
-    },
-    {
-      "features": [
         "default",
         "otel-trace"
       ],
@@ -5017,14 +4897,6 @@
       ],
       "kind": "lib",
       "label": "//crates/lash-core-worker:lash-core-worker__fv_12ba3a06",
-      "package": "lash-internal-core-worker"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-core-worker:lash-core-worker__fv_30d84584",
       "package": "lash-internal-core-worker"
     },
     {
@@ -5441,7 +5313,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:integration_boundary__test__fv_415f7832",
+      "label": "//crates/lash-core:integration_boundary__test__fv_278d9d57",
       "package": "lash-internal-core"
     },
     {
@@ -5451,7 +5323,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:integration_boundary__test__fv_a5aea43c",
+      "label": "//crates/lash-core:integration_boundary__test__fv_72355884",
       "package": "lash-internal-core"
     },
     {
@@ -6055,14 +5927,6 @@
       "package": "lash-internal-core"
     },
     {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-core:lash-core__fv_35d98750",
-      "package": "lash-internal-core"
-    },
-    {
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-core:lash-core__fv_773fc0d0",
@@ -6125,7 +5989,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-core:lash-core__unit_test__fv_415f7832",
+      "label": "//crates/lash-core:lash-core__unit_test__fv_278d9d57",
       "package": "lash-internal-core"
     },
     {
@@ -6135,7 +5999,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-core:lash-core__unit_test__fv_a5aea43c",
+      "label": "//crates/lash-core:lash-core__unit_test__fv_72355884",
       "package": "lash-internal-core"
     },
     {
@@ -6144,26 +6008,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:panic_containment__test__fv_415f7832",
-      "package": "lash-internal-core"
-    },
-    {
-      "features": [
-        "default",
-        "otel-trace",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-core:panic_containment__test__fv_a5aea43c",
-      "package": "lash-internal-core"
-    },
-    {
-      "features": [
-        "default",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-core:restate_double__test__fv_415f7832",
+      "label": "//crates/lash-core:panic_containment__test__fv_278d9d57",
       "package": "lash-internal-core"
     },
     {
@@ -6173,7 +6018,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:restate_double__test__fv_a5aea43c",
+      "label": "//crates/lash-core:panic_containment__test__fv_72355884",
       "package": "lash-internal-core"
     },
     {
@@ -6182,26 +6027,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:runtime_effect__test__fv_415f7832",
-      "package": "lash-internal-core"
-    },
-    {
-      "features": [
-        "default",
-        "otel-trace",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-core:runtime_effect__test__fv_a5aea43c",
-      "package": "lash-internal-core"
-    },
-    {
-      "features": [
-        "default",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-core:runtime_lifecycle__test__fv_415f7832",
+      "label": "//crates/lash-core:restate_double__test__fv_278d9d57",
       "package": "lash-internal-core"
     },
     {
@@ -6211,7 +6037,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:runtime_lifecycle__test__fv_a5aea43c",
+      "label": "//crates/lash-core:restate_double__test__fv_72355884",
       "package": "lash-internal-core"
     },
     {
@@ -6220,26 +6046,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:runtime_observability__test__fv_415f7832",
-      "package": "lash-internal-core"
-    },
-    {
-      "features": [
-        "default",
-        "otel-trace",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-core:runtime_observability__test__fv_a5aea43c",
-      "package": "lash-internal-core"
-    },
-    {
-      "features": [
-        "default",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-core:runtime_scenarios__test__fv_415f7832",
+      "label": "//crates/lash-core:runtime_effect__test__fv_278d9d57",
       "package": "lash-internal-core"
     },
     {
@@ -6249,7 +6056,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:runtime_scenarios__test__fv_a5aea43c",
+      "label": "//crates/lash-core:runtime_effect__test__fv_72355884",
       "package": "lash-internal-core"
     },
     {
@@ -6258,26 +6065,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:runtime_turns__test__fv_415f7832",
-      "package": "lash-internal-core"
-    },
-    {
-      "features": [
-        "default",
-        "otel-trace",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-core:runtime_turns__test__fv_a5aea43c",
-      "package": "lash-internal-core"
-    },
-    {
-      "features": [
-        "default",
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash-core:tool_execution_grant_layout__test__fv_415f7832",
+      "label": "//crates/lash-core:runtime_lifecycle__test__fv_278d9d57",
       "package": "lash-internal-core"
     },
     {
@@ -6287,7 +6075,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:tool_execution_grant_layout__test__fv_a5aea43c",
+      "label": "//crates/lash-core:runtime_lifecycle__test__fv_72355884",
       "package": "lash-internal-core"
     },
     {
@@ -6296,7 +6084,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:turn_event_schema__test__fv_415f7832",
+      "label": "//crates/lash-core:runtime_observability__test__fv_278d9d57",
       "package": "lash-internal-core"
     },
     {
@@ -6306,26 +6094,84 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-core:turn_event_schema__test__fv_a5aea43c",
+      "label": "//crates/lash-core:runtime_observability__test__fv_72355884",
       "package": "lash-internal-core"
     },
     {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-http-transport:lash-http-transport",
-      "package": "lash-internal-http-transport"
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-core:runtime_scenarios__test__fv_278d9d57",
+      "package": "lash-internal-core"
     },
     {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-http-transport:lash-http-transport",
-      "package": "lash-internal-http-transport"
+      "features": [
+        "default",
+        "otel-trace",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-core:runtime_scenarios__test__fv_72355884",
+      "package": "lash-internal-core"
     },
     {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-http-transport:lash-http-transport",
-      "package": "lash-internal-http-transport"
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-core:runtime_turns__test__fv_278d9d57",
+      "package": "lash-internal-core"
+    },
+    {
+      "features": [
+        "default",
+        "otel-trace",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-core:runtime_turns__test__fv_72355884",
+      "package": "lash-internal-core"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-core:tool_execution_grant_layout__test__fv_278d9d57",
+      "package": "lash-internal-core"
+    },
+    {
+      "features": [
+        "default",
+        "otel-trace",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-core:tool_execution_grant_layout__test__fv_72355884",
+      "package": "lash-internal-core"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-core:turn_event_schema__test__fv_278d9d57",
+      "package": "lash-internal-core"
+    },
+    {
+      "features": [
+        "default",
+        "otel-trace",
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash-core:turn_event_schema__test__fv_72355884",
+      "package": "lash-internal-core"
     },
     {
       "features": [],
@@ -7669,13 +7515,13 @@
         "dhat-heap"
       ],
       "kind": "bin",
-      "label": "//crates/lash-perf:lash-perf__bin__fv_b35a9f47",
+      "label": "//crates/lash-perf:lash-perf__bin__fv_9733d528",
       "package": "lash-perf"
     },
     {
       "features": [],
       "kind": "bin",
-      "label": "//crates/lash-perf:lash-perf__bin__fv_c9b5da41",
+      "label": "//crates/lash-perf:lash-perf__bin__fv_faece333",
       "package": "lash-perf"
     },
     {
@@ -7683,13 +7529,13 @@
         "dhat-heap"
       ],
       "kind": "bin-unit-test",
-      "label": "//crates/lash-perf:lash-perf__bin__unit_test__fv_b35a9f47",
+      "label": "//crates/lash-perf:lash-perf__bin__unit_test__fv_9733d528",
       "package": "lash-perf"
     },
     {
       "features": [],
       "kind": "bin-unit-test",
-      "label": "//crates/lash-perf:lash-perf__bin__unit_test__fv_c9b5da41",
+      "label": "//crates/lash-perf:lash-perf__bin__unit_test__fv_faece333",
       "package": "lash-perf"
     },
     {
@@ -7697,13 +7543,13 @@
         "dhat-heap"
       ],
       "kind": "lib",
-      "label": "//crates/lash-perf:lash-perf__fv_b35a9f47",
+      "label": "//crates/lash-perf:lash-perf__fv_9733d528",
       "package": "lash-perf"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-perf:lash-perf__fv_c9b5da41",
+      "label": "//crates/lash-perf:lash-perf__fv_faece333",
       "package": "lash-perf"
     },
     {
@@ -7711,13 +7557,13 @@
         "dhat-heap"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-perf:lash-perf__unit_test__fv_b35a9f47",
+      "label": "//crates/lash-perf:lash-perf__unit_test__fv_9733d528",
       "package": "lash-perf"
     },
     {
       "features": [],
       "kind": "unit-test",
-      "label": "//crates/lash-perf:lash-perf__unit_test__fv_c9b5da41",
+      "label": "//crates/lash-perf:lash-perf__unit_test__fv_faece333",
       "package": "lash-perf"
     },
     {
@@ -7725,13 +7571,13 @@
         "dhat-heap"
       ],
       "kind": "bin",
-      "label": "//crates/lash-perf:tool_batch_baseline__bin__fv_b35a9f47",
+      "label": "//crates/lash-perf:tool_batch_baseline__bin__fv_9733d528",
       "package": "lash-perf"
     },
     {
       "features": [],
       "kind": "bin",
-      "label": "//crates/lash-perf:tool_batch_baseline__bin__fv_c9b5da41",
+      "label": "//crates/lash-perf:tool_batch_baseline__bin__fv_faece333",
       "package": "lash-perf"
     },
     {
@@ -7739,13 +7585,13 @@
         "dhat-heap"
       ],
       "kind": "bin-unit-test",
-      "label": "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_b35a9f47",
+      "label": "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_9733d528",
       "package": "lash-perf"
     },
     {
       "features": [],
       "kind": "bin-unit-test",
-      "label": "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_c9b5da41",
+      "label": "//crates/lash-perf:tool_batch_baseline__bin__unit_test__fv_faece333",
       "package": "lash-perf"
     },
     {
@@ -8278,48 +8124,38 @@
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:conformance__test__fv_c8dd7cb3",
+      "label": "//crates/lash-postgres-store:conformance__test__fv_03307499",
       "package": "lash-internal-postgres-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:durable_read_fixture__test__fv_c8dd7cb3",
+      "label": "//crates/lash-postgres-store:durable_read_fixture__test__fv_03307499",
       "package": "lash-internal-postgres-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_c8dd7cb3",
+      "label": "//crates/lash-postgres-store:host_provisioned_rollout__test__fv_03307499",
       "package": "lash-internal-postgres-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:integration__test__fv_c8dd7cb3",
+      "label": "//crates/lash-postgres-store:integration__test__fv_03307499",
       "package": "lash-internal-postgres-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "perf-witness",
         "testing"
       ],
@@ -8329,13 +8165,163 @@
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "perf-witness",
         "testing"
       ],
       "kind": "lib",
       "label": "//crates/lash-postgres-store:lash-postgres-store",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
+      "package": "lash-internal-postgres-store"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_21aba84c",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8343,259 +8329,53 @@
         "perf-witness"
       ],
       "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_290534b4",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_555910a9",
       "package": "lash-internal-postgres-store"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_2dd6a4e8",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_6a6015bc",
       "package": "lash-internal-postgres-store"
     },
     {
       "features": [
-        "lashlang"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_dad1e7c0",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f5b624ec",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f9019d21",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f9019d21",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f9019d21",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f9019d21",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f9019d21",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f9019d21",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f9019d21",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f9019d21",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f9019d21",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f9019d21",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f9019d21",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f9019d21",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f9019d21",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f9019d21",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f9019d21",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f9019d21",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f9019d21",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__fv_f9019d21",
-      "package": "lash-internal-postgres-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_c8dd7cb3",
+      "label": "//crates/lash-postgres-store:lash-postgres-store__unit_test__fv_03307499",
       "package": "lash-internal-postgres-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:preflight_durable_walk__test__fv_c8dd7cb3",
+      "label": "//crates/lash-postgres-store:preflight_durable_walk__test__fv_03307499",
       "package": "lash-internal-postgres-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:preflight_schema_status__test__fv_c8dd7cb3",
+      "label": "//crates/lash-postgres-store:preflight_schema_status__test__fv_03307499",
       "package": "lash-internal-postgres-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:schema_constraints__test__fv_c8dd7cb3",
+      "label": "//crates/lash-postgres-store:schema_constraints__test__fv_03307499",
       "package": "lash-internal-postgres-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-postgres-store:schema_drift__test__fv_c8dd7cb3",
+      "label": "//crates/lash-postgres-store:schema_drift__test__fv_03307499",
       "package": "lash-internal-postgres-store"
     },
     {
@@ -8604,7 +8384,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-protocol-rlm:cell_binding_drift__test__fv_192d2697",
+      "label": "//crates/lash-protocol-rlm:cell_binding_drift__test__fv_819d79aa",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -8851,7 +8631,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_192d2697",
+      "label": "//crates/lash-protocol-rlm:lash-protocol-rlm__unit_test__fv_819d79aa",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -8860,7 +8640,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-protocol-rlm:protocol_drivers__test__fv_192d2697",
+      "label": "//crates/lash-protocol-rlm:protocol_drivers__test__fv_819d79aa",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -8869,7 +8649,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-protocol-rlm:tool_batch_parallelism__test__fv_192d2697",
+      "label": "//crates/lash-protocol-rlm:tool_batch_parallelism__test__fv_819d79aa",
       "package": "lash-internal-protocol-rlm"
     },
     {
@@ -9477,7 +9257,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-provider-google:block_identity__test__fv_83a8d243",
+      "label": "//crates/lash-provider-google:block_identity__test__fv_7f5e0378",
       "package": "lash-internal-provider-google"
     },
     {
@@ -9486,7 +9266,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-provider-google:charge_safety__test__fv_83a8d243",
+      "label": "//crates/lash-provider-google:charge_safety__test__fv_7f5e0378",
       "package": "lash-internal-provider-google"
     },
     {
@@ -9542,7 +9322,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-provider-google:lash-provider-google__unit_test__fv_83a8d243",
+      "label": "//crates/lash-provider-google:lash-provider-google__unit_test__fv_7f5e0378",
       "package": "lash-internal-provider-google"
     },
     {
@@ -9551,7 +9331,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-provider-google:property__test__fv_83a8d243",
+      "label": "//crates/lash-provider-google:property__test__fv_7f5e0378",
       "package": "lash-internal-provider-google"
     },
     {
@@ -9560,7 +9340,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-provider-openai:codex_websocket_runtime__test__fv_d9360e75",
+      "label": "//crates/lash-provider-openai:codex_websocket_runtime__test__fv_f7da9c6d",
       "package": "lash-internal-provider-openai"
     },
     {
@@ -9674,7 +9454,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_d9360e75",
+      "label": "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_f7da9c6d",
       "package": "lash-internal-provider-openai"
     },
     {
@@ -9697,94 +9477,6 @@
       ],
       "kind": "test",
       "label": "//crates/lash-regress:integration__test__fv_7f10c809",
-      "package": "lash-regress"
-    },
-    {
-      "features": [
-        "backend-pikevm",
-        "default",
-        "std",
-        "utf16"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-regress:lash-regress",
-      "package": "lash-regress"
-    },
-    {
-      "features": [
-        "backend-pikevm",
-        "default",
-        "std",
-        "utf16"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-regress:lash-regress",
-      "package": "lash-regress"
-    },
-    {
-      "features": [
-        "backend-pikevm",
-        "default",
-        "std",
-        "utf16"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-regress:lash-regress",
-      "package": "lash-regress"
-    },
-    {
-      "features": [
-        "backend-pikevm",
-        "default",
-        "std",
-        "utf16"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-regress:lash-regress",
-      "package": "lash-regress"
-    },
-    {
-      "features": [
-        "backend-pikevm",
-        "default",
-        "std",
-        "utf16"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-regress:lash-regress",
-      "package": "lash-regress"
-    },
-    {
-      "features": [
-        "backend-pikevm",
-        "default",
-        "std",
-        "utf16"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-regress:lash-regress",
-      "package": "lash-regress"
-    },
-    {
-      "features": [
-        "backend-pikevm",
-        "default",
-        "std",
-        "utf16"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-regress:lash-regress",
-      "package": "lash-regress"
-    },
-    {
-      "features": [
-        "backend-pikevm",
-        "default",
-        "std",
-        "utf16"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-regress:lash-regress",
       "package": "lash-regress"
     },
     {
@@ -10755,199 +10447,181 @@
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate-test:lash-restate-test__fv_498d37bf",
+      "label": "//crates/lash-restate-test:lash-restate-test__fv_115f5643",
       "package": "lash-internal-restate-test"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate-test:lash-restate-test__fv_498d37bf",
+      "label": "//crates/lash-restate-test:lash-restate-test__fv_115f5643",
       "package": "lash-internal-restate-test"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate-test:lash-restate-test__fv_7852b0a1",
+      "label": "//crates/lash-restate-test:lash-restate-test__fv_146a5e04",
       "package": "lash-internal-restate-test"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate-test:lash-restate-test__fv_8f3fdb86",
+      "label": "//crates/lash-restate-test:lash-restate-test__fv_fd9ff782",
       "package": "lash-internal-restate-test"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate-test:lash-restate-test__fv_8f3fdb86",
+      "label": "//crates/lash-restate-test:lash-restate-test__fv_fd9ff782",
       "package": "lash-internal-restate-test"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate-test:lash-restate-test__fv_fb643143",
+      "label": "//crates/lash-restate-test:lash-restate-test__fv_fe3c2baf",
       "package": "lash-internal-restate-test"
     },
     {
-      "features": [
-        "lashlang"
-      ],
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_197896d4",
-      "package": "lash-internal-restate"
-    },
-    {
-      "features": [
-        "lashlang"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_197896d4",
-      "package": "lash-internal-restate"
-    },
-    {
-      "features": [
-        "lashlang"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_197896d4",
+      "label": "//crates/lash-restate:lash-restate",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_1dbb6bba",
+      "label": "//crates/lash-restate:lash-restate",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_2c0a0ded",
+      "label": "//crates/lash-restate:lash-restate__fv_2c1ea1c9",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_2c0a0ded",
+      "label": "//crates/lash-restate:lash-restate__fv_66322f1d",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_2c0a0ded",
+      "label": "//crates/lash-restate:lash-restate__fv_66322f1d",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_2c0a0ded",
+      "label": "//crates/lash-restate:lash-restate__fv_66322f1d",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_2c0a0ded",
+      "label": "//crates/lash-restate:lash-restate__fv_66322f1d",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_2c0a0ded",
+      "label": "//crates/lash-restate:lash-restate__fv_66322f1d",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_2c0a0ded",
+      "label": "//crates/lash-restate:lash-restate__fv_66322f1d",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_2c0a0ded",
+      "label": "//crates/lash-restate:lash-restate__fv_66322f1d",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_2c0a0ded",
+      "label": "//crates/lash-restate:lash-restate__fv_66322f1d",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_2c0a0ded",
+      "label": "//crates/lash-restate:lash-restate__fv_66322f1d",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_2c0a0ded",
+      "label": "//crates/lash-restate:lash-restate__fv_66322f1d",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_2c0a0ded",
+      "label": "//crates/lash-restate:lash-restate__fv_66322f1d",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_2c0a0ded",
+      "label": "//crates/lash-restate:lash-restate__fv_66322f1d",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_2c0a0ded",
+      "label": "//crates/lash-restate:lash-restate__fv_66322f1d",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_349c36c6",
+      "label": "//crates/lash-restate:lash-restate__fv_66322f1d",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_8229eaf0",
+      "label": "//crates/lash-restate:lash-restate__fv_66322f1d",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_85abed0d",
+      "label": "//crates/lash-restate:lash-restate__fv_ec2d4413",
       "package": "lash-internal-restate"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_85abed0d",
+      "label": "//crates/lash-restate:lash-restate__fv_ec2d4413",
       "package": "lash-internal-restate"
     },
     {
-      "features": [
-        "lashlang"
-      ],
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_889b1965",
+      "label": "//crates/lash-restate:lash-restate__fv_ec2d4413",
       "package": "lash-internal-restate"
     },
     {
-      "features": [
-        "lashlang"
-      ],
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_af4869c4",
+      "label": "//crates/lash-restate:lash-restate__fv_ec2d4413",
       "package": "lash-internal-restate"
     },
     {
-      "features": [
-        "lashlang"
-      ],
+      "features": [],
       "kind": "lib",
-      "label": "//crates/lash-restate:lash-restate__fv_af4869c4",
+      "label": "//crates/lash-restate:lash-restate__fv_fdeb4970",
+      "package": "lash-internal-restate"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-restate:lash-restate__fv_fdeb4970",
       "package": "lash-internal-restate"
     },
     {
@@ -12259,33 +11933,6 @@
     },
     {
       "features": [
-        "default",
-        "schema-validation"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-sansio:lash-sansio",
-      "package": "lash-internal-sansio"
-    },
-    {
-      "features": [
-        "default",
-        "schema-validation"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-sansio:lash-sansio",
-      "package": "lash-internal-sansio"
-    },
-    {
-      "features": [
-        "default",
-        "schema-validation"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-sansio:lash-sansio",
-      "package": "lash-internal-sansio"
-    },
-    {
-      "features": [
         "schema-validation"
       ],
       "kind": "lib",
@@ -12325,152 +11972,53 @@
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-sim:lash-sim__fv_b6980b7d",
+      "label": "//crates/lash-sim:lash-sim__fv_97b4ed14",
       "package": "lash-sim"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//crates/lash-sim:lash-sim__fv_b6980b7d",
+      "label": "//crates/lash-sim:lash-sim__fv_97b4ed14",
       "package": "lash-sim"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:conformance__test__fv_8eb65fd0",
+      "label": "//crates/lash-sqlite-store:conformance__test__fv_998117fe",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:conformance_memory__test__fv_8eb65fd0",
+      "label": "//crates/lash-sqlite-store:conformance_memory__test__fv_998117fe",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:durable_read_fixture__test__fv_8eb65fd0",
+      "label": "//crates/lash-sqlite-store:durable_read_fixture__test__fv_998117fe",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_8eb65fd0",
+      "label": "//crates/lash-sqlite-store:fencing_backstop__test__fv_998117fe",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:integration__test__fv_8eb65fd0",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [
-        "lashlang"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_0335a3ee",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_1ed1653a",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_2bd92685",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_2bd92685",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_3ba8325d",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "perf-witness"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_70e128ba",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang",
-        "perf-witness"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_70e128ba",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [
-        "lashlang"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_bda51fcd",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_c8e89265",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_c8e89265",
-      "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [
-        "default",
-        "lashlang"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_d504b7ec",
+      "label": "//crates/lash-sqlite-store:integration__test__fv_998117fe",
       "package": "lash-internal-sqlite-store"
     },
     {
@@ -12478,283 +12026,280 @@
         "perf-witness"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_e1c584bf",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_04076328",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_199586c4",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_199586c4",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_199586c4",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_199586c4",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_199586c4",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_1c715874",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_1c715874",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_433fb696",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_ef218274",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang"
+        "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_f28b6c0a",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_aa9b4703",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_d29e3995",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [
+        "perf-witness"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__fv_d29e3995",
+      "package": "lash-internal-sqlite-store"
+    },
+    {
+      "features": [
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-sqlite-store:lash-sqlite-store__unit_test__fv_8eb65fd0",
+      "label": "//crates/lash-sqlite-store:lash-sqlite-store__unit_test__fv_998117fe",
       "package": "lash-internal-sqlite-store"
     },
     {
       "features": [
-        "default",
-        "lashlang",
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-sqlite-store:process_change_horizon__test__fv_8eb65fd0",
+      "label": "//crates/lash-sqlite-store:process_change_horizon__test__fv_998117fe",
       "package": "lash-internal-sqlite-store"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-store-sql:lash-store-sql",
-      "package": "lash-internal-store-sql"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-store-sql:lash-store-sql",
-      "package": "lash-internal-store-sql"
     },
     {
       "features": [
@@ -14397,30 +13942,6 @@
       "package": "lash-internal-trace"
     },
     {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-trace:lash-trace",
-      "package": "lash-internal-trace"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-trace:lash-trace",
-      "package": "lash-internal-trace"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash-trace:lash-trace",
-      "package": "lash-internal-trace"
-    },
-    {
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-trace:lash-trace__fv_8ada4082",
@@ -14764,10 +14285,10 @@
     },
     {
       "features": [
-        "typescript"
+        "sqlite"
       ],
       "kind": "test",
-      "label": "//crates/lash:attachments_evidence__test__fv_03665848",
+      "label": "//crates/lash:attachments_evidence__test__fv_01266018",
       "package": "lash-runtime"
     },
     {
@@ -14775,31 +14296,7 @@
         "rlm"
       ],
       "kind": "test",
-      "label": "//crates/lash:attachments_evidence__test__fv_082d2ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "google"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:attachments_evidence__test__fv_38737b3a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "mcp"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:attachments_evidence__test__fv_5d943bea",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "restate"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:attachments_evidence__test__fv_607f068b",
+      "label": "//crates/lash:attachments_evidence__test__fv_13e4de86",
       "package": "lash-runtime"
     },
     {
@@ -14807,99 +14304,7 @@
         "s3"
       ],
       "kind": "test",
-      "label": "//crates/lash:attachments_evidence__test__fv_762daba3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:attachments_evidence__test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:attachments_evidence__test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:attachments_evidence__test__fv_7c9c5afe",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "http-transport"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:attachments_evidence__test__fv_8ec3d5b3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "anthropic"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:attachments_evidence__test__fv_929fa16e",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "postgres"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:attachments_evidence__test__fv_96566a0a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "subagents"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:attachments_evidence__test__fv_c1f52ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "sqlite"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:attachments_evidence__test__fv_ce32d96f",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "openai"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:attachments_evidence__test__fv_dde16b6b",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "typescript"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:integration__test__fv_03665848",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "rlm"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:integration__test__fv_082d2ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "google"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:integration__test__fv_38737b3a",
+      "label": "//crates/lash:attachments_evidence__test__fv_15005b34",
       "package": "lash-runtime"
     },
     {
@@ -14907,35 +14312,7 @@
         "mcp"
       ],
       "kind": "test",
-      "label": "//crates/lash:integration__test__fv_5d943bea",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "restate"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:integration__test__fv_607f068b",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "s3"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:integration__test__fv_762daba3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:integration__test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:integration__test__fv_7b6b036d",
+      "label": "//crates/lash:attachments_evidence__test__fv_3efe9f14",
       "package": "lash-runtime"
     },
     {
@@ -14943,31 +14320,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash:integration__test__fv_7c9c5afe",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "http-transport"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:integration__test__fv_8ec3d5b3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "anthropic"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:integration__test__fv_929fa16e",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "postgres"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:integration__test__fv_96566a0a",
+      "label": "//crates/lash:attachments_evidence__test__fv_4b9e51e5",
       "package": "lash-runtime"
     },
     {
@@ -14975,239 +14328,199 @@
         "subagents"
       ],
       "kind": "test",
-      "label": "//crates/lash:integration__test__fv_c1f52ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "sqlite"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:integration__test__fv_ce32d96f",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "openai"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:integration__test__fv_dde16b6b",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "google"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_0ebc287d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "default",
-        "rlm"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_21fbab9c",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "default",
-        "rlm"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_21fbab9c",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_30bac093",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_30bac093",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_37dec63b",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "rlm"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_3a78cf5f",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "openai"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_4a4172a7",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "sqlite"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_4b065bf7",
+      "label": "//crates/lash:attachments_evidence__test__fv_6c8897c1",
       "package": "lash-runtime"
     },
     {
       "features": [
         "restate"
       ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_5875bc86",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_5a5838c7",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "default",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_7144e7a1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "default",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_7144e7a1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "anthropic"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_731a85cb",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "mcp"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_7989f91e",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_82aab50a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "default"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_84b4934b",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "http-transport"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_8e805151",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "subagents"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_9ba45f07",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "default",
-        "rlm",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_a0db8c55",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "default",
-        "rlm",
-        "testing"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_a0db8c55",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "postgres"
-      ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_aaf32101",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_b6188282",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_b6188282",
+      "kind": "test",
+      "label": "//crates/lash:attachments_evidence__test__fv_6d3c1b7e",
       "package": "lash-runtime"
     },
     {
       "features": [
         "typescript"
       ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_c0e37a9c",
+      "kind": "test",
+      "label": "//crates/lash:attachments_evidence__test__fv_709f8da8",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "http-transport"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:attachments_evidence__test__fv_764a4c4d",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "postgres"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:attachments_evidence__test__fv_84f76885",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "openai"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:attachments_evidence__test__fv_8738280f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:attachments_evidence__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:attachments_evidence__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "anthropic"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:attachments_evidence__test__fv_9a15893f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "google"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:attachments_evidence__test__fv_f1f3d888",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "sqlite"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:integration__test__fv_01266018",
       "package": "lash-runtime"
     },
     {
       "features": [
         "rlm"
       ],
-      "kind": "lib",
-      "label": "//crates/lash:lash__fv_c8a58465",
+      "kind": "test",
+      "label": "//crates/lash:integration__test__fv_13e4de86",
       "package": "lash-runtime"
     },
     {
       "features": [
         "s3"
       ],
+      "kind": "test",
+      "label": "//crates/lash:integration__test__fv_15005b34",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "mcp"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:integration__test__fv_3efe9f14",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:integration__test__fv_4b9e51e5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "subagents"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:integration__test__fv_6c8897c1",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "restate"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:integration__test__fv_6d3c1b7e",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "typescript"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:integration__test__fv_709f8da8",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "http-transport"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:integration__test__fv_764a4c4d",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "postgres"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:integration__test__fv_84f76885",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "openai"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:integration__test__fv_8738280f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:integration__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:integration__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "anthropic"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:integration__test__fv_9a15893f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "google"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:integration__test__fv_f1f3d888",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "http-transport"
+      ],
       "kind": "lib",
-      "label": "//crates/lash:lash__fv_cc433927",
+      "label": "//crates/lash:lash__fv_08800a94",
       "package": "lash-runtime"
     },
     {
@@ -15217,7 +14530,7 @@
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash:lash__fv_da3bf2b1",
+      "label": "//crates/lash:lash__fv_09144d65",
       "package": "lash-runtime"
     },
     {
@@ -15227,17 +14540,69 @@
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash:lash__fv_dc56ff77",
+      "label": "//crates/lash:lash__fv_09144d65",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_09246f0a",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_09246f0a",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_2b2511e5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "restate"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_2b3c9542",
       "package": "lash-runtime"
     },
     {
       "features": [
         "default",
-        "rlm",
+        "rlm"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_2e49abe8",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "default",
+        "rlm"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_2e49abe8",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "sqlite"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_2f0df850",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
         "testing"
       ],
       "kind": "lib",
-      "label": "//crates/lash:lash__fv_dc56ff77",
+      "label": "//crates/lash:lash__fv_3444d48f",
       "package": "lash-runtime"
     },
     {
@@ -15245,7 +14610,125 @@
         "otel-trace"
       ],
       "kind": "lib",
-      "label": "//crates/lash:lash__fv_eb931083",
+      "label": "//crates/lash:lash__fv_393a8140",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "anthropic"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_436e23b6",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "postgres"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_452eb8d1",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "typescript"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_4b2aa215",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "rlm"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_5063177d",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "default",
+        "rlm",
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_558ae714",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "default",
+        "rlm",
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_558ae714",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "subagents"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_5e9510eb",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "google"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_658fa524",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_68322efb",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "openai"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_829caa3e",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "rlm"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_8c7e9792",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_8fc779e9",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "default",
+        "testing"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_8fc779e9",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "default"
+      ],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_a10a75e3",
       "package": "lash-runtime"
     },
     {
@@ -15253,107 +14736,45 @@
         "restate"
       ],
       "kind": "lib",
-      "label": "//crates/lash:lash__fv_ecf692ef",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "typescript"
-      ],
-      "kind": "unit-test",
-      "label": "//crates/lash:lash__unit_test__fv_03665848",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "rlm"
-      ],
-      "kind": "unit-test",
-      "label": "//crates/lash:lash__unit_test__fv_082d2ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "google"
-      ],
-      "kind": "unit-test",
-      "label": "//crates/lash:lash__unit_test__fv_38737b3a",
+      "label": "//crates/lash:lash__fv_a737d449",
       "package": "lash-runtime"
     },
     {
       "features": [
         "mcp"
       ],
-      "kind": "unit-test",
-      "label": "//crates/lash:lash__unit_test__fv_5d943bea",
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_c6c7c7c9",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_e9a5986b",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_e9a5986b",
       "package": "lash-runtime"
     },
     {
       "features": [
-        "restate"
+        "default",
+        "rlm",
+        "testing"
       ],
-      "kind": "unit-test",
-      "label": "//crates/lash:lash__unit_test__fv_607f068b",
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_eaf4a5be",
       "package": "lash-runtime"
     },
     {
       "features": [
         "s3"
       ],
-      "kind": "unit-test",
-      "label": "//crates/lash:lash__unit_test__fv_762daba3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "unit-test",
-      "label": "//crates/lash:lash__unit_test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "unit-test",
-      "label": "//crates/lash:lash__unit_test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "unit-test",
-      "label": "//crates/lash:lash__unit_test__fv_7c9c5afe",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "http-transport"
-      ],
-      "kind": "unit-test",
-      "label": "//crates/lash:lash__unit_test__fv_8ec3d5b3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "anthropic"
-      ],
-      "kind": "unit-test",
-      "label": "//crates/lash:lash__unit_test__fv_929fa16e",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "postgres"
-      ],
-      "kind": "unit-test",
-      "label": "//crates/lash:lash__unit_test__fv_96566a0a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "subagents"
-      ],
-      "kind": "unit-test",
-      "label": "//crates/lash:lash__unit_test__fv_c1f52ea1",
+      "kind": "lib",
+      "label": "//crates/lash:lash__fv_f8b6e40f",
       "package": "lash-runtime"
     },
     {
@@ -15361,7 +14782,79 @@
         "sqlite"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash:lash__unit_test__fv_ce32d96f",
+      "label": "//crates/lash:lash__unit_test__fv_01266018",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "rlm"
+      ],
+      "kind": "unit-test",
+      "label": "//crates/lash:lash__unit_test__fv_13e4de86",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "s3"
+      ],
+      "kind": "unit-test",
+      "label": "//crates/lash:lash__unit_test__fv_15005b34",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "mcp"
+      ],
+      "kind": "unit-test",
+      "label": "//crates/lash:lash__unit_test__fv_3efe9f14",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "unit-test",
+      "label": "//crates/lash:lash__unit_test__fv_4b9e51e5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "subagents"
+      ],
+      "kind": "unit-test",
+      "label": "//crates/lash:lash__unit_test__fv_6c8897c1",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "restate"
+      ],
+      "kind": "unit-test",
+      "label": "//crates/lash:lash__unit_test__fv_6d3c1b7e",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "typescript"
+      ],
+      "kind": "unit-test",
+      "label": "//crates/lash:lash__unit_test__fv_709f8da8",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "http-transport"
+      ],
+      "kind": "unit-test",
+      "label": "//crates/lash:lash__unit_test__fv_764a4c4d",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "postgres"
+      ],
+      "kind": "unit-test",
+      "label": "//crates/lash:lash__unit_test__fv_84f76885",
       "package": "lash-runtime"
     },
     {
@@ -15369,107 +14862,35 @@
         "openai"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash:lash__unit_test__fv_dde16b6b",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "typescript"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:observation_admin_evidence__test__fv_03665848",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "rlm"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:observation_admin_evidence__test__fv_082d2ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "google"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:observation_admin_evidence__test__fv_38737b3a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "mcp"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:observation_admin_evidence__test__fv_5d943bea",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "restate"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:observation_admin_evidence__test__fv_607f068b",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "s3"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:observation_admin_evidence__test__fv_762daba3",
+      "label": "//crates/lash:lash__unit_test__fv_8738280f",
       "package": "lash-runtime"
     },
     {
       "features": [],
-      "kind": "test",
-      "label": "//crates/lash:observation_admin_evidence__test__fv_7b6b036d",
+      "kind": "unit-test",
+      "label": "//crates/lash:lash__unit_test__fv_8d8059a5",
       "package": "lash-runtime"
     },
     {
       "features": [],
-      "kind": "test",
-      "label": "//crates/lash:observation_admin_evidence__test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:observation_admin_evidence__test__fv_7c9c5afe",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "http-transport"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:observation_admin_evidence__test__fv_8ec3d5b3",
+      "kind": "unit-test",
+      "label": "//crates/lash:lash__unit_test__fv_8d8059a5",
       "package": "lash-runtime"
     },
     {
       "features": [
         "anthropic"
       ],
-      "kind": "test",
-      "label": "//crates/lash:observation_admin_evidence__test__fv_929fa16e",
+      "kind": "unit-test",
+      "label": "//crates/lash:lash__unit_test__fv_9a15893f",
       "package": "lash-runtime"
     },
     {
       "features": [
-        "postgres"
+        "google"
       ],
-      "kind": "test",
-      "label": "//crates/lash:observation_admin_evidence__test__fv_96566a0a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "subagents"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:observation_admin_evidence__test__fv_c1f52ea1",
+      "kind": "unit-test",
+      "label": "//crates/lash:lash__unit_test__fv_f1f3d888",
       "package": "lash-runtime"
     },
     {
@@ -15477,23 +14898,7 @@
         "sqlite"
       ],
       "kind": "test",
-      "label": "//crates/lash:observation_admin_evidence__test__fv_ce32d96f",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "openai"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:observation_admin_evidence__test__fv_dde16b6b",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "typescript"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:otel_trace_evidence__test__fv_03665848",
+      "label": "//crates/lash:observation_admin_evidence__test__fv_01266018",
       "package": "lash-runtime"
     },
     {
@@ -15501,31 +14906,7 @@
         "rlm"
       ],
       "kind": "test",
-      "label": "//crates/lash:otel_trace_evidence__test__fv_082d2ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "google"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:otel_trace_evidence__test__fv_38737b3a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "mcp"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:otel_trace_evidence__test__fv_5d943bea",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "restate"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:otel_trace_evidence__test__fv_607f068b",
+      "label": "//crates/lash:observation_admin_evidence__test__fv_13e4de86",
       "package": "lash-runtime"
     },
     {
@@ -15533,19 +14914,15 @@
         "s3"
       ],
       "kind": "test",
-      "label": "//crates/lash:otel_trace_evidence__test__fv_762daba3",
+      "label": "//crates/lash:observation_admin_evidence__test__fv_15005b34",
       "package": "lash-runtime"
     },
     {
-      "features": [],
+      "features": [
+        "mcp"
+      ],
       "kind": "test",
-      "label": "//crates/lash:otel_trace_evidence__test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:otel_trace_evidence__test__fv_7b6b036d",
+      "label": "//crates/lash:observation_admin_evidence__test__fv_3efe9f14",
       "package": "lash-runtime"
     },
     {
@@ -15553,31 +14930,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash:otel_trace_evidence__test__fv_7c9c5afe",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "http-transport"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:otel_trace_evidence__test__fv_8ec3d5b3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "anthropic"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:otel_trace_evidence__test__fv_929fa16e",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "postgres"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:otel_trace_evidence__test__fv_96566a0a",
+      "label": "//crates/lash:observation_admin_evidence__test__fv_4b9e51e5",
       "package": "lash-runtime"
     },
     {
@@ -15585,23 +14938,15 @@
         "subagents"
       ],
       "kind": "test",
-      "label": "//crates/lash:otel_trace_evidence__test__fv_c1f52ea1",
+      "label": "//crates/lash:observation_admin_evidence__test__fv_6c8897c1",
       "package": "lash-runtime"
     },
     {
       "features": [
-        "sqlite"
+        "restate"
       ],
       "kind": "test",
-      "label": "//crates/lash:otel_trace_evidence__test__fv_ce32d96f",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "openai"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:otel_trace_evidence__test__fv_dde16b6b",
+      "label": "//crates/lash:observation_admin_evidence__test__fv_6d3c1b7e",
       "package": "lash-runtime"
     },
     {
@@ -15609,67 +14954,7 @@
         "typescript"
       ],
       "kind": "test",
-      "label": "//crates/lash:processes_evidence__test__fv_03665848",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "rlm"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence__test__fv_082d2ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "google"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence__test__fv_38737b3a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "mcp"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence__test__fv_5d943bea",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "restate"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence__test__fv_607f068b",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "s3"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence__test__fv_762daba3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence__test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence__test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence__test__fv_7c9c5afe",
+      "label": "//crates/lash:observation_admin_evidence__test__fv_709f8da8",
       "package": "lash-runtime"
     },
     {
@@ -15677,15 +14962,7 @@
         "http-transport"
       ],
       "kind": "test",
-      "label": "//crates/lash:processes_evidence__test__fv_8ec3d5b3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "anthropic"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence__test__fv_929fa16e",
+      "label": "//crates/lash:observation_admin_evidence__test__fv_764a4c4d",
       "package": "lash-runtime"
     },
     {
@@ -15693,23 +14970,7 @@
         "postgres"
       ],
       "kind": "test",
-      "label": "//crates/lash:processes_evidence__test__fv_96566a0a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "subagents"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence__test__fv_c1f52ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "sqlite"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence__test__fv_ce32d96f",
+      "label": "//crates/lash:observation_admin_evidence__test__fv_84f76885",
       "package": "lash-runtime"
     },
     {
@@ -15717,7 +14978,91 @@
         "openai"
       ],
       "kind": "test",
-      "label": "//crates/lash:processes_evidence__test__fv_dde16b6b",
+      "label": "//crates/lash:observation_admin_evidence__test__fv_8738280f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:observation_admin_evidence__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:observation_admin_evidence__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "anthropic"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:observation_admin_evidence__test__fv_9a15893f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "google"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:observation_admin_evidence__test__fv_f1f3d888",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "sqlite"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:otel_trace_evidence__test__fv_01266018",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "rlm"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:otel_trace_evidence__test__fv_13e4de86",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "s3"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:otel_trace_evidence__test__fv_15005b34",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "mcp"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:otel_trace_evidence__test__fv_3efe9f14",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:otel_trace_evidence__test__fv_4b9e51e5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "subagents"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:otel_trace_evidence__test__fv_6c8897c1",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "restate"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:otel_trace_evidence__test__fv_6d3c1b7e",
       "package": "lash-runtime"
     },
     {
@@ -15725,67 +15070,7 @@
         "typescript"
       ],
       "kind": "test",
-      "label": "//crates/lash:processes_evidence_b__test__fv_03665848",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "rlm"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence_b__test__fv_082d2ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "google"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence_b__test__fv_38737b3a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "mcp"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence_b__test__fv_5d943bea",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "restate"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence_b__test__fv_607f068b",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "s3"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence_b__test__fv_762daba3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence_b__test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence_b__test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence_b__test__fv_7c9c5afe",
+      "label": "//crates/lash:otel_trace_evidence__test__fv_709f8da8",
       "package": "lash-runtime"
     },
     {
@@ -15793,15 +15078,7 @@
         "http-transport"
       ],
       "kind": "test",
-      "label": "//crates/lash:processes_evidence_b__test__fv_8ec3d5b3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "anthropic"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence_b__test__fv_929fa16e",
+      "label": "//crates/lash:otel_trace_evidence__test__fv_764a4c4d",
       "package": "lash-runtime"
     },
     {
@@ -15809,23 +15086,7 @@
         "postgres"
       ],
       "kind": "test",
-      "label": "//crates/lash:processes_evidence_b__test__fv_96566a0a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "subagents"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence_b__test__fv_c1f52ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "sqlite"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:processes_evidence_b__test__fv_ce32d96f",
+      "label": "//crates/lash:otel_trace_evidence__test__fv_84f76885",
       "package": "lash-runtime"
     },
     {
@@ -15833,7 +15094,91 @@
         "openai"
       ],
       "kind": "test",
-      "label": "//crates/lash:processes_evidence_b__test__fv_dde16b6b",
+      "label": "//crates/lash:otel_trace_evidence__test__fv_8738280f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:otel_trace_evidence__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:otel_trace_evidence__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "anthropic"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:otel_trace_evidence__test__fv_9a15893f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "google"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:otel_trace_evidence__test__fv_f1f3d888",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "sqlite"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_01266018",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "rlm"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_13e4de86",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "s3"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_15005b34",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "mcp"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_3efe9f14",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_4b9e51e5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "subagents"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_6c8897c1",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "restate"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_6d3c1b7e",
       "package": "lash-runtime"
     },
     {
@@ -15841,67 +15186,7 @@
         "typescript"
       ],
       "kind": "test",
-      "label": "//crates/lash:protocol_evidence__test__fv_03665848",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "rlm"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:protocol_evidence__test__fv_082d2ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "google"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:protocol_evidence__test__fv_38737b3a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "mcp"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:protocol_evidence__test__fv_5d943bea",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "restate"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:protocol_evidence__test__fv_607f068b",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "s3"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:protocol_evidence__test__fv_762daba3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:protocol_evidence__test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:protocol_evidence__test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:protocol_evidence__test__fv_7c9c5afe",
+      "label": "//crates/lash:processes_evidence__test__fv_709f8da8",
       "package": "lash-runtime"
     },
     {
@@ -15909,15 +15194,7 @@
         "http-transport"
       ],
       "kind": "test",
-      "label": "//crates/lash:protocol_evidence__test__fv_8ec3d5b3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "anthropic"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:protocol_evidence__test__fv_929fa16e",
+      "label": "//crates/lash:processes_evidence__test__fv_764a4c4d",
       "package": "lash-runtime"
     },
     {
@@ -15925,23 +15202,7 @@
         "postgres"
       ],
       "kind": "test",
-      "label": "//crates/lash:protocol_evidence__test__fv_96566a0a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "subagents"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:protocol_evidence__test__fv_c1f52ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "sqlite"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:protocol_evidence__test__fv_ce32d96f",
+      "label": "//crates/lash:processes_evidence__test__fv_84f76885",
       "package": "lash-runtime"
     },
     {
@@ -15949,7 +15210,91 @@
         "openai"
       ],
       "kind": "test",
-      "label": "//crates/lash:protocol_evidence__test__fv_dde16b6b",
+      "label": "//crates/lash:processes_evidence__test__fv_8738280f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "anthropic"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_9a15893f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "google"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence__test__fv_f1f3d888",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "sqlite"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_01266018",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "rlm"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_13e4de86",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "s3"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_15005b34",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "mcp"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_3efe9f14",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_4b9e51e5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "subagents"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_6c8897c1",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "restate"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_6d3c1b7e",
       "package": "lash-runtime"
     },
     {
@@ -15957,67 +15302,7 @@
         "typescript"
       ],
       "kind": "test",
-      "label": "//crates/lash:sessions_evidence__test__fv_03665848",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "rlm"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:sessions_evidence__test__fv_082d2ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "google"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:sessions_evidence__test__fv_38737b3a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "mcp"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:sessions_evidence__test__fv_5d943bea",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "restate"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:sessions_evidence__test__fv_607f068b",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "s3"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:sessions_evidence__test__fv_762daba3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:sessions_evidence__test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:sessions_evidence__test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:sessions_evidence__test__fv_7c9c5afe",
+      "label": "//crates/lash:processes_evidence_b__test__fv_709f8da8",
       "package": "lash-runtime"
     },
     {
@@ -16025,15 +15310,7 @@
         "http-transport"
       ],
       "kind": "test",
-      "label": "//crates/lash:sessions_evidence__test__fv_8ec3d5b3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "anthropic"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:sessions_evidence__test__fv_929fa16e",
+      "label": "//crates/lash:processes_evidence_b__test__fv_764a4c4d",
       "package": "lash-runtime"
     },
     {
@@ -16041,23 +15318,7 @@
         "postgres"
       ],
       "kind": "test",
-      "label": "//crates/lash:sessions_evidence__test__fv_96566a0a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "subagents"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:sessions_evidence__test__fv_c1f52ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "sqlite"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:sessions_evidence__test__fv_ce32d96f",
+      "label": "//crates/lash:processes_evidence_b__test__fv_84f76885",
       "package": "lash-runtime"
     },
     {
@@ -16065,7 +15326,91 @@
         "openai"
       ],
       "kind": "test",
-      "label": "//crates/lash:sessions_evidence__test__fv_dde16b6b",
+      "label": "//crates/lash:processes_evidence_b__test__fv_8738280f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "anthropic"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_9a15893f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "google"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:processes_evidence_b__test__fv_f1f3d888",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "sqlite"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:protocol_evidence__test__fv_01266018",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "rlm"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:protocol_evidence__test__fv_13e4de86",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "s3"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:protocol_evidence__test__fv_15005b34",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "mcp"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:protocol_evidence__test__fv_3efe9f14",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:protocol_evidence__test__fv_4b9e51e5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "subagents"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:protocol_evidence__test__fv_6c8897c1",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "restate"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:protocol_evidence__test__fv_6d3c1b7e",
       "package": "lash-runtime"
     },
     {
@@ -16073,67 +15418,7 @@
         "typescript"
       ],
       "kind": "test",
-      "label": "//crates/lash:triggers_evidence__test__fv_03665848",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "rlm"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:triggers_evidence__test__fv_082d2ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "google"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:triggers_evidence__test__fv_38737b3a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "mcp"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:triggers_evidence__test__fv_5d943bea",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "restate"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:triggers_evidence__test__fv_607f068b",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "s3"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:triggers_evidence__test__fv_762daba3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:triggers_evidence__test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:triggers_evidence__test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:triggers_evidence__test__fv_7c9c5afe",
+      "label": "//crates/lash:protocol_evidence__test__fv_709f8da8",
       "package": "lash-runtime"
     },
     {
@@ -16141,15 +15426,7 @@
         "http-transport"
       ],
       "kind": "test",
-      "label": "//crates/lash:triggers_evidence__test__fv_8ec3d5b3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "anthropic"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:triggers_evidence__test__fv_929fa16e",
+      "label": "//crates/lash:protocol_evidence__test__fv_764a4c4d",
       "package": "lash-runtime"
     },
     {
@@ -16157,23 +15434,7 @@
         "postgres"
       ],
       "kind": "test",
-      "label": "//crates/lash:triggers_evidence__test__fv_96566a0a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "subagents"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:triggers_evidence__test__fv_c1f52ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "sqlite"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:triggers_evidence__test__fv_ce32d96f",
+      "label": "//crates/lash:protocol_evidence__test__fv_84f76885",
       "package": "lash-runtime"
     },
     {
@@ -16181,7 +15442,91 @@
         "openai"
       ],
       "kind": "test",
-      "label": "//crates/lash:triggers_evidence__test__fv_dde16b6b",
+      "label": "//crates/lash:protocol_evidence__test__fv_8738280f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:protocol_evidence__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:protocol_evidence__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "anthropic"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:protocol_evidence__test__fv_9a15893f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "google"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:protocol_evidence__test__fv_f1f3d888",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "sqlite"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:sessions_evidence__test__fv_01266018",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "rlm"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:sessions_evidence__test__fv_13e4de86",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "s3"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:sessions_evidence__test__fv_15005b34",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "mcp"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:sessions_evidence__test__fv_3efe9f14",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:sessions_evidence__test__fv_4b9e51e5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "subagents"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:sessions_evidence__test__fv_6c8897c1",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "restate"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:sessions_evidence__test__fv_6d3c1b7e",
       "package": "lash-runtime"
     },
     {
@@ -16189,67 +15534,7 @@
         "typescript"
       ],
       "kind": "test",
-      "label": "//crates/lash:ui__test__fv_03665848",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "rlm"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:ui__test__fv_082d2ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "google"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:ui__test__fv_38737b3a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "mcp"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:ui__test__fv_5d943bea",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "restate"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:ui__test__fv_607f068b",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "s3"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:ui__test__fv_762daba3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:ui__test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [],
-      "kind": "test",
-      "label": "//crates/lash:ui__test__fv_7b6b036d",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "testing"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:ui__test__fv_7c9c5afe",
+      "label": "//crates/lash:sessions_evidence__test__fv_709f8da8",
       "package": "lash-runtime"
     },
     {
@@ -16257,15 +15542,7 @@
         "http-transport"
       ],
       "kind": "test",
-      "label": "//crates/lash:ui__test__fv_8ec3d5b3",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "anthropic"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:ui__test__fv_929fa16e",
+      "label": "//crates/lash:sessions_evidence__test__fv_764a4c4d",
       "package": "lash-runtime"
     },
     {
@@ -16273,23 +15550,7 @@
         "postgres"
       ],
       "kind": "test",
-      "label": "//crates/lash:ui__test__fv_96566a0a",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "subagents"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:ui__test__fv_c1f52ea1",
-      "package": "lash-runtime"
-    },
-    {
-      "features": [
-        "sqlite"
-      ],
-      "kind": "test",
-      "label": "//crates/lash:ui__test__fv_ce32d96f",
+      "label": "//crates/lash:sessions_evidence__test__fv_84f76885",
       "package": "lash-runtime"
     },
     {
@@ -16297,7 +15558,267 @@
         "openai"
       ],
       "kind": "test",
-      "label": "//crates/lash:ui__test__fv_dde16b6b",
+      "label": "//crates/lash:sessions_evidence__test__fv_8738280f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:sessions_evidence__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:sessions_evidence__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "anthropic"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:sessions_evidence__test__fv_9a15893f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "google"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:sessions_evidence__test__fv_f1f3d888",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "sqlite"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:triggers_evidence__test__fv_01266018",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "rlm"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:triggers_evidence__test__fv_13e4de86",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "s3"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:triggers_evidence__test__fv_15005b34",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "mcp"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:triggers_evidence__test__fv_3efe9f14",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:triggers_evidence__test__fv_4b9e51e5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "subagents"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:triggers_evidence__test__fv_6c8897c1",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "restate"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:triggers_evidence__test__fv_6d3c1b7e",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "typescript"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:triggers_evidence__test__fv_709f8da8",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "http-transport"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:triggers_evidence__test__fv_764a4c4d",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "postgres"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:triggers_evidence__test__fv_84f76885",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "openai"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:triggers_evidence__test__fv_8738280f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:triggers_evidence__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:triggers_evidence__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "anthropic"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:triggers_evidence__test__fv_9a15893f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "google"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:triggers_evidence__test__fv_f1f3d888",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "sqlite"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:ui__test__fv_01266018",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "rlm"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:ui__test__fv_13e4de86",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "s3"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:ui__test__fv_15005b34",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "mcp"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:ui__test__fv_3efe9f14",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "testing"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:ui__test__fv_4b9e51e5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "subagents"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:ui__test__fv_6c8897c1",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "restate"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:ui__test__fv_6d3c1b7e",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "typescript"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:ui__test__fv_709f8da8",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "http-transport"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:ui__test__fv_764a4c4d",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "postgres"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:ui__test__fv_84f76885",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "openai"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:ui__test__fv_8738280f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:ui__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [],
+      "kind": "test",
+      "label": "//crates/lash:ui__test__fv_8d8059a5",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "anthropic"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:ui__test__fv_9a15893f",
+      "package": "lash-runtime"
+    },
+    {
+      "features": [
+        "google"
+      ],
+      "kind": "test",
+      "label": "//crates/lash:ui__test__fv_f1f3d888",
       "package": "lash-runtime"
     },
     {
@@ -16326,48 +15847,6 @@
       "features": [],
       "kind": "lib",
       "label": "//crates/lashlang:lashlang__fv_06c90646",
-      "package": "lash-internal-lashlang"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lashlang:lashlang__fv_06c90646",
-      "package": "lash-internal-lashlang"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lashlang:lashlang__fv_06c90646",
-      "package": "lash-internal-lashlang"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lashlang:lashlang__fv_2ec6ac9b",
-      "package": "lash-internal-lashlang"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lashlang:lashlang__fv_2ec6ac9b",
-      "package": "lash-internal-lashlang"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lashlang:lashlang__fv_2ec6ac9b",
-      "package": "lash-internal-lashlang"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lashlang:lashlang__fv_2ec6ac9b",
-      "package": "lash-internal-lashlang"
-    },
-    {
-      "features": [],
-      "kind": "lib",
-      "label": "//crates/lashlang:lashlang__fv_2ec6ac9b",
       "package": "lash-internal-lashlang"
     },
     {
@@ -16638,22 +16117,22 @@
     },
     {
       "features": [],
-      "kind": "lib",
-      "label": "//crates/lashlang:lashlang__fv_c6906a37",
-      "package": "lash-internal-lashlang"
+      "kind": "bin",
+      "label": "//examples/agent-service:agent-service__fv_49a9f56c",
+      "package": "agent-service"
     },
     {
       "features": [
         "restate"
       ],
       "kind": "bin",
-      "label": "//examples/agent-service:agent-service__fv_25c97c0e",
+      "label": "//examples/agent-service:agent-service__fv_a7f26781",
       "package": "agent-service"
     },
     {
       "features": [],
-      "kind": "bin",
-      "label": "//examples/agent-service:agent-service__fv_c37b7586",
+      "kind": "bin-unit-test",
+      "label": "//examples/agent-service:agent-service__unit_test__fv_49a9f56c",
       "package": "agent-service"
     },
     {
@@ -16661,13 +16140,13 @@
         "restate"
       ],
       "kind": "bin-unit-test",
-      "label": "//examples/agent-service:agent-service__unit_test__fv_25c97c0e",
+      "label": "//examples/agent-service:agent-service__unit_test__fv_a7f26781",
       "package": "agent-service"
     },
     {
       "features": [],
-      "kind": "bin-unit-test",
-      "label": "//examples/agent-service:agent-service__unit_test__fv_c37b7586",
+      "kind": "test",
+      "label": "//examples/agent-service:fresh_boot__test__fv_49a9f56c",
       "package": "agent-service"
     },
     {
@@ -16675,27 +16154,27 @@
         "restate"
       ],
       "kind": "test",
-      "label": "//examples/agent-service:fresh_boot__test__fv_25c97c0e",
+      "label": "//examples/agent-service:fresh_boot__test__fv_a7f26781",
       "package": "agent-service"
     },
     {
       "features": [],
-      "kind": "test",
-      "label": "//examples/agent-service:fresh_boot__test__fv_c37b7586",
-      "package": "agent-service"
+      "kind": "bin",
+      "label": "//examples/agent-workbench:agent-workbench__fv_782b5a81",
+      "package": "agent-workbench"
     },
     {
       "features": [
         "provider-wire-fixtures"
       ],
       "kind": "bin",
-      "label": "//examples/agent-workbench:agent-workbench__fv_8d652ec9",
+      "label": "//examples/agent-workbench:agent-workbench__fv_bc4abf6c",
       "package": "agent-workbench"
     },
     {
       "features": [],
-      "kind": "bin",
-      "label": "//examples/agent-workbench:agent-workbench__fv_fbf68d16",
+      "kind": "bin-unit-test",
+      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_782b5a81",
       "package": "agent-workbench"
     },
     {
@@ -16703,13 +16182,7 @@
         "provider-wire-fixtures"
       ],
       "kind": "bin-unit-test",
-      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_8d652ec9",
-      "package": "agent-workbench"
-    },
-    {
-      "features": [],
-      "kind": "bin-unit-test",
-      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_fbf68d16",
+      "label": "//examples/agent-workbench:agent-workbench__unit_test__fv_bc4abf6c",
       "package": "agent-workbench"
     },
     {
@@ -16717,7 +16190,7 @@
         "e2e"
       ],
       "kind": "test",
-      "label": "//examples/slack-clone:mcp__test__fv_e01027d1",
+      "label": "//examples/slack-clone:mcp__test__fv_5ab25c31",
       "package": "slack-clone"
     },
     {
@@ -16725,13 +16198,13 @@
         "live-e2e"
       ],
       "kind": "test",
-      "label": "//examples/slack-clone:mcp__test__fv_e1d4fabc",
+      "label": "//examples/slack-clone:mcp__test__fv_c10b662f",
       "package": "slack-clone"
     },
     {
       "features": [],
       "kind": "test",
-      "label": "//examples/slack-clone:mcp__test__fv_e9ad9b1c",
+      "label": "//examples/slack-clone:mcp__test__fv_dff5559e",
       "package": "slack-clone"
     },
     {
@@ -16739,7 +16212,7 @@
         "e2e"
       ],
       "kind": "bin",
-      "label": "//examples/slack-clone:slack-clone-bot__bin__fv_e01027d1",
+      "label": "//examples/slack-clone:slack-clone-bot__bin__fv_5ab25c31",
       "package": "slack-clone"
     },
     {
@@ -16747,13 +16220,13 @@
         "live-e2e"
       ],
       "kind": "bin",
-      "label": "//examples/slack-clone:slack-clone-bot__bin__fv_e1d4fabc",
+      "label": "//examples/slack-clone:slack-clone-bot__bin__fv_c10b662f",
       "package": "slack-clone"
     },
     {
       "features": [],
       "kind": "bin",
-      "label": "//examples/slack-clone:slack-clone-bot__bin__fv_e9ad9b1c",
+      "label": "//examples/slack-clone:slack-clone-bot__bin__fv_dff5559e",
       "package": "slack-clone"
     },
     {
@@ -16761,7 +16234,7 @@
         "live-e2e"
       ],
       "kind": "bin",
-      "label": "//examples/slack-clone:slack-clone-live-e2e__bin__fv_e1d4fabc",
+      "label": "//examples/slack-clone:slack-clone-live-e2e__bin__fv_c10b662f",
       "package": "slack-clone"
     },
     {
@@ -16769,7 +16242,7 @@
         "live-e2e"
       ],
       "kind": "bin-unit-test",
-      "label": "//examples/slack-clone:slack-clone-live-e2e__bin__unit_test__fv_e1d4fabc",
+      "label": "//examples/slack-clone:slack-clone-live-e2e__bin__unit_test__fv_c10b662f",
       "package": "slack-clone"
     },
     {
@@ -16777,7 +16250,7 @@
         "e2e"
       ],
       "kind": "bin",
-      "label": "//examples/slack-clone:slack-clone-mcp-http-server__bin__fv_e01027d1",
+      "label": "//examples/slack-clone:slack-clone-mcp-http-server__bin__fv_5ab25c31",
       "package": "slack-clone"
     },
     {
@@ -16785,13 +16258,13 @@
         "live-e2e"
       ],
       "kind": "bin",
-      "label": "//examples/slack-clone:slack-clone-mcp-http-server__bin__fv_e1d4fabc",
+      "label": "//examples/slack-clone:slack-clone-mcp-http-server__bin__fv_c10b662f",
       "package": "slack-clone"
     },
     {
       "features": [],
       "kind": "bin",
-      "label": "//examples/slack-clone:slack-clone-mcp-http-server__bin__fv_e9ad9b1c",
+      "label": "//examples/slack-clone:slack-clone-mcp-http-server__bin__fv_dff5559e",
       "package": "slack-clone"
     },
     {
@@ -16799,7 +16272,7 @@
         "e2e"
       ],
       "kind": "bin",
-      "label": "//examples/slack-clone:slack-clone-mcp-server__bin__fv_e01027d1",
+      "label": "//examples/slack-clone:slack-clone-mcp-server__bin__fv_5ab25c31",
       "package": "slack-clone"
     },
     {
@@ -16807,13 +16280,13 @@
         "live-e2e"
       ],
       "kind": "bin",
-      "label": "//examples/slack-clone:slack-clone-mcp-server__bin__fv_e1d4fabc",
+      "label": "//examples/slack-clone:slack-clone-mcp-server__bin__fv_c10b662f",
       "package": "slack-clone"
     },
     {
       "features": [],
       "kind": "bin",
-      "label": "//examples/slack-clone:slack-clone-mcp-server__bin__fv_e9ad9b1c",
+      "label": "//examples/slack-clone:slack-clone-mcp-server__bin__fv_dff5559e",
       "package": "slack-clone"
     },
     {
@@ -16821,7 +16294,7 @@
         "e2e"
       ],
       "kind": "bin",
-      "label": "//examples/slack-clone:slack-clone-platform__bin__fv_e01027d1",
+      "label": "//examples/slack-clone:slack-clone-platform__bin__fv_5ab25c31",
       "package": "slack-clone"
     },
     {
@@ -16829,13 +16302,13 @@
         "live-e2e"
       ],
       "kind": "bin",
-      "label": "//examples/slack-clone:slack-clone-platform__bin__fv_e1d4fabc",
+      "label": "//examples/slack-clone:slack-clone-platform__bin__fv_c10b662f",
       "package": "slack-clone"
     },
     {
       "features": [],
       "kind": "bin",
-      "label": "//examples/slack-clone:slack-clone-platform__bin__fv_e9ad9b1c",
+      "label": "//examples/slack-clone:slack-clone-platform__bin__fv_dff5559e",
       "package": "slack-clone"
     },
     {
@@ -16843,7 +16316,7 @@
         "e2e"
       ],
       "kind": "lib",
-      "label": "//examples/slack-clone:slack-clone__fv_e01027d1",
+      "label": "//examples/slack-clone:slack-clone__fv_5ab25c31",
       "package": "slack-clone"
     },
     {
@@ -16851,13 +16324,13 @@
         "live-e2e"
       ],
       "kind": "lib",
-      "label": "//examples/slack-clone:slack-clone__fv_e1d4fabc",
+      "label": "//examples/slack-clone:slack-clone__fv_c10b662f",
       "package": "slack-clone"
     },
     {
       "features": [],
       "kind": "lib",
-      "label": "//examples/slack-clone:slack-clone__fv_e9ad9b1c",
+      "label": "//examples/slack-clone:slack-clone__fv_dff5559e",
       "package": "slack-clone"
     },
     {
@@ -16865,7 +16338,7 @@
         "e2e"
       ],
       "kind": "unit-test",
-      "label": "//examples/slack-clone:slack-clone__unit_test__fv_e01027d1",
+      "label": "//examples/slack-clone:slack-clone__unit_test__fv_5ab25c31",
       "package": "slack-clone"
     },
     {
@@ -16873,13 +16346,13 @@
         "live-e2e"
       ],
       "kind": "unit-test",
-      "label": "//examples/slack-clone:slack-clone__unit_test__fv_e1d4fabc",
+      "label": "//examples/slack-clone:slack-clone__unit_test__fv_c10b662f",
       "package": "slack-clone"
     },
     {
       "features": [],
       "kind": "unit-test",
-      "label": "//examples/slack-clone:slack-clone__unit_test__fv_e9ad9b1c",
+      "label": "//examples/slack-clone:slack-clone__unit_test__fv_dff5559e",
       "package": "slack-clone"
     }
   ],
@@ -17824,8 +17297,6 @@
     },
     {
       "declared_features": [
-        "default",
-        "lashlang",
         "perf-witness",
         "testing"
       ],
@@ -17857,8 +17328,6 @@
       "manifest": "crates/lash-postgres-store/Cargo.toml",
       "package": "lash-internal-postgres-store",
       "resolved_features": [
-        "default",
-        "lashlang",
         "perf-witness",
         "testing"
       ],
@@ -18560,9 +18029,7 @@
       }
     },
     {
-      "declared_features": [
-        "lashlang"
-      ],
+      "declared_features": [],
       "dependencies": [
         "async-trait",
         "bytes",
@@ -18604,9 +18071,7 @@
       "doc": "//crates/lash-restate:lash-restate__doc",
       "manifest": "crates/lash-restate/Cargo.toml",
       "package": "lash-internal-restate",
-      "resolved_features": [
-        "lashlang"
-      ],
+      "resolved_features": [],
       "targets": [
         {
           "cargo": "lash_restate",
@@ -18878,8 +18343,6 @@
     },
     {
       "declared_features": [
-        "default",
-        "lashlang",
         "perf-witness",
         "testing"
       ],
@@ -18911,8 +18374,6 @@
       "manifest": "crates/lash-sqlite-store/Cargo.toml",
       "package": "lash-internal-sqlite-store",
       "resolved_features": [
-        "default",
-        "lashlang",
         "perf-witness",
         "testing"
       ],

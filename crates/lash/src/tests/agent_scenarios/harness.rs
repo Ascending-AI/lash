@@ -301,16 +301,15 @@ impl AgentScenarioSetup {
             Arc::clone(&prompt_captures),
         );
         let observed_writes = checkpoint_writes.clone();
-        let backend = DecoratedBackend::over_sqlite(memory_backend().await).session_store_factory(
-            move |inner| {
+        let backend =
+            DecoratedBackend::over(memory_backend().await).session_store_factory(move |inner| {
                 Arc::new(
                     lash_core::testing::checkpoint_observer::ObservedSessionStoreFactory::new(
                         inner,
                         observed_writes,
                     ),
                 )
-            },
-        );
+            });
         let factory = rlm_factory(&backend).with_lashlang_execution_sink(
             Arc::clone(&graph_store) as Arc<dyn crate::tracing::TraceSink>
         );

@@ -21,8 +21,10 @@ pub(crate) async fn memory_backend() -> lash_sqlite_store::SqliteBackend {
 }
 
 /// A fresh memory backend's Lashlang artifact store.
-pub(crate) async fn memory_artifact_store() -> Arc<dyn LashlangArtifactStore> {
-    LashlangArtifactBackend::lashlang_artifact_store(&memory_backend().await)
+pub(crate) async fn memory_artifact_store() -> LashlangArtifacts {
+    LashlangArtifacts::new(lash_core::Backend::module_artifacts(
+        &memory_backend().await,
+    ))
 }
 
 #[test]
@@ -950,7 +952,7 @@ async fn process_trace_map_is_obtainable_without_an_execution_started_event() {
     };
 
     let direct = trace_lashlang_process_map(&output.artifact, "scan").expect("direct map");
-    let snapshot = trace_lashlang_process_map_snapshot(store.as_ref(), &input)
+    let snapshot = trace_lashlang_process_map_snapshot(&store, &input)
         .await
         .expect("stored map snapshot");
     assert_eq!(snapshot, direct);
@@ -959,7 +961,7 @@ async fn process_trace_map_is_obtainable_without_an_execution_started_event() {
     let mut missing_process = input.clone();
     missing_process.process_name = "missing".to_string();
     assert!(matches!(
-        trace_lashlang_process_map_snapshot(store.as_ref(), &missing_process).await,
+        trace_lashlang_process_map_snapshot(&store, &missing_process).await,
         Err(TraceLanguageExecutionMapError::ProcessMissing { process_name, .. })
             if process_name == "missing"
     ));
@@ -968,7 +970,7 @@ async fn process_trace_map_is_obtainable_without_an_execution_started_event() {
     let mut missing_artifact = input;
     missing_artifact.module_ref = lashlang::ModuleRef::new(&missing_hash);
     assert!(matches!(
-        trace_lashlang_process_map_snapshot(store.as_ref(), &missing_artifact).await,
+        trace_lashlang_process_map_snapshot(&store, &missing_artifact).await,
         Err(TraceLanguageExecutionMapError::ArtifactMissing(_))
     ));
 }
@@ -1488,11 +1490,11 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
         .publish_module_artifact(&lash_core::ArtifactOwner::host("fixture"), &output.artifact)
         .await
         .expect("module publishes");
-    let artifact_store: Arc<dyn LashlangArtifactStore> = store;
+    let artifact_store: LashlangArtifacts = store;
     let site = test_start_site("child_process:scan", 1);
 
     let first = prepare_lashlang_process_start(
-        Arc::clone(&artifact_store),
+        artifact_store.clone(),
         "parent:root",
         test_process_start(&output, site.clone(), "."),
         lash_core::ProcessOriginator::host(),
@@ -1506,7 +1508,7 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
     .await
     .expect("first start prepares");
     let replayed = prepare_lashlang_process_start(
-        Arc::clone(&artifact_store),
+        artifact_store.clone(),
         "parent:root",
         test_process_start(&output, site.clone(), "."),
         lash_core::ProcessOriginator::host(),
@@ -1520,7 +1522,7 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
     .await
     .expect("replayed start prepares");
     let sibling = prepare_lashlang_process_start(
-        Arc::clone(&artifact_store),
+        artifact_store.clone(),
         "parent:root",
         test_process_start(&output, test_start_site("child_process:scan", 2), "."),
         lash_core::ProcessOriginator::host(),
@@ -1591,7 +1593,7 @@ process scan(root: str) -> str {
             bad_start.process_ref = process_mismatch.process_ref.clone();
         }
         let error = prepare_lashlang_process_start(
-            Arc::clone(&store) as Arc<dyn LashlangArtifactStore>,
+            store.clone(),
             "parent:four-shape",
             bad_start,
             lash_core::ProcessOriginator::host(),
@@ -1647,7 +1649,7 @@ process scan(root: str) -> str {
     );
 
     prepare_lashlang_process_start(
-        Arc::clone(&store) as Arc<dyn LashlangArtifactStore>,
+        store.clone(),
         "parent:four-shape",
         start,
         lash_core::ProcessOriginator::host(),
@@ -1661,7 +1663,7 @@ process scan(root: str) -> str {
     .await
     .expect("the real prepare entry point explicitly omits both live-host fixtures");
 
-    let artifact_store: Arc<dyn LashlangArtifactStore> = store;
+    let artifact_store: LashlangArtifacts = store;
     let cases = [
         (
             requirements_mismatch,
@@ -1716,7 +1718,7 @@ process scan(root: str) -> str {
             registry_available,
         );
         let run_outcome = Box::pin(crate::process::run_lashlang_process(
-            LashlangProcessEngine::new(Arc::clone(&artifact_store), LashlangSurface::default()),
+            LashlangProcessEngine::new(artifact_store.clone(), LashlangSurface::default()),
             context,
             payload,
         ))
@@ -1814,7 +1816,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
             .await
             .expect("module publishes");
     }
-    let artifact_store: Arc<dyn LashlangArtifactStore> = store.clone();
+    let artifact_store: LashlangArtifacts = store.clone();
 
     let start_with = |definition: lashlang::ProcessDefinitionIdentity| {
         let mut envelope = lashlang::Record::new();
@@ -1838,7 +1840,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
     };
 
     prepare_lashlang_process_start(
-        Arc::clone(&artifact_store),
+        artifact_store.clone(),
         "parent:root",
         start_with(
             lashlang::ProcessDefinitionIdentity::from_artifact_export(
@@ -1859,7 +1861,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
     .expect("matching immutable signature passes");
 
     let error = prepare_lashlang_process_start(
-        Arc::clone(&artifact_store),
+        artifact_store.clone(),
         "parent:root",
         start_with(
             lashlang::ProcessDefinitionIdentity::from_artifact_export(
@@ -1904,7 +1906,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
         ),
     ] {
         let error = prepare_lashlang_process_start(
-            Arc::clone(&artifact_store),
+            artifact_store.clone(),
             "parent:root",
             start_with(definition),
             lash_core::ProcessOriginator::host(),
@@ -1934,7 +1936,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
         valid.process_name,
     );
     let error = prepare_lashlang_process_start(
-        Arc::clone(&artifact_store),
+        artifact_store.clone(),
         "parent:root",
         start_with(wrong_ref),
         lash_core::ProcessOriginator::host(),
@@ -2001,7 +2003,7 @@ async fn process_signature_union_accepts_a_later_matching_nonprocess_arm() {
         process_name: "install".to_string(),
         args,
     };
-    let artifact_store: Arc<dyn LashlangArtifactStore> = store;
+    let artifact_store: LashlangArtifacts = store;
 
     prepare_lashlang_process_start(
         artifact_store,
@@ -2186,11 +2188,11 @@ async fn a_prepared_start_records_the_resolved_attempt_bound_and_the_fingerprint
         .publish_module_artifact(&lash_core::ArtifactOwner::host("fixture"), &output.artifact)
         .await
         .expect("module publishes");
-    let artifact_store: Arc<dyn LashlangArtifactStore> = store;
+    let artifact_store: LashlangArtifacts = store;
     let site = test_start_site("child_process:scan", 1);
 
     let prepare = |bound: u32| {
-        let artifact_store = Arc::clone(&artifact_store);
+        let artifact_store = artifact_store.clone();
         let start = test_process_start(&output, site.clone(), ".");
         async move {
             prepare_lashlang_process_start(

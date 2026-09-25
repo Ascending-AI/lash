@@ -370,6 +370,10 @@ pub mod persistence {
     pub use lash_core::store::{
         ConformancePersistence, ConformanceSessionStoreFactory, StoreTestSupport,
     };
+    /// The Lashlang module-artifact port a backend's store set supplies.
+    pub use lash_core::{
+        ArtifactPublicationPause, ArtifactStoreError, DurabilityTier, ModuleArtifactStore,
+    };
     pub use lash_core::{
         AttachmentCondemnation, AttachmentCondemnationPhase, AttachmentCondemnationProvenance,
         AttachmentCondemnationRecord, AttachmentDeleteArming, AttachmentReclamationPolicy,
@@ -403,11 +407,9 @@ pub mod persistence {
         facade_support::ChronologicalEntry, facade_support::ChronologicalPayload,
         facade_support::ChronologicalProjection,
     };
-    /// The Lashlang artifact port a backend supplies to an RLM host.
+    /// The typed view an RLM host reads and writes its module artifacts through.
     #[cfg(feature = "rlm")]
-    pub use lash_lashlang_runtime::{
-        LashlangArtifactBackend, LashlangArtifactStore, LashlangArtifactStoreSet,
-    };
+    pub use lash_lashlang_runtime::LashlangArtifacts;
 }
 
 /// Plugin contracts, manifests, and operation types.

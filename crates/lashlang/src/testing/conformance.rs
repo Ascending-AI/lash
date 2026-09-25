@@ -7,16 +7,16 @@
 use std::future::Future as _;
 use std::sync::Arc;
 
-use lash_core_execution::{ArtifactOwner, ExecutionScope};
+use lash_core_execution::{ArtifactOwner, DurabilityTier, ExecutionScope, ModuleArtifactStore};
 
 use crate::testing::ast_builders as builders;
-use crate::{DurabilityTier, LashlangArtifactStore, ModuleArtifact, TypeExpr};
+use crate::{LashlangArtifacts, ModuleArtifact, TypeExpr};
 
 /// A writer plus a factory that constructs a post-write store handle over the
 /// same durable backing store.
 pub struct ReopenableLashlangArtifactStore {
-    pub open: Arc<dyn LashlangArtifactStore>,
-    pub reopen: Arc<dyn Fn() -> Arc<dyn LashlangArtifactStore> + Send + Sync>,
+    pub open: Arc<dyn ModuleArtifactStore>,
+    pub reopen: Arc<dyn Fn() -> Arc<dyn ModuleArtifactStore> + Send + Sync>,
 }
 
 /// `process <name>(root: str) -> str { finish root }`
@@ -49,7 +49,7 @@ fn execution_owner(id: &str) -> ArtifactOwner {
 /// Prove that a backend fixture returns independent store handles.
 pub async fn lashlang_artifact_store_fresh_instances<F>(make: &F)
 where
-    F: Fn() -> Arc<dyn LashlangArtifactStore>,
+    F: Fn() -> Arc<dyn ModuleArtifactStore>,
 {
     let first = make();
     let second = make();
@@ -61,7 +61,7 @@ where
 
 /// Prove that the store reports the backend's declared durability tier.
 pub async fn lashlang_artifact_store_durability_tier(
-    store: Arc<dyn LashlangArtifactStore>,
+    store: Arc<dyn ModuleArtifactStore>,
     expected_tier: DurabilityTier,
 ) {
     assert_eq!(store.durability_tier(), expected_tier);
@@ -71,7 +71,8 @@ pub async fn lashlang_artifact_store_durability_tier(
     clippy::expect_used,
     reason = "artifact-store conformance law: the test provokes the exact failure path, and each expect asserts the fixture's step, per each message"
 )]
-pub async fn failed_registration_reclaims_staging_owner(store: Arc<dyn LashlangArtifactStore>) {
+pub async fn failed_registration_reclaims_staging_owner(store: Arc<dyn ModuleArtifactStore>) {
+    let store = LashlangArtifacts::new(store);
     let artifact = sample_module_artifact("failed");
     let staged = execution_owner("failed-registration");
     store
@@ -95,7 +96,8 @@ pub async fn failed_registration_reclaims_staging_owner(store: Arc<dyn LashlangA
     clippy::expect_used,
     reason = "artifact-store conformance law exercising owner publish, retain, release and reclaim; each expect asserts one fixture step, per each message"
 )]
-pub async fn owner_lifecycle(store: Arc<dyn LashlangArtifactStore>) {
+pub async fn owner_lifecycle(store: Arc<dyn ModuleArtifactStore>) {
+    let store = LashlangArtifacts::new(store);
     let artifact = sample_module_artifact("alpha");
     let first = ArtifactOwner::host("host-a");
     let second = ArtifactOwner::host("host-b");
@@ -150,7 +152,8 @@ pub async fn owner_lifecycle(store: Arc<dyn LashlangArtifactStore>) {
     clippy::expect_used,
     reason = "artifact-store conformance law: staged publication transfers once and replays idempotently; each expect asserts one fixture step"
 )]
-pub async fn transfer_is_idempotent(store: Arc<dyn LashlangArtifactStore>) {
+pub async fn transfer_is_idempotent(store: Arc<dyn ModuleArtifactStore>) {
+    let store = LashlangArtifacts::new(store);
     let artifact = sample_module_artifact("beta");
     let staged = execution_owner("module-transfer");
     let process = ArtifactOwner::process(lash_core_execution::ProcessRef::new(
@@ -186,7 +189,8 @@ pub async fn transfer_is_idempotent(store: Arc<dyn LashlangArtifactStore>) {
     clippy::expect_used,
     reason = "artifact-store conformance law asserting the retirement fence; each expect asserts one fixture step"
 )]
-pub async fn retirement_fences_late_publication(store: Arc<dyn LashlangArtifactStore>) {
+pub async fn retirement_fences_late_publication(store: Arc<dyn ModuleArtifactStore>) {
+    let store = LashlangArtifacts::new(store);
     let artifact = sample_module_artifact("gamma");
     let abandoned = execution_owner("abandoned-module-writer");
     store
@@ -217,7 +221,8 @@ pub async fn retirement_fences_late_publication(store: Arc<dyn LashlangArtifactS
     clippy::expect_used,
     reason = "artifact-store conformance law on a fenced slow writer; the pause handle and both steps are fixture facts, per each message"
 )]
-pub async fn slow_writer_is_fenced_after_retirement(store: Arc<dyn LashlangArtifactStore>) {
+pub async fn slow_writer_is_fenced_after_retirement(store: Arc<dyn ModuleArtifactStore>) {
+    let store = LashlangArtifacts::new(store);
     let artifact = sample_module_artifact("slow");
     let abandoned = execution_owner("slow-module-writer");
     let pause = store
@@ -251,6 +256,7 @@ pub async fn slow_writer_is_fenced_after_retirement(store: Arc<dyn LashlangArtif
 pub async fn survives_reopen(reopenable: ReopenableLashlangArtifactStore) {
     let ReopenableLashlangArtifactStore { open, reopen } = reopenable;
     let open_identity = Arc::downgrade(&open);
+    let open = LashlangArtifacts::new(open);
     let artifact = sample_module_artifact("epsilon");
     let first = ArtifactOwner::host("reopen-host-first");
     let second = ArtifactOwner::host("reopen-host-second");
@@ -270,6 +276,7 @@ pub async fn survives_reopen(reopenable: ReopenableLashlangArtifactStore) {
         !std::sync::Weak::ptr_eq(&open_identity, &Arc::downgrade(&reopened)),
         "lashlang artifact reopen factory reused the writer handle"
     );
+    let reopened = LashlangArtifacts::new(reopened);
     assert!(
         reopened
             .get_module_artifact(artifact.module_ref())
@@ -294,14 +301,9 @@ pub async fn survives_reopen(reopenable: ReopenableLashlangArtifactStore) {
     );
 }
 
-#[expect(
-    clippy::unwrap_used,
-    reason = "artifact-store conformance law: the hostile literal is appended to a valid ModuleRef prefix, so decoding succeeds by construction here; the store call below asserts the rejection"
-)]
-pub async fn hostile_module_references_are_rejected(store: Arc<dyn LashlangArtifactStore>) {
+pub async fn hostile_module_references_are_rejected(store: Arc<dyn ModuleArtifactStore>) {
     for raw in ["", "nul\0reference"] {
-        let module_ref: crate::ModuleRef = serde_json::from_value(serde_json::json!(raw)).unwrap();
-        assert!(store.get_module_artifact(&module_ref).await.is_err());
+        assert!(store.get_module_artifact(raw).await.is_err());
     }
 }
 
@@ -351,7 +353,8 @@ fn number_module_artifact(value: f64) -> ModuleArtifact {
     clippy::expect_used,
     reason = "artifact-store conformance law: each step's success is the law being asserted"
 )]
-pub async fn alpha_variants_publish_distinct_refs(store: Arc<dyn LashlangArtifactStore>) {
+pub async fn alpha_variants_publish_distinct_refs(store: Arc<dyn ModuleArtifactStore>) {
+    let store = LashlangArtifacts::new(store);
     let owner = ArtifactOwner::host("alpha-variant-test");
     let spawn_child = alpha_variant_module_artifact("spawnChild");
     let load_child = alpha_variant_module_artifact("loadChild");

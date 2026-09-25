@@ -57,10 +57,9 @@ impl From<RestateQueuedWork> for BackendQueuedWork {
 /// Its binding identity is the Restate authority's, the one the effect host's
 /// turn-control binding and await-event keys derive from.
 ///
-/// `S` is the store set's type. A backend over a store set that also keeps
-/// Lashlang module artifacts (feature `lashlang`) is a
-/// `LashlangArtifactBackend` and hands out that store set's artifact store, so
-/// an RLM host reads its artifacts from the substrate it journals beside.
+/// `S` is the store set's type. The backend hands out that store set's
+/// Lashlang artifact store, so an RLM host reads its artifacts from the
+/// substrate it journals beside.
 pub struct RestateBackend<S: ?Sized + StoreSet = dyn StoreSet> {
     stores: Arc<S>,
     connection: RestateConnection,
@@ -230,23 +229,18 @@ impl<S: ?Sized + StoreSet> lash_core::Backend for RestateBackend<S> {
         self.stores.attachment_store()
     }
 
+    /// The store set this backend journals beside keeps its Lashlang module
+    /// artifacts.
+    fn module_artifacts(&self) -> Arc<dyn lash_core::ModuleArtifactStore> {
+        self.stores.module_artifacts()
+    }
+
     fn process_work(&self) -> Option<lash_core::ProcessWorkWiring> {
         Some(self.process.process_work())
     }
 
     fn queued_work(&self) -> BackendQueuedWork {
         self.queued_work.clone()
-    }
-}
-
-/// The store set this backend journals beside keeps its Lashlang module
-/// artifacts.
-#[cfg(feature = "lashlang")]
-impl<S: ?Sized + lashlang::LashlangArtifactStoreSet> lashlang::LashlangArtifactBackend
-    for RestateBackend<S>
-{
-    fn lashlang_artifact_store(&self) -> Arc<dyn lashlang::LashlangArtifactStore> {
-        self.stores.lashlang_artifact_store()
     }
 }
 

@@ -619,8 +619,7 @@ impl PostgresTriggerStore {
 #[derive(Clone)]
 pub struct PostgresLashlangArtifactStore {
     pool: PgPool,
-    #[cfg(feature = "lashlang")]
-    publication_pause: Arc<std::sync::Mutex<Option<lashlang::ArtifactPublicationPause>>>,
+    publication_pause: Arc<std::sync::Mutex<Option<lash_core_execution::ArtifactPublicationPause>>>,
 }
 
 /// Connection-pool and per-connection timeout knobs for [`PostgresStorage`].
@@ -1083,7 +1082,6 @@ impl PostgresStorage {
     pub fn lashlang_artifact_store(&self) -> PostgresLashlangArtifactStore {
         PostgresLashlangArtifactStore {
             pool: self.pool.clone(),
-            #[cfg(feature = "lashlang")]
             publication_pause: Arc::new(std::sync::Mutex::new(None)),
         }
     }
@@ -1091,7 +1089,6 @@ impl PostgresStorage {
     pub fn process_env_store(&self) -> PostgresLashlangArtifactStore {
         PostgresLashlangArtifactStore {
             pool: self.pool.clone(),
-            #[cfg(feature = "lashlang")]
             publication_pause: Arc::new(std::sync::Mutex::new(None)),
         }
     }

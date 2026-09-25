@@ -611,7 +611,7 @@ lash_conformance::artifact_store_reopenable_tests!({
                 .expect("open first Postgres artifact pool");
             let open = lash_conformance::fused_artifact_store::ArtifactStoreHandles {
                 artifacts: Arc::new(open_storage.lashlang_artifact_store())
-                    as Arc<dyn lashlang::LashlangArtifactStore>,
+                    as Arc<dyn lash_core::ModuleArtifactStore>,
                 process_env: Arc::new(open_storage.process_env_store())
                     as Arc<dyn ProcessExecutionEnvStore>,
             };
@@ -627,7 +627,7 @@ lash_conformance::artifact_store_reopenable_tests!({
                     });
                     lash_conformance::fused_artifact_store::ArtifactStoreHandles {
                         artifacts: Arc::new(reopened.lashlang_artifact_store())
-                            as Arc<dyn lashlang::LashlangArtifactStore>,
+                            as Arc<dyn lash_core::ModuleArtifactStore>,
                         process_env: Arc::new(reopened.process_env_store())
                             as Arc<dyn ProcessExecutionEnvStore>,
                     }

@@ -86,8 +86,7 @@ fn assert_exact_globals(state: &RlmExecutionState, names: &[&str], after: &str) 
 
 /// A cell context whose tool surface can start a process.
 async fn process_context() -> lash_core::RuntimeExecutionContext<'static> {
-    let artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
-        crate::testing::memory_artifact_store().await;
+    let artifact_store: lashlang::LashlangArtifacts = crate::testing::memory_artifact_store().await;
     let backend = memory_backend().await;
     let process_env_store = backend.process_env_store();
     let effect_host = backend.effect_host();

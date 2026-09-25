@@ -91,7 +91,7 @@ const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
 /// Lashlang artifacts, with the handles on its stores that the service's own
 /// retention pass uses.
 struct ServiceBackend {
-    backend: Arc<dyn lash::persistence::LashlangArtifactBackend>,
+    backend: Arc<dyn lash::Backend>,
     store_factory: Arc<lash_sqlite_store::SqliteSessionStoreFactory>,
     attachment_store: Arc<dyn lash::persistence::AttachmentStore>,
 }

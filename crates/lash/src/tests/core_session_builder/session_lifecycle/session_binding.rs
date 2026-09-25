@@ -146,7 +146,7 @@ async fn resume_preserves_the_parked_lifecycle_owner_with_the_same_lease_identit
 
 #[tokio::test]
 async fn session_delete_context_retries_after_storage_tombstone() -> Result<()> {
-    let backend = DecoratedBackend::over_sqlite(memory_backend().await)
+    let backend = DecoratedBackend::over(memory_backend().await)
         .effect_host(|inner| Arc::new(FailOnceRetirementHost::over(inner)));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         Arc::new(backend),

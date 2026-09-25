@@ -15,7 +15,7 @@ bytes = { workspace = true }
 chrono = { workspace = true }
 dotenvy = "0.15"
 futures-util = { workspace = true }
-lash-restate = { workspace = true, optional = true, features = ["lashlang"] }
+lash-restate = { workspace = true, optional = true }
 lash-remote-protocol = { workspace = true }
 lash-protocol-rlm = { workspace = true }
 lash-plugin-process-controls = { workspace = true }

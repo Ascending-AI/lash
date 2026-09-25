@@ -12,13 +12,14 @@ enum HostSetupFailureSite {
 struct FailingArtifactStore;
 
 #[async_trait::async_trait]
-impl lashlang::LashlangArtifactStore for FailingArtifactStore {
+impl lash_core::ModuleArtifactStore for FailingArtifactStore {
     async fn publish_module_artifact(
         &self,
         _owner: &lash_core::ArtifactOwner,
-        _artifact: &lashlang::ModuleArtifact,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        Err(lashlang::ArtifactStoreError::Backend(
+        _module_ref: &str,
+        _bytes: &[u8],
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        Err(lash_core::ArtifactStoreError::Backend(
             "injected artifact store failure".to_string(),
         ))
     }
@@ -26,9 +27,9 @@ impl lashlang::LashlangArtifactStore for FailingArtifactStore {
     async fn retain_module_artifact(
         &self,
         _owner: &lash_core::ArtifactOwner,
-        _module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        Err(lashlang::ArtifactStoreError::Backend(
+        _module_ref: &str,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        Err(lash_core::ArtifactStoreError::Backend(
             "injected artifact store failure".to_string(),
         ))
     }
@@ -37,9 +38,9 @@ impl lashlang::LashlangArtifactStore for FailingArtifactStore {
         &self,
         _from: &lash_core::ArtifactOwner,
         _to: &lash_core::ArtifactOwner,
-        _module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        Err(lashlang::ArtifactStoreError::Backend(
+        _module_ref: &str,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        Err(lash_core::ArtifactStoreError::Backend(
             "injected artifact store failure".to_string(),
         ))
     }
@@ -47,9 +48,9 @@ impl lashlang::LashlangArtifactStore for FailingArtifactStore {
     async fn release_module_artifact(
         &self,
         _owner: &lash_core::ArtifactOwner,
-        _module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        Err(lashlang::ArtifactStoreError::Backend(
+        _module_ref: &str,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        Err(lash_core::ArtifactStoreError::Backend(
             "injected artifact store failure".to_string(),
         ))
     }
@@ -57,16 +58,16 @@ impl lashlang::LashlangArtifactStore for FailingArtifactStore {
     async fn retire_module_artifact_owner(
         &self,
         _owner: &lash_core::ArtifactOwner,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        Err(lashlang::ArtifactStoreError::Backend(
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        Err(lash_core::ArtifactStoreError::Backend(
             "injected artifact store failure".to_string(),
         ))
     }
 
     async fn get_module_artifact(
         &self,
-        _module_ref: &lashlang::ModuleRef,
-    ) -> Result<Option<Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError> {
+        _module_ref: &str,
+    ) -> Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
         Ok(None)
     }
 }
@@ -113,7 +114,7 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
         language: "typescript".to_string(),
         code: "finish(1);".to_string(),
     };
-    let mut artifact_store: Arc<dyn lashlang::LashlangArtifactStore> =
+    let mut artifact_store: lashlang::LashlangArtifacts =
         crate::testing::memory_artifact_store().await;
     let mut surface = LashlangSurface::default();
     let mut deferred_resolver = None;
@@ -153,7 +154,7 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
             request.code = r#"const worker = async () => { return null; };
             finish(null);"#
                 .to_string();
-            artifact_store = Arc::new(FailingArtifactStore);
+            artifact_store = lashlang::LashlangArtifacts::new(Arc::new(FailingArtifactStore));
             surface = LashlangSurface::new(
                 lashlang::LashlangAbilities::default(),
                 lashlang::LashlangLanguageFeatures::default(),

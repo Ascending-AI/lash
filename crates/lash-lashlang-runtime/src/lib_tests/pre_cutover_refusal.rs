@@ -84,24 +84,25 @@ impl lash_core::RuntimeEffectController for CrossingCounter {
     }
 }
 
-/// An artifact store that serves stored bytes through the same decoder, and
-/// the same error mapping, the SQLite and PostgreSQL stores' reads use.
+/// An artifact store that serves stored bytes, which the typed view decodes
+/// through the same decoder, and the same error mapping, as every store's.
 struct StoredBytesArtifactStore {
     bytes: &'static [u8],
 }
 
 #[async_trait::async_trait]
-impl lashlang::LashlangArtifactStore for StoredBytesArtifactStore {
-    fn durability_tier(&self) -> lashlang::DurabilityTier {
-        lashlang::DurabilityTier::Durable
+impl lash_core::ModuleArtifactStore for StoredBytesArtifactStore {
+    fn durability_tier(&self) -> lash_core::DurabilityTier {
+        lash_core::DurabilityTier::Durable
     }
 
     async fn publish_module_artifact(
         &self,
         _owner: &lash_core::ArtifactOwner,
-        _artifact: &lashlang::ModuleArtifact,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        Err(lashlang::ArtifactStoreError::Backend(
+        _module_ref: &str,
+        _bytes: &[u8],
+    ) -> Result<(), lash_core::ArtifactStoreError> {
+        Err(lash_core::ArtifactStoreError::Backend(
             "read-only predecessor store".to_string(),
         ))
     }
@@ -109,8 +110,8 @@ impl lashlang::LashlangArtifactStore for StoredBytesArtifactStore {
     async fn retain_module_artifact(
         &self,
         _owner: &lash_core::ArtifactOwner,
-        _module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+        _module_ref: &str,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
         Ok(())
     }
 
@@ -118,33 +119,31 @@ impl lashlang::LashlangArtifactStore for StoredBytesArtifactStore {
         &self,
         _from: &lash_core::ArtifactOwner,
         _to: &lash_core::ArtifactOwner,
-        _module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+        _module_ref: &str,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
         Ok(())
     }
 
     async fn release_module_artifact(
         &self,
         _owner: &lash_core::ArtifactOwner,
-        _module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+        _module_ref: &str,
+    ) -> Result<(), lash_core::ArtifactStoreError> {
         Ok(())
     }
 
     async fn retire_module_artifact_owner(
         &self,
         _owner: &lash_core::ArtifactOwner,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+    ) -> Result<(), lash_core::ArtifactStoreError> {
         Ok(())
     }
 
     async fn get_module_artifact(
         &self,
-        _module_ref: &lashlang::ModuleRef,
-    ) -> Result<Option<Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError> {
-        lashlang::ModuleArtifact::from_store_bytes(self.bytes)
-            .map(|artifact| Some(Arc::new(artifact)))
-            .map_err(lashlang::ArtifactStoreError::from)
+        _module_ref: &str,
+    ) -> Result<Option<Vec<u8>>, lash_core::ArtifactStoreError> {
+        Ok(Some(self.bytes.to_vec()))
     }
 }
 
@@ -156,7 +155,7 @@ struct RefusedRun {
 
 /// Run one process through `run_lashlang_process` behind a crossing counter.
 async fn run_counted(
-    store: Arc<dyn lashlang::LashlangArtifactStore>,
+    store: lashlang::LashlangArtifacts,
     input: &LashlangProcessInput,
     handover: Option<lash_core::SegmentHandover>,
 ) -> RefusedRun {
@@ -277,8 +276,8 @@ async fn pre_fig3571_module_artifact_is_a_typed_terminal_before_any_effect() {
     let decode = lashlang::ModuleArtifact::from_store_bytes(MODULE_ARTIFACT_PRE_FIG3571)
         .expect_err("the predecessor artifact must not decode under the carrier IR");
     assert!(matches!(
-        lashlang::ArtifactStoreError::from(decode),
-        lashlang::ArtifactStoreError::Decode(_)
+        lash_core::ArtifactStoreError::from(decode),
+        lash_core::ArtifactStoreError::Decode(_)
     ));
     let (process_name, process_ref) = stored["exports"]["processes"]
         .as_object()
@@ -295,9 +294,9 @@ async fn pre_fig3571_module_artifact_is_a_typed_terminal_before_any_effect() {
     };
 
     let run = run_counted(
-        Arc::new(StoredBytesArtifactStore {
+        lashlang::LashlangArtifacts::new(Arc::new(StoredBytesArtifactStore {
             bytes: MODULE_ARTIFACT_PRE_FIG3571,
-        }),
+        })),
         &input,
         None,
     )
@@ -312,7 +311,7 @@ async fn pre_fig3571_module_artifact_is_a_typed_terminal_before_any_effect() {
 
 /// A sleep process the current build published, for the handover cases: were
 /// it resumed, its first act would be a sleep effect.
-async fn published_sleep_process() -> (Arc<dyn LashlangArtifactStore>, LashlangProcessInput) {
+async fn published_sleep_process() -> (LashlangArtifacts, LashlangProcessInput) {
     let store = crate::lib_tests::memory_artifact_store().await;
     let environment = LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),

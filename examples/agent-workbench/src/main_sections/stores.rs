@@ -3,12 +3,12 @@ use super::*;
 /// The workbench's Restate backend: the Restate engine host over a store set
 /// that also keeps the RLM factory's Lashlang artifacts.
 pub(crate) type WorkbenchRestateBackend =
-    lash_restate::RestateBackend<dyn lash::persistence::LashlangArtifactStoreSet>;
+    lash_restate::RestateBackend<dyn lash::durability::StoreSet>;
 
 /// The SQL store set the workbench runs its Restate backend over: SQLite
 /// under the data directory, or PostgreSQL when a database URL is configured.
 pub(crate) struct WorkbenchStores {
-    pub(crate) stores: Arc<dyn lash::persistence::LashlangArtifactStoreSet>,
+    pub(crate) stores: Arc<dyn lash::durability::StoreSet>,
     pub(crate) backend: &'static str,
 }
 

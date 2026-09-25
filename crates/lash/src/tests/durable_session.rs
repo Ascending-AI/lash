@@ -1003,7 +1003,7 @@ impl SessionStoreFactory for NoByIdLookupFactory {
 #[tokio::test]
 async fn a_catalog_without_the_by_id_seam_names_the_capability_not_a_missing_session() -> Result<()>
 {
-    let backend = DecoratedBackend::over_sqlite(memory_backend().await)
+    let backend = DecoratedBackend::over(memory_backend().await)
         .session_store_factory(|inner| Arc::new(NoByIdLookupFactory { inner }));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         Arc::new(backend),
@@ -1150,7 +1150,7 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
     let counters = Arc::new(RuntimeBuildCounters::default());
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         Arc::new(
-            DecoratedBackend::over_sqlite(memory_backend().await).process_work({
+            DecoratedBackend::over(memory_backend().await).process_work({
                 let counters = Arc::clone(&counters);
                 move |registry| {
                     lash_core::ProcessWorkWiring::new(

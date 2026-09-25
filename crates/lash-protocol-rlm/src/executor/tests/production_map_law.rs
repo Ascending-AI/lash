@@ -287,7 +287,7 @@ fn node_naming(artifact: &lashlang::ModuleArtifact, marker: &str) -> String {
 }
 
 async fn stored_artifact(
-    store: &dyn lashlang::LashlangArtifactStore,
+    store: &lashlang::LashlangArtifacts,
     module_ref: &str,
 ) -> Arc<lashlang::ModuleArtifact> {
     let module_ref: lashlang::ModuleRef =
@@ -309,7 +309,7 @@ fn production_rlm_map_is_the_compiled_inventory_for_every_loop_kind() {
             panic!("one execution_started event, got {}", maps.len());
         };
         let artifact = stored_artifact(
-            crate::testing::memory_artifact_store().await.as_ref(),
+            &crate::testing::memory_artifact_store().await,
             &started.identity.module_ref,
         )
         .await;
@@ -386,17 +386,17 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
     let path = dir.path().join("artifacts.db");
     // The cell publishes through one store; the engine reads through another
     // opened on the same file, so every module it runs comes back through
-    // the store's decoder.
-    let cell_store: Arc<dyn lashlang::LashlangArtifactStore> = Arc::new(
+    // the decoder.
+    let cell_store = lashlang::LashlangArtifacts::new(Arc::new(
         lash_sqlite_store::Store::open(&path)
             .await
             .expect("open the publishing store"),
-    );
-    let engine_store: Arc<dyn lashlang::LashlangArtifactStore> = Arc::new(
+    ));
+    let engine_store = lashlang::LashlangArtifacts::new(Arc::new(
         lash_sqlite_store::Store::open(&path)
             .await
             .expect("open the engine's store"),
-    );
+    ));
     let sink = Arc::new(RecordingSink::default());
     let backend = memory_backend().await;
     let registry = backend.process_registry();
@@ -417,14 +417,11 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
     let traced_engine = || {
         // The process controls reach the engine through the worker's tool
         // catalog, so its surface carries no copy of them.
-        lash_lashlang_runtime::LashlangProcessEngine::new(
-            Arc::clone(&engine_store),
-            surface.clone(),
-        )
-        .with_execution_trace(
-            Some(sink.clone() as Arc<dyn TraceSink>),
-            TraceContext::default(),
-        )
+        lash_lashlang_runtime::LashlangProcessEngine::new(engine_store.clone(), surface.clone())
+            .with_execution_trace(
+                Some(sink.clone() as Arc<dyn TraceSink>),
+                TraceContext::default(),
+            )
     };
     let runtime_host = lash_core::facade_support::RuntimeHostConfig::new(
         Arc::clone(&backend),
@@ -540,8 +537,7 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
         "the worker and the literal nested in it both run: {names:?}"
     );
     let worker_name = {
-        let artifact =
-            stored_artifact(engine_store.as_ref(), &processes[0].0.identity.module_ref).await;
+        let artifact = stored_artifact(&engine_store, &processes[0].0.identity.module_ref).await;
         artifact
             .ir()
             .declarations
@@ -558,7 +554,7 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
             .expect("the worker is lifted from main")
     };
     for (started, map) in processes {
-        let artifact = stored_artifact(engine_store.as_ref(), &started.identity.module_ref).await;
+        let artifact = stored_artifact(&engine_store, &started.identity.module_ref).await;
         let process_ref = artifact
             .process_ref(&started.identity.entry_name)
             .expect("the executed process is exported")

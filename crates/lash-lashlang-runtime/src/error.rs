@@ -139,7 +139,7 @@ pub enum LashlangRuntimeError {
     #[error("failed to load lashlang module artifact: {source}")]
     LoadArtifact {
         #[source]
-        source: lashlang::ArtifactStoreError,
+        source: lash_core::ArtifactStoreError,
     },
     /// The requested Lashlang module artifact is missing from storage.
     #[error("missing lashlang module artifact `{module_ref}` for process `{process}`")]

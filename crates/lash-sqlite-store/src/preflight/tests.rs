@@ -390,8 +390,6 @@ mod walk {
 
     #[tokio::test]
     async fn module_artifact_surface_reads_the_persisted_json() {
-        use lashlang::LashlangArtifactStore;
-
         let root = super::temp_root();
         let core = root.path().join(crate::DURABLE_CORE_DB_FILE);
         let store = Store::open(&core).await.expect("provision durable core");
@@ -399,14 +397,13 @@ mod walk {
             lashlang::Expr::Finish(Box::new(lashlang::Expr::String("done".into()))),
         ]))
         .expect("a one-statement module forms an artifact");
-        store
+        lashlang::LashlangArtifacts::new(std::sync::Arc::new(store))
             .publish_module_artifact(
                 &lash_core_execution::ArtifactOwner::host("preflight-test"),
                 &artifact,
             )
             .await
             .expect("persist module artifact");
-        drop(store);
 
         let page = SqliteStorePreflight::for_session_store_root(root.path())
             .scan_durable(&DurableScan::first(DurableSurface::ModuleArtifact, 10))

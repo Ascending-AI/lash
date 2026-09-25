@@ -29,8 +29,8 @@ use lash_core_execution::{
 use lash_sansio::{ProcessId, SessionId};
 use std::sync::atomic::Ordering;
 
+use lash_core_execution::ModuleArtifactStore;
 use lash_core_execution::ProcessInput;
-use lashlang::LashlangArtifactStore;
 
 static CHECKPOINT_DATA_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
 static SESSION_LIST_STATEMENT_COUNT: AtomicUsize = AtomicUsize::new(0);
@@ -161,6 +161,8 @@ async fn scope_retirement_recovery_case(failing_store: &str) {
             failing_store == "environment",
         )),
     });
+    let module_artifacts =
+        lashlang::LashlangArtifacts::new(Arc::clone(&module_store) as Arc<dyn ModuleArtifactStore>);
     let engine = Arc::new(FailOnceLashlangRetirementEngine {
         store: Arc::clone(&module_store),
         retire_failures: std::sync::atomic::AtomicUsize::new(usize::from(
@@ -189,7 +191,7 @@ async fn scope_retirement_recovery_case(failing_store: &str) {
     // process cleanup(value: str) -> str { finish value }
     let module = lashlang::ModuleArtifact::from_program(one_process_module("cleanup", "value"))
         .expect("build cleanup module");
-    module_store
+    module_artifacts
         .publish_module_artifact(&owner, &module)
         .await
         .expect("publish execution-owned module");
@@ -290,7 +292,7 @@ async fn scope_retirement_recovery_case(failing_store: &str) {
             .is_none()
     );
     assert!(
-        module_store
+        module_artifacts
             .get_module_artifact(module.module_ref())
             .await
             .expect("read retired module")
@@ -303,7 +305,7 @@ async fn scope_retirement_recovery_case(failing_store: &str) {
             .is_err()
     );
     assert!(
-        module_store
+        module_artifacts
             .publish_module_artifact(&owner, &module)
             .await
             .is_err()
@@ -1141,9 +1143,11 @@ async fn terminal_segment_handover_cleanup_removes_continuation_state() {
 
 #[tokio::test]
 async fn sqlite_lashlang_artifact_store_round_trips_verified_module_artifacts() {
-    let store = crate::test_support::memory_store()
-        .await
-        .expect("memory store");
+    let store = lashlang::LashlangArtifacts::new(Arc::new(
+        crate::test_support::memory_store()
+            .await
+            .expect("memory store"),
+    ));
     // process scan(root: str) -> str { finish root }
     let module = one_process_module("scan", "root");
     let linked = lashlang::LinkedModule::link(
@@ -1179,8 +1183,12 @@ async fn sqlite_lashlang_artifact_store_round_trips_verified_module_artifacts() 
 async fn sqlite_module_cache_does_not_resurrect_artifact_reclaimed_by_another_handle() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("artifacts.db");
-    let releasing = Store::open(&path).await.expect("open releasing store");
-    let cached = Store::open(&path).await.expect("open caching store");
+    let releasing = lashlang::LashlangArtifacts::new(Arc::new(
+        Store::open(&path).await.expect("open releasing store"),
+    ));
+    let cached = lashlang::LashlangArtifacts::new(Arc::new(
+        Store::open(&path).await.expect("open caching store"),
+    ));
     // process cache_probe(root: str) -> str { finish root }
     let module = lashlang::ModuleArtifact::from_program(one_process_module("cache_probe", "root"))
         .expect("build module artifact");

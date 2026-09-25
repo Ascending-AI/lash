@@ -420,7 +420,7 @@ pub async fn run_lashlang_process(
             // way on every attempt: the shared resume-refusal terminal, before
             // any effect, never a retried infrastructure fault. It names the
             // module ref it refused so a drain can find it.
-            Err(lashlang::ArtifactStoreError::Decode(message)) => {
+            Err(lash_core::ArtifactStoreError::Decode(message)) => {
                 tracing::warn!(
                     module_ref = %input.module_ref,
                     error = %message,
@@ -820,7 +820,7 @@ async fn execute_lashlang(
 struct LashlangProcessHost<'run> {
     ctx: lash_core::RuntimeExecutionContext<'run>,
     host_environment: lashlang::LashlangHostEnvironment,
-    artifact_store: Arc<dyn lashlang::LashlangArtifactStore>,
+    artifact_store: lashlang::LashlangArtifacts,
     processes: lash_core::facade_support::ProcessEngineProcessContext,
     process_id: ProcessId,
     /// The one derivation of the ids and key namespace this tier mints,

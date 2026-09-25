@@ -915,8 +915,8 @@ pub(super) async fn segmented_child_await_registration(
         ),
     )
     .expect("link segmented child-await law");
-    lashlang::LashlangArtifactStore::publish_module_artifact(
-        recovery_artifact_store().as_ref(),
+    lashlang::LashlangArtifacts::publish_module_artifact(
+        &recovery_artifact_store(),
         &lash_core::ArtifactOwner::host("restate-workflow-test"),
         &linked.artifact,
     )
@@ -1215,8 +1215,8 @@ pub(super) async fn snapshot_lashlang_registration(
         ),
     )
     .expect("link snapshot lashlang module");
-    lashlang::LashlangArtifactStore::publish_module_artifact(
-        recovery_artifact_store().as_ref(),
+    lashlang::LashlangArtifacts::publish_module_artifact(
+        &recovery_artifact_store(),
         &lash_core::ArtifactOwner::host("restate-workflow-test"),
         &linked_module.artifact,
     )

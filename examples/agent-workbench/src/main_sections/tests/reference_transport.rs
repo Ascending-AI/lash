@@ -471,7 +471,7 @@ pub(crate) async fn recoverable_chat_test_state_with_replay_store(
     if let Some(driver) = queued_work_driver {
         decorated = decorated.with_queued_work(driver);
     }
-    let backend: Arc<dyn lash::persistence::LashlangArtifactBackend> = Arc::new(decorated);
+    let backend: Arc<dyn lash::Backend> = Arc::new(decorated);
     let model = with_workbench_model_capability(
         lash::ModelSpec::builder("test-model")
             .context_window_tokens(context_window_tokens)

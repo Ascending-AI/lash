@@ -64,8 +64,8 @@ async fn two_segment_tool_registration(process_id: &ProcessId) -> ProcessRegistr
         lashlang::LashlangHostEnvironment::new(resources, lashlang::LashlangAbilities::default()),
     )
     .expect("link the two-segment process");
-    lashlang::LashlangArtifactStore::publish_module_artifact(
-        recovery_artifact_store().as_ref(),
+    lashlang::LashlangArtifacts::publish_module_artifact(
+        &recovery_artifact_store(),
         &lash_core::ArtifactOwner::host("restate-substrate-lost"),
         &linked.artifact,
     )

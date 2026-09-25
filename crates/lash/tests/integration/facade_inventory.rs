@@ -53,6 +53,7 @@ use lash::durability::StoreSet as _;
 use lash::durability::ensure_durable_effect_input as _;
 use lash::observe::InMemoryLiveReplayStore as _;
 use lash::persistence::CheckpointKind as _;
+use lash::persistence::DurabilityTier as _;
 use lash::persistence::PendingTurnInputDraft as _;
 use lash::persistence::SessionAttachmentStore as _;
 use lash::persistence::SessionRelation as _;
@@ -161,6 +162,7 @@ use lash::schema::{SchemaContract as _, SchemaProjectionPolicy as _};
 
 #[cfg(feature = "rlm")]
 mod rlm_inventory {
+    use lash::persistence::LashlangArtifacts as _;
     use lash::rlm::LashlangAbilities as _;
     use lash::rlm::LashlangHostEnvironment as _;
     use lash::rlm::LinkedModule as _;
@@ -175,7 +177,6 @@ mod rlm_inventory {
     use lash::rlm::lang::AbilityOp as _;
     use lash::rlm::lang::AbilityResult as _;
     use lash::rlm::lang::ContentHash as _;
-    use lash::rlm::lang::DurabilityTier as _;
     use lash::rlm::lang::Entry as _;
     use lash::rlm::lang::ExecutionEnvironment as _;
     use lash::rlm::lang::ExecutionHost as _;

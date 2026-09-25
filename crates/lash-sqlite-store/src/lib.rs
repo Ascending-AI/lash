@@ -208,10 +208,7 @@ pub struct Store {
     turn_cancel_closure_owner: Option<lash_core_execution::TurnCancelClosureOwnerBinding>,
     session_id: Arc<OnceLock<SessionId>>,
     clock: Arc<dyn lash_core_execution::Clock>,
-    #[cfg(feature = "lashlang")]
-    artifact_cache: Mutex<BTreeMap<lashlang::ModuleRef, Arc<lashlang::ModuleArtifact>>>,
-    #[cfg(feature = "lashlang")]
-    artifact_publication_pause: Mutex<Option<lashlang::ArtifactPublicationPause>>,
+    artifact_publication_pause: Mutex<Option<lash_core_execution::ArtifactPublicationPause>>,
     options: StoreOptions,
     commit_count: AtomicU64,
     process_registry_attached: bool,

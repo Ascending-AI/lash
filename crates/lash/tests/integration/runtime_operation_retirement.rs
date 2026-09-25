@@ -444,6 +444,10 @@ impl lash::Backend for WithHost {
         self.inner.attachment_store()
     }
 
+    fn module_artifacts(&self) -> Arc<dyn lash::persistence::ModuleArtifactStore> {
+        self.inner.module_artifacts()
+    }
+
     fn process_work(&self) -> Option<lash::process::ProcessWorkWiring> {
         self.inner.process_work()
     }

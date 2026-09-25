@@ -4,9 +4,9 @@
 use std::sync::Arc;
 
 use crate::{
-    AttachmentStore, Clock, EffectHost, ProcessContinuationStore, ProcessDefinitionRegistry,
-    ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring, QueuedWorkSubstrate,
-    SessionStoreFactory, TriggerStore,
+    AttachmentStore, Clock, EffectHost, ModuleArtifactStore, ProcessContinuationStore,
+    ProcessDefinitionRegistry, ProcessExecutionEnvStore, ProcessRegistry, ProcessWorkWiring,
+    QueuedWorkSubstrate, SessionStoreFactory, TriggerStore,
 };
 
 /// One substrate: every persistence port a runtime needs and the effect host
@@ -53,6 +53,12 @@ pub trait Backend: Send + Sync {
 
     /// The attachment byte store sessions write through.
     fn attachment_store(&self) -> Arc<dyn AttachmentStore>;
+
+    /// The Lashlang module-artifact store, beside the sessions that write
+    /// its artifacts: an RLM host reads its artifacts from the substrate
+    /// that reopens its sessions, and the artifact cleanup sweep reaches the
+    /// store the sessions wrote.
+    fn module_artifacts(&self) -> Arc<dyn ModuleArtifactStore>;
 
     /// The engine that executes this backend's background processes,
     /// wired over [`Self::process_registry`], when the substrate supplies one
@@ -137,4 +143,7 @@ pub trait StoreSet: Send + Sync {
 
     /// The attachment byte store sessions write through.
     fn attachment_store(&self) -> Arc<dyn AttachmentStore>;
+
+    /// The Lashlang module-artifact store.
+    fn module_artifacts(&self) -> Arc<dyn ModuleArtifactStore>;
 }

@@ -398,8 +398,6 @@ fn linked_module_hash_ignores_unused_host_abilities() {
 
 #[tokio::test]
 async fn module_artifact_store_bytes_reject_corruption() {
-    use crate::LashlangArtifactStore;
-
     // process scan() { finish 1 }
     let linked = LinkedModule::link(
         builders::module(
@@ -413,7 +411,9 @@ async fn module_artifact_store_bytes_reject_corruption() {
         full_host_environment(),
     )
     .expect("link module");
-    let store = crate::InMemoryLashlangArtifactStore::new();
+    let store = crate::LashlangArtifacts::new(std::sync::Arc::new(
+        crate::InMemoryLashlangArtifactStore::new(),
+    ));
 
     store
         .publish_module_artifact(
@@ -433,4 +433,39 @@ async fn module_artifact_store_bytes_reject_corruption() {
     );
 
     assert!(ModuleArtifact::from_store_bytes(b"not json").is_err());
+}
+
+/// The artifact port keys store bytes by the reference its caller names, so a
+/// module's bytes can sit under another module's reference. The typed view
+/// refuses to hand them back as that other module.
+#[tokio::test]
+async fn a_module_stored_under_another_reference_is_refused() {
+    use lash_core_execution::ModuleArtifactStore as _;
+
+    let module = |value: f64| {
+        ModuleArtifact::from_program(builders::program(vec![builders::finish(builders::num(
+            value,
+        ))]))
+        .expect("build module artifact")
+    };
+    let (stored, named) = (module(1.0), module(2.0));
+    let port = std::sync::Arc::new(crate::InMemoryLashlangArtifactStore::new());
+    port.publish_module_artifact(
+        &lash_core_execution::ArtifactOwner::host("misfiled-module"),
+        named.module_ref().as_str(),
+        &stored.to_store_bytes().expect("encode module"),
+    )
+    .await
+    .expect("the port stores bytes under any reference");
+
+    let read = crate::LashlangArtifacts::new(port)
+        .get_module_artifact(named.module_ref())
+        .await;
+    assert!(
+        matches!(
+            read,
+            Err(lash_core_execution::ArtifactStoreError::Decode(_))
+        ),
+        "{read:?}"
+    );
 }

@@ -1,14 +1,13 @@
 //! Shared conformance for durable backends that fuse both artifact-store traits
 //! ADR-0013's engine rebuild path depends on:
-//! [`lashlang::LashlangArtifactStore`] (module artifacts)
+//! [`lash_core::ModuleArtifactStore`] (module artifacts)
 //! and [`lash_core::ProcessExecutionEnvStore`] (process-execution-env blobs).
 //!
-//! The two traits live in independent crates by design (the language crate does
-//! not depend on the runtime kernel, which stays integration-agnostic). This
-//! crate is the only layer depending on both, so the cross-namespace isolation
-//! case — which requires a single store viewed through both traits — lives
-//! here. Per-trait behavior is delegated to each owner's suite so there is one
-//! source of truth for every contract.
+//! Both ports live in the execution kernel, but the module-artifact laws live in
+//! lashlang, which builds the modules they publish. This crate depends on both,
+//! so the cross-namespace isolation case — which requires a single store viewed
+//! through both ports — lives here. Per-port behavior is delegated to each
+//! owner's suite so there is one source of truth for every contract.
 
 use std::sync::Arc;
 
@@ -16,13 +15,13 @@ use crate::ReopenableProcessExecutionEnvStore;
 use lash_core::ProcessExecutionEnvStore;
 use lashlang::testing::ast_builders as b;
 use lashlang::testing::conformance::ReopenableLashlangArtifactStore;
-use lashlang::{LashlangArtifactStore, ModuleArtifact};
+use lashlang::{LashlangArtifacts, ModuleArtifact};
 use pretty_assertions::assert_eq;
 
 /// A durable store accessed through both artifact-store traits over the same
 /// backing storage.
 pub struct ArtifactStoreHandles {
-    pub artifacts: Arc<dyn LashlangArtifactStore>,
+    pub artifacts: Arc<dyn lash_core::ModuleArtifactStore>,
     pub process_env: Arc<dyn ProcessExecutionEnvStore>,
 }
 
@@ -68,7 +67,7 @@ where
 {
     lashlang::testing::conformance::lashlang_artifact_store_durability_tier(
         make().open.artifacts,
-        lashlang::DurabilityTier::Durable,
+        lash_core::DurabilityTier::Durable,
     )
     .await;
 }
@@ -215,6 +214,7 @@ where
     F: Fn() -> ReopenableArtifactStore,
 {
     let handles = make().open;
+    let artifacts = LashlangArtifacts::new(handles.artifacts);
     let artifact = sample_module_artifact("delta");
     let env_spec = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::default(),
@@ -224,8 +224,7 @@ where
     let env_bytes = env_spec.to_store_bytes().expect("encode env");
     let owner = lash_core::ArtifactOwner::host("fused-conformance");
 
-    handles
-        .artifacts
+    artifacts
         .publish_module_artifact(&owner, &artifact)
         .await
         .expect("publish module artifact");
@@ -235,8 +234,7 @@ where
         .await
         .expect("publish process environment");
 
-    let module = handles
-        .artifacts
+    let module = artifacts
         .get_module_artifact(artifact.module_ref())
         .await
         .expect("module artifact isolated from environment writes")

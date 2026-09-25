@@ -19,6 +19,7 @@ pub(crate) struct LawBackend {
     process_definitions: Arc<dyn crate::ProcessDefinitionRegistry>,
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     attachment_store: Arc<dyn crate::AttachmentStore>,
+    module_artifacts: Arc<dyn crate::ModuleArtifactStore>,
     process_work: Option<crate::ProcessWorkWiring>,
     queued_work: crate::BackendQueuedWork,
 }
@@ -36,6 +37,7 @@ impl LawBackend {
             process_definitions: backend.process_definition_registry(),
             process_env_store: backend.process_env_store(),
             attachment_store: backend.attachment_store(),
+            module_artifacts: backend.module_artifacts(),
             process_work: backend.process_work(),
             queued_work: backend.queued_work(),
         }
@@ -59,6 +61,7 @@ impl LawBackend {
             process_definitions: stores.process_definition_registry(),
             process_env_store: stores.process_env_store(),
             attachment_store: stores.attachment_store(),
+            module_artifacts: stores.module_artifacts(),
             process_work: None,
             queued_work: crate::BackendQueuedWork::Disabled,
         }
@@ -170,6 +173,10 @@ impl crate::Backend for LawBackend {
         Arc::clone(&self.attachment_store)
     }
 
+    fn module_artifacts(&self) -> Arc<dyn crate::ModuleArtifactStore> {
+        Arc::clone(&self.module_artifacts)
+    }
+
     fn process_work(&self) -> Option<crate::ProcessWorkWiring> {
         self.process_work.clone()
     }
@@ -267,6 +274,10 @@ impl crate::Backend for StoreLawBackend {
 
     fn attachment_store(&self) -> Arc<dyn crate::AttachmentStore> {
         Arc::new(crate::attachments::UnavailableAttachmentStore)
+    }
+
+    fn module_artifacts(&self) -> Arc<dyn crate::ModuleArtifactStore> {
+        Self::no_second_substrate("Lashlang artifact store")
     }
 
     fn process_work(&self) -> Option<crate::ProcessWorkWiring> {

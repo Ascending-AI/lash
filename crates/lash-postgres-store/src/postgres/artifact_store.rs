@@ -145,15 +145,16 @@ impl ArtifactStoreFailure {
         }
     }
 
-    #[cfg(feature = "lashlang")]
-    fn into_artifact_store_error(self) -> lashlang::ArtifactStoreError {
+    fn into_artifact_store_error(self) -> lash_core_execution::ArtifactStoreError {
         match self {
-            Self::OwnerRetired => lashlang::ArtifactStoreError::OwnerRetired,
-            Self::DestinationOwnerRetired => lashlang::ArtifactStoreError::DestinationOwnerRetired,
-            Self::StagingEdgeMissing { artifact } => {
-                lashlang::ArtifactStoreError::StagingEdgeMissing { artifact }
+            Self::OwnerRetired => lash_core_execution::ArtifactStoreError::OwnerRetired,
+            Self::DestinationOwnerRetired => {
+                lash_core_execution::ArtifactStoreError::DestinationOwnerRetired
             }
-            Self::Backend(message) => lashlang::ArtifactStoreError::Backend(message),
+            Self::StagingEdgeMissing { artifact } => {
+                lash_core_execution::ArtifactStoreError::StagingEdgeMissing { artifact }
+            }
+            Self::Backend(message) => lash_core_execution::ArtifactStoreError::Backend(message),
         }
     }
 }
@@ -514,11 +515,12 @@ impl PostgresLashlangArtifactStore {
     }
 }
 
-#[cfg(feature = "lashlang")]
 #[async_trait::async_trait]
-impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
-    fn pause_next_publication_for_testing(&self) -> Option<lashlang::ArtifactPublicationPause> {
-        let pause = lashlang::ArtifactPublicationPause::default();
+impl lash_core_execution::ModuleArtifactStore for PostgresLashlangArtifactStore {
+    fn pause_next_publication_for_testing(
+        &self,
+    ) -> Option<lash_core_execution::ArtifactPublicationPause> {
+        let pause = lash_core_execution::ArtifactPublicationPause::default();
         *self
             .publication_pause
             .lock()
@@ -526,23 +528,21 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
         Some(pause)
     }
 
-    fn durability_tier(&self) -> lashlang::DurabilityTier {
-        lashlang::DurabilityTier::Durable
+    fn durability_tier(&self) -> lash_core_execution::DurabilityTier {
+        lash_core_execution::DurabilityTier::Durable
     }
 
     async fn publish_module_artifact(
         &self,
         owner: &lash_core_execution::ArtifactOwner,
-        artifact: &lashlang::ModuleArtifact,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        if !crate::namespace::is_valid_opaque_key(artifact.module_ref().as_str()) {
-            return Err(lashlang::ArtifactStoreError::Backend(
+        module_ref: &str,
+        bytes: &[u8],
+    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(module_ref) {
+            return Err(lash_core_execution::ArtifactStoreError::Backend(
                 "invalid module reference".into(),
             ));
         }
-        let bytes = artifact
-            .to_store_bytes()
-            .map_err(lashlang::ArtifactStoreError::from)?;
         let publication_pause = self
             .publication_pause
             .lock()
@@ -551,22 +551,17 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
         if let Some(pause) = publication_pause {
             pause.pause().await;
         }
-        self.publish_namespaced_bytes(
-            MODULE_ARTIFACT_NAMESPACE,
-            artifact.module_ref().as_str(),
-            &bytes,
-            owner,
-        )
-        .await
-        .map_err(ArtifactStoreFailure::into_artifact_store_error)
+        self.publish_namespaced_bytes(MODULE_ARTIFACT_NAMESPACE, module_ref, bytes, owner)
+            .await
+            .map_err(ArtifactStoreFailure::into_artifact_store_error)
     }
 
     async fn retain_module_artifact(
         &self,
         owner: &lash_core_execution::ArtifactOwner,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        self.retain_namespaced_bytes(MODULE_ARTIFACT_NAMESPACE, module_ref.as_str(), owner)
+        module_ref: &str,
+    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
+        self.retain_namespaced_bytes(MODULE_ARTIFACT_NAMESPACE, module_ref, owner)
             .await
             .map_err(ArtifactStoreFailure::into_artifact_store_error)
     }
@@ -575,9 +570,9 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
         &self,
         from: &lash_core_execution::ArtifactOwner,
         to: &lash_core_execution::ArtifactOwner,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        self.transfer_namespaced_owner(MODULE_ARTIFACT_NAMESPACE, module_ref.as_str(), from, to)
+        module_ref: &str,
+    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
+        self.transfer_namespaced_owner(MODULE_ARTIFACT_NAMESPACE, module_ref, from, to)
             .await
             .map_err(ArtifactStoreFailure::into_artifact_store_error)
     }
@@ -585,9 +580,9 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
     async fn release_module_artifact(
         &self,
         owner: &lash_core_execution::ArtifactOwner,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
-        self.release_namespaced_owner(MODULE_ARTIFACT_NAMESPACE, module_ref.as_str(), owner)
+        module_ref: &str,
+    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
+        self.release_namespaced_owner(MODULE_ARTIFACT_NAMESPACE, module_ref, owner)
             .await
             .map_err(ArtifactStoreFailure::into_artifact_store_error)
     }
@@ -595,7 +590,7 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
     async fn retire_module_artifact_owner(
         &self,
         owner: &lash_core_execution::ArtifactOwner,
-    ) -> Result<(), lashlang::ArtifactStoreError> {
+    ) -> Result<(), lash_core_execution::ArtifactStoreError> {
         self.retire_namespaced_owner(MODULE_ARTIFACT_NAMESPACE, owner)
             .await
             .map_err(ArtifactStoreFailure::into_artifact_store_error)
@@ -603,24 +598,16 @@ impl lashlang::LashlangArtifactStore for PostgresLashlangArtifactStore {
 
     async fn get_module_artifact(
         &self,
-        module_ref: &lashlang::ModuleRef,
-    ) -> Result<Option<Arc<lashlang::ModuleArtifact>>, lashlang::ArtifactStoreError> {
-        if !crate::namespace::is_valid_opaque_key(module_ref.as_str()) {
-            return Err(lashlang::ArtifactStoreError::Backend(
+        module_ref: &str,
+    ) -> Result<Option<Vec<u8>>, lash_core_execution::ArtifactStoreError> {
+        if !crate::namespace::is_valid_opaque_key(module_ref) {
+            return Err(lash_core_execution::ArtifactStoreError::Backend(
                 "invalid module reference".into(),
             ));
         }
-        let bytes = self
-            .get_namespaced_bytes(MODULE_ARTIFACT_NAMESPACE, module_ref.as_str())
+        self.get_namespaced_bytes(MODULE_ARTIFACT_NAMESPACE, module_ref)
             .await
-            .map_err(|err| lashlang::ArtifactStoreError::Backend(err.to_string()))?;
-        bytes
-            .map(|bytes| {
-                lashlang::ModuleArtifact::from_store_bytes(&bytes)
-                    .map(Arc::new)
-                    .map_err(lashlang::ArtifactStoreError::from)
-            })
-            .transpose()
+            .map_err(|err| lash_core_execution::ArtifactStoreError::Backend(err.to_string()))
     }
 }
 

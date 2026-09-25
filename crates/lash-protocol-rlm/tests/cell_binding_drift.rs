@@ -15,7 +15,7 @@ use lash_core::EffectHost;
 /// bare effect host with no backend, so the artifacts get a memory backend of
 /// their own.
 fn rlm_factory(
-    artifacts: &dyn lash_lashlang_runtime::LashlangArtifactBackend,
+    artifacts: &dyn lash_core::Backend,
 ) -> Arc<dyn lash_core::facade_support::PluginFactory> {
     Arc::new(
         lash_protocol_rlm::RlmProtocolPluginFactory::new(
