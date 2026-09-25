@@ -107,6 +107,22 @@ struct PendingBinding {
     assignment: LashExpr,
 }
 
+/// How a `break` bound to an enclosing switch is lowered. The common case
+/// assigns the case block's flag. A `break` that a `finally` clause can carry
+/// — which must cancel the completion already unwinding through it — lowers
+/// to a real `Break` out of the run-once wrapper loop `lower_switch` emits
+/// around that switch's case dispatch.
+pub(super) struct SwitchBreak {
+    flag: String,
+    loop_depth: usize,
+    abrupt: bool,
+    /// The flag a `continue` inside an abrupt-mode case arms before leaving
+    /// the wrapper, so the wrapper's tail can re-`continue` the loop the
+    /// switch really sits in. `None` when no loop encloses the switch, where
+    /// a `continue` is refused outright.
+    continue_flag: Option<String>,
+}
+
 #[derive(Default)]
 struct PositionContext {
     loop_depth: usize,
@@ -137,7 +153,7 @@ struct Lowerer {
     private_bindings: BTreeSet<String>,
     next_function: usize,
     position: PositionContext,
-    switch_breaks: Vec<(String, usize)>,
+    switch_breaks: Vec<SwitchBreak>,
     continue_epilogues: Vec<Option<LashExpr>>,
     process_depth: usize,
     declarations: Vec<Declaration>,
@@ -585,13 +601,17 @@ impl Lowerer {
                 vec![self.lower_switch(discriminant, cases)?]
             }
             Stmt::Break => {
-                if let Some((flag, switch_loop_depth)) = self.switch_breaks.last()
-                    && self.position.loop_depth == *switch_loop_depth
+                if let Some(entry) = self.switch_breaks.last()
+                    && self.position.loop_depth == entry.loop_depth
                 {
-                    vec![LashExpr::Assign {
-                        target: AssignTarget::variable(flag.as_str().into()),
-                        expr: Box::new(LashExpr::Bool(true)),
-                    }]
+                    if entry.abrupt {
+                        vec![LashExpr::Break]
+                    } else {
+                        vec![LashExpr::Assign {
+                            target: AssignTarget::variable(entry.flag.as_str().into()),
+                            expr: Box::new(LashExpr::Bool(true)),
+                        }]
+                    }
                 } else if self.position.loop_depth == 0 {
                     return Err(Diagnostic::new(
                         DiagnosticCode::LoopControlOutsideLoop,
@@ -609,6 +629,20 @@ impl Lowerer {
                         "continue is only valid in a loop",
                         None,
                     ));
+                }
+                if let Some(entry) = self.switch_breaks.last()
+                    && entry.abrupt
+                    && self.position.loop_depth == entry.loop_depth
+                    && let Some(flag) = &entry.continue_flag
+                {
+                    // A case's `continue` reaches the loop enclosing the
+                    // switch, not the wrapper the dispatch runs in: arm the
+                    // flag, leave the wrapper, and the tail emitted under it
+                    // re-`continue`s.
+                    return Ok(vec![
+                        Self::temp_assignment(flag, LashExpr::Bool(true)),
+                        LashExpr::Break,
+                    ]);
                 }
                 vec![
                     self.continue_epilogues

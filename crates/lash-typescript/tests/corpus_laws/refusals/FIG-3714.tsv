@@ -13,3 +13,5 @@ differential:FIG-3714:8	cannot render a collection transform with extra argument
 differential:FIG-3714:9	cannot render a collection transform with extra arguments as TypeScript	an array callback given a thisArg lowers to a transform the printer cannot spell
 differential:FIG-3714:10	cannot render a collection transform with extra arguments as TypeScript	an array callback given a thisArg lowers to a transform the printer cannot spell
 differential:FIG-3714:11	cannot render a collection transform with extra arguments as TypeScript	an array callback given a thisArg lowers to a transform the printer cannot spell
+differential:FIG-3714:12	generated binding `__typescript_0_switch_value` has no authored TypeScript spelling	a switch lowers its discriminant through a generated temporary, which has no authored spelling
+differential:FIG-3714:13	generated binding `__typescript_0_switch_value` has no authored TypeScript spelling	a switch lowers its discriminant through a generated temporary, which has no authored spelling

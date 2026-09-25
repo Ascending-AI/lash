@@ -106,6 +106,68 @@ fn switch_break_makes_the_rest_of_its_consequent_unreachable() {
     );
 }
 
+/// FIG-3714: a `break` a `finally` runs while a `throw` is still unwinding
+/// cancels the pending completion — the exception never leaves the function
+/// and the switch ends. Mirrors the CHECK#3 shape of
+/// `language/statements/try/S12.14_A15.js`.
+#[test]
+fn switch_break_inside_finally_cancels_the_pending_throw() {
+    assert_eq!(
+        finished(
+            "var run = function (value) {\
+               var result = 0;\
+               switch (value) {\
+                 case 0:\
+                   try {\
+                     result += 2;\
+                     throw 'ex';\
+                   } finally {\
+                     break;\
+                   }\
+                 default:\
+                   result += 32;\
+                   break;\
+               }\
+               return result;\
+             };\
+             finish(run(0));"
+        ),
+        Value::Number(2.0)
+    );
+}
+
+/// FIG-3714: inside a switch whose `break` can ride a `finally`, a case's
+/// `continue` still reaches the loop that encloses the switch, not the
+/// dispatch wrapper the switch's `break` targets.
+#[test]
+fn switch_continue_reaches_the_enclosing_loop() {
+    assert_eq!(
+        finished(
+            "var acc = '';\
+             for (var i = 0; i < 3; i++) {\
+               switch (i) {\
+                 case 0:\
+                   acc += 'a';\
+                   continue;\
+                 case 1:\
+                   try {\
+                     acc += 'b';\
+                     throw 'x';\
+                   } finally {\
+                     break;\
+                   }\
+                 case 2:\
+                   acc += 'c';\
+                   continue;\
+               }\
+               acc += 'Z';\
+             }\
+             finish(acc);"
+        ),
+        Value::String("abZc".into())
+    );
+}
+
 /// FIG-3714: a nested `for...in` over a record of records visits every inner
 /// member. Mirrors `language/statements/for-in/S12.6.4_A5.js`.
 #[test]

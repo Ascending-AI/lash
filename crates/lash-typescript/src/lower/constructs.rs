@@ -556,10 +556,11 @@ impl Lowerer {
             }
             if switch_broken.is_none()
                 && Self::may_break_switch(statement)
-                && let Some((flag, depth)) = self.switch_breaks.last()
-                && *depth == self.position.loop_depth
+                && let Some(entry) = self.switch_breaks.last()
+                && !entry.abrupt
+                && entry.loop_depth == self.position.loop_depth
             {
-                switch_broken = Some(flag.clone());
+                switch_broken = Some(entry.flag.clone());
             }
         }
         for internal in flush_ready(&mut pending, &mut available, &mut output) {
@@ -633,11 +634,26 @@ impl Lowerer {
         let value = self.temporary("switch_value");
         let matched = self.temporary("switch_match");
         let broken = self.temporary("switch_broken");
+        // A `break` a `finally` clause can run — while an abrupt completion
+        // is still unwinding — must cancel that completion, which the flag a
+        // plain `break` assigns cannot do. Such a switch lowers its case
+        // dispatch inside a run-once loop so its `break`s are real `Break`s
+        // out of it (FIG-3714).
+        let abrupt = cases.iter().any(|case| {
+            case.consequent
+                .iter()
+                .any(|statement| Self::break_through_finally(statement, false))
+        });
+        let continued =
+            (abrupt && self.position.loop_depth > 0).then(|| self.temporary("switch_continued"));
         let mut output = vec![
             Self::temp_assignment(&value, self.lower_expr(discriminant)?),
             Self::temp_assignment(&matched, LashExpr::Number(-1.0)),
             Self::temp_assignment(&broken, LashExpr::Bool(false)),
         ];
+        if let Some(continued) = &continued {
+            output.push(Self::temp_assignment(continued, LashExpr::Bool(false)));
+        }
         // ECMA-262's CaseBlockEvaluation gives the whole case block one
         // declarative environment, instantiated before the first case test
         // is read: a closure made in one case sees a sibling case's
@@ -686,12 +702,17 @@ impl Lowerer {
                 else_block: Box::new(LashExpr::Undefined),
             });
         }
-        self.switch_breaks
-            .push((broken.clone(), self.position.loop_depth));
+        self.switch_breaks.push(SwitchBreak {
+            flag: broken.clone(),
+            loop_depth: self.position.loop_depth,
+            abrupt,
+            continue_flag: continued.clone(),
+        });
+        let mut dispatch = Vec::with_capacity(cases.len());
         for (index, case) in cases.iter().enumerate() {
             let body =
                 LashExpr::Block(self.lower_statements(&case.consequent, StatementScope::Case)?);
-            output.push(LashExpr::If {
+            dispatch.push(LashExpr::If {
                 condition: Box::new(LashExpr::JavaScriptLogical {
                     left: Box::new(LashExpr::JavaScriptLogical {
                         left: Box::new(LashExpr::JavaScriptBinary {
@@ -715,8 +736,71 @@ impl Lowerer {
         }
         self.switch_breaks.pop();
         self.scopes.pop();
+        if abrupt {
+            dispatch.push(LashExpr::Break);
+            output.push(LashExpr::While {
+                condition: Box::new(LashExpr::Bool(true)),
+                body: Box::new(LashExpr::Block(dispatch)),
+            });
+            if let Some(continued) = &continued {
+                let epilogue = self
+                    .continue_epilogues
+                    .last()
+                    .and_then(Clone::clone)
+                    .unwrap_or(LashExpr::Undefined);
+                output.push(LashExpr::If {
+                    condition: Box::new(Self::variable(continued)),
+                    then_block: Box::new(LashExpr::Block(vec![epilogue, LashExpr::Continue])),
+                    else_block: Box::new(LashExpr::Undefined),
+                });
+            }
+        } else {
+            output.extend(dispatch);
+        }
         output.push(LashExpr::Undefined);
         Ok(LashExpr::Block(output))
+    }
+
+    /// Whether a `break` bound to the enclosing switch — one no nested loop,
+    /// switch or function binds instead — sits under a `finally` clause,
+    /// where it can run while another completion is still unwinding.
+    fn break_through_finally(statement: &Stmt, in_finally: bool) -> bool {
+        match statement.unlabeled() {
+            Stmt::Break => in_finally,
+            Stmt::Block(statements) => statements
+                .iter()
+                .any(|statement| Self::break_through_finally(statement, in_finally)),
+            Stmt::If {
+                consequent,
+                alternate,
+                ..
+            } => {
+                Self::break_through_finally(consequent, in_finally)
+                    || alternate
+                        .as_deref()
+                        .is_some_and(|statement| Self::break_through_finally(statement, in_finally))
+            }
+            Stmt::Try {
+                body,
+                catch,
+                finally,
+            } => {
+                body.iter()
+                    .any(|statement| Self::break_through_finally(statement, in_finally))
+                    || catch.iter().any(|catch| {
+                        catch
+                            .body
+                            .iter()
+                            .any(|statement| Self::break_through_finally(statement, in_finally))
+                    })
+                    || finally.iter().any(|finally| {
+                        finally
+                            .iter()
+                            .any(|statement| Self::break_through_finally(statement, true))
+                    })
+            }
+            _ => false,
+        }
     }
 
     pub(super) fn lower_object_literal(

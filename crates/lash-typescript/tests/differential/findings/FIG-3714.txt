@@ -9,3 +9,5 @@
 (() => [1].flatMap(function () { return [this]; }, 's')[0])()
 (() => { const held = { v: 1 }; return [held].map(function () { return this.target; }, { target: held })[0] === held; })()
 (() => { const seen = []; [1, 2].forEach(function (v) { seen.push(this.t * v); }, { t: 10 }); return seen.join(','); })()
+(() => { const run = (value) => { let result = 0; switch (value) { case 0: try { result += 2; throw 'ex'; } finally { break; } default: result += 32; break; } return result; }; return run(0); })()
+(() => { let acc = ''; for (let i = 0; i < 3; i++) { switch (i) { case 0: acc += 'a'; continue; case 1: try { acc += 'b'; throw 'x'; } finally { break; } case 2: acc += 'c'; continue; } acc += 'Z'; } return acc; })()

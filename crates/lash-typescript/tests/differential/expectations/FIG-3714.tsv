@@ -10,3 +10,5 @@ FIG-3714	8	accept	"(() => { const a = { marker: 1 }; return [1].flatMap(function
 FIG-3714	9	accept	"(() => [1].flatMap(function () { return [this]; }, 's')[0])()"	"s"	-
 FIG-3714	10	accept	"(() => { const held = { v: 1 }; return [held].map(function () { return this.target; }, { target: held })[0] === held; })()"	"true"	-
 FIG-3714	11	accept	"(() => { const seen = []; [1, 2].forEach(function (v) { seen.push(this.t * v); }, { t: 10 }); return seen.join(','); })()"	"10,20"	-
+FIG-3714	12	accept	"(() => { const run = (value) => { let result = 0; switch (value) { case 0: try { result += 2; throw 'ex'; } finally { break; } default: result += 32; break; } return result; }; return run(0); })()"	"2"	-
+FIG-3714	13	accept	"(() => { let acc = ''; for (let i = 0; i < 3; i++) { switch (i) { case 0: acc += 'a'; continue; case 1: try { acc += 'b'; throw 'x'; } finally { break; } case 2: acc += 'c'; continue; } acc += 'Z'; } return acc; })()"	"abZc"	-
