@@ -21,5 +21,7 @@ node crates/lash-typescript/tests/differential/generate.mjs
 
 The generator rewrites every shard, removes a table whose findings file is
 gone, and prints the per-shard and total row counts. It refuses any Node
-version other than the stamped version. Review changes to the inputs and
-generated tables together.
+version other than the stamped version, pins `TZ=UTC` itself, and evaluates
+each row in a fresh realm (`vm.createContext`), so no row can mutate
+another's intrinsics and a `Date` row answers the same whatever timezone the
+host runs in. Review changes to the inputs and generated tables together.

@@ -18,9 +18,16 @@ Regeneration is deliberate and byte-identical, like the expression table's:
 node crates/lash-typescript/tests/differential/sessions/generate.mjs
 ```
 
-The generator refuses any Node other than the stamped version. The mapping
-below is written once, in code, in `realm.mjs`, which both this corpus and the
-generated sessions are answered through.
+The generator refuses any Node other than the stamped version and pins
+`TZ=UTC` itself. The mapping below is written once, in code, in `realm.mjs`,
+which both this corpus and the generated sessions are answered through.
+
+Where a Rust caller starts `oracle.mjs` (writing `generated.json`, the
+longer live runs), the binary resolves as: `LASH_NODE` when set, else the
+mise-installed pinned Node at
+`~/.local/share/mise/installs/node/25.2.1/bin/node` when present, else a
+failure naming both — `kiln run`'s Bazel environment has no `node` on
+`PATH`.
 
 ## The mapping
 
