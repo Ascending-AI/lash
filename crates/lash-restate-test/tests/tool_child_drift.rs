@@ -71,6 +71,26 @@ struct World {
     gate: Arc<tokio::sync::Semaphore>,
     probe_executions: Arc<AtomicUsize>,
     bodies: Arc<AtomicUsize>,
+    /// Gated work an undrifted deployment has in flight: the first
+    /// deployment's probe attempt or orchestrating body, until its future
+    /// ends — it completed, or the crash dropped it.
+    undrifted_in_flight: Arc<AtomicUsize>,
+}
+
+/// Counts one piece of gated work in flight while it lives.
+struct InFlight(Arc<AtomicUsize>);
+
+impl InFlight {
+    fn enter(counter: &Arc<AtomicUsize>) -> Self {
+        counter.fetch_add(1, Ordering::SeqCst);
+        Self(Arc::clone(counter))
+    }
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::SeqCst);
+    }
 }
 
 impl Default for World {
@@ -79,6 +99,7 @@ impl Default for World {
             gate: Arc::new(tokio::sync::Semaphore::new(0)),
             probe_executions: Arc::default(),
             bodies: Arc::default(),
+            undrifted_in_flight: Arc::default(),
         }
     }
 }
@@ -100,6 +121,7 @@ impl lash_core::ToolProvider for ProbeTool {
 
     async fn execute(&self, _call: lash_core::ToolCall<'_>) -> lash_core::ToolAttemptOutcome {
         self.world.probe_executions.fetch_add(1, Ordering::SeqCst);
+        let _in_flight = (!self.drifted).then(|| InFlight::enter(&self.world.undrifted_in_flight));
         let _permit = self
             .world
             .gate
@@ -132,6 +154,7 @@ impl lash_core::facade_support::OrchestratingToolImplementation for OrchTool {
         context: &lash_core::facade_support::OrchestrationContext<'_>,
     ) -> lash_core::ToolOutcome {
         self.world.bodies.fetch_add(1, Ordering::SeqCst);
+        let in_flight = (!self.drifted).then(|| InFlight::enter(&self.world.undrifted_in_flight));
         drop(
             self.world
                 .gate
@@ -139,6 +162,7 @@ impl lash_core::facade_support::OrchestratingToolImplementation for OrchTool {
                 .await
                 .expect("the gate never closes"),
         );
+        drop(in_flight);
         match self.body {
             Body::TwoNestedCalls => {
                 let mut replies = Vec::new();
@@ -321,18 +345,21 @@ async fn start_turn(called: Called) -> Turn {
         let live = Arc::clone(&live);
         let answer = Arc::clone(&answer);
         Arc::new(move |scoped| {
-            let session = live
-                .lock()
-                .unwrap()
-                .as_ref()
-                .map(|deployment| deployment.session.clone());
+            let live = Arc::clone(&live);
             let answer = Arc::clone(&answer);
             Box::pin(async move {
-                let Some(session) = session else {
-                    // Between deployments: nothing serves the turn, as a
-                    // redeploy's gap between two builds does.
-                    std::future::pending::<()>().await;
-                    return;
+                // An attempt that starts between two deployments waits for
+                // the next one, as a request queued across a rollout does.
+                let session = loop {
+                    let current = live
+                        .lock()
+                        .unwrap()
+                        .as_ref()
+                        .map(|deployment| deployment.session.clone());
+                    if let Some(session) = current {
+                        break session;
+                    }
+                    tokio::time::sleep(Duration::from_millis(5)).await;
                 };
                 let output = session
                     .turn(lash::TurnInput::text("call the tool"))
@@ -396,19 +423,41 @@ impl Turn {
         self.backend.server().advance(Duration::from_secs(61));
         self.turn_suspended().await;
         self.redeploy(true).await;
+        // The crash first, and the gate only once the crashed attempt's gated
+        // work is gone: opened any earlier, the first deployment's attempt —
+        // still running under its undrifted context — could pass the gate
+        // and finish the call live before the crash lands, leaving the
+        // drifted deployment only a recorded result to replay.
+        assert!(self.backend.server().crash(&child), "the child is running");
+        tokio::time::timeout(Duration::from_secs(30), async {
+            while self.world.undrifted_in_flight.load(Ordering::SeqCst) > 0 {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the crash drops the first deployment's in-flight attempt");
         self.world
             .gate
             .add_permits(tokio::sync::Semaphore::MAX_PERMITS);
-        assert!(self.backend.server().crash(&child), "the child is running");
         child
     }
 
     /// Replaces the deployment: the old one is dropped first, so exactly one
     /// deployment's context source is installed.
+    ///
+    /// A redeploy kills what the old deployment was running: a turn handler
+    /// attempt in flight keeps the old deployment's session, so it would go
+    /// on serving the turn — and lending its children the old context —
+    /// under the build the redeploy replaced. Its retry runs on the new one.
     async fn redeploy(&self, drifted: bool) {
         drop(self.live.lock().unwrap().take());
         let next = deploy(&self.backend, &self.world, self.called, drifted).await;
         *self.live.lock().unwrap() = Some(next);
+        for view in self.backend.server().invocations() {
+            if view.target.starts_with("LashTestHandlerHost") && view.status == "running" {
+                self.backend.server().crash(&view.id);
+            }
+        }
     }
 
     async fn turn_suspended(&self) {
@@ -447,7 +496,7 @@ impl Turn {
         .await;
         parked.unwrap_or_else(|_| {
             panic!(
-                "the turn parked {attempts} times: {:#?}",
+                "no park with at least {attempts} refusals was recorded: {:#?}",
                 self.backend.server().invocations()
             )
         })
