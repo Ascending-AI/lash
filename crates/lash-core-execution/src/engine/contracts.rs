@@ -30,56 +30,6 @@ pub enum ResolveAck {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Never {}
 
-/// The name of one in-place code change a [`version`] decision gates.
-///
-/// [`version`]: super::EngineContext::version
-#[derive(Debug, PartialEq, Eq, Hash)]
-pub struct ChangeId(&'static str);
-
-impl ChangeId {
-    pub const fn new(name: &'static str) -> Self {
-        Self(name)
-    }
-
-    pub const fn as_str(&self) -> &'static str {
-        self.0
-    }
-}
-
-/// The versions of one change this build can run, `min..=max`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
-pub struct VersionRange {
-    min: u32,
-    max: u32,
-}
-
-impl VersionRange {
-    /// Panics (at compile time in a `const`) when `min > max`.
-    pub const fn new(min: u32, max: u32) -> Self {
-        assert!(min <= max, "a version range's min exceeds its max");
-        Self { min, max }
-    }
-
-    pub const fn min(&self) -> u32 {
-        self.min
-    }
-
-    pub const fn max(&self) -> u32 {
-        self.max
-    }
-
-    pub const fn contains(&self, version: u32) -> bool {
-        self.min <= version && version <= self.max
-    }
-}
-
-/// One recorded version decision.
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct RecordedVersion {
-    pub change: String,
-    pub version: u32,
-}
-
 /// The deployment a drive request is pinned to, so the engine routes a replay
 /// to a compatible build.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -120,8 +70,6 @@ pub struct DriveHandover {
     /// Open groups with their rank cursors.
     pub open_groups: Vec<EffectGroupHandle>,
     pub unresolved_children: Vec<UnresolvedChild>,
-    /// The version decisions still in force.
-    pub versions: Vec<RecordedVersion>,
     pub active_root: Option<RootProgress>,
 }
 

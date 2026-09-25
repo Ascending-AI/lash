@@ -61,7 +61,6 @@ engine's own op type:
 pub trait EngineContext {
     type Op<'a, T: 'a>: DurableOp<T> + 'a where Self: 'a;
     fn now_ms(&self) -> Self::Op<'_, EpochMs>;
-    fn version(&self, change: &'static ChangeId, supported: VersionRange) -> Self::Op<'_, u32>;
     fn observe(&self, observation: DriveObservation);
     fn race<'r, 'a: 'r, 'b: 'r, A: 'a, B: 'b>(
         &'r self,
@@ -484,7 +483,6 @@ carries:
 - a window of already-admitted drive request ids;
 - open groups with their rank cursors;
 - unresolved children with their inherited authority;
-- the version decisions still in force;
 - the active root's progress.
 
 **An oversized single turn** hands over at its next checkpoint boundary, as a
@@ -493,13 +491,10 @@ fold, both by blob reference. If it cannot, it parks as journal-budget
 exhausted ([ADR 0025](0025-bounded-journals-are-an-effect-controller-obligation.md)).
 The contract is frozen now; an engine implements it when it needs it.
 
-**Version decisions.** Both mechanisms are frozen:
-
-- `version(change, supported)` is recorded. A fresh execution takes
-  `supported.max()`, and a replay returns the recorded value. It is for
-  in-place code patches.
-- `DriveRequest.build_generation` pins the deployment, so the engine routes a
-  replay to a compatible build.
+**Version decisions.** `DriveRequest.build_generation` pins the deployment,
+so the engine routes a replay to a compatible build. In-place code patches are
+not supported: a changed drive runs on the next segment on the latest build
+([ADR 0043](0043-hosts-register-immutable-deployments.md), ADR 0106).
 
 Durable format changes keep using the generation gates (§12).
 
@@ -724,7 +719,7 @@ The plan's open questions, as ruled on 2026-09-24:
 | QB5 Group-child graph appends | A recorded command of the child, incorporated at its rank (§6). |
 | QB6 Who owns P16 | The lane that owns the Restate process workflow (§13). |
 | QB7 Send and !Send | Static dispatch, no `dyn Future` on the workflow side, two compile tests (§8). |
-| QB8 Versions and deployment pinning | Both: a recorded `version()` op and `build_generation` pinning (§7). |
+| QB8 Versions and deployment pinning | `build_generation` pinning (§7). The recorded `version()` op this ruling also kept was dropped when ADR 0106 Q6 ruled lash takes no in-place code patches. |
 | QB9 L-S6 | A later epoch adopts an already-committed root (§11). |
 
 ## What is deliberately not adopted
