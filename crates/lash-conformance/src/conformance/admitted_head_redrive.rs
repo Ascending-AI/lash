@@ -16,6 +16,12 @@
 //! second on the first turn's committed head. Each redrive finishes with the
 //! answer its first execution committed, asks the model nothing, commits
 //! nothing again and keeps its admitted turn index.
+//!
+//! The protocol's code executor carries state into every commit, derived
+//! from the state it was last restored with. A redrive opens on the live
+//! head, which already holds the turn's own execution state, so it matches
+//! its first execution's commit only when adopting the admitted head also
+//! restores the executor at that head (FIG-3684).
 
 use crate::admit;
 use std::sync::Arc;
@@ -40,6 +46,94 @@ impl lash_core::runtime::RuntimeTurnPhaseProbe for PanicAfterTurnCommit {
     fn begin_named(&self, _phase: &str) {}
 }
 
+/// A protocol whose code executor's state is a counter: restoring an
+/// execution state adopts its counter, and every capture commits the counter
+/// plus one. A turn's committed execution state therefore names the state its
+/// executor was restored at, the way a real executor's heap does.
+#[derive(Default)]
+struct CountingExecutionProtocol {
+    restored: std::sync::atomic::AtomicU64,
+}
+
+impl CountingExecutionProtocol {
+    fn root(value: u64) -> Arc<[u8]> {
+        value.to_string().into_bytes().into()
+    }
+
+    fn adopt(&self, state: Option<&lash_core::plugin::HydratedExecutionState>) {
+        let restored = state.map_or(0, |state| {
+            std::str::from_utf8(&state.root)
+                .ok()
+                .and_then(|root| root.parse().ok())
+                .unwrap_or_else(|| panic!("unexpected execution-state root {:?}", state.root))
+        });
+        self.restored.store(restored, Ordering::SeqCst);
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::plugin::ProtocolSessionPlugin for CountingExecutionProtocol {
+    async fn restore_session(
+        &self,
+        _ctx: lash_core::plugin::ProtocolSessionContext<'_>,
+        state: lash_core::plugin::ProtocolSessionRestoreView,
+    ) -> Result<(), crate::SessionError> {
+        let state = state
+            .execution_state
+            .map_err(|source| crate::SessionError::Store {
+                context: "hydrate the counting executor's state".to_string(),
+                source,
+            })?;
+        self.adopt(state.as_ref());
+        Ok(())
+    }
+}
+
+#[async_trait::async_trait]
+impl lash_core::plugin::CodeExecutorPlugin for CountingExecutionProtocol {
+    async fn execute_code(
+        &self,
+        _ctx: crate::RuntimeExecutionContext<'_>,
+        _request: crate::ExecRequest,
+    ) -> Result<crate::ExecResponse, crate::SessionError> {
+        Err(crate::SessionError::Protocol(
+            "the admitted-head law's turns run no code".to_string(),
+        ))
+    }
+
+    fn execution_state_dirty(&self) -> bool {
+        true
+    }
+
+    async fn snapshot_execution_state(
+        &self,
+        _ctx: lash_core::plugin::ProtocolSessionContext<'_>,
+    ) -> Result<lash_core::plugin::ExecutionStateSnapshot, crate::SessionError> {
+        Ok(lash_core::plugin::ExecutionStateSnapshot::from_root(Some(
+            Self::root(self.restored.load(Ordering::SeqCst) + 1),
+        )))
+    }
+
+    async fn hydrated_execution_state(
+        &self,
+        _ctx: lash_core::plugin::ProtocolSessionContext<'_>,
+    ) -> Result<Option<lash_core::plugin::HydratedExecutionState>, crate::SessionError> {
+        Ok(Some(lash_core::plugin::HydratedExecutionState {
+            root: Self::root(self.restored.load(Ordering::SeqCst)),
+            components: std::collections::BTreeMap::new(),
+        }))
+    }
+
+    async fn restore_execution_state(
+        &self,
+        _ctx: lash_core::plugin::ProtocolSessionContext<'_>,
+        state: &lash_core::plugin::HydratedExecutionState,
+    ) -> Result<(), crate::SessionError> {
+        self.adopt(Some(state));
+        Ok(())
+    }
+}
+
 /// Everything a runtime for this law is built from, shared by every attempt
 /// so each is the same session on the same store.
 #[derive(Clone)]
@@ -61,12 +155,19 @@ async fn build_runtime(parts: RedriveParts) -> crate::LashRuntime {
         policy: policy.clone(),
         ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
+    // Each attempt is a fresh process: its executor starts empty.
+    let protocol = Arc::new(CountingExecutionProtocol::default());
     Box::pin(
         crate::LashRuntime::builder(parts.host, crate::testing::runtime_lease_owner())
             .with_session_id(&parts.session_id)
             .with_policy(policy)
             .with_initial_state(state)
-            .with_plugin_factories(crate::testing::test_standard_protocol_factories())
+            .with_plugin_factories(vec![
+                crate::testing::test_standard_protocol_factory_with_runtime_state(
+                    Arc::clone(&protocol) as Arc<dyn lash_core::plugin::ProtocolSessionPlugin>,
+                    Some(protocol as Arc<dyn lash_core::plugin::CodeExecutorPlugin>),
+                ),
+            ])
             .with_store(parts.store)
             .with_queued_work(Arc::new(crate::NoQueuedWork::new()))
             .build(),
@@ -222,6 +323,15 @@ pub async fn a_turn_redriven_after_its_commit_replays_at_its_admitted_head(
             committed.head_revision,
             revision + 1,
             "turn {ordinal}: the turn committed once and the redrive commits nothing again"
+        );
+        let execution_state = committed
+            .execution_state_hydration()
+            .expect("hydrate the committed execution state")
+            .expect("every turn commits the executor's state");
+        assert_eq!(
+            &*execution_state.root,
+            ordinal.to_string().as_bytes(),
+            "turn {ordinal}: the executor ran the turn over its admitted head's state"
         );
         revision = committed.head_revision;
     }

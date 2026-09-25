@@ -560,3 +560,76 @@ fn persisted_commit_cannot_adopt_regressing_revision() {
     receipt.head_revision = 1;
     state.apply_persisted_commit_result(receipt);
 }
+
+fn fresh_state_with_initial_frame() -> RuntimeSessionState {
+    let mut state =
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    state.ensure_agent_frame_initialized();
+    state
+}
+
+fn initial_frame_protocol_turn_options(state: &RuntimeSessionState) -> crate::ProtocolTurnOptions {
+    state
+        .current_agent_frame()
+        .expect("the initial frame is open")
+        .protocol_turn_options
+        .clone()
+}
+
+/// The initial frame's committed payload, without its wall-clock timestamp.
+fn initial_frame_payload(state: &RuntimeSessionState) -> (crate::NodeId, serde_json::Value) {
+    let [node] = state.session_graph.nodes.as_slice() else {
+        panic!("the state holds only its initial frame");
+    };
+    (
+        node.node_id.clone(),
+        serde_json::to_value(&node.payload).expect("encode the frame payload"),
+    )
+}
+
+/// A fresh session opens its initial frame before materialization settles the
+/// protocol options, and a reopen of its durable head opens it after: the
+/// unpersisted frame takes the settled options, so both commit the same frame
+/// (FIG-3684).
+#[test]
+fn an_unpersisted_initial_frame_opens_under_the_settled_protocol_options() {
+    let mut fresh = fresh_state_with_initial_frame();
+    assert_eq!(
+        initial_frame_protocol_turn_options(&fresh),
+        crate::ProtocolTurnOptions::default()
+    );
+    let settled =
+        crate::ProtocolTurnOptions::from_payload(serde_json::json!({ "channel": "cell" }));
+    fresh.protocol_turn_options = settled.clone();
+    fresh.open_unpersisted_initial_frame_under_settled_protocol_options();
+    assert_eq!(initial_frame_protocol_turn_options(&fresh), settled);
+
+    let mut reopened =
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    reopened.protocol_turn_options = settled;
+    reopened.ensure_agent_frame_initialized();
+    assert_eq!(
+        initial_frame_payload(&fresh),
+        initial_frame_payload(&reopened),
+        "a fresh session and a reopen of its head commit the same initial frame"
+    );
+}
+
+/// A persisted frame is a historical snapshot: settling options later never
+/// rewrites it.
+#[test]
+fn a_persisted_initial_frame_keeps_the_options_it_opened_under() {
+    let mut state = fresh_state_with_initial_frame();
+    let opened_under = initial_frame_protocol_turn_options(&state);
+    let persisted = state
+        .session_graph
+        .nodes
+        .iter()
+        .map(|node| node.node_id.clone())
+        .collect::<Vec<_>>();
+    state.mark_node_ids_persisted(persisted);
+    state.protocol_turn_options =
+        crate::ProtocolTurnOptions::from_payload(serde_json::json!({ "channel": "cell" }));
+    state.open_unpersisted_initial_frame_under_settled_protocol_options();
+    assert_eq!(initial_frame_protocol_turn_options(&state), opened_under);
+}

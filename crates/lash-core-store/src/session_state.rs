@@ -1106,6 +1106,52 @@ impl RuntimeSessionState {
         self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
     }
 
+    /// Open a still-unpersisted initial frame under the session's settled
+    /// protocol turn options.
+    ///
+    /// A fresh session opens its initial frame when its state is built, before
+    /// protocol materialization settles the options. That frame is not durable
+    /// until the first commit carries it, while the settled options are
+    /// published at materialization. A reopen of that durable head therefore
+    /// opens the frame under the settled options, and the first commit must
+    /// carry the same frame on every execution (FIG-3684). A persisted frame
+    /// is an immutable historical snapshot and is never rewritten.
+    #[expect(
+        clippy::expect_used,
+        reason = "the initial frame material is a non-empty literal"
+    )]
+    pub fn open_unpersisted_initial_frame_under_settled_protocol_options(&mut self) {
+        let frame_key = crate::FrameKey::from_caller_material("initial-frame")
+            .expect("the initial frame material is non-empty");
+        let frame_node_id = crate::NodeId::new(
+            crate::session_graph::frame_node_id(&self.session_id, frame_key.as_str()).into_inner(),
+        );
+        if self.persisted_node_ids.contains(&frame_node_id) {
+            return;
+        }
+        let settled = &self.protocol_turn_options;
+        let Some(position) = self.session_graph.nodes.iter().position(|node| {
+            node.node_id == frame_node_id
+                && matches!(
+                    &node.payload,
+                    crate::SessionNodePayload::FrameOpen { protocol_turn_options, .. }
+                        if protocol_turn_options != settled
+                )
+        }) else {
+            return;
+        };
+        let settled = settled.clone();
+        let record = std::sync::Arc::make_mut(&mut self.session_graph.data_mut().nodes[position]);
+        if let crate::SessionNodePayload::FrameOpen {
+            protocol_turn_options,
+            ..
+        } = &mut record.payload
+        {
+            *protocol_turn_options = settled;
+        }
+        self.agent_frames = self.session_graph.agent_frame_records(&self.session_id);
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "the initial frame material is a non-empty literal"
