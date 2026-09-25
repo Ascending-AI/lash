@@ -12,6 +12,9 @@ turn; see [Journaled surface](#amendment-fig-3587-journaled-surface).
 Amended 2026-09-25 (FIG-3719): the engine, not the frontier read, answers
 whether a drifted binding's effect is served, so a positional journal
 (Restate) serves a recorded result too.
+Amended 2026-09-25 (FIG-3680): a command the journal holds nothing for refuses
+only writes under the run's namespace, so an orchestrating call that journaled
+no nested effect redrives by serving its presentation.
 
 Amended 2026-09-24 (FIG-3669), **not yet implemented**:
 [ADR 0104](0104-restate-is-the-only-effect-engine-sql-stores-are-storage.md)
@@ -232,8 +235,15 @@ against that snapshot:
 - recorded at `k` as another shape (a scalar call replayed as an aggregate):
   refuse at `k`;
 - nothing at `k` but anything recorded beyond it, or a seal: the command may
-  run, but its first journal write is refused (`CommandJournalGuard`), so
-  nothing is dispatched;
+  run, but its first journal write under the namespace, or one that names no
+  key (a group open, a proxied process command), is refused
+  (`CommandJournalGuard`), so nothing is dispatched. A keyed write outside the
+  namespace is the host's to judge, as under the key fence: an orchestrating
+  call whose body issued no nested effect, or a call settled in preparation,
+  wrote only its presentation (`{call_id}:present`), and the redrive serves it
+  from the journal (FIG-3680; the law
+  `an_empty_orchestrating_call_redrives_from_its_cell` runs on SQLite,
+  PostgreSQL and the Restate server double);
 - nothing at or beyond `k`: the run is live from here.
 
 A command the journal records as having written that writes nothing on the

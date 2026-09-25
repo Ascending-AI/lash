@@ -124,8 +124,17 @@ impl<'run> ReplayCommands<'_, 'run> {
                     refusal: divergence.into_error(&self.attribution()),
                 })
             }
+            // Only the run's own namespace is refused: a call the recorded run
+            // made with nothing under it (an orchestrating body that issued no
+            // nested effect) still presents its result, and the host serves
+            // that from its own record (FIG-3680).
             Ok(CommandAdmission::RefuseWrites(divergence)) => {
-                CommandJournalGuard::refusing(divergence.into_error(&self.attribution()))
+                let range = self.run.namespace().range();
+                CommandJournalGuard::refusing(lash_core::RefusedWriteRange {
+                    lower: range.lower,
+                    upper: range.upper,
+                    refusal: divergence.into_error(&self.attribution()),
+                })
             }
             Err(divergence) => {
                 return Err(self.stop(divergence.into_error(&self.attribution())));

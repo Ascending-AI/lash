@@ -33,9 +33,9 @@ pub use control::{
     CompletionKeyPreparation, EffectHost, EffectJournalIdentity, EffectJournalRetirement,
     EffectRetirementGate, ExecutionScope, ExternalCompletionError, IndependentEffectWork,
     QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe,
-    RecordedJournal, RecordedKeyFence, Resolution, ResolveOutcome, RuntimeEffectController,
-    ScopeBoundController, ScopedEffectController, SegmentProgress, ServedOnlyRange,
-    ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
+    RecordedJournal, RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome,
+    RuntimeEffectController, ScopeBoundController, ScopedEffectController, SegmentProgress,
+    ServedOnlyRange, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
     TurnCancelClosureOwnerBinding,
 };
 pub use control::{EffectTaskController, drive_effect_controller_task};

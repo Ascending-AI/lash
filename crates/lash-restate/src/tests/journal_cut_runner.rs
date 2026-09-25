@@ -180,6 +180,34 @@ mod on_the_server_double {
     });
 }
 
+// FIG-3680's empty-orchestration redrive law on the server double: a cell
+// that called an orchestrating tool whose body journals no nested effect is
+// cut before its seal, and the double's retry replays it to the turn's end.
+mod empty_orchestration_on_the_server_double {
+    use super::super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
+
+    lash_conformance::cell_orchestration_redrive_tests!({
+        let harness =
+            LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+        let server = harness
+            .server_double()
+            .unwrap_or_else(|| panic!("the in-process harness runs on the server double"));
+        let runner = super::JournalCutRunner::shared(harness.turn_runner(), server);
+        let host = harness.endpoint_host();
+        let prefix: &'static str =
+            Box::leak(format!("restate-empty-relay-{}", harness.run_nonce()).into_boxed_str());
+        let stores = harness.law_stores();
+        (
+            harness,
+            prefix,
+            host,
+            stores,
+            runner,
+            vec![super::super::conformance_and_poison::drift_law_rlm_factory()],
+        )
+    });
+}
+
 // FIG-3719 on the server double: a served-only effect that acts outside a
 // `ctx.run` closure — the process start a drifted orchestrating binding
 // (`agents.spawn`, for one) issues, or a retry sleep — refuses up front, so

@@ -61,12 +61,12 @@ pub use executor::{
     ExecutionScope, ExternalCompletionError, IndependentEffectWork, ProcessLocalExecution,
     ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt,
     QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, RecordedJournal, RecordedKeyFence,
-    Resolution, ResolveOutcome, RuntimeAwaitEventOptions, RuntimeEffectController,
-    RuntimeEffectControllerError, RuntimeEffectLocalExecutor, RuntimeSleepOptions,
-    ScopeBoundController, ScopedEffectController, SegmentProgress, ServedOnlyRange,
-    ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard, TriggerLocalExecution,
-    TurnCancelClosureOwnerBinding, TurnCancellationAuthority, TurnControlAttachment,
-    TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
+    RefusedWriteRange, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
+    RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectLocalExecutor,
+    RuntimeSleepOptions, ScopeBoundController, ScopedEffectController, SegmentProgress,
+    ServedOnlyRange, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
+    TriggerLocalExecution, TurnCancelClosureOwnerBinding, TurnCancellationAuthority,
+    TurnControlAttachment, TurnControlBinding, TurnControlBindingId, TurnControlBindingIdError,
     turn_control_binding_id_for_scope,
 };
 pub use group::{

@@ -545,8 +545,11 @@ impl LashlangReplayRun {
     ///   its writes pass, and it must make one.
     /// * The journal holds nothing at it but still holds entries beyond it:
     ///   [`CommandAdmission::RefuseWrites`] — the command may run, but its
-    ///   first journal write is refused, because the recorded run did not
-    ///   write here and nothing may be dispatched live inside it.
+    ///   first journal write under the namespace is refused, because the
+    ///   recorded run did not write here and nothing may be dispatched live
+    ///   inside it. A write outside the namespace is the host's to judge: an
+    ///   orchestrating call whose body issued no nested effect wrote only its
+    ///   presentation, and replays by serving it (FIG-3680).
     /// * The journal holds nothing at or beyond it, or checks itself by
     ///   position: [`CommandAdmission::Live`].
     pub fn enter(
@@ -695,7 +698,8 @@ pub enum CommandAdmission {
     /// Nothing is recorded at or beyond this command; its writes are live.
     Live,
     /// Nothing is recorded here but entries are recorded beyond: the first
-    /// write is refused with this divergence.
+    /// write under the run's namespace, or one naming no key, is refused with
+    /// this divergence.
     RefuseWrites(ReplayDivergence),
 }
 

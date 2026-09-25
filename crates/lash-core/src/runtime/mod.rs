@@ -213,7 +213,7 @@ pub use effect::{
     ProcessCommand, ProcessEffectOutcome, ProcessLocalExecution, ProcessOutcomeObserver,
     ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard,
     QueuedLaneHolder, QueuedLaneProbe, RankedGroupSettlement, RecordedJournal, RecordedKeyFence,
-    RecordedKeyRange, RecordedKeys, Resolution, ResolveOutcome,
+    RecordedKeyRange, RecordedKeys, RefusedWriteRange, Resolution, ResolveOutcome,
     RuntimeAssistantResponseHooksOutcome, RuntimeAttribution, RuntimeAwaitEventOptions,
     RuntimeDirectLlmOutcome, RuntimeEffectCommand, RuntimeEffectController,
     RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
