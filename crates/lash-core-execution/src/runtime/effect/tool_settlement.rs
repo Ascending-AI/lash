@@ -138,7 +138,9 @@ use crate::{LlmCallId, PluginMessage, ProcessId, TokenUsage};
 /// Version 6 (FIG-3515) answers a tool call with one tool-result part whose
 /// content is ordered text and attachment blocks; a v5 settlement's
 /// text-only results and call-bound attachment parts are refused.
-pub const TOOL_SETTLEMENT_VERSION: u16 = 6;
+/// Version 7 (FIG-3712) carries the stream events of a child that ran with no
+/// live opener ([`ToolSettlement::stream`]); a v6 settlement is refused.
+pub const TOOL_SETTLEMENT_VERSION: u16 = 7;
 
 /// The durable format version of one atomic attempt's captured facts.
 ///
@@ -316,6 +318,16 @@ pub struct ToolSettlement {
     /// before it returned a value (§13).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub usage: Vec<ToolUsageDelta>,
+    /// The stream events a child emitted while no opener was live where it
+    /// ran (FIG-3712), in the journal's own bounded shape.
+    ///
+    /// A child that runs beside its live opener streams its events to the
+    /// opener as they happen and records none here. A child that built its
+    /// own context has no stream to reach, so its events are recorded, and
+    /// the opener emits them when it incorporates this settlement. See
+    /// [`RecordedChildStream`](super::RecordedChildStream).
+    #[serde(default, skip_serializing_if = "super::RecordedChildStream::is_empty")]
+    pub stream: super::RecordedChildStream,
     /// The resolved model-facing return: the session's singleton plugin
     /// projector run once at this child's presentation boundary, or its
     /// recorded fallback on projector error, plus the
@@ -378,6 +390,7 @@ impl ToolSettlement {
                 .iter()
                 .flat_map(|capture| capture.usage.iter().cloned())
                 .collect(),
+            stream: super::RecordedChildStream::default(),
             model_return,
         }
     }

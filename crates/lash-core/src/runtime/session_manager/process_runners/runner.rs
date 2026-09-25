@@ -200,7 +200,8 @@ impl RuntimeSessionServices {
                     .control
                     .effect_host
                     .effect_group_closing(),
-            );
+            )
+            .with_unrecorded_session_sources(services.current.host.core.control.open_sources);
             if let Some(invocation) = execution_context_for_runtime.causal_invocation.clone() {
                 context = context.with_parent_invocation(invocation);
             }

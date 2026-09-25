@@ -809,6 +809,10 @@ impl Session {
             context
                 .with_execution_env_spec(execution_env_spec)
                 .with_live_tool_catalog(tool_surface.live_tool_catalog())
+                .with_unrecorded_session_sources(crate::runtime::effect::UnrecordedSessionSources {
+                    context_overlay_tools: !self.context_tools.is_empty(),
+                    ..Default::default()
+                })
         })
     }
 

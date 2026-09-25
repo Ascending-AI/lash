@@ -675,6 +675,7 @@ manifest = "ToolChildRequest"
 kind = "rust_items"
 paths = [
   "crates/lash-core-execution/src/runtime/effect/tool_child.rs",
+  "crates/lash-core-execution/src/runtime/effect/tool_child/session_facts.rs",
   "crates/lash-core-execution/src/tool_dispatch/attempt_coordinator.rs",
   "crates/lash-core-execution/src/tool_provider.rs",
   "crates/lash-core-store/src/effect_opener.rs",
@@ -695,6 +696,12 @@ symbols = [
   "ToolChildScope",
   "ToolChildAdmission",
   "ToolChildCompletionRouting",
+  # FIG-3712: the session facts a child records at group open.
+  "ToolChildSessionFacts",
+  "UnrecordedSessionSources",
+  "ToolDefinition",
+  "SessionToolAccessWire",
+  "SubagentSessionContext",
   "ToolAttemptEffectIdentity",
   "EffectOpener",
   "AdmittedScope",
@@ -768,9 +775,17 @@ paths = [
   "crates/lash-sansio/src/tool_output.rs",
   "crates/lash-sansio/src/effect_identity.rs",
   "crates/lash-sansio/src/causal.rs",
+  "crates/lash-core-execution/src/runtime/effect/recorded_stream.rs",
 ]
 symbols = [
   "ToolSettlement",
+  # FIG-3712: the recorded stream of a child that ran with no live opener.
+  # Its events are opaque payloads in the journal's own shape, so the stream
+  # DTOs themselves stay outside this closure.
+  "RecordedChildStream",
+  "RecordedChildEvent",
+  "RecordedChildChannel",
+  "ChildStreamTruncation",
   "ToolUsageDelta",
   "ToolDispatchOutcome",
   "PendingToolDispatchOutcome",

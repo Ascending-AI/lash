@@ -365,23 +365,26 @@ impl PluginHost {
             tool_catalog_overlay,
             tool_snapshot,
         } = request;
-        let (authority, protocol_turn_options, materialization, snapshot) = match materialization {
-            PluginSessionMaterializationRequest::Creation {
-                config,
-                seed_snapshot,
-            } => (
-                config.authority,
-                config.protocol_turn_options,
-                PluginSessionMaterialization::Creation,
-                seed_snapshot,
-            ),
-            PluginSessionMaterializationRequest::Rematerialization { snapshot, config } => (
-                config.authority,
-                config.protocol_turn_options,
-                PluginSessionMaterialization::Rematerialization,
-                Some(snapshot),
-            ),
-        };
+        let (authority, protocol_turn_options, materialization, snapshot, forked) =
+            match materialization {
+                PluginSessionMaterializationRequest::Creation {
+                    config,
+                    seed_snapshot,
+                } => (
+                    config.authority,
+                    config.protocol_turn_options,
+                    PluginSessionMaterialization::Creation,
+                    seed_snapshot,
+                    seed_snapshot.is_some(),
+                ),
+                PluginSessionMaterializationRequest::Rematerialization { snapshot, config } => (
+                    config.authority,
+                    config.protocol_turn_options,
+                    PluginSessionMaterialization::Rematerialization,
+                    Some(snapshot),
+                    false,
+                ),
+            };
         let ctx = PluginSessionContext {
             session_id,
             tool_access: authority.tool_access.clone(),
@@ -420,20 +423,31 @@ impl PluginHost {
             extensions: self.extensions.clone(),
             session_extensions,
             triggers,
+            retains_state: Arc::new(std::sync::atomic::AtomicBool::new(
+                !contributions.state_retaining_plugins.is_empty(),
+            )),
             contributions,
+            forked,
         });
         self.register_session(&session_id, &session)?;
         session.state.lock_recover().initialize(snapshot)?;
         for plugin in &session.plugins {
+            let state = PluginStateStore::bind(
+                &session.session_id,
+                plugin.id(),
+                Arc::clone(&session.state),
+            );
+            let probe = state.retention_probe();
             plugin.session_ready(SessionReadyContext {
                 session_id: session.session_id.clone(),
                 host: self.plugin_view(),
-                state: PluginStateStore::bind(
-                    &session.session_id,
-                    plugin.id(),
-                    Arc::clone(&session.state),
-                ),
+                state,
             })?;
+            if Arc::strong_count(&probe) > 1 {
+                session
+                    .retains_state
+                    .store(true, std::sync::atomic::Ordering::SeqCst);
+            }
         }
         Ok(session)
     }
@@ -455,7 +469,15 @@ impl PluginHost {
                 Arc::clone(&state),
             ));
             plugin.register(&mut reg)?;
-            reg.state = None;
+            if let Some(store) = reg.state.take() {
+                let probe = store.retention_probe();
+                drop(store);
+                if Arc::strong_count(&probe) > 1 {
+                    reg.contributions
+                        .state_retaining_plugins
+                        .push(plugin.id().to_string());
+                }
+            }
             reg.registering_plugin_id = None;
             plugins.push(plugin);
         }

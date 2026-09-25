@@ -24,6 +24,7 @@ mod direct_outcome;
 mod graph;
 mod process_runners;
 mod session_init;
+mod tool_child_context;
 #[cfg(any(test, feature = "testing"))]
 pub use session_init::take_spawned_child_runtimes;
 mod usage;

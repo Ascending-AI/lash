@@ -85,6 +85,12 @@ impl std::fmt::Debug for PluginStateStore {
 }
 
 impl PluginStateStore {
+    /// A handle whose strong count tells whether a plugin kept this store:
+    /// every clone of the store shares it.
+    pub(super) fn retention_probe(&self) -> Arc<str> {
+        Arc::clone(&self.plugin_id)
+    }
+
     pub(super) fn bind(
         session_id: &SessionId,
         plugin_id: &str,

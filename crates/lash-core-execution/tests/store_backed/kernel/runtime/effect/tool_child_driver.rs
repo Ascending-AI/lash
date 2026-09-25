@@ -82,6 +82,7 @@ mod tests {
             crate::TurnControlBindingId::new("recorded-binding").expect("a valid binding id"),
             ProcessExecutionEnvRef::new("env-ref"),
             ToolChildCompletionRouting::Inline,
+            crate::runtime::effect::ToolChildSessionFacts::default(),
         )
     }
     /// The opener's own context, every recorded field set to something the child

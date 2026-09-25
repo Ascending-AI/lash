@@ -23,5 +23,7 @@ mod session_delete_failure;
 #[cfg(feature = "rlm")]
 #[path = "core_session_builder/session_lifecycle_growth.rs"]
 mod session_lifecycle_growth;
+#[cfg(test)]
+mod tool_child_source;
 
 mod reopen_generation;

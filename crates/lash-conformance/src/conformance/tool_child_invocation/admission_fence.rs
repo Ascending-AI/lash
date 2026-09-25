@@ -178,14 +178,7 @@ fn register_fence_opener(
         vec![law_fence_orchestrating_tool()],
     )
     .expect("the law's leaf provider and orchestrating tool register disjoint ids");
-    let mut definitions = leaf_definitions();
-    definitions.push(crate::ToolDefinition::raw(
-        LEAF_ORCHESTRATING,
-        LEAF_ORCHESTRATING.trim_start_matches("tool:"),
-        "conformance orchestrating leaf",
-        crate::ToolDefinition::default_input_schema(),
-        serde_json::json!({ "type": "object", "additionalProperties": true }),
-    ));
+    let definitions = law_definitions();
     let engines = crate::ProcessEngineRegistry::new().with_registration(
         crate::ProcessEngineRegistration::accepting(Arc::new(LawFenceEngine)),
     );

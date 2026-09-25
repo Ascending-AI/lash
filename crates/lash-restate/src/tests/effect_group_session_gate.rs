@@ -206,6 +206,7 @@ fn tool_request(scope: &ExecutionScope) -> lash_core::runtime::effect::ToolChild
             .expect("a valid binding id"),
         lash_core::ProcessExecutionEnvRef::new("env"),
         lash_core::runtime::effect::ToolChildCompletionRouting::Durable,
+        lash_core::runtime::effect::ToolChildSessionFacts::default(),
     )
 }
 

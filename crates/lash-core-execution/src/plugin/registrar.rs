@@ -84,6 +84,8 @@ fn register_singleton_hook<H>(
 
 #[derive(Clone, Default)]
 pub(crate) struct PluginContributions {
+    /// Plugins that kept their state store past registration (FIG-3712).
+    pub(crate) state_retaining_plugins: Vec<String>,
     pub(crate) tool_providers: Vec<RegisteredHook<Arc<dyn ToolProvider>>>,
     pub(crate) internal_tools: Vec<crate::InternalProcessToolDef>,
     pub(crate) orchestrating_tools: Vec<crate::tool_provider::orchestration::OrchestratingToolDef>,
