@@ -102,6 +102,41 @@ fn validate_process_command_journal_identity<T: PartialEq>(
     ))
 }
 
+/// The cancel a turn's stop owes the process it was awaiting, as the recorded
+/// answer of the turn-stop admission step.
+///
+/// `Some` is the cancellation the store holds for the process: the one this
+/// stop recorded, or one another requester recorded first, which the workflow
+/// receives just as idempotently. `None` means the process ended before the
+/// stop reached it, so there is nothing to cancel and the wait reads its
+/// terminal. Any other store failure is an engine fault: it ends the attempt
+/// unrecorded and the step runs again.
+async fn turn_stop_process_cancel_admission(
+    registry: &dyn ProcessRegistry,
+    process_ref: &lash_core::ProcessRef,
+    requester: String,
+) -> Result<Option<RestateProcessCancelRequest>, PluginError> {
+    let refusal = match registry
+        .request_process_cancel(
+            process_ref,
+            lash_core::CancelOrigin::TurnStopped,
+            requester,
+            None,
+        )
+        .await
+    {
+        Ok(record) => return RestateProcessCancelRequest::from_record(&record).map(Some),
+        Err(refusal) => refusal,
+    };
+    match registry.get_process_ref(process_ref).await? {
+        Some(record) if record.is_terminal() => Ok(None),
+        Some(record) if record.cancel_request.is_some() => {
+            RestateProcessCancelRequest::from_record(&record).map(Some)
+        }
+        _ => Err(refusal),
+    }
+}
+
 pub(super) async fn execute_restate_process_command<'ctx, C>(
     context: &C,
     authority_id: &RestateAuthorityId,
@@ -410,30 +445,52 @@ lash_core::TurnFailureCause::Outcome,
                             "process-await cancellation won without turn-cancellation context",
                         ));
                     };
-                    let record = registry
-                        .request_process_cancel(
-                            &process_ref,
-                            lash_core::CancelOrigin::TurnStopped,
-                            serde_json::to_string(&turn_cancellation.scope).map_err(|error| {
-                                PluginError::Runtime(RuntimeError::new(
-                                    RuntimeErrorCode::RecordEncodingFailed,
-                                    error.to_string(),
-                                ))
-                            })?,
-                            None,
-                        )
-                        .await?;
-                    context
-                        .request_process_workflow_cancel(RestateProcessCancelRequest::from_record(
-                            &record,
-                        )?)
-                        .await
-                        .map_err(|err| {
+                    let requester =
+                        serde_json::to_string(&turn_cancellation.scope).map_err(|error| {
                             PluginError::Runtime(RuntimeError::new(
-                                RuntimeErrorCode::RestateProcessCancel,
-                                format!("Restate process cancellation failed: {err}"),
+                                RuntimeErrorCode::RecordEncodingFailed,
+                                error.to_string(),
                             ))
                         })?;
+                    // The losing process wait is cancelled through a recorded
+                    // step (ADR 0105 §3: `dispose(child, AwaitCancelled)`).
+                    // The store answers differently once the cancel it asked
+                    // for has ended the process, so a replay reads the
+                    // recorded answer and issues the same cancel call, never
+                    // the store (FIG-3752).
+                    let admission_registry = Arc::clone(&registry);
+                    let admission_process_ref = process_ref.clone();
+                    let Json(cancel_request) = context
+                        .run_json_or_retry_send(
+                            process_command_journal_name(
+                                invocation,
+                                "process-await-turn-cancel-admission",
+                            ),
+                            async move {
+                                turn_stop_process_cancel_admission(
+                                    admission_registry.as_ref(),
+                                    &admission_process_ref,
+                                    requester,
+                                )
+                                .await
+                                .map_err(|error| error.to_string())
+                            },
+                        )
+                        .await
+                        .map_err(|error| {
+                            process_command_journal_error("turn-stop cancel admission", error)
+                        })?;
+                    if let Some(cancel_request) = cancel_request {
+                        context
+                            .request_process_workflow_cancel(cancel_request)
+                            .await
+                            .map_err(|err| {
+                                PluginError::Runtime(RuntimeError::new(
+                                    RuntimeErrorCode::RestateProcessCancel,
+                                    format!("Restate process cancellation failed: {err}"),
+                                ))
+                            })?;
+                    }
                     trace_park("process_after_turn_cancel");
                     match context.await_process_terminal(process_id.clone()).await {
                         Ok(output) => {
