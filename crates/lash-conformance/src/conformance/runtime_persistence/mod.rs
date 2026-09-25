@@ -117,6 +117,7 @@ mod admission_base_retention;
 mod append_receipts;
 mod attachments_and_queue;
 mod checkpoint_claims;
+mod enqueue_sequence_identity;
 mod leases;
 mod queue_redrive;
 mod queued_run_assignments;
@@ -138,6 +139,7 @@ pub mod runtime_persistence_macro_support {
     pub use super::append_receipts::*;
     pub use super::attachments_and_queue::*;
     pub use super::checkpoint_claims::*;
+    pub use super::enqueue_sequence_identity::*;
     pub use super::leases::*;
     pub use super::queue_redrive::*;
     pub use super::queued_run_assignments::*;

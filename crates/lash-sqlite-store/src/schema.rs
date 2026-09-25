@@ -220,7 +220,7 @@ CREATE TABLE IF NOT EXISTS fork_lineage (
 );
 
 CREATE TABLE IF NOT EXISTS usage_deltas (
-    seq                  INTEGER PRIMARY KEY,
+    seq                  INTEGER PRIMARY KEY AUTOINCREMENT,
     session_id            TEXT NOT NULL,
     operation_storage_key TEXT NOT NULL,
     entry_ordinal         INTEGER NOT NULL,
@@ -393,7 +393,7 @@ CREATE TABLE IF NOT EXISTS session_execution_leases (
 );
 
 CREATE TABLE IF NOT EXISTS queued_work_batches (
-    enqueue_seq       INTEGER PRIMARY KEY,
+    enqueue_seq       INTEGER PRIMARY KEY AUTOINCREMENT,
     batch_id          TEXT NOT NULL UNIQUE,
     session_id        TEXT NOT NULL,
     source_key        TEXT,
@@ -440,7 +440,7 @@ CREATE INDEX IF NOT EXISTS idx_queued_work_claim
     ON queued_work_batches(session_id, claim_id, claim_token);
 
 CREATE TABLE IF NOT EXISTS pending_turn_inputs (
-    enqueue_seq       INTEGER PRIMARY KEY,
+    enqueue_seq       INTEGER PRIMARY KEY AUTOINCREMENT,
     input_id          TEXT NOT NULL UNIQUE,
     session_id        TEXT NOT NULL,
     source_key        TEXT,
@@ -909,7 +909,13 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// redrive the session-state generation gate refused, which a pre-90 build
 /// cannot decode. No relation changes; a pre-90 database is rejected at open
 /// and recreated; it is not migrated.
-pub(crate) const SCHEMA_VERSION: i32 = 90;
+/// Bumped to 91 for FIG-3632: `queued_work_batches.enqueue_seq`,
+/// `pending_turn_inputs.enqueue_seq` and `usage_deltas.seq` are now
+/// `INTEGER PRIMARY KEY AUTOINCREMENT`, so a delete can never let SQLite
+/// reissue the freed maximum rowid the way `session_ingress` already could
+/// not. A pre-91 database still declares the reusable rowid columns and is
+/// rejected at open and recreated; it is not migrated.
+pub(crate) const SCHEMA_VERSION: i32 = 91;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
