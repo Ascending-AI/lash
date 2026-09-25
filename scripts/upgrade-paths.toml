@@ -357,14 +357,29 @@ constant_path = "crates/lash-restate/src/controller/process_command.rs"
 note = "Restate journal: replays only under the code that wrote it; drains by generation G"
 
 [[surface]]
-constant = "DURABLE_WAIT_INDEX_IDENTITY_EPOCH"
+constant = "DURABLE_WAIT_REGISTRY_FORMAT_VERSION"
 constant_path = "crates/lash-restate/src/durable_wait.rs"
-note = "shared Restate object state: keys namespaced by version, deliverers fan out until the old namespace drains"
+note = "Restate object state: format-stamped values upcast lazily on read through the N-1 slot; an upgrade sweep rewrites stragglers"
 
 [[surface]]
-constant = "EFFECT_GROUP_INDEX_PROTOCOL_VERSION"
+constant = "EFFECT_GROUP_STATE_FORMAT_VERSION"
 constant_path = "crates/lash-restate/src/effect_group/protocol.rs"
-note = "shared Restate object state: keys namespaced by version, deliverers fan out until the old namespace drains"
+note = "Restate object state: format-stamped values upcast lazily on read through the N-1 slot; an upgrade sweep rewrites stragglers"
+
+[[surface]]
+constant = "EFFECT_GROUP_PAYLOAD_FORMAT_VERSION"
+constant_path = "crates/lash-restate/src/effect_group/payload.rs"
+note = "Restate object state: format-stamped values upcast lazily on read through the N-1 slot; an upgrade sweep rewrites stragglers"
+
+[[surface]]
+constant = "EFFECT_GROUP_WIRE_VERSION"
+constant_path = "crates/lash-restate/src/effect_group/protocol.rs"
+note = "live wire: callers and handlers of mixed versions coexist during the roll window"
+
+[[surface]]
+constant = "EFFECT_GROUP_DISPATCH_JOURNAL_VERSION"
+constant_path = "crates/lash-restate/src/effect_group/protocol.rs"
+note = "Restate journal: replays only under the code that wrote it; drains by generation G"
 
 [[surface]]
 constant = "EFFECT_JOURNAL_VERSION"
