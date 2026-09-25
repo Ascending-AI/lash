@@ -197,6 +197,10 @@ impl LiveAttempt {
     /// what it was held.
     pub fn release(&mut self) {
         self.gated = false;
+        // Not parked until its handler parks again: whatever it parked on
+        // before the grant — a request of its own that has answered, say —
+        // may be what the turn lets it go on with.
+        self.probe.set_response_drained(false);
         if let Some(gate) = self.start_gate.take() {
             let _ = gate.send(());
         }
@@ -250,8 +254,12 @@ pub enum Waiter {
     Call { caller: InvKey, completion_id: u32 },
     /// An `AttachInvocationCommand`'s result notification.
     Attach { caller: InvKey, completion_id: u32 },
-    /// An ingress request/response call or attach.
-    Ingress(oneshot::Sender<Outcome>),
+    /// An ingress request/response call or attach, with the serial
+    /// scheduler's ticket when an attempt's handler issued it.
+    Ingress {
+        sender: oneshot::Sender<Outcome>,
+        ticket: Option<u64>,
+    },
 }
 
 /// The invoker's retry bookkeeping for one invocation.

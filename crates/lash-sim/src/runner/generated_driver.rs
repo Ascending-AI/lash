@@ -181,12 +181,9 @@ pub(super) fn run_serial_lane(
 pub const SERIAL_ENGINE_DETERMINISM_ORACLE: &str = "sim.oracle.serial-engine-determinism.v1";
 
 /// The serial lane is deterministic across runs of one seed: the same
-/// delivered boundaries and the same final abstract outcome. The server's
-/// grant order and stall count are recorded as evidence: a turn waiting on a
-/// scripted provider gate is not blocked on the server, so an outside request
-/// from a task lash runs beside its handlers can still land on a stall. The
-/// lane tightens to grant-order equality and zero stalls once those tasks are
-/// server-visible (FIG-3751).
+/// delivered boundaries, the same final abstract outcome, and the same grant
+/// order on the server, with no stall preemption — every hand-off of the
+/// server's turn was sequenced, none forced by wall time (FIG-3751).
 pub(super) fn serial_engine_determinism(
     seed: u64,
     first: &SerialLaneRun,
@@ -199,6 +196,23 @@ pub(super) fn serial_engine_determinism(
             "the two runs reached different outcomes: {} then {}",
             first.summary.digest, second.summary.digest
         ))
+    } else if first.stall_preemptions != 0 || second.stall_preemptions != 0 {
+        Some(format!(
+            "the server moved the turn on a stall ({} then {} preemption(s))",
+            first.stall_preemptions, second.stall_preemptions
+        ))
+    } else if first.schedule_trace != second.schedule_trace {
+        let at = first
+            .schedule_trace
+            .iter()
+            .zip(&second.schedule_trace)
+            .position(|(a, b)| a != b)
+            .unwrap_or_else(|| first.schedule_trace.len().min(second.schedule_trace.len()));
+        Some(format!(
+            "the server granted the turn in different orders ({} then {} grants, first apart at grant {at})",
+            first.schedule_trace.len(),
+            second.schedule_trace.len()
+        ))
     } else {
         None
     };
@@ -210,17 +224,9 @@ pub(super) fn serial_engine_determinism(
         None => OracleVerdict::passed(
             SERIAL_ENGINE_DETERMINISM_ORACLE,
             format!(
-                "seed {seed:#018x}: two serial runs delivered {} boundaries and reached one outcome; the server granted the turn {} then {} times, with {} then {} stall preemption(s), and the grant orders {}",
+                "seed {seed:#018x}: two serial runs delivered {} boundaries, reached one outcome and granted the server's turn {} times in one order, with no stall preemption",
                 first.delivered.len(),
                 first.schedule_trace.len(),
-                second.schedule_trace.len(),
-                first.stall_preemptions,
-                second.stall_preemptions,
-                if first.schedule_trace == second.schedule_trace {
-                    "matched"
-                } else {
-                    "differed"
-                }
             ),
         ),
     }

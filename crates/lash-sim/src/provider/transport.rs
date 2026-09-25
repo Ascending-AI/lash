@@ -50,6 +50,10 @@ struct ScriptedTransportScheduleInner {
     gates: Mutex<BTreeMap<ScriptedProviderEventKey, Arc<ScriptedTransportEventGate>>>,
     releases: Mutex<Vec<ScriptedProviderEventRelease>>,
     next_release_sequence: AtomicUsize,
+    /// The server double's gate declarations, when the provider runs inside
+    /// its handlers: a provider parked on a closed gate waits on the
+    /// scheduler, not on the server.
+    outside_gates: Mutex<Option<lash_restate_test::OutsideGates>>,
 }
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
@@ -79,6 +83,13 @@ struct ScriptedTransportEventGate {
 impl ScriptedTransportSchedule {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// Declare every closed-gate wait to `gates`: under serial scheduling
+    /// the server double then lets the scheduler's requests land while a
+    /// provider waits on it.
+    pub fn declare_gates_to(&self, gates: lash_restate_test::OutsideGates) {
+        *self.inner.outside_gates.lock_recover() = Some(gates);
     }
 
     pub async fn wait_until_blocked(&self, exchange_index: usize, event_index: usize) {
@@ -136,9 +147,17 @@ impl ScriptedTransportSchedule {
     }
 
     async fn wait_for_release(&self, exchange_index: usize, event_index: usize) {
-        self.gate(exchange_index, event_index)
-            .wait_for_release()
-            .await;
+        let gate = self.gate(exchange_index, event_index);
+        let _declared = (!gate.opened.load(Ordering::SeqCst))
+            .then(|| {
+                self.inner
+                    .outside_gates
+                    .lock_recover()
+                    .as_ref()
+                    .map(lash_restate_test::OutsideGates::enter)
+            })
+            .flatten();
+        gate.wait_for_release().await;
     }
 
     fn gate(&self, exchange_index: usize, event_index: usize) -> Arc<ScriptedTransportEventGate> {

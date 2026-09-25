@@ -270,11 +270,12 @@ fn full_random_seed_12_keeps_modeled_provider_exchange_slots_owned_by_scheduler(
     );
 }
 
-/// The serial lane on the server double delivers one boundary sequence and
-/// reaches one outcome per seed.
+/// The serial lane on the server double delivers one boundary sequence,
+/// reaches one outcome and grants the server's turn in one order, with no
+/// stall preemption, per seed: twenty seeds, each run twice.
 #[test]
 fn serial_engine_lane_is_deterministic_across_seeds() {
-    for seed in [3_u64, 11, 29] {
+    for seed in 0_u64..20 {
         let run = || {
             run_serial_lane(generate_workload(seed, "fast-random", 48).expect("workload"))
                 .expect("serial lane run")

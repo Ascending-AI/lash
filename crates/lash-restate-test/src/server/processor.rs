@@ -985,6 +985,13 @@ impl State {
     /// Register `waiter` for `key`'s completion, answering at once if it
     /// already completed.
     pub fn add_waiter(&mut self, sh: &Arc<Shared>, key: InvKey, waiter: Waiter) {
+        if let Waiter::Ingress {
+            ticket: Some(ticket),
+            ..
+        } = &waiter
+        {
+            self.ingress_awaits(*ticket, key);
+        }
         if let Status::Completed(outcome) = &self.invocations[key.0].status {
             let outcome = outcome.clone();
             self.answer_waiter(sh, waiter, &outcome);
@@ -1015,8 +1022,13 @@ impl State {
                 notification_template::Id::CompletionId(completion_id),
                 Self::outcome_result(outcome),
             ),
-            Waiter::Ingress(sender) => {
+            Waiter::Ingress { sender, ticket } => {
                 let _ = sender.send(outcome.clone());
+                // Answered: the handler that issued it waits on the turn
+                // from here on, not on the server.
+                if let Some(ticket) = ticket {
+                    self.ingress_ended(ticket);
+                }
             }
         }
     }

@@ -131,7 +131,10 @@ async fn drive(
             let pending = matches!(polled, Ok(std::task::Poll::Pending));
             probe.set_response_drained(pending);
             if pending {
-                shared.activity.notify_waiters();
+                // Decide the turn at the park itself, not whenever the
+                // scheduler's task next runs: by then work outside the
+                // server (a store call) may have woken the handler again.
+                shared.parked();
             }
             match polled {
                 Ok(std::task::Poll::Ready(frame)) => std::task::Poll::Ready(Ok(frame)),
@@ -162,6 +165,12 @@ async fn drive(
         loop {
             match decoder.next_frame() {
                 Ok(Some(frame)) => {
+                    // Serial scheduling: an attempt that gave the turn up
+                    // while its handler went on (a watch in flight beside
+                    // its own work, say) writes once it holds the turn.
+                    if shared.config.scheduling == super::Scheduling::Serial {
+                        shared.await_turn((key, number), super::Wake::Outside).await;
+                    }
                     if shared.on_frame(key, number, frame, received_us) == Flow::Stop {
                         return;
                     }
