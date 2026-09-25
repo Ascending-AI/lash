@@ -2326,8 +2326,9 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         races_turn_gate: bool,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         if matches!(envelope.command, RuntimeEffectCommand::Sleep { .. }) {
-            self.sleep_until_due(claim.due_at_ms).await;
-            return Ok(RuntimeEffectOutcome::Sleep);
+            return self
+                .sleep_racing_turn(claim.due_at_ms, local_executor, races_turn_gate)
+                .await;
         }
         match envelope.command {
             RuntimeEffectCommand::PeekAwaitEvent { key } => {
@@ -2359,7 +2360,7 @@ impl<P: EffectReplayRowStore, A: AwaitEventBackend> StoreEffectReplayDriver<P, A
         }
     }
 
-    async fn sleep_until_due(&self, due_at_ms: Option<u64>) {
+    pub(super) async fn sleep_until_due(&self, due_at_ms: Option<u64>) {
         let Some(due_at_ms) = due_at_ms else {
             return;
         };

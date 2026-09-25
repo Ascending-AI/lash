@@ -1254,6 +1254,92 @@ async fn compiler_keeps_assignment_hot_paths_specialized() {
     );
 }
 
+/// F5 (FIG-3672 P9): the cancel checkpoint schedule's gaps double from 2^20
+/// instructions and stop growing at 2^28, so a long run journals a bounded,
+/// slowly growing number of checkpoint peeks.
+#[test]
+fn cancel_checkpoints_follow_the_geometric_schedule() {
+    let first = CANCEL_CHECKPOINT_INSTRUCTIONS;
+    assert_eq!(cancel_checkpoint_reached(0), 0);
+    assert_eq!(cancel_checkpoint_reached(first - 1), 0);
+    assert_eq!(cancel_checkpoint_reached(first), 1);
+    assert_eq!(cancel_checkpoint_reached(3 * first - 1), 1);
+    assert_eq!(cancel_checkpoint_reached(3 * first), 2);
+    assert_eq!(cancel_checkpoint_reached(7 * first), 3);
+    assert_eq!(cancel_checkpoint_reached(511 * first - 1), 8);
+    assert_eq!(cancel_checkpoint_reached(511 * first), 9);
+    let capped = 511 * first;
+    assert_eq!(
+        cancel_checkpoint_reached(capped + CANCEL_CHECKPOINT_INTERVAL_CAP - 1),
+        9
+    );
+    assert_eq!(
+        cancel_checkpoint_reached(capped + CANCEL_CHECKPOINT_INTERVAL_CAP),
+        10
+    );
+    // A trillion instructions — hours of pure compute — journal a few
+    // thousand checkpoints, not a million.
+    let trillion = 1_000_000_000_000_u64;
+    assert_eq!(
+        cancel_checkpoint_reached(trillion),
+        9 + (trillion - capped) / CANCEL_CHECKPOINT_INTERVAL_CAP
+    );
+    assert!(cancel_checkpoint_reached(trillion) < 4_000);
+    for instructions in [first, 5 * first, 600 * first, trillion] {
+        assert!(
+            cancel_checkpoint_reached(instructions) <= cancel_checkpoint_reached(instructions + 1)
+        );
+    }
+}
+
+#[derive(Default)]
+struct CheckpointCountingHost {
+    checkpoints: Mutex<Vec<u64>>,
+}
+
+impl ExecutionHost for CheckpointCountingHost {
+    async fn perform(&self, op: AbilityOp) -> Result<AbilityResult, ExecutionHostError> {
+        Host.perform(op).await
+    }
+
+    async fn cancel_checkpoint(&self, checkpoint: u64) {
+        self.checkpoints.lock_recover().push(checkpoint);
+    }
+}
+
+/// F5 (FIG-3672 P9): a long run hands its host exactly the checkpoints the
+/// schedule places, once each and in order: a loop of a few million
+/// instructions reaches three, not one per 2^20 instructions.
+#[tokio::test(flavor = "current_thread")]
+async fn a_long_run_reaches_only_the_scheduled_checkpoints() {
+    let program = compile_labeled_program(builders::program(vec![
+        builders::assign("n", builders::num(0.0)),
+        builders::while_loop(
+            builders::binary(
+                builders::var("n"),
+                BinaryOp::Less,
+                builders::num(1_500_000.0),
+            ),
+            builders::block(vec![builders::assign(
+                "n",
+                builders::binary(builders::var("n"), BinaryOp::Add, builders::num(1.0)),
+            )]),
+        ),
+    ]));
+    let host = CheckpointCountingHost::default();
+    let mut state = State::new();
+    execute_compiled(&program, &mut state, &host)
+        .await
+        .expect("the loop runs to completion");
+    let checkpoints = host.checkpoints.lock_recover().clone();
+    let reached = u64::try_from(checkpoints.len()).expect("checkpoint count fits");
+    assert!(
+        (2..=4).contains(&reached),
+        "a loop of a few million instructions reaches a handful of checkpoints: {checkpoints:?}"
+    );
+    assert_eq!(checkpoints, (1..=reached).collect::<Vec<_>>());
+}
+
 mod builtin_cases;
 mod builtin_function_cases;
 mod case_builders;

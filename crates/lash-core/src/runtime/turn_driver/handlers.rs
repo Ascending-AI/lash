@@ -587,9 +587,12 @@ impl RuntimeTurnDriver<'_> {
                 // lost to the gate: it asks the gate why, through a journaled
                 // peek (FIG-3672 P9). A refusal that parks the turn (a replay
                 // divergence, a drifted binding) is not a stop, and journals
-                // nothing further.
+                // nothing further. Nor is a session retirement: the deleted
+                // session's gate is revoked with it, so a peek could only
+                // fail, and the typed retirement refusal must reach the turn.
+                let stopped_on_host = !err.code.parks_turn() && !err.is_session_retirement();
                 let cancellation_evidence = self
-                    .recorded_cell_cancel(machine, &cell_key, !err.code.parks_turn())
+                    .recorded_cell_cancel(machine, &cell_key, stopped_on_host)
                     .await?;
                 if let Some(code_executor) = self.session.plugins().code_executor() {
                     code_executor

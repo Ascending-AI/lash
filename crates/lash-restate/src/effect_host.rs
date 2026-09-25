@@ -810,7 +810,9 @@ impl AwaitEventResolver for RestateEffectHostController {
     ) -> Result<Resolution, RuntimeError> {
         let ingress = &self.await_event_ingress;
         self.ensure_key_access(key).await?;
-        await_restate_await_event_via_ingress(ingress, key, cancel, deadline, None).await
+        let attach = turn_cancel_watch_attachment(key);
+        await_restate_await_event_via_ingress(ingress, key, cancel, deadline, attach.as_deref())
+            .await
     }
 
     async fn revoke_await_events_for_session(
@@ -1269,7 +1271,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                 result = &mut wait => Some(result.map_err(|error| ingress_group_error(
                     "LashDurableWaitWorkflow/await_resolution(RANK)", error
                 ))?),
-                _ = cancel.cancellation().cancelled() => None,
+                _ = cancel.cancellation().cancelled() => None, // P16 (FIG-3673) replaces with a recorded race.
                 stop = self.turn_stop(cancel.observed_scope()) => {
                     stop?;
                     None

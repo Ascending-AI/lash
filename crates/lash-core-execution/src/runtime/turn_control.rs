@@ -409,6 +409,19 @@ impl TurnWorkDriver {
                     Some(evidence),
                 )),
                 ResolveOutcome::AlreadyResolved { terminal } => match decode_gate(terminal)? {
+                    // A cancellation lash originated itself (a host-local
+                    // stop) accepted no host policy: the first host request
+                    // that would stop the turn now adopts it, policy and all,
+                    // through the escalation promise (FIG-3672 P9).
+                    TurnGateTerminal::CancelRequested(existing)
+                        if existing.is_internal()
+                            && (existing.mode.is_immediate() || evidence.mode.is_immediate()) =>
+                    {
+                        let adopted = self
+                            .adopt(resolver, &request.address, evidence, existing)
+                            .await?;
+                        Ok(adopted)
+                    }
                     // The disposition comparison is deliberately the first arm:
                     // a conflicting repeat is refused before it can reach the
                     // escalation promise, so a stronger timing mode never
@@ -465,7 +478,7 @@ impl TurnWorkDriver {
                     RuntimeError::new(crate::RuntimeErrorCode::RuntimeStore, err.to_string())
                 })?;
             base_winner =
-                ActiveTurnControl::peek_base_cancel_evidence(resolver, &request.address).await?;
+                ActiveTurnControl::peek_policy_acceptor(resolver, &request.address).await?;
         }
         // No cancellation is in force for either no-op outcome, so the receipt
         // carries no record — the same shape the pre-gate no-op returns. A row
@@ -570,6 +583,48 @@ impl TurnWorkDriver {
         )
     }
 
+    /// Adopt a base lash originated itself: the host request rides the
+    /// escalation promise with its own policy, first writer wins. Answers the
+    /// outcome and the request whose policy now stands.
+    async fn adopt(
+        &self,
+        resolver: &dyn AwaitEventResolver,
+        address: &TurnAddress,
+        evidence: TurnCancellationEvidence,
+        existing: TurnCancellationEvidence,
+    ) -> Result<(TurnCancelOutcome, Option<TurnCancellationEvidence>), RuntimeError> {
+        let key = escalation_key(resolver, address).await?;
+        let resolution = gate_resolution(TurnEscalationTerminal::Escalated(
+            TurnEscalationEvidence::adopting(&evidence),
+        ))?;
+        Ok(
+            match resolver.resolve_await_event(&key, resolution).await? {
+                ResolveOutcome::Accepted => {
+                    let adopted = TurnCancellationEvidence {
+                        mode: TurnCancelMode::Immediate,
+                        ..evidence
+                    };
+                    (TurnCancelOutcome::Requested(adopted.clone()), Some(adopted))
+                }
+                ResolveOutcome::AlreadyResolved { terminal } => match decode_gate(terminal)? {
+                    TurnEscalationTerminal::Escalated(escalated) => {
+                        let standing = escalated_cancel_evidence(&existing, escalated);
+                        let acceptor = policy_acceptor(existing, Some(&standing));
+                        (
+                            TurnCancelOutcome::AlreadyRequested(standing),
+                            Some(acceptor),
+                        )
+                    }
+                    TurnEscalationTerminal::CompletionSealed => (
+                        TurnCancelOutcome::AlreadyRequested(existing.clone()),
+                        Some(existing),
+                    ),
+                },
+                ResolveOutcome::UnknownOrRevoked => (TurnCancelOutcome::UnknownOrRevoked, None),
+            },
+        )
+    }
+
     pub async fn await_terminal(
         &self,
         address: &TurnAddress,
@@ -648,6 +703,13 @@ struct TurnEscalationEvidence {
     /// Mode of the request that won escalation — always `Immediate`.
     #[serde(default, skip_serializing_if = "TurnCancelMode::is_immediate")]
     pub mode: TurnCancelMode,
+    /// The undelivered-input policy of a host request that adopted a
+    /// cancellation lash originated itself (a host-local stop): that base
+    /// accepted no host policy, so the first host request supplies one. Read
+    /// only over an internal base; over a host-accepted base the base policy
+    /// stands (FIG-2874).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub adopted_undelivered: Option<TurnCancelDisposition>,
 }
 
 impl From<&TurnCancellationEvidence> for TurnEscalationEvidence {
@@ -657,6 +719,19 @@ impl From<&TurnCancellationEvidence> for TurnEscalationEvidence {
             origin: evidence.origin.clone(),
             reason: evidence.reason.clone(),
             mode: evidence.mode,
+            adopted_undelivered: None,
+        }
+    }
+}
+
+impl TurnEscalationEvidence {
+    /// A host request adopting an internal base: it carries its own policy,
+    /// and asks the turn to stop now.
+    fn adopting(evidence: &TurnCancellationEvidence) -> Self {
+        Self {
+            mode: TurnCancelMode::Immediate,
+            adopted_undelivered: Some(evidence.undelivered),
+            ..Self::from(evidence)
         }
     }
 }
@@ -781,13 +856,41 @@ fn escalated_cancel_evidence(
     base: &TurnCancellationEvidence,
     escalation: TurnEscalationEvidence,
 ) -> TurnCancellationEvidence {
+    let undelivered = match escalation.adopted_undelivered {
+        Some(adopted) if base.is_internal() => adopted,
+        _ => base.undelivered,
+    };
     TurnCancellationEvidence {
         request_id: escalation.request_id,
         origin: escalation.origin,
         reason: escalation.reason,
-        undelivered: base.undelivered,
+        undelivered,
         mode: escalation.mode,
         honoured_after_step: None,
+    }
+}
+
+/// Whether a base may still be superseded through its escalation promise: an
+/// `AfterStep` base by a stronger request, and a base lash originated itself
+/// by a host request's adoption.
+fn base_escalation_is_open(base: &TurnCancellationEvidence) -> bool {
+    !base.mode.is_immediate() || base.is_internal()
+}
+
+/// The request whose undelivered-input policy stands: the base winner, or the
+/// host request that adopted an internal base.
+fn policy_acceptor(
+    base: TurnCancellationEvidence,
+    effective: Option<&TurnCancellationEvidence>,
+) -> TurnCancellationEvidence {
+    match effective {
+        Some(effective) if base.is_internal() && !effective.is_internal() => {
+            TurnCancellationEvidence {
+                honoured_after_step: None,
+                ..effective.clone()
+            }
+        }
+        _ => base,
     }
 }
 
@@ -802,7 +905,7 @@ async fn effective_cancel_evidence(
     address: &TurnAddress,
     base: TurnCancellationEvidence,
 ) -> Result<TurnCancellationEvidence, RuntimeError> {
-    if base.mode.is_immediate() {
+    if !base_escalation_is_open(&base) {
         return Ok(base);
     }
     let key = match escalation_key(resolver, address).await {
@@ -912,7 +1015,7 @@ async fn close_cancel_escalation(
     escalation_key: &AwaitEventKey,
     base: TurnCancellationEvidence,
 ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
-    if base.mode.is_immediate() {
+    if !base_escalation_is_open(&base) {
         return Ok(Some(base));
     }
     let outcome = resolver
@@ -1026,7 +1129,10 @@ impl ActiveTurnControl {
             TurnCancelClosureProposal::CompletionSealed => TurnGateTerminal::CompletionSealed,
         };
         let effective_cancellation = self.settle_proposed(resolver, proposed, honoured).await?;
-        let base_cancellation = self.read_settled_base_cancel_evidence(resolver).await?;
+        let base_cancellation = self
+            .read_settled_base_cancel_evidence(resolver)
+            .await?
+            .map(|base| policy_acceptor(base, effective_cancellation.as_ref()));
         Ok(TurnCancelClosureSettlement::new(
             authorization.clone(),
             base_cancellation,
@@ -1110,6 +1216,22 @@ impl ActiveTurnControl {
             Err(err) if err.code == crate::RuntimeErrorCode::AwaitEventUnknownOrRevoked => Ok(None),
             Err(err) => Err(err),
         }
+    }
+
+    /// The request whose policy stands at `address`: the base winner, or the
+    /// host request that adopted an internal one.
+    async fn peek_policy_acceptor(
+        resolver: &dyn AwaitEventResolver,
+        address: &TurnAddress,
+    ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
+        let Some(base) = Self::peek_base_cancel_evidence(resolver, address).await? else {
+            return Ok(None);
+        };
+        if !base.is_internal() {
+            return Ok(Some(base));
+        }
+        let effective = effective_cancel_evidence(resolver, address, base.clone()).await?;
+        Ok(Some(policy_acceptor(base, Some(&effective))))
     }
 
     /// Read the exact authorized base gate after settlement. Unlike the
@@ -1222,17 +1344,24 @@ impl ActiveTurnControl {
     pub async fn watch_immediate(
         &self,
         resolver: &dyn AwaitEventResolver,
-        stop_wait: CancellationToken,
     ) -> Result<Option<TurnCancellationEvidence>, RuntimeError> {
+        self.gate_pair()
+            .await_stop(|key| async move {
+                // Never a fired token: firing the waiter's token would resolve
+                // the turn's gate itself `Cancelled`. The watch ends only by
+                // being dropped.
+                resolver
+                    .await_await_event(&key, CancellationToken::new(), None)
+                    .await
+            })
+            .await
+    }
+
+    fn gate_pair(&self) -> TurnCancelGatePair {
         TurnCancelGatePair {
             cancel: self.cancel_key.clone(),
             escalation: self.escalation_key.clone(),
         }
-        .await_stop(|key| {
-            let stop_wait = stop_wait.clone();
-            async move { resolver.await_await_event(&key, stop_wait, None).await }
-        })
-        .await
     }
 
     /// Execution-side only: turn a host-local stop into a durable request on

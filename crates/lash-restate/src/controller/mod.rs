@@ -652,7 +652,12 @@ where
                 let request = ready_wait_request(&shape.wait_scope, &group_key)?;
                 let resolution = match self
                     .context
-                    .await_effect_group_wait(request, group_key.clone(), None)
+                    .await_effect_group_wait(
+                        request,
+                        group_key.clone(),
+                        None,
+                        tokio_util::sync::CancellationToken::new(),
+                    )
                     .await
                     .map_err(|error| {
                         effect_group_engine_error(
@@ -735,13 +740,20 @@ where
         if matches!(read, EffectGroupReadRankResponse::NotSettled) {
             let scope = ExecutionScope::runtime_operation(handle.group_key());
             let request = rank_wait_request(&scope, handle.group_key(), rank)?;
-            // The rank wait races the turn's durable cancellation gate, never
-            // a live token: the journal records which completed first
-            // (FIG-3672 P9).
+            // A turn-observing rank wait races the turn's durable cancellation
+            // gate, never a live token: the journal records which completed
+            // first (FIG-3672 P9). A rank wait that observes no turn (a
+            // process body's) still races its execution's own token: P16
+            // (FIG-3673) replaces with a recorded race.
             let turn_cancel = restate_group_turn_cancel_wait_request(&self.authority_id, &cancel)?;
             let resolution = match self
                 .context
-                .await_effect_group_wait(request, handle.group_key().to_string(), turn_cancel)
+                .await_effect_group_wait(
+                    request,
+                    handle.group_key().to_string(),
+                    turn_cancel,
+                    cancel.cancellation().clone(),
+                )
                 .await
                 .map_err(|error| {
                     effect_group_engine_error(
@@ -1111,8 +1123,8 @@ where
                             }
                         });
                         // The process body's own stop (not a turn's): the
-                        // process drive still reads its token, which P16
-                        // replaces with the recorded verdict (FIG-3672).
+                        // process drive still reads its token. P16 (FIG-3673)
+                        // replaces with a recorded race.
                         cancellation.cancel();
                         return Err(RuntimeEffectControllerError::new(
                             RuntimeErrorCode::RuntimeEffectSleepCancelled,
@@ -1141,11 +1153,13 @@ where
                 self.require_active_session(key.scope.session_id())
                     .await
                     .map_err(RuntimeEffectControllerError::from)?;
-                // The token is the waiting execution's own cooperative cancel:
-                // the turn's cancellation reaches this wait only through the
-                // durable gate race below (FIG-3672 P9).
+                // A turn's cancellation reaches this wait only through the
+                // durable gate race below (FIG-3672 P9). The token is raced
+                // only by a wait that observes no turn, such as a process
+                // body's `waitSignal`: P16 (FIG-3673) replaces with a recorded
+                // race.
                 let RuntimeAwaitEventOptions {
-                    cancellation: _,
+                    cancellation,
                     deadline,
                     clock,
                     observe_turn_cancel,
@@ -1178,7 +1192,7 @@ where
                 let replay_key = invocation.replay_key().to_string();
                 match self
                     .context
-                    .await_event_or_turn_cancel(request, replay_key, turn_cancel)
+                    .await_event_or_turn_cancel(request, replay_key, turn_cancel, cancellation)
                     .await
                 {
                     Ok(RestateTurnCancelRaceOutcome::Completed(resolution)) => {
@@ -1519,8 +1533,7 @@ pub(crate) fn restate_effect_execution(
             refuse_unhonored_group_membership(group.as_deref(), "restate peek await event")?;
             RestateEffectExecution::PeekAwaitEvent { invocation, key }
         }
-        command @ (RuntimeEffectCommand::LlmCall { .. }
-        | RuntimeEffectCommand::Direct { .. }
+        command @ (RuntimeEffectCommand::Direct { .. }
         | RuntimeEffectCommand::ToolAttempt { .. }
         | RuntimeEffectCommand::Trigger { .. }
         | RuntimeEffectCommand::LanguageRuntimeValue { .. }
@@ -1541,9 +1554,13 @@ pub(crate) fn restate_effect_execution(
         // outcome (FIG-3683, FIG-3726). The executor marks only live faults
         // retryable, so a deterministic outcome — the synced environment, a
         // deterministic hook failure — is journaled as ever.
+        // A model call whose body lost its watch on the turn's cancellation
+        // gate ends the attempt the same way (FIG-3672 P9): the watch fault is
+        // never the call's recorded outcome, and never a cancellation.
         command @ (RuntimeEffectCommand::LoadExecutionEnv { .. }
         | RuntimeEffectCommand::AssistantResponseHooks { .. }
-        | RuntimeEffectCommand::SyncExecutionEnvironment) => RestateEffectExecution::JournaledRun {
+        | RuntimeEffectCommand::SyncExecutionEnvironment
+        | RuntimeEffectCommand::LlmCall { .. }) => RestateEffectExecution::JournaledRun {
             envelope: RuntimeEffectEnvelope {
                 invocation,
                 command,

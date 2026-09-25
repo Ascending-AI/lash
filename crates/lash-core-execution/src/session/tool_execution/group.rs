@@ -502,10 +502,13 @@ impl RuntimeExecutionContext<'_> {
                 let awaited = controller
                     .await_next_settlement(&mut handle, turn_cancel.clone())
                     .await;
+                // Decided by the wait's recorded outcome alone, never by a
+                // live read of the execution's token: a turn-observing rank
+                // wait that ended cancelled is the turn's cancellation, and an
+                // execution whose own stop ended it is cancelled either way.
                 if matches!(&awaited, Err(error)
                     if error.code == crate::RuntimeErrorCode::RuntimeEffectGroupAwaitCancelled)
                     && turn_cancel.observes_turn_cancel()
-                    && !cancel.is_cancelled()
                 {
                     lost_to_turn_gate = true;
                 }

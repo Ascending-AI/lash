@@ -373,6 +373,19 @@ impl TurnCancelRequest {
                 "turn cancellation requires a non-empty request id",
             ));
         }
+        if self
+            .request_id
+            .starts_with(TurnCancellationEvidence::INTERNAL_REQUEST_ID_PREFIX)
+        {
+            return Err(RuntimeError::new(
+                crate::RuntimeErrorCode::InvalidTurnCancelRequest,
+                format!(
+                    "a host turn cancellation request id cannot start with `{}`: lash \
+                     reserves that namespace for cancellations it originates itself",
+                    TurnCancellationEvidence::INTERNAL_REQUEST_ID_PREFIX
+                ),
+            ));
+        }
         Ok(())
     }
 

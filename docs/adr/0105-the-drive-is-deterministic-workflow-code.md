@@ -209,34 +209,93 @@ The engine tests in `lash-core-execution` run this shape on a `!Send` and a
   race whose first arm is a recorded step is carried out by the engine's
   recorded body. The body runs under a cooperative cancel that fires when the
   gate pair asks the turn to stop now (an `Immediate` request, or an
-  escalation of an `AfterStep` one), watched over the deployment resolver.
-  Whatever the body returns, finished or stopped, is the step's recorded
-  outcome, so it also records which arm won. A replay serves that outcome and
-  never runs the watch. A watch that fails stops the step, closed rather than
-  open (`ActiveTurnControl::run_step_body`).
-- **Waits race the gate in the engine.** A timer, an await-event, a process
-  await and an effect-group rank wait race the turn's gate where the engine
-  records them: in Restate's journal (the gate's awakeable, then its
-  registration), and on the SQL tier inside the recorded execution. Nothing
-  live races a wait, and no engine writes a verdict back into a token the
-  drive reads.
+  escalation of an `AfterStep` one). The body watches the gate pair over the
+  deployment resolver for its own lifetime, with a token it never fires, and
+  drops the watch when it ends. On the Restate ingress every watch of one gate
+  attaches to one server-side waiter by idempotency key, so a turn holds one
+  waiter per gate however many model calls it makes. Whatever the body
+  returns, finished or stopped, is the step's recorded outcome, so it also
+  records which arm won. A replay serves that outcome and never runs the
+  watch.
+- **A tool attempt the turn runs in process is such a step too.** Its body
+  watches the gate the same way and hands the tool the stop as its
+  cancellation token, so a routed `Immediate` request stops a tool that waits
+  on its token. A tool attempt's engine records every outcome, so a watch that
+  gives up leaves the tool running to its own end; the turn honours the
+  request at its next journaled peek.
+- **A watch fault is never a cancellation.** Every gate watch (a step body's,
+  and the SQL and ingress-host race arms) retries a fault on one ladder: 8
+  attempts, 25ms doubling to 1s. A watch that exhausts the ladder ends the
+  attempt with the typed live fault `TransientCancelWatch`. No engine records
+  it (the SQL claim is released unsealed; on Restate the run ends retryably),
+  so the step runs again. The body is dropped, never stopped, so no
+  provider-cancelled evidence is minted (`ActiveTurnControl::run_step_body`,
+  `TurnCancelGatePair::await_stop_retrying`).
+- **Waits race the gate in the engine.** On Restate, a turn-observing timer,
+  await-event, process await and effect-group rank wait race the turn's gate
+  in the journal (the gate's awakeable, then its registration). On the SQL
+  tier, a turn-observing timer, await-event and process await race it inside
+  their recorded execution. No engine writes a verdict back into a token the
+  drive reads. Two races are **not recorded yet**, and P14 (FIG-3672 inventory
+  AC13) records them: an effect-group rank wait on the SQL tier and on the
+  Restate ingress host races the gate live, so a replay that finds the rank
+  already journaled can take a different settlement prefix than the live run.
+- **Process-scope waits keep the process's own stop until P16.** A wait that
+  observes no turn — a process body's `waitSignal`, its group rank wait, its
+  process await and its sleep — keeps the cancellation it had before P9: the
+  process drive's own cancellation token wherever that token reached the wait.
+  P16 (FIG-3673) replaces each of these with a recorded race against the
+  segment's durable cancel promise.
 - **The drive keeps one recorded fact.** It is the cancellation the turn
   honours, advanced only by journaled gate peeks (start gate, after the model
   call, the step boundary, after a code cell that stopped on the host, and
   after an abort a recorded outcome typed as the turn's cancellation) and by
-  recorded outcomes. There is no live watcher, token, evidence mutex or origin
-  hint on the drive path.
-- **A code cell stops at recorded checkpoints.** The VM hands its host a
-  cancel checkpoint each time its executed-instruction count crosses a
-  multiple of `CANCEL_CHECKPOINT_INSTRUCTIONS`. The cell's host answers it
-  with a journaled gate peek under the checkpoint's identity. The checkpoint
-  is also the cell's only wait during a long stretch of pure compute, so a
-  single-threaded executor cancels a runaway cell without a scheduler yield.
-- **A host-local stop is a durable request.** The facade's `cancel` token and
-  `cancel_running_turns`, and a process stopping its child turn, are
-  forwarded as a request on the turn's gate with lash's internal evidence.
-  The turn honours that request where it honours any request.
-- Effect-journal generation 6.
+  recorded outcomes. A cell that aborted on a session retirement asks no
+  peek: the deleted session's gate is revoked with it, and the typed
+  retirement refusal reaches the turn. There is no live watcher, token,
+  evidence mutex or origin
+  hint on the drive path. What remains live is outside the drive: the
+  commit's `lease.is_lost()` filter (S5), and host glue that reads a
+  `LocalTurnStop`'s token before the drive starts (queue drain and lane
+  acquisition).
+- **A code cell stops at recorded checkpoints.** The VM hands its host cancel
+  checkpoint `n` when its executed-instruction count reaches the `n`th
+  position of a fixed schedule: the first gap is 2^20 instructions, each gap
+  doubles, and gaps stop growing at 2^28. A run of `I` instructions reaches at
+  most `9 + (I - 511 * 2^20) / 2^28` checkpoints. Each checkpoint journals one
+  gate peek, or two while an `AfterStep` request is pending (the second reads
+  its escalation). The schedule is a function of lashlang's instruction
+  accounting (`INSTRUCTION_ACCOUNTING_VERSION`: compiler emission, builtin cost
+  charges, yield granularity and the schedule itself). That accounting is
+  pinned into the cell journal grammar (`LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION`
+  4), so a journal written under other accounting is refused before its cell
+  runs. The checkpoint is also the cell's only wait during a long stretch of
+  pure compute, so a single-threaded executor cancels a runaway cell without a
+  scheduler yield.
+- **A host-local stop is a durable request that a host request can adopt.**
+  The facade's `cancel` token and `cancel_running_turns`, and a process
+  stopping its child turn, are forwarded as a request on the turn's gate with
+  lash's internal evidence. The turn honours that request where it honours any
+  request. Forwarding retries until the turn ends; it never gives up while the
+  turn can still honour the stop. Internal evidence chose no undelivered-input
+  policy. So the first routed host request that would stop the turn now adopts
+  it through the escalation promise, and the turn settles under that request's
+  identity and policy (a later `Drop` is kept). Over a host-accepted base, the
+  escalation still carries no policy (FIG-2874). One exception: two local
+  stops (`AfterStep`, then `Immediate`) already hold the escalation promise, so
+  a later routed request cannot adopt them.
+- **Public API changes (pre-release).**
+  - `TurnCancelOriginHint` and `facade_support::configure_local_turn_token`
+    are removed; a host stops a turn through `LocalTurnStop`.
+  - `RuntimeEffectController::await_next_settlement` and
+    `EffectLayer::await_next_settlement` take a `TurnCancelWait` instead of a
+    `CancellationToken`.
+  - `lashlang::ExecutionHost::yield_now` is replaced by
+    `cancel_checkpoint(u64)`.
+  - `TURN_CANCEL_WATCH_MAX_ATTEMPTS` is removed.
+  - `ActiveTurnControl::watch_immediate` no longer takes a token.
+  - A host `TurnCancelRequest` id may not start with `internal:`.
+- Effect-journal generation 7.
 
 ### 4. Group operations are complete
 

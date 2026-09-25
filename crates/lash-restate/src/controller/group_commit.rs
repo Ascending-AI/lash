@@ -122,7 +122,12 @@ where
         let request = drained_wait_request(&wait_scope, group_key, position)?;
         let replay_key = request.key.key_id.clone();
         let resolution = match context
-            .await_effect_group_wait(request, replay_key, None)
+            .await_effect_group_wait(
+                request,
+                replay_key,
+                None,
+                tokio_util::sync::CancellationToken::new(),
+            )
             .await
             .map_err(|error| {
                 effect_group_engine_error(

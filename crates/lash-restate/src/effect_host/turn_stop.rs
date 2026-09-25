@@ -16,8 +16,10 @@ impl RestateEffectHostController {
             return std::future::pending().await;
         };
         let pair = lash_core::TurnCancelGatePair::for_scope(self, scope).await?;
+        // A watch that keeps failing ends as the typed live fault, never as
+        // a stop (FIG-3672 P9).
         match pair
-            .await_stop(|key| async move {
+            .await_stop_retrying(|key| async move {
                 self.await_await_event(&key, tokio_util::sync::CancellationToken::new(), None)
                     .await
             })

@@ -370,6 +370,8 @@ lash_core::TurnFailureCause::Outcome,
                     lash_core::runtime::registry_transitions::unknown_process(&process_id).into(),
                 );
             }
+            // A process await that observes no turn races nothing here, as
+            // before P9. P16 (FIG-3673) replaces with a recorded race.
             let turn_cancel = restate_process_turn_cancel_wait_request(
                 authority_id,
                 invocation,

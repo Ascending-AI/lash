@@ -204,19 +204,18 @@ pub(crate) fn test_await_event_or_turn_cancel<'run, 'ctx, C>(
     request: RestateDurableWaitAwaitRequest,
     replay_key: String,
     turn_cancel: Option<RestateDurableWaitAwaitRequest>,
+    process_stop: tokio_util::sync::CancellationToken,
 ) -> TestTurnCancelRaceFuture<'run, Resolution>
 where
     C: RestateControllerContext<'ctx> + ?Sized,
     'ctx: 'run,
 {
     Box::pin(async move {
+        // A wait that observes no turn keeps the process drive's own stop:
+        // P16 (FIG-3673) replaces with a recorded race.
         let Some(turn_cancel) = turn_cancel else {
             return context
-                .await_event(
-                    request,
-                    replay_key,
-                    tokio_util::sync::CancellationToken::new(),
-                )
+                .await_event(request, replay_key, process_stop)
                 .await
                 .map(RestateTurnCancelRaceOutcome::Completed);
         };

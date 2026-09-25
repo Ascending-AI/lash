@@ -43,9 +43,11 @@ mod tests {
             key: &crate::AwaitEventKey,
         ) -> Result<Option<crate::Resolution>, crate::RuntimeError> {
             if key == &self.base_key {
+                // The base, then its escalation: a base lash originated
+                // itself stays adoptable until its escalation is closed.
                 assert_eq!(
                     self.resolve_calls.load(Ordering::SeqCst),
-                    1,
+                    2,
                     "strict base read must follow effective settlement"
                 );
                 self.base_peeks.fetch_add(1, Ordering::SeqCst);
@@ -1505,8 +1507,9 @@ mod tests {
         );
         assert_eq!(
             resolver.resolve_calls.load(Ordering::SeqCst),
-            1,
-            "the effective cancellation was settled before the strict base read failed"
+            2,
+            "the effective cancellation (base and escalation) was settled before the strict \
+             base read failed"
         );
         assert_eq!(resolver.base_peeks.load(Ordering::SeqCst), 1);
         assert_eq!(
@@ -2163,6 +2166,77 @@ mod tests {
         ));
     }
 
+    /// F7 (FIG-3672 P9): a host-local stop takes the gate mid-turn with
+    /// lash's internal evidence, which chose no undelivered-input policy. A
+    /// host request routed afterwards adopts it: its identity and its `Drop`
+    /// policy are what the turn settles, not the internal default.
+    #[tokio::test]
+    async fn a_routed_request_after_a_local_stop_keeps_its_drop_policy() {
+        let address = address("local-then-routed");
+        let (host, driver) = bound_driver(&address).await;
+        let active = ActiveTurnControl::new(host.as_ref(), address.clone())
+            .await
+            .expect("active control");
+        active
+            .request_local_stop(
+                host.await_event_resolver(),
+                TurnCancelMode::Immediate,
+                Some("user".to_string()),
+            )
+            .await
+            .expect("the local stop takes the gate");
+        let honoured = active
+            .observe_pending_cancel(
+                &scoped_turn_controller(host.as_ref(), &address),
+                TurnCancelPeekIdentity::AfterLlm {
+                    protocol_iteration: 0,
+                },
+            )
+            .await
+            .expect("peek after the model call")
+            .expect("the local stop is honoured");
+        assert!(honoured.is_internal());
+
+        let routed = driver
+            .request_cancel(
+                request(address.clone(), "host-drop").undelivered(TurnCancelDisposition::Drop),
+            )
+            .await
+            .expect("route the host request");
+        assert!(matches!(
+            routed.outcome,
+            TurnCancelOutcome::Requested(ref evidence)
+                if evidence.request_id == "host-drop"
+                    && evidence.undelivered == TurnCancelDisposition::Drop
+        ));
+        assert_eq!(
+            routed
+                .record
+                .as_ref()
+                .map(|record| record.request.undelivered),
+            Some(TurnCancelDisposition::Drop),
+            "the durable request row names the adopting request's policy"
+        );
+
+        let settled = active
+            .settle_before_commit(host.as_ref(), Some(&honoured), None)
+            .await
+            .expect("settle")
+            .expect("the turn settles cancelled");
+        assert_eq!(settled.request_id, "host-drop");
+        assert_eq!(settled.undelivered, TurnCancelDisposition::Drop);
+
+        // A host request can never pose as lash's own evidence.
+        let forged = driver
+            .request_cancel(request(address.clone(), "internal:forged"))
+            .await
+            .expect_err("the internal namespace is reserved");
+        assert_eq!(
+            forged.code,
+            crate::RuntimeErrorCode::InvalidTurnCancelRequest
+        );
+    }
+
     #[tokio::test]
     async fn a_local_after_step_stop_is_a_durable_request_that_lands_at_the_boundary() {
         let backend = crate::support::memory_backend().await;
@@ -2232,10 +2306,7 @@ mod tests {
         // pair alone: the base gate's after-step request, then its escalation.
         let watched = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            active.watch_immediate(
-                host.await_event_resolver(),
-                tokio_util::sync::CancellationToken::new(),
-            ),
+            active.watch_immediate(host.await_event_resolver()),
         )
         .await
         .expect("the forwarded stop reaches the gate pair")

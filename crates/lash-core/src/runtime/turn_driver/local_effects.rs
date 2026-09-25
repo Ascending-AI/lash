@@ -36,7 +36,8 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                 // The recorded body races the model call against the turn's
                 // gate itself: this is the engine's cooperative cancel for a
                 // step it cannot select away, and what the body saw is its
-                // recorded outcome (ADR 0105 §3, FIG-3672 P9).
+                // recorded outcome (ADR 0105 §3, FIG-3672 P9). A watch that
+                // gave up is a live fault the engine never records.
                 let control = Arc::clone(&runner.driver.turn_control);
                 let host = Arc::clone(&runner.driver.host.core.control.effect_host);
                 let honoured = runner.driver.turn_cancel.is_some();
@@ -50,13 +51,12 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
                     text_streamed,
                     call_record,
                     stream,
-                } = control
-                    .run_step_body(host.as_ref(), honoured, |stop| async move {
-                        driver
-                            .run_llm_call(request, protocol_iteration, invocation, &event_tx, &stop)
-                            .await
-                    })
-                    .await;
+                } = Box::pin(control.run_step_body(&host, honoured, |stop| async move {
+                    driver
+                        .run_llm_call(request, protocol_iteration, invocation, &event_tx, &stop)
+                        .await
+                }))
+                .await?;
                 Ok(RuntimeEffectOutcome::LlmCall {
                     result: Box::new(result),
                     text_streamed,

@@ -537,6 +537,51 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
     });
 }
 
+/// On the SQL engine a turn-observing cell timer races the turn's
+/// cancellation gate inside its recorded execution (FIG-3672 P9): an
+/// `Immediate` stop ends a cell parked in a long `sleep` promptly, instead of
+/// after the timer.
+#[test]
+pub(super) fn an_immediate_stop_ends_a_cell_sleeping_on_the_sql_engine() {
+    block_on(async {
+        let stop = lash_core::CancellationToken::new();
+        let mut state = RlmExecutionState::for_engine("typescript");
+        let execution = execute_code_with_channel_and_bounds(
+            &mut state,
+            lash_core::testing::code_execution_context_stopped_on(
+                crate::testing::memory_backend_ports().await,
+                stop.clone(),
+            )
+            .await,
+            ExecRequest {
+                language: "typescript".to_string(),
+                code: "await sleep(3600000); let woke: number = 1;".to_string(),
+            },
+            crate::testing::memory_artifact_store().await,
+            LashlangSurface::default(),
+            None,
+            RlmProjectedBindings::default(),
+            Arc::new(ProjectionRegistry::new()),
+            RlmLashlangExecutionTraceConfig::default(),
+            lashlang::ExecutionBounds::unbounded(),
+            crate::plugin::RlmChannel::Cell,
+        );
+        tokio::pin!(execution);
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_millis(100), &mut execution)
+                .await
+                .is_err(),
+            "the cell parks in its sleep"
+        );
+        stop.cancel();
+        let response = tokio::time::timeout(std::time::Duration::from_secs(5), execution)
+            .await
+            .expect("an Immediate stop ends the sleeping cell promptly");
+        let error = response.error.expect("the stopped cell reports its stop");
+        assert_eq!(error.kind, lash_core::CellFailureKind::Host);
+    });
+}
+
 #[test]
 pub(super) fn cancellation_wins_over_pre_execution_compile_failures() {
     block_on(async {

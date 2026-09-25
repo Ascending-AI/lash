@@ -164,6 +164,20 @@ pub(super) async fn retire_restate_scope_via_ingress(
     }
 }
 
+/// The idempotency key every watch of one turn's cancellation gate attaches
+/// under (FIG-3672 P9), or `None` for any other wait. Each model call watches
+/// the gate for its own lifetime and drops its call when it ends; attaching
+/// keeps the server-side waiter to one per gate however many calls the turn
+/// makes.
+pub(super) fn turn_cancel_watch_attachment(key: &AwaitEventKey) -> Option<String> {
+    matches!(
+        key.wait,
+        lash_core::AwaitEventWaitIdentity::TurnCancelGate
+            | lash_core::AwaitEventWaitIdentity::TurnCancelEscalation
+    )
+    .then(|| format!("lash-turn-cancel-watch:{}", key.key_id))
+}
+
 pub(super) async fn await_restate_await_event_via_ingress(
     ingress: &RestateAwaitEventIngress,
     key: &AwaitEventKey,

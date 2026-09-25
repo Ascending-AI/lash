@@ -49,10 +49,10 @@ uuid = { workspace = true, features = ["v4"] }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tokio-util = { workspace = true, features = ["rt"] }
-chrono = { workspace = true }
 futures-util = { workspace = true }
 
 [dev-dependencies]
+chrono = { workspace = true }
 lash-core = { package = "lash-internal-core", path = ".", features = ["testing"] }
 insta = "1"
 # FIG-1161: loom seam tests. The flag is scoped to this crate with

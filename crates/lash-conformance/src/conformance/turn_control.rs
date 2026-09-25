@@ -498,7 +498,7 @@ async fn exact_scope_and_session_sweep_isolation<RegistrationBarrier, Registrati
     let waiter_active = Arc::clone(&active);
     let cancel_wait = crate::task::spawn(async move {
         waiter_active
-            .watch_immediate(waiter_host.await_event_resolver(), CancellationToken::new())
+            .watch_immediate(waiter_host.await_event_resolver())
             .await
     });
     tokio::task::yield_now().await;

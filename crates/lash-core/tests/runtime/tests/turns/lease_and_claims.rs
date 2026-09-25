@@ -7,186 +7,119 @@ mod acceptance_window;
 mod attempt_usage;
 use acceptance_window::{AcceptanceWindowJournalController, LATE_TAB_INPUT};
 
-#[tokio::test]
-pub(super) async fn a_failed_step_cancel_watch_stops_the_step_closed_and_settles_turn() {
+/// Run one turn whose model call is `complete`, over `controller`'s
+/// cancellation-gate watch, and return the turn's result.
+async fn run_turn_over_cancel_watch<F, Fut>(
+    controller: Arc<super::effect::RecordingEffectController>,
+    turn_id: &str,
+    complete: F,
+) -> Result<AssembledTurn, lash_core::RuntimeError>
+where
+    F: Fn() -> Fut + Send + Sync + 'static,
+    Fut: std::future::Future<Output = Result<LlmResponse, LlmTransportError>> + Send + 'static,
+{
     let backend = memory_backend().await;
-    let controller = Arc::new(
-        super::effect::RecordingEffectController::default().with_always_failing_cancel_watch(),
-    );
-    let controller_for_provider = Arc::clone(&controller);
-    let provider_calls = Arc::new(AtomicUsize::new(0));
-    let observed_provider_calls = Arc::clone(&provider_calls);
-    let tool_executions = Arc::new(AtomicUsize::new(0));
-    let (provider_started_tx, provider_started_rx) = tokio::sync::oneshot::channel::<()>();
-    let provider_started_tx = Arc::new(Mutex::new(Some(provider_started_tx)));
     let transport = TestProvider::builder()
         .kind("mock")
-        .requires_streaming(true)
-        .complete(move |request| {
-            let controller = Arc::clone(&controller_for_provider);
-            let observed_provider_calls = Arc::clone(&observed_provider_calls);
-            let provider_started_tx = Arc::clone(&provider_started_tx);
-            async move {
-                let call = observed_provider_calls.fetch_add(1, Ordering::SeqCst);
-                match call {
-                    0 => {
-                        request
-                            .stream_events
-                            .expect("stream events")
-                            .send(LlmStreamEvent::Delta {
-                                block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
-                                text: "drained before effect abort".to_string(),
-                            });
-                        if let Some(started) = provider_started_tx.lock_recover().take() {
-                            let _ = started.send(());
-                        }
-                        controller.wait_for_cancel_watch_failure().await;
-                        for _ in 0..32 {
-                            tokio::task::yield_now().await;
-                        }
-                        Ok(LlmResponse {
-                            parts: vec![LlmOutputPart::ToolCall {
-                                call_id: "post-exhaustion-tool".to_string(),
-                                tool_name: "echo_tool".to_string(),
-                                input_json: serde_json::json!({"value": "zombie"}).to_string(),
-                                replay: None,
-                            }],
-                            response_metadata: Default::default(),
-                            ..LlmResponse::default()
-                        })
-                    }
-                    1 => Ok(LlmResponse {
-                        parts: vec![LlmOutputPart::Text {
-                            text: "zombie turn completed".to_string(),
-                            response_meta: None,
-                        }],
-                        response_metadata: Default::default(),
-                        ..LlmResponse::default()
-                    }),
-                    _ => panic!("unexpected provider call {call}"),
-                }
-            }
-        })
+        .complete(move |_request| complete())
         .build();
     let clock = Arc::new(CancelWatchTestClock(lash_core::testing::TestClock::new(0)));
     let host_clock: Arc<dyn lash_core::Clock> = clock.clone();
-    let config = super::effect::runtime_host_config_with_effect_layer(&backend, controller.clone())
+    let config = super::effect::runtime_host_config_with_effect_layer(&backend, controller)
         .with_clock(host_clock);
-    let driver_store: Arc<dyn lash_core::RuntimePersistence> =
-        unbound_recording_store(&backend).await;
-    lash_core::testing::store_fixtures::bind_conformance_session(
-        &driver_store,
-        &lash_core::SessionId::from("root"),
-    )
-    .await;
-    let turn_driver = lash_core::facade_support::TurnWorkDriver::for_session(
-        Arc::clone(&config.control.effect_host),
-        "root",
-        driver_store,
-    );
     let host = EmbeddedRuntimeHost::new(config);
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         Arc::new(CountingEchoTool {
-            executions: Arc::clone(&tool_executions),
+            executions: Arc::new(AtomicUsize::new(0)),
         }),
         transport,
         host,
     )
     .await;
-    let turn_id = "bounded-cancel-watch";
-    let turn_address = lash_core::facade_support::TurnAddress::new("root", turn_id);
-    let turn_cancel = CancellationToken::new();
-    // The host sink holds the buffered stream event until the test releases
-    // it: nothing on the drive path fires a host token any more.
-    let sink_release = CancellationToken::new();
-    let (turn_events, stream_event_entered_rx) =
-        CancellationGatedTurnEvents::new(sink_release.clone());
-    let turn_events_for_task = turn_events.clone();
-    let turn = lash_core::task::spawn(async move {
-        runtime
-            .stream_turn(
-                TurnInput::text("stop the step when its cancellation watch fails"),
-                TurnOptions::new(
-                    turn_cancel,
-                    backend_turn_scope(&backend, &SessionId::from("root"), &TurnId::from(turn_id)),
-                )
-                .with_turn_events(&turn_events_for_task),
-            )
-            .await
-    });
-
-    provider_started_rx
-        .await
-        .expect("provider must start before cancellation is committed");
-    stream_event_entered_rx
-        .await
-        .expect("the buffered stream event must reach the gated sink");
-    let receipt = turn_driver
-        .request_cancel(lash_core::facade_support::TurnCancelRequest::new(
-            turn_address.clone(),
-            "watch-exhaustion-cancel",
-            Some("test-user".to_string()),
-        ))
-        .await
-        .expect("commit cancellation receipt");
-    assert!(matches!(
-        receipt.outcome,
-        lash_core::facade_support::TurnCancelOutcome::Requested(ref evidence)
-            if evidence.request_id == "watch-exhaustion-cancel"
-    ));
-    controller.release_cancel_watch_failures();
-    sink_release.cancel();
-
-    let turn = tokio::time::timeout(std::time::Duration::from_secs(5), turn)
-        .await
-        .expect("a failed watch must stop the step and settle the turn")
-        .expect("turn task")
-        .expect("committed cancellation remains a successful turn terminal");
-    // The model call's body watches the gate itself and fails closed on the
-    // first watch failure (FIG-3672 P9): there is no drive-level watcher to
-    // retry, and the turn learns the cancellation from its journaled peek.
-    assert_eq!(controller.cancel_watch_attempts(), 1);
-    assert_eq!(
-        provider_calls.load(Ordering::SeqCst),
-        1,
-        "a failed watch must abort the in-flight provider call before another can start"
+    let turn = runtime.stream_turn(
+        TurnInput::text("run a model call over a failing cancellation watch"),
+        TurnOptions::new(
+            CancellationToken::new(),
+            backend_turn_scope(&backend, &SessionId::from("root"), &TurnId::from(turn_id)),
+        ),
     );
-    assert_eq!(
-        tool_executions.load(Ordering::SeqCst),
-        0,
-        "provider output produced after the watch failed must never reach an executor"
-    );
-    assert!(matches!(
-        turn.outcome,
-        TurnOutcome::Stopped(TurnStop::Cancelled { ref evidence })
-            if evidence.request_id == "watch-exhaustion-cancel"
-    ));
-    assert!(
-        turn_events.snapshot().iter().any(|activity| matches!(
-            &activity.event,
-            TurnEvent::AssistantProseDelta { text, .. }
-                if text.as_ref() == "drained before effect abort"
-        )),
-        "cooperative teardown must drain the buffered stream event; provider_calls={}, tool_executions={}",
-        provider_calls.load(Ordering::SeqCst),
-        tool_executions.load(Ordering::SeqCst)
-    );
+    tokio::time::timeout(std::time::Duration::from_secs(20), turn)
+        .await
+        .expect("the turn settles or aborts")
+}
 
-    let terminal = tokio::time::timeout(
-        std::time::Duration::from_secs(1),
-        turn_driver.await_terminal(&turn_address),
-    )
+/// F1 (FIG-3672 P9): a transient fault watching the turn's cancellation gate
+/// during a model call is retried; it never stops the call, so the turn
+/// completes as it would have without the fault.
+#[tokio::test]
+pub(super) async fn a_transient_cancel_watch_fault_never_cancels_the_model_call() {
+    let controller = Arc::new(
+        super::effect::RecordingEffectController::default().with_transient_cancel_watch_failures(3),
+    );
+    let watched = Arc::clone(&controller);
+    let turn = Box::pin(run_turn_over_cancel_watch(
+        Arc::clone(&controller),
+        "transient-watch",
+        move || {
+            let watched = Arc::clone(&watched);
+            async move {
+                // The call outlives the faults: it ends only after the watch has
+                // failed three times and retried past them.
+                while watched.cancel_watch_attempts() < 3 {
+                    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                }
+                Ok(LlmResponse {
+                    parts: vec![LlmOutputPart::Text {
+                        text: "completed through the watch faults".to_string(),
+                        response_meta: None,
+                    }],
+                    response_metadata: Default::default(),
+                    ..LlmResponse::default()
+                })
+            }
+        },
+    ))
     .await
-    .expect("the cancelled turn must settle its terminal")
-    .expect("read settled turn terminal");
-    assert!(matches!(
-        terminal,
-        lash_core::facade_support::TurnTerminal::Committed {
-            outcome: TurnOutcome::Stopped(TurnStop::Cancelled { ref evidence }),
-            ..
-        } if evidence.request_id == "watch-exhaustion-cancel"
-    ));
+    .expect("the turn completes");
+    assert_eq!(controller.cancel_watch_attempts(), 3);
+    assert!(
+        matches!(turn.outcome, TurnOutcome::Finished(_)),
+        "a watch fault must never become a cancellation: {:?}",
+        turn.outcome
+    );
+}
+
+/// F1 (FIG-3672 P9): a watch that keeps failing ends the attempt with the
+/// typed live fault the engine never records — never a `Cancelled` turn and
+/// never provider-cancelled evidence.
+#[tokio::test]
+pub(super) async fn an_exhausted_cancel_watch_fails_the_attempt_closed_not_cancelled() {
+    let controller = Arc::new(
+        super::effect::RecordingEffectController::default().with_always_failing_cancel_watch(),
+    );
+    controller.release_cancel_watch_failures();
+    let result = Box::pin(run_turn_over_cancel_watch(
+        Arc::clone(&controller),
+        "exhausted-watch",
+        std::future::pending,
+    ))
+    .await;
+    assert_eq!(
+        controller.cancel_watch_attempts(),
+        8,
+        "the watch rides the whole retry ladder (8 attempts) before giving up"
+    );
+    match result {
+        Err(error) => assert_eq!(
+            error.code,
+            lash_core::RuntimeErrorCode::TransientCancelWatch
+        ),
+        Ok(turn) => panic!(
+            "an exhausted watch must abort the attempt, not settle: {:?}",
+            turn.outcome
+        ),
+    }
 }
 
 #[tokio::test]

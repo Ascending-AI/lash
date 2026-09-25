@@ -1599,16 +1599,28 @@ impl RuntimeEffectControllerError {
         self
     }
 
+    /// A step whose execution lost its watch on the turn's cancellation gate
+    /// (FIG-3672 P9): the watch retried and gave up, so the attempt ends with
+    /// this live fault instead of a recorded outcome. It is never journaled
+    /// and never read as a cancellation — the engine runs the step again.
+    pub fn turn_cancel_watch_lost(message: impl Into<String>) -> Self {
+        Self::new(RuntimeErrorCode::TransientCancelWatch, message)
+            .retryable_uncommitted_derivation()
+    }
+
     /// Only the host derivations — the assistant-response hooks, the
     /// execution-environment sync and the execution-environment load — can
-    /// consume derivation retry authority.
+    /// consume derivation retry authority, and any step whose cancellation
+    /// watch was lost ([`Self::turn_cancel_watch_lost`]): that fault is about
+    /// the attempt, never the step.
     pub fn journal_disposition(&self, kind: RuntimeEffectKind) -> EffectErrorJournalDisposition {
         if matches!(
             kind,
             RuntimeEffectKind::AssistantResponseHooks
                 | RuntimeEffectKind::SyncExecutionEnvironment
                 | RuntimeEffectKind::LoadExecutionEnv
-        ) {
+        ) || self.code == RuntimeErrorCode::TransientCancelWatch
+        {
             self.journal_disposition
         } else {
             EffectErrorJournalDisposition::Terminal

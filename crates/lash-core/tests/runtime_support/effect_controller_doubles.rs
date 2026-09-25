@@ -182,6 +182,12 @@ pub enum CancelWatchBehavior {
         failures_released: Arc<std::sync::atomic::AtomicBool>,
         release_failures: Arc<tokio::sync::Notify>,
     },
+    /// The first `remaining` watches of the gate fail, then every watch
+    /// delegates: a transient fault the watch's retry ladder rides out.
+    FailFirst {
+        remaining: Arc<std::sync::atomic::AtomicUsize>,
+        attempts: Arc<std::sync::atomic::AtomicUsize>,
+    },
 }
 
 #[derive(Clone, Default)]
@@ -292,9 +298,17 @@ impl RecordingEffectController {
         self
     }
 
+    pub fn with_transient_cancel_watch_failures(mut self, failures: usize) -> Self {
+        self.cancel_watch = CancelWatchBehavior::FailFirst {
+            remaining: Arc::new(std::sync::atomic::AtomicUsize::new(failures)),
+            attempts: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        };
+        self
+    }
+
     pub fn release_cancel_watch_failures(&self) {
         match &self.cancel_watch {
-            CancelWatchBehavior::Delegate => {
+            CancelWatchBehavior::Delegate | CancelWatchBehavior::FailFirst { .. } => {
                 panic!("cancel-watch failure gate is unavailable in delegate mode")
             }
             CancelWatchBehavior::AlwaysError {
@@ -311,14 +325,15 @@ impl RecordingEffectController {
     pub fn cancel_watch_attempts(&self) -> usize {
         match &self.cancel_watch {
             CancelWatchBehavior::Delegate => 0,
-            CancelWatchBehavior::AlwaysError { attempts, .. } => attempts.load(Ordering::SeqCst),
+            CancelWatchBehavior::AlwaysError { attempts, .. }
+            | CancelWatchBehavior::FailFirst { attempts, .. } => attempts.load(Ordering::SeqCst),
         }
     }
 
     pub(crate) async fn wait_for_cancel_watch_failure(&self) {
         match &self.cancel_watch {
-            CancelWatchBehavior::Delegate => {
-                panic!("cancel-watch exhaustion is unavailable in delegate mode")
+            CancelWatchBehavior::Delegate | CancelWatchBehavior::FailFirst { .. } => {
+                panic!("cancel-watch exhaustion is only available in always-error mode")
             }
             CancelWatchBehavior::AlwaysError {
                 attempts,
@@ -426,6 +441,23 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             return Err(RuntimeError::new(
                 lash_core::RuntimeErrorCode::TransientCancelWatch,
                 "cancel resolver remains unavailable",
+            ));
+        }
+        if matches!(key.wait, AwaitEventWaitIdentity::TurnCancelGate)
+            && let CancelWatchBehavior::FailFirst {
+                remaining,
+                attempts,
+            } = &self.cancel_watch
+            && remaining
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |left| {
+                    left.checked_sub(1)
+                })
+                .is_ok()
+        {
+            attempts.fetch_add(1, Ordering::SeqCst);
+            return Err(RuntimeError::new(
+                lash_core::RuntimeErrorCode::TransientCancelWatch,
+                "cancel resolver briefly unavailable",
             ));
         }
         inner.await_await_event(key, cancel, deadline).await

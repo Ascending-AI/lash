@@ -23,6 +23,8 @@ use crate::{TurnActivity, TurnActivityId, TurnEvent};
 pub(crate) struct RecordedTurnCancel {
     observed: Arc<std::sync::atomic::AtomicBool>,
     control: Option<Arc<crate::runtime::turn_control::ActiveTurnControl>>,
+    /// The deployment host a recorded step body watches the gate pair over.
+    host: Option<Arc<dyn crate::EffectHost>>,
     /// The stop the turn lends its tool children, fired with the fact.
     lent: Option<CancellationToken>,
 }
@@ -849,11 +851,19 @@ impl<'run> RuntimeExecutionContext<'run> {
         mut self,
         honoured: bool,
         control: Arc<crate::runtime::turn_control::ActiveTurnControl>,
+        host: Arc<dyn crate::EffectHost>,
         lent: CancellationToken,
     ) -> Self {
+        // A tool this execution runs in process cooperates through the same
+        // lent stop its group children get: it fires only when the recorded
+        // fact advances, so a tool's cancel is never a live read of the gate.
+        if self.cancellation_token.is_none() {
+            self.cancellation_token = Some(lent.clone());
+        }
         let turn_cancel = RecordedTurnCancel {
             observed: Arc::default(),
             control: Some(control),
+            host: Some(host),
             lent: Some(lent),
         };
         if honoured {
@@ -869,6 +879,29 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// point.
     pub fn note_turn_cancelled(&self) {
         self.turn_cancel.note();
+    }
+
+    /// Execution-side only: run one recorded step body that this execution
+    /// issues in process (a tool attempt) under a cooperative stop that fires
+    /// when the turn's gate pair asks it to stop now (FIG-3672 P9). The body
+    /// gets the stop; what it returns is the step's recorded outcome. A watch
+    /// that gives up leaves the body running to its end (the engine records
+    /// every tool outcome, so the fault must not become one). An execution
+    /// with no gate control runs the body under its own token.
+    pub(crate) async fn run_turn_step_body<T, F, Fut>(&self, body: F) -> T
+    where
+        F: FnOnce(Option<CancellationToken>) -> Fut,
+        Fut: std::future::Future<Output = T>,
+    {
+        let (Some(control), Some(host)) = (
+            self.turn_cancel.control.as_ref(),
+            self.turn_cancel.host.as_ref(),
+        ) else {
+            return body(self.cancellation_token.clone()).await;
+        };
+        control
+            .run_recorded_step_body(host, self.is_cancelled(), |stop| body(Some(stop)))
+            .await
     }
 
     /// A code cell's cancel checkpoint (FIG-3672 P9): a journaled peek of the
