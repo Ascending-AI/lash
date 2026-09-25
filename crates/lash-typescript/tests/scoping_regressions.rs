@@ -47,10 +47,15 @@ fn unresolved_reads_and_arguments_reject_before_execution() {
     let typo = lash_typescript::testing::compile("finish(someTypo);")
         .expect_err("unknown binding must reject");
     assert_eq!(typo.code, lash_typescript::DiagnosticCode::UnknownBinding);
-    let arguments = lash_typescript::testing::compile(
-        "function f(): number { return arguments.length; } finish(f());",
-    )
-    .expect_err("arguments must direct authors to rest parameters");
+    // Inside a function `arguments` is the materialized arguments object.
+    assert_eq!(
+        finished("function f(): number { return arguments.length; } finish(f());"),
+        Value::Number(0.0)
+    );
+    // At module scope there is no arguments object; the diagnostic still
+    // directs authors to rest parameters.
+    let arguments = lash_typescript::testing::compile("finish(arguments.length);")
+        .expect_err("top-level arguments must direct authors to rest parameters");
     assert_eq!(
         arguments.code,
         lash_typescript::DiagnosticCode::ThisUnsupported

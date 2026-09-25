@@ -342,10 +342,14 @@ async fn suspended_caller_and_callee_preserve_heap_arguments_and_locals() {
 }
 
 fn assert_resume_rejects_program_counter(program: &CompiledProgram, continuation: VmContinuation) {
-    assert!(matches!(
-        Vm::resume_from(continuation, program, &Host),
-        Err(ContinuationError::InstructionPointerOutsideCodeRange { .. })
-    ));
+    let error = Vm::resume_from(continuation, program, &Host).err();
+    assert!(
+        matches!(
+            error,
+            Some(ContinuationError::InstructionPointerOutsideCodeRange { .. })
+        ),
+        "got {error:?}"
+    );
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -424,6 +428,16 @@ async fn resume_rejects_cross_function_active_and_return_instruction_pointers() 
     root_to_function.slots = nested.frame_stack[0].slots.clone();
     root_to_function.globals = nested.frame_stack[0].globals.clone();
     root_to_function.iterator_stack = nested.frame_stack[0].iterator_stack.clone();
+    // The dropped frames' `lash:*` extras still name heap objects; keep them
+    // reachable or the heap-graph check refuses the continuation before the
+    // pointer range check this case exercises.
+    for value in nested
+        .globals
+        .values()
+        .chain(nested.frame_stack[1].globals.values())
+    {
+        root_to_function.operand_stack.push(value.clone());
+    }
     assert_resume_rejects_program_counter(&program, root_to_function);
 
     let mut root_exact_end = nested.clone();
@@ -433,6 +447,13 @@ async fn resume_rejects_cross_function_active_and_return_instruction_pointers() 
     root_exact_end.slots = nested.frame_stack[0].slots.clone();
     root_exact_end.globals = nested.frame_stack[0].globals.clone();
     root_exact_end.iterator_stack = nested.frame_stack[0].iterator_stack.clone();
+    for value in nested
+        .globals
+        .values()
+        .chain(nested.frame_stack[1].globals.values())
+    {
+        root_exact_end.operand_stack.push(value.clone());
+    }
     assert_eq!(
         round_trip_and_resume(&program, root_exact_end).await,
         ExecutionOutcome::Continued,

@@ -365,14 +365,19 @@ no probe that fires it fails that test.
   RegExp match that would produce one therefore fails closed as
   `TS_REGEX_LONE_SURROGATE_MATCH_UNSUPPORTED`; add `u` or avoid matching half
   of an astral character.
-- `lastIndex` applies ECMA `ToLength` at the **write**, not at the read. ECMA
-  makes it an ordinary writable data property and coerces on use, so Node reads
-  back exactly what was stored: `r.lastIndex = -1` reads `-1`, and `Infinity`
-  reads `Infinity`. Here the same writes read back `0` and `2 ** 53 - 1`. The
-  coerced value is what every accepted operation would have used anyway, so the
-  divergence is confined to reading the property straight back; storing the
-  clamp is what keeps `lastIndex` a durable integer rather than an arbitrary
-  double the snapshot has to carry.
+- `RegExp(pattern, flags)` — as a call or a `new` — coerces a non-RegExp
+  pattern and explicit flags through ECMA `ToString`, so `new RegExp(5)` is
+  `/5/` and a value whose own `toString`/`valueOf` ECMA would run answers
+  through the guest hook (FIG-3652). A literal non-string pattern still
+  refuses at admission as `TS_NEW_UNSUPPORTED`.
+- `lastIndex` is the ordinary writable data property ECMA specifies: a write
+  stores the raw value and `exec` applies `ToLength` at use, so Node's
+  read-back is verbatim — `r.lastIndex = -1` reads `-1`, `2.7` reads `2.7`,
+  and `Infinity` reads `Infinity`. What the durable `u64` slot cannot hold
+  exactly — negatives, fractions, `NaN`, `Infinity`, non-numbers — rides an
+  in-memory override while the slot keeps the value's `ToLength` floor; a
+  process restored from a snapshot therefore reads the coercion where the
+  live process read the raw write.
 - `matchAll` is accepted only in a direct iterable sink and otherwise rejects as
   `TS_REGEX_ITERATOR_POSITION` with a spread repair. This keeps the iterator from becoming durable state. The
   shared sink lowers the operation as one bounded materialization, so a later
@@ -523,6 +528,15 @@ no probe that fires it fails that test.
   source text. The divergence from Node is registered as
   `function-source-text`: Node prints `function includes() { [native code] }`
   for `String('y'.includes)`; lash refuses.
+- `Number.prototype.toString` accepts the full ECMA radix range 2–36 and
+  rejects an out-of-range radix with a guest `RangeError`, and `toFixed`,
+  `toExponential` and `toPrecision` follow the ECMA digit bounds with Node's
+  `RangeError` messages.
+- `Function()`, `AsyncFunction()` and `GeneratorFunction()` evaluate source
+  text, which the dialect does not admit; a call to one refuses as
+  `TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED`. Their values still materialize as
+  built-ins — `async function(){}.constructor === AsyncFunction` — and a
+  non-callable built-in such as `Math` throws the `TypeError` Node throws.
 - Multi-argument Date construction and ISO date-times without an explicit
   offset are interpreted as UTC, never the host timezone. `Date.parse` and
   string construction accept only ECMA date-time syntax; a structurally valid
@@ -533,6 +547,11 @@ no probe that fires it fails that test.
   `new Date(d.getTime() + n)`. Local-time getters reject with the corresponding
   `getUTC*` replacement; locale and local string methods direct the author to
   `toISOString()`.
+- A bare `Date()` call answers the current UTC date-time string through the
+  journaled clock. A materialized `Date` value invoked indirectly —
+  `const d = Date; d()` — cannot reach that effect from a synchronous
+  built-in call and refuses as `TS_DATE_NOW_EFFECT_REQUIRED`; write `Date()`
+  directly instead.
 - Date numeric coercion is supported, including subtraction and relational
   comparison. String coercion—`d.toString()`, `d.toUTCString()`, `String(d)`,
   `d + ''`, template interpolation, or through an array/Error-message join—

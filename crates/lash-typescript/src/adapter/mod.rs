@@ -25,7 +25,8 @@ use goal::Goal;
 use nesting::{guard_source_nesting, source_nesting_diagnostic};
 pub(crate) use prototype_chain::is_prototype_chain_property as names_the_prototype_chain;
 use prototype_chain::{
-    check_property_key, is_prototype_chain_property, prototype_access_rejection,
+    builtin_prototype_mutation, check_property_key, is_prototype_chain_property,
+    prototype_access_rejection,
 };
 use rejections::{parser_diagnostic, reject, reject_defect, reject_refusal, source_span};
 pub(crate) use types::{TypeAnnotation, TypeAnnotationField, TypeShape};
@@ -201,7 +202,8 @@ pub(crate) struct Function {
     pub(crate) body: FunctionBody,
     pub(crate) is_async: bool,
     /// An arrow has no receiver of its own: its `this` is its enclosing
-    /// function's (ECMA-262 lexical `this`).
+    /// function's (ECMA-262 lexical `this`), and its `arguments` binds the
+    /// enclosing non-arrow function's arguments object, not one of its own.
     pub(crate) is_arrow: bool,
 }
 
@@ -295,6 +297,9 @@ pub(crate) enum Expr {
 pub(crate) enum ArrayElement {
     Value(Expr),
     Spread(Expr),
+    /// An elision — `[1, , 3]` — ECMA's hole: the slot has no own property at
+    /// all, distinct from a stored `undefined`.
+    Hole,
 }
 
 #[derive(Clone, Debug)]
@@ -1212,11 +1217,7 @@ impl Adapter<'_> {
                     .iter()
                     .map(|element| {
                         let Some(element) = element else {
-                            return Err(reject(
-                                DiagnosticCode::SparseArrayUnsupported,
-                                "array literal elisions",
-                                span,
-                            ));
+                            return Ok(ArrayElement::Hole);
                         };
                         let value = self.convert_expr(&element.expr)?;
                         Ok(if element.spread.is_some() {
@@ -1565,7 +1566,10 @@ impl Adapter<'_> {
         }
         let property = match &member.prop {
             swc::MemberProp::Ident(name) => {
-                if is_prototype_chain_property(name.sym.as_ref()) {
+                if is_prototype_chain_property(name.sym.as_ref())
+                    && !(name.sym.as_ref() == "prototype"
+                        && matches!(&member.obj.as_ref(), swc::Expr::Ident(owner) if lashlang::is_javascript_builtin_global(owner.sym.as_ref())))
+                {
                     return Err(prototype_access_rejection(member.span));
                 }
                 MemberProperty::Field(self.identifier_name(name)?)
@@ -1610,6 +1614,9 @@ impl Adapter<'_> {
     }
 
     fn convert_update_target(&self, expr: &swc::Expr) -> Result<AssignTarget, Diagnostic> {
+        if let Some(diagnostic) = expr.as_member().and_then(builtin_prototype_mutation) {
+            return Err(diagnostic);
+        }
         match self.convert_expr(expr)? {
             Expr::Ident(name, _) => Ok(AssignTarget::Ident(name)),
             Expr::Member {
@@ -1632,6 +1639,9 @@ impl Adapter<'_> {
                 Ok(AssignTarget::Ident(self.identifier(&name.id)?))
             }
             swc::AssignTarget::Simple(swc::SimpleAssignTarget::Member(member)) => {
+                if let Some(diagnostic) = builtin_prototype_mutation(member) {
+                    return Err(diagnostic);
+                }
                 let Expr::Member {
                     object, property, ..
                 } = self.convert_member(member)?

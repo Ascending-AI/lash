@@ -342,30 +342,78 @@ impl BuiltinPrototype {
     }
 }
 
-/// One built-in function object an advertised prototype carries.
+/// What owns a built-in value.
+///
+/// A prototype for an instance method, or a named object for the rest of the
+/// first-class surface (FIG-3656): `"globalThis"` names the global scope's
+/// values — the constructors, namespaces and function-valued globals — while
+/// `Object("Math")` owns the `Math.max` statics and `Object("Number")` owns
+/// the `Number.prototype` object under the name `"prototype"`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub(crate) enum BuiltinOwner {
+    Prototype(BuiltinPrototype),
+    Object(&'static str),
+}
+
+impl BuiltinOwner {
+    /// The name a wire carries for the owner, which is also how a qualified
+    /// built-in name is spelled: `"Array"` owns both `Array.prototype`'s
+    /// methods and `Array`'s statics; `"globalThis"` owns the bare globals.
+    pub(crate) const GLOBAL: &'static str = "globalThis";
+
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::Prototype(prototype) => prototype.name(),
+            Self::Object(name) => name,
+        }
+    }
+}
+
+/// One built-in object an advertised surface carries.
 ///
 /// ECMA gives each one identity: `'a'.includes === 'b'.includes`, while
 /// `'a'.includes !== [].includes`, since those are two functions on two
-/// prototypes. A function is therefore named by its prototype and its own
-/// `name`, never by the property key it was read through: `Set.prototype.keys`
+/// prototypes, and `Math === Math` holds across reads because `Math` is one
+/// object. A built-in is therefore named by its owner and its own `name`,
+/// never by the property key it was read through: `Set.prototype.keys`
 /// *is* `Set.prototype.values`.
+///
+/// Not every row is callable: the namespaces and `Owner.prototype` objects
+/// are built-ins too, so `typeof` consults `callable` — `Math` answers
+/// `"object"` where `Math.max` answers `"function"`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub(crate) struct BuiltinFunction(u16);
 
 struct BuiltinFunctionRow {
-    prototype: BuiltinPrototype,
+    owner: BuiltinOwner,
     name: &'static str,
     /// ECMA's `length`: the count of required parameters the specification
     /// states, which is not the arity the signature prose advertises.
+    /// Meaningful only on a callable row.
     length: u8,
+    /// Whether ECMA gives the object a `[[Call]]` — what `typeof` and the
+    /// call dispatch consult.
+    callable: bool,
 }
 
 macro_rules! builtin_functions {
     ($(($prototype:expr, $name:literal, $length:literal)),+ $(,)?) => {
         &[$(BuiltinFunctionRow {
-            prototype: $prototype,
+            owner: BuiltinOwner::Prototype($prototype),
             name: $name,
             length: $length,
+            callable: true,
+        }),+]
+    };
+}
+
+macro_rules! builtin_objects {
+    ($(($owner:expr, $name:literal, $length:literal, $callable:literal)),+ $(,)?) => {
+        &[$(BuiltinFunctionRow {
+            owner: BuiltinOwner::Object($owner),
+            name: $name,
+            length: $length,
+            callable: $callable,
         }),+]
     };
 }
@@ -508,10 +556,374 @@ const BUILTIN_FUNCTIONS: &[BuiltinFunctionRow] = {
         (P::UrlSearchParams, "sort", 0),
         (P::UrlSearchParams, "toString", 0),
         (P::UrlSearchParams, "values", 0),
+        // Readable method values the call surface does not advertise: the
+        // `Function.prototype` trio and `Object.prototype`'s legacy members.
+        // Reading `f.bind` answers the one function object; calling it is a
+        // `this`-binding question FIG-3700 owns, so the signatures stay shut.
+        (P::Function, "apply", 2),
+        (P::Function, "bind", 1),
+        (P::Function, "call", 1),
+        (P::Object, "isPrototypeOf", 1),
+        (P::Object, "propertyIsEnumerable", 1),
+        (P::Object, "toLocaleString", 0),
+        (P::String, "localeCompare", 1),
+        (P::String, "normalize", 0),
+        (P::String, "toLocaleLowerCase", 0),
+        (P::String, "toLocaleUpperCase", 0),
+        (P::Number, "toLocaleString", 0),
+        (P::RegExp, "compile", 1),
+        (P::Object, "__defineGetter__", 2),
+        (P::Object, "__defineSetter__", 2),
+        (P::Object, "__lookupGetter__", 1),
+        (P::Object, "__lookupSetter__", 1),
     ]
 };
 
-/// Property keys whose value is a function registered under another name.
+/// Instance-method names that are readable built-ins without being advertised
+/// calls — the one sanctioned gap in the read/call surface invariant.
+const READABLE_INSTANCE_EXTRAS: &[&str] = &[
+    "__defineGetter__",
+    "__defineSetter__",
+    "__lookupGetter__",
+    "__lookupSetter__",
+    "apply",
+    "bind",
+    "call",
+    "compile",
+    "isPrototypeOf",
+    "localeCompare",
+    "normalize",
+    "propertyIsEnumerable",
+    "toLocaleLowerCase",
+    "toLocaleString",
+    "toLocaleUpperCase",
+];
+
+/// The object-scope built-ins: the global constructors, namespaces and
+/// function-valued globals under `"globalThis"`, every `Owner.prototype`
+/// object, and the static methods each owner carries. `name`/`length` are
+/// node v25's; `Number.parseInt` and `Number.parseFloat` are absent because
+/// they are the global `parseInt`/`parseFloat` objects — the read aliases
+/// them.
+const BUILTIN_OBJECTS: &[BuiltinFunctionRow] = {
+    const G: &str = BuiltinOwner::GLOBAL;
+    builtin_objects![
+        // Constructors and function-valued globals — `typeof` `"function"`.
+        (G, "AggregateError", 2, true),
+        (G, "Array", 1, true),
+        (G, "ArrayBuffer", 1, true),
+        (G, "AsyncFunction", 1, true),
+        (G, "BigInt", 1, true),
+        (G, "BigInt64Array", 3, true),
+        (G, "BigUint64Array", 3, true),
+        (G, "Boolean", 1, true),
+        (G, "DataView", 1, true),
+        (G, "Date", 7, true),
+        (G, "Error", 1, true),
+        (G, "EvalError", 1, true),
+        (G, "FinalizationRegistry", 1, true),
+        (G, "Float16Array", 3, true),
+        (G, "Float32Array", 3, true),
+        (G, "Float64Array", 3, true),
+        (G, "Function", 1, true),
+        (G, "GeneratorFunction", 1, true),
+        (G, "Int16Array", 3, true),
+        (G, "Int32Array", 3, true),
+        (G, "Int8Array", 3, true),
+        (G, "Iterator", 1, true),
+        (G, "Map", 0, true),
+        (G, "Number", 1, true),
+        (G, "Object", 1, true),
+        (G, "Promise", 1, true),
+        (G, "Proxy", 2, true),
+        (G, "RangeError", 1, true),
+        (G, "ReferenceError", 1, true),
+        (G, "RegExp", 2, true),
+        (G, "Set", 0, true),
+        (G, "SharedArrayBuffer", 1, true),
+        (G, "String", 1, true),
+        (G, "Symbol", 0, true),
+        (G, "SyntaxError", 1, true),
+        (G, "TypeError", 1, true),
+        (G, "Uint16Array", 3, true),
+        (G, "Uint32Array", 3, true),
+        (G, "Uint8Array", 3, true),
+        (G, "Uint8ClampedArray", 3, true),
+        (G, "URIError", 1, true),
+        (G, "URL", 1, true),
+        (G, "URLSearchParams", 0, true),
+        (G, "WeakMap", 0, true),
+        (G, "WeakRef", 1, true),
+        (G, "WeakSet", 0, true),
+        (G, "atob", 1, true),
+        (G, "btoa", 1, true),
+        (G, "decodeURI", 1, true),
+        (G, "decodeURIComponent", 1, true),
+        (G, "encodeURI", 1, true),
+        (G, "encodeURIComponent", 1, true),
+        (G, "escape", 1, true),
+        (G, "eval", 1, true),
+        (G, "isFinite", 1, true),
+        (G, "isNaN", 1, true),
+        (G, "parseFloat", 1, true),
+        (G, "parseInt", 2, true),
+        (G, "structuredClone", 1, true),
+        (G, "unescape", 1, true),
+        // The namespaces — `typeof` `"object"`.
+        (G, "Atomics", 0, false),
+        (G, "Intl", 0, false),
+        (G, "JSON", 0, false),
+        (G, "Math", 0, false),
+        (G, "Reflect", 0, false),
+        // The `Owner.prototype` objects — `typeof` `"object"` except
+        // `Function.prototype`, which is itself callable.
+        ("AggregateError", "prototype", 0, false),
+        ("Array", "prototype", 0, false),
+        ("ArrayBuffer", "prototype", 0, false),
+        ("AsyncFunction", "prototype", 0, false),
+        ("BigInt", "prototype", 0, false),
+        ("BigInt64Array", "prototype", 0, false),
+        ("BigUint64Array", "prototype", 0, false),
+        ("Boolean", "prototype", 0, false),
+        ("DataView", "prototype", 0, false),
+        ("Date", "prototype", 0, false),
+        ("Error", "prototype", 0, false),
+        ("EvalError", "prototype", 0, false),
+        ("FinalizationRegistry", "prototype", 0, false),
+        ("Float16Array", "prototype", 0, false),
+        ("Float32Array", "prototype", 0, false),
+        ("Float64Array", "prototype", 0, false),
+        ("Function", "prototype", 0, true),
+        ("GeneratorFunction", "prototype", 0, false),
+        ("Int16Array", "prototype", 0, false),
+        ("Int32Array", "prototype", 0, false),
+        ("Int8Array", "prototype", 0, false),
+        ("Iterator", "prototype", 0, false),
+        ("Map", "prototype", 0, false),
+        ("Number", "prototype", 0, false),
+        ("Object", "prototype", 0, false),
+        ("Promise", "prototype", 0, false),
+        ("RangeError", "prototype", 0, false),
+        ("ReferenceError", "prototype", 0, false),
+        ("RegExp", "prototype", 0, false),
+        ("Set", "prototype", 0, false),
+        ("SharedArrayBuffer", "prototype", 0, false),
+        ("String", "prototype", 0, false),
+        ("Symbol", "prototype", 0, false),
+        ("SyntaxError", "prototype", 0, false),
+        ("TypeError", "prototype", 0, false),
+        ("Uint16Array", "prototype", 0, false),
+        ("Uint32Array", "prototype", 0, false),
+        ("Uint8Array", "prototype", 0, false),
+        ("Uint8ClampedArray", "prototype", 0, false),
+        ("URIError", "prototype", 0, false),
+        ("URL", "prototype", 0, false),
+        ("URLSearchParams", "prototype", 0, false),
+        ("WeakMap", "prototype", 0, false),
+        ("WeakRef", "prototype", 0, false),
+        ("WeakSet", "prototype", 0, false),
+        // Constructor statics.
+        ("Array", "from", 1, true),
+        ("Array", "fromAsync", 1, true),
+        ("Array", "isArray", 1, true),
+        ("Array", "of", 0, true),
+        ("ArrayBuffer", "isView", 1, true),
+        ("BigInt", "asIntN", 2, true),
+        ("BigInt", "asUintN", 2, true),
+        ("Date", "UTC", 7, true),
+        ("Date", "now", 0, true),
+        ("Date", "parse", 1, true),
+        ("Error", "captureStackTrace", 2, true),
+        ("Error", "isError", 1, true),
+        ("Iterator", "from", 1, true),
+        ("Map", "groupBy", 2, true),
+        ("Number", "isFinite", 1, true),
+        ("Number", "isInteger", 1, true),
+        ("Number", "isNaN", 1, true),
+        ("Number", "isSafeInteger", 1, true),
+        ("Object", "assign", 2, true),
+        ("Object", "create", 2, true),
+        ("Object", "defineProperties", 2, true),
+        ("Object", "defineProperty", 3, true),
+        ("Object", "entries", 1, true),
+        ("Object", "freeze", 1, true),
+        ("Object", "fromEntries", 1, true),
+        ("Object", "getOwnPropertyDescriptor", 2, true),
+        ("Object", "getOwnPropertyDescriptors", 1, true),
+        ("Object", "getOwnPropertyNames", 1, true),
+        ("Object", "getOwnPropertySymbols", 1, true),
+        ("Object", "getPrototypeOf", 1, true),
+        ("Object", "groupBy", 2, true),
+        ("Object", "hasOwn", 2, true),
+        ("Object", "is", 2, true),
+        ("Object", "isExtensible", 1, true),
+        ("Object", "isFrozen", 1, true),
+        ("Object", "isSealed", 1, true),
+        ("Object", "keys", 1, true),
+        ("Object", "preventExtensions", 1, true),
+        ("Object", "seal", 1, true),
+        ("Object", "setPrototypeOf", 2, true),
+        ("Object", "values", 1, true),
+        ("Promise", "all", 1, true),
+        ("Promise", "allSettled", 1, true),
+        ("Promise", "any", 1, true),
+        ("Promise", "race", 1, true),
+        ("Promise", "reject", 1, true),
+        ("Promise", "resolve", 1, true),
+        ("Promise", "try", 1, true),
+        ("Promise", "withResolvers", 0, true),
+        ("Proxy", "revocable", 2, true),
+        ("RegExp", "escape", 1, true),
+        ("String", "fromCharCode", 1, true),
+        ("String", "fromCodePoint", 1, true),
+        ("String", "raw", 1, true),
+        ("Symbol", "for", 1, true),
+        ("Symbol", "keyFor", 1, true),
+        ("URL", "canParse", 2, true),
+        ("URL", "createObjectURL", 1, true),
+        ("URL", "parse", 2, true),
+        ("URL", "revokeObjectURL", 1, true),
+        // Namespace members.
+        ("Atomics", "add", 3, true),
+        ("Atomics", "and", 3, true),
+        ("Atomics", "compareExchange", 4, true),
+        ("Atomics", "exchange", 3, true),
+        ("Atomics", "isLockFree", 1, true),
+        ("Atomics", "load", 2, true),
+        ("Atomics", "notify", 2, true),
+        ("Atomics", "or", 3, true),
+        ("Atomics", "pause", 0, true),
+        ("Atomics", "store", 3, true),
+        ("Atomics", "sub", 3, true),
+        ("Atomics", "wait", 4, true),
+        ("Atomics", "waitAsync", 4, true),
+        ("Atomics", "xor", 3, true),
+        ("Intl", "Collator", 0, true),
+        ("Intl", "DateTimeFormat", 0, true),
+        ("Intl", "DisplayNames", 0, true),
+        ("Intl", "DurationFormat", 0, true),
+        ("Intl", "ListFormat", 0, true),
+        ("Intl", "Locale", 0, true),
+        ("Intl", "NumberFormat", 0, true),
+        ("Intl", "PluralRules", 0, true),
+        ("Intl", "RelativeTimeFormat", 0, true),
+        ("Intl", "Segmenter", 0, true),
+        ("Intl", "getCanonicalLocales", 1, true),
+        ("Intl", "supportedValuesOf", 1, true),
+        ("JSON", "isRawJSON", 1, true),
+        ("JSON", "parse", 2, true),
+        ("JSON", "rawJSON", 1, true),
+        ("JSON", "stringify", 3, true),
+        ("Math", "abs", 1, true),
+        ("Math", "acos", 1, true),
+        ("Math", "acosh", 1, true),
+        ("Math", "asin", 1, true),
+        ("Math", "asinh", 1, true),
+        ("Math", "atan", 1, true),
+        ("Math", "atan2", 2, true),
+        ("Math", "atanh", 1, true),
+        ("Math", "cbrt", 1, true),
+        ("Math", "ceil", 1, true),
+        ("Math", "clz32", 1, true),
+        ("Math", "cos", 1, true),
+        ("Math", "cosh", 1, true),
+        ("Math", "exp", 1, true),
+        ("Math", "expm1", 1, true),
+        ("Math", "f16round", 1, true),
+        ("Math", "floor", 1, true),
+        ("Math", "fround", 1, true),
+        ("Math", "hypot", 2, true),
+        ("Math", "imul", 2, true),
+        ("Math", "log", 1, true),
+        ("Math", "log1p", 1, true),
+        ("Math", "log2", 1, true),
+        ("Math", "log10", 1, true),
+        ("Math", "max", 2, true),
+        ("Math", "min", 2, true),
+        ("Math", "pow", 2, true),
+        ("Math", "random", 0, true),
+        ("Math", "round", 1, true),
+        ("Math", "sign", 1, true),
+        ("Math", "sin", 1, true),
+        ("Math", "sinh", 1, true),
+        ("Math", "sqrt", 1, true),
+        ("Math", "tan", 1, true),
+        ("Math", "tanh", 1, true),
+        ("Math", "trunc", 1, true),
+        ("Reflect", "apply", 3, true),
+        ("Reflect", "construct", 2, true),
+        ("Reflect", "defineProperty", 3, true),
+        ("Reflect", "deleteProperty", 2, true),
+        ("Reflect", "get", 2, true),
+        ("Reflect", "getOwnPropertyDescriptor", 2, true),
+        ("Reflect", "getPrototypeOf", 1, true),
+        ("Reflect", "has", 2, true),
+        ("Reflect", "isExtensible", 1, true),
+        ("Reflect", "ownKeys", 1, true),
+        ("Reflect", "preventExtensions", 1, true),
+        ("Reflect", "set", 3, true),
+        ("Reflect", "setPrototypeOf", 2, true),
+        // Prototype methods whose owners have no `BuiltinPrototype` —
+        // `Promise.prototype.then` reads as a function value even though no
+        // heap object kind inherits it.
+        ("Promise.prototype", "then", 2, true),
+        ("Promise.prototype", "catch", 1, true),
+        ("Promise.prototype", "finally", 1, true),
+        ("Symbol.prototype", "toString", 0, true),
+        ("Symbol.prototype", "valueOf", 0, true),
+        ("BigInt.prototype", "toLocaleString", 0, true),
+        ("BigInt.prototype", "toString", 1, true),
+        ("BigInt.prototype", "valueOf", 0, true),
+        ("ArrayBuffer.prototype", "resize", 1, true),
+        ("ArrayBuffer.prototype", "slice", 2, true),
+        ("ArrayBuffer.prototype", "transfer", 0, true),
+        ("SharedArrayBuffer.prototype", "grow", 1, true),
+        ("SharedArrayBuffer.prototype", "slice", 2, true),
+        ("DataView.prototype", "getBigInt64", 1, true),
+        ("DataView.prototype", "getBigUint64", 1, true),
+        ("DataView.prototype", "getFloat16", 1, true),
+        ("DataView.prototype", "getFloat32", 1, true),
+        ("DataView.prototype", "getFloat64", 1, true),
+        ("DataView.prototype", "getInt8", 1, true),
+        ("DataView.prototype", "getInt16", 1, true),
+        ("DataView.prototype", "getInt32", 1, true),
+        ("DataView.prototype", "getUint8", 1, true),
+        ("DataView.prototype", "getUint16", 1, true),
+        ("DataView.prototype", "getUint32", 1, true),
+        ("DataView.prototype", "setBigInt64", 2, true),
+        ("DataView.prototype", "setBigUint64", 2, true),
+        ("DataView.prototype", "setFloat16", 2, true),
+        ("DataView.prototype", "setFloat32", 2, true),
+        ("DataView.prototype", "setFloat64", 2, true),
+        ("DataView.prototype", "setInt8", 2, true),
+        ("DataView.prototype", "setInt16", 2, true),
+        ("DataView.prototype", "setInt32", 2, true),
+        ("DataView.prototype", "setUint8", 2, true),
+        ("DataView.prototype", "setUint16", 2, true),
+        ("DataView.prototype", "setUint32", 2, true),
+        ("WeakMap.prototype", "delete", 1, true),
+        ("WeakMap.prototype", "get", 1, true),
+        ("WeakMap.prototype", "has", 1, true),
+        ("WeakMap.prototype", "set", 2, true),
+        ("WeakSet.prototype", "add", 1, true),
+        ("WeakSet.prototype", "delete", 1, true),
+        ("WeakSet.prototype", "has", 1, true),
+        ("WeakRef.prototype", "deref", 0, true),
+        ("FinalizationRegistry.prototype", "register", 2, true),
+        ("FinalizationRegistry.prototype", "unregister", 1, true),
+        ("AsyncFunction.prototype", "apply", 2, true),
+        ("AsyncFunction.prototype", "bind", 1, true),
+        ("AsyncFunction.prototype", "call", 1, true),
+        ("AsyncFunction.prototype", "toString", 0, true),
+        ("GeneratorFunction.prototype", "apply", 2, true),
+        ("GeneratorFunction.prototype", "bind", 1, true),
+        ("GeneratorFunction.prototype", "call", 1, true),
+        ("GeneratorFunction.prototype", "toString", 0, true),
+    ]
+};
+
+/// Prototype members that are the same function object under two names —
+/// `(owner, alias, real)` — `Set.prototype.keys` is `Set.prototype.values`.
 const BUILTIN_FUNCTION_ALIASES: &[(BuiltinPrototype, &str, &str)] =
     &[(BuiltinPrototype::Set, "keys", "values")];
 
@@ -526,15 +938,27 @@ const fn is_advertised_instance_method(method: &str) -> bool {
     false
 }
 
+const fn is_readable_instance_extra(method: &str) -> bool {
+    let mut i = 0;
+    while i < READABLE_INSTANCE_EXTRAS.len() {
+        if str_eq(READABLE_INSTANCE_EXTRAS[i], method) {
+            return true;
+        }
+        i += 1;
+    }
+    false
+}
+
 // A readable built-in the call surface does not advertise would be a method
 // value no member call can reach, so the table is held to the signatures at
-// compile time, alias keys included.
+// compile time, alias keys and the readable extras included.
 const _: () = {
-    assert!(BUILTIN_FUNCTIONS.len() <= u16::MAX as usize);
+    assert!(BUILTIN_FUNCTIONS.len() + BUILTIN_OBJECTS.len() <= u16::MAX as usize);
     let mut i = 0;
     while i < BUILTIN_FUNCTIONS.len() {
+        let name = BUILTIN_FUNCTIONS[i].name;
         assert!(
-            is_advertised_instance_method(BUILTIN_FUNCTIONS[i].name),
+            is_advertised_instance_method(name) || is_readable_instance_extra(name),
             "a readable built-in function is not an advertised instance method"
         );
         i += 1;
@@ -551,11 +975,33 @@ const _: () = {
 
 impl BuiltinFunction {
     fn row(self) -> &'static BuiltinFunctionRow {
-        &BUILTIN_FUNCTIONS[usize::from(self.0)]
+        let index = usize::from(self.0);
+        if index < BUILTIN_FUNCTIONS.len() {
+            &BUILTIN_FUNCTIONS[index]
+        } else {
+            &BUILTIN_OBJECTS[index - BUILTIN_FUNCTIONS.len()]
+        }
     }
 
-    pub(crate) fn prototype(self) -> BuiltinPrototype {
-        self.row().prototype
+    /// What owns the object: a prototype for an instance method, a named
+    /// object for a static or a `Owner.prototype`, or the global scope.
+    pub(crate) fn owner(self) -> BuiltinOwner {
+        self.row().owner
+    }
+
+    /// The owning prototype, when the built-in is an instance method.
+    pub(crate) fn prototype(self) -> Option<BuiltinPrototype> {
+        match self.owner() {
+            BuiltinOwner::Prototype(prototype) => Some(prototype),
+            BuiltinOwner::Object(_) => None,
+        }
+    }
+
+    /// Whether ECMA gives the object a `[[Call]]`: the constructors, methods
+    /// and function-valued globals answer `true`; the namespaces and
+    /// `Owner.prototype` objects answer `false` — what `typeof` reports.
+    pub(crate) fn callable(self) -> bool {
+        self.row().callable
     }
 
     /// ECMA's `name` of the function object.
@@ -568,13 +1014,84 @@ impl BuiltinFunction {
         self.row().length
     }
 
-    /// The function `prototype` carries under its own `name`, which is how a
-    /// wire names one.
+    /// The name the surface metadata and diagnostics spell: `"Math"` for a
+    /// namespace, `"Math.max"` for a static, `"Number.prototype"` for a
+    /// prototype object, `"Number.prototype.toString"` for a method.
+    pub(crate) fn qualified_name(self) -> String {
+        match self.owner() {
+            BuiltinOwner::Prototype(prototype) => {
+                format!("{}.prototype.{}", prototype.name(), self.name())
+            }
+            BuiltinOwner::Object(owner) if owner == BuiltinOwner::GLOBAL => self.name().to_string(),
+            BuiltinOwner::Object(owner) => format!("{owner}.{}", self.name()),
+        }
+    }
+
+    /// The function `prototype` carries under its own `name`.
     pub(crate) fn named(prototype: BuiltinPrototype, name: &str) -> Option<Self> {
         BUILTIN_FUNCTIONS
             .iter()
-            .position(|row| row.prototype == prototype && row.name == name)
+            .position(|row| row.owner == BuiltinOwner::Prototype(prototype) && row.name == name)
             .map(|index| Self(index as u16))
+    }
+
+    /// The built-in an owner scope carries under `name` — how a wire names
+    /// one. `scope` is a prototype name for an instance method, an owner name
+    /// for a static or a `Owner.prototype` object, or `"globalThis"` for a
+    /// global. A prototype scope wins the lookup: `("Number", "toString")` is
+    /// `Number.prototype.toString`, and no static shadows an instance method
+    /// of the same owner.
+    pub(crate) fn named_scoped(scope: &str, name: &str) -> Option<Self> {
+        if let Some(prototype) = BuiltinPrototype::from_name(scope)
+            && let Some(function) = Self::named(prototype, name)
+        {
+            return Some(function);
+        }
+        Self::named_static(scope, name)
+    }
+
+    /// The built-in an owner scope carries under `name`, looking only at the
+    /// object-scope rows — no prototype preference. A surface asks this when
+    /// it needs a *static* specifically: `Number.toString` is inherited from
+    /// `Function.prototype`, not an own `Number.prototype.toString` row.
+    pub(crate) fn named_static(scope: &str, name: &str) -> Option<Self> {
+        BUILTIN_OBJECTS
+            .iter()
+            .position(|row| {
+                matches!(row.owner, BuiltinOwner::Object(owner) if owner == scope)
+                    && row.name == name
+            })
+            .map(|index| Self((index + BUILTIN_FUNCTIONS.len()) as u16))
+    }
+
+    /// The built-in a qualified name spells: `"Math.max"` is
+    /// `Object("Math")`'s `"max"`, `"Number.prototype"` is `Object("Number")`'s
+    /// `"prototype"`, `"Number.prototype.toString"` is the `Number` prototype's
+    /// `"toString"` method, and a bare `"Number"` is a global. A
+    /// `"Owner.prototype.member"` whose owner is not a [`BuiltinPrototype`]
+    /// lives under the `"Owner.prototype"` object scope.
+    pub(crate) fn named_qualified(name: &str) -> Option<Self> {
+        if let Some((owner, member)) = name.split_once(".prototype.") {
+            if let Some(prototype) = BuiltinPrototype::from_name(owner)
+                && let Some(function) = Self::named(prototype, member)
+            {
+                return Some(function);
+            }
+            return Self::named_static(&format!("{owner}.prototype"), member);
+        }
+        match name.rsplit_once('.') {
+            Some((scope, leaf)) => Self::named_scoped(scope, leaf),
+            None => Self::named_scoped(BuiltinOwner::GLOBAL, name),
+        }
+    }
+
+    /// Whether a bare identifier may materialize a global built-in value:
+    /// every global-scope row except `AsyncFunction`/`GeneratorFunction`,
+    /// which exist only as the `.constructor` of the functions they built —
+    /// a bare identifier stays unbound, like Node.
+    pub(crate) fn is_global_value(name: &str) -> bool {
+        !matches!(name, "AsyncFunction" | "GeneratorFunction")
+            && Self::named_scoped(BuiltinOwner::GLOBAL, name).is_some()
     }
 
     /// Whether any prototype carries a built-in under property key `key`: the
@@ -793,16 +1310,40 @@ mod tests {
             );
         }
         for (index, row) in BUILTIN_FUNCTIONS.iter().enumerate() {
+            let BuiltinOwner::Prototype(prototype) = row.owner else {
+                panic!("an instance-method row must name a prototype");
+            };
             assert_eq!(
-                BuiltinFunction::named(row.prototype, row.name),
+                BuiltinFunction::named(prototype, row.name),
                 Some(BuiltinFunction(index as u16)),
                 "{}.prototype.{} is listed twice",
-                row.prototype.name(),
+                prototype.name(),
                 row.name
             );
             assert_eq!(
-                BuiltinPrototype::from_name(row.prototype.name()),
-                Some(row.prototype)
+                BuiltinPrototype::from_name(prototype.name()),
+                Some(prototype)
+            );
+        }
+        // The object-scope rows round-trip through their qualified names,
+        // and no two of them spell the same one.
+        for (index, row) in BUILTIN_OBJECTS.iter().enumerate() {
+            let function = BuiltinFunction(BUILTIN_FUNCTIONS.len() as u16 + index as u16);
+            assert_eq!(
+                BuiltinFunction::named_qualified(&function.qualified_name()),
+                Some(function),
+                "{} is listed twice",
+                function.qualified_name()
+            );
+            let BuiltinOwner::Object(scope) = row.owner else {
+                panic!("an object row must name an owner scope");
+            };
+            assert_eq!(
+                BuiltinFunction::named_scoped(scope, row.name),
+                Some(function),
+                "{}.{} is listed twice",
+                scope,
+                row.name
             );
         }
     }

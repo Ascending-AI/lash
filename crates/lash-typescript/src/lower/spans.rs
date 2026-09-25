@@ -150,3 +150,19 @@ fn extract(
         );
     }
 }
+
+/// The source position a lowered TypeScript expression is reported at.
+///
+/// Only the forms a diagnostic points at carry one: a call, a member access
+/// and an await. Everything else inherits the nearest enclosing span the
+/// linker is already carrying, which is what the lashlang parser's tables did
+/// for a sub-expression it recorded no span for.
+pub(super) fn source_span(expr: &super::Expr) -> Option<SourceSpan> {
+    match expr {
+        super::Expr::Call { span, .. }
+        | super::Expr::Member { span, .. }
+        | super::Expr::Await { span, .. } => Some(*span),
+        super::Expr::Ident(_, span) => *span,
+        _ => None,
+    }
+}

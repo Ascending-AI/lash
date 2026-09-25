@@ -48,9 +48,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if op == JavaScriptUnaryOp::TypeOf
             && let Value::Ref(id) = value
         {
-            let is_function = self.heap.get(id)?.is_function();
+            // A built-in answers by whether ECMA gives it a `[[Call]]`: the
+            // constructors and methods are `"function"`, the namespaces and
+            // `Owner.prototype` objects are `"object"`.
+            let callable = if self.heap.is_builtin_object(id) {
+                self.heap.builtin_is_callable(id)
+            } else {
+                self.heap.get(id)?.is_function()
+            };
             self.stack.push(Value::String(
-                if is_function { "function" } else { "object" }.into(),
+                if callable { "function" } else { "object" }.into(),
             ));
         } else if op.coerces_to_number() {
             let number = self.heap.javascript_to_number(&value)?;

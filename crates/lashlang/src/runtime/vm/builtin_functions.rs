@@ -107,7 +107,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
         function: BuiltinFunction,
         args: &[Value],
     ) -> Result<Value, RuntimeError> {
-        let prototype = function.prototype();
+        let Some(prototype) = function.prototype() else {
+            // A global or a static answers by its qualified name — the
+            // constructors, the URI codecs and their friends have no
+            // receiver to reject.
+            return self.global_builtin_result(&function.qualified_name(), args);
+        };
         let name = function.name();
         match (prototype, name) {
             // ECMA's Object.prototype.toString answers a tag for every

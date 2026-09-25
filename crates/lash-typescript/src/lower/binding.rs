@@ -11,8 +11,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use super::captures::BindingId;
 use super::{
-    BinaryOp, CallArg, Expr, FunctionBody, MemberProperty, Pattern, Stmt, TsAssignTarget, VarKind,
-    is_reserved_name, pattern_names, reserved_identifier,
+    BinaryOp, CallArg, Expr, Function, FunctionBody, MemberProperty, Pattern, Stmt, TsAssignTarget,
+    VarKind, is_reserved_name, pattern_names, reserved_identifier,
 };
 use crate::{Diagnostic, DiagnosticCode};
 
@@ -711,4 +711,46 @@ impl super::Lowerer {
             .flat_map(|scope| scope.bindings.values())
             .find(|binding| binding.internal.as_str() == internal)
     }
+}
+
+/// Whether anything in the function — parameter defaults, the body, and
+/// nested arrows, which bind `arguments` lexically — names the arguments
+/// object the implicit `arguments` binding materializes. The scan reads
+/// through nested non-arrow functions too: one that mentions `arguments`
+/// binds its own, and the extra snapshot the outer binding costs here is
+/// cheaper than a boundary-exact walk.
+pub(super) fn function_uses_arguments(function: &Function) -> bool {
+    fn uses(expr: &Expr) -> bool {
+        matches!(expr, Expr::Ident(name, _) if name == "arguments")
+    }
+    function
+        .params
+        .iter()
+        .flat_map(Pattern::child_expressions)
+        .any(uses)
+        || match &function.body {
+            FunctionBody::Block(statements) => statements
+                .iter()
+                .flat_map(Stmt::child_expressions)
+                .any(uses),
+            FunctionBody::Expression(expression) => uses(expression),
+        }
+}
+
+/// Whether the function's own scope declares `arguments` outright — as a
+/// parameter or a hoisted `var`/`function`/`enum` name — so the implicit
+/// binding must not also declare it.
+pub(super) fn function_declares_arguments(function: &Function) -> bool {
+    let parameter_shadows = function.params.iter().any(|pattern| {
+        let mut names = Vec::new();
+        pattern_names(pattern, &mut names);
+        names.iter().any(|name| name == "arguments")
+    });
+    parameter_shadows
+        || match &function.body {
+            FunctionBody::Block(statements) => function_var_names(statements)
+                .iter()
+                .any(|name| name == "arguments"),
+            FunctionBody::Expression(_) => false,
+        }
 }

@@ -71,3 +71,9 @@
 # cannot invoke them — so the method refuses by name rather than silently
 # computing the wrong set.
 "(() => { const o={size:1,has:()=>true,keys:()=>[9]}; return [...new Set([1]).union(o)].join(','); })()"	runtime-reject	TS_METHOD_UNSUPPORTED
+# FIG-3656: `new Number` is a boxed-primitive constructor the value model
+# does not admit — the compiler refuses it outright — and a `{}` literal's
+# `constructor` read is a static link refusal.
+"typeof new Number(1)"	reject	TS_NEW_UNSUPPORTED
+"(() => { try { return new Number(1).toFixed(101); } catch (e) { return e instanceof RangeError; } })()"	reject	TS_NEW_UNSUPPORTED
+"({}).constructor === Object"	accept-unlinked	TS_LINK_ERROR

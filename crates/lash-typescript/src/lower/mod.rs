@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use lashlang::{
     AssignPathStep, AssignTarget, CatchClause, Declaration, Expr as LashExpr, FunctionExpr,
     JavaScriptBinaryOp, JavaScriptLogicalOp, JavaScriptUnaryOp, LabelMetadata, MethodKey,
-    ProcessParam, ResourceRefExpr, StructuralRole, TryExpr, TypeExpr,
+    ProcessParam, ResourceRefExpr, StructuralRole, TryExpr, TypeExpr, is_javascript_builtin_global,
 };
 
 use crate::adapter::{
@@ -13,12 +13,13 @@ use crate::adapter::{
 };
 use crate::node_label::NodeLabel;
 use crate::{Diagnostic, DiagnosticCode, SourceSpan};
-use spans::SpanMarkers;
+use spans::{SpanMarkers, source_span};
 
 mod stdlib;
 use stdlib::*;
 mod array_callbacks;
 mod array_map;
+mod arrays;
 mod attribute_update;
 mod await_expr;
 mod binding;
@@ -980,8 +981,29 @@ impl Lowerer {
                 self.declare(&name, BindingKind::Parameter, false, true)?;
             }
         }
+        // `arguments` binds in the parameter scope the way ECMA's arguments
+        // object does: an arrow inside resolves it here and captures the
+        // enclosing function's arguments object, where `Lash.Arguments`
+        // evaluated in the arrow's own frame would read the wrong argv. The
+        // binding materializes only where a reference can reach it — an
+        // unused binding would still cost an argv snapshot per call, and a
+        // parameter or hoisted `var`/`function` of the same name owns the
+        // slot itself.
+        let binds_arguments = !function.is_arrow
+            && function_uses_arguments(function)
+            && !function_declares_arguments(function);
+        if binds_arguments {
+            self.declare("arguments", BindingKind::Const, true, false)?;
+        }
         let mut params = Vec::with_capacity(function.params.len());
         let mut prologue = Vec::new();
+        if binds_arguments {
+            let internal = self.binding("arguments")?.internal.clone();
+            prologue.push(LashExpr::Assign {
+                target: AssignTarget::variable(internal.as_str().into()),
+                expr: Box::new(Self::stdlib_call("Lash.Arguments", vec![])),
+            });
+        }
         for pattern in &function.params {
             let target = match pattern {
                 Pattern::Rest(target) => target.as_ref(),
@@ -1129,11 +1151,16 @@ impl Lowerer {
             Expr::Ident(name, _) if name == "Infinity" && !self.has_binding(name) => {
                 LashExpr::Number(f64::INFINITY)
             }
+            // A supported built-in materializes as its first-class object:
+            // `Number` as a value is the constructor itself — `typeof`
+            // answers "function", `Number.MAX_VALUE` reads its own property,
+            // a call to it coerces. The direct-call fast paths (`Number(x)`,
+            // `String(x)`, `Boolean(x)`) still fold ahead of this through
+            // `GlobalBuiltin`.
             Expr::Ident(name, _)
-                if matches!(name.as_str(), "String" | "Number" | "Boolean")
-                    && !self.has_binding(name) =>
+                if !self.has_binding(name) && is_javascript_builtin_global(name) =>
             {
-                self.lower_conversion_function(name)
+                Self::stdlib_call("Lash.Builtin", vec![LashExpr::String(name.as_str().into())])
             }
             Expr::Ident(name, _) if name == "globalThis" && !self.has_binding(name) => {
                 return Err(Diagnostic::refusal(
@@ -1143,11 +1170,14 @@ impl Lowerer {
                 ));
             }
             Expr::Ident(name, _) if name == "arguments" && !self.has_binding(name) => {
-                return Err(Diagnostic::new(
-                    DiagnosticCode::ThisUnsupported,
-                    "Unsupported: arguments. Declare an explicit ...rest parameter instead.",
-                    None,
-                ));
+                if self.functions.is_empty() {
+                    return Err(Diagnostic::new(
+                        DiagnosticCode::ThisUnsupported,
+                        "Unsupported: arguments. Declare an explicit ...rest parameter instead.",
+                        None,
+                    ));
+                }
+                Self::stdlib_call("Lash.Arguments", vec![])
             }
             Expr::This if self.has_binding(RECEIVER_BINDING) => {
                 self.name_receiver()?;
@@ -1183,11 +1213,15 @@ impl Lowerer {
                 // `typeof` on a name nothing binds answers "undefined" without
                 // resolving it — except the reserved value idents, which are
                 // never unbound names: each lowers to a concrete literal below,
-                // and `typeof` must classify that literal.
+                // and `typeof` must classify that literal. The same holds for
+                // the materialized built-ins (`typeof Number` is "function")
+                // and for `arguments` inside a function.
                 UnaryOp::TypeOf
                     if matches!(value.as_ref(), Expr::Ident(name, _)
                         if !self.has_binding(name)
-                            && !matches!(name.as_str(), "undefined" | "NaN" | "Infinity")) =>
+                            && !matches!(name.as_str(), "undefined" | "NaN" | "Infinity")
+                            && name != "arguments"
+                            && !is_javascript_builtin_global(name)) =>
                 {
                     let Expr::Ident(name, _) = value.as_ref() else {
                         unreachable!("the guard matched an identifier")
@@ -1498,20 +1532,45 @@ impl Lowerer {
             };
         }
         if let Expr::Ident(owner, _) = object
-            && is_known_runtime_global(owner)
+            && is_javascript_builtin_global(owner)
             && !self.has_binding(owner)
         {
             let name = match property {
                 MemberProperty::Field(field) => field.as_str(),
-                MemberProperty::Index(_) => "computed property",
+                MemberProperty::Index(_) => "",
             };
             if let Some(value) = builtin_constant(owner, name) {
                 return Ok(LashExpr::Number(value));
             }
-            return Err(Diagnostic::refusal(
-                DiagnosticCode::MethodUnsupported,
-                format!("property `{owner}.{name}` is not in the TypeScript runtime surface"),
-                None,
+            // The rest of the built-in's surface is a read on the built-in
+            // object itself — `Number.prototype`, `Math.constructor`, a miss
+            // — and the heap answers what Node answers: the property value or
+            // `undefined`.
+            let target = Box::new(Self::stdlib_call(
+                "Lash.Builtin",
+                vec![LashExpr::String(owner.as_str().into())],
+            ));
+            return Ok(match property {
+                MemberProperty::Field(field) => LashExpr::Field {
+                    target,
+                    field: field.as_str().into(),
+                },
+                MemberProperty::Index(index) => LashExpr::Index {
+                    target,
+                    index: Box::new(self.lower_expr(index)?),
+                },
+            });
+        }
+        // `(async function(){}).constructor` is %AsyncFunction%: the runtime
+        // erases async-ness from a closure, so the lowerer answers from the
+        // AST before the value ever materializes.
+        if let Expr::Function(function) = object
+            && function.is_async
+            && matches!(property, MemberProperty::Field(field) if field == "constructor")
+        {
+            return Ok(Self::stdlib_call(
+                "Lash.Builtin",
+                vec![LashExpr::String("AsyncFunction".into())],
             ));
         }
         // The retired global, named and refused rather than left to reject as
@@ -1618,21 +1677,5 @@ fn map_binary(op: BinaryOp) -> JavaScriptBinaryOp {
         BinaryOp::Exponent | BinaryOp::In | BinaryOp::InstanceOf => {
             unreachable!("operator has a dedicated lowering")
         }
-    }
-}
-
-/// The source position a lowered TypeScript expression is reported at.
-///
-/// Only the forms a diagnostic points at carry one: a call, a member access
-/// and an await. Everything else inherits the nearest enclosing span the
-/// linker is already carrying, which is what the lashlang parser's tables did
-/// for a sub-expression it recorded no span for.
-fn source_span(expr: &Expr) -> Option<SourceSpan> {
-    match expr {
-        Expr::Call { span, .. } | Expr::Member { span, .. } | Expr::Await { span, .. } => {
-            Some(*span)
-        }
-        Expr::Ident(_, span) => *span,
-        _ => None,
     }
 }

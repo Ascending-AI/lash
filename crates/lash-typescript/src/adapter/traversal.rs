@@ -78,8 +78,9 @@ impl Expr {
     pub(crate) fn children(&self) -> Box<dyn Iterator<Item = &Expr> + '_> {
         let mut children = Vec::new();
         match self {
-            Expr::Array(items) => children.extend(items.iter().map(|item| match item {
-                ArrayElement::Value(value) | ArrayElement::Spread(value) => value,
+            Expr::Array(items) => children.extend(items.iter().filter_map(|item| match item {
+                ArrayElement::Value(value) | ArrayElement::Spread(value) => Some(value),
+                ArrayElement::Hole => None,
             })),
             Expr::Object(properties) => {
                 for property in properties {

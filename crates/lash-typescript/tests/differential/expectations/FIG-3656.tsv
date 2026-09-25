@@ -1,0 +1,85 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+FIG-3656	1	accept	"typeof Math"	"object"	-
+FIG-3656	2	accept	"typeof JSON"	"object"	-
+FIG-3656	3	accept	"typeof Reflect"	"object"	-
+FIG-3656	4	accept	"typeof Number"	"function"	-
+FIG-3656	5	accept	"typeof String"	"function"	-
+FIG-3656	6	accept	"typeof Boolean"	"function"	-
+FIG-3656	7	accept	"typeof Array"	"function"	-
+FIG-3656	8	accept	"typeof Object"	"function"	-
+FIG-3656	9	accept	"typeof Function"	"function"	-
+FIG-3656	10	accept	"typeof Error"	"function"	-
+FIG-3656	11	accept	"typeof TypeError"	"function"	-
+FIG-3656	12	accept	"typeof RangeError"	"function"	-
+FIG-3656	13	accept	"typeof SyntaxError"	"function"	-
+FIG-3656	14	accept	"typeof ReferenceError"	"function"	-
+FIG-3656	15	accept	"typeof Date"	"function"	-
+FIG-3656	16	accept	"typeof RegExp"	"function"	-
+FIG-3656	17	accept	"typeof Map"	"function"	-
+FIG-3656	18	accept	"typeof Set"	"function"	-
+FIG-3656	19	accept	"typeof Promise"	"function"	-
+FIG-3656	20	accept	"typeof Symbol"	"function"	-
+FIG-3656	21	accept	"typeof BigInt"	"function"	-
+FIG-3656	22	accept	"typeof eval"	"function"	-
+FIG-3656	23	accept	"typeof parseInt"	"function"	-
+FIG-3656	24	accept	"typeof parseFloat"	"function"	-
+FIG-3656	25	accept	"typeof isNaN"	"function"	-
+FIG-3656	26	accept	"typeof isFinite"	"function"	-
+FIG-3656	27	accept	"typeof decodeURIComponent"	"function"	-
+FIG-3656	28	accept	"typeof Math.max"	"function"	-
+FIG-3656	29	accept	"typeof [].push"	"function"	-
+FIG-3656	30	accept	"typeof ''.includes"	"function"	-
+FIG-3656	31	accept	"typeof String.prototype"	"object"	-
+FIG-3656	32	reject	"typeof new Number(1)"	"object"	TS_NEW_UNSUPPORTED
+FIG-3656	33	accept	"Math.max === Math.max"	"true"	-
+FIG-3656	34	accept	"'a'.includes === 'b'.includes"	"true"	-
+FIG-3656	35	accept	"Number === Number"	"true"	-
+FIG-3656	36	accept	"String.prototype === String.prototype"	"true"	-
+FIG-3656	37	accept	"'length' in []"	"true"	-
+FIG-3656	38	accept	"'push' in []"	"true"	-
+FIG-3656	39	accept	"'map' in []"	"true"	-
+FIG-3656	40	accept	"'toString' in {}"	"true"	-
+FIG-3656	41	accept	"'hasOwnProperty' in {}"	"true"	-
+FIG-3656	42	accept	"'valueOf' in []"	"true"	-
+FIG-3656	43	accept	"0 in []"	"false"	-
+FIG-3656	44	accept	"'0' in []"	"false"	-
+FIG-3656	45	accept	"'foo' in {}"	"false"	-
+FIG-3656	46	accept	"'max' in Math"	"true"	-
+FIG-3656	47	accept	"'parse' in JSON"	"true"	-
+FIG-3656	48	accept	"'stringify' in JSON"	"true"	-
+FIG-3656	49	accept	"'PI' in Math"	"true"	-
+FIG-3656	50	accept	"'MAX_SAFE_INTEGER' in Number"	"true"	-
+FIG-3656	51	accept	"'prototype' in Number"	"true"	-
+FIG-3656	52	accept	"'prototype' in Math"	"false"	-
+FIG-3656	53	accept	"'prototype' in eval"	"false"	-
+FIG-3656	54	accept	"'call' in Number"	"true"	-
+FIG-3656	55	accept	"'apply' in eval"	"true"	-
+FIG-3656	56	accept	"'name' in Number"	"true"	-
+FIG-3656	57	accept	"'length' in Number"	"true"	-
+FIG-3656	58	accept	"'length' in Math.max"	"true"	-
+FIG-3656	59	accept	"Number.length"	"1"	-
+FIG-3656	60	accept	"Number.name"	"Number"	-
+FIG-3656	61	accept	"Math.max.length"	"2"	-
+FIG-3656	62	accept	"'x'.constructor === String"	"true"	-
+FIG-3656	63	accept	"(1).constructor === Number"	"true"	-
+FIG-3656	64	accept	"true.constructor === Boolean"	"true"	-
+FIG-3656	65	accept	"[].constructor === Array"	"true"	-
+FIG-3656	66	accept-unlinked	"({}).constructor === Object"	"true"	TS_LINK_ERROR
+FIG-3656	67	accept	"(function(){ return arguments.length; })(1, 2, 3)"	"3"	-
+FIG-3656	68	accept	"(function(){ return arguments[0]; })(7)"	"7"	-
+FIG-3656	69	accept	"(function(){ try { return arguments.callee; } catch (e) { return e.name; } })(1)"	"TypeError"	-
+FIG-3656	70	accept	"(function(){ return 'callee' in arguments; })()"	"true"	-
+FIG-3656	71	accept	"(() => { const r = /x/g; r.lastIndex = 2.7; return r.lastIndex; })()"	"2.7"	-
+FIG-3656	72	accept	"(() => { const r = /x/g; r.lastIndex = 'foo'; return r.lastIndex; })()"	"foo"	-
+FIG-3656	73	accept	"'lastIndex' in /x/g"	"true"	-
+FIG-3656	74	accept	"0 in [1,,3]"	"true"	-
+FIG-3656	75	accept	"1 in [1,,3]"	"false"	-
+FIG-3656	76	accept	"[1,,3].hasOwnProperty(1)"	"false"	-
+FIG-3656	77	accept	"[1,,3].length"	"3"	-
+FIG-3656	78	accept	"(() => { try { return null.x; } catch (e) { return e instanceof TypeError; } })()"	"true"	-
+FIG-3656	79	accept	"(() => { try { return (1)(); } catch (e) { return e instanceof TypeError; } })()"	"true"	-
+FIG-3656	80	accept	"(() => { try { return 'x'.repeat(-1); } catch (e) { return e instanceof RangeError; } })()"	"true"	-
+FIG-3656	81	reject	"(() => { try { return new Number(1).toFixed(101); } catch (e) { return e instanceof RangeError; } })()"	"true"	TS_NEW_UNSUPPORTED
+FIG-3656	82	accept	"new Error('x').hasOwnProperty('message')"	"true"	-
+FIG-3656	83	accept	"'message' in new Error()"	"true"	-
+FIG-3656	84	accept	"(() => { try { return 'a' in []; } catch (e) { return 'threw'; } })()"	"false"	-

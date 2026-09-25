@@ -142,10 +142,10 @@ const typescriptNames = [
   "async-calls-unawaited",
   "binding-reassignment",
   "builtin-arity",
-  // Members a built-in namespace lacks: tsc --strict rejects the same reads
-  // and writes as TS2339 (FIG-3705).
-  "builtin-member-read",
-  "builtin-member-write",
+  // A call to a member a built-in namespace lacks: tsc --strict rejects the
+  // same call as TS2339 (FIG-3705). Reads and writes are ECMA now — a
+  // missing member reads `undefined` and a write lands an expando.
+  "builtin-member-call",
   "classic-for-continue-across-finally",
   "closed-shape-field-guard",
   "comma-operator",

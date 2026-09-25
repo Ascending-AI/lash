@@ -310,8 +310,8 @@
           }
         },
         {
-          "source": "[1].map();\n",
-          "reject": "TS_METHOD_UNSUPPORTED",
+          "source": "const r = /((((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))))/;\n",
+          "reject": "TS_REGEX_PATTERN_NESTING_LIMIT",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -1916,8 +1916,8 @@
           }
         },
         {
-          "source": "const r = /a/v;\n",
-          "reject": "TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED",
+          "source": "isNaN(1, 2);\n",
+          "reject": "TS_EXPRESSION_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -3363,8 +3363,8 @@
           }
         },
         {
-          "source": "Error.isError(new Error('x'));\n",
-          "reject": "TS_METHOD_UNSUPPORTED",
+          "source": "const o = { m() { super.x; } };\n",
+          "reject": "TS_SUPER_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5030,8 +5030,8 @@
           }
         },
         {
-          "source": "for await (const x of [1]) { }\n",
-          "reject": "TS_FOR_OF_UNSUPPORTED",
+          "source": "class A { x = 1; }\n",
+          "reject": "TS_CLASS_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5365,8 +5365,8 @@
           }
         },
         {
-          "source": "outer: while (true) { break outer; }\n",
-          "reject": "TS_LABEL_UNSUPPORTED",
+          "source": "async function f() { return 1; } f();\n",
+          "reject": "TS_AWAIT_REQUIRED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5635,8 +5635,8 @@
           }
         },
         {
-          "source": "const r = /a/v;\n",
-          "reject": "TS_REGEX_UNICODE_SETS_FLAG_UNSUPPORTED",
+          "source": "class A { static #m() { } }\n",
+          "reject": "TS_CLASS_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5704,7 +5704,7 @@
           }
         },
         {
-          "source": "RegExp.escape('a');\n",
+          "source": "Error.isError(new Error('x'));\n",
           "reject": "TS_METHOD_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
@@ -6514,8 +6514,8 @@
           }
         },
         {
-          "source": "const b = delete 1;\n",
-          "reject": "TS_DELETE_NON_REFERENCE_UNSUPPORTED",
+          "source": "const r = /((((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))))/;\n",
+          "reject": "TS_REGEX_PATTERN_NESTING_LIMIT",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -7967,8 +7967,8 @@
           }
         },
         {
-          "source": "class A { static { } }\n",
-          "reject": "TS_CLASS_UNSUPPORTED",
+          "source": "const it = 'a'.matchAll(/a/g);\n",
+          "reject": "TS_REGEX_ITERATOR_POSITION",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -8604,8 +8604,8 @@
           }
         },
         {
-          "source": "class A { }\n",
-          "reject": "TS_CLASS_UNSUPPORTED",
+          "source": "isNaN(1, 2);\n",
+          "reject": "TS_EXPRESSION_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -8999,8 +8999,8 @@
           }
         },
         {
-          "source": "class A { static x = 1; }\n",
-          "reject": "TS_CLASS_UNSUPPORTED",
+          "source": "import defer * as ns from 'mod';\n",
+          "reject": "TS_IMPORT_EXPORT_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -9462,8 +9462,8 @@
           }
         },
         {
-          "source": "const x = x;\n",
-          "reject": "TS_TEMPORAL_DEAD_ZONE",
+          "source": "const x = Math.extra();\n",
+          "reject": "TS_METHOD_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -9554,8 +9554,8 @@
           }
         },
         {
-          "source": "eval('1');\n",
-          "reject": "TS_EVAL_UNSUPPORTED",
+          "source": "for (let i = 0; i < 2; i++) { try { continue; } finally { } }\n",
+          "reject": "TS_FOR_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -10015,8 +10015,8 @@
           }
         },
         {
-          "source": "const x = Math.extra;\n",
-          "reject": "TS_METHOD_UNSUPPORTED",
+          "source": "eval('1');\n",
+          "reject": "TS_EVAL_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],

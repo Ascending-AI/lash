@@ -92,7 +92,10 @@ function verifyProperty(obj, name, desc, options) {
       "Invalid descriptor field: " + names[i]
     );
   }
-  const originalValue = obj[name];
+  // Read the value only where it is used: a strict-mode poisoned name such
+  // as `arguments.callee` throws on read, and a test asserting only
+  // attributes must never touch it.
+  const originalValue = options && options.restore ? obj[name] : undefined;
   const failures = [];
   if (__test262HasOwn(desc, "value")) {
     if (!isSameValue(desc.value, obj[name])) {

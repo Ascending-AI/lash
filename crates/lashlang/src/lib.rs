@@ -99,8 +99,8 @@ pub use runtime::{
     ValueProjectionContext, ValueProjector, Vm, VmContinuation, VmFinallyCompletionContinuation,
     VmFinallyContinuation, VmHandlerContinuation, VmHeapContinuation, VmIteratorContinuation,
     VmIteratorCursor, VmPendingErrorOriginContinuation, VmProfileContinuation, VmRunOutcome,
-    cancel_checkpoint_reached, compile, execute, from_json, is_process_handle, prewarm,
-    unwrap_type_value,
+    cancel_checkpoint_reached, compile, execute, from_json, is_javascript_builtin_global,
+    is_process_handle, prewarm, unwrap_type_value,
 };
 pub use runtime::{
     CANONICAL_MESSAGEPACK_DEPTH_LIMIT, CanonicalMapOrder, CanonicalPathSegment,
@@ -168,7 +168,11 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// v27 (FIG-3733): `JavaScriptAddAssign` fuses `s = s + rhs` under ECMA `+`
 /// rules, so a uniquely owned accumulator appends in place. A v26 stream is
 /// refused.
-pub const BYTECODE_FORMAT_VERSION: u32 = 27;
+/// v28 (FIG-3656): the continuation's `builtin_function` heap object names
+/// its owner scope rather than a prototype — built-in values now include
+/// constructors, namespaces, and static methods — so a v27 stream's reader
+/// meets an unknown field and is refused.
+pub const BYTECODE_FORMAT_VERSION: u32 = 28;
 pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{
     LashlangBranchSite, LashlangEffectFailure, LashlangExecutionCallSite, LashlangExecutionChild,

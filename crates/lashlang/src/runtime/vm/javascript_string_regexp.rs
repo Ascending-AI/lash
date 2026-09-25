@@ -72,11 +72,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
         receiver: HeapId,
     ) -> Result<i64, RuntimeError> {
         let units = bounded_utf16_input(&self.heap, input)?;
-        let saved = self.heap.regexp_last_index(receiver)?.unwrap_or(0);
+        // `search` preserves `lastIndex` — the stored value, not the coerced
+        // `exec` view of it.
+        let saved = self
+            .heap
+            .regexp_last_index_value(receiver)?
+            .unwrap_or(Value::Number(0.0));
         let sticky =
             matches!(self.heap.get(receiver)?, HeapObject::RegExp(re) if re.flags.contains('y'));
         let found = self.first_regexp_match(receiver, &units, 0, sticky)?;
-        self.heap.set_regexp_last_index(receiver, saved)?;
+        self.heap.set_regexp_last_index_raw(receiver, saved)?;
         Ok(found.map_or(-1, |found| found.range.start as i64))
     }
 
@@ -85,15 +90,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
         input: &str,
         receiver: HeapId,
     ) -> Result<Value, RuntimeError> {
-        let (global, unicode, sticky, start) = match self.heap.get(receiver)? {
+        let (global, unicode, sticky) = match self.heap.get(receiver)? {
             HeapObject::RegExp(regexp) => (
                 regexp.flags.contains('g'),
                 regexp.flags.contains('u'),
                 regexp.flags.contains('y'),
-                regexp.last_index as usize,
             ),
             _ => return Err(js_stdlib_error("matchAll requires a RegExp")),
         };
+        let start = self.heap.regexp_last_index_coerced(receiver)? as usize;
         if !global {
             return Err(self.regexp_type_error(
                 "String.prototype.matchAll called with a non-global RegExp argument",

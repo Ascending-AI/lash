@@ -372,6 +372,7 @@ impl Checker {
             | Expr::LoneSurrogateString => Ok(()),
             Expr::Array(elements) => elements.iter().try_for_each(|element| match element {
                 ArrayElement::Value(expr) | ArrayElement::Spread(expr) => self.expr(expr),
+                ArrayElement::Hole => Ok(()),
             }),
             Expr::Object(properties) => properties.iter().try_for_each(|property| match property {
                 ObjectProperty::KeyValue(key, value) => {

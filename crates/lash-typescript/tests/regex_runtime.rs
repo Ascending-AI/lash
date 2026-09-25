@@ -360,15 +360,13 @@ fn invalid_dynamic_patterns_throw_syntax_error_objects() {
     );
     assert_eq!(
         finished(
-            "function id(x){return x;} try { new RegExp(id(1)); finish('wrong'); } catch (e) { finish([e.name,e.message]); }"
+            "function id(x){return x;} var r = new RegExp(id(1), id('g')); finish([r.source, r.flags, r.test('a1b')]);"
         ),
         Value::List(
             vec![
-                Value::String("TypeError".into()),
-                Value::String(
-                    "TS_REGEX_CONSTRUCTOR_STRING_REQUIRED: RegExp pattern and flags must be strings or undefined; pass an explicit string"
-                        .into(),
-                ),
+                Value::String("1".into()),
+                Value::String("g".into()),
+                Value::Bool(true),
             ]
             .into(),
         )

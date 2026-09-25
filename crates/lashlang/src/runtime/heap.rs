@@ -7,6 +7,7 @@ mod builtin_functions;
 mod closure_reach;
 pub(crate) mod guest_coercion;
 mod id;
+mod javascript_builtins;
 mod javascript_exotics;
 mod object;
 mod partition;
@@ -29,6 +30,7 @@ use object::{
 pub(crate) use reference_assignment::restricted_function_property;
 
 pub use id::HeapId;
+pub use javascript_builtins::is_javascript_builtin_global;
 #[cfg(test)]
 pub(crate) use javascript_exotics::RegExpProgramCache;
 pub(crate) use javascript_exotics::{
@@ -109,11 +111,44 @@ pub(crate) struct Heap {
     /// The stamp of every object absent from `revisions`, drawn at build: a
     /// heap rebuilt from a wire reads as unlike any capture, not unwritten.
     base_revision: u64,
-    /// The one object each built-in function value lives in. It is an index
-    /// over `entries`, never state of its own: a wire rebuilds it from the
-    /// objects it carries, and a sweep drops what it collected.
+    /// The one object each built-in value lives in — a method, a static, a
+    /// constructor, a namespace or a `Owner.prototype` object, all
+    /// `HeapObject::BuiltinFunction` interned by their `ecma_stdlib` row. It
+    /// is an index over `entries`, never state of its own: a wire rebuilds
+    /// it from the objects it carries, and a sweep drops what it collected.
     builtin_functions: BTreeMap<BuiltinFunction, HeapId>,
     pub(crate) guest_coercion: guest_coercion::GuestCoercionReplay,
+    /// Guest expando properties written to a built-in object, held as one
+    /// record per built-in. In-memory only: a wire round-trip restores the
+    /// built-in without its expandos, the same session-only treatment the
+    /// `lastIndex` override and sparse holes get.
+    builtin_expandos: FxHashMap<HeapId, HeapId>,
+    /// Own names deleted off a built-in (`delete eval.length`): tombstones
+    /// that hide the static surface so a read falls through to the
+    /// prototype chain. In-memory only.
+    builtin_deleted: FxHashMap<HeapId, BTreeSet<String>>,
+    /// The expando keys `for...in`/`Object.keys` visit, in write order. A
+    /// write shadowing a static keeps the static's non-enumerable attribute
+    /// and is absent here. In-memory only.
+    builtin_enumerable: FxHashMap<HeapId, Vec<String>>,
+    /// Element positions an ECMA array literal opened but never stored — the
+    /// sparse holes. The `List` itself stays dense (a hole occupies an
+    /// `Undefined` slot); this in-memory side set is what `hasOwnProperty`,
+    /// `in` and `sort` consult to distinguish a hole from a stored
+    /// `undefined`. Not durable: a wire round-trip densifies, the registered
+    /// FIG-3700 divergence.
+    list_holes: FxHashMap<HeapId, BTreeSet<usize>>,
+    /// `lastIndex` values a guest wrote that the durable `u64` slot cannot
+    /// represent — ECMA stores the raw value and coerces at `exec`. The
+    /// `RegExpObject.last_index` slot keeps the coerced number for the wire;
+    /// this in-memory override wins reads until an assignment replaces it.
+    /// Not durable: a wire round-trip keeps the coerced slot.
+    regexp_last_index_overrides: FxHashMap<HeapId, Value>,
+    /// Records `Lash.Arguments` materialized for a call frame — they answer
+    /// strict-mode `callee`/`caller` poison and keep `length`/`callee` off
+    /// the enumerable surface. In-memory only: a wire round-trip leaves a
+    /// plain record, matching the hole/override treatment.
+    arguments_records: FxHashSet<HeapId>,
 }
 
 /// The next write stamp; see [`Heap::revisions`].
@@ -150,36 +185,17 @@ impl Default for Heap {
             base_revision: next_revision(),
             builtin_functions: BTreeMap::new(),
             guest_coercion: guest_coercion::GuestCoercionReplay::default(),
+            builtin_enumerable: FxHashMap::default(),
+            builtin_expandos: FxHashMap::default(),
+            builtin_deleted: FxHashMap::default(),
+            list_holes: FxHashMap::default(),
+            regexp_last_index_overrides: FxHashMap::default(),
+            arguments_records: FxHashSet::default(),
         }
     }
 }
 
 impl Heap {
-    pub(crate) fn validate_closures(
-        &self,
-        functions: &[CompiledFunction],
-    ) -> Result<(), RuntimeError> {
-        for (_, object) in self.objects_in_id_order() {
-            let HeapObject::Closure {
-                function, captures, ..
-            } = object
-            else {
-                continue;
-            };
-            let compiled = functions
-                .get(*function as usize)
-                .ok_or(RuntimeError::UnknownFunction { index: *function })?;
-            if captures.len() != compiled.capture_count {
-                return Err(RuntimeError::ClosureCaptureCountMismatch {
-                    index: *function,
-                    expected: compiled.capture_count,
-                    actual: captures.len(),
-                });
-            }
-        }
-        Ok(())
-    }
-
     pub(crate) fn with_limit(logical_byte_limit: u64) -> Self {
         Self {
             logical_byte_limit,
@@ -1467,6 +1483,7 @@ impl Heap {
             if let Ok(object) = self.get(id) {
                 pending.extend(object.child_refs());
             }
+            self.collect_side_state_refs(id, &mut pending);
         }
         let mut dead = Vec::new();
         for (id, entry) in &self.entries {
@@ -1484,6 +1501,7 @@ impl Heap {
         self.entries.retain(|id, _| marked.contains(id));
         self.revisions.retain(|id, _| marked.contains(id));
         self.builtin_functions.retain(|_, id| marked.contains(id));
+        self.sweep_builtin_side_state(&marked);
         for (id, children, logical_bytes) in dead {
             self.retarget_parent_edges(id, &children, &[]);
             self.parents.remove(&id);
@@ -1591,6 +1609,12 @@ impl Clone for Heap {
             base_revision: self.base_revision,
             builtin_functions: self.builtin_functions.clone(),
             guest_coercion: guest_coercion::GuestCoercionReplay::default(),
+            builtin_enumerable: self.builtin_enumerable.clone(),
+            builtin_expandos: self.builtin_expandos.clone(),
+            builtin_deleted: self.builtin_deleted.clone(),
+            list_holes: self.list_holes.clone(),
+            regexp_last_index_overrides: self.regexp_last_index_overrides.clone(),
+            arguments_records: self.arguments_records.clone(),
         }
     }
 }

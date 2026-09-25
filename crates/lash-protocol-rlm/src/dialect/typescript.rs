@@ -1274,25 +1274,22 @@ mod tests {
 
         // The refusals are the paths a cell cannot write or the lowerer claims
         // for itself; every one of them used to be advertised as a callable.
+        // `undefined`, `eval` and `arguments` joined them in FIG-3656: each
+        // now names a real global value, so `X.op` is that value's member
+        // call — never a tool path.
         for expected in [
             "delete.op",
             "new.op",
             "Math.op",
             "probe.then",
             "probe.catch",
+            "undefined.op",
+            "eval.op",
+            "arguments.op",
         ] {
             assert!(
                 refused.iter().any(|path| path == expected),
                 "registration must refuse `{expected}`: {refused:?}"
-            );
-        }
-        // The strict-mode-illegal binding names stay admitted: they are legal
-        // member roots, the advertised form is the call path itself, and each
-        // dispatches below (FIG-1483).
-        for expected in ["undefined.op", "eval.op", "arguments.op"] {
-            assert!(
-                admitted.iter().any(|(.., path)| path == expected),
-                "registration must admit `{expected}`: {refused:?}"
             );
         }
         assert!(

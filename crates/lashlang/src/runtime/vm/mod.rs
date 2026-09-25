@@ -19,6 +19,7 @@ mod javascript_array;
 mod javascript_codec;
 pub(crate) mod javascript_date;
 mod javascript_json;
+mod javascript_number;
 mod javascript_operators;
 pub(crate) mod javascript_regexp;
 mod javascript_stdlib;

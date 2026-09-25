@@ -142,11 +142,15 @@ impl HeapObject {
         }
     }
 
-    /// Whether the object is callable: a closure, or a built-in method read
-    /// as a value. Both are ECMA functions, so `typeof` answers `"function"`
-    /// for either, and neither can outlive the program that holds it.
+    /// Whether the object is callable: a closure, or a built-in carrying a
+    /// `[[Call]]`. The built-in row says which — `Math` is an object where
+    /// `Math.max` is a function, so `typeof` answers from the table.
     pub(crate) fn is_function(&self) -> bool {
-        matches!(self, Self::Closure { .. } | Self::BuiltinFunction(_))
+        match self {
+            Self::Closure { .. } => true,
+            Self::BuiltinFunction(function) => function.callable(),
+            _ => false,
+        }
     }
 
     /// The kind as a diagnostic names it: an error by its class.

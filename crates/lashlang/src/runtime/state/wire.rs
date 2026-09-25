@@ -19,9 +19,9 @@ pub(super) enum CanonicalHeapObject {
         name: Option<CanonicalValue>,
         length: Option<CanonicalValue>,
     },
-    /// A built-in method value, named by its prototype and ECMA `name`.
+    /// A built-in value, named by its owner scope and ECMA `name`.
     BuiltinFunction {
-        prototype: String,
+        owner: String,
         name: String,
     },
     RegExp {
@@ -108,7 +108,7 @@ impl CanonicalHeapObject {
                     .transpose()?,
             },
             HeapObject::BuiltinFunction(function) => Self::BuiltinFunction {
-                prototype: function.prototype().name().to_string(),
+                owner: function.owner().name().to_string(),
                 name: function.name().to_string(),
             },
             HeapObject::RegExp(regexp) => Self::RegExp {
@@ -237,16 +237,14 @@ impl CanonicalHeapObject {
                 name: name.map(CanonicalValue::into_runtime).transpose()?,
                 length: length.map(CanonicalValue::into_runtime).transpose()?,
             },
-            Self::BuiltinFunction { prototype, name } => HeapObject::BuiltinFunction(
-                crate::runtime::heap::BuiltinPrototype::from_name(&prototype)
-                    .and_then(|prototype| {
-                        crate::runtime::heap::BuiltinFunction::named(prototype, &name)
-                    })
-                    .ok_or_else(|| {
+            Self::BuiltinFunction { owner, name } => HeapObject::BuiltinFunction(
+                crate::runtime::heap::BuiltinFunction::named_scoped(&owner, &name).ok_or_else(
+                    || {
                         SnapshotDecodeError::InvalidEncoding(format!(
-                            "unknown built-in function {prototype}.prototype.{name}"
+                            "unknown built-in function {owner}.{name}"
                         ))
-                    })?,
+                    },
+                )?,
             ),
             Self::RegExp {
                 pattern,

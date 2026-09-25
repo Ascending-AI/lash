@@ -190,6 +190,11 @@ async fn url_search_params_live_link_survives_state_snapshot_round_trip() {
 
 #[tokio::test(flavor = "current_thread")]
 async fn regexp_last_index_uses_heap_aware_to_number_and_to_length() {
+    // `lastIndex` stores the raw written value like ECMA's writable data
+    // property; `exec` coerces it through ToLength at use. A sticky `y` flag
+    // anchors the match at that offset, so the post-exec `lastIndex` reports
+    // where the coerced search began: `b` at index 1 of "ab" matches only
+    // when the stored value coerces to 1.
     let mut expressions = Vec::new();
     for (suffix, value) in [
         ("list", Expr::List(vec![Expr::Number(1.0)])),
@@ -208,7 +213,7 @@ async fn regexp_last_index_uses_heap_aware_to_number_and_to_length() {
             &regexp,
             heap_new(
                 "RegExp",
-                vec![Expr::String("a+".into()), Expr::String("g".into())],
+                vec![Expr::String("b".into()), Expr::String("y".into())],
             ),
         ));
         expressions.push(Expr::Assign {
@@ -218,6 +223,14 @@ async fn regexp_last_index_uses_heap_aware_to_number_and_to_length() {
             },
             expr: Box::new(value),
         });
+        expressions.push(private_builtin(
+            "__typescript_regexp",
+            vec![
+                Expr::String("exec".into()),
+                Expr::Variable(regexp.into()),
+                Expr::String("ab".into()),
+            ],
+        ));
     }
     expressions.push(Expr::Finish(Box::new(Expr::List(
         ["list", "empty", "many", "record", "map", "date", "infinity"]
@@ -229,13 +242,16 @@ async fn regexp_last_index_uses_heap_aware_to_number_and_to_length() {
         run_typescript_ast_across_every_effect(Program::block(expressions)).await,
         ExecutionOutcome::Finished(Value::List(
             vec![
-                Value::Number(1.0),
+                // [1] coerces to 1, `b` matches at index 1, `lastIndex` is 2.
+                Value::Number(2.0),
+                // The rest coerce to 0 or out of bounds: no match, and a
+                // failed sticky exec resets `lastIndex` to 0.
                 Value::Number(0.0),
                 Value::Number(0.0),
                 Value::Number(0.0),
                 Value::Number(0.0),
-                Value::Number(42.0),
-                Value::Number(crate::runtime::heap::MAX_JAVASCRIPT_LENGTH as f64),
+                Value::Number(0.0),
+                Value::Number(0.0),
             ]
             .into()
         ))

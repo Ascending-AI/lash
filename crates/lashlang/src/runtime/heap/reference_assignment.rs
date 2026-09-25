@@ -178,7 +178,14 @@ impl Heap {
             .clone();
         let mut new_object = old_object.clone();
         let deleted = match &mut new_object {
-            HeapObject::Record(record) => record.remove(key.as_str()).is_some(),
+            HeapObject::Record(record) => {
+                if self.is_arguments_record(*target_id)
+                    && matches!(key.as_str(), "callee" | "caller")
+                {
+                    return Err(crate::runtime::access::arguments_poison_error(key.as_str()));
+                }
+                record.remove(key.as_str()).is_some()
+            }
             // An error's own data properties are all configurable, so `delete`
             // removes the slot. Any other name is not an own property, and
             // deleting a name an object does not own answers `true`.
@@ -189,12 +196,22 @@ impl Heap {
                 _ => false,
             },
             HeapObject::List(values) => {
+                // `length` and tuple members are non-configurable: a strict
+                // `delete` raises TypeError.
                 if key == "length" {
-                    return Ok(false);
+                    return Err(RuntimeError::ValidationFailed {
+                        reason: "TypeError: Cannot delete property 'length' of array".to_string(),
+                    });
                 }
                 if let Some(index) = javascript_array_index_key(&key)
                     && index < values.len()
                 {
+                    // `delete` on a hole answers `true` — there is no own
+                    // property to remove; deleting a stored element would
+                    // create a hole, which stays refused.
+                    if self.is_list_hole(*target_id, index) {
+                        return Ok(true);
+                    }
                     return Err(RuntimeError::ValidationFailed {
                         reason: format!(
                             "TS_DELETE_ARRAY_INDEX_UNSUPPORTED: delete on dense array index {index} would create a hole; use splice({index}, 1)"
@@ -203,16 +220,42 @@ impl Heap {
                 }
                 false
             }
-            HeapObject::Tuple(_) => return Ok(false),
+            HeapObject::Tuple(values) => {
+                // A tuple is frozen: every member is non-configurable, so a
+                // strict `delete` of a present index — or `length` — raises
+                // TypeError; deleting a name it never owned answers `true`.
+                let present = key == "length"
+                    || javascript_array_index_key(&key).is_some_and(|index| index < values.len());
+                if present {
+                    return Err(RuntimeError::ValidationFailed {
+                        reason: format!(
+                            "TypeError: Cannot delete property '{key}' of a frozen array"
+                        ),
+                    });
+                }
+                return Ok(true);
+            }
+            // `lastIndex` is the RegExp's only own slot and it is
+            // non-configurable, so a strict `delete` raises TypeError; the
+            // flag accessors live on the prototype, where a delete answers
+            // `true`.
+            HeapObject::RegExp(_) => {
+                if key.as_str() == "lastIndex" {
+                    return Err(RuntimeError::ValidationFailed {
+                        reason: "TypeError: Cannot delete property 'lastIndex' of [object RegExp]"
+                            .to_string(),
+                    });
+                }
+                return Ok(true);
+            }
             HeapObject::Closure { name, length, .. } => match key.as_ref() {
                 "name" => name.take().is_some(),
                 "length" => length.take().is_some(),
                 _ => false,
             },
-            // A built-in's own `name` and `length` belong to the one object
-            // every read of it shares, so deleting them stays refused below;
-            // any other key is not its own, and deleting it changes nothing.
-            HeapObject::BuiltinFunction(_) if !matches!(key.as_ref(), "name" | "length") => false,
+            // A built-in deletes through its own surface: a configurable
+            // static tombstones, a non-configurable one throws.
+            HeapObject::BuiltinFunction(_) => return self.builtin_delete(*target_id, &key),
             object => {
                 return Err(RuntimeError::ValidationFailed {
                     reason: format!(
@@ -367,11 +410,33 @@ impl Heap {
         {
             return Err(error);
         }
+        // `callee`/`caller` on a strict `arguments` record are poisoned:
+        // a write raises the same TypeError a read does.
+        if self.is_arguments_record(target_id)
+            && matches!(leaf_key.as_deref(), Some("callee" | "caller"))
+        {
+            return Err(crate::runtime::access::arguments_poison_error(
+                leaf_key.as_deref().unwrap_or("callee"),
+            ));
+        }
         let is_last_index = leaf_key.as_deref() == Some("lastIndex");
         if is_last_index && matches!(self.get(target_id)?, HeapObject::RegExp(_)) {
+            // ECMA's `lastIndex` is a writable data slot: the raw value is
+            // stored, and `exec` coerces at use. The durable `u64` keeps a
+            // coerced number; a value it cannot represent rides the in-memory
+            // override.
             let imported = self.import_values(vec![value], 1)?.remove(0);
-            let last_index = regexp_last_index(self.javascript_to_number(&imported)?);
-            return self.set_regexp_last_index(target_id, last_index);
+            return self.set_regexp_last_index_raw(target_id, imported);
+        }
+
+        if self.is_builtin_object(target_id) {
+            let Some(key) = leaf_key.as_deref() else {
+                return Err(RuntimeError::MissingAssignmentField {
+                    field: "path".to_string(),
+                });
+            };
+            let imported = self.import_values(vec![value], 1)?.remove(0);
+            return self.builtin_assign(target_id, key, imported);
         }
 
         if matches!(self.get(target_id)?, HeapObject::Url(_)) {
@@ -461,6 +526,12 @@ impl Heap {
                     });
                 }
                 values.truncate(length);
+                if let Some(holes) = self.list_holes.get_mut(&target_id) {
+                    holes.retain(|index| *index < length);
+                    if holes.is_empty() {
+                        self.list_holes.remove(&target_id);
+                    }
+                }
             }
             (HeapObject::List(values), CompiledAssignPathStep::Index) => {
                 let key = self
@@ -489,6 +560,9 @@ impl Heap {
                     values.resize(index + 1, Value::Undefined);
                 }
                 values[index] = imported;
+                // A store to a hole position fills it: the index is a real
+                // own element now.
+                self.clear_list_hole(target_id, index);
             }
             (HeapObject::RegExpMatch(result), CompiledAssignPathStep::Index) => {
                 let key = self
@@ -677,14 +751,4 @@ fn javascript_array_length(number: f64) -> Result<usize, RuntimeError> {
         return Ok(number as usize);
     }
     Err(RuntimeError::range_error("Invalid array length"))
-}
-
-fn regexp_last_index(number: f64) -> u64 {
-    if number.is_nan() || number <= 0.0 {
-        return 0;
-    }
-    if number.is_infinite() || number >= MAX_JAVASCRIPT_LENGTH as f64 {
-        return MAX_JAVASCRIPT_LENGTH;
-    }
-    number.trunc() as u64
 }

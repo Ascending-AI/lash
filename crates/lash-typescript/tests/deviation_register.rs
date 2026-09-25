@@ -198,17 +198,12 @@ const PROBES: &[Probe] = &[
         refusal: "TS_SOURCE_NESTING_LIMIT",
         source: Source::Generated(nested_source),
     },
-    // 12. Dense arrays: the skipped-index write, and a literal elision refused
-    // statically rather than filled with `undefined` (FIG-3702).
+    // 12. Dense arrays: a skipped-index write refuses rather than manufacturing
+    // a hole (FIG-3702). Literal elisions are admitted — holes are tracked.
     probe(
         12,
         "TS_SPARSE_ARRAY_UNSUPPORTED",
         "const a = [1]; a[3] = 9; finish(a.length);",
-    ),
-    probe(
-        12,
-        "TS_SPARSE_ARRAY_UNSUPPORTED",
-        "const a = [0, , 2]; finish(a);",
     ),
     probe(
         12,
@@ -325,8 +320,17 @@ const PROBES: &[Probe] = &[
         "function f() { return 1; } function f() { return 2; } finish(f());",
     ),
     readme_probe(
+        "TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED",
+        "const f = Function('return 1'); finish(f());",
+    ),
+    readme_probe("TS_NEW_UNSUPPORTED", "function F() { } const o = new F();"),
+    readme_probe(
         "TS_DATE_PARSE_NON_ISO",
         "finish(Date.parse('March 7, 2024'));",
+    ),
+    readme_probe(
+        "TS_DATE_NOW_EFFECT_REQUIRED",
+        "const d = Date; finish(d());",
     ),
     readme_probe(
         "TS_DATE_IMMUTABLE",

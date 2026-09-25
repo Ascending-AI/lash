@@ -4,6 +4,7 @@ use super::super::{
 };
 use super::javascript_array::{copy_within, javascript_array_method_for_value};
 use super::javascript_json::{javascript_json_stringify, parse_javascript_json};
+pub(super) use super::javascript_number::*;
 pub(super) use super::javascript_stdlib::*;
 use super::*;
 use std::collections::BTreeSet;
@@ -24,10 +25,27 @@ impl<H: ExecutionHost> Vm<'_, H> {
         field: &Name,
     ) -> Result<Value, RuntimeError> {
         if let Value::Ref(id) = target {
+            if self.heap.is_builtin_object(id) {
+                return self.heap.builtin_read(id, field.text.as_ref());
+            }
+            // An own `constructor` key (a record field) wins over the kind's
+            // answer, exactly as it does in ECMA.
+            if field.text.as_ref() == "constructor"
+                && !matches!(self.heap.get(id)?, HeapObject::Record(record) if record.get("constructor").is_some())
+                && let Some(name) = self.heap.javascript_constructor_of(&Value::Ref(id))?
+            {
+                return self.heap.builtin_value(&name);
+            }
             let value = read_javascript_heap_field(&self.heap, id, field)?;
             return self.or_inherited_builtin(value, &target, &field.text);
         }
         let inherited = inline_inherited_builtin(&target, &field.text);
+        if field.text.as_ref() == "constructor"
+            && !matches!(&target, Value::Record(record) if record.get_symbol(field.symbol).is_some())
+            && let Some(name) = self.heap.javascript_constructor_of(&target)?
+        {
+            return self.heap.builtin_value(&name);
+        }
         let value = read_javascript_field_direct(target, field)?;
         self.or_builtin(value, inherited)
     }
@@ -38,11 +56,20 @@ impl<H: ExecutionHost> Vm<'_, H> {
         index: Value,
     ) -> Result<Value, RuntimeError> {
         if let Value::Ref(id) = target {
+            let key = self.heap.javascript_to_string(&index)?;
+            if self.heap.is_builtin_object(id) {
+                return self.heap.builtin_read(id, &key);
+            }
+            if key == "constructor"
+                && !matches!(self.heap.get(id)?, HeapObject::Record(record) if record.get("constructor").is_some())
+                && let Some(name) = self.heap.javascript_constructor_of(&Value::Ref(id))?
+            {
+                return self.heap.builtin_value(&name);
+            }
             let value = read_javascript_heap_index(&self.heap, id, &index)?;
             if !matches!(value, Value::Undefined) {
                 return Ok(value);
             }
-            let key = self.heap.javascript_to_string(&index)?;
             return self.or_inherited_builtin(value, &target, &key);
         }
         // A `null` or `undefined` base throws before its key is converted, so
@@ -51,6 +78,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
             return Err(nullish_property_read(&target, &index));
         }
         let key = self.heap.javascript_to_string(&index)?;
+        if key == "constructor"
+            && !matches!(&target, Value::Record(record) if record.get(&key).is_some())
+            && let Some(name) = self.heap.javascript_constructor_of(&target)?
+        {
+            return self.heap.builtin_value(&name);
+        }
         let inherited = inline_inherited_builtin(&target, &key);
         let value = read_javascript_index_direct_with_key(target, &key)?;
         self.or_builtin(value, inherited)
@@ -159,6 +192,9 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 .plain_object_method(receiver, method.as_str())?
                 .is_some();
             self.stack.push(Value::Bool(own));
+            return Ok(());
+        }
+        if self.execute_lash_intrinsic(&values)? {
             return Ok(());
         }
         if let [Value::String(method), value] = values.as_slice()
@@ -289,139 +325,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if self.try_execute_regexp_match_stdlib(&values)? {
             return Ok(());
         }
-        if let [Value::String(method), Value::Ref(receiver)] = values.as_slice()
-            && matches!(self.heap.get(*receiver)?, HeapObject::Error(_))
-        {
-            let result = match method.as_str() {
-                "Object.keys" | "Object.values" | "Object.entries" => {
-                    Some(Value::List(Vec::new().into()))
-                }
-                "JSON.stringify" => Some(Value::String("{}".into())),
-                _ => None,
-            };
-            if let Some(result) = result {
-                self.stack.push(result);
-                return Ok(());
-            }
-        }
-        if let [Value::String(method), Value::Ref(receiver)] = values.as_slice()
-            && matches!(
-                method.as_str(),
-                "Object.keys" | "Object.values" | "Object.entries"
-            )
-        {
-            let result = match self.heap.get(*receiver)? {
-                HeapObject::Record(record) => {
-                    let entries = ecma_record_entries(record);
-                    match method.as_str() {
-                        "Object.keys" => entries
-                            .into_iter()
-                            .map(|(key, _)| Value::String(key.into()))
-                            .collect(),
-                        "Object.values" => entries
-                            .into_iter()
-                            .map(|(_, value)| value.clone())
-                            .collect(),
-                        "Object.entries" => entries
-                            .into_iter()
-                            .map(|(key, value)| {
-                                Value::List(vec![Value::String(key.into()), value.clone()].into())
-                            })
-                            .collect(),
-                        _ => unreachable!(),
-                    }
-                }
-                HeapObject::List(items) | HeapObject::Tuple(items) => match method.as_str() {
-                    "Object.keys" => (0..items.len())
-                        .map(|index| Value::String(index.to_string().into()))
-                        .collect(),
-                    "Object.values" => items.to_vec(),
-                    "Object.entries" => items
-                        .iter()
-                        .enumerate()
-                        .map(|(index, value)| {
-                            Value::List(
-                                vec![Value::String(index.to_string().into()), value.clone()].into(),
-                            )
-                        })
-                        .collect(),
-                    _ => unreachable!(),
-                },
-                _ => Vec::new(),
-            };
-            self.stack.push(Value::List(result.into()));
+        if self.execute_heap_property_intrinsic(&values)? {
             return Ok(());
         }
         if self.object_is_by_reference(&values) {
-            return Ok(());
-        }
-        if let [Value::String(method), Value::Ref(receiver), key] = values.as_slice()
-            && method.as_str() == "Object.hasOwn"
-        {
-            let key = self.heap.javascript_to_string(key)?;
-            let has = match self.heap.get(*receiver)? {
-                HeapObject::Record(record) => record.get(&key).is_some(),
-                HeapObject::List(values) | HeapObject::Tuple(values) => {
-                    key == "length"
-                        || array_index_property(&key)
-                            .is_some_and(|index| index < values.len() as u32)
-                }
-                // An error's own properties are exactly the slots its
-                // constructor installed or a write defined: `message` only
-                // when a non-`undefined` argument was given, `cause` only
-                // when `options` carried one, `errors` only on
-                // AggregateError. `name` answers from the brand, like the
-                // prototype property it stands in for, so it is never own.
-                HeapObject::Error(error) => match key.as_str() {
-                    "message" => error.message.is_some(),
-                    "cause" => error.cause.is_some(),
-                    "errors" => error.errors.is_some(),
-                    _ => false,
-                },
-                HeapObject::Closure { name, length, .. } => match key.as_str() {
-                    "name" => name.is_some(),
-                    "length" => length.is_some(),
-                    _ => false,
-                },
-                // A built-in function's own properties are its `name` and
-                // `length`; its methods are `Function.prototype`'s.
-                HeapObject::BuiltinFunction(_) => matches!(key.as_str(), "name" | "length"),
-                _ => false,
-            };
-            self.stack.push(Value::Bool(has));
-            return Ok(());
-        }
-        if let [Value::String(method), Value::Ref(receiver), args @ ..] = values.as_slice()
-            && method.as_str() == "Object.assign"
-            && matches!(self.heap.get(*receiver)?, HeapObject::Record(_))
-        {
-            let HeapObject::Record(target) = self.heap.get(*receiver)? else {
-                unreachable!("record receiver checked")
-            };
-            let mut output = target.as_ref().clone();
-            for source in args {
-                // This arm runs before the materializing dispatch below, because
-                // a heap receiver has to stay a reference. That left a projected
-                // *source* handle to match no source shape and be skipped
-                // silently, so `Object.assign(target, projected)` copied
-                // nothing. A projected handle is a host-side view of a value:
-                // assign the record behind it. Nullish sources are still
-                // skipped, projected or not.
-                let source = materialize_value(source.clone())?;
-                let entries = match &source {
-                    Value::Ref(id) => match self.heap.get(*id)? {
-                        HeapObject::Record(record) => Some(ecma_record_entries(record)),
-                        _ => None,
-                    },
-                    Value::Record(record) => Some(ecma_record_entries(record)),
-                    _ => None,
-                };
-                for (key, value) in entries.unwrap_or_default() {
-                    output.insert(key.to_string(), value.clone());
-                }
-            }
-            self.heap.replace_javascript_record(*receiver, output)?;
-            self.stack.push(Value::Ref(*receiver));
             return Ok(());
         }
         if let [Value::String(method), Value::Ref(receiver), args @ ..] = values.as_slice()
@@ -438,7 +345,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             return self.execute_javascript_heap_method(method, *receiver, args);
         }
         if let [Value::String(method), Value::Ref(receiver)] = values.as_slice()
-            && method.as_str() == "Lash.ArrayFromIterable"
+            && matches!(method.as_str(), "Lash.ArrayFromIterable" | "Array.from")
         {
             let output = match self.heap.get(*receiver)? {
                 HeapObject::UrlSearchParams(params) => Some(
@@ -465,6 +372,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 // elements, and could not carry an element that holds a
                 // function.
                 HeapObject::List(items) | HeapObject::Tuple(items) => Some(items.clone()),
+                HeapObject::RegExpMatch(result) => Some(result.items.clone()),
                 _ => None,
             };
             if let Some(output) = output {
@@ -791,7 +699,7 @@ fn javascript_json_has_cycle(
     Ok(false)
 }
 
-fn javascript_stdlib(heap: &Heap, values: &[Value]) -> Result<Value, RuntimeError> {
+pub(super) fn javascript_stdlib(heap: &Heap, values: &[Value]) -> Result<Value, RuntimeError> {
     let Some(Value::String(method)) = values.first() else {
         return Err(js_stdlib_error("missing method discriminator"));
     };
@@ -1435,127 +1343,6 @@ pub(super) fn javascript_array_method(
         _ => Err(js_stdlib_error(format!(
             "TS_METHOD_UNSUPPORTED: Array.{method}"
         ))),
-    }
-}
-
-fn javascript_number_method(
-    method: &str,
-    value: f64,
-    args: &[Value],
-) -> Result<Value, RuntimeError> {
-    let digits = |default: i64, min: i64| -> Result<i64, RuntimeError> {
-        let value = args
-            .first()
-            .map(javascript_to_number)
-            .unwrap_or(default as f64);
-        let value = if value.is_nan() {
-            0
-        } else {
-            value.trunc() as i64
-        };
-        if !(min..=100).contains(&value) {
-            return Err(RuntimeError::range_error(match method {
-                "toFixed" => "toFixed() digits argument must be between 0 and 100",
-                "toExponential" => "toExponential() argument must be between 0 and 100",
-                _ => "toPrecision() argument must be between 1 and 100",
-            }));
-        }
-        Ok(value)
-    };
-    let rendered = match method {
-        "toFixed" => {
-            let digits = digits(0, 0)? as u8;
-            ryu_js::Buffer::new()
-                .format_to_fixed(value, digits)
-                .to_string()
-        }
-        // Both answer a non-finite receiver before they range-check the
-        // argument; `toFixed` range-checks first.
-        "toExponential" | "toPrecision" if !value.is_finite() => {
-            javascript_to_string(&Value::Number(value))
-        }
-        "toExponential" => {
-            let fraction = if args.is_empty() || matches!(args, [Value::Undefined]) {
-                None
-            } else {
-                Some(digits(0, 0)? as usize)
-            };
-            javascript_exponential(value, fraction)
-        }
-        "toPrecision" if args.is_empty() || matches!(args, [Value::Undefined]) => {
-            javascript_to_string(&Value::Number(value))
-        }
-        "toPrecision" => javascript_precision(value, digits(1, 1)? as usize),
-        "toString" if args.is_empty() => javascript_to_string(&Value::Number(value)),
-        "valueOf" if args.is_empty() => return Ok(Value::Number(value)),
-        _ => {
-            return Err(js_stdlib_error(format!(
-                "TS_METHOD_UNSUPPORTED: Number.{method}"
-            )));
-        }
-    };
-    Ok(Value::String(rendered.into()))
-}
-
-fn javascript_exponential(value: f64, fraction: Option<usize>) -> String {
-    if !value.is_finite() {
-        return javascript_to_string(&Value::Number(value));
-    }
-    let value = if value == 0.0 { 0.0 } else { value };
-    match fraction {
-        // ECMA rounds the exact decimal value to `fraction + 1` significant
-        // digits and takes the larger mantissa on an exact tie (`25` with zero
-        // fraction digits is `3e+1`, not `2e+1`). Rust's own formatter rounds
-        // half-to-even, so the digits come from the exact binary expansion
-        // instead.
-        Some(fraction) => exact_exponential(value, fraction),
-        None => {
-            let shortest = javascript_to_string(&Value::Number(value));
-            let parsed = shortest.parse::<f64>().unwrap_or(value);
-            normalize_exponent(format!("{parsed:e}"), fraction)
-        }
-    }
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "the raw string is Rust's own exponent formatting output, split into mantissa and digits, per both messages"
-)]
-fn normalize_exponent(raw: String, fraction: Option<usize>) -> String {
-    let (mantissa, exponent) = raw.split_once('e').expect("Rust exponent formatting");
-    let mut mantissa = mantissa.to_string();
-    if fraction.is_none() {
-        while mantissa.contains('.') && mantissa.ends_with('0') {
-            mantissa.pop();
-        }
-        if mantissa.ends_with('.') {
-            mantissa.pop();
-        }
-    }
-    let exponent = exponent.parse::<i32>().expect("Rust exponent digits");
-    format!(
-        "{mantissa}e{}{exponent}",
-        if exponent >= 0 { "+" } else { "" }
-    )
-}
-
-fn javascript_precision(value: f64, precision: usize) -> String {
-    if !value.is_finite() {
-        return javascript_to_string(&Value::Number(value));
-    }
-    let absolute = value.abs();
-    let exponent = if absolute == 0.0 {
-        0
-    } else {
-        absolute.log10().floor() as i32
-    };
-    if exponent >= precision as i32 || exponent < -6 {
-        javascript_exponential(value, Some(precision - 1))
-    } else {
-        let fraction = (precision as i32 - exponent - 1).max(0) as u8;
-        ryu_js::Buffer::new()
-            .format_to_fixed(value, fraction)
-            .to_string()
     }
 }
 
