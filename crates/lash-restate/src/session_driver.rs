@@ -374,57 +374,9 @@ impl LashSession for LashSessionImpl {
                 input.drive_version,
             ));
         }
-        let request = input.request;
-        if ctx.key() != request.session.as_str() {
-            return Err(TerminalError::new(format!(
-                "LashSession/{} was asked to drive session `{}`",
-                ctx.key(),
-                request.session
-            ))
-            .into());
-        }
-        let driver = self.slot.driver_for(LashService::SessionDriver.name())?;
-        let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone());
-        let admission_scope = drive_admission_scope(&request.session, &request.request);
-        let mut ran = Vec::new();
-        let mut ordinal = 0_u32;
-        loop {
-            let scoped = controller
-                .scoped_effect_controller(admission_scope.clone())
-                .map_err(refused_scope)?;
-            let verdict = driver
-                .admit(scoped, &request, ordinal)
-                .await
-                .map_err(abort_failure)?;
-            let stop = match verdict {
-                AdmitVerdict::Admit(admitted) => {
-                    let key = turn_workflow_key(admitted.session(), admitted.root());
-                    let Json(outcome) = controller
-                        .context()
-                        .workflow_client::<LashTurnClient>(key)
-                        .run(Json(RestateTurnDriveRequest {
-                            drive_version: LASH_SESSION_DRIVE_VERSION,
-                            admitted,
-                        }))
-                        .call()
-                        .await?;
-                    ran.push(outcome);
-                    ordinal = ordinal.checked_add(1).ok_or_else(|| {
-                        HandlerError::from(TerminalError::new(format!(
-                            "session `{}` drive `{}` exhausted its admission ordinals",
-                            request.session,
-                            request.request.as_str()
-                        )))
-                    })?;
-                    continue;
-                }
-                AdmitVerdict::Idle => DriveStop::Idle,
-                AdmitVerdict::Parked(park) => DriveStop::Parked(park),
-                AdmitVerdict::SubstrateLost { root } => DriveStop::SubstrateLost { root },
-                AdmitVerdict::RootTerminal { root, by } => DriveStop::RootTerminal { root, by },
-            };
-            return Ok(Json(DriveOutcome { ran, stop }));
-        }
+        drive_session_journal(&self.slot, &self.authority_id, ctx, input.request)
+            .await
+            .map(Json)
     }
 }
 
@@ -434,32 +386,106 @@ impl LashTurn for LashTurnImpl {
         ctx: WorkflowContext<'_>,
         Json(input): Json<RestateTurnDriveRequest>,
     ) -> HandlerResult<Json<RootOutcome>> {
+        // The generation gate precedes every journaled command.
         if input.drive_version != LASH_SESSION_DRIVE_VERSION {
             return Err(retired_generation(
                 LashService::TurnDriver,
                 input.drive_version,
             ));
         }
-        let admitted = input.admitted;
-        let expected = turn_workflow_key(admitted.session(), admitted.root());
-        if ctx.key() != expected {
-            return Err(TerminalError::new(format!(
-                "LashTurn/{} was asked to run root `{expected}`",
-                ctx.key()
-            ))
-            .into());
-        }
-        let driver = self.slot.driver_for(LashService::TurnDriver.name())?;
-        let controller = RestateRuntimeEffectController::new(ctx, self.authority_id.clone());
+        run_root_journal(&self.slot, &self.authority_id, ctx, input.admitted)
+            .await
+            .map(Json)
+    }
+}
+
+/// What `LashSession/{session}/drive` journals: admission `n` on the
+/// drive-admission scope, then, for an admitted root, the call to its
+/// `LashTurn`, then admission `n + 1`, until admission answers anything but
+/// an admitted root.
+async fn drive_session_journal(
+    slot: &RestateSessionDriverSlot,
+    authority_id: &RestateAuthorityId,
+    ctx: ObjectContext<'_>,
+    request: DriveRequest,
+) -> Result<DriveOutcome, HandlerError> {
+    if ctx.key() != request.session.as_str() {
+        return Err(TerminalError::new(format!(
+            "LashSession/{} was asked to drive session `{}`",
+            ctx.key(),
+            request.session
+        ))
+        .into());
+    }
+    let driver = slot.driver_for(LashService::SessionDriver.name())?;
+    let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone());
+    let admission_scope = drive_admission_scope(&request.session, &request.request);
+    let mut ran = Vec::new();
+    let mut ordinal = 0_u32;
+    loop {
         let scoped = controller
-            .scoped_effect_controller(drive_root_scope(admitted.session(), admitted.root()))
+            .scoped_effect_controller(admission_scope.clone())
             .map_err(refused_scope)?;
-        let outcome = driver
-            .run_root(scoped, admitted)
+        let verdict = driver
+            .admit(scoped, &request, ordinal)
             .await
             .map_err(abort_failure)?;
-        Ok(Json(outcome))
+        let stop = match verdict {
+            AdmitVerdict::Admit(admitted) => {
+                let key = turn_workflow_key(admitted.session(), admitted.root());
+                let Json(outcome) = controller
+                    .context()
+                    .workflow_client::<LashTurnClient>(key)
+                    .run(Json(RestateTurnDriveRequest {
+                        drive_version: LASH_SESSION_DRIVE_VERSION,
+                        admitted,
+                    }))
+                    .call()
+                    .await?;
+                ran.push(outcome);
+                ordinal = ordinal.checked_add(1).ok_or_else(|| {
+                    HandlerError::from(TerminalError::new(format!(
+                        "session `{}` drive `{}` exhausted its admission ordinals",
+                        request.session,
+                        request.request.as_str()
+                    )))
+                })?;
+                continue;
+            }
+            AdmitVerdict::Idle => DriveStop::Idle,
+            AdmitVerdict::Parked(park) => DriveStop::Parked(park),
+            AdmitVerdict::SubstrateLost { root } => DriveStop::SubstrateLost { root },
+            AdmitVerdict::RootTerminal { root, by } => DriveStop::RootTerminal { root, by },
+        };
+        return Ok(DriveOutcome { ran, stop });
     }
+}
+
+/// What `LashTurn/{session}:{root}/run` journals: the kernel's root run on
+/// the root's scope, which records its seal first.
+async fn run_root_journal(
+    slot: &RestateSessionDriverSlot,
+    authority_id: &RestateAuthorityId,
+    ctx: WorkflowContext<'_>,
+    admitted: Admitted,
+) -> Result<RootOutcome, HandlerError> {
+    let expected = turn_workflow_key(admitted.session(), admitted.root());
+    if ctx.key() != expected {
+        return Err(TerminalError::new(format!(
+            "LashTurn/{} was asked to run root `{expected}`",
+            ctx.key()
+        ))
+        .into());
+    }
+    let driver = slot.driver_for(LashService::TurnDriver.name())?;
+    let controller = RestateRuntimeEffectController::new(ctx, authority_id.clone());
+    let scoped = controller
+        .scoped_effect_controller(drive_root_scope(admitted.session(), admitted.root()))
+        .map_err(refused_scope)?;
+    driver
+        .run_root(scoped, admitted)
+        .await
+        .map_err(abort_failure)
 }
 
 #[cfg(test)]

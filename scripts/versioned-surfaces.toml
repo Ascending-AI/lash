@@ -101,12 +101,14 @@ must_cover = ["RestateSessionDriveRequest", "RestateTurnDriveRequest"]
 [[surface.guard]]
 kind = "rust_items"
 paths = ["crates/lash-restate/src/session_driver.rs"]
-symbols = ["DRIVE_HANDLER", "unstamped_drive_version", "build_generation", "turn_workflow_key"]
-
-[[surface.guard]]
-kind = "rust_impls"
-paths = ["crates/lash-restate/src/session_driver.rs"]
-symbols = ["LashSession for LashSessionImpl", "LashTurn for LashTurnImpl"]
+symbols = [
+  "DRIVE_HANDLER",
+  "unstamped_drive_version",
+  "build_generation",
+  "turn_workflow_key",
+  "drive_session_journal",
+  "run_root_journal",
+]
 
 [[surface]]
 constant = "SCHEMA_VERSION"
