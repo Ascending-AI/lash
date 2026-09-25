@@ -72,14 +72,11 @@ impl Lowerer {
         ]);
         let guard = may_be_plain_object(receiver_expr);
         let search = self.temporary("replace_search");
-        let mut expressions = vec![
-            assign(&receiver, self.lower_expr(receiver_expr)?),
-            assign(&search, self.lower_expr(needle_expr)?),
-            assign(&callback, self.lower_expr(callback_expr)?),
-        ];
         // The built-in converts the pattern after both arguments are
         // evaluated.
-        let builtin = LashExpr::Block(vec![
+        let builtin_arm = LashExpr::Block(vec![
+            assign(&search, self.lower_expr(needle_expr)?),
+            assign(&callback, self.lower_expr(callback_expr)?),
             assign(
                 &needle,
                 add(LashExpr::String(String::new().into()), variable(&search)),
@@ -109,8 +106,10 @@ impl Lowerer {
         ]);
         // A plain object has no string `replace`: its own member is called
         // with the arguments as given, and the worker's generated string
-        // calls never see it.
-        expressions.push(if guard {
+        // calls never see it. The member is bound before the arguments are
+        // evaluated, as ECMA's call evaluation orders them: they lower
+        // inside each arm.
+        let call = if guard {
             LashExpr::If {
                 condition: Box::new(stdlib(
                     "Lash.OwnMethod",
@@ -119,14 +118,20 @@ impl Lowerer {
                 then_block: Box::new(LashExpr::MethodCall {
                     receiver: Box::new(variable(&receiver)),
                     method: MethodKey::Field("replace".into()),
-                    args: vec![variable(&search), variable(&callback)],
+                    args: vec![
+                        self.lower_expr(needle_expr)?,
+                        self.lower_expr(callback_expr)?,
+                    ],
                 }),
-                else_block: Box::new(builtin),
+                else_block: Box::new(builtin_arm),
             }
         } else {
-            builtin
-        });
-        Ok(LashExpr::Block(expressions))
+            builtin_arm
+        };
+        Ok(LashExpr::Block(vec![
+            assign(&receiver, self.lower_expr(receiver_expr)?),
+            call,
+        ]))
     }
 
     pub(super) fn lower_group_by(
@@ -295,19 +300,12 @@ impl Lowerer {
         let receiver = self.temporary("callback_receiver");
         let callback_name = self.temporary("callback_function");
         let worker = self.temporary("callback_worker");
-        let mut setup = vec![
-            assign(&receiver, receiver_value),
-            assign(&callback_name, self.lower_expr(callback)?),
-        ];
-        // The call's arguments as evaluated, in order: a plain object's own
-        // method receives exactly these.
-        let mut arguments = vec![callback_name.clone()];
+        let mut setup = vec![assign(&callback_name, self.lower_expr(callback)?)];
         let initial_name = initial.map(|_| self.temporary("callback_initial"));
         if let (Some(value), Some(name)) = (initial, initial_name.as_deref()) {
             // Arguments are evaluated left-to-right: for reduce the initial
             // value precedes any excess arguments.
             setup.push(assign(name, self.lower_expr(value)?));
-            arguments.push(name.to_string());
         }
         // The predicate family and `Array.from`'s mapper take a `thisArg`: the
         // callback's receiver on every call (ECMA-262 `Call(callbackfn,
@@ -317,7 +315,6 @@ impl Lowerer {
         {
             let name = self.temporary("callback_this");
             setup.push(assign(&name, self.lower_expr(value)?));
-            arguments.push(name.clone());
             Some(name)
         } else {
             None
@@ -334,34 +331,16 @@ impl Lowerer {
         for argument in args.iter().skip(consumed) {
             let ignored = self.temporary("callback_ignored_argument");
             setup.push(assign(&ignored, self.lower_expr(argument)?));
-            arguments.push(ignored);
         }
         // A plain object has no array methods: `o.map(f)` calls `o`'s own
-        // `map`. Which one runs is decided at run time, after the arguments,
-        // and the built-in's generated code never sees a plain object.
-        let own_method = own_method_guard.then(|| {
-            stdlib(
-                "Lash.OwnMethod",
-                vec![variable(&receiver), LashExpr::String(method.into())],
-            )
-        });
-        let own_call = || LashExpr::MethodCall {
-            receiver: Box::new(variable(&receiver)),
-            method: MethodKey::Field(method.into()),
-            args: arguments.iter().map(|name| variable(name)).collect(),
-        };
+        // `map`. Which one runs is decided before the arguments, so the
+        // built-in arm is the one that evaluates them — and the own arm's
+        // member read still precedes its argument list, as ECMA's call
+        // evaluation orders them.
         if method == "toSorted" {
-            let copy = stdlib("slice", vec![variable(&receiver)]);
             setup.push(assign(
                 &receiver,
-                match &own_method {
-                    Some(own) => LashExpr::If {
-                        condition: Box::new(own.clone()),
-                        then_block: Box::new(variable(&receiver)),
-                        else_block: Box::new(copy),
-                    },
-                    None => copy,
-                },
+                stdlib("slice", vec![variable(&receiver)]),
             ));
         }
         let initial = initial_name.as_deref().map(variable);
@@ -461,19 +440,41 @@ impl Lowerer {
         } else {
             stdlib("__singleCallbackResult", vec![driven])
         };
-        setup.push(match own_method {
-            Some(own) => LashExpr::If {
-                condition: Box::new(own),
-                then_block: Box::new(own_call()),
-                else_block: Box::new(builtin),
-            },
-            None => builtin,
-        });
+        setup.push(builtin);
+        // A plain object has no array methods: `o.map(f)` calls `o`'s own
+        // `map`. The member is bound before the arguments are evaluated —
+        // an argument that replaces the member calls the one the lookup
+        // found — and each arm evaluates the argument list itself.
+        let expr = if own_method_guard {
+            LashExpr::Block(vec![
+                assign(&receiver, receiver_value),
+                LashExpr::If {
+                    condition: Box::new(stdlib(
+                        "Lash.OwnMethod",
+                        vec![variable(&receiver), LashExpr::String(method.into())],
+                    )),
+                    then_block: Box::new(LashExpr::MethodCall {
+                        receiver: Box::new(variable(&receiver)),
+                        method: MethodKey::Field(method.into()),
+                        args: args
+                            .iter()
+                            .map(|argument| self.lower_expr(argument))
+                            .collect::<Result<_, Diagnostic>>()?,
+                    }),
+                    else_block: Box::new(LashExpr::Block(setup)),
+                },
+            ])
+        } else {
+            let mut items = Vec::with_capacity(setup.len() + 1);
+            items.push(assign(&receiver, receiver_value));
+            items.append(&mut setup);
+            LashExpr::Block(items)
+        };
         Ok(LashExpr::Role {
             role: StructuralRole::CollectionTransform {
                 operation: method.into(),
             },
-            expr: Box::new(LashExpr::Block(setup)),
+            expr: Box::new(expr),
         })
     }
 }

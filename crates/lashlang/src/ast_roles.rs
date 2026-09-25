@@ -94,9 +94,13 @@ pub enum StructuralRole {
     /// any further operands (an initial value, evaluated extra arguments),
     /// then a driver function that captures the receiver and the callback,
     /// and ends with the one or two expressions that run the driver and yield
-    /// the transform's result. `operation` is the front end's name for the
-    /// transform; structure never depends on it. See
-    /// [`CollectionTransformParts`].
+    /// the transform's result. A transform whose call binds its member before
+    /// its arguments evaluate puts everything after the receiver binding in
+    /// the else of an `If` whose then arm is the bound member call:
+    /// `Block([receiver = r, If { condition, then: MethodCall, else:
+    /// Block([callback = f, operand = x*, driver = function, result+]) }])`.
+    /// `operation` is the front end's name for the transform; structure never
+    /// depends on it. See [`CollectionTransformParts`].
     CollectionTransform { operation: AstString },
     /// The process failure wrapper around an authored run body. `expr` is
     /// `Try { body: Finish(Call { function: run, args }), catch e: Fail(e) }`,
@@ -372,19 +376,43 @@ impl<'a> CollectionTransformParts<'a> {
                 target: receiver_slot,
                 expr: receiver,
             },
-            Expr::Assign {
-                target: callback_slot,
-                expr: callback,
-            },
             rest @ ..,
         ] = items.as_slice()
         else {
             return None;
         };
-        if !receiver_slot.is_simple()
-            || !callback_slot.is_simple()
-            || receiver_slot.root == callback_slot.root
-        {
+        if !receiver_slot.is_simple() {
+            return None;
+        }
+        // A guarded transform decides its call's member before it evaluates
+        // the argument list: the callback, operands, driver and result sit in
+        // the else of an `If` whose then arm is the bound member call.
+        let rest = match rest {
+            [
+                Expr::If {
+                    then_block,
+                    else_block,
+                    ..
+                },
+            ] if matches!(then_block.as_ref(), Expr::MethodCall { .. }) => {
+                let Expr::Block(arm) = else_block.as_ref() else {
+                    return None;
+                };
+                arm.as_slice()
+            }
+            _ => rest,
+        };
+        let [
+            Expr::Assign {
+                target: callback_slot,
+                expr: callback,
+            },
+            rest @ ..,
+        ] = rest
+        else {
+            return None;
+        };
+        if !callback_slot.is_simple() || receiver_slot.root == callback_slot.root {
             return None;
         }
         let driver = rest.iter().position(|item| {
