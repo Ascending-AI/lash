@@ -309,32 +309,35 @@ async fn coordinate_nested_tool_batch<'run>(
                             }
                         },
                     };
-                    // A body-driven call is invisible to the turn stream only
-                    // when the child's dispatch lent no activity channel: emit
-                    // the same stream-start and activity pair a turn-dispatched
-                    // call emits, parented to the body that named it.
-                    let _ = dispatch
-                        .event_tx
-                        .send(crate::SessionStreamEvent::ToolCallStart {
-                            call_id: Some(call_id.clone()),
-                            name: tool_name.clone(),
-                            args: call_args.clone(),
-                        })
-                        .await;
-                    if let Some(turn_tx) = &dispatch.turn_activity_tx {
-                        let _ = turn_tx
-                            .send(crate::TurnActivity::new(
-                                activity_id.clone(),
-                                crate::TurnEvent::ToolCallStarted {
-                                    call_id: Some(call_id.clone()),
-                                    name: tool_name.clone(),
-                                    args: call_args.clone(),
-                                    graph_key: None,
-                                    parent_call_id: parent_call_id.clone(),
-                                },
-                            ))
-                            .await;
-                    }
+                    // A body-driven call publishes the same stream-start and
+                    // activity pair a turn-dispatched call emits, parented to
+                    // the body that named it, through the dispatch's lent
+                    // observation sink (ADR 0105 §1).
+                    let mut cursor =
+                        dispatch.observation_cursor(&format!("nested:{call_id}:start"));
+                    cursor.observe(
+                        dispatch.observer.as_ref(),
+                        crate::engine::ObservedEvent::Session(
+                            crate::SessionStreamEvent::ToolCallStart {
+                                call_id: Some(call_id.clone()),
+                                name: tool_name.clone(),
+                                args: call_args.clone(),
+                            },
+                        ),
+                    );
+                    cursor.observe(
+                        dispatch.observer.as_ref(),
+                        crate::engine::ObservedEvent::Activity {
+                            correlation_id: Some(activity_id.clone()),
+                            event: crate::TurnEvent::ToolCallStarted {
+                                call_id: Some(call_id.clone()),
+                                name: tool_name.clone(),
+                                args: call_args.clone(),
+                                graph_key: None,
+                                parent_call_id: parent_call_id.clone(),
+                            },
+                        },
+                    );
                     let pending = crate::sansio::PendingToolCall {
                         call_id: call_id.clone(),
                         tool_name: tool_name.clone(),
@@ -470,7 +473,7 @@ async fn coordinate_nested_tool_batch<'run>(
                 };
                 // The completion pair to the start emitted above: the record
                 // when the call produced one, the reply's output otherwise.
-                if let Some(turn_tx) = &dispatch.turn_activity_tx {
+                {
                     let completed = match reply.record.as_ref() {
                         Some(record) => crate::TurnEvent::ToolCallCompleted {
                             call_id: record.call_id.clone().or_else(|| Some(call_id.clone())),
@@ -482,7 +485,7 @@ async fn coordinate_nested_tool_batch<'run>(
                             parent_call_id: parent_call_id.clone(),
                         },
                         None => crate::TurnEvent::ToolCallCompleted {
-                            call_id: Some(call_id),
+                            call_id: Some(call_id.clone()),
                             name: tool_name.unwrap_or(call_tool_id),
                             args: call_args,
                             output: reply.output.clone(),
@@ -491,9 +494,15 @@ async fn coordinate_nested_tool_batch<'run>(
                             parent_call_id,
                         },
                     };
-                    let _ = turn_tx
-                        .send(crate::TurnActivity::new(activity_id, completed))
-                        .await;
+                    dispatch
+                        .observation_cursor(&format!("nested:{call_id}:complete"))
+                        .observe(
+                            dispatch.observer.as_ref(),
+                            crate::engine::ObservedEvent::Activity {
+                                correlation_id: Some(activity_id),
+                                event: completed,
+                            },
+                        );
                 }
                 reply
             }

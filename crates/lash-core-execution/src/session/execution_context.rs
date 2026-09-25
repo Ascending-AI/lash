@@ -3,11 +3,9 @@ use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 
-use tokio::sync::mpsc::Sender;
 use tokio_util::sync::CancellationToken;
 
 use crate::tool_dispatch::ToolDispatchContext;
-use crate::{TurnActivity, TurnActivityId, TurnEvent};
 
 /// What an execution knows about its turn's cancellation, from recorded facts
 /// only (FIG-3672 P9).
@@ -66,7 +64,6 @@ pub struct RuntimeExecutionContext<'run> {
     process_execution: Option<RuntimeProcessExecution>,
     pub(super) parent_invocation: Option<crate::RuntimeInvocation>,
     turn_phase_probe: Option<Arc<dyn crate::runtime::RuntimeTurnPhaseProbe>>,
-    pub(super) turn_event_tx: Option<Sender<TurnActivity>>,
     pub(super) cancellation_token: Option<CancellationToken>,
     /// Whether `cancellation_token` is only a stop lent to this execution's
     /// step bodies (a process drive's, FIG-3673): then no drive decision reads
@@ -525,7 +522,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             unrecorded_sources: crate::runtime::effect::UnrecordedSessionSources::default(),
             parent_invocation: None,
             turn_phase_probe: None,
-            turn_event_tx: None,
             cancellation_token: None,
             token_is_lent_stop: false,
             turn_cancel: RecordedTurnCancel::default(),
@@ -558,7 +554,6 @@ impl<'run> RuntimeExecutionContext<'run> {
             process_execution: self.process_execution.clone(),
             parent_invocation: self.parent_invocation.clone(),
             turn_phase_probe: self.turn_phase_probe.clone(),
-            turn_event_tx: self.turn_event_tx.clone(),
             cancellation_token: self.cancellation_token.clone(),
             token_is_lent_stop: self.token_is_lent_stop,
             turn_cancel: self.turn_cancel.clone(),
@@ -664,14 +659,20 @@ impl<'run> RuntimeExecutionContext<'run> {
             .map(crate::TriggerRouter::store)
     }
 
-    pub(super) async fn emit_turn_activity(
-        &self,
-        correlation_id: TurnActivityId,
-        event: TurnEvent,
-    ) {
-        if let Some(tx) = &self.turn_event_tx {
-            let _ = tx.send(TurnActivity::new(correlation_id, event)).await;
+    /// A fresh observation cursor for one emission lane of this execution —
+    /// keyed under the enclosing cell's invocation when the context carries
+    /// one, else the dispatch's own base (ADR 0105 §1).
+    pub(crate) fn observation_cursor(&self, lane: &str) -> crate::engine::ObservationCursor {
+        if let Some(key) = self
+            .parent_invocation
+            .as_ref()
+            .and_then(crate::RuntimeInvocation::replay_key)
+        {
+            return crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new(format!(
+                "{key}:{lane}"
+            )));
         }
+        self.dispatch.observation_cursor(lane)
     }
 
     /// Adds sources this context was built from that have no recorded form:
@@ -686,8 +687,12 @@ impl<'run> RuntimeExecutionContext<'run> {
         self
     }
 
-    pub fn with_turn_event_sender(mut self, turn_event_tx: Sender<TurnActivity>) -> Self {
-        self.turn_event_tx = Some(turn_event_tx);
+    /// Overrides the dispatch's observation sink, for tests and hosts that
+    /// probe the emitted stream directly.
+    pub fn with_observer(mut self, observer: Arc<dyn crate::engine::ObservationSink>) -> Self {
+        let mut dispatch = (*self.dispatch).clone();
+        dispatch.observer = observer;
+        self.dispatch = Arc::new(dispatch);
         self
     }
 

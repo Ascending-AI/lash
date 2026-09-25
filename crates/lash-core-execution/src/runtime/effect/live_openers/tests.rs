@@ -22,10 +22,6 @@ fn live_context() -> LiveOpenerContext {
         }
     }
 
-    let (event_tx, event_rx) = tokio::sync::mpsc::channel(1);
-    // Held for the registry's lifetime in each test, so the sender never
-    // reports a closed channel for a reason unrelated to what is asserted.
-    std::mem::forget(event_rx);
     let dispatch = crate::tool_dispatch::ToolDispatchContext {
         plugins: crate::plugin::PluginHost::empty()
             .build_session("session")
@@ -53,8 +49,7 @@ fn live_context() -> LiveOpenerContext {
         ),
         session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::new("test-frame").expect("frame id"),
-        event_tx,
-        turn_activity_tx: None,
+        observer: Arc::new(crate::engine::NullObservationSink),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),

@@ -562,34 +562,36 @@ mod turn_cancel_gate_tests;
 mod scalar_presentation_tests;
 
 impl RuntimeExecutionContext<'_> {
-    pub(crate) async fn emit_tool_call_started(
+    pub(crate) fn emit_tool_call_started(
         &self,
         call_id: &str,
         name: &str,
         args: serde_json::Value,
         activity_id: TurnActivityId,
     ) {
-        let _ = self
-            .dispatch
-            .event_tx
-            .send(SessionStreamEvent::ToolCallStart {
+        let mut cursor = self.observation_cursor(&format!("tool:{call_id}:start"));
+        cursor.observe(
+            self.dispatch.observer.as_ref(),
+            crate::engine::ObservedEvent::Session(SessionStreamEvent::ToolCallStart {
                 call_id: Some(call_id.to_string()),
                 name: name.to_string(),
                 args: args.clone(),
-            })
-            .await;
+            }),
+        );
         self.emit_tool_call_started_trace(call_id, name, &args);
-        self.emit_turn_activity(
-            activity_id,
-            TurnEvent::ToolCallStarted {
-                call_id: Some(call_id.to_string()),
-                name: name.to_string(),
-                args,
-                graph_key: self.code_block_graph_key(),
-                parent_call_id: self.batch_parent_call_id(),
+        cursor.observe(
+            self.dispatch.observer.as_ref(),
+            crate::engine::ObservedEvent::Activity {
+                correlation_id: Some(activity_id),
+                event: TurnEvent::ToolCallStarted {
+                    call_id: Some(call_id.to_string()),
+                    name: name.to_string(),
+                    args,
+                    graph_key: self.code_block_graph_key(),
+                    parent_call_id: self.batch_parent_call_id(),
+                },
             },
-        )
-        .await;
+        );
     }
 
     pub async fn prepare_tool_call(
@@ -814,18 +816,23 @@ impl RuntimeExecutionContext<'_> {
                     "settlement incorporation refused: {message}"
                 )));
         }
-        for intent_outcome in &outcome.intent_outcomes {
-            model_return.parts.push(crate::ModelToolReturnPart::text(
-                intent_outcome.model_addendum(),
-            ));
-            self.emit_turn_activity(
-                tool_correlation_id.clone(),
-                TurnEvent::ToolIntentOutcome {
-                    call_id: call_id.clone(),
-                    outcome: intent_outcome.clone(),
-                },
-            )
-            .await;
+        {
+            let mut cursor = self.observation_cursor(&format!("tool:{call_id}:intents"));
+            for intent_outcome in &outcome.intent_outcomes {
+                model_return.parts.push(crate::ModelToolReturnPart::text(
+                    intent_outcome.model_addendum(),
+                ));
+                cursor.observe(
+                    self.dispatch.observer.as_ref(),
+                    crate::engine::ObservedEvent::Activity {
+                        correlation_id: Some(tool_correlation_id.clone()),
+                        event: TurnEvent::ToolIntentOutcome {
+                            call_id: call_id.clone(),
+                            outcome: intent_outcome.clone(),
+                        },
+                    },
+                );
+            }
         }
 
         let record = ToolCallRecord {
@@ -835,7 +842,7 @@ impl RuntimeExecutionContext<'_> {
             output: output.clone(),
             duration_ms: outcome.record.duration_ms,
         };
-        self.emit_tool_call_completed(&record, &attempts).await;
+        self.emit_tool_call_completed(&record, &attempts);
         Ok(CompletedProtocolToolCall {
             completed: crate::sansio::CompletedToolCall {
                 call_id,
@@ -851,25 +858,33 @@ impl RuntimeExecutionContext<'_> {
         })
     }
 
-    async fn emit_tool_call_completed(
+    fn emit_tool_call_completed(
         &self,
         record: &ToolCallRecord,
         attempts: &[lash_trace::TraceRetryAttempt],
     ) {
         self.emit_tool_call_completed_trace(record, attempts);
-        self.emit_turn_activity(
-            tool_activity_id(record.call_id.as_deref().unwrap_or_default()),
-            TurnEvent::ToolCallCompleted {
-                call_id: record.call_id.clone(),
-                name: record.tool.clone(),
-                args: record.args.clone(),
-                output: record.output.clone(),
-                duration_ms: record.duration_ms,
-                graph_key: self.code_block_graph_key(),
-                parent_call_id: self.batch_parent_call_id(),
+        let mut cursor = self.observation_cursor(&format!(
+            "tool:{}:complete",
+            record.call_id.as_deref().unwrap_or_default()
+        ));
+        cursor.observe(
+            self.dispatch.observer.as_ref(),
+            crate::engine::ObservedEvent::Activity {
+                correlation_id: Some(tool_activity_id(
+                    record.call_id.as_deref().unwrap_or_default(),
+                )),
+                event: TurnEvent::ToolCallCompleted {
+                    call_id: record.call_id.clone(),
+                    name: record.tool.clone(),
+                    args: record.args.clone(),
+                    output: record.output.clone(),
+                    duration_ms: record.duration_ms,
+                    graph_key: self.code_block_graph_key(),
+                    parent_call_id: self.batch_parent_call_id(),
+                },
             },
-        )
-        .await;
+        );
     }
 
     pub async fn complete_undispatched_tool_call(
@@ -883,8 +898,7 @@ impl RuntimeExecutionContext<'_> {
             &outcome.record.tool,
             outcome.record.args.clone(),
             tool_activity_id(&call_id),
-        )
-        .await;
+        );
         self.complete_tool_call(call_id, replay, outcome).await
     }
 
@@ -913,7 +927,7 @@ impl RuntimeExecutionContext<'_> {
             output: output.clone(),
             duration_ms: 0,
         };
-        self.emit_tool_call_completed(&record, &[]).await;
+        self.emit_tool_call_completed(&record, &[]);
         CompletedProtocolToolCall {
             completed: crate::sansio::CompletedToolCall {
                 model_return: ModelToolReturn::from_output(call_id.clone(), tool.clone(), &output),
@@ -968,8 +982,7 @@ impl RuntimeExecutionContext<'_> {
             &completed.tool_name,
             completed.args.clone(),
             tool_activity_id(&completed.call_id),
-        )
-        .await;
+        );
         self.emit_tool_call_completed(
             &ToolCallRecord {
                 call_id: Some(completed.call_id.clone()),
@@ -979,8 +992,7 @@ impl RuntimeExecutionContext<'_> {
                 duration_ms: completed.duration_ms,
             },
             &[],
-        )
-        .await;
+        );
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1338,8 +1350,7 @@ impl RuntimeExecutionContext<'_> {
             &manifest.name,
             args.clone(),
             tool_correlation_id.clone(),
-        )
-        .await;
+        );
 
         let parent_invocation = Some(command.clone());
         let mut dispatch = (*self.dispatch).clone();

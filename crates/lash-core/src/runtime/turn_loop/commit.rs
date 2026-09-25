@@ -948,12 +948,16 @@ impl LashRuntime {
         emit_terminal_sequence(
             &mut recorded_assembly,
             observer,
+            &mut turn_observation_cursor(
+                finish_scoped_effect_controller,
+                &trace_turn_id,
+                "terminal",
+            ),
             None,
             TurnStop::Cancelled {
                 evidence: evidence.clone(),
             },
-        )
-        .await;
+        );
         // A cancelled turn starts no follow-on (FIG-3157). Its final commit
         // settles withheld turn input through the cancellation's undelivered
         // disposition (FIG-3531), handed over directly rather than inferred
@@ -1070,19 +1074,19 @@ impl LashRuntime {
         emit_terminal_sequence(
             &mut recorded_assembly,
             observer,
+            &mut turn_observation_cursor(&scoped_effect_controller, &trace_turn_id, "terminal"),
             Some(TerminalDiagnostic {
                 kind: TerminalDiagnosticKind::Runtime,
                 code: Some(crate::TurnFailureCode::AgentFrameSwitchLimit.into()),
                 message,
                 retryable: Some(false),
-                activity: TerminalActivityTarget::UnscopedSink {
-                    sink: observer,
+                activity: TerminalActivityTarget::ForTurn {
+                    observer,
                     turn_id: &trace_turn_id,
                 },
             }),
             TurnStop::RuntimeError,
-        )
-        .await;
+        );
 
         let messages = crate::MessageSequence::from_base(
             self.state

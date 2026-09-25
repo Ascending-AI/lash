@@ -279,16 +279,16 @@ impl LashRuntime {
         emit_terminal_sequence(
             &mut recorded_assembly,
             observer,
+            &mut turn_observation_cursor(scoped_effect_controller, &trace_turn_id, "terminal"),
             Some(TerminalDiagnostic {
                 kind: TerminalDiagnosticKind::Plugin,
                 code: Some(abort.code),
                 message: abort.message,
                 retryable: None,
-                activity: TerminalActivityTarget::TurnScopedSink(observer),
+                activity: TerminalActivityTarget::TurnScoped(observer),
             }),
             TurnStop::PluginAbort,
-        )
-        .await;
+        );
         Box::pin(self.finish_turn(TurnCommitContext {
             finish: TurnFinishInput {
                 turn_pipeline,
@@ -533,6 +533,11 @@ impl LashRuntime {
             ),
             turn_cancel: None,
             children_stop: CancellationToken::new(),
+            turn_observations: super::turn_observation_cursor(
+                &scoped_effect_controller,
+                &trace_turn_id,
+                "drive",
+            ),
         });
         let protocol_run_offset = 0;
         self.mark_phase_begin(RuntimeTurnPhase::EffectLoop);

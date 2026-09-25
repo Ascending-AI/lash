@@ -3,8 +3,6 @@ pub mod context;
 pub use lash_sansio::session_model::message;
 pub use lash_sansio::session_model::prompt;
 
-use tokio::sync::mpsc;
-
 use crate::ModelSpec;
 use crate::llm::types::{LlmEventSender, LlmStreamEvent};
 use crate::provider::{ProviderBinding, ProviderHandle, ProviderResolutionError};
@@ -48,13 +46,6 @@ pub fn plugin_runtime_event_from_protocol(
     event: &ProtocolEvent,
 ) -> Result<Option<PersistedPluginRuntimeEvent>, serde_json::Error> {
     event.decode(PLUGIN_RUNTIME_PROTOCOL_PLUGIN_ID)
-}
-
-/// Send an event to the channel if it's still open.
-pub(crate) async fn send_event(tx: &mpsc::Sender<SessionStreamEvent>, event: SessionStreamEvent) {
-    if !tx.is_closed() {
-        let _ = tx.send(event).await;
-    }
 }
 
 pub(crate) use lash_core_store::message_projection::plugin_message_to_message;

@@ -15,27 +15,21 @@
 crates/lash-core-execution/src/runtime/effect/group.rs  |  let mut first_seen_at: HashMap<&str, usize> = HashMap::with_capacity(children.len());  |  1  # UNMAPPED
 crates/lash-core-execution/src/runtime/effect/group.rs  |  use std::collections::HashMap;  |  1  # UNMAPPED
 crates/lash-core-execution/src/runtime/effect/tool_child_driver.rs  |  clock: Arc::new(std::sync::Mutex::new(Arc::new(crate::SystemClock))),  |  1  # CR11
-crates/lash-core-execution/src/session.rs  |  event_tx: tokio::sync::mpsc::Sender<SessionStreamEvent>,  |  1  # UNMAPPED
 crates/lash-core-execution/src/session/execution_context.rs  |  started_process_ids: Arc<std::sync::Mutex<std::collections::HashSet<ProcessId>>>,  |  1  # UNMAPPED
 crates/lash-core-execution/src/session/execution_context.rs  |  tokio::sync::mpsc::UnboundedReceiver<  |  1  # UNMAPPED
-crates/lash-core-execution/src/session/execution_context.rs  |  use tokio::sync::mpsc::Sender;  |  1  # UNMAPPED
 crates/lash-core-execution/src/session/tool_execution.rs  |  let trace_hooks: HashMap<String, crate::ToolChildExecutionTraceHook> =  |  1  # UNMAPPED
 crates/lash-core-execution/src/session/tool_execution.rs  |  use std::collections::HashMap;  |  1  # UNMAPPED
-crates/lash-core-execution/src/tool_dispatch/context.rs  |  use tokio::sync::mpsc;  |  1  # UNMAPPED
 crates/lash-core-execution/src/tool_dispatch/preparation.rs  |  .unwrap_or_else(|| format!("tool:{}", uuid::Uuid::new_v4())),  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_boundary.rs  |  Arc::new(crate::SystemClock),  |  1  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/context.rs  |  tokio::select! {  |  1  # AC33
 crates/lash-core/src/runtime/turn_driver/effects.rs  |  &std::collections::HashSet<String>,  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/effects.rs  |  ) -> Result<std::collections::HashSet<String>, RuntimeError> {  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/effects.rs  |  .collect::<std::collections::HashSet<_>>();  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/effects.rs  |  fn retain_rows(&mut self, overlapping: &std::collections::HashSet<String>) {  |  2  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/effects.rs  |  fn retain_rows(&mut self, overlapping: &std::collections::HashSet<String>);  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/effects.rs  |  let mut already_delivered = std::collections::HashSet::new();  |  1  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/effects.rs  |  tokio::select! {  |  1  # AC34
 crates/lash-core/src/runtime/turn_driver/machine.rs  |  assistant_ids_at_last_model_call: Option<HashSet<String>>,  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/machine.rs  |  fn assistant_ids<'a>(messages: impl Iterator<Item = &'a Message>) -> HashSet<String> {  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/machine.rs  |  use std::collections::HashSet;  |  1  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/streaming.rs  |  TurnActivityId::new(uuid::Uuid::new_v4().to_string()),  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/streaming.rs  |  call_id: crate::LlmCallId(uuid::Uuid::new_v4().to_string()),  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/streaming.rs  |  let mut block_raw_text = std::collections::HashMap::new();  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/streaming.rs  |  llm_stream_rx: &mut tokio::sync::mpsc::UnboundedReceiver<LlmStreamEvent>,  |  2  # UNMAPPED
@@ -45,8 +39,6 @@ crates/lash-core/src/runtime/turn_driver/streaming.rs  |  tokio::sync::mpsc::unb
 crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  handle: tokio::task::AbortHandle,  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/streaming/support.rs  |  pub(super) fn new(handle: tokio::task::AbortHandle) -> Self {  |  1  # UNMAPPED
 crates/lash-core/src/runtime/turn_driver/streaming/terminal.rs  |  call_id: crate::LlmCallId(uuid::Uuid::new_v4().to_string()),  |  1  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/tools.rs  |  let (turn_event_tx, mut turn_event_rx) = tokio::sync::mpsc::channel::<TurnActivity>(64);  |  2  # UNMAPPED
-crates/lash-core/src/runtime/turn_driver/tools.rs  |  tokio::sync::mpsc::channel::<SessionStreamEvent>(64);  |  2  # UNMAPPED
 crates/lash-core/src/runtime/turn_loop/commit.rs  |  let mut seen = std::collections::HashSet::new();  |  1  # LZ29
 crates/lash-core/src/runtime/turn_loop/resident_session.rs  |  uuid::Uuid::new_v4()  |  1  # UNMAPPED
 crates/lash-lashlang-runtime/src/lib.rs  |  ) -> Pin<Box<dyn Future<Output = Result<(), LashlangRuntimeError>> + Send + 'a>> {  |  1  # UNMAPPED

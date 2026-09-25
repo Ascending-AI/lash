@@ -4,7 +4,7 @@ use std::sync::{Arc, OnceLock};
 
 use crate::PluginMessage;
 use crate::tool_dispatch::ToolDispatchContext;
-use crate::{PromptContribution, RuntimeServices, SessionStreamEvent, ToolProvider};
+use crate::{PromptContribution, RuntimeServices, ToolProvider};
 
 mod execution_context;
 mod opener_groups;
@@ -764,7 +764,7 @@ impl Session {
         trigger_router: Option<crate::TriggerRouter>,
         process_definitions: Option<std::sync::Arc<dyn crate::ProcessDefinitionRegistry>>,
         process_engines: crate::ProcessEngineRegistry,
-        event_tx: tokio::sync::mpsc::Sender<SessionStreamEvent>,
+        observer: Arc<dyn crate::engine::ObservationSink>,
         chronological_projection: Arc<crate::ChronologicalProjection>,
         protocol_extension: Option<crate::ProtocolTurnExtensionHandle>,
         turn_context: crate::TurnContext,
@@ -791,8 +791,7 @@ impl Session {
             execution_env_spec: execution_env_spec.clone(),
             session_id: SessionId::from(session_id.to_string()),
             agent_frame_id,
-            event_tx,
-            turn_activity_tx: None,
+            observer,
             checkpoint_messages,
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&self.services.attachment_store),

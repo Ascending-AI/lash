@@ -132,7 +132,6 @@ mod tests {
             request.session_id.clone(),
         ));
         let policy = Arc::new(DenyProcessAwaitAttachments::default());
-        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
         let dispatch = Arc::new(ToolDispatchContext {
             plugins,
             tools: provider,
@@ -158,8 +157,7 @@ mod tests {
             ),
             session_id: request.session_id.clone(),
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-            event_tx,
-            turn_activity_tx: None,
+            observer: crate::engine::NullObservationSink::arc(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&attachment_store),
@@ -306,7 +304,6 @@ mod tests {
             crate::testing::MockSessionManager::default()
                 .with_process_registry(Arc::clone(&registry)),
         );
-        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
         let dispatch = Arc::new(ToolDispatchContext {
             plugins,
             tools,
@@ -332,8 +329,7 @@ mod tests {
             ),
             session_id: SessionId::from("session"),
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-            event_tx,
-            turn_activity_tx: None,
+            observer: crate::engine::NullObservationSink::arc(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),
@@ -499,7 +495,6 @@ mod tests {
             )
             .await
             .expect("observe target process");
-        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
         let dispatch = Arc::new(ToolDispatchContext {
             plugins,
             tools: provider,
@@ -525,8 +520,7 @@ mod tests {
             ),
             session_id: SessionId::from("session"),
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-            event_tx,
-            turn_activity_tx: None,
+            observer: crate::engine::NullObservationSink::arc(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),
@@ -608,7 +602,6 @@ mod tests {
             crate::testing::MockSessionManager::default()
                 .with_process_registry(Arc::clone(&registry)),
         );
-        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
         let dispatch = Arc::new(ToolDispatchContext {
             plugins,
             tools: provider,
@@ -634,8 +627,7 @@ mod tests {
             ),
             session_id: SessionId::from("session"),
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-            event_tx,
-            turn_activity_tx: None,
+            observer: crate::engine::NullObservationSink::arc(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),
@@ -771,7 +763,6 @@ mod tests {
             )
             .await
             .expect("register hidden process");
-        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(8);
         let dispatch = Arc::new(ToolDispatchContext {
             plugins,
             tools: provider,
@@ -797,8 +788,7 @@ mod tests {
             ),
             session_id: SessionId::from("session"),
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-            event_tx,
-            turn_activity_tx: None,
+            observer: crate::engine::NullObservationSink::arc(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),
@@ -1144,7 +1134,6 @@ mod tests {
             )
             .await
             .expect("complete the started child");
-        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(64);
         let dispatch = Arc::new(ToolDispatchContext {
             plugins,
             tools: provider,
@@ -1175,8 +1164,7 @@ mod tests {
             ),
             session_id: SessionId::from("session"),
             agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-            event_tx,
-            turn_activity_tx: None,
+            observer: crate::engine::NullObservationSink::arc(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),

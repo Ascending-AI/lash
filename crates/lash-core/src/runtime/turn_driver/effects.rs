@@ -436,7 +436,8 @@ impl RuntimeTurnDriver<'_> {
             for event in
                 crate::plugin::plugin_runtime_session_events(&emitted.plugin_id, emitted.events)
             {
-                event_tx.session(event);
+                self.turn_observations
+                    .observe(event_tx, crate::engine::ObservedEvent::Session(event));
             }
         }
         Ok(response)
@@ -562,10 +563,15 @@ impl RuntimeTurnDriver<'_> {
                 let accepted_turn_inputs = claim.accepted_turn_inputs();
                 self.withheld_terminal_work.turn_inputs.push(claim);
                 if !accepted_turn_inputs.is_empty() {
-                    event_tx.session(SessionStreamEvent::InjectedTurnInputAccepted {
-                        inputs: accepted_turn_inputs,
-                        checkpoint,
-                    });
+                    self.turn_observations.observe(
+                        event_tx,
+                        crate::engine::ObservedEvent::Session(
+                            SessionStreamEvent::InjectedTurnInputAccepted {
+                                inputs: accepted_turn_inputs,
+                                checkpoint,
+                            },
+                        ),
+                    );
                 }
             } else {
                 let mut delivery_claim = claim.clone();
@@ -589,6 +595,7 @@ impl RuntimeTurnDriver<'_> {
             let materialized = claim.materialize_queued_checkpoint_work();
             send_queued_work_started_event(
                 event_tx,
+                &mut self.turn_observations,
                 crate::QueuedWorkClaimBoundary::ActiveTurnCheckpoint,
                 &claim,
                 materialized.turn_causes.clone(),
@@ -659,10 +666,15 @@ impl RuntimeTurnDriver<'_> {
         .await?;
 
         if !committed.is_empty() {
-            event_tx.session(SessionStreamEvent::InjectedMessagesCommitted {
-                messages: committed.clone(),
-                checkpoint,
-            });
+            self.turn_observations.observe(
+                event_tx,
+                crate::engine::ObservedEvent::Session(
+                    SessionStreamEvent::InjectedMessagesCommitted {
+                        messages: committed.clone(),
+                        checkpoint,
+                    },
+                ),
+            );
         }
 
         Ok(crate::CheckpointDelivery {
@@ -686,32 +698,6 @@ impl RuntimeTurnDriver<'_> {
         crate::RuntimeEffectControllerError,
     > {
         let code_executor = self.session.plugins().code_executor();
-        let (session_event_tx, mut session_event_rx) = mpsc::channel::<SessionStreamEvent>(100);
-        let (turn_event_tx, mut turn_event_rx) = mpsc::channel::<TurnActivity>(100);
-        let relay_tx = event_tx.clone();
-        let relay_handle = crate::task::spawn(async move {
-            let mut session_closed = false;
-            let mut turn_closed = false;
-            while !(session_closed && turn_closed) {
-                tokio::select! {
-                    biased;
-                    maybe_event = session_event_rx.recv(), if !session_closed => {
-                        let Some(event) = maybe_event else {
-                            session_closed = true;
-                            continue;
-                        };
-                        relay_tx.session(event);
-                    }
-                    maybe_turn_event = turn_event_rx.recv(), if !turn_closed => {
-                        let Some(event) = maybe_turn_event else {
-                            turn_closed = true;
-                            continue;
-                        };
-                        relay_tx.publish(RuntimeStreamEvent::Turn(event));
-                    }
-                }
-            }
-        });
         let read_view = self
             .checkpoint_state_view(messages, protocol_iteration)
             .map_err(|error| {
@@ -722,9 +708,8 @@ impl RuntimeTurnDriver<'_> {
         let chronological_projection = read_view.shared_chronological_projection();
         let code_block_graph_key = foreground_exec_graph_key(&invocation);
         let context = self
-            .execution_context(session_event_tx.clone(), event_tx, chronological_projection)
+            .execution_context(event_tx, chronological_projection)
             .map_err(crate::RuntimeEffectControllerError::from)?
-            .with_turn_event_sender(turn_event_tx.clone())
             .with_tracing(self.execution_tracing(protocol_iteration))
             .with_code_block_graph_key(code_block_graph_key);
         let context = context.with_parent_invocation(invocation);
@@ -743,9 +728,6 @@ impl RuntimeTurnDriver<'_> {
         };
         let nested_effect_error = context.take_nested_effect_error();
         drop(context);
-        drop(session_event_tx);
-        drop(turn_event_tx);
-        let _ = relay_handle.await;
         match nested_effect_error {
             Some(error) => Err(error),
             None => Ok(result),

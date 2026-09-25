@@ -200,16 +200,14 @@ pub async fn await_process_with_cancellation(
         .await
 }
 
-pub async fn emit_tool_call_started(
+pub fn emit_tool_call_started(
     context: &crate::RuntimeExecutionContext<'_>,
     call_id: &str,
     name: &str,
     args: serde_json::Value,
     activity_id: crate::TurnActivityId,
 ) {
-    context
-        .emit_tool_call_started(call_id, name, args, activity_id)
-        .await;
+    context.emit_tool_call_started(call_id, name, args, activity_id);
 }
 
 /// `ToolRegistry::from_tool_registrations`: a registry over explicit source,

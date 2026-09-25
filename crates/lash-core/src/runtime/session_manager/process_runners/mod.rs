@@ -10,11 +10,10 @@ pub(in crate::runtime::session_manager::process_runners) struct ProcessRunContex
     dispatch: Arc<crate::tool_dispatch::ToolDispatchContext<'run>>,
     /// The process incarnation's live-opener registration (ADR 0099 §3), when
     /// this host routes tool children and the scope names an opener. Held here
-    /// so `shutdown` releases it *before* awaiting `event_drain`: the
-    /// registration's forwarder holds a clone of the context's `event_tx`, and
-    /// the drain ends only once every sender — including that clone — is gone.
+    /// so `shutdown` releases it with the dispatch: the lent context's
+    /// observation sink is the process's own, so nothing the registration
+    /// held could outlive them.
     live_opener: Option<crate::LiveOpenerGuard>,
-    event_drain: tokio::task::JoinHandle<()>,
 }
 
 impl<'run> ProcessRunContext<'run> {
@@ -41,15 +40,9 @@ impl<'run> ProcessRunContext<'run> {
         let Self {
             dispatch,
             live_opener,
-            event_drain,
         } = self;
-        // Release the registration first: its `ended` token stops the
-        // child-event forwarder, dropping the last `event_tx` clone, so the
-        // drain below observes the channel closing rather than waiting on a
-        // sender the registration would have held open.
         drop(live_opener);
         drop(dispatch);
-        let _ = event_drain.await;
     }
 }
 
@@ -120,9 +113,6 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
         let tool_surface = self.tool_surface.ok_or_else(|| {
             crate::PluginError::Session("process run context requires a tool surface".to_string())
         })?;
-        let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<crate::SessionStreamEvent>(64);
-        let event_drain =
-            crate::task::spawn(async move { while event_rx.recv().await.is_some() {} });
         let services = Arc::new(self.services.clone());
         let scoped_effect_controller = self.scoped_effect_controller.ok_or_else(|| {
             crate::PluginError::Session(
@@ -170,8 +160,9 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
                     "process execution requires an initialized agent frame".to_string(),
                 )
             })?,
-            event_tx,
-            turn_activity_tx: None,
+            // A process run has no host lane: its emissions went to a
+            // drained channel before, so the dispatch observes nowhere.
+            observer: crate::engine::NullObservationSink::arc(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(
@@ -185,12 +176,11 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
         });
         // Publish the process incarnation as a live opener, lending this
         // dispatch context to the group children it opens (ADR 0099 §3). The
-        // lent `event_tx` is a channel the registration owns — never the
-        // context's own sender — forwarded into that channel so a child that
-        // outlives the registration cannot pin it past `shutdown`'s drain.
-        // Nothing registers when the deployment routes no tool children, the
-        // scope names no opener, or the host hands out no owned controller to
-        // lend the captured context's controller slots — the lend a `'static`
+        // lent context keeps the dispatch's own observation sink — nowhere —
+        // so nothing a child emits outlives the registration. Nothing
+        // registers when the deployment routes no tool children, the scope
+        // names no opener, or the host hands out no owned controller to lend
+        // the captured context's controller slots — the lend a `'static`
         // capture needs, since the runner's own live controller cannot
         // outlive its frame.
         let live_opener = opener
@@ -213,35 +203,17 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
                     .effect_host
                     .scoped_static(dispatch.effect_controller.scoped().admitted_scope().clone())
                     .ok()??;
-                let (child_event_tx, mut child_event_rx) =
-                    tokio::sync::mpsc::channel::<crate::SessionStreamEvent>(64);
-                let context = crate::facade_support::LiveOpenerContext::capture_with_event_sender(
+                let context = crate::facade_support::LiveOpenerContext::capture(
                     dispatch.as_ref(),
                     lent_controller,
-                    child_event_tx,
                     self.cancellation.clone(),
                 );
-                let (guard, ended) = tool_children.openers().register(opener, context);
-                let event_tx = dispatch.event_tx.clone();
-                crate::task::spawn(async move {
-                    loop {
-                        tokio::select! {
-                            () = ended.cancelled() => break,
-                            event = child_event_rx.recv() => {
-                                let Some(event) = event else { break };
-                                if event_tx.send(event).await.is_err() {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                });
+                let (guard, _ended) = tool_children.openers().register(opener, context);
                 Some(guard)
             });
         Ok(ProcessRunContext {
             dispatch,
             live_opener,
-            event_drain,
         })
     }
 }

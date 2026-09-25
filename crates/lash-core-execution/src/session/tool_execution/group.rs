@@ -280,8 +280,7 @@ impl RuntimeExecutionContext<'_> {
                 &leaf.call.call.tool_name,
                 leaf.call.call.args.clone(),
                 tool_activity_id(&call_id),
-            )
-            .await;
+            );
         }
 
         // The group's unique children are reserved against the opener's bound
@@ -689,21 +688,24 @@ impl RuntimeExecutionContext<'_> {
         // exactly the recorded prefix, never a rank that settled after the
         // record was cut. This seam keeps presentation (the recorded
         // `settlement.model_return`) and the activity events.
-        //
         // A child that ran with no live opener recorded its stream instead of
         // sending it (FIG-3712); it reaches the stream here, before the
         // child's own completion.
-        self.emit_recorded_child_stream(&call_id, &outcome.record, &settlement.stream)
-            .await;
-        for intent_outcome in &outcome.intent_outcomes {
-            self.emit_turn_activity(
-                correlation_id.clone(),
-                TurnEvent::ToolIntentOutcome {
-                    call_id: call_id.clone(),
-                    outcome: intent_outcome.clone(),
-                },
-            )
-            .await;
+        self.emit_recorded_child_stream(&call_id, &outcome.record, &settlement.stream);
+        {
+            let mut cursor = self.observation_cursor(&format!("tool:{call_id}:intents"));
+            for intent_outcome in &outcome.intent_outcomes {
+                cursor.observe(
+                    self.dispatch.observer.as_ref(),
+                    crate::engine::ObservedEvent::Activity {
+                        correlation_id: Some(correlation_id.clone()),
+                        event: TurnEvent::ToolIntentOutcome {
+                            call_id: call_id.clone(),
+                            outcome: intent_outcome.clone(),
+                        },
+                    },
+                );
+            }
         }
         let record = ToolCallRecord {
             call_id: Some(call_id.clone()),
@@ -712,8 +714,7 @@ impl RuntimeExecutionContext<'_> {
             output: outcome.record.output.clone(),
             duration_ms: outcome.record.duration_ms,
         };
-        self.emit_tool_call_completed(&record, &outcome.attempts)
-            .await;
+        self.emit_tool_call_completed(&record, &outcome.attempts);
         Ok(CompletedProtocolToolCall {
             completed: crate::sansio::CompletedToolCall {
                 call_id,
@@ -836,9 +837,12 @@ impl RuntimeExecutionContext<'_> {
     /// Emits the stream events a group child recorded because no opener was
     /// live where it ran (FIG-3712): its session events on the session
     /// stream, its turn activities on the activity stream, each in recorded
-    /// order. A stream the recording budget cut says so on the session
-    /// stream, as a `child_stream_truncated` message.
-    async fn emit_recorded_child_stream(
+    /// order and each verbatim — the events carry the identities the child's
+    /// recorder minted, so they publish through `Recorded*` variants rather
+    /// than being re-projected or re-keyed. A stream the recording budget
+    /// cut says so on the session stream, as a `child_stream_truncated`
+    /// message.
+    fn emit_recorded_child_stream(
         &self,
         call_id: &str,
         record: &crate::ToolCallRecord,
@@ -854,31 +858,36 @@ impl RuntimeExecutionContext<'_> {
                  they are skipped"
             );
         }
+        let mut cursor = self.observation_cursor(&format!("tool:{call_id}:stream"));
+        let observer = self.dispatch.observer.as_ref();
         for event in events {
             match event {
                 crate::runtime::effect::DecodedChildEvent::Session(event) => {
-                    crate::session_model::send_event(&self.dispatch.event_tx, event).await;
+                    cursor.observe(
+                        observer,
+                        crate::engine::ObservedEvent::RecordedSession(event),
+                    );
                 }
                 crate::runtime::effect::DecodedChildEvent::Activity(activity) => {
-                    if let Some(tx) = &self.turn_event_tx {
-                        let _ = tx.send(activity).await;
-                    }
+                    cursor.observe(
+                        observer,
+                        crate::engine::ObservedEvent::RecordedActivity(activity),
+                    );
                 }
             }
         }
         if let Some(truncated) = stream.truncated {
-            crate::session_model::send_event(
-                &self.dispatch.event_tx,
-                crate::SessionStreamEvent::Message {
+            cursor.observe(
+                observer,
+                crate::engine::ObservedEvent::RecordedSession(crate::SessionStreamEvent::Message {
                     text: format!(
                         "tool child `{call_id}` recorded more stream than its budget holds; \
-                         {} later events ({} bytes) were dropped",
+                             {} later events ({} bytes) were dropped",
                         truncated.dropped_events, truncated.dropped_bytes
                     ),
                     kind: "child_stream_truncated".to_string(),
-                },
-            )
-            .await;
+                }),
+            );
         }
     }
 

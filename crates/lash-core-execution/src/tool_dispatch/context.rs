@@ -2,14 +2,13 @@ use crate::SessionId;
 use std::sync::{Arc, Mutex};
 
 use lash_sansio::sync::MutexExt;
-use tokio::sync::mpsc;
 
 use crate::plugin::{
     PluginSession, SessionGraphService, SessionLifecycleService, SessionStateService,
 };
 use crate::{
-    PreparedToolCall, SessionStreamEvent, ToolCallRecord, ToolCatalog, ToolFailure,
-    ToolFailureClass, ToolOutcome, ToolProvider,
+    PreparedToolCall, ToolCallRecord, ToolCatalog, ToolFailure, ToolFailureClass, ToolOutcome,
+    ToolProvider,
 };
 
 #[derive(Clone, Default)]
@@ -127,12 +126,14 @@ pub struct ToolDispatchContext<'run> {
     pub execution_env_spec: crate::ProcessExecutionEnvSpec,
     pub session_id: SessionId,
     pub agent_frame_id: crate::FrameNodeId,
-    pub event_tx: mpsc::Sender<SessionStreamEvent>,
-    /// The turn's `TurnActivity` channel, lent to a group child so its nested
-    /// calls surface the same `ToolCallStarted`/`ToolCallCompleted` activities
-    /// a turn-dispatched call emits (ADR 0099 §3's live-channel side of the
-    /// split). `None` where the dispatch serves no turn stream.
-    pub turn_activity_tx: Option<mpsc::Sender<crate::TurnActivity>>,
+    /// The turn's observation sink (ADR 0105 §1): every host-facing event a
+    /// dispatch emits is a synchronous [`ObservationSink::observe`] call,
+    /// keyed by replay key and ordinal, and never awaited. A group child
+    /// borrows the opener's so its nested calls surface the same
+    /// `ToolCallStarted`/`ToolCallCompleted` activities a turn-dispatched call
+    /// emits (ADR 0099 §3's live half of the split); a dispatch that serves no
+    /// turn stream carries [`NullObservationSink`](crate::engine::NullObservationSink).
+    pub observer: Arc<dyn crate::engine::ObservationSink>,
     pub checkpoint_messages: CheckpointMessageBuffer,
     pub trigger_outcomes: ToolTriggerOutcomeBuffer,
     pub attachment_store: Arc<crate::SessionAttachmentStore>,
@@ -165,6 +166,35 @@ impl ToolDispatchContext<'_> {
         self.tools.attempt_may_defer(tool_id)
     }
 
+    /// The replay-key base this dispatch's observation lanes key under: the
+    /// invocation the dispatch serves when it carries one, else the admitted
+    /// scope's journal identity — deterministic for a given dispatch, so a
+    /// replay keys the same observations identically (ADR 0105 §1).
+    pub fn observation_base_key(&self) -> String {
+        if let Some(key) = self
+            .parent_invocation
+            .as_ref()
+            .and_then(crate::RuntimeInvocation::replay_key)
+        {
+            return key.to_owned();
+        }
+        self.effect_controller
+            .scoped()
+            .execution_scope()
+            .journal_identity()
+            .map(|identity| identity.key().to_owned())
+            .unwrap_or_else(|_| format!("dispatch:{}", self.session_id))
+    }
+
+    /// A fresh observation cursor for one emission lane of this dispatch —
+    /// `lane` keeps sibling lanes distinct under one base key.
+    pub fn observation_cursor(&self, lane: &str) -> crate::engine::ObservationCursor {
+        crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new(format!(
+            "{}:{lane}",
+            self.observation_base_key()
+        )))
+    }
+
     /// Attribution available without a causal parent comes only from the
     /// admitted execution scope. `CurrentSession` also hosts process and
     /// runtime-operation work, so its descriptive session id is not provenance
@@ -185,7 +215,7 @@ impl ToolDispatchContext<'_> {
 /// vocabulary changes: the list is the contract every tool-child driver rebinds
 /// a lent opener context against, so an edit that slips by unnoticed is a field
 /// a child can inherit under the wrong opener's authority.
-pub const TOOL_CHILD_REBIND_VERSION: u16 = 2;
+pub const TOOL_CHILD_REBIND_VERSION: u16 = 3;
 
 /// Where a tool child's value for one [`ToolDispatchContext`] field comes from
 /// (ADR 0099 section 3).
@@ -232,8 +262,7 @@ pub enum RebindField {
     ExecutionEnvSpec,
     SessionId,
     AgentFrameId,
-    EventTx,
-    TurnActivityTx,
+    Observer,
     CheckpointMessages,
     TriggerOutcomes,
     AttachmentStore,
@@ -264,8 +293,7 @@ impl RebindField {
             Self::ExecutionEnvSpec => "execution_env_spec",
             Self::SessionId => "session_id",
             Self::AgentFrameId => "agent_frame_id",
-            Self::EventTx => "event_tx",
-            Self::TurnActivityTx => "turn_activity_tx",
+            Self::Observer => "observer",
             Self::CheckpointMessages => "checkpoint_messages",
             Self::TriggerOutcomes => "trigger_outcomes",
             Self::AttachmentStore => "attachment_store",
@@ -308,8 +336,7 @@ impl RebindField {
             | Self::TriggerRouter
             | Self::ProcessDefinitions
             | Self::ProcessEngines
-            | Self::EventTx
-            | Self::TurnActivityTx
+            | Self::Observer
             | Self::AttachmentStore
             | Self::AttachmentSourcePolicy
             | Self::TurnContext
@@ -342,8 +369,7 @@ pub const REBIND_FIELDS: &[RebindField] = &[
     RebindField::ExecutionEnvSpec,
     RebindField::SessionId,
     RebindField::AgentFrameId,
-    RebindField::EventTx,
-    RebindField::TurnActivityTx,
+    RebindField::Observer,
     RebindField::CheckpointMessages,
     RebindField::TriggerOutcomes,
     RebindField::AttachmentStore,
@@ -378,8 +404,7 @@ impl<'run> ToolDispatchContext<'run> {
             execution_env_spec: self.execution_env_spec.clone(),
             session_id: self.session_id.clone(),
             agent_frame_id: self.agent_frame_id.clone(),
-            event_tx: self.event_tx.clone(),
-            turn_activity_tx: self.turn_activity_tx.clone(),
+            observer: Arc::clone(&self.observer),
             checkpoint_messages: self.checkpoint_messages.clone(),
             trigger_outcomes: self.trigger_outcomes.clone(),
             attachment_store: Arc::clone(&self.attachment_store),
@@ -430,8 +455,7 @@ impl<'run> ToolDispatchContext<'run> {
             execution_env_spec: self.execution_env_spec.clone(),
             session_id: self.session_id.clone(),
             agent_frame_id: self.agent_frame_id.clone(),
-            event_tx: self.event_tx.clone(),
-            turn_activity_tx: self.turn_activity_tx.clone(),
+            observer: Arc::clone(&self.observer),
             checkpoint_messages: self.checkpoint_messages.clone(),
             trigger_outcomes: self.trigger_outcomes.clone(),
             attachment_store: Arc::clone(&self.attachment_store),

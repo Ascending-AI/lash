@@ -800,7 +800,6 @@ fn projection_policy_tool_definition() -> crate::ToolDefinition {
 
 async fn strict_mcp_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatchContext<'static> {
     let ports = crate::support::dispatch_ports().await;
-    let (event_tx, _event_rx) = mpsc::channel(8);
     let plugins = test_plugins(Arc::new(StrictMcpTools { executed }));
     let tools = plugins.tools();
     let tool_catalog = plugins
@@ -829,8 +828,7 @@ async fn strict_mcp_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatch
         ),
         session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-        event_tx,
-        turn_activity_tx: None,
+        observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::clone(&ports.attachment_store),
@@ -900,7 +898,6 @@ use crate::testing::MockSessionManager;
 
 async fn dispatch_context() -> ToolDispatchContext<'static> {
     let ports = crate::support::dispatch_ports().await;
-    let (event_tx, _event_rx) = mpsc::channel(8);
     let plugins = test_plugins(Arc::new(MockTools));
     let tools = plugins.tools();
     let tool_catalog = plugins
@@ -929,8 +926,7 @@ async fn dispatch_context() -> ToolDispatchContext<'static> {
         ),
         session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-        event_tx,
-        turn_activity_tx: None,
+        observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::clone(&ports.attachment_store),
@@ -944,7 +940,6 @@ async fn projection_policy_dispatch_context(
     captured: Arc<std::sync::Mutex<Option<crate::ToolArgumentProjectionPolicy>>>,
 ) -> ToolDispatchContext<'static> {
     let ports = crate::support::dispatch_ports().await;
-    let (event_tx, _event_rx) = mpsc::channel(8);
     let provider: Arc<dyn ToolProvider> = Arc::new(ProjectionPolicyTools);
     let hook_captured = Arc::clone(&captured);
     let hook: crate::plugin::BeforeToolCallHook = Arc::new(move |ctx| {
@@ -989,8 +984,7 @@ async fn projection_policy_dispatch_context(
         ),
         session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-        event_tx,
-        turn_activity_tx: None,
+        observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::clone(&ports.attachment_store),
@@ -1130,7 +1124,6 @@ async fn pinned_contract_dispatch_context(
     executed: Arc<AtomicUsize>,
 ) -> ToolDispatchContext<'static> {
     let ports = crate::support::dispatch_ports().await;
-    let (event_tx, _event_rx) = mpsc::channel(8);
     let provider: Arc<dyn ToolProvider> = Arc::new(CountingContractTools {
         contracts_resolved,
         executed,
@@ -1160,8 +1153,7 @@ async fn pinned_contract_dispatch_context(
         ),
         session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-        event_tx,
-        turn_activity_tx: None,
+        observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::clone(&ports.attachment_store),
@@ -1178,7 +1170,6 @@ async fn authority_hidden_dispatch_context(
     provider: Arc<dyn ToolProvider>,
 ) -> ToolDispatchContext<'static> {
     let ports = crate::support::dispatch_ports().await;
-    let (event_tx, _event_rx) = mpsc::channel(8);
     let tool_access = crate::SessionToolAccess::ambient()
         .with_hidden_tools(["hidden"])
         .expect("valid hidden name");
@@ -1234,8 +1225,7 @@ async fn authority_hidden_dispatch_context(
         ),
         session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-        event_tx,
-        turn_activity_tx: None,
+        observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::clone(&ports.attachment_store),
@@ -1253,7 +1243,6 @@ async fn exact_dispatch_context_with_plugins(
     plugins: Arc<PluginSession>,
 ) -> ToolDispatchContext<'static> {
     let ports = crate::support::dispatch_ports().await;
-    let (event_tx, _event_rx) = mpsc::channel(8);
     let tools = plugins.tools();
     let tool_catalog = plugins
         .resolved_tool_catalog(&SessionId::from("session"))
@@ -1281,8 +1270,7 @@ async fn exact_dispatch_context_with_plugins(
         ),
         session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-        event_tx,
-        turn_activity_tx: None,
+        observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::clone(&ports.attachment_store),
@@ -1360,7 +1348,6 @@ async fn pending_dispatch_context(
     retry_policy: ToolRetryPolicy,
 ) -> ToolDispatchContext<'static> {
     let ports = crate::support::dispatch_ports().await;
-    let (event_tx, _event_rx) = mpsc::channel(8);
     let provider: Arc<dyn ToolProvider> = Arc::new(PendingProbeTools {
         definition: pending_probe_tool(retry_policy),
         attempts,
@@ -1410,8 +1397,7 @@ async fn pending_dispatch_context(
         ),
         session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-        event_tx,
-        turn_activity_tx: None,
+        observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::clone(&ports.attachment_store),
@@ -1437,7 +1423,6 @@ async fn parallel_dispatch_context(
     started: Arc<AtomicUsize>,
 ) -> ToolDispatchContext<'static> {
     let ports = crate::support::dispatch_ports().await;
-    let (event_tx, _event_rx) = mpsc::channel(8);
     let plugins = test_plugins(Arc::new(ParallelProbeTools { barrier, started }));
     let tools = plugins.tools();
     let tool_catalog = plugins
@@ -1466,8 +1451,7 @@ async fn parallel_dispatch_context(
         ),
         session_id: SessionId::from("session"),
         agent_frame_id: crate::FrameNodeId::new("test-frame").unwrap(),
-        event_tx,
-        turn_activity_tx: None,
+        observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
         attachment_store: Arc::clone(&ports.attachment_store),

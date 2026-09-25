@@ -38,9 +38,10 @@ pub use admission::{
     InheritedAuthority, ParkRef, SealVerdict, TurnCancelSignal,
 };
 pub use commands::{
-    AdmissionCommand, AdmissionExecutors, AdmissionResult, AdmissionStepContext, CooperativeCancel,
-    EffectCommand, EffectExecutors, EffectResult, Heartbeat, ObservationSink, SessionServices,
-    StepContext,
+    AdmissionCommand, AdmissionExecutors, AdmissionResult, AdmissionStepContext,
+    ChannelObservationSink, CooperativeCancel, EffectCommand, EffectExecutors, EffectResult,
+    GatedObservationSink, Heartbeat, NullObservationSink, ObservationCursor, ObservationSink,
+    SessionServices, StepContext,
 };
 pub use commit::{
     CancellationSettlement, CommitTurnOutcome, CommittedAttachments, CommittedGraphNode,
@@ -50,7 +51,7 @@ pub use commit::{
 };
 pub use context::{
     Disposed, Disposition, DriveObservation, DurableOp, EngineContext, EngineFault, EngineRetry,
-    EngineTerminal, EpochMs, ObservedEvent, ReplayKey, Winner,
+    EngineTerminal, EpochMs, ObservedEvent, ReplayKey, Winner, activity_projection,
 };
 pub use contracts::{
     BuildGeneration, DriveHandover, DriveRequest, Never, PendingResolution, ResolveAck,

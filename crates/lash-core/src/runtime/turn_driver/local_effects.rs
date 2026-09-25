@@ -190,6 +190,7 @@ pub(super) fn turn_effect_executor(
         opener_state: driver.opener_state.clone(),
         turn_cancel: driver.turn_cancel.clone(),
         children_stop: driver.children_stop.clone(),
+        turn_observations: driver.turn_observations.clone(),
     };
     crate::RuntimeEffectLocalExecutor::owned_runner(
         Box::new(LocalTurnEffectRunner {

@@ -273,57 +273,85 @@ pub(in crate::runtime) fn turn_input_completion_trace_payload(
     })
 }
 
-pub(in crate::runtime) async fn emit_turn_started_to_sink(
-    events: &dyn TurnActivitySink,
+/// A fresh observation cursor for one turn-level emission lane of the
+/// physical turn `turn_id` admitted under `controller`'s scope (ADR 0105 §1:
+/// `(replay key, ordinal)` is the identity). Frames of one logical turn share
+/// the scope's journal key, so `turn_id` and `lane` keep each physical turn's
+/// lanes distinct.
+pub(in crate::runtime) fn turn_observation_cursor(
+    scoped_effect_controller: &ScopedEffectController<'_>,
     turn_id: &TurnId,
-) {
-    emit_turn_activity_to_sink_for_turn(
-        events,
-        turn_id,
-        TurnActivity::independent(TurnEvent::TurnStarted {
-            turn_id: turn_id.clone(),
-        }),
-    )
-    .await;
+    lane: &str,
+) -> crate::engine::ObservationCursor {
+    let scope = scoped_effect_controller
+        .execution_scope()
+        .journal_identity()
+        .map(|identity| identity.key().to_owned())
+        .unwrap_or_else(|_| "turn".to_string());
+    crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new(format!(
+        "{scope}:{turn_id}:{lane}"
+    )))
 }
 
-pub(in crate::runtime) async fn emit_queued_work_started_to_sink(
-    events: &dyn TurnActivitySink,
+pub(in crate::runtime) fn emit_turn_started(
+    observer: &TurnObserver,
+    cursor: &mut crate::engine::ObservationCursor,
+    turn_id: &TurnId,
+) {
+    cursor.observe(
+        &observer.for_turn(turn_id),
+        crate::engine::ObservedEvent::Activity {
+            correlation_id: None,
+            event: TurnEvent::TurnStarted {
+                turn_id: turn_id.clone(),
+            },
+        },
+    );
+}
+
+pub(in crate::runtime) fn emit_queued_work_started(
+    observer: &TurnObserver,
+    cursor: &mut crate::engine::ObservationCursor,
     turn_id: &TurnId,
     boundary: crate::QueuedWorkClaimBoundary,
     claim: &crate::QueuedWorkClaim,
     causes: Vec<crate::TurnCause>,
 ) {
-    emit_turn_activity_to_sink_for_turn(
-        events,
-        turn_id,
-        TurnActivity::independent(TurnEvent::QueuedWorkStarted {
-            boundary,
-            batch_ids: queued_work_batch_ids(claim)
-                .into_iter()
-                .map(crate::BatchId::into_inner)
-                .collect(),
-            causes,
-        }),
-    )
-    .await;
+    cursor.observe(
+        &observer.for_turn(turn_id),
+        crate::engine::ObservedEvent::Activity {
+            correlation_id: None,
+            event: TurnEvent::QueuedWorkStarted {
+                boundary,
+                batch_ids: queued_work_batch_ids(claim)
+                    .into_iter()
+                    .map(crate::BatchId::into_inner)
+                    .collect(),
+                causes,
+            },
+        },
+    );
 }
 
 pub(in crate::runtime) fn send_queued_work_started_event(
     event_tx: &TurnObserver,
+    cursor: &mut crate::engine::ObservationCursor,
     boundary: crate::QueuedWorkClaimBoundary,
     claim: &crate::QueuedWorkClaim,
     causes: Vec<crate::TurnCause>,
 ) {
-    event_tx.activity(
-        TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
-        TurnEvent::QueuedWorkStarted {
-            boundary,
-            batch_ids: queued_work_batch_ids(claim)
-                .into_iter()
-                .map(crate::BatchId::into_inner)
-                .collect(),
-            causes,
+    cursor.observe(
+        event_tx,
+        crate::engine::ObservedEvent::Activity {
+            correlation_id: None,
+            event: TurnEvent::QueuedWorkStarted {
+                boundary,
+                batch_ids: queued_work_batch_ids(claim)
+                    .into_iter()
+                    .map(crate::BatchId::into_inner)
+                    .collect(),
+                causes,
+            },
         },
     );
 }
@@ -417,13 +445,13 @@ impl TerminalDiagnosticKind {
     }
 }
 
-/// How a terminal diagnostic's turn activity is addressed to its sink.
+/// How a terminal diagnostic's turn activity is addressed on the observer.
 enum TerminalActivityTarget<'a> {
-    /// The sink is already turn-scoped, so the activity is emitted directly.
-    TurnScopedSink(&'a dyn TurnActivitySink),
-    /// The sink is unscoped, so the activity is addressed to `turn_id`.
-    UnscopedSink {
-        sink: &'a dyn TurnActivitySink,
+    /// The observer is already turn-scoped, so the activity publishes as is.
+    TurnScoped(&'a TurnObserver),
+    /// The observer is unscoped, so the activity is addressed to `turn_id`.
+    ForTurn {
+        observer: &'a TurnObserver,
         turn_id: &'a TurnId,
     },
 }
@@ -444,9 +472,10 @@ struct TerminalDiagnostic<'a> {
 /// between), then `TurnOutcome::Stopped(stop)`, then `Done`. Every session
 /// event is recorded on `recorded_assembly` as it is written, so the committed
 /// turn carries the same terminal facts the host streamed.
-async fn emit_terminal_sequence(
+fn emit_terminal_sequence(
     recorded_assembly: &mut RecordedTurnAssembly,
-    events: &dyn EventSink,
+    observer: &TurnObserver,
+    cursor: &mut crate::engine::ObservationCursor,
     diagnostic: Option<TerminalDiagnostic<'_>>,
     stop: TurnStop,
 ) {
@@ -464,26 +493,34 @@ async fn emit_terminal_sequence(
             }),
         };
         recorded_assembly.record(&error_event);
-        let activity = TurnActivity::independent(TurnEvent::Error {
-            message: diagnostic.message,
-        });
+        // The diagnostic activity publishes ahead of the session error it
+        // belongs to; the session events stay verbatim — `observe` would
+        // project a second `TurnEvent::Error`.
+        let activity = crate::engine::ObservedEvent::Activity {
+            correlation_id: None,
+            event: TurnEvent::Error {
+                message: diagnostic.message,
+            },
+        };
         match diagnostic.activity {
-            TerminalActivityTarget::TurnScopedSink(sink) => {
-                emit_turn_activity_to_sink(sink, activity).await;
+            TerminalActivityTarget::TurnScoped(sink) => {
+                cursor.observe(sink, activity);
             }
-            TerminalActivityTarget::UnscopedSink { sink, turn_id } => {
-                emit_turn_activity_to_sink_for_turn(sink, turn_id, activity).await;
+            TerminalActivityTarget::ForTurn { observer, turn_id } => {
+                cursor.observe(&observer.for_turn(turn_id), activity);
             }
         }
-        emit_session_event_to_sink(events, error_event).await;
+        observer.publish(crate::runtime::RuntimeStreamEvent::Session(error_event));
     }
     let outcome_event = SessionStreamEvent::TurnOutcome {
         outcome: TurnOutcome::Stopped(stop),
     };
     recorded_assembly.record(&outcome_event);
-    emit_session_event_to_sink(events, outcome_event).await;
+    observer.publish(crate::runtime::RuntimeStreamEvent::Session(outcome_event));
     recorded_assembly.record(&SessionStreamEvent::Done);
-    emit_session_event_to_sink(events, SessionStreamEvent::Done).await;
+    observer.publish(crate::runtime::RuntimeStreamEvent::Session(
+        SessionStreamEvent::Done,
+    ));
 }
 
 /// Publish one observation to its host sink, addressing an activity to its

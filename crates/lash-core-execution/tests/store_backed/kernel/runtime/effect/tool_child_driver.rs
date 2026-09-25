@@ -102,10 +102,6 @@ mod tests {
     fn lent_with_direct_completions(
         direct_completions: crate::DirectCompletionClient<'static>,
     ) -> ToolDispatchContext<'static> {
-        let (event_tx, event_rx) = tokio::sync::mpsc::channel(1);
-        // Held for the test's lifetime, so the sender never reports a closed
-        // channel for a reason unrelated to what is asserted.
-        std::mem::forget(event_rx);
         let mut other_tool = manifest("opener-tool");
         other_tool.retry_policy = ToolRetryPolicy::Never;
         ToolDispatchContext {
@@ -135,8 +131,7 @@ mod tests {
             execution_env_spec: spec(9),
             session_id: SessionId::from("opener-session"),
             agent_frame_id: FrameNodeId::new("opener-frame").expect("a valid frame id"),
-            event_tx,
-            turn_activity_tx: None,
+            observer: crate::engine::NullObservationSink::arc(),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::new(crate::SessionAttachmentStore::unavailable()),

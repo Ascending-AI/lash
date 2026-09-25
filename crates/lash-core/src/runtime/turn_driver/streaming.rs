@@ -310,7 +310,13 @@ impl RuntimeTurnDriver<'_> {
             abort_requested: &mut abort_requested,
             block_raw_text: &mut block_raw_text,
         };
-        let mut host_forwarder = ProviderHostForwarder::new(event_tx);
+        let mut host_forwarder = ProviderHostForwarder::new(
+            event_tx,
+            crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new(format!(
+                "{}:stream",
+                invocation.replay_key().unwrap_or("llm-call"),
+            ))),
+        );
         let mut call_record = None;
         let result = loop {
             tokio::select! {
@@ -1067,7 +1073,7 @@ impl RuntimeTurnDriver<'_> {
                 // even when the discarded attempt produced no output. Empty
                 // correlation lists are therefore meaningful host evidence.
                 forwarder.send_semantic_turn_activity(
-                    TurnActivityId::new(uuid::Uuid::new_v4().to_string()),
+                    None,
                     TurnEvent::ModelAttemptReset {
                         assistant_prose_correlation_ids,
                         reasoning_correlation_ids,

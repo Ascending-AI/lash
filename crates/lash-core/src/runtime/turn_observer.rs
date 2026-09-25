@@ -47,7 +47,7 @@ use super::RuntimeStreamEvent;
 use super::observation_publisher::ObservationSource;
 use crate::engine::{DriveObservation, ObservationSink, ObservedEvent};
 use crate::session_model::SessionStreamEvent;
-use crate::{TurnActivity, TurnActivityId, TurnEvent, TurnFinish, TurnId, TurnOutcome, TurnStop};
+use crate::{TurnActivity, TurnActivityId, TurnEvent, TurnId, TurnOutcome, TurnStop};
 
 /// How many events may queue ahead of the host before new stream deltas merge
 /// and a cancellation discards the delta backlog. It is the capacity of the
@@ -187,15 +187,20 @@ impl TurnObserver {
     }
 
     /// Publish a session event, preceded by the turn activity it projects to
-    /// when it has one.
+    /// when it has one. Drive code goes through
+    /// [`ObservationCursor`](crate::engine::ObservationCursor) instead, so the
+    /// projected activity takes its id from `(key, ordinal)` — these helpers
+    /// survive for tests that drive the queue directly.
+    #[cfg(test)]
     pub(in crate::runtime) fn session(&self, event: SessionStreamEvent) {
-        if let Some(projected) = activity_projection(&event) {
+        if let Some(projected) = crate::engine::activity_projection(&event) {
             self.independent(projected);
         }
         self.publish(RuntimeStreamEvent::Session(event));
     }
 
     /// Publish a turn activity correlated with `correlation_id`.
+    #[cfg(test)]
     pub(in crate::runtime) fn activity(&self, correlation_id: TurnActivityId, event: TurnEvent) {
         self.publish(RuntimeStreamEvent::Turn(TurnActivity::new(
             correlation_id,
@@ -204,6 +209,7 @@ impl TurnObserver {
     }
 
     /// Publish a turn activity correlated with nothing else.
+    #[cfg(test)]
     pub(in crate::runtime) fn independent(&self, event: TurnEvent) {
         self.publish(RuntimeStreamEvent::Turn(TurnActivity::independent(event)));
     }
@@ -308,7 +314,7 @@ impl ObservationSink for TurnObserver {
         let id = TurnActivityId::new(format!("{key}#{ordinal}"));
         match event {
             ObservedEvent::Session(event) => {
-                if let Some(projected) = activity_projection(&event) {
+                if let Some(projected) = crate::engine::activity_projection(&event) {
                     self.publish(RuntimeStreamEvent::Turn(TurnActivity {
                         id: id.clone(),
                         correlation_id: id,
@@ -326,6 +332,12 @@ impl ObservationSink for TurnObserver {
                     id,
                     event,
                 }));
+            }
+            ObservedEvent::RecordedSession(event) => {
+                self.publish(RuntimeStreamEvent::Session(event));
+            }
+            ObservedEvent::RecordedActivity(activity) => {
+                self.publish(RuntimeStreamEvent::Turn(activity));
             }
         }
     }
@@ -500,64 +512,6 @@ fn publishes_cancellation(event: &RuntimeStreamEvent) -> bool {
             outcome: TurnOutcome::Stopped(TurnStop::Cancelled { .. }),
         })
     )
-}
-
-/// The application-facing activity a session event projects to, if any.
-fn activity_projection(event: &SessionStreamEvent) -> Option<TurnEvent> {
-    match event {
-        SessionStreamEvent::TokenUsage {
-            protocol_iteration,
-            usage,
-            cumulative,
-        } => Some(TurnEvent::Usage {
-            protocol_iteration: *protocol_iteration,
-            usage: usage.clone(),
-            cumulative: cumulative.clone(),
-        }),
-        SessionStreamEvent::LlmRequest {
-            protocol_iteration, ..
-        } => Some(TurnEvent::ModelRequestStarted {
-            protocol_iteration: *protocol_iteration,
-        }),
-        SessionStreamEvent::RetryStatus {
-            wait_seconds,
-            attempt,
-            max_attempts,
-            reason,
-            ..
-        } => Some(TurnEvent::RetryStatus {
-            wait_seconds: *wait_seconds,
-            attempt: *attempt,
-            max_attempts: *max_attempts,
-            reason: reason.clone(),
-        }),
-        SessionStreamEvent::PluginEvent { plugin_id, event } => Some(TurnEvent::PluginRuntime {
-            plugin_id: plugin_id.clone(),
-            event: event.clone(),
-        }),
-        SessionStreamEvent::InjectedMessagesCommitted {
-            messages,
-            checkpoint,
-        } => Some(TurnEvent::QueuedMessagesCommitted {
-            messages: messages.clone(),
-            checkpoint: *checkpoint,
-        }),
-        SessionStreamEvent::Error { message, .. } => Some(TurnEvent::Error {
-            message: message.clone(),
-        }),
-        SessionStreamEvent::TurnOutcome {
-            outcome: TurnOutcome::Finished(TurnFinish::FinalValue { value }),
-        } => Some(TurnEvent::FinalValue {
-            value: value.clone(),
-        }),
-        SessionStreamEvent::TurnOutcome {
-            outcome: TurnOutcome::Finished(TurnFinish::ToolValue { tool_name, value }),
-        } => Some(TurnEvent::ToolValue {
-            tool_name: tool_name.clone(),
-            value: value.clone(),
-        }),
-        _ => None,
-    }
 }
 
 #[cfg(test)]

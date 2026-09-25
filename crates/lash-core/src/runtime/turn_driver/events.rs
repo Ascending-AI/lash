@@ -6,16 +6,24 @@ impl RuntimeTurnDriver<'_> {
     /// through here, in program order.
     pub(super) fn emit_recorded(&mut self, event_tx: &TurnObserver, event: SessionStreamEvent) {
         self.recorded_assembly.record(&event);
-        event_tx.session(event);
+        self.turn_observations
+            .observe(event_tx, crate::engine::ObservedEvent::Session(event));
     }
 }
 
 pub(in crate::runtime) fn send_turn_input_applications(
     event_tx: &TurnObserver,
+    cursor: &mut crate::engine::ObservationCursor,
     applications: Vec<crate::TurnInputApplication>,
 ) {
     if !applications.is_empty() {
-        event_tx.independent(TurnEvent::QueuedInputAccepted { applications });
+        cursor.observe(
+            event_tx,
+            crate::engine::ObservedEvent::Activity {
+                correlation_id: None,
+                event: TurnEvent::QueuedInputAccepted { applications },
+            },
+        );
     }
 }
 
@@ -27,6 +35,7 @@ pub(in crate::runtime) fn send_turn_input_applications(
 /// deterministic: a replay of this path emits identical block identities.
 pub(in crate::runtime) fn emit_semantic_response_parts(
     event_tx: &TurnObserver,
+    cursor: &mut crate::engine::ObservationCursor,
     response: &LlmResponse,
     prose_projector: Option<&dyn crate::plugin::AssistantProseProjectorPlugin>,
     reasoning_publication: &ReasoningPublicationState,
@@ -54,26 +63,36 @@ pub(in crate::runtime) fn emit_semantic_response_parts(
                     item_id,
                 };
                 next_ordinal += 1;
-                event_tx.activity(
-                    TurnActivityId::new(block.id.clone()),
-                    TurnEvent::StreamBlockStarted {
-                        kind: StreamBlockKind::AssistantText,
-                        block: block.clone(),
+                let correlation_id = TurnActivityId::new(block.id.clone());
+                cursor.observe(
+                    event_tx,
+                    crate::engine::ObservedEvent::Activity {
+                        correlation_id: Some(correlation_id.clone()),
+                        event: TurnEvent::StreamBlockStarted {
+                            kind: StreamBlockKind::AssistantText,
+                            block: block.clone(),
+                        },
                     },
                 );
-                event_tx.activity(
-                    TurnActivityId::new(block.id.clone()),
-                    TurnEvent::AssistantProseDelta {
-                        text: text.clone().into(),
-                        block: block.clone(),
+                cursor.observe(
+                    event_tx,
+                    crate::engine::ObservedEvent::Activity {
+                        correlation_id: Some(correlation_id.clone()),
+                        event: TurnEvent::AssistantProseDelta {
+                            text: text.clone().into(),
+                            block: block.clone(),
+                        },
                     },
                 );
-                event_tx.activity(
-                    TurnActivityId::new(block.id.clone()),
-                    TurnEvent::StreamBlockCompleted {
-                        kind: StreamBlockKind::AssistantText,
-                        block,
-                        text: text.into(),
+                cursor.observe(
+                    event_tx,
+                    crate::engine::ObservedEvent::Activity {
+                        correlation_id: Some(correlation_id),
+                        event: TurnEvent::StreamBlockCompleted {
+                            kind: StreamBlockKind::AssistantText,
+                            block,
+                            text: text.into(),
+                        },
                     },
                 );
             }
@@ -87,26 +106,36 @@ pub(in crate::runtime) fn emit_semantic_response_parts(
                 for (block, text) in
                     reasoning_publication.unpublished_blocks(part_index, part, &mut next_ordinal)
                 {
-                    event_tx.activity(
-                        TurnActivityId::new(block.id.clone()),
-                        TurnEvent::StreamBlockStarted {
-                            kind: StreamBlockKind::Reasoning,
-                            block: block.clone(),
+                    let correlation_id = TurnActivityId::new(block.id.clone());
+                    cursor.observe(
+                        event_tx,
+                        crate::engine::ObservedEvent::Activity {
+                            correlation_id: Some(correlation_id.clone()),
+                            event: TurnEvent::StreamBlockStarted {
+                                kind: StreamBlockKind::Reasoning,
+                                block: block.clone(),
+                            },
                         },
                     );
-                    event_tx.activity(
-                        TurnActivityId::new(block.id.clone()),
-                        TurnEvent::ReasoningDelta {
-                            text: text.clone().into(),
-                            block: block.clone(),
+                    cursor.observe(
+                        event_tx,
+                        crate::engine::ObservedEvent::Activity {
+                            correlation_id: Some(correlation_id.clone()),
+                            event: TurnEvent::ReasoningDelta {
+                                text: text.clone().into(),
+                                block: block.clone(),
+                            },
                         },
                     );
-                    event_tx.activity(
-                        TurnActivityId::new(block.id.clone()),
-                        TurnEvent::StreamBlockCompleted {
-                            kind: StreamBlockKind::Reasoning,
-                            block,
-                            text: text.into(),
+                    cursor.observe(
+                        event_tx,
+                        crate::engine::ObservedEvent::Activity {
+                            correlation_id: Some(correlation_id),
+                            event: TurnEvent::StreamBlockCompleted {
+                                kind: StreamBlockKind::Reasoning,
+                                block,
+                                text: text.into(),
+                            },
                         },
                     );
                 }
@@ -117,26 +146,36 @@ pub(in crate::runtime) fn emit_semantic_response_parts(
     let full_text = project_assistant_prose(&response.full_text(), prose_projector);
     if !emitted_text && !full_text.is_empty() {
         let block = StreamBlockIdentity::new("response:full-text", next_ordinal);
-        event_tx.activity(
-            TurnActivityId::new(block.id.clone()),
-            TurnEvent::StreamBlockStarted {
-                kind: StreamBlockKind::AssistantText,
-                block: block.clone(),
+        let correlation_id = TurnActivityId::new(block.id.clone());
+        cursor.observe(
+            event_tx,
+            crate::engine::ObservedEvent::Activity {
+                correlation_id: Some(correlation_id.clone()),
+                event: TurnEvent::StreamBlockStarted {
+                    kind: StreamBlockKind::AssistantText,
+                    block: block.clone(),
+                },
             },
         );
-        event_tx.activity(
-            TurnActivityId::new(block.id.clone()),
-            TurnEvent::AssistantProseDelta {
-                text: full_text.clone().into(),
-                block: block.clone(),
+        cursor.observe(
+            event_tx,
+            crate::engine::ObservedEvent::Activity {
+                correlation_id: Some(correlation_id.clone()),
+                event: TurnEvent::AssistantProseDelta {
+                    text: full_text.clone().into(),
+                    block: block.clone(),
+                },
             },
         );
-        event_tx.activity(
-            TurnActivityId::new(block.id.clone()),
-            TurnEvent::StreamBlockCompleted {
-                kind: StreamBlockKind::AssistantText,
-                block,
-                text: full_text.into(),
+        cursor.observe(
+            event_tx,
+            crate::engine::ObservedEvent::Activity {
+                correlation_id: Some(correlation_id),
+                event: TurnEvent::StreamBlockCompleted {
+                    kind: StreamBlockKind::AssistantText,
+                    block,
+                    text: full_text.into(),
+                },
             },
         );
     }

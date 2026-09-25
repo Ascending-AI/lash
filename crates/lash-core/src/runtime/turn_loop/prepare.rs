@@ -153,19 +153,23 @@ impl LashRuntime {
                 emit_terminal_sequence(
                     &mut recorded_assembly,
                     observer,
+                    &mut turn_observation_cursor(
+                        &scoped_effect_controller,
+                        &trace_turn_id,
+                        "terminal",
+                    ),
                     Some(TerminalDiagnostic {
                         kind: TerminalDiagnosticKind::InputValidation,
                         code: Some(crate::TurnFailureCode::InvalidTurnInput.into()),
                         message: e,
                         retryable: Some(false),
-                        activity: TerminalActivityTarget::UnscopedSink {
-                            sink: observer,
+                        activity: TerminalActivityTarget::ForTurn {
+                            observer,
                             turn_id: &trace_turn_id,
                         },
                     }),
                     TurnStop::InvalidInput,
-                )
-                .await;
+                );
                 let turn_index = self.physical_turn_index(admitted_turn_index);
                 let turn_control_host = Arc::clone(&self.host.core.control.effect_host);
                 let turn_control_binding =
@@ -314,14 +318,15 @@ impl LashRuntime {
             initial_turn_input_applications.extend(claim.applications.iter().cloned());
         }
         if !initial_turn_input_applications.is_empty() {
-            emit_turn_activity_to_sink_for_turn(
-                observer,
-                &trace_turn_id,
-                TurnActivity::independent(TurnEvent::QueuedInputAccepted {
-                    applications: initial_turn_input_applications,
-                }),
-            )
-            .await;
+            turn_observation_cursor(&scoped_effect_controller, &trace_turn_id, "prepare").observe(
+                &observer.for_turn(&trace_turn_id),
+                crate::engine::ObservedEvent::Activity {
+                    correlation_id: None,
+                    event: TurnEvent::QueuedInputAccepted {
+                        applications: initial_turn_input_applications,
+                    },
+                },
+            );
         }
 
         // One graph-append draft per physical turn: prepare-turn hooks, the

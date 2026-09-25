@@ -479,7 +479,6 @@ impl<'run> TestExecutionContextBuilder<'run> {
                 crate::runtime::RuntimeEffectControllerHandle::borrowed(effect_controller)
             }
         };
-        let (event_tx, _event_rx) = tokio::sync::mpsc::channel(1);
         let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
             process_definitions: self.process_definitions,
             process_engines: self.process_engines,
@@ -503,8 +502,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             session_id: self.session_id,
             agent_frame_id: crate::FrameNodeId::new("test-frame")
                 .expect("test frame identity is non-empty"),
-            event_tx,
-            turn_activity_tx: None,
+            observer: Arc::new(crate::engine::NullObservationSink),
             checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
             trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
             attachment_store: Arc::clone(&self.attachment_store),
