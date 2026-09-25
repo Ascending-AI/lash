@@ -909,24 +909,29 @@ class FeatureCoverageContractTests(unittest.TestCase):
         self.assertIn("lane 'member-testing' has no executable commands", result.stdout)
         self.assertIn("lacks an exact ON command for member/testing", result.stdout)
 
-    def test_workspace_checker_bounds_scanned_sources(self) -> None:
+    def test_workspace_checker_scans_each_source_once(self) -> None:
         # A wall-clock budget flakes under `just floor`'s parallel gates, so
-        # the budget is on work instead: cfg_requirements scans each workspace
-        # Rust source once, and a regression that does more work (re-scanning
-        # per feature, walking files repeatedly) multiplies this deterministic
-        # count on any machine.
+        # the budget is on work instead: cfg_requirements is meant to visit,
+        # and read, every workspace Rust source exactly once. Ordinary repo
+        # growth keeps these counts equal; a regression that does more work
+        # (re-scanning per feature, reading files repeatedly) breaks them on
+        # any machine, which is what the clock assertion was really guarding.
         result = run_subprocess(
             ["python3", str(CHECKER), "check", "--root", str(ROOT)],
             check=False,
             env={**os.environ, "LASH_FEATURE_COVERAGE_STATS": "1"},
-            timeout=120,  # liveness guard only; the source count is the budget
+            timeout=120,  # liveness guard only; the counts are the budget
         )
         self.assertEqual(result.returncode, 0, result.stdout)
-        match = re.search(r"feature coverage scan: (\d+) Rust sources", result.stdout)
+        match = re.search(
+            r"feature coverage scan: (\d+) Rust source visits, "
+            r"(\d+) unique paths, (\d+) reads",
+            result.stdout,
+        )
         self.assertIsNotNone(match, result.stdout)
-        # Measured at 2559 sources on 2026-09-25; ~25% headroom for ordinary
-        # source growth. A real bump means the checker scans more than once.
-        self.assertLessEqual(int(match.group(1)), 3200, result.stdout)
+        visits, unique, reads = (int(group) for group in match.groups())
+        self.assertEqual(visits, unique, result.stdout)
+        self.assertEqual(unique, reads, result.stdout)
 
 
 if __name__ == "__main__":
