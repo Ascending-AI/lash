@@ -9,9 +9,8 @@
 //! from a caller-held future.
 
 #![expect(
-    clippy::unwrap_used,
     clippy::expect_used,
-    reason = "test assertions; a failed unwrap is the test failure"
+    reason = "test assertions; a failed expect is the test failure"
 )]
 
 use std::sync::Arc;
@@ -421,7 +420,7 @@ async fn dropped_schedule_is_reconciled() {
     )
     .await
     .expect("sweep");
-    assert_eq!(report.scheduled, [session_id.clone()]);
+    assert_eq!(report.scheduled, std::slice::from_ref(&session_id));
     let outcome = attach(
         &world.backend,
         &session_id,

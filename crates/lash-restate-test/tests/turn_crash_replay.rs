@@ -14,9 +14,8 @@
 //! the matrix.
 
 #![expect(
-    clippy::unwrap_used,
     clippy::expect_used,
-    reason = "test assertions; a failed unwrap is the test failure"
+    reason = "test assertions; a failed expect is the test failure"
 )]
 
 use std::sync::Arc;
