@@ -56,8 +56,8 @@ opus	54	accept	"'a' + undefined"	"aundefined"	-
 opus	55	accept	"[] + []"	""	-
 opus	56	accept	"[] + 1"	"1"	-
 opus	57	accept	"1 + []"	"1"	-
-opus	58	runtime-reject	"({}) + 1"	"[object Object]1"	TS_OBJECT_STRING_COERCION
-opus	59	runtime-reject	"1 + ({})"	"1[object Object]"	TS_OBJECT_STRING_COERCION
+opus	58	accept	"({}) + 1"	"[object Object]1"	-
+opus	59	accept	"1 + ({})"	"1[object Object]"	-
 opus	60	accept	"[1,2] + '!'"	"1,2!"	-
 opus	61	accept	"[null] + '!'"	"!"	-
 opus	62	accept	"[undefined] + '!'"	"!"	-
@@ -124,7 +124,7 @@ opus	122	accept	"`${-1.5e-9}`"	"-1.5e-9"	-
 opus	123	accept	"`${null}`"	"null"	-
 opus	124	accept	"`${undefined}`"	"undefined"	-
 opus	125	accept	"`${[1,2]}`"	"1,2"	-
-opus	126	runtime-reject	"`${({})}`"	"[object Object]"	TS_OBJECT_STRING_COERCION
+opus	126	accept	"`${({})}`"	"[object Object]"	-
 opus	127	accept	"`${true}`"	"true"	-
 opus	128	accept	"`${'x'}`"	"x"	-
 opus	129	accept	"`${[null,undefined,1]}`"	",,1"	-

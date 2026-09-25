@@ -206,7 +206,7 @@ builtin, or constructor called with the wrong arity is
 (`parseInt()`), or `TS_CONSTRUCTOR_UNSUPPORTED` at run time
 (`new Map(1, 2)`) — all TS2554; an authored function called short is *not*
 refused, since ECMA supplies `undefined`. `+` on an object without a string
-operand is `TS_OBJECT_STRING_COERCION` at run time (TS2365); `new` on an
+operand runs its `valueOf`/`toString` at run time (TS2365); `new` on an
 authored function is `TS_NEW_UNSUPPORTED` (TS7009), as is `new RegExp` with
 a non-string literal pattern (TS2769). Assigning a `const` or a function
 declaration is `TS_ASSIGN_CONST` (TS2588, TS2630); `instanceof` on a
@@ -507,13 +507,22 @@ no probe that fires it fails that test.
   booleans, `null`, `undefined`, dates, regexps and errors — a `Map` or `Set`
   prints as `[object Map]`/`[object Set]` because it has no JSON body. Node's
   inspector formatting is still not reproduced.
-- String coercion of a plain object, a `Map` or a `Set` refuses as
-  `TS_OBJECT_STRING_COERCION` instead of producing a type tag: `"" + {a: 1}`,
-  `` `${{a: 1}}` `` and `String({a: 1})` all lower to `+` and all three refuse,
-  pointing at `console.log` or `JSON.stringify(value)`. Every value with a
-  string of its own keeps its exact ECMA text, and property keys,
-  `map.toString()`, `Number({})`, loose equality and `console.log` are
-  untouched.
+- String coercion is ECMA-262's (FIG-3652): `"" + value`, `` `${value}` ``
+  and `String(value)` run ToPrimitive, so an object's own `valueOf`/`toString`
+  answer in hint order (`+` asks `valueOf` first; a template and `String()`
+  ask `toString` first), and an object with no string of its own answers its
+  type tag, `[object Object]`, `[object Map]` or `[object Set]`. Every coercion
+  the VM performs — operators, property keys, and the arguments the built-ins
+  convert — runs the hooks through the one call path with the object as their
+  receiver. A hook cannot perform an effect (`EffectInBuiltinCallback`). A
+  function has no string the runtime keeps (its source text), so converting one
+  to a primitive refuses as `TS_FUNCTION_STRING_COERCION`: `tsc --strict`
+  already rejects the statically typed shapes (TS2362 and TS2363 for
+  arithmetic, TS2365 for `+`, TS2464 for a computed key), and the `any`-typed
+  and string-context ones are an unsupported feature, Function.prototype's
+  source text. The divergence from Node is registered as
+  `function-source-text`: Node prints `function includes() { [native code] }`
+  for `String('y'.includes)`; lash refuses.
 - Multi-argument Date construction and ISO date-times without an explicit
   offset are interpreted as UTC, never the host timezone. `Date.parse` and
   string construction accept only ECMA date-time syntax; a structurally valid

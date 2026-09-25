@@ -1,0 +1,22 @@
+lane	index	disposition	expression	node_v25.2.1	diagnostic
+FIG-3652	1	accept	"(() => { const o = { valueOf() { return 7; } }; return o + 1; })()"	"8"	-
+FIG-3652	2	accept	"(() => { const o = { toString() { return 'x'; } }; return 'a' + o; })()"	"ax"	-
+FIG-3652	3	accept	"(() => { const o = { toString() { return 'T'; }, valueOf() { return 5; } }; return [o + 1, `${o}`, String(o), o * 2].join('|'); })()"	"6|T|T|10"	-
+FIG-3652	4	accept	"(() => { const a = { valueOf() { return 1; } }; const b = { valueOf() { return 3; } }; return 'abcdef'.slice(a, b); })()"	"bc"	-
+FIG-3652	5	accept	"(() => { const o = { valueOf() { throw 'boom'; } }; try { 'abc'.slice(o); return 'no'; } catch (e) { return e; } })()"	"boom"	-
+FIG-3652	6	accept	"(() => { const o = { valueOf() { return {}; }, toString() { return {}; } }; try { return o + 1; } catch (e) { return e instanceof TypeError; } })()"	"true"	-
+FIG-3652	7	accept	"(() => { const n = { v: 2, valueOf() { return this.v; } }; return [n * 3, n > 1, n == 2, -n, +n, ~n, n << 1].join(','); })()"	"6,true,true,-2,2,-3,4"	-
+FIG-3652	8	accept	"(() => { const k = { toString() { return 'key'; } }; const r = { key: 9 }; return r[k]; })()"	"9"	-
+FIG-3652	9	accept	"(() => { const s = { toString() { return 'cd'; } }; return ['abcdef'.indexOf(s), 'abcd'.includes(s), 'x'.concat(s)].join(','); })()"	"2,true,xcd"	-
+FIG-3652	10	accept	"(() => { const f = { valueOf() { throw new Error('no'); } }; return [[].indexOf(1, f), [].includes(1, f)].join(','); })()"	"-1,false"	-
+FIG-3652	11	accept	"(() => { const i = { valueOf() { return 1; } }; return [[1, 2, 3].indexOf(2, i), [1, 2, 3].fill(0, i).join(''), (3.14159).toFixed(i), parseInt('ff', { valueOf() { return 16; } })].join(','); })()"	"1,100,3.1,255"	-
+FIG-3652	12	accept	"(() => { const m = { toString() { return 'msg'; } }; return new Error(m).message; })()"	"msg"	-
+FIG-3652	13	accept	"[encodeURIComponent({ toString() { return 'a b'; } }), String.fromCharCode({ valueOf() { return 65; } }), Math.max({ valueOf() { return 4; } }, 2)].join(',')"	"a%20b,A,4"	-
+FIG-3652	14	accept	"JSON.stringify(JSON.parse({ toString() { return '[1,2]'; } }))"	"[1,2]"	-
+FIG-3652	15	accept	"/x/.test({ toString() { return 'x'; } })"	"true"	-
+FIG-3652	16	accept	"'AB'.match({ toString: function() { return 'AB'; } })[0]"	"AB"	-
+FIG-3652	17	accept	"[0,1,2].lastIndexOf(2, { toString: function() { return '2'; } })"	"2"	-
+FIG-3652	18	accept	"(() => { const log = []; const a = { valueOf() { log.push('a'); return 1; } }; const b = { valueOf() { log.push('b'); return 2; } }; return (a + b) + log.join(''); })()"	"3ab"	-
+FIG-3652	19	accept	"(() => { const s = { toString() { throw 'search'; } }; const r = { toString() { throw 'replace'; } }; try { 'x'.replace(s, r); } catch (e) { return e; } })()"	"search"	-
+FIG-3652	20	accept	"JSON.stringify(Object.groupBy([1, '1', { toString() { return 1; } }], (v) => v))"	"{\"1\":[1,\"1\",{}]}"	-
+FIG-3652	21	runtime-reject	"'' + function () { return 1; }"	"function () { return 1; }"	TS_FUNCTION_STRING_COERCION

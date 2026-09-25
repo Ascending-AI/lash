@@ -12,9 +12,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// The `regexp` argument of `String.prototype.match`/`search`. A RegExp is
     /// used as-is; anything else becomes `RegExp(pattern)` — `undefined` the
     /// empty pattern, every other value coerced through ToString — per the
-    /// ECMA RegExpCreate the operation performs on a non-RegExp argument. An
-    /// object whose own `toString`/`valueOf` would answer is refused: running
-    /// it means running guest code (FIG-3658).
+    /// ECMA RegExpCreate the operation performs on a non-RegExp argument,
+    /// which runs an object's own `toString`/`valueOf` (FIG-3652).
     pub(super) fn string_regexp_argument(
         &mut self,
         pattern: &Value,
@@ -27,11 +26,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let pattern = if matches!(pattern, Value::Undefined) {
             String::new()
         } else {
-            if self.heap.javascript_object_coercion_needs_guest(pattern)? {
-                return Err(RuntimeError::ValidationFailed {
-                    reason: "TS_OBJECT_STRING_COERCION: ToString on an object with its own toString or valueOf would run guest code; pass a RegExp or a primitive pattern".to_string(),
-                });
-            }
             self.heap.javascript_to_string(pattern)?
         };
         let Value::Ref(receiver) = self.construct_regexp(&[Value::String(pattern.into())])? else {

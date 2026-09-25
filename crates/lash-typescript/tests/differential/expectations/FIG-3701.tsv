@@ -9,7 +9,7 @@ FIG-3701	7	accept	"({ includes: 7 }).includes"	"7"	-
 FIG-3701	8	accept	"({ toString: undefined }).toString"	"undefined"	-
 FIG-3701	9	accept	"(() => { const f = 'x'.includes; try { f('x'); return 'none'; } catch (e) { return e instanceof TypeError; } })()"	"true"	-
 FIG-3701	10	accept	"(() => { const t = ({}).toString; return t(); })()"	"[object Undefined]"	-
-FIG-3701	11	accept	"String([].map)"	"function map() { [native code] }"	-
+FIG-3701	11	runtime-reject	"String([].map)"	"function map() { [native code] }"	TS_FUNCTION_STRING_COERCION
 FIG-3701	12	accept	"new Set().keys === new Set().values"	"true"	-
 FIG-3701	13	accept	"[].hasOwnProperty === ({}).hasOwnProperty"	"true"	-
 FIG-3701	14	accept	"[].toString === ({}).toString"	"false"	-

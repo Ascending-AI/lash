@@ -244,6 +244,7 @@ typescript	exotic-own-properties	rejected	TS_EXOTIC_PROPERTY_UNSUPPORTED	const m
 typescript	function-constructor	rejected	TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED	const f = Function('return 1');
 typescript	function-receivers	accepted	-	-
 typescript	function-redeclaration	rejected	TS_FUNCTION_REDECLARATION_UNSUPPORTED	function f() { } function f() { }
+typescript	function-string-coercion	rejected	TS_FUNCTION_STRING_COERCION	const s = '' + (() => 1);
 typescript	generics	accepted	-	-
 typescript	instanceof-arbitrary	rejected	TS_INSTANCEOF_UNSUPPORTED	const b = 'a' instanceof String;
 typescript	interfaces	accepted	-	-
@@ -255,7 +256,7 @@ typescript	mutable-captures	rejected	TS_MUTABLE_CAPTURE_UNSUPPORTED	let n = 0; c
 typescript	namespaces	rejected	TS_NAMESPACE_UNSUPPORTED	namespace N { }
 typescript	new-arbitrary	rejected	TS_NEW_UNSUPPORTED	function F() { } const o = new F();
 typescript	non-null-assertion	accepted	-	-
-typescript	object-string-coercion	rejected	TS_OBJECT_STRING_COERCION	const s = '' + { a: 1 };
+typescript	object-string-coercion	accepted	-	-
 typescript	private-names-outside-classes	rejected	TS_PRIVATE_NAME_UNSUPPORTED	function f(o: any) { return #x in o; }
 typescript	Promise.race	accepted	-	-
 typescript	regexp-nesting	rejected	TS_REGEX_PATTERN_NESTING_LIMIT	const r = /((((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))))/;

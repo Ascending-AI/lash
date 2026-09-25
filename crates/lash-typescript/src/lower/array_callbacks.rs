@@ -181,7 +181,9 @@ impl Lowerer {
             ])
         } else {
             LashExpr::Block(vec![
-                assign(&key, add(LashExpr::String("".into()), callback_call)),
+                // GroupBy's ToPropertyKey: the string hint, and ECMA's own
+                // answer for an object without hooks.
+                assign(&key, stdlib("Lash.ToPropertyKey", vec![callback_call])),
                 LashExpr::If {
                     condition: Box::new(stdlib(
                         "Object.hasOwn",

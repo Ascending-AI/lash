@@ -161,7 +161,9 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// v25 (FIG-3730): `JavaScriptUnary` and `JavaScriptBinary` carry ECMA's
 /// bitwise and shift operators (`~`, `&`, `|`, `^`, `<<`, `>>`, `>>>`) as
 /// single instructions. A v24 stream is refused.
-pub const BYTECODE_FORMAT_VERSION: u32 = 25;
+/// v26 (FIG-3652): the `JavaScriptUnaryOp::ToString` operator joins the
+/// instruction vocabulary; a v25 stream is refused.
+pub const BYTECODE_FORMAT_VERSION: u32 = 26;
 pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{
     LashlangBranchSite, LashlangEffectFailure, LashlangExecutionCallSite, LashlangExecutionChild,

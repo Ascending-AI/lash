@@ -32,10 +32,10 @@ sol	30	accept	"'2' + 1"	"21"	-
 sol	31	accept	"1 - '2'"	"-1"	-
 sol	32	accept	"'3' * '4'"	"12"	-
 sol	33	accept	"[] + []"	""	-
-sol	34	runtime-reject	"[] + {}"	"[object Object]"	TS_OBJECT_STRING_COERCION
+sol	34	accept	"[] + {}"	"[object Object]"	-
 sol	35	accept	"1 + []"	"1"	-
-sol	36	runtime-reject	"1 + {}"	"1[object Object]"	TS_OBJECT_STRING_COERCION
-sol	37	runtime-reject	"`${{}}`"	"[object Object]"	TS_OBJECT_STRING_COERCION
+sol	36	accept	"1 + {}"	"1[object Object]"	-
+sol	37	accept	"`${{}}`"	"[object Object]"	-
 sol	38	accept	"[1,2] + 3"	"1,23"	-
 sol	39	accept	"'a' + undefined"	"aundefined"	-
 sol	40	accept	"'a' + null"	"anull"	-
@@ -44,7 +44,7 @@ sol	42	accept	"`${null}`"	"null"	-
 sol	43	accept	"`${[1,2]}`"	"1,2"	-
 sol	44	accept	"`${[1,[2,3]]}`"	"1,2,3"	-
 sol	45	accept	"`${[null,undefined,1]}`"	",,1"	-
-sol	46	runtime-reject	"`${{a:1}}`"	"[object Object]"	TS_OBJECT_STRING_COERCION
+sol	46	accept	"`${{a:1}}`"	"[object Object]"	-
 sol	47	accept	"`${-0}`"	"0"	-
 sol	48	accept	"`${0}`"	"0"	-
 sol	49	accept	"`${1/0}`"	"Infinity"	-

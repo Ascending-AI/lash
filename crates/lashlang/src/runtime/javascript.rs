@@ -35,6 +35,7 @@ pub(crate) fn eval_javascript_unary(
             javascript_to_number(&value),
         ))),
         JavaScriptUnaryOp::Not => Value::Bool(!is_truthy(&value)?),
+        JavaScriptUnaryOp::ToString => Value::String(javascript_to_string(&value).into()),
         JavaScriptUnaryOp::TypeOf => Value::String(
             match value {
                 Value::Undefined => "undefined",

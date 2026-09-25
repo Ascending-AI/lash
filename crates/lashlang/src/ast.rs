@@ -1593,6 +1593,10 @@ pub enum JavaScriptUnaryOp {
     TypeOf,
     // `~`: ECMA-262's bitwise NOT over ToInt32 of the operand.
     BitNot,
+    /// ECMA-262 ToString: `String(value)` and a template substitution. It
+    /// asks an object for its primitive with the string hint, `toString`
+    /// first.
+    ToString,
 }
 
 impl JavaScriptUnaryOp {

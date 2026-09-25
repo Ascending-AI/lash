@@ -250,8 +250,8 @@ const PROBES: &[Probe] = &[
             "finish(typeof has);",
         ],
     ),
-    // 13. String coercion of a value whose only string is a type tag.
-    probe(13, "TS_OBJECT_STRING_COERCION", "finish('' + { a: 1 });"),
+    // A function has no primitive the runtime keeps (FIG-3652).
+    readme_probe("TS_FUNCTION_STRING_COERCION", "finish('' + (() => 1));"),
     // 23. A classic-loop `continue` across a `finally`.
     probe(
         23,

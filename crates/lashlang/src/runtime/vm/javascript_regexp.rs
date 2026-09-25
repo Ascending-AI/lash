@@ -301,11 +301,6 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 match args.get(1) {
                     None | Some(Value::Undefined) => (pattern, regexp.flags.clone()),
                     Some(Value::String(flags)) => (pattern, flags.to_string()),
-                    Some(flags) if self.heap.javascript_object_coercion_needs_guest(flags)? => {
-                        return Err(RuntimeError::ValidationFailed {
-                            reason: "TS_OBJECT_STRING_COERCION: ToString on an object with its own toString or valueOf would run guest code; pass a string flags argument".to_string(),
-                        });
-                    }
                     Some(flags) => (pattern, self.heap.javascript_to_string(flags)?),
                 }
             }
@@ -697,6 +692,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             ("replaceString", [input, search, replacement, all]) => {
                 let input = self.heap.javascript_to_string(input)?;
+                // ToString(searchValue) runs before ToString(replaceValue).
+                let search = match search {
+                    Value::Ref(id) if matches!(self.heap.get(*id)?, HeapObject::RegExp(_)) => {
+                        search.clone()
+                    }
+                    search => Value::String(self.heap.javascript_to_string(search)?.into()),
+                };
+                let search = &search;
                 let replacement = self.heap.javascript_to_string(replacement)?;
                 let Value::Bool(all) = all else {
                     return Err(js_stdlib_error("replace all discriminator must be boolean"));

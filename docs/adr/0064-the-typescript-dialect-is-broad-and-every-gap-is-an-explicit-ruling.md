@@ -67,6 +67,17 @@ differential generator and the enum oracle pin — and records the split where
 a `TS_*` code also covers shapes `tsc` accepts, with the ticket that owns
 each accepted shape.
 
+Amended 2026-09-25 (FIG-3652): converting a function to a primitive refuses
+as `TS_FUNCTION_STRING_COERCION`. ECMA-262 answers it with
+`Function.prototype.toString`'s source text, which the runtime does not keep.
+`tsc --strict` rejects the statically typed shapes: TS2362 and TS2363
+(arithmetic on a function), TS2365 (`+` with a number and a function) and
+TS2464 (a function as a computed key). A function typed `any`, or one put
+into a string, is an unsupported feature. The refusal replaces the host-boundary fault
+those paths raised. Register entry 13's refusal of string coercion for a
+plain object, a `Map` or a `Set` is retired in the same change: those are
+supported constructs, and they answer ECMA's type tags.
+
 ## Context
 
 ADR 0062 fixed the dialect's contract shape: everything accepted behaves
@@ -227,7 +238,6 @@ registration fails CI if a refusal stops firing.
 | TS2554 | `[1].map();` | `TS_METHOD_UNSUPPORTED` | validate |
 | TS2554 | `parseInt();` | `TS_EXPRESSION_UNSUPPORTED` | validate |
 | TS2554 | `new Map(1, 2);` | `TS_CONSTRUCTOR_UNSUPPORTED` | run time |
-| TS2365 | `const o = { a: 1 }; o + 1;` | `TS_OBJECT_STRING_COERCION` | run time |
 | TS7009 | `function F() { } new F();` | `TS_NEW_UNSUPPORTED` | validate |
 | TS2769 | `new RegExp(null);` | `TS_NEW_UNSUPPORTED` | validate |
 | TS2588 | `const v = 1; v = 2;` | `TS_ASSIGN_CONST` | validate |
@@ -261,10 +271,10 @@ its owner:
 - `TS_INSTANCEOF_UNSUPPORTED` also refuses right-hand sides `tsc` accepts
   (`o instanceof F`, `o instanceof WeakMap`): `instanceof` admits exactly
   the heap kinds the dialect has.
-- `TS_OBJECT_STRING_COERCION` also refuses the coercions `tsc` accepts —
-  `'' + o`, `String(o)`, `` `${o}` `` — which are FIG-3652's. Non-`+`
-  arithmetic on an object (`o - 1`, `tsc` TS2362) has no refusal at all:
-  it runs ECMA's ToNumber to `NaN`, so there is nothing to register.
+- `TS_OBJECT_STRING_COERCION` is retired (FIG-3652): the coercions `tsc`
+  accepts — `'' + o`, `String(o)`, `` `${o}` `` — and the TS2365 shape alike
+  now run ECMA's ToPrimitive, as does non-`+` arithmetic on an object
+  (`o - 1`, `tsc` TS2362), so there is nothing to register.
 - TS2554's counterparts are narrower than `tsc` in one direction too: an
   authored function called short (`function f(a, b) { } f(1);`) is not
   refused — ECMA supplies `undefined` — while every arity miss on the

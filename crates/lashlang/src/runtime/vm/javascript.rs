@@ -142,6 +142,14 @@ impl<H: ExecutionHost> Vm<'_, H> {
             let arguments = arguments.to_vec();
             return self.call_plain_object_method(resolved, &name, receiver, arguments);
         }
+        self.convert_guest_arguments(&mut values)?;
+        if let [Value::String(selector), key] = values.as_slice()
+            && selector.as_str() == "Lash.ToPropertyKey"
+        {
+            let key = self.heap.javascript_to_string(key)?;
+            self.stack.push(Value::String(key.into()));
+            return Ok(());
+        }
         // Whether a lowering that runs a built-in method as generated code must
         // instead call the receiver's own member: see above.
         if let [Value::String(selector), receiver, Value::String(method)] = values.as_slice()
@@ -452,6 +460,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         .collect(),
                 ),
                 HeapObject::Set(set) => Some(set.values.clone()),
+                // A shallow copy that keeps each element's identity, as
+                // Array.from does; exporting the array would copy its
+                // elements, and could not carry an element that holds a
+                // function.
+                HeapObject::List(items) | HeapObject::Tuple(items) => Some(items.clone()),
                 _ => None,
             };
             if let Some(output) = output {
@@ -1349,18 +1362,18 @@ pub(super) fn javascript_array_method(
         ("includes", [needle, from]) => array_includes(
             items,
             needle,
-            clamp_relative_index(search_index_argument(heap, from)?, items.len()),
+            clamp_relative_index(heap.javascript_to_number(from)?, items.len()),
         ),
         ("indexOf", [needle, from]) => array_index_of(
             items,
             needle,
-            clamp_relative_index(search_index_argument(heap, from)?, items.len()),
+            clamp_relative_index(heap.javascript_to_number(from)?, items.len()),
         ),
         ("lastIndexOf", [needle, Value::Undefined]) if argument_count < 2 => {
             array_last_index_of(items, needle, items.len())
         }
         ("lastIndexOf", [needle, from]) => {
-            last_index_exclusive(search_index_argument(heap, from)?, items.len())
+            last_index_exclusive(heap.javascript_to_number(from)?, items.len())
                 .map_or(Ok(Value::Number(-1.0)), |end| {
                     array_last_index_of(items, needle, end)
                 })

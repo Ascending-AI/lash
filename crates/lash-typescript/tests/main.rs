@@ -44,6 +44,8 @@ mod for_of_facets;
 mod global_this_reads;
 #[path = "grammar_coverage.rs"]
 mod grammar_coverage;
+#[path = "guest_coercion.rs"]
+mod guest_coercion;
 #[path = "mutable_captures.rs"]
 mod mutable_captures;
 #[path = "no_abort_guarantee.rs"]

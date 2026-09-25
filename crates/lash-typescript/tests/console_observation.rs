@@ -187,24 +187,16 @@ fn console_with_no_arguments_prints_an_empty_observation() {
 }
 
 #[test]
-fn string_concatenation_refuses_the_objects_with_no_string_of_their_own() {
+fn string_concatenation_gives_an_object_its_type_tag() {
     // The observation seam renders a plain object as JSON; `"" + obj`,
-    // `` `${obj}` `` and `String(obj)` all lower to `+`, which refuses rather
-    // than writing `[object Object]` into the cell's output (FIG-3166).
+    // `` `${obj}` `` and `String(obj)` are ECMA-262's string coercion, which
+    // answers `[object Object]` (FIG-3652).
     for source in [
         r#"console.log("" + { a: 1 });"#,
         "console.log(`${{ a: 1 }}`);",
         "console.log(String({ a: 1 }));",
     ] {
-        let program = lash_typescript::testing::compile(source).expect("TypeScript should compile");
-        let host = PrintHost::default();
-        let error =
-            futures::executor::block_on(lashlang::execute(&program, &mut State::new(), &host))
-                .expect_err("string coercion of a plain object refuses");
-        assert!(
-            format!("{error:?}").contains("TS_OBJECT_STRING_COERCION"),
-            "expected the object string-coercion refusal for {source}, got {error:?}"
-        );
+        assert_eq!(printed_line(source), "[object Object]", "{source}");
     }
     // Everything that has a string of its own still concatenates.
     assert_eq!(printed_line("console.log([1, 2].join(\",\"));"), "1,2");

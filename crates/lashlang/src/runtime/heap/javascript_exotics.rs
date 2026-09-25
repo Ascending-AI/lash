@@ -1,60 +1,8 @@
+use super::guest_coercion::{GuestPrimitive, PrimitiveHint};
 use super::*;
 use crate::runtime::{ProjectedFuture, javascript_to_number, javascript_to_string};
 
 pub(crate) const MAX_JAVASCRIPT_LENGTH: u64 = 9_007_199_254_740_991;
-
-/// What an object whose only ECMA string is a type tag — a plain object, a
-/// `Map`, a `Set` — answers when it is converted to a primitive.
-///
-/// ECMA-262 answers `"[object Object]"`, `"[object Map]"` and `"[object Set]"`.
-/// That text is the correct answer wherever something asked for the tag on
-/// purpose: a property key (`obj[{a: 1}]` reads the `"[object Object]"` slot),
-/// `console.log`'s fallback for a value with no JSON body, and an explicit
-/// `map.toString()`. It is a defect wherever a cell meant to render the value —
-/// `"" + result`, `` `${result}` `` and `String(result)` all lower to `+`, and
-/// all three drop everything the cell computed. FIG-3166 refuses those three
-/// rather than silently guessing a JSON body for them, because every other gap
-/// in this dialect is an explicit refusal with a stable code and because the
-/// refusal is what stops a cell finishing an unexamined tool result.
-///
-/// Every other conversion is untouched: arrays, `Date`, `Error`, `RegExp`,
-/// `URL` and the primitives keep their exact ECMA-262 strings under both
-/// variants, and a number-hinted conversion of a plain object is still `NaN`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum ObjectStringCoercion {
-    /// ECMA-262's type tag.
-    Ecma,
-    /// `TS_OBJECT_STRING_COERCION`.
-    Refuse,
-}
-
-impl ObjectStringCoercion {
-    /// `ecma` is the exact string ECMA-262 produces; `article` names the value
-    /// in the refusal ("a plain object", "a Map", "a Set"). `depth` is the
-    /// nesting level of the value: above the top level the value reached the
-    /// coercion as an element of a container, and the refusal says so, exactly
-    /// as the `Date` refusal beside it does.
-    fn string_or_refuse(
-        self,
-        ecma: &str,
-        article: &str,
-        depth: usize,
-    ) -> Result<Value, RuntimeError> {
-        match self {
-            Self::Ecma => Ok(Value::String(ecma.into())),
-            Self::Refuse => {
-                let site = if depth > 1 { " inside a container" } else { "" };
-                Err(RuntimeError::ValidationFailed {
-                    reason: format!(
-                        "TS_OBJECT_STRING_COERCION: string coercion of {article}{site} would \
-                         produce `{ecma}` and discard the value; examine it with console.log or \
-                         serialize it explicitly with JSON.stringify(value)"
-                    ),
-                })
-            }
-        }
-    }
-}
 
 /// The brand an error object carries: the `name` it reports, and — for the ECMA
 /// kinds — the one constructor besides `Error` that `instanceof` answers true
@@ -718,15 +666,10 @@ impl Heap {
         self.commit_object_update(id, object)
     }
 
-    /// Whether ECMA would coerce `value` through a guest-written method: a
-    /// plain object carrying its own callable `toString` or `valueOf` has no
-    /// substrate answer, because OrdinaryToPrimitive runs that method. Sites
-    /// that would otherwise silently coerce to a type tag or `NaN` check this
-    /// and refuse instead (FIG-3658).
-    pub(crate) fn javascript_object_coercion_needs_guest(
-        &self,
-        value: &Value,
-    ) -> Result<bool, RuntimeError> {
+    /// Whether ECMA's OrdinaryToPrimitive would run a guest-written method on
+    /// `value`: a plain object carrying its own callable `toString` or
+    /// `valueOf` (FIG-3652).
+    pub(crate) fn has_guest_primitive_hooks(&self, value: &Value) -> Result<bool, RuntimeError> {
         let record = match value {
             Value::Record(record) => Some(record.as_ref()),
             Value::Ref(id) => match self.get(*id)? {
@@ -752,12 +695,12 @@ impl Heap {
     /// OrdinaryToPrimitive's `TypeError`. A plain object whose own `toString`
     /// is not callable shadows `Object.prototype.toString`, and the
     /// `valueOf` it inherits answers the object itself, so no step yields a
-    /// primitive — unless an own callable `valueOf` does, which is guest code
-    /// that the callers of this conversion refuse before they get here.
+    /// primitive — unless an own callable `valueOf` does, which the guest
+    /// hooks then run.
     fn ensure_record_has_primitive(&self, record: &Record) -> Result<(), RuntimeError> {
         let callable = |name: &str| -> Result<bool, RuntimeError> {
             Ok(match record.get(name) {
-                Some(Value::Ref(id)) => matches!(self.get(*id)?, HeapObject::Closure { .. }),
+                Some(Value::Ref(id)) => self.get(*id)?.is_function(),
                 _ => false,
             })
         };
@@ -769,36 +712,68 @@ impl Heap {
         Ok(())
     }
 
-    /// This is the ECMA-exact conversion: an object with no string of its own
-    /// answers `"[object Object]"`. Property keys, `console.log`'s fallback
-    /// text and `Map.prototype.toString` all ask for exactly that. The string
-    /// *operators* ask for [`Self::javascript_to_primitive_for_string_operand`]
-    /// instead.
+    /// ECMA-262 ToString as `String(value)` and a template substitution run
+    /// it: the string hint.
+    pub(crate) fn javascript_to_string_for_output(
+        &self,
+        value: &Value,
+    ) -> Result<String, RuntimeError> {
+        let primitive = self.javascript_to_primitive_inner(
+            value,
+            &mut BTreeSet::new(),
+            1,
+            PrimitiveHint::String,
+        )?;
+        Ok(javascript_to_string(&primitive))
+    }
+
+    /// ToPrimitive with an explicit hint, answering ECMA's type tag for an
+    /// object with no string of its own.
+    pub(crate) fn javascript_to_primitive_with_hint(
+        &self,
+        value: &Value,
+        hint: PrimitiveHint,
+    ) -> Result<Value, RuntimeError> {
+        self.javascript_to_primitive_inner(value, &mut BTreeSet::new(), 1, hint)
+    }
+
+    /// ToPrimitive with an explicit hint of a value that is (or reaches) a
+    /// projected host binding.
+    pub(crate) fn javascript_to_primitive_with_hint_async<'a>(
+        &'a self,
+        value: &'a Value,
+        hint: PrimitiveHint,
+    ) -> ProjectedFuture<'a, Result<Value, RuntimeError>> {
+        Box::pin(async move {
+            self.javascript_to_primitive_inner_async(value, &mut BTreeSet::new(), 1, hint)
+                .await
+        })
+    }
+
+    /// A plain object's primitive: its guest hooks' answer when it has any,
+    /// else its type tag.
+    fn plain_object_primitive(
+        &self,
+        value: &Value,
+        hint: PrimitiveHint,
+    ) -> Result<Value, RuntimeError> {
+        if self.has_guest_primitive_hooks(value)? {
+            match self.guest_primitive(value, hint)? {
+                GuestPrimitive::Value(primitive) => return Ok(primitive),
+                GuestPrimitive::Tag => {}
+            }
+        }
+        Ok(Value::String("[object Object]".into()))
+    }
+
+    /// ECMA-262 ToPrimitive with the default hint: an object with no string
+    /// of its own answers its type tag (`"[object Object]"`), as
+    /// `Object.prototype.toString` does.
     pub(crate) fn javascript_to_primitive_string_or_number(
         &self,
         value: &Value,
     ) -> Result<Value, RuntimeError> {
-        self.javascript_to_primitive_inner(
-            value,
-            &mut BTreeSet::new(),
-            1,
-            ObjectStringCoercion::Ecma,
-        )
-    }
-
-    /// The same conversion for an operand of `+` — which is also what template
-    /// interpolation and `String(value)` lower to — refusing the objects whose
-    /// only ECMA string is a type tag (FIG-3166).
-    pub(crate) fn javascript_to_primitive_for_string_operand(
-        &self,
-        value: &Value,
-    ) -> Result<Value, RuntimeError> {
-        self.javascript_to_primitive_inner(
-            value,
-            &mut BTreeSet::new(),
-            1,
-            ObjectStringCoercion::Refuse,
-        )
+        self.javascript_to_primitive_inner(value, &mut BTreeSet::new(), 1, PrimitiveHint::Default)
     }
 
     pub(crate) fn javascript_coercion_contains_projected(
@@ -842,50 +817,23 @@ impl Heap {
         Ok(contains)
     }
 
-    pub(crate) fn javascript_to_primitive_string_or_number_async<'a>(
-        &'a self,
-        value: &'a Value,
-    ) -> ProjectedFuture<'a, Result<Value, RuntimeError>> {
-        self.javascript_to_primitive_async_with(value, ObjectStringCoercion::Ecma)
-    }
-
-    /// Async twin of [`Self::javascript_to_primitive_for_string_operand`], used
-    /// when an operand of `+` is (or reaches) a projected host binding.
-    pub(crate) fn javascript_to_primitive_for_string_operand_async<'a>(
-        &'a self,
-        value: &'a Value,
-    ) -> ProjectedFuture<'a, Result<Value, RuntimeError>> {
-        self.javascript_to_primitive_async_with(value, ObjectStringCoercion::Refuse)
-    }
-
-    fn javascript_to_primitive_async_with<'a>(
-        &'a self,
-        value: &'a Value,
-        objects: ObjectStringCoercion,
-    ) -> ProjectedFuture<'a, Result<Value, RuntimeError>> {
-        Box::pin(async move {
-            self.javascript_to_primitive_inner_async(value, &mut BTreeSet::new(), 1, objects)
-                .await
-        })
-    }
-
     fn javascript_to_primitive_inner_async<'a>(
         &'a self,
         value: &'a Value,
         active: &'a mut BTreeSet<HeapId>,
         depth: usize,
-        objects: ObjectStringCoercion,
+        hint: PrimitiveHint,
     ) -> ProjectedFuture<'a, Result<Value, RuntimeError>> {
         Box::pin(async move {
             super::ensure_value_depth(depth)?;
             match value {
                 Value::Projected(projected) => {
                     let materialized = projected.materialize_async().await?;
-                    self.javascript_to_primitive_inner_async(&materialized, active, depth, objects)
+                    self.javascript_to_primitive_inner_async(&materialized, active, depth, hint)
                         .await
                 }
                 Value::Tuple(values) | Value::List(values) => Ok(Value::String(
-                    self.javascript_sequence_string_async(values, active, depth, objects)
+                    self.javascript_sequence_string_async(values, active, depth)
                         .await?
                         .into(),
                 )),
@@ -894,8 +842,7 @@ impl Heap {
                         HeapObject::Tuple(values) | HeapObject::List(values) => values.as_slice(),
                         HeapObject::RegExpMatch(result) => result.items.as_slice(),
                         _ => {
-                            return self
-                                .javascript_to_primitive_inner(value, active, depth, objects);
+                            return self.javascript_to_primitive_inner(value, active, depth, hint);
                         }
                     };
                     if !active.insert(*id) {
@@ -905,13 +852,13 @@ impl Heap {
                         });
                     }
                     let result = self
-                        .javascript_sequence_string_async(values, active, depth, objects)
+                        .javascript_sequence_string_async(values, active, depth)
                         .await
                         .map(|value| Value::String(value.into()));
                     active.remove(id);
                     result
                 }
-                _ => self.javascript_to_primitive_inner(value, active, depth, objects),
+                _ => self.javascript_to_primitive_inner(value, active, depth, hint),
             }
         })
     }
@@ -921,7 +868,6 @@ impl Heap {
         values: &'a [Value],
         active: &'a mut BTreeSet<HeapId>,
         depth: usize,
-        objects: ObjectStringCoercion,
     ) -> ProjectedFuture<'a, Result<String, RuntimeError>> {
         Box::pin(async move {
             let mut strings = Vec::with_capacity(values.len());
@@ -936,7 +882,12 @@ impl Heap {
                     }
                     other => {
                         let primitive = self
-                            .javascript_to_primitive_inner_async(other, active, depth + 1, objects)
+                            .javascript_to_primitive_inner_async(
+                                other,
+                                active,
+                                depth + 1,
+                                PrimitiveHint::String,
+                            )
                             .await?;
                         javascript_to_string(&primitive)
                     }
@@ -948,7 +899,12 @@ impl Heap {
     }
 
     pub(crate) fn javascript_to_number(&self, value: &Value) -> Result<f64, RuntimeError> {
-        let primitive = self.javascript_to_primitive_string_or_number(value)?;
+        let primitive = self.javascript_to_primitive_inner(
+            value,
+            &mut BTreeSet::new(),
+            1,
+            PrimitiveHint::Number,
+        )?;
         Ok(javascript_to_number(&primitive))
     }
 
@@ -960,7 +916,12 @@ impl Heap {
                 date.milliseconds,
             ));
         }
-        let primitive = self.javascript_to_primitive_string_or_number(value)?;
+        let primitive = self.javascript_to_primitive_inner(
+            value,
+            &mut BTreeSet::new(),
+            1,
+            PrimitiveHint::String,
+        )?;
         Ok(javascript_to_string(&primitive))
     }
 
@@ -975,7 +936,7 @@ impl Heap {
         value: &Value,
         active: &mut BTreeSet<HeapId>,
         depth: usize,
-        objects: ObjectStringCoercion,
+        hint: PrimitiveHint,
     ) -> Result<Value, RuntimeError> {
         super::ensure_value_depth(depth)?;
         let object = match value {
@@ -992,28 +953,28 @@ impl Heap {
         };
         let primitive = match object.map(|(_, object)| object) {
             Some(HeapObject::Tuple(values) | HeapObject::List(values)) => Value::String(
-                self.javascript_sequence_string(values, active, depth, objects)?
+                self.javascript_sequence_string(values, active, depth)?
                     .into(),
             ),
             Some(HeapObject::RegExpMatch(result)) => Value::String(
-                self.javascript_sequence_string(&result.items, active, depth, objects)?
+                self.javascript_sequence_string(&result.items, active, depth)?
                     .into(),
             ),
             Some(HeapObject::Record(record)) => {
                 self.ensure_record_has_primitive(record)?;
-                objects.string_or_refuse("[object Object]", "a plain object", depth)?
+                self.plain_object_primitive(value, hint)?
             }
             // A Date's default ToPrimitive hint is string — unlike every other
             // object — so the `+`/`String()`/template conversion answers its
             // DateString, while the number-hinted coercion keeps the epoch.
-            Some(HeapObject::Date(date)) => match objects {
-                ObjectStringCoercion::Refuse => Value::String(
+            Some(HeapObject::Date(date)) => match hint {
+                PrimitiveHint::Number => Value::Number(date.milliseconds),
+                PrimitiveHint::Default | PrimitiveHint::String => Value::String(
                     crate::runtime::vm::javascript_date::date_to_string(date.milliseconds).into(),
                 ),
-                ObjectStringCoercion::Ecma => Value::Number(date.milliseconds),
             },
-            Some(HeapObject::Map(_)) => objects.string_or_refuse("[object Map]", "a Map", depth)?,
-            Some(HeapObject::Set(_)) => objects.string_or_refuse("[object Set]", "a Set", depth)?,
+            Some(HeapObject::Map(_)) => Value::String("[object Map]".into()),
+            Some(HeapObject::Set(_)) => Value::String("[object Set]".into()),
             Some(HeapObject::RegExp(regexp)) => Value::String(regexp_string(regexp).into()),
             Some(HeapObject::Error(error)) => Value::String(
                 match error
@@ -1030,26 +991,30 @@ impl Heap {
             Some(HeapObject::UrlSearchParams(params)) => {
                 Value::String(super::url_objects::serialize_params(&params.entries).into())
             }
+            // A function's string is its source text
+            // (Function.prototype.toString), which the dialect does not keep.
             Some(HeapObject::Closure { .. }) => {
-                return Err(RuntimeError::FunctionValueAtHostBoundary);
+                return Err(RuntimeError::ValidationFailed {
+                    reason: "TS_FUNCTION_STRING_COERCION: converting a function to a primitive needs its source text, which this runtime does not keep; call the function or compare it by identity".to_string(),
+                });
             }
-            // `Function.prototype.toString` of a built-in is ECMA's
-            // NativeFunction form, and the text node prints.
-            Some(HeapObject::BuiltinFunction(function)) => {
-                Value::String(format!("function {}() {{ [native code] }}", function.name()).into())
+            // A built-in function value used in a coercion is a function: the
+            // same refusal applies (FIG-3652, FIG-3701).
+            Some(HeapObject::BuiltinFunction(_)) => {
+                return Err(RuntimeError::ValidationFailed {
+                    reason: "TS_FUNCTION_STRING_COERCION: converting a function to a primitive needs its source text, which this runtime does not keep; call the function or compare it by identity".to_string(),
+                });
             }
             None => match value {
                 Value::Tuple(values) | Value::List(values) => Value::String(
-                    self.javascript_sequence_string(values, active, depth, objects)?
+                    self.javascript_sequence_string(values, active, depth)?
                         .into(),
                 ),
                 Value::Record(record) => {
                     self.ensure_record_has_primitive(record)?;
-                    objects.string_or_refuse("[object Object]", "a plain object", depth)?
+                    self.plain_object_primitive(value, hint)?
                 }
-                Value::Image(_) | Value::Resource(_) => {
-                    objects.string_or_refuse("[object Object]", "a plain object", depth)?
-                }
+                Value::Image(_) | Value::Resource(_) => Value::String("[object Object]".into()),
                 // A projected handle is a host-side view of a value, not an
                 // object of its own: coerce what is behind it.
                 Value::Projected(projected) => {
@@ -1057,7 +1022,7 @@ impl Heap {
                         &projected.materialize()?,
                         active,
                         depth,
-                        objects,
+                        hint,
                     );
                 }
                 other => other.clone(),
@@ -1076,7 +1041,6 @@ impl Heap {
         values: &[Value],
         active: &mut BTreeSet<HeapId>,
         depth: usize,
-        objects: ObjectStringCoercion,
     ) -> Result<String, RuntimeError> {
         values
             .iter()
@@ -1091,7 +1055,7 @@ impl Heap {
                     ))
                 }
                 other => self
-                    .javascript_to_primitive_inner(other, active, depth + 1, objects)
+                    .javascript_to_primitive_inner(other, active, depth + 1, PrimitiveHint::String)
                     .map(|primitive| javascript_to_string(&primitive)),
             })
             .collect::<Result<Vec<_>, _>>()

@@ -83,6 +83,12 @@ pub enum RuntimeError {
     /// Effects from callbacks require a resumable builtin protocol not yet present.
     #[error("effects are not supported inside builtin callbacks")]
     EffectInBuiltinCallback,
+    /// A coercion reached an object's own `valueOf`/`toString` (FIG-3652).
+    /// Internal to one instruction: the VM runs the hook through its call
+    /// path and reruns the instruction, so this reaches neither a guest
+    /// handler nor a host.
+    #[error("a guest ToPrimitive hook must run before this instruction completes")]
+    GuestCoercionPending,
     /// Active VM execution exceeded its explicit instruction budget.
     #[error("lashlang instruction budget of {limit} instructions exceeded")]
     InstructionBudgetExceeded { limit: u64 },
@@ -578,6 +584,9 @@ impl RuntimeError {
             Self::FunctionValueAtHostBoundary => ErrorTaxonomy::Catchable,
             Self::JavaScriptExoticAtHostBoundary { .. } => ErrorTaxonomy::Catchable,
             Self::EffectInBuiltinCallback => ErrorTaxonomy::Catchable,
+            // Never raised past its instruction; were it to escape, it is an
+            // invariant break, not a guest failure.
+            Self::GuestCoercionPending => ErrorTaxonomy::UncatchableTerminal,
             Self::InstructionBudgetExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
             Self::RegExpBudgetExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
             Self::ExecutionDeadlineExceeded { .. } => ErrorTaxonomy::UncatchableTerminal,
@@ -716,6 +725,7 @@ impl RuntimeError {
             Self::FunctionValueAtHostBoundary => "FunctionValueAtHostBoundary",
             Self::JavaScriptExoticAtHostBoundary { .. } => "JavaScriptExoticAtHostBoundary",
             Self::EffectInBuiltinCallback => "EffectInBuiltinCallback",
+            Self::GuestCoercionPending => "GuestCoercionPending",
             Self::InstructionBudgetExceeded { .. } => "InstructionBudgetExceeded",
             Self::RegExpBudgetExceeded { .. } => "RegExpBudgetExceeded",
             Self::ExecutionDeadlineExceeded { .. } => "ExecutionDeadlineExceeded",
@@ -1002,6 +1012,7 @@ mod tests {
             RuntimeError::FunctionValueAtHostBoundary,
             RuntimeError::JavaScriptExoticAtHostBoundary { kind: "Map".into() },
             RuntimeError::EffectInBuiltinCallback,
+            RuntimeError::GuestCoercionPending,
             RuntimeError::InstructionBudgetExceeded { limit: 10 },
             RuntimeError::RegExpBudgetExceeded { limit: 1_000_000 },
             RuntimeError::ExecutionDeadlineExceeded { limit_ms: 20 },
@@ -1326,6 +1337,9 @@ mod tests {
                 RuntimeError::EffectInBuiltinCallback => {
                     "effects are not supported inside builtin callbacks"
                 }
+                RuntimeError::GuestCoercionPending => {
+                    "a guest ToPrimitive hook must run before this instruction completes"
+                }
                 RuntimeError::InstructionBudgetExceeded { .. } => {
                     "lashlang instruction budget of 10 instructions exceeded"
                 }
@@ -1637,6 +1651,7 @@ mod tests {
     RuntimeError::FunctionValueAtHostBoundary => "FunctionValueAtHostBoundary",
     RuntimeError::JavaScriptExoticAtHostBoundary { .. } => "JavaScriptExoticAtHostBoundary",
     RuntimeError::EffectInBuiltinCallback => "EffectInBuiltinCallback",
+    RuntimeError::GuestCoercionPending => "GuestCoercionPending",
     RuntimeError::InstructionBudgetExceeded { .. } => "InstructionBudgetExceeded",
     RuntimeError::RegExpBudgetExceeded { .. } => "RegExpBudgetExceeded",
     RuntimeError::ExecutionDeadlineExceeded { .. } => "ExecutionDeadlineExceeded",

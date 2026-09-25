@@ -1240,7 +1240,10 @@ impl Lowerer {
             } => {
                 let mut value = LashExpr::String(quasis.first().map_or("", String::as_str).into());
                 for (index, expression) in expressions.iter().enumerate() {
-                    value = js_add(value, self.lower_expr(expression)?);
+                    value = js_add(
+                        value,
+                        js_unary(JavaScriptUnaryOp::ToString, self.lower_expr(expression)?),
+                    );
                     value = js_add(
                         value,
                         LashExpr::String(quasis.get(index + 1).map_or("", String::as_str).into()),

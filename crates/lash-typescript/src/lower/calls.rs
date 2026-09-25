@@ -350,7 +350,7 @@ impl Lowerer {
             .transpose()?;
         Ok(match (builtin, value) {
             (CoercionBuiltin::String, None) => LashExpr::String("".into()),
-            (CoercionBuiltin::String, Some(value)) => js_add(LashExpr::String("".into()), value),
+            (CoercionBuiltin::String, Some(value)) => js_unary(JavaScriptUnaryOp::ToString, value),
             (CoercionBuiltin::Number, None) => LashExpr::Number(0.0),
             (CoercionBuiltin::Number, Some(value)) => js_unary(JavaScriptUnaryOp::Plus, value),
             (CoercionBuiltin::Boolean, None) => LashExpr::Bool(false),

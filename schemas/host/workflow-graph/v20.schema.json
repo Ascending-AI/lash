@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/workflow-graph/v19",
+  "$id": "https://lash.dev/schemas/workflow-graph/v20",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
@@ -1208,14 +1208,25 @@
       "type": "string"
     },
     "JavaScriptUnaryOp": {
-      "enum": [
-        "Plus",
-        "Negate",
-        "Not",
-        "TypeOf",
-        "BitNot"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "Plus",
+            "Negate",
+            "Not",
+            "TypeOf",
+            "BitNot"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "ECMA-262 ToString: `String(value)` and a template substitution. It asks an object for its primitive with the string hint, `toString` first.",
+          "enum": [
+            "ToString"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "LabelMetadata": {
       "properties": {
@@ -2926,7 +2937,7 @@
     },
     "schema_version": {
       "enum": [
-        19
+        20
       ],
       "format": "uint32",
       "minimum": 0.0,
@@ -2946,6 +2957,6 @@
   ],
   "title": "WorkflowGraph",
   "type": "object",
-  "x-lash-schema-version": 19,
+  "x-lash-schema-version": 20,
   "x-lash-version-constant": "WORKFLOW_GRAPH_SCHEMA_VERSION"
 }
