@@ -1,6 +1,7 @@
 use super::*;
 use lash::SessionId;
 use lash::TurnId;
+use lash::rlm::RlmSendBuilderExt;
 
 // Coverage for `/api/admin/store-maintenance`: the two levers that bound
 // session-store growth, and — the point of the route — the destruction it
@@ -399,11 +400,11 @@ async fn store_maintenance_reclaims_only_unreferenced_attachments_inner() {
         .await
         .expect("open the reclamation test session");
     let output = session
-        .turn(input)
-        .turn_id(turn_id)
+        .send(input)
+        .id(turn_id)
         .require_finish()
         .expect("require deterministic finish")
-        .run()
+        .output()
         .await
         .expect("run the attachment turn");
     assert_eq!(output.final_value(), Some(&json!("attachment retained")));

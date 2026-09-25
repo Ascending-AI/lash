@@ -1027,9 +1027,9 @@ async fn stop_control_requests_after_step_and_abort_escalates_the_durable_record
             );
             assert_eq!(recorded.request.mode, lash::TurnCancelMode::AfterStep);
             session
-                .turn(lash::TurnInput::text("stop after the step"))
-                .turn_id("stop-mode-turn")
-                .run()
+                .send(lash::TurnInput::text("stop after the step"))
+                .id("stop-mode-turn")
+                .output()
                 .await
         },
     );

@@ -148,8 +148,8 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
             .expect("open tool control session");
 
         let cancelled = session
-            .turn(lash::TurnInput::text("cancel the action"))
-            .run()
+            .send(lash::TurnInput::text("cancel the action"))
+            .output()
             .await
             .expect("run cancellation turn")
             .result;
@@ -175,8 +175,8 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
         );
 
         let finished = session
-            .turn(lash::TurnInput::text("finish from the tool"))
-            .run()
+            .send(lash::TurnInput::text("finish from the tool"))
+            .output()
             .await
             .expect("run tool finish turn")
             .result;
@@ -188,8 +188,8 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
         ));
 
         let failed = session
-            .turn(lash::TurnInput::text("reject from the tool"))
-            .run()
+            .send(lash::TurnInput::text("reject from the tool"))
+            .output()
             .await
             .expect("run tool failure turn")
             .result;

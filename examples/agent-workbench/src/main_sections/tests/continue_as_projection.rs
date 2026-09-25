@@ -1,5 +1,6 @@
 use super::*;
 use lash::TurnId;
+use lash::rlm::RlmSendBuilderExt;
 
 #[tokio::test]
 async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_task() {
@@ -65,11 +66,11 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
         .expect("open multi-frame session");
     let initial_turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let initial_output = session
-        .turn(lash::TurnInput::text(initial_prompt))
-        .turn_id(initial_turn_id.clone())
+        .send(lash::TurnInput::text(initial_prompt))
+        .id(initial_turn_id.clone())
         .require_finish()
         .expect("require initial finish")
-        .stream_to(&ChannelTurnEvents {
+        .output_into(&ChannelTurnEvents {
             turn_state: Arc::clone(&initial_turn_state),
         })
         .await
@@ -124,11 +125,11 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
         .expect("reopen final follow frame");
     let ordinary_turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let ordinary_output = session
-        .turn(lash::TurnInput::text(ordinary_prompt))
-        .turn_id(ordinary_turn_id.clone())
+        .send(lash::TurnInput::text(ordinary_prompt))
+        .id(ordinary_turn_id.clone())
         .require_finish()
         .expect("require ordinary follow-frame finish")
-        .stream_to(&ChannelTurnEvents {
+        .output_into(&ChannelTurnEvents {
             turn_state: Arc::clone(&ordinary_turn_state),
         })
         .await
@@ -340,11 +341,11 @@ async fn continue_as_frame_switch_keeps_committed_user_rows_in_api_and_transcrip
     );
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let output = session
-        .turn(lash::TurnInput::text(switch_prompt))
-        .turn_id(switch_turn_id)
+        .send(lash::TurnInput::text(switch_prompt))
+        .id(switch_turn_id)
         .require_finish()
         .expect("require switched-frame finish")
-        .stream_to(&ChannelTurnEvents {
+        .output_into(&ChannelTurnEvents {
             turn_state: Arc::clone(&turn_state),
         })
         .await
@@ -519,11 +520,11 @@ async fn a_frame_switch_keeps_sends_the_workbench_never_saw_commit() {
     );
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let output = session
-        .turn(lash::TurnInput::text(switch_prompt))
-        .turn_id(switch_turn_id)
+        .send(lash::TurnInput::text(switch_prompt))
+        .id(switch_turn_id)
         .require_finish()
         .expect("require unobserved-commit finish")
-        .stream_to(&ChannelTurnEvents {
+        .output_into(&ChannelTurnEvents {
             turn_state: Arc::clone(&turn_state),
         })
         .await

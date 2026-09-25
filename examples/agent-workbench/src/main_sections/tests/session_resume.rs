@@ -1,4 +1,5 @@
 use super::*;
+use lash::rlm::RlmSendBuilderExt;
 
 #[test]
 fn committed_transcript_and_provider_history_survive_web_process_reconstruction() {
@@ -66,11 +67,11 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         ("resume-turn-two", "resume question two"),
     ] {
         let output = first_session
-            .turn(lash::TurnInput::text(text))
-            .turn_id(turn_id)
+            .send(lash::TurnInput::text(text))
+            .id(turn_id)
             .require_finish()
             .expect("require finish")
-            .run()
+            .output()
             .await
             .expect("commit pre-restart turn");
         crate::commit_assistant_transcript(
@@ -287,11 +288,11 @@ async fn committed_transcript_and_provider_history_survive_web_process_reconstru
         .await
         .expect("open resumed session");
     let resumed_output = resumed_session
-        .turn(lash::TurnInput::text("resume question three"))
-        .turn_id("resume-turn-three")
+        .send(lash::TurnInput::text("resume question three"))
+        .id("resume-turn-three")
         .require_finish()
         .expect("require resumed finish")
-        .run()
+        .output()
         .await
         .expect("commit resumed turn");
     crate::commit_assistant_transcript(

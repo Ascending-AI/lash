@@ -1,6 +1,7 @@
 use super::*;
 use lash::SessionId;
 use lash::TurnId;
+use lash::rlm::RlmSendBuilderExt;
 
 /// One turn through the workbench's own session-opening path.
 ///
@@ -24,11 +25,11 @@ pub(crate) async fn run_turn_through_the_workbench_open_path(
         turn_state: Arc::clone(&turn_state),
     };
     session
-        .turn(lash::TurnInput::text(text))
-        .turn_id(turn_id.to_string())
+        .send(lash::TurnInput::text(text))
+        .id(turn_id.to_string())
         .require_finish()
         .expect("require finish")
-        .stream_to(&ui_events)
+        .output_into(&ui_events)
         .await
         .expect("run the turn");
 }

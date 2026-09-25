@@ -89,10 +89,10 @@ async fn run_fixture() -> Result<ValidEmptyReport, String> {
             .await
             .map_err(|error| error.to_string())?;
         let output = session
-            .turn(lash::TurnInput::text(
+            .send(lash::TurnInput::text(
                 "Complete successfully without producing assistant content.",
             ))
-            .run()
+            .output()
             .await
             .map_err(|error| error.to_string())?;
 
