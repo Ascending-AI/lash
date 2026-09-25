@@ -61,7 +61,9 @@ pub use lash_core_ids::perf_witness;
 /// The module lives in `lash-core-llm`; this facade re-exports its public
 /// surface unchanged and keeps the crate-internal helper crate-internal.
 pub mod provider {
-    pub(crate) use lash_core_llm::core_internal::synthetic_terminal_call_record;
+    pub(crate) use lash_core_llm::core_internal::{
+        call_id_for_scope, synthetic_terminal_call_record,
+    };
     pub use lash_core_llm::provider::*;
 }
 pub mod runtime;

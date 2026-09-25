@@ -854,6 +854,7 @@ fn task_join_failure_constructor_records_a_real_interrupted_attempt() {
         .with_lash_code(TurnFailureCode::TaskJoinFailed)
         .with_retry_verdict(TransportRetryVerdict::NotRetryable);
     let record = synthetic_terminal_call_record(
+        LlmCallId("task-join-call".to_string()),
         7,
         Duration::from_millis(11),
         AttemptOutcome::Interrupted,
@@ -863,6 +864,7 @@ fn task_join_failure_constructor_records_a_real_interrupted_attempt() {
         Vec::new(),
     );
 
+    assert_eq!(record.call_id, LlmCallId("task-join-call".to_string()));
     assert_eq!(record.attempts.len(), 1);
     assert_eq!(record.attempts[0].ordinal, 1);
     assert_eq!(record.attempts[0].outcome, AttemptOutcome::Interrupted);
@@ -877,6 +879,28 @@ fn task_join_failure_constructor_records_a_real_interrupted_attempt() {
             .and_then(|error| error.code.as_ref()),
         Some(&TurnFailureCode::TaskJoinFailed.into())
     );
+}
+
+#[tokio::test]
+async fn call_id_derives_from_the_request_scope() {
+    let mut handle = ProviderHandle::new(MutatingProvider::default().into_components());
+
+    let request = empty_request();
+    let first = handle
+        .complete(request.clone())
+        .await
+        .expect("first completion");
+    let second = handle.complete(request).await.expect("second completion");
+    assert_eq!(first.call_record.call_id, second.call_record.call_id);
+    assert_eq!(
+        first.call_record.call_id,
+        LlmCallId("provider-test:request".to_string())
+    );
+
+    let mut other = empty_request();
+    other.scope.request_id = "provider-test:other-request".to_string();
+    let third = handle.complete(other).await.expect("third completion");
+    assert_ne!(third.call_record.call_id, first.call_record.call_id);
 }
 
 #[tokio::test]

@@ -17146,8 +17146,7 @@
         "serde_json",
         "thiserror",
         "tokio",
-        "tracing",
-        "uuid"
+        "tracing"
       ],
       "doc": "//crates/lash-core-llm:lash-core-llm__doc",
       "manifest": "crates/lash-core-llm/Cargo.toml",
