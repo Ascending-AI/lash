@@ -57,10 +57,10 @@ use drain_barrier::blocking_positions;
 pub(crate) use drain_barrier::{drained_wait_lifted, drained_wait_request};
 use group_waits::{resolve_group_wait, seal_cancel_decisions, wait_resolution};
 pub(crate) use protocol::EFFECT_GROUP_STATE_FORMATS;
-pub(crate) use protocol::protocol_refusal_in;
-#[cfg(test)]
-pub(crate) use protocol::protocol_retired_error;
-pub use protocol::{EFFECT_GROUP_INDEX_PROTOCOL_VERSION, EFFECT_GROUP_STATE_FORMAT_VERSION};
+pub use protocol::{
+    EFFECT_GROUP_DISPATCH_JOURNAL_VERSION, EFFECT_GROUP_STATE_FORMAT_VERSION,
+    EFFECT_GROUP_WIRE_VERSION,
+};
 use protocol::{load_index, load_index_shared};
 pub(crate) use reopen::{content_checked_shape_mismatch, content_mismatch};
 pub(crate) use wire::btree_map_as_pairs;
@@ -558,7 +558,6 @@ impl EffectGroupIndex {
             store_index(
                 &ctx,
                 EffectGroupIndexRecord {
-                    protocol_version: EFFECT_GROUP_INDEX_PROTOCOL_VERSION,
                     shape_digest,
                     lifecycle: EffectGroupLifecycle::Preparing {
                         dispatch: EffectGroupDispatchState::Unadopted,

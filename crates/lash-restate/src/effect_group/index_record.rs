@@ -168,9 +168,6 @@ pub struct EffectGroupIndexLiveRecord {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct EffectGroupIndexRecord {
-    /// The effect-group index protocol version that wrote this record; a
-    /// handler refuses any other before it acts (see [`super::protocol`]).
-    pub(crate) protocol_version: u32,
     pub(crate) shape_digest: String,
     pub(crate) lifecycle: EffectGroupLifecycle,
 }
@@ -209,7 +206,6 @@ impl EffectGroupIndexRecord {
 #[test]
 fn completed_retirement_index_serializes_as_tombstone_only() {
     let record = EffectGroupIndexRecord {
-        protocol_version: EFFECT_GROUP_INDEX_PROTOCOL_VERSION,
         shape_digest: "shape-digest".to_owned(),
         lifecycle: EffectGroupLifecycle::Retired {
             cleanup: EffectGroupCleanup::Complete,
@@ -219,7 +215,6 @@ fn completed_retirement_index_serializes_as_tombstone_only() {
     assert_eq!(
         serde_json::to_value(record).expect("serialize completed retirement tombstone"),
         serde_json::json!({
-            "protocol_version": EFFECT_GROUP_INDEX_PROTOCOL_VERSION,
             "shape_digest": "shape-digest",
             "lifecycle": {
                 "type": "retired",
@@ -233,7 +228,6 @@ fn completed_retirement_index_serializes_as_tombstone_only() {
 #[test]
 fn retired_index_live_read_is_a_typed_terminal_error() {
     let record = EffectGroupIndexRecord {
-        protocol_version: EFFECT_GROUP_INDEX_PROTOCOL_VERSION,
         shape_digest: "shape-digest".to_owned(),
         lifecycle: EffectGroupLifecycle::Retired {
             cleanup: EffectGroupCleanup::Complete,

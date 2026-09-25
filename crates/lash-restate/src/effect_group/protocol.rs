@@ -10,7 +10,10 @@
 
 use super::*;
 
-/// The version of the Restate effect-group index protocol this build speaks.
+/// The version of the wire the group's handlers speak: the request and
+/// response shapes callers exchange with them (ADR 0106 §3, FIG-3814). The
+/// stored record's format is [`EFFECT_GROUP_STATE_FORMAT_VERSION`] — a wire
+/// move that does not move the record bumps this alone.
 ///
 /// 2: the close and the retirement release their cancel-decided wait
 /// children's waits, and admission answers such a child `CancelDecided`
@@ -19,7 +22,13 @@ use super::*;
 /// refuses a caller's read of a group closed to it (FIG-3676).
 /// 4: a recorded settlement ends the child's cancel wait as `Settled`, which
 /// the child's dispatch invocation reads as no cancel (FIG-3709).
-pub const EFFECT_GROUP_INDEX_PROTOCOL_VERSION: u32 = 4;
+pub const EFFECT_GROUP_WIRE_VERSION: u32 = 4;
+
+/// The version of what the dispatch workflow journals: its
+/// `EffectGroupDispatchRequest` input and the `ctx.run` outputs a replay
+/// trusts. A replayed journal belongs to the generation that wrote it, so
+/// this is a drain surface, not a stamped one.
+pub const EFFECT_GROUP_DISPATCH_JOURNAL_VERSION: u32 = 4;
 
 /// The stored format the group index's retained record stamps into its
 /// object-state envelope. Bump it when the record's stored shape changes;
@@ -60,40 +69,12 @@ pub(crate) fn decode_index_state(
     object_state::decode_stamped_value(group_key, state, &EFFECT_GROUP_STATE_FORMATS)
 }
 
-/// The typed refusal of index state written under another protocol version.
-pub(crate) fn protocol_retired_error(
-    group_key: &str,
-    stamped: Option<u64>,
-) -> RuntimeEffectControllerError {
-    let found = stamped.map_or_else(
-        || "no protocol version".to_string(),
-        |v| format!("protocol version {v}"),
-    );
-    RuntimeEffectControllerError::new(
-        RuntimeErrorCode::EngineEffectGroupProtocolRetired,
-        format!(
-            "effect group {group_key} index state carries {found}; this deployment speaks \
-             effect-group protocol version {EFFECT_GROUP_INDEX_PROTOCOL_VERSION} and refuses it \
-             before any effect. The group's state must be recreated under this version."
-        ),
-    )
-}
-
-/// The typed protocol refusal an index handler's terminal error carries, if
-/// that is what `message` is.
-pub(crate) fn protocol_refusal_in(message: &str) -> Option<RuntimeEffectControllerError> {
-    serde_json::from_str::<RuntimeEffectControllerError>(message)
-        .ok()
-        .filter(|error| error.code == RuntimeErrorCode::EngineEffectGroupProtocolRetired)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
     fn record_state(format: Option<u16>) -> serde_json::Value {
         let body = serde_json::to_value(EffectGroupIndexRecord {
-            protocol_version: EFFECT_GROUP_INDEX_PROTOCOL_VERSION,
             shape_digest: "shape-digest".to_owned(),
             lifecycle: EffectGroupLifecycle::Retired {
                 cleanup: EffectGroupCleanup::Complete,
