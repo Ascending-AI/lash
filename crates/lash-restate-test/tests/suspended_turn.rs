@@ -369,10 +369,13 @@ impl Turn {
 
     /// Whether the invocation `view` reports is parked: it can make no
     /// progress until the server moves time or feeds it. A live attempt
-    /// that is blocked on the server is parked; so is any invocation that
-    /// is not running at all (suspended, waiting on a timer). A held
-    /// redrive parks on the test's hold rather than on the server, so it
-    /// never reads parked this way — callers that count it must say so.
+    /// whose open input the SDK waits on is parked; so is any invocation
+    /// that is not running at all (suspended, waiting on a timer). An
+    /// attempt whose input the server has closed but whose task has not
+    /// drained the close yet is not parked — it still has the suspension
+    /// to run. A held redrive parks on the test's hold rather than on the
+    /// server, so it never reads parked this way — callers that count it
+    /// must say so.
     fn is_parked(view: &lash_restate_test::InvocationView) -> bool {
         view.status != "running" || view.blocked_on_server == Some(true)
     }
@@ -498,7 +501,9 @@ async fn a_child_attempt_after_its_turn_was_suspended_still_finishes_the_turn() 
     }
     // Idle past the inactivity timeout: the turn, waiting on its child's
     // settlement, is suspended. The child is inside its tool call, not
-    // waiting on the server, so it keeps running.
+    // waiting on the server, so it keeps running. The advance counts only
+    // once the turn's task has parked on its input, so wait for that first.
+    turn.turn_parked().await;
     turn.backend.server().advance(Duration::from_secs(61));
     turn.turn_suspended().await;
     // The child's attempt dies, and the one that replaces it starts while
@@ -538,6 +543,7 @@ async fn a_batch_child_with_no_live_turn_records_its_nested_events_for_the_turn(
     while turn.executions.load(Ordering::SeqCst) == 0 {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
+    turn.turn_parked().await;
     turn.backend.server().advance(Duration::from_secs(61));
     turn.turn_suspended().await;
     assert!(turn.backend.server().crash(&child), "the child is running");
@@ -704,7 +710,12 @@ async fn a_rebuilt_childs_tool_sees_its_turns_durable_cancel_as_its_token() {
         }
         turn.backend.server().advance(Duration::from_secs(61));
     }
-    assert!(suspended, "the turn is suspended");
+    assert!(
+        suspended,
+        "the turn is suspended: {:?}\ntimers: {:?}",
+        turn.backend.server().invocations(),
+        turn.backend.server().timers()
+    );
     assert!(turn.backend.server().crash(&child), "the child is running");
     let server = turn.backend.server().clone();
     let ticker = tokio::spawn(async move {
