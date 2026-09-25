@@ -1,0 +1,13 @@
+# Corpus programs the lens printer refuses, typed (FIG-3599). Each row names
+# the program, the exact refusal and why the printer cannot spell it. A row
+# whose program now round-trips, or whose refusal changed, fails the law
+# until it is deleted or corrected.
+# program id	refusal	reason
+differential:FIG-3732:1	cannot render a classic for head that is neither one declaration list nor one expression as TypeScript	a binding-pattern declaration head lowers to a statement sequence (materialize, slice, bind), which the lens printer does not re-sugar into one declaration
+differential:FIG-3732:2	cannot render a classic for head that is neither one declaration list nor one expression as TypeScript	a binding-pattern declaration head lowers to a statement sequence (materialize, slice, bind), which the lens printer does not re-sugar into one declaration
+differential:FIG-3732:3	cannot render a classic for head that is neither one declaration list nor one expression as TypeScript	a binding-pattern declaration head lowers to a statement sequence (materialize, slice, bind), which the lens printer does not re-sugar into one declaration
+differential:FIG-3732:4	cannot render a classic for head that is neither one declaration list nor one expression as TypeScript	a binding-pattern declaration head lowers to a statement sequence (materialize, slice, bind), which the lens printer does not re-sugar into one declaration
+differential:FIG-3732:5	generated binding `__typescript_0_array_pattern` has no authored TypeScript spelling	an array pattern materializes its iterable through a generated temporary, which has no authored spelling
+differential:FIG-3732:6	generated binding `__typescript_0_array_pattern` has no authored TypeScript spelling	an array pattern materializes its iterable through a generated temporary, which has no authored spelling
+differential:FIG-3732:7	generated binding `__typescript_0_array_pattern` has no authored TypeScript spelling	an array pattern materializes its iterable through a generated temporary, which has no authored spelling
+differential:FIG-3732:8	generated binding `__typescript_0_array_pattern` has no authored TypeScript spelling	an array pattern materializes its iterable through a generated temporary, which has no authored spelling

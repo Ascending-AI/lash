@@ -344,9 +344,16 @@ pub(crate) fn read_javascript_index_direct_with_key(
         return Err(error);
     }
     match target {
-        Value::List(values) | Value::Tuple(values) => Ok(javascript_array_index_key(key)
-            .and_then(|index| values.get(index).cloned())
-            .unwrap_or(Value::Undefined)),
+        Value::List(values) | Value::Tuple(values) => Ok(if key == "length" {
+            // `length` is the one own non-index property a dense array has:
+            // `in` and `hasOwn` already count it and the field read serves
+            // it, so the index read answers it too.
+            Value::Number(values.len() as f64)
+        } else {
+            javascript_array_index_key(key)
+                .and_then(|index| values.get(index).cloned())
+                .unwrap_or(Value::Undefined)
+        }),
         Value::String(value) => {
             let Some(index) = javascript_array_index_key(key) else {
                 return Ok(Value::Undefined);
@@ -820,6 +827,9 @@ pub(crate) fn read_javascript_heap_index(
         return Err(error);
     }
     Ok(match heap.get(id)? {
+        HeapObject::List(values) | HeapObject::Tuple(values) if key == "length" => {
+            Value::Number(values.len() as f64)
+        }
         HeapObject::List(values) | HeapObject::Tuple(values) => javascript_array_index_key(&key)
             .and_then(|index| values.get(index).cloned())
             .unwrap_or(Value::Undefined),
