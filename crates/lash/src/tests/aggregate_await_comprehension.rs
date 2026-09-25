@@ -102,8 +102,8 @@ async fn delivered_orders_printed_by(cell: &str) -> Result<(String, usize)> {
     let session = core.session("fig2764-comprehension").open().await?;
     let events = RecordingEvents::default();
     let result = session
-        .turn(TurnInput::text("which orders were delivered?"))
-        .stream_to(&events)
+        .send(TurnInput::text("which orders were delivered?"))
+        .output_into(&events)
         .await?;
     assert!(
         matches!(

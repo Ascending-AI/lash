@@ -10,13 +10,14 @@ pub(super) async fn turn_stream_finish_returns_committed_assistant_prose() -> Re
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("turn-stream-last-group").open().await?;
-    let mut stream = session.turn(TurnInput::text("stream groups")).stream()?;
+    let handle = session.send(TurnInput::text("stream groups")).await?;
+    let mut stream = handle.events();
 
     let mut activities = Vec::new();
     while let Some(activity) = stream.next_activity().await {
         activities.push(activity?);
     }
-    let result = stream.finish().await?;
+    let result = handle.output().await?.result;
 
     assert_eq!(assistant_prose(&activities), "firstsecond");
     assert_eq!(result.assistant_message(), Some("first\n\nsecond"));
@@ -37,7 +38,7 @@ pub(super) async fn turn_run_collects_activities_and_returns_committed_assistant
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("turn-run-last-group").open().await?;
 
-    let collected = session.turn(TurnInput::text("run groups")).run().await?;
+    let collected = session.send(TurnInput::text("run groups")).output().await?;
 
     assert_eq!(assistant_prose(&collected.activities), "firstsecond");
     assert_eq!(
@@ -64,8 +65,8 @@ pub(super) async fn retry_status_streams_as_semantic_turn_event() -> Result<()> 
     let events = RecordingEvents::default();
 
     let result = session
-        .turn(TurnInput::text("hello"))
-        .stream_to(&events)
+        .send(TurnInput::text("hello"))
+        .output_into(&events)
         .await?;
 
     assert!(matches!(
@@ -100,9 +101,9 @@ pub(super) async fn control_turn_accepts_prebuilt_turn_input() -> Result<()> {
     let session = core.session("raw-turn").open().await?;
 
     let result = session
-        .turn(TurnInput::text("raw input"))
-        .turn_id("host-trace-id")
-        .run()
+        .send(TurnInput::text("raw input"))
+        .id("host-trace-id")
+        .output()
         .await?;
 
     assert_eq!(assistant_prose(&result.activities), "echo: raw input");
@@ -371,7 +372,7 @@ pub(super) async fn next_turn_notification_during_a_live_turn_has_bounded_hydrat
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("queued-work-live-lease").open().await?;
     let entered = first_entered.notified();
-    let foreground = session.turn(TurnInput::text("foreground turn")).stream()?;
+    let foreground = session.send(TurnInput::text("foreground turn")).await?;
     entered.await;
     let baseline_builds = builds.load(Ordering::SeqCst);
 
@@ -395,7 +396,7 @@ pub(super) async fn next_turn_notification_during_a_live_turn_has_bounded_hydrat
 
     release_first.add_permits(1);
     let foreground_result =
-        tokio::time::timeout(std::time::Duration::from_secs(2), foreground.finish())
+        tokio::time::timeout(std::time::Duration::from_secs(2), foreground.output())
             .await
             .expect("foreground turn completes after release");
     match foreground_result {
@@ -689,14 +690,14 @@ pub(super) async fn cancel_running_turns_sweeps_lock_queued_turns() -> Result<()
     .expect("core");
     let session = core.session("cancel-lock-queue").open().await?;
 
-    let first = session.turn(TurnInput::text("hang one")).stream()?;
+    let first = session.send(TurnInput::text("hang one")).await?;
     started_rx.await.expect("first turn reached the provider");
-    let second = session.turn(TurnInput::text("hang two")).stream()?;
+    let second = session.send(TurnInput::text("hang two")).await?;
 
     assert_eq!(session.cancel_running_turns(), 2);
 
-    let first = first.finish().await?;
-    let second = second.finish().await?;
+    let first = first.output().await?.result;
+    let second = second.output().await?.result;
     assert!(matches!(
         first.outcome,
         TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
@@ -726,21 +727,21 @@ pub(super) async fn cancel_running_turns_does_not_cross_separately_opened_handle
     let handle_a = core.session("cancel-scope").open().await?;
     let handle_b = core.session("cancel-scope").open().await?;
 
-    let hanging = handle_a.turn(TurnInput::text("hang here")).stream()?;
+    let hanging = handle_a.send(TurnInput::text("hang here")).await?;
     started_rx.await.expect("turn reached the provider");
 
     // The other handle has its own registry: nothing to cancel there.
     assert_eq!(handle_b.cancel_running_turns(), 0);
     assert_eq!(handle_a.cancel_running_turns(), 1);
 
-    let result = hanging.finish().await?;
+    let result = hanging.output().await?.result;
     assert!(matches!(
         result.outcome,
         TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
     ));
 
     // The untouched handle keeps working.
-    let output = handle_b.turn(TurnInput::text("plain")).run().await?;
+    let output = handle_b.send(TurnInput::text("plain")).output().await?;
     assert_eq!(output.assistant_message(), Some("echo: plain"));
     Ok(())
 }
@@ -765,16 +766,16 @@ pub(super) async fn a_local_stop_commits_the_request_it_was_forwarded_as() -> Re
     let session = core.session("provider-abort-evidence").open().await?;
 
     let hanging = session
-        .turn(TurnInput::text("hang here"))
-        .turn_id("abort-evidence-turn")
-        .stream()?;
+        .send(TurnInput::text("hang here"))
+        .id("abort-evidence-turn")
+        .await?;
     started_rx.await.expect("turn reached the provider");
     assert_eq!(
         session.cancel_running_turns_with_origin(Some("user".to_string())),
         1
     );
 
-    let result = hanging.finish().await?;
+    let result = hanging.output().await?.result;
     let evidence = result
         .cancellation()
         .expect("a cancelled turn names the request that stopped it");
@@ -850,10 +851,10 @@ pub(super) async fn assert_session_turn_cancel_disposition(
     .without_queued_work()
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
-    let stream = session
-        .turn(TurnInput::text("hang until session cancellation"))
-        .turn_id(turn_id)
-        .stream()?;
+    let handle = session
+        .send(TurnInput::text("hang until session cancellation"))
+        .id(turn_id)
+        .await?;
     started_rx.await.expect("turn reached the provider");
 
     let undelivered = session
@@ -893,7 +894,7 @@ pub(super) async fn assert_session_turn_cancel_disposition(
             if evidence.request_id == request_id && evidence.undelivered == disposition
     ));
 
-    let interrupted = stream.finish().await?;
+    let interrupted = handle.output().await?.result;
     assert!(matches!(
         interrupted.outcome,
         TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
@@ -1322,10 +1323,10 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
             "active input must be one normal committed transcript message"
         );
         session
-            .turn(TurnInput::text("later turn input"))
-            .turn_id("rlm-later-turn")
+            .send(TurnInput::text("later turn input"))
+            .id("rlm-later-turn")
             .require_finish()?
-            .run()
+            .output()
             .await?;
 
         let requests = requests.lock_recover().clone();
@@ -1386,7 +1387,7 @@ pub(super) async fn run_collects_ordered_assistant_prose_activity() -> Result<()
     let core = standard_core().await;
     let session = core.session("main").open().await?;
 
-    let result = session.turn(TurnInput::text("visible")).run().await?;
+    let result = session.send(TurnInput::text("visible")).output().await?;
 
     assert_eq!(assistant_prose(&result.activities), "echo: visible");
     assert!(
@@ -1435,8 +1436,8 @@ pub(super) async fn core_catalog_and_actual_turn_resolve_the_identical_contract(
     tools.take_resolved();
 
     let output = session
-        .turn(TurnInput::text("use the lookup tool"))
-        .run()
+        .send(TurnInput::text("use the lookup tool"))
+        .output()
         .await?;
 
     assert!(output.is_success());
@@ -1575,7 +1576,7 @@ pub(super) fn turn_run_batch_tool_runs_every_call_concurrently_and_preserves_ord
         .build(crate::testing::runtime_lease_owner())?;
         let session = core.session("runtime-batch-tool-order").open().await?;
 
-        let output = session.turn(TurnInput::text("run batch")).run().await?;
+        let output = session.send(TurnInput::text("run batch")).output().await?;
 
         assert_eq!(output.assistant_message(), Some("done"));
         let batch_completed = output
@@ -1645,7 +1646,7 @@ pub(super) fn batch_child_tool_calls_carry_parent_call_id_linkage() -> Result<()
             .build(crate::testing::runtime_lease_owner())?;
             let session = core.session("batch-child-parent-linkage").open().await?;
 
-            let output = session.turn(TurnInput::text("run batch")).run().await?;
+            let output = session.send(TurnInput::text("run batch")).output().await?;
 
             // The batch container call itself is a top-level standard-mode call: no
             // parent linkage and no code-block graph key.
