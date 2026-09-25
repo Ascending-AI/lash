@@ -716,6 +716,25 @@ mod on_the_server_double {
         (harness, prefix, effect_host, stores, turn_runner)
     });
 
+    // L-S8: a fresh execution of a started root is SubstrateLost. Every run
+    // of the probe runner is a fresh invocation, so its second run of the
+    // same admission is the fresh execution.
+    lash_conformance::root_start_marker_tests!(
+        #[ignore = "parked: no root start marker yet; a fresh execution re-seals its admission and re-runs the root (FIG-3815: root start marker)"]
+        {
+            let harness =
+                LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process())
+                    .await;
+            let effect_host = harness.endpoint_host();
+            let turn_runner = harness.turn_runner();
+            let stores = harness.law_stores();
+            let prefix: &'static str = Box::leak(
+                format!("restate-root-start-marker-{}", harness.run_nonce()).into_boxed_str(),
+            );
+            (harness, prefix, effect_host, stores, turn_runner)
+        }
+    );
+
     // FIG-3788: a driver turn that switched frames, crashed after the switch
     // commit and redelivered replays its recorded admission and switched
     // turn from the journal and runs only the follow-on frame.
