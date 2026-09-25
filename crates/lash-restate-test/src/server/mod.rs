@@ -838,7 +838,10 @@ impl RestateTestServer {
                 journal_len: invocation.journal.len(),
                 retry_count: invocation.retry.failures_in_loop,
                 blocked_on_server: match &invocation.status {
-                    Status::Running(attempt) => Some(attempt.probe.is_idle()),
+                    // A closed input is work the attempt has not drained
+                    // yet, not a wait on the server: its starved flag still
+                    // reads true until the SDK polls the end of input.
+                    Status::Running(attempt) => Some(attempt.is_open() && attempt.probe.is_idle()),
                     _ => None,
                 },
                 last_failure: invocation

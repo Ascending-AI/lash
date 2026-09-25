@@ -349,18 +349,86 @@ impl Turn {
         }
     }
 
-    /// Waits until invocation `id` reports `status`.
-    async fn invocation_reaches(&self, id: &str, status: &str) {
+    /// Whether the turn is not live anywhere, read once: its handler is
+    /// suspended, or a redrive has started and is parked on the test's
+    /// hold, never running the turn.
+    fn is_held(&self) -> bool {
+        self.backend.server().invocations().into_iter().any(|view| {
+            view.target.starts_with(TURN_HOST) && (view.status == "suspended" || view.attempts >= 2)
+        })
+    }
+
+    /// Whether invocation `id` reports `status`, read once.
+    fn has_status(&self, id: &str, status: &str) -> bool {
+        self.backend
+            .server()
+            .invocations()
+            .into_iter()
+            .any(|view| view.id == id && view.status == status)
+    }
+
+    /// Whether the invocation `view` reports is parked: it can make no
+    /// progress until the server moves time or feeds it. A live attempt
+    /// whose open input the SDK waits on is parked; so is any invocation
+    /// that is not running at all (suspended, waiting on a timer). An
+    /// attempt whose input the server has closed but whose task has not
+    /// drained the close yet is not parked — it still has the suspension
+    /// to run. A held redrive parks on the test's hold rather than on the
+    /// server, so it never reads parked this way — callers that count it
+    /// must say so.
+    fn is_parked(view: &lash_restate_test::InvocationView) -> bool {
+        view.status != "running" || view.blocked_on_server == Some(true)
+    }
+
+    /// Waits until the turn's invocation is parked: suspended, a redrive
+    /// held on the test's gate, or its live attempt blocked on the server.
+    /// Only a time advance or outside input can move it from there.
+    async fn turn_parked(&self) {
+        loop {
+            if self.backend.server().invocations().into_iter().any(|view| {
+                view.target.starts_with(TURN_HOST) && (view.attempts >= 2 || Self::is_parked(&view))
+            }) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    /// Waits until invocation `id` is parked.
+    async fn invocation_parked(&self, id: &str) {
         loop {
             if self
                 .backend
                 .server()
                 .invocations()
                 .into_iter()
-                .any(|view| view.id == id && view.status == status)
+                .any(|view| view.id == id && Self::is_parked(&view))
             {
                 return;
             }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    /// Waits until invocation `id`'s last failure contains `message`.
+    async fn invocation_failed_with(&self, id: &str, message: &str) {
+        loop {
+            if self.backend.server().invocations().into_iter().any(|view| {
+                view.id == id
+                    && view
+                        .last_failure
+                        .as_ref()
+                        .is_some_and(|(_, failure)| failure.contains(message))
+            }) {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    }
+
+    /// Waits until invocation `id` reports `status`.
+    async fn invocation_reaches(&self, id: &str, status: &str) {
+        while !self.has_status(id, status) {
             tokio::time::sleep(Duration::from_millis(5)).await;
         }
     }
@@ -403,21 +471,6 @@ impl Turn {
             .collect()
     }
 
-    /// Waits until the turn is not live anywhere, when every redrive of its
-    /// handler is held: it is suspended, or a redrive has started and is
-    /// waiting on the hold, never running the turn.
-    async fn turn_held(&self) {
-        loop {
-            if self.backend.server().invocations().into_iter().any(|view| {
-                view.target.starts_with(TURN_HOST)
-                    && (view.status == "suspended" || view.attempts >= 2)
-            }) {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    }
-
     /// Waits until the turn's handler has been suspended.
     async fn turn_suspended(&self) {
         loop {
@@ -448,7 +501,9 @@ async fn a_child_attempt_after_its_turn_was_suspended_still_finishes_the_turn() 
     }
     // Idle past the inactivity timeout: the turn, waiting on its child's
     // settlement, is suspended. The child is inside its tool call, not
-    // waiting on the server, so it keeps running.
+    // waiting on the server, so it keeps running. The advance counts only
+    // once the turn's task has parked on its input, so wait for that first.
+    turn.turn_parked().await;
     turn.backend.server().advance(Duration::from_secs(61));
     turn.turn_suspended().await;
     // The child's attempt dies, and the one that replaces it starts while
@@ -488,6 +543,7 @@ async fn a_batch_child_with_no_live_turn_records_its_nested_events_for_the_turn(
     while turn.executions.load(Ordering::SeqCst) == 0 {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
+    turn.turn_parked().await;
     turn.backend.server().advance(Duration::from_secs(61));
     turn.turn_suspended().await;
     assert!(turn.backend.server().crash(&child), "the child is running");
@@ -552,25 +608,22 @@ async fn a_durable_turn_cancel_reaches_a_rebuilt_child_at_its_next_wait() {
     }
     // Idle past the inactivity timeout until the turn, waiting on its child,
     // and the child, in its hour-long retry sleep, are both suspended. The
-    // server notices starvation at one advance and suspends at a later one,
-    // and the child may reach its sleep only after an advance, so this
-    // advances until both are suspended: a few minutes of virtual time, far
-    // short of the retry.
-    // Each advance is a minute of virtual time; forty of them stay far
-    // short of the hour-long retry.
+    // server closes a starved attempt's input on a time advance, and an
+    // attempt reads starved only once its task has parked on its input —
+    // which a loaded executor may schedule late — so each advance waits for
+    // both invocations to be parked before it checks and moves time again:
+    // every advance that does not suspend them is still spent against the
+    // inactivity timeout, and forty minute-long advances stay far short of
+    // the retry without a wall-clock window anywhere.
     let mut suspended = false;
     for _ in 0..40 {
-        turn.backend.server().advance(Duration::from_secs(61));
-        if tokio::time::timeout(Duration::from_millis(500), async {
-            turn.turn_held().await;
-            turn.invocation_reaches(&child, "suspended").await;
-        })
-        .await
-        .is_ok()
-        {
+        turn.turn_parked().await;
+        turn.invocation_parked(&child).await;
+        if turn.is_held() && turn.has_status(&child, "suspended") {
             suspended = true;
             break;
         }
+        turn.backend.server().advance(Duration::from_secs(61));
     }
     assert!(
         suspended,
@@ -593,38 +646,12 @@ async fn a_durable_turn_cancel_reaches_a_rebuilt_child_at_its_next_wait() {
         .expect("the durable cancel is accepted");
 
     // The turn is held, so only the child's rebuilt context can observe the
-    // cancel: its retry sleep loses to the turn's durable gate.
-    let observed = tokio::time::timeout(Duration::from_secs(20), async {
-        loop {
-            if turn.backend.server().invocations().into_iter().any(|view| {
-                view.id == child
-                    && view.last_failure.as_ref().is_some_and(|(_, message)| {
-                        message.contains("runtime_effect_sleep_cancelled")
-                    })
-            }) {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(5)).await;
-        }
-    })
-    .await;
-    if observed.is_err() {
-        let open: Vec<_> = turn
-            .backend
-            .server()
-            .invocations()
-            .into_iter()
-            .map(|view| {
-                format!(
-                    "{} {} {} attempts={} last_failure={:?}",
-                    view.id, view.target, view.status, view.attempts, view.last_failure
-                )
-            })
-            .collect();
-        panic!(
-            "the cancel never reached the child's retry sleep while its turn was held: {open:#?}"
-        );
-    }
+    // cancel: its retry sleep loses to the turn's durable gate. The gate's
+    // resolution resuming the child and cancelling its sleep is work the
+    // cancel's receipt already set in motion, so the law waits on the
+    // child's recorded failure, not on a wall-clock window.
+    turn.invocation_failed_with(&child, "runtime_effect_sleep_cancelled")
+        .await;
     assert_eq!(
         turn.executions.load(Ordering::SeqCst),
         1,
@@ -670,18 +697,25 @@ async fn a_rebuilt_childs_tool_sees_its_turns_durable_cancel_as_its_token() {
     while turn.executions.load(Ordering::SeqCst) == 0 {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
+    // Idle past the inactivity timeout until the turn is suspended or
+    // held. Every advance waits for the turn to be parked before it checks
+    // and moves time again — the suspend lands only after the turn's task
+    // has parked on its input, which a loaded executor may schedule late.
     let mut suspended = false;
     for _ in 0..20 {
-        turn.backend.server().advance(Duration::from_secs(61));
-        if tokio::time::timeout(Duration::from_millis(250), turn.turn_held())
-            .await
-            .is_ok()
-        {
+        turn.turn_parked().await;
+        if turn.is_held() {
             suspended = true;
             break;
         }
+        turn.backend.server().advance(Duration::from_secs(61));
     }
-    assert!(suspended, "the turn is suspended");
+    assert!(
+        suspended,
+        "the turn is suspended: {:?}\ntimers: {:?}",
+        turn.backend.server().invocations(),
+        turn.backend.server().timers()
+    );
     assert!(turn.backend.server().crash(&child), "the child is running");
     let server = turn.backend.server().clone();
     let ticker = tokio::spawn(async move {
