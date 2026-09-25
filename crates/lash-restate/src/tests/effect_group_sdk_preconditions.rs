@@ -521,7 +521,7 @@ async fn witness_retry_exhaustion_pauses_until_resumed(
     println!(
         "EG0_WITNESS retry-exhaustion-pauses-until-resumed PASS first_loop={first_loop} after_resume={after_resume}"
     );
-    let _ = admin.kill_invocation_for_test_cleanup(&id).await;
+    let _ = admin.kill_invocation(&id).await;
 }
 
 /// Drives `cancellation_coverage` and reads the two children back out of
@@ -603,8 +603,8 @@ async fn witness_implicit_cancellation_covers_calls_not_sends(
     );
 
     // The send child sleeps well past this suite; leave nothing running.
-    let _ = admin.kill_invocation_for_test_cleanup(&sent_id).await;
-    let _ = admin.kill_invocation_for_test_cleanup(&called_id).await;
+    let _ = admin.kill_invocation(&sent_id).await;
+    let _ = admin.kill_invocation(&called_id).await;
 }
 
 /// The invocation's lifecycle once it is no longer open, or `None` while it is.

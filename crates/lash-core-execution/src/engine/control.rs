@@ -8,7 +8,11 @@
 //! registry: the process registry's scope-close adapter implements it, and
 //! [`NoScopeClose`] stands in until one is installed.
 
-use crate::store::{ControlIntentId, EnginePark, RootTerminal, StoreError};
+use crate::store::{ControlIntentId, EnginePark, ParkId, ParkReason, RootTerminal, StoreError};
+use std::num::NonZeroUsize;
+
+use serde::{Deserialize, Serialize};
+
 use crate::{SessionId, TurnId};
 
 /// Where the drive reports a closed root scope or session scope.
@@ -107,6 +111,22 @@ pub enum EngineRefusal {
 /// acknowledgement a crash lost.
 #[async_trait::async_trait]
 pub trait SessionControlEngine: Send + Sync {
+    /// O3: the engine's stalled work becomes lash parks. Every execution the
+    /// engine stopped retrying is recorded through `parks` with
+    /// [`ParkReason::EngineRetryExhausted`] and the engine's handle; one
+    /// whose target already ended is released instead. A stalled
+    /// admission-only drive (no root, no effects) is resumed, never parked.
+    ///
+    /// Bounded: at most `page.limit` executions after `page.after`, in the
+    /// engine's own order; the report's `next` resumes the listing, and
+    /// `None` means it ran out. Idempotent: a second pass over the same
+    /// stalled execution records nothing new.
+    async fn reconcile_parks(
+        &self,
+        parks: &dyn ParkRecoveryWriter,
+        page: EnginePage,
+    ) -> Result<ParkReconcileReport, EngineRefusal>;
+
     /// O4 redrive: resume the execution holding the root's park. An engine
     /// holding none answers [`EngineAck::NothingHeld`], and the caller
     /// schedules a drive instead.
@@ -133,6 +153,14 @@ pub struct NoEngineControl;
 
 #[async_trait::async_trait]
 impl SessionControlEngine for NoEngineControl {
+    async fn reconcile_parks(
+        &self,
+        _parks: &dyn ParkRecoveryWriter,
+        _page: EnginePage,
+    ) -> Result<ParkReconcileReport, EngineRefusal> {
+        Ok(ParkReconcileReport::default())
+    }
+
     async fn resume_root(
         &self,
         _target: &RootRef,
@@ -148,4 +176,98 @@ impl SessionControlEngine for NoEngineControl {
     ) -> Result<EngineAck, EngineRefusal> {
         Ok(EngineAck::NothingHeld)
     }
+}
+
+/// An engine's opaque position in its own listing of stalled executions:
+/// what [`EnginePage::after`] resumes from. Meaningful only to the engine
+/// that issued it.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct EngineCursor(String);
+
+impl EngineCursor {
+    /// The engine's position `value`.
+    #[must_use]
+    pub fn new(value: impl Into<String>) -> Self {
+        Self(value.into())
+    }
+
+    /// The position as the engine wrote it.
+    #[must_use]
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// One bounded page of an engine's stalled-work listing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct EnginePage {
+    /// Resume strictly after this position; `None` starts at the beginning.
+    pub after: Option<EngineCursor>,
+    /// Read at most this many executions.
+    pub limit: NonZeroUsize,
+}
+
+/// The work a park holds, as the engine names it to the park writer.
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ParkTarget {
+    /// A session's logical root.
+    Root { session: SessionId, root: TurnId },
+    /// A process.
+    Process { process: crate::ProcessId },
+}
+
+/// What [`ParkRecoveryWriter::record_engine_park`] did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EngineParkRecorded {
+    /// A new park, with reason `EngineRetryExhausted`.
+    Parked(ParkId),
+    /// The target already held a park: it keeps its reason and now carries
+    /// the engine's handle. A park that already carried the same handle is
+    /// left as it is.
+    AttachedToExisting(ParkId),
+    /// The target already has terminal evidence: the engine should release
+    /// its execution.
+    TargetTerminal,
+    /// The target is gone (its session deleted, or the process pruned): the
+    /// engine should release its execution.
+    TargetGone,
+}
+
+/// The park writer an engine's reconcile records stalled work through: the
+/// recovery path for a park the execution could not record itself, because
+/// the engine stopped running it before it reached its own park step.
+/// Reconciliation is its only caller (ADR 0105 §9).
+///
+/// Its writes converge with the execution's own park write: both key the
+/// park by its target, so a divergence park the execution recorded first
+/// keeps its reason and gains the engine's handle.
+#[async_trait::async_trait]
+pub trait ParkRecoveryWriter: Send + Sync {
+    /// Park `target` for `reason`, carrying the engine's `engine` handle.
+    async fn record_engine_park(
+        &self,
+        target: &ParkTarget,
+        reason: ParkReason,
+        engine: EnginePark,
+    ) -> Result<EngineParkRecorded, StoreError>;
+}
+
+/// What one [`SessionControlEngine::reconcile_parks`] pass did.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ParkReconcileReport {
+    /// Targets this pass parked.
+    pub parked: Vec<ParkTarget>,
+    /// Stalled executions whose target already held a park.
+    pub attached: usize,
+    /// Roots whose execution this pass released because the store had
+    /// already ended them.
+    pub released: Vec<RootRef>,
+    /// Sessions whose stalled admission-only drive this pass resumed.
+    pub resumed_drives: Vec<SessionId>,
+    /// Stalled executions this pass left as they were.
+    pub unchanged: usize,
+    /// Where the next pass resumes; `None` when this one read to the end.
+    pub next: Option<EngineCursor>,
 }

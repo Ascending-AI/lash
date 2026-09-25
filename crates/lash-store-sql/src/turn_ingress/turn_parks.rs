@@ -16,12 +16,10 @@
 pub const TABLE: &str = "turn_parks";
 
 /// Every column a park row carries, in insert order.
-pub const INSERT_COLUMNS: &str =
-    "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts";
+pub const INSERT_COLUMNS: &str = "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref";
 
 /// The stored record's read projection.
-pub const RECORD_COLUMNS: &str =
-    "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts";
+pub const RECORD_COLUMNS: &str = "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref, resume_intent";
 
 /// The grouped count `count_parks_by_reason` reads for drain status.
 ///
@@ -36,17 +34,32 @@ crate::statements! {
         /// Open session `?1`'s first park of turn `?2`: `park_id` `?3` is the
         /// feed sequence the `Parked` event was allocated, `?4` the reason
         /// code, `?5` the reason payload, `?6` the park instant, `?7` the same
-        /// instant as `last_refused_ms`, `?8` = 1 attempt.
-        insert = "INSERT INTO turn_parks (session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+        /// instant as `last_refused_ms`, `?8` = 1 attempt, `?9` the engine's
+        /// handle when the engine parked it.
+        insert = "INSERT INTO turn_parks (session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
 
         /// Re-park of the same turn `?2` in session `?1`: `park_id` and
         /// `since_ms` are kept, the reason refreshes, `last_refused_ms` moves
-        /// to `?5`, and `attempts` counts the refusal.
+        /// to `?5`, `attempts` counts the refusal, a requested redrive is
+        /// cleared (it ran and parked again), and engine handle `?6` replaces
+        /// the stored one when given.
         update_same_turn = "UPDATE turn_parks
              SET reason_code = ?3, reason_json = ?4,
-                 last_refused_ms = ?5, attempts = attempts + 1
+                 last_refused_ms = ?5, attempts = attempts + 1,
+                 engine_ref = COALESCE(?6, engine_ref), resume_intent = NULL
              WHERE session_id = ?1 AND turn_id = ?2";
+
+        /// Store engine handle `?3` on session `?1`'s park of turn `?2`,
+        /// keeping its reason and attempts.
+        attach_engine = "UPDATE turn_parks
+             SET engine_ref = ?3
+             WHERE session_id = ?1 AND turn_id = ?2";
+
+        /// Record redrive intent `?3` on session `?1`'s park `?2`.
+        set_resume_intent = "UPDATE turn_parks
+             SET resume_intent = ?3
+             WHERE session_id = ?1 AND park_id = ?2";
 
         /// Drop the park a different turn `?2` supersedes in session `?1`,
         /// returning what the `Unparked{Superseded}` event names.
@@ -54,7 +67,7 @@ crate::statements! {
              WHERE session_id = ?1 AND turn_id <> ?2
              RETURNING turn_id, park_id";
 
-        select_by_session = "SELECT session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts
+        select_by_session = "SELECT session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref, resume_intent
              FROM turn_parks
              WHERE session_id = ?1";
 

@@ -585,28 +585,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         .await
         .map_err(store_sqlx_error)?;
         rows.iter()
-            .map(|row| {
-                let session_id: String = row.get(0);
-                let turn_id: String = row.get(1);
-                let park_id: i64 = row.get(2);
-                let reason_code: String = row.get(3);
-                let reason_json: String = row.get(4);
-                let since_ms: i64 = row.get(5);
-                let last_refused_ms: i64 = row.get(6);
-                let attempts: i64 = row.get(7);
-                lash_core_execution::store::TurnPark::decode(
-                    SessionId::from(session_id),
-                    lash_sansio::TurnId::from(turn_id),
-                    lash_core_execution::store::ParkId::from_feed_sequence(
-                        u64::try_from(park_id).unwrap_or_default(),
-                    ),
-                    &reason_code,
-                    &reason_json,
-                    u64::try_from(since_ms).unwrap_or_default(),
-                    u64::try_from(last_refused_ms).unwrap_or_default(),
-                    u32::try_from(attempts).unwrap_or(u32::MAX),
-                )
-            })
+            .map(crate::runtime_persistence::turn_park::decode_turn_park_row)
             .collect()
     }
 

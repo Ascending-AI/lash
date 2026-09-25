@@ -231,67 +231,6 @@ impl LashRuntime {
         }
     }
 
-    /// Record the turn's park when its abort is a refusal that parks it
-    /// (FIG-3586, FIG-3600).
-    ///
-    /// A parked turn keeps every claim it holds, exactly as any live-fault
-    /// abort does, so each redrive under the same build refuses again with
-    /// nothing dispatched; the park is the typed, queryable record of why it
-    /// stopped, which `drain_status` counts. Best effort, like every
-    /// abort-path repair: the turn is already aborting and this must not
-    /// replace its error. A park the store cannot write leaves the turn
-    /// exactly as the abort left it — its held claims still keep the
-    /// deployment from reporting drained.
-    pub(in crate::runtime) async fn record_turn_park_after_abort(
-        &self,
-        err: &RuntimeError,
-        turn_id: &TurnId,
-    ) {
-        let Some(reason) = crate::store::ParkReason::of_error(err) else {
-            return;
-        };
-        let Some(store) = self
-            .session
-            .as_ref()
-            .and_then(|session| session.history_store())
-        else {
-            return;
-        };
-        let write = crate::store::TurnParkWrite {
-            session_id: self.state.session_id.clone(),
-            turn_id: turn_id.clone(),
-            reason,
-            at_ms: self.host.core.clock.timestamp_ms(),
-        };
-        let reason_code = write.reason.code().as_str();
-        let effect_kind = write.reason.effect_kind();
-        match store.record_turn_park(&write).await {
-            Ok(park) => {
-                crate::operational_metrics::record_work_parked("turn", reason_code);
-                tracing::warn!(
-                    session_id = %self.state.session_id,
-                    turn_id = %turn_id,
-                    code = %err.code,
-                    reason_code,
-                    effect_kind,
-                    park_id = %park.park_id,
-                    attempts = park.attempts,
-                    event = "turn.parked",
-                    "turn parked on a replay refusal; redrive it under the build that wrote its \
-                     journal, cancel it, or fork from before it"
-                );
-            }
-            Err(error) => tracing::warn!(
-                session_id = %self.state.session_id,
-                turn_id = %turn_id,
-                error = %error,
-                event = "turn.park_record_failed",
-                "failed to record the turn's park; its held claims still keep the deployment \
-                 from draining"
-            ),
-        }
-    }
-
     /// Hand claimed rows back after a local abort.
     ///
     /// A root's recorded claim is never handed back: its redrive settles with

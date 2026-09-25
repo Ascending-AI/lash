@@ -29,6 +29,7 @@ mod contracts;
 mod control;
 mod drive;
 mod groups;
+mod reconcile;
 /// The determinism harness every slice that makes the drive deterministic
 /// proves its change with (FIG-3672).
 #[cfg(any(test, feature = "testing"))]
@@ -49,9 +50,9 @@ pub use commands::{
 };
 pub use commit::{
     CancellationSettlement, CommitTurnOutcome, CommittedAttachments, CommittedGraphNode,
-    DurableTurnState, EngineParkRef, ExecutionStateUpdate, IngressSettlement, ParkId,
-    ParkRecoveryWriter, ParkedWorkRef, RecordedPluginStates, RootTerminalWrite, SessionGraphDelta,
-    SessionHeadRef, TurnCommitId, TurnCommitRequest, UsageDelta,
+    DurableTurnState, ExecutionStateUpdate, IngressSettlement, ParkId, RecordedPluginStates,
+    RootTerminalWrite, SessionGraphDelta, SessionHeadRef, TurnCommitId, TurnCommitRequest,
+    UsageDelta,
 };
 pub use context::{
     Disposed, Disposition, DriveObservation, DurableOp, EngineContext, EngineFault, EngineRetry,
@@ -62,7 +63,8 @@ pub use contracts::{
     RecordedVersion, ResolveAck, RootProgress, TurnSegmentHandover, UnresolvedChild, VersionRange,
 };
 pub use control::{
-    EngineAck, EngineRefusal, NoEngineControl, NoScopeClose, RootRef, ScopeCloseSink,
+    EngineAck, EngineCursor, EnginePage, EngineParkRecorded, EngineRefusal, NoEngineControl,
+    NoScopeClose, ParkReconcileReport, ParkRecoveryWriter, ParkTarget, RootRef, ScopeCloseSink,
     SessionControlEngine, begin_session_close_replay_key,
 };
 pub use drive::{
@@ -70,6 +72,9 @@ pub use drive::{
     drive_admission_scope, drive_close_root_replay_key, drive_root_scope, drive_seal_replay_key,
 };
 pub use groups::{DriveGroups, GroupClosed, GroupKey};
+pub use reconcile::{
+    DriveReconcileReport, ReconcileArm, ReconcileCursor, ReconcileFailure, ReconcileTick, SlotPass,
+};
 
 #[cfg(test)]
 mod tests;

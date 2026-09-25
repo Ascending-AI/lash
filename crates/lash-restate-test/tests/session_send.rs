@@ -413,10 +413,13 @@ async fn dropped_schedule_is_reconciled() {
     );
 
     let engine = Arc::clone(world.backend.restate().session_work_engine());
-    let report = lash_core::drive::reconcile_session_work(
+    let report = lash_core::drive::reconcile_session_drives(
         world.backend.stores().session_store_factory().as_ref(),
         engine.as_ref() as &dyn SessionWorkEngine,
         "boot-1",
+        None,
+        std::num::NonZeroUsize::MIN.saturating_add(63),
+        u64::MAX,
     )
     .await
     .expect("sweep");
@@ -437,10 +440,13 @@ async fn dropped_schedule_is_reconciled() {
             .is_empty()
     );
     // A second sweep finds nothing open and asks for nothing.
-    let again = lash_core::drive::reconcile_session_work(
+    let again = lash_core::drive::reconcile_session_drives(
         world.backend.stores().session_store_factory().as_ref(),
         engine.as_ref() as &dyn SessionWorkEngine,
         "boot-2",
+        None,
+        std::num::NonZeroUsize::MIN.saturating_add(63),
+        u64::MAX,
     )
     .await
     .expect("sweep again");

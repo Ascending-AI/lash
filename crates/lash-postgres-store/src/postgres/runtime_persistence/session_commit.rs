@@ -1086,138 +1086,19 @@ impl SessionCommitStore for PostgresSessionStore {
         park: &lash_core_execution::store::TurnParkWrite,
     ) -> Result<lash_core_execution::store::TurnPark, StoreError> {
         self.bind_session_id(&park.session_id)?;
-        let reason_code = park.reason.code().as_str();
-        let reason_json = serde_json::to_string(&park.reason).map_err(|error| {
-            StoreError::RecordEncodingFailed {
-                record_kind: "TurnPark".to_string(),
-                message: error.to_string(),
-            }
-        })?;
-        let at_ms = i64::try_from(park.at_ms).map_err(|_| {
-            StoreError::Backend(format!(
-                "turn park instant {} exceeds the stored range",
-                park.at_ms
-            ))
-        })?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
         ensure_session_not_deleted_tx(&mut tx, &park.session_id).await?;
-        let turn_parks = &crate::turn_ingress::turn_ingress_sql().turn_parks;
-        // The row lock is what makes the re-park-versus-supersede decision
-        // atomic: a concurrent park of this session waits here, then decides
-        // on the committed row.
-        let existing = sqlx::query(
-            crate::turn_ingress::turn_ingress_sql()
-                .turn_parks_postgres
-                .select_for_update_by_session
-                .sql(),
-        )
-        .bind(park.session_id.as_str())
-        .fetch_optional(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
-        if let Some(row) = existing.as_ref().filter(|row| {
-            let stored_turn_id: String = row.get(1);
-            stored_turn_id == park.turn_id.as_str()
-        }) {
-            // A same-turn re-park keeps `park_id` and `since_ms`, refreshes
-            // the reason and `last_refused_ms`, and counts the refusal — no
-            // feed event.
-            sqlx::query(turn_parks.update_same_turn.sql())
-                .bind(park.session_id.as_str())
-                .bind(park.turn_id.as_str())
-                .bind(reason_code)
-                .bind(&reason_json)
-                .bind(at_ms)
-                .execute(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
-            let park_id: i64 = row.get(2);
-            let since_ms: i64 = row.get(5);
-            let attempts: i64 = row.get(7);
-            let recorded = lash_core_execution::store::TurnPark {
-                session_id: park.session_id.clone(),
-                turn_id: park.turn_id.clone(),
-                reason: park.reason.clone(),
-                park_id: lash_core_execution::store::ParkId::from_feed_sequence(
-                    u64::try_from(park_id).unwrap_or_default(),
-                ),
-                since_ms: u64::try_from(since_ms).unwrap_or_default(),
-                last_refused_ms: u64::try_from(at_ms).unwrap_or_default(),
-                attempts: u32::try_from(attempts.saturating_add(1)).unwrap_or(u32::MAX),
-            };
-            tx.commit().await.map_err(store_sqlx_error)?;
-            return Ok(recorded);
-        }
-        if let Some(row) = existing.as_ref() {
-            // A different turn's park supersedes the stored one: close it on
-            // the feed, then open the new park.
-            let superseded_turn_id: String = row.get(1);
-            let superseded_park_id: i64 = row.get(2);
-            let deleted = sqlx::query(turn_parks.delete_for_supersede_returning.sql())
-                .bind(park.session_id.as_str())
-                .bind(park.turn_id.as_str())
-                .fetch_optional(&mut *tx)
-                .await
-                .map_err(store_sqlx_error)?;
-            if deleted.is_none() {
-                return Err(StoreError::Backend(format!(
-                    "turn park supersede of `{superseded_turn_id}` in session \
-                     `{}` deleted no row",
-                    park.session_id
-                )));
-            }
-            crate::runtime_persistence::turn_park_feed::log_turn_park_closed_tx(
-                &mut tx,
-                &park.session_id,
-                &superseded_turn_id,
-                superseded_park_id,
-                &lash_core_execution::store::TurnParkEventKind::Unparked {
-                    cause: lash_core_execution::store::UnparkCause::Superseded,
-                },
-                park.at_ms,
-            )
-            .await?;
-        }
-        let park_id = crate::runtime_persistence::turn_park_feed::log_turn_parked_tx(
-            &mut tx,
-            &park.session_id,
-            park.turn_id.as_str(),
-            &park.reason,
-            park.at_ms,
-        )
-        .await?;
-        sqlx::query(turn_parks.insert.sql())
-            .bind(park.session_id.as_str())
-            .bind(park.turn_id.as_str())
-            .bind(park_id)
-            .bind(reason_code)
-            .bind(&reason_json)
-            .bind(at_ms)
-            .bind(at_ms)
-            .bind(1_i64)
-            .execute(&mut *tx)
-            .await
-            .map_err(store_sqlx_error)?;
+        let recorded = super::turn_park::record_turn_park_tx(&mut tx, park).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
-        Ok(lash_core_execution::store::TurnPark {
-            session_id: park.session_id.clone(),
-            turn_id: park.turn_id.clone(),
-            reason: park.reason.clone(),
-            park_id: lash_core_execution::store::ParkId::from_feed_sequence(
-                u64::try_from(park_id).unwrap_or_default(),
-            ),
-            since_ms: u64::try_from(at_ms).unwrap_or_default(),
-            last_refused_ms: u64::try_from(at_ms).unwrap_or_default(),
-            attempts: 1,
-        })
+        Ok(recorded)
     }
 
     async fn load_turn_park(
         &self,
         session_id: &SessionId,
     ) -> Result<Option<lash_core_execution::store::TurnPark>, StoreError> {
-        let row = sqlx::query(
+        sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
                 .turn_parks
                 .select_by_session
@@ -1226,28 +1107,9 @@ impl SessionCommitStore for PostgresSessionStore {
         .bind(session_id.as_str())
         .fetch_optional(&self.pool)
         .await
-        .map_err(store_sqlx_error)?;
-        row.map(|row| {
-            let turn_id: String = row.get(1);
-            let park_id: i64 = row.get(2);
-            let reason_code: String = row.get(3);
-            let reason_json: String = row.get(4);
-            let since_ms: i64 = row.get(5);
-            let last_refused_ms: i64 = row.get(6);
-            let attempts: i64 = row.get(7);
-            lash_core_execution::store::TurnPark::decode(
-                session_id.clone(),
-                turn_id.into(),
-                lash_core_execution::store::ParkId::from_feed_sequence(
-                    u64::try_from(park_id).unwrap_or_default(),
-                ),
-                &reason_code,
-                &reason_json,
-                u64::try_from(since_ms).unwrap_or_default(),
-                u64::try_from(last_refused_ms).unwrap_or_default(),
-                u32::try_from(attempts).unwrap_or(u32::MAX),
-            )
-        })
+        .map_err(store_sqlx_error)?
+        .as_ref()
+        .map(super::turn_park::decode_turn_park_row)
         .transpose()
     }
 }

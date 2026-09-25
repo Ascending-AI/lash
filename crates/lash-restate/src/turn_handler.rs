@@ -62,21 +62,19 @@ pub fn parked_turn_failure(refusal: impl std::fmt::Display) -> HandlerError {
 /// refused where it parks its opener and recorded nothing (FIG-3725): its
 /// tool drifted and it would run live, or its replay diverged. Its opener,
 /// suspended on the child's rank, cannot learn of a refusal that settles
-/// nothing, so the child writes the turn's typed park through the session's
-/// own store, where the parked-work surface shows it. `None` when the child's
-/// scope names no turn (a process opener, a queue drain with no attributed
-/// turn), or its session has no store.
+/// nothing, so the child writes its opener root's typed park through the
+/// session's own store, where the parked-work surface shows it. `None` when
+/// the child's scope names no root (a process opener), or its session has no
+/// store.
 pub(crate) async fn park_refused_group_child(
     sessions: &dyn lash_core::SessionStoreFactory,
     scope: &lash_core::ExecutionScope,
-    physical_turn: Option<&lash_core::TurnId>,
     refusal: &lash_core::RuntimeEffectControllerError,
 ) -> Result<Option<lash_core::store::TurnPark>, lash_core::StoreError> {
     use lash_core::ClockWallTime as _;
     lash_core::park_turn_of_refused_group_child(
         sessions,
         scope,
-        physical_turn,
         &refusal.clone().into_runtime_error(),
         lash_core::facade_support::SystemClock.timestamp_ms(),
     )

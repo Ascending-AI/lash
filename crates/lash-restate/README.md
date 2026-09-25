@@ -61,8 +61,9 @@ requests and capture the returned invocation id. The client accepts Restate's
 turn invocation instead of modeling it as local in-process work.
 `RestateAdminClient` cancels those active invocations through the Admin API,
 queries invocation status, and exposes unfinished-invocation introspection for
-tests and cleanup. `kill_invocation_for_test_cleanup` is intentionally reserved
-for test/dev cleanup after graceful cancel fails. The Restate CLI remains a
+tests and cleanup. `kill_invocation` stops an invocation for good; it is the
+release half of an operator's cancel or fork of a parked root, run only after
+the store recorded the root's end. The Restate CLI remains a
 useful operator tool, but Lash tests and examples use these HTTP APIs directly.
 
 Deterministic contract failures are terminal handler errors, not retry loops.
