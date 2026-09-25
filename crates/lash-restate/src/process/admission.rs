@@ -182,6 +182,11 @@ enum AdmissionVerdict {
     Ended {
         output: Box<lash_core::ProcessAwaitOutput>,
     },
+    /// The process's own records break an admission invariant: no retry can
+    /// admit it, so the segment ends the process Failed (FIG-3819).
+    Invariant {
+        message: String,
+    },
 }
 
 /// What the start step journaled.
@@ -203,6 +208,10 @@ enum StartOutcome {
     /// The process ended between the verdict and the start (FIG-3820).
     Ended {
         output: Box<lash_core::ProcessAwaitOutput>,
+    },
+    /// See [`AdmissionVerdict::Invariant`].
+    Invariant {
+        message: String,
     },
 }
 
@@ -248,6 +257,10 @@ pub(crate) enum SegmentAdmission {
     Ended {
         output: Box<lash_core::ProcessAwaitOutput>,
     },
+    /// The process's records break an admission invariant, a fact the
+    /// verdict or start step journaled: the segment ends the process Failed
+    /// rather than stranding it Running (FIG-3819).
+    Invariant { message: String },
 }
 
 fn store_fault(error: PluginError) -> HandlerError {
@@ -258,18 +271,17 @@ fn store_fault(error: PluginError) -> HandlerError {
 
 /// The start of the process that owns `segment_ordinal > 0`: its execution
 /// is the one every later segment continues.
-fn retained_start(
-    record: &ProcessRecord,
-    segment_ordinal: u64,
-) -> Result<ProcessStarted, HandlerError> {
+fn retained_start(record: &ProcessRecord, segment_ordinal: u64) -> Result<ProcessStarted, String> {
     record.first_started.as_deref().cloned().ok_or_else(|| {
-        HandlerError::from(TerminalError::new(format!(
+        format!(
             "process `{}` segment {segment_ordinal} has a handover without a retained execution start",
             record.id
-        )))
+        )
     })
 }
 
+/// An unknown process fails only the invocation: with no record there is no
+/// process to strand Running and none to store a terminal on (FIG-3819).
 async fn read_record(
     registry: &Arc<dyn ProcessRegistry>,
     process_id: &lash_sansio::ProcessId,
@@ -338,7 +350,17 @@ pub(crate) async fn admit_segment(
                     else {
                         return Ok(Json(AdmissionVerdict::MissingHandover));
                     };
-                    Some(handover_digest(&persisted.handover)?)
+                    match handover_digest(&persisted.handover) {
+                        Ok(digest) => Some(digest),
+                        Err(error) => {
+                            return Ok(Json(AdmissionVerdict::Invariant {
+                                message: format!(
+                                    "process `{process_id}` segment {segment_ordinal} handover \
+                                     cannot be digested: {error:?}"
+                                ),
+                            }));
+                        }
+                    }
                 };
                 let record = read_record(&registry, &process_id).await?;
                 if segment_ordinal > 0
@@ -356,7 +378,12 @@ pub(crate) async fn admit_segment(
                         .await
                         .map_err(store_fault)?;
                     match marker {
-                        Some(_) => Some(retained_start(&record, segment_ordinal)?),
+                        Some(_) => match retained_start(&record, segment_ordinal) {
+                            Ok(start) => Some(start),
+                            Err(message) => {
+                                return Ok(Json(AdmissionVerdict::Invariant { message }));
+                            }
+                        },
                         None => None,
                     }
                 };
@@ -383,6 +410,9 @@ pub(crate) async fn admit_segment(
         } => (nonce, handover, policy),
         AdmissionVerdict::MissingHandover => return Ok(SegmentAdmission::MissingHandover),
         AdmissionVerdict::Ended { output } => return Ok(SegmentAdmission::Ended { output }),
+        AdmissionVerdict::Invariant { message } => {
+            return Ok(SegmentAdmission::Invariant { message });
+        }
         AdmissionVerdict::SubstrateLost { lost } => {
             return Ok(SegmentAdmission::SubstrateLost { lost });
         }
@@ -437,6 +467,7 @@ pub(crate) async fn admit_segment(
         }))),
         StartOutcome::SubstrateLost { lost } => Ok(SegmentAdmission::SubstrateLost { lost }),
         StartOutcome::Ended { output } => Ok(SegmentAdmission::Ended { output }),
+        StartOutcome::Invariant { message } => Ok(SegmentAdmission::Invariant { message }),
     }
 }
 
@@ -450,6 +481,9 @@ async fn start_root_segment(
 ) -> Result<StartOutcome, HandlerError> {
     let record = read_record(registry, process_id).await?;
     if record.disposition == lash_core::RecoveryContract::ExternallyOwned {
+        // Not an admission invariant: an externally owned process's terminal
+        // belongs to its owner, and the workflow-key authority is refused on
+        // it, so the invocation fails without writing one (FIG-3819).
         return Err(TerminalError::new(format!(
             "process `{process_id}` is externally owned and is never executed by lash"
         ))
@@ -475,11 +509,11 @@ async fn start_root_segment(
     }
     let authority = ProcessExecutionWriteAuthority::invocation(process_id.clone(), nonce.clone())
         .bind_attempt(1);
-    let mut started = authority.invocation_started().ok_or_else(|| {
-        HandlerError::from(TerminalError::new(format!(
-            "process `{process_id}` root segment could not bind its execution"
-        )))
-    })?;
+    let Some(mut started) = authority.invocation_started() else {
+        return Ok(StartOutcome::Invariant {
+            message: format!("process `{process_id}` root segment could not bind its execution"),
+        });
+    };
     started.started_at_ms = super::restate_now_ms();
     started.generation = generation.clone();
     match registry
@@ -495,12 +529,14 @@ async fn start_root_segment(
         }),
         lash_core::ProcessStartOutcome::AlreadyStarted { current, .. }
         | lash_core::ProcessStartOutcome::AttemptsExhausted { current, .. } => {
-            let lost = current.first_started.as_deref().cloned().ok_or_else(|| {
-                HandlerError::from(TerminalError::new(format!(
-                    "process `{process_id}` refused a root start without naming the start it kept"
-                )))
-            })?;
-            Ok(StartOutcome::SubstrateLost { lost })
+            Ok(match current.first_started.as_deref().cloned() {
+                Some(lost) => StartOutcome::SubstrateLost { lost },
+                None => StartOutcome::Invariant {
+                    message: format!(
+                        "process `{process_id}` refused a root start without naming the start it kept"
+                    ),
+                },
+            })
         }
     }
 }
@@ -518,16 +554,21 @@ async fn start_later_segment(
             output: Box::new(output),
         });
     }
-    let root = retained_start(&record, segment_ordinal)?;
-    let execution_id = root
+    let root = match retained_start(&record, segment_ordinal) {
+        Ok(root) => root,
+        Err(message) => return Ok(StartOutcome::Invariant { message }),
+    };
+    let Some(execution_id) = root
         .owner
         .engine_process_execution_id(process_id)
-        .ok_or_else(|| {
-            HandlerError::from(TerminalError::new(format!(
+        .map(str::to_string)
+    else {
+        return Ok(StartOutcome::Invariant {
+            message: format!(
                 "process `{process_id}` segment {segment_ordinal} retained a non-Restate execution owner"
-            )))
-        })?
-        .to_string();
+            ),
+        });
+    };
     let recorded = continuations
         .mark_segment_started(
             &ProcessSegmentKey::new(process_id.clone(), segment_ordinal),
