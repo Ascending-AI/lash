@@ -7,7 +7,7 @@
 
 use lashlang::{Expr as LashExpr, Program as LashProgram};
 
-use super::{Binding, BindingKind, BindingRole, Lowerer, Scope};
+use super::{Binding, BindingKind, BindingRole, Lowerer, Scope, StatementScope};
 use crate::adapter;
 use crate::{Diagnostic, DiagnosticCode};
 
@@ -259,7 +259,7 @@ fn lower_pass(
             else_block: Box::new(LashExpr::Undefined),
         })
         .collect::<Vec<_>>();
-    expressions.extend(lowerer.lower_statements(&program.statements, true)?);
+    expressions.extend(lowerer.lower_statements(&program.statements, StatementScope::Root)?);
     Ok((lowerer, LashExpr::Block(expressions)))
 }
 

@@ -268,188 +268,6 @@ impl Lowerer {
             .any(|scope| scope.bindings.contains_key(name))
     }
 
-    fn lower_statements(
-        &mut self,
-        statements: &[Stmt],
-        root: bool,
-    ) -> Result<Vec<LashExpr>, Diagnostic> {
-        if !root {
-            self.scopes.push(Scope::default());
-        }
-        let hoisted_vars = if root {
-            let mut hoisted = Vec::new();
-            for name in function_var_names(statements) {
-                let existing = self
-                    .scopes
-                    .last()
-                    .and_then(|scope| scope.bindings.get(&name));
-                if let Some(binding) = existing {
-                    if !matches!(
-                        binding.kind,
-                        BindingKind::Var | BindingKind::Function | BindingKind::Parameter
-                    ) {
-                        return Err(Diagnostic::new(
-                            DiagnosticCode::DuplicateBinding,
-                            format!("var `{name}` conflicts with a lexical binding"),
-                            None,
-                        ));
-                    }
-                    if binding.kind == BindingKind::Parameter {
-                        let parameter = binding.internal.clone();
-                        hoisted.extend(self.separate_parameter_var(&name, &parameter));
-                    }
-                    continue;
-                }
-                self.declare(&name, BindingKind::Var, true, root)?;
-                let binding = self.binding(&name)?.clone();
-                hoisted.push(LashExpr::Assign {
-                    target: AssignTarget::variable(binding.internal.as_str().into()),
-                    expr: Box::new(self.binding_initial_value(&binding, LashExpr::Undefined)),
-                });
-            }
-            hoisted
-        } else {
-            Vec::new()
-        };
-        self.predeclare(statements, root)?;
-        if root && self.current_function() == 0 {
-            self.declare_global_this_slots()?;
-        }
-
-        let local_function_internals = statements
-            .iter()
-            .filter_map(|statement| match statement.unlabeled() {
-                Stmt::Function { name, .. } => {
-                    Some(self.binding(name).map(|binding| binding.internal.clone()))
-                }
-                _ => None,
-            })
-            .collect::<Result<BTreeSet<_>, _>>()?;
-        let current_function = self.current_function();
-        let mut available = self
-            .scopes
-            .iter()
-            .flat_map(|scope| scope.bindings.values())
-            .filter(|binding| {
-                // A binding owned by an enclosing function reaches this frame as
-                // a capture or a parameter, so it already holds a value whenever
-                // these statements run. Only bindings this frame declares itself
-                // have to be ordered against the declarations that fill them.
-                (binding.initialized || binding.owner_function != current_function)
-                    && !local_function_internals.contains(&binding.internal)
-            })
-            .map(|binding| binding.internal.clone())
-            .collect::<BTreeSet<_>>();
-        let mut pending = Vec::with_capacity(local_function_internals.len());
-        let previous_capture_mode = self.allow_uninitialized_declaration_capture;
-        self.allow_uninitialized_declaration_capture = true;
-        for statement in statements {
-            if let Stmt::Function { name, function } = statement.unlabeled() {
-                let binding = self.binding(name)?.clone();
-                if function.is_async {
-                    self.set_role(name, BindingRole::AsyncHelper)?;
-                }
-                let expression = self.lower_function(function, Some(binding.internal.clone()))?;
-                let definition = match &expression {
-                    LashExpr::Function(definition) => definition.as_ref(),
-                    LashExpr::BuiltinCall { name, args } => {
-                        let [LashExpr::Function(definition), ..] = args.as_slice() else {
-                            unreachable!("closure intrinsic starts with a function literal")
-                        };
-                        debug_assert_eq!(name.as_str(), "__typescript_closure");
-                        definition
-                    }
-                    _ => unreachable!("function lowering returns a function expression"),
-                };
-                let captures = definition
-                    .captures
-                    .iter()
-                    .map(|capture| capture.as_str().to_string())
-                    .collect();
-                pending.push(PendingFunction {
-                    internal: binding.internal.clone(),
-                    captures,
-                    expression: self.binding_initial_value(&binding, expression),
-                });
-            }
-        }
-        self.allow_uninitialized_declaration_capture = previous_capture_mode;
-        reject_mutual_recursion(&pending, statements, self)?;
-        let mut pending = pending
-            .into_iter()
-            .map(|function| PendingBinding {
-                internal: function.internal.clone(),
-                captures: function.captures,
-                assignment: LashExpr::Assign {
-                    target: AssignTarget::variable(function.internal.into()),
-                    expr: Box::new(function.expression),
-                },
-            })
-            .collect::<Vec<_>>();
-
-        // A function declaration holds its value only once it is emitted,
-        // which waits until every binding it captures holds one. Until then
-        // a read of it is a read before initialization, refused by name like
-        // any other, rather than of a name that has no assignment yet.
-        for binding in &pending {
-            self.set_local_initialized(&binding.internal, false);
-        }
-        let flush_ready = |pending: &mut Vec<PendingBinding>,
-                           available: &mut BTreeSet<String>,
-                           output: &mut Vec<LashExpr>| {
-            let mut flushed = Vec::new();
-            while let Some(index) = pending.iter().position(|binding| {
-                binding
-                    .captures
-                    .iter()
-                    .all(|capture| available.contains(capture))
-            }) {
-                let binding = pending.remove(index);
-                available.insert(binding.internal.clone());
-                flushed.push(binding.internal);
-                output.push(binding.assignment);
-            }
-            flushed
-        };
-        let mut output = hoisted_vars;
-        for statement in statements {
-            for internal in flush_ready(&mut pending, &mut available, &mut output) {
-                self.set_local_initialized(&internal, true);
-            }
-            match statement.unlabeled() {
-                Stmt::Function { .. } => {}
-                Stmt::Var { declarations, .. } => {
-                    output.extend(self.lower_stmt(statement)?);
-                    for declaration in declarations {
-                        let mut names = Vec::new();
-                        pattern_names(&declaration.pattern, &mut names);
-                        for name in names {
-                            available.insert(self.binding(&name)?.internal.clone());
-                        }
-                    }
-                }
-                _ => output.extend(self.lower_stmt(statement)?),
-            }
-        }
-        for internal in flush_ready(&mut pending, &mut available, &mut output) {
-            self.set_local_initialized(&internal, true);
-        }
-        if let Some(function) = pending.first() {
-            return Err(Diagnostic::new(
-                DiagnosticCode::TemporalDeadZone,
-                format!(
-                    "function `{}` captures a binding that is unavailable at declaration time",
-                    function.internal
-                ),
-                None,
-            ));
-        }
-        if !root {
-            self.scopes.pop();
-        }
-        Ok(output)
-    }
-
     fn predeclare(&mut self, statements: &[Stmt], root: bool) -> Result<(), Diagnostic> {
         for statement in statements {
             match statement.unlabeled() {
@@ -520,7 +338,9 @@ impl Lowerer {
             Stmt::Expr(expr) => vec![self.lower_expr(expr)?],
             Stmt::Block(statements) => vec![LashExpr::Role {
                 role: StructuralRole::Scope,
-                expr: Box::new(LashExpr::Block(self.lower_statements(statements, false)?)),
+                expr: Box::new(LashExpr::Block(
+                    self.lower_statements(statements, StatementScope::Nested)?,
+                )),
             }],
             Stmt::Var { kind, declarations } => {
                 let mut output = Vec::with_capacity(declarations.len());
@@ -805,7 +625,7 @@ impl Lowerer {
                 catch,
                 finally,
             } => {
-                let body = LashExpr::Block(self.lower_statements(body, false)?);
+                let body = LashExpr::Block(self.lower_statements(body, StatementScope::Nested)?);
                 let catch = catch
                     .as_ref()
                     .map(|catch| {
@@ -843,7 +663,7 @@ impl Lowerer {
                         } else {
                             self.temporary("caught")
                         };
-                        prefix.extend(self.lower_statements(&catch.body, false)?);
+                        prefix.extend(self.lower_statements(&catch.body, StatementScope::Nested)?);
                         self.scopes.pop();
                         Ok(CatchClause {
                             binding: exception.into(),
@@ -854,7 +674,7 @@ impl Lowerer {
                 let finally = finally
                     .as_ref()
                     .map(|statements| {
-                        self.lower_statements(statements, false)
+                        self.lower_statements(statements, StatementScope::Nested)
                             .map(|body| Box::new(LashExpr::Block(body)))
                     })
                     .transpose()?;
@@ -878,7 +698,7 @@ impl Lowerer {
             stmt => (None, stmt),
         };
         let mut expressions = match stmt {
-            Stmt::Block(statements) => self.lower_statements(statements, false)?,
+            Stmt::Block(statements) => self.lower_statements(statements, StatementScope::Nested)?,
             _ => self.lower_stmt(stmt)?,
         };
         expressions.push(LashExpr::Undefined);
@@ -1096,7 +916,7 @@ impl Lowerer {
             }
             FunctionBody::Block(statements) => {
                 let mut body = std::mem::take(&mut prologue);
-                body.extend(self.lower_statements(statements, true)?);
+                body.extend(self.lower_statements(statements, StatementScope::Root)?);
                 body.push(LashExpr::Undefined);
                 completion_list(body)
             }
