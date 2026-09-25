@@ -230,6 +230,9 @@ pub(super) async fn delete_session_from_catalog(
                 tx.execute(statement, params![session_id.as_str()])
                     .map_err(sqlite_error)?;
             }
+            // The session's logical roots and their input bindings go with
+            // it; a `close_session` intent stays as its deletion tombstone.
+            crate::session_roots::delete_session_roots_conn(tx, &session_id)?;
             // The session-core rows the family owns, named rather than spelled.
             for statement in [
                 session_sql().observer_intents.delete_by_session.sql(),

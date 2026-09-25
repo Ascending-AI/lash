@@ -17,14 +17,15 @@ use lash::persistence::{
     OperationId, OrphanedTurnInputScope, PendingFollowOn, PendingTurnInputDraft,
     PersistedSessionConfig, PersistedSessionRead, QueuedWorkBatch, QueuedWorkBatchDraft,
     QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimOutcome, QueuedWorkClaimPolicy,
-    QueuedWorkEnqueueOutcome, QueuedWorkStore, RealizedNodeTimestamp, RuntimeCommit,
-    RuntimeCommitReceipt, RuntimePersistence, RuntimeSessionState, RuntimeTurnCommitStamp,
-    RuntimeUsageDelta, RuntimeUsageDeltaIdentity, SelectedQueuedWorkClaimOutcome,
-    SessionCheckpoint, SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
-    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore,
-    SessionHeadMeta, SessionHeadPayload, SessionMeta, SessionNodeRecord, StoreError,
-    StoreMaintenance, StoredDriveEpoch, TurnInputCheckpointBoundary, TurnInputClaim,
-    TurnInputIngress, TurnInputState, TurnInputStore, VacuumReport, commit_runtime_state_verified,
+    QueuedWorkEnqueueOutcome, QueuedWorkStore, RealizedNodeTimestamp, RootStore, RootTerminal,
+    RuntimeCommit, RuntimeCommitReceipt, RuntimePersistence, RuntimeSessionState,
+    RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
+    SelectedQueuedWorkClaimOutcome, SessionCheckpoint, SessionCommitStore, SessionExecutionLease,
+    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionHeadMeta,
+    SessionHeadPayload, SessionMeta, SessionNodeRecord, StoreError, StoreMaintenance,
+    StoredDriveEpoch, TurnInputCheckpointBoundary, TurnInputClaim, TurnInputIngress,
+    TurnInputState, TurnInputStore, VacuumReport, commit_runtime_state_verified,
     load_persisted_session_state,
 };
 use lash::plugins::{
@@ -307,6 +308,42 @@ impl DriveEpochStore for FacadeStore {
 }
 
 #[async_trait]
+impl RootStore for FacadeStore {
+    async fn root_terminal(
+        &self,
+        _session_id: &SessionId,
+        _root: &lash::TurnId,
+    ) -> Result<Option<RootTerminal>, StoreError> {
+        unreachable!("fixture runs no session drive")
+    }
+
+    async fn root_of_input(
+        &self,
+        _session_id: &SessionId,
+        _input: &lash::InputId,
+    ) -> Result<Option<lash::TurnId>, StoreError> {
+        unreachable!("fixture runs no session drive")
+    }
+
+    async fn root_binding(
+        &self,
+        _session_id: &SessionId,
+        _input: &lash::InputId,
+    ) -> Result<Option<lash::TurnId>, StoreError> {
+        unreachable!("fixture runs no session drive")
+    }
+
+    async fn bind_root_inputs(
+        &self,
+        _session_id: &SessionId,
+        _root: &lash::TurnId,
+        _inputs: &[lash::InputId],
+    ) -> Result<(), StoreError> {
+        unreachable!("fixture runs no session drive")
+    }
+}
+
+#[async_trait]
 impl QueuedWorkStore for FacadeStore {
     async fn select_queued_run(
         &self,
@@ -474,6 +511,8 @@ fn persistence_types_are_nameable(
         session_id: SessionId::from("facade"),
         expected_head_revision: 0,
         session_execution_lease_fence: None,
+        drive_fence: None,
+        root_terminal: None,
         release_session_execution_lease: None,
         config: PersistedSessionConfig::new(lash::TurnBudget::Unbounded),
         current_frame_node_id: None,

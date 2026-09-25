@@ -98,6 +98,8 @@ fn session_completion_matches(
 struct SnapshotStore {
     /// The drive epoch each session drive's seal raises (FIG-3600).
     drive_epochs: lash_core::store::InMemoryDriveEpochs,
+    /// Logical roots' terminal evidence and input bindings (FIG-3600 S7).
+    roots: lash_core::store::InMemoryRootLedger,
     read: std::sync::Mutex<Option<lash_core::store::PersistedSessionRead>>,
     session_meta: std::sync::Mutex<Option<lash_core::SessionMeta>>,
     runtime_turn_commits: std::sync::Mutex<
@@ -160,6 +162,7 @@ impl SnapshotStore {
         }
         Self {
             drive_epochs: Default::default(),
+            roots: Default::default(),
             read: std::sync::Mutex::new(Some(lash_core::store::PersistedSessionRead {
                 session_id: state.session_id,
                 head_revision: 7,
@@ -395,6 +398,13 @@ impl lash_core::SessionCommitStore for SnapshotStore {
         // session reopen) must advance the durable head revision; only receipt
         // replay may return a non-advancing receipt.
         let next_head_revision = read.as_ref().map_or(0, |read| read.head_revision) + 1;
+        if let Some(write) = commit.root_terminal.clone() {
+            self.roots.write_terminal(write.into_terminal(
+                commit.session_id.clone(),
+                next_head_revision,
+                0,
+            ))?;
+        }
         *read = Some(lash_core::store::PersistedSessionRead {
             session_id: commit.session_id.clone(),
             head_revision: next_head_revision,
@@ -2413,6 +2423,8 @@ async fn snapshot_store_reports_the_holder_a_claim_displaces() {
     .await;
 }
 
+#[path = "tests/root_stores.rs"]
+mod root_stores;
 #[path = "tests/snapshot_store_lease.rs"]
 mod snapshot_store_lease;
 #[path = "tests/turn_input_stores.rs"]

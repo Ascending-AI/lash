@@ -713,8 +713,19 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         session_id: &SessionId,
         root: &lash_sansio::TurnId,
     ) -> Result<Option<lash_core_execution::store::RootTerminal>, StoreError> {
-        let _ = (session_id, root);
-        Ok(None)
+        // The root's own evidence, else the session's `close_session`
+        // tombstone, which answers every root of a deleted session.
+        let mut connection = crate::acquire_runtime_connection(&self.pool).await?;
+        if let Some(terminal) =
+            crate::session_roots::root_terminal_conn(&mut connection, session_id, root).await?
+        {
+            return Ok(Some(terminal));
+        }
+        Ok(
+            crate::session_roots::close_session_intent_conn(&mut connection, session_id)
+                .await?
+                .and_then(|intent| intent.session_deleted_terminal(root)),
+        )
     }
 
     async fn list_open_control_intents(
@@ -722,8 +733,8 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         after: Option<lash_core_execution::store::ControlIntentId>,
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<lash_core_execution::store::ControlIntent>, StoreError> {
-        let _ = (after, limit);
-        Ok(Vec::new())
+        let mut connection = crate::acquire_runtime_connection(&self.pool).await?;
+        crate::session_roots::open_control_intents_conn(&mut connection, after, limit.get()).await
     }
 
     async fn compact_turn_park_feed(
@@ -1094,6 +1105,9 @@ pub(crate) async fn delete_session_tx(
         )
         .await?;
     }
+    // The session's logical roots and their input bindings go with it; a
+    // `close_session` intent stays as its deletion tombstone.
+    crate::session_roots::delete_session_roots_conn(tx, session_id).await?;
     for statement in [
         turn_ingress.queued_items_postgres.delete_by_session.sql(),
         turn_ingress.queued_batches.delete_by_session.sql(),

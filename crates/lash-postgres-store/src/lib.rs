@@ -1312,6 +1312,8 @@ mod session_factory;
 mod session_ingress;
 #[path = "postgres/session_meta.rs"]
 mod session_meta;
+#[path = "postgres/session_roots.rs"]
+mod session_roots;
 #[path = "postgres/session_sql.rs"]
 mod session_sql;
 #[path = "postgres/support.rs"]
