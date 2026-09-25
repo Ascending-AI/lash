@@ -3,6 +3,8 @@ use crate::*;
 
 #[path = "session_factory/artifact_retirement.rs"]
 mod artifact_retirement;
+#[path = "session_factory/control_intent_ledger.rs"]
+mod control_intent_ledger;
 #[path = "session_factory/store.rs"]
 mod store;
 
@@ -775,59 +777,6 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         lash_core_execution::store::validate_session_id(session_id)?;
         let store = self.store_for(session_id.clone());
         lash_core_execution::store::load_persisted_session_read_view(&store).await
-    }
-}
-
-#[async_trait::async_trait]
-impl lash_core_execution::store::ControlIntentStore for PostgresSessionStoreFactory {
-    async fn begin_session_close(
-        &self,
-        _session_id: &SessionId,
-        _at_ms: u64,
-    ) -> std::result::Result<Option<lash_core_execution::store::ControlIntent>, StoreError> {
-        Err(StoreError::UnsupportedStoreOperation {
-            operation: "ControlIntentStore::begin_session_close",
-        })
-    }
-
-    async fn claim_intent_application(
-        &self,
-        _id: lash_core_execution::store::ControlIntentId,
-    ) -> std::result::Result<lash_core_execution::store::IntentApplication, StoreError> {
-        Err(StoreError::UnsupportedStoreOperation {
-            operation: "ControlIntentStore::claim_intent_application",
-        })
-    }
-
-    async fn acknowledge_intent(
-        &self,
-        _id: lash_core_execution::store::ControlIntentId,
-        _at_ms: u64,
-    ) -> std::result::Result<(), StoreError> {
-        Err(StoreError::UnsupportedStoreOperation {
-            operation: "ControlIntentStore::acknowledge_intent",
-        })
-    }
-
-    async fn record_intent_failure(
-        &self,
-        _id: lash_core_execution::store::ControlIntentId,
-        _error: &str,
-        _retryable: bool,
-        _at_ms: u64,
-    ) -> std::result::Result<lash_core_execution::store::ControlIntent, StoreError> {
-        Err(StoreError::UnsupportedStoreOperation {
-            operation: "ControlIntentStore::record_intent_failure",
-        })
-    }
-
-    async fn load_intent(
-        &self,
-        _id: lash_core_execution::store::ControlIntentId,
-    ) -> std::result::Result<Option<lash_core_execution::store::ControlIntent>, StoreError> {
-        Err(StoreError::UnsupportedStoreOperation {
-            operation: "ControlIntentStore::load_intent",
-        })
     }
 }
 

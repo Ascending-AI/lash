@@ -86,6 +86,35 @@ fn read_session_state_version_conn(
     lash_core_execution::store::resolve_session_state_version(marker)
 }
 
+/// Refuse a write into session `session_id` once its close began: the
+/// `CloseSession` intent is the point of no return of its deletion, so it
+/// accepts nothing more (FIG-3600 S7).
+pub(crate) fn ensure_session_not_closing_conn(
+    conn: &rusqlite::Connection,
+    session_id: &SessionId,
+) -> Result<(), StoreError> {
+    let closing: Option<i64> = conn
+        .query_row(
+            session_sql().meta.select_closing_intent.sql(),
+            params![session_id.as_str()],
+            |row| row.get(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?
+        .flatten();
+    match closing {
+        None => Ok(()),
+        Some(intent) => Err(StoreError::SessionClosing {
+            session_id: session_id.clone(),
+            intent: lash_core_execution::store::ControlIntentId::from_sequence(
+                u64::try_from(intent).map_err(|_| {
+                    stored_data_corrupt("SessionMeta", "closing_intent must be non-negative")
+                })?,
+            ),
+        }),
+    }
+}
+
 pub(crate) fn ensure_session_not_deleted_conn(
     conn: &rusqlite::Connection,
     session_id: &SessionId,
@@ -180,6 +209,7 @@ mod turn_input;
 pub(crate) mod turn_park_feed;
 
 use claim_support::*;
+pub(crate) use queued_run::pending_queued_root_conn;
 pub(crate) use session_ingress::{
     apply_session_ingress_settlement_conn, session_ingress_rows_conn,
 };

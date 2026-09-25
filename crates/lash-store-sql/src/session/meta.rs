@@ -112,19 +112,30 @@ pub const BATCH_DELETED_EVIDENCE_COLUMNS: &str =
 
 /// A session's drive epoch and the admission that last raised it (ADR 0105
 /// §2, B3): the fence every claim, reclaim and settlement checks.
-pub const DRIVE_EPOCH_COLUMNS: &str = "drive_epoch, drive_admission_id";
+pub const DRIVE_EPOCH_COLUMNS: &str = "drive_epoch, drive_admission_id, closing_intent";
 
 crate::statements! {
     /// `session_meta` statements both backends issue verbatim.
     pub struct SessionMetaStatements @ "session_meta" {
         /// Session `?1`'s drive epoch and the admission that last raised it.
-        select_drive_epoch = "SELECT drive_epoch, drive_admission_id FROM session_meta WHERE session_id = ?1";
+        select_drive_epoch = "SELECT drive_epoch, drive_admission_id, closing_intent FROM session_meta WHERE session_id = ?1";
 
         /// The seal's compare-and-set: raise session `?1`'s drive epoch from
         /// `?2` to `?3` under admission `?4`. Zero rows means the epoch moved.
         seal_drive_epoch = "UPDATE session_meta
              SET drive_epoch = ?3, drive_admission_id = ?4
              WHERE session_id = ?1 AND drive_epoch = ?2";
+
+        /// Close session `?1` under control intent `?2`: record the intent
+        /// and raise the drive epoch under admission `?3`, so every fence an
+        /// earlier admission sealed is stale (FIG-3600 S7). A session already
+        /// closing is left as it is: zero rows.
+        begin_close = "UPDATE session_meta
+             SET closing_intent = ?2, drive_epoch = drive_epoch + 1, drive_admission_id = ?3
+             WHERE session_id = ?1 AND closing_intent IS NULL";
+
+        /// The control intent session `?1` is closing under, if any.
+        select_closing_intent = "SELECT closing_intent FROM session_meta WHERE session_id = ?1";
 
         /// Retain checkpoint `?2` (or nothing) as the base session `?1`'s
         /// latest turn was admitted on, replacing the previous admission's
