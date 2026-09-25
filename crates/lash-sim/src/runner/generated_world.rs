@@ -292,6 +292,7 @@ impl GeneratedRuntimeWorld {
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         let provider_scripts = scripts.clone();
         let provider_schedule = ScriptedTransportSchedule::new();
+        provider_schedule.declare_gates_to(self.engine.restate().server().outside_gates());
         let (core, transport, provider_kind) = runtime_core_for_scripts(
             scripts,
             Arc::clone(&self.backend) as Arc<dyn lash::Backend>,

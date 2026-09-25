@@ -14,7 +14,7 @@ use std::time::Duration;
 
 use lash_http_transport::{HttpMethod, HttpRequest, read_http_body_bytes};
 use lash_restate_test::{
-    CrashPoint, CrashRule, RestateTestServer, Scheduling, ServerConfig, TimeMode,
+    CrashPoint, CrashRule, OutsideGates, RestateTestServer, Scheduling, ServerConfig, TimeMode,
 };
 use restate_sdk::prelude::*;
 
@@ -205,10 +205,31 @@ impl Relay {
             .await?;
         Ok(Json(answer))
     }
+
+    /// Calls `Counter/{key}/add` through the server's ingress straight from
+    /// the handler, outside any `ctx.run`, and returns its answer.
+    #[handler]
+    async fn ask_direct(
+        &self,
+        _ctx: Context<'_>,
+        Json(key): Json<String>,
+    ) -> HandlerResult<Json<String>> {
+        let server = INGRESS
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+            .unwrap();
+        Ok(Json(
+            post(&server, &format!("Counter/{key}/add"), "1").await.1,
+        ))
+    }
 }
 
 /// [`INGRESS`] for [`Beside`], so its law runs beside the relay's.
 static BESIDE_INGRESS: Mutex<Option<RestateTestServer>> = Mutex::new(None);
+
+/// The gates [`Beside`] declares its wait to, when its law declares it.
+static BESIDE_GATES: Mutex<Option<OutsideGates>> = Mutex::new(None);
 
 struct Beside;
 
@@ -218,7 +239,8 @@ impl Beside {
     /// as lash's gate watches do — that calls `Counter/{key}/add` through
     /// the server's ingress. The spawned task does not carry the attempt, so
     /// its request lands as one from outside every attempt, while the
-    /// handler waits on it without being blocked on the server.
+    /// handler waits on it without being blocked on the server. When its
+    /// law declares [`BESIDE_GATES`], the wait is declared an outside gate.
     #[handler]
     async fn ask(&self, ctx: Context<'_>, Json(key): Json<String>) -> HandlerResult<Json<String>> {
         let server = BESIDE_INGRESS
@@ -226,8 +248,13 @@ impl Beside {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
             .unwrap();
+        let gates = BESIDE_GATES
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
         let answer = ctx
             .run(|| async move {
+                let _gate = gates.as_ref().map(OutsideGates::enter);
                 let task = tokio::spawn(async move {
                     post(&server, &format!("Counter/{key}/add"), "1").await.1
                 });
@@ -591,38 +618,60 @@ async fn a_handler_waiting_on_its_own_ingress_request_yields_the_serial_turn() {
             post(&server, "Relay/ask", "\"relay\"").await,
             (200, "\"1\"".into())
         );
-        // The relay's request is attributed to its attempt, so the turn
+        // Outside any `ctx.run` too: parked on its own request, whose
+        // target is ready, the handler gives the turn to that target.
+        assert_eq!(
+            post(&server, "Relay/ask_direct", "\"direct\"").await,
+            (200, "\"1\"".into())
+        );
+        // The relay's requests are attributed to its attempt, so the turn
         // moves to the counter at once instead of after a stall.
         assert_eq!(server.stats().stall_preemptions, 0);
         *INGRESS.lock().unwrap() = None;
     }
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn an_outside_request_a_stalled_holder_waits_on_lands_after_a_stall() {
-    for config in [
-        ServerConfig::default().scheduling(Scheduling::Serial),
-        ServerConfig::default()
-            .always_replay(true)
-            .scheduling(Scheduling::Serial),
-    ] {
-        let server = server(config).await;
-        *BESIDE_INGRESS.lock().unwrap() = Some(server.clone());
-        // The holder is the only live attempt and waits on work the server
-        // cannot see; the request that work waits on must still land once
-        // the holder has stalled, not wait for a turn nobody frees.
-        let answer = tokio::time::timeout(
-            Duration::from_secs(20),
-            post(&server, "Beside/ask", "\"beside\""),
-        )
-        .await
-        .expect("the outside request lands after the holder stalls");
-        assert_eq!(answer, (200, "\"1\"".into()));
-        assert!(
-            server.stats().stall_preemptions >= 1,
-            "the landing is counted as a stall: {:?}",
-            server.stats()
-        );
-        *BESIDE_INGRESS.lock().unwrap() = None;
+/// A handler inside a `ctx.run` waits on a task it spawned, whose request
+/// lands as one from outside every attempt. Declared as an outside gate,
+/// the wait lets that request land between turns with no stall, in one
+/// order per seed on a current-thread runtime; undeclared, the request
+/// still lands, once the holder has stalled.
+#[tokio::test]
+async fn an_outside_request_a_holder_waits_on_lands_at_a_declared_gate_or_after_a_stall() {
+    let mut traces = Vec::new();
+    for declared in [true, true, true, false] {
+        for config in [
+            ServerConfig::default()
+                .with_seed(7)
+                .scheduling(Scheduling::Serial),
+            ServerConfig::default()
+                .with_seed(7)
+                .always_replay(true)
+                .scheduling(Scheduling::Serial),
+        ] {
+            let server = server(config).await;
+            *BESIDE_INGRESS.lock().unwrap() = Some(server.clone());
+            *BESIDE_GATES.lock().unwrap() = declared.then(|| server.outside_gates());
+            let answer = tokio::time::timeout(
+                Duration::from_secs(20),
+                post(&server, "Beside/ask", "\"beside\""),
+            )
+            .await
+            .expect("the outside request lands");
+            assert_eq!(answer, (200, "\"1\"".into()));
+            let stalls = server.stats().stall_preemptions;
+            if declared {
+                assert_eq!(stalls, 0, "a declared gate lands the request between turns");
+                traces.push(server.schedule_trace());
+            } else {
+                assert!(stalls >= 1, "an undeclared wait lands only after a stall");
+            }
+            *BESIDE_GATES.lock().unwrap() = None;
+            *BESIDE_INGRESS.lock().unwrap() = None;
+        }
     }
+    assert!(
+        traces.chunks(2).all(|runs| runs == &traces[..2]),
+        "one seed grants the turn in one order: {traces:?}"
+    )
 }

@@ -200,11 +200,94 @@ pub(crate) struct Shared {
     state: Mutex<State>,
     /// Pulsed whenever an attempt starts, blocks, or ends, or time moves.
     activity: Arc<Notify>,
+    /// Serial scheduling: pulsed whenever the turn is granted. A handler
+    /// resuming from its own ingress request waits on this rather than on
+    /// `activity`, which its own park pulses.
+    granted: Notify,
     /// Told the new virtual time whenever it moves, so clocks the handlers
     /// read (a store set's) move with it.
     time_listener: OnceLock<Arc<dyn Fn(u64) + Send + Sync>>,
     /// The server's tasks still alive: attempts and time and turn drivers.
     tasks: Arc<AtomicUsize>,
+}
+
+/// What woke an attempt that waits for the serial turn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Wake {
+    /// The server: a request of its handler's answered.
+    Server,
+    /// Something outside the server: the attempt has a frame to write.
+    Outside,
+}
+
+/// An outside ingress request waiting to land, or landing: once admitted,
+/// the request has landed when this drops.
+struct Landing {
+    shared: Arc<Shared>,
+    admitted: tokio::sync::oneshot::Receiver<()>,
+}
+
+impl Drop for Landing {
+    fn drop(&mut self) {
+        // Admitted (or its admission dropped by a shut server): the next
+        // request may go.
+        if !matches!(
+            self.admitted.try_recv(),
+            Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+        ) {
+            self.shared.lock().landed();
+            self.shared.activity.notify_waiters();
+        }
+    }
+}
+
+/// A test's declaration that a handler waits, inside a `ctx.run` closure,
+/// on something outside the server that the test drives — a scripted
+/// provider's next event, a task the handler spawned whose own requests
+/// must land first.
+///
+/// Under [`Scheduling::Serial`] a holder parked inside a `ctx.run` closure
+/// keeps the turn: the server cannot tell a closure waiting on work that
+/// finishes by itself (a store call) from one waiting on the test. While
+/// gates are [entered](Self::enter), attempts parked inside `ctx.run`
+/// closures with no request of their own in flight — no more of them than
+/// there are entered gates — are taken to wait on those gates: the turn
+/// moves on and outside work goes on between turns, at the same point on
+/// every run. A weak handle: it does not keep the server alive.
+#[derive(Clone, Debug)]
+pub struct OutsideGates {
+    shared: Weak<Shared>,
+}
+
+impl OutsideGates {
+    /// A handler is about to wait on a gate; it is held until the guard
+    /// drops. Enter it only once the gate is known closed, so the wait
+    /// really parks.
+    pub fn enter(&self) -> OutsideGate {
+        if let Some(shared) = self.shared.upgrade() {
+            shared.lock().gate_entered();
+            shared.activity.notify_waiters();
+        }
+        OutsideGate {
+            shared: self.shared.clone(),
+        }
+    }
+}
+
+/// A gate a handler waits on, entered through [`OutsideGates::enter`];
+/// dropping it says the wait is over.
+#[derive(Debug)]
+pub struct OutsideGate {
+    shared: Weak<Shared>,
+}
+
+impl Drop for OutsideGate {
+    fn drop(&mut self) {
+        if let Some(shared) = self.shared.upgrade() {
+            shared.lock().gate_left();
+            shared.activity.notify_waiters();
+        }
+    }
 }
 
 /// Counts one server task while it lives.
@@ -280,7 +363,7 @@ impl Shared {
         let granted = state.schedule();
         drop(state);
         if granted {
-            self.activity.notify_waiters();
+            self.turn_granted();
         }
         flow
     }
@@ -291,8 +374,22 @@ impl Shared {
         let granted = state.schedule();
         drop(state);
         if granted {
-            self.activity.notify_waiters();
+            self.turn_granted();
         }
+    }
+
+    /// An attempt's handler parked: move the serial turn if that frees it.
+    fn parked(&self) {
+        if self.config.scheduling == Scheduling::Serial && self.lock().schedule() {
+            self.granted.notify_waiters();
+        }
+        self.activity.notify_waiters();
+    }
+
+    /// Serial scheduling: the turn moved to an attempt.
+    fn turn_granted(&self) {
+        self.granted.notify_waiters();
+        self.activity.notify_waiters();
     }
 
     /// Serial scheduling: an ingress request issued by the handler of
@@ -308,29 +405,55 @@ impl Shared {
     async fn ingress_ended(&self, turn: serial::Turn, ticket: u64) {
         self.lock().ingress_ended(ticket);
         self.activity.notify_waiters();
+        self.await_turn(turn, Wake::Server).await;
+    }
+
+    /// Serial scheduling: return once `turn` holds the turn (or is no
+    /// longer live), queueing it for the turn meanwhile — at once when the
+    /// server woke it, between turns when something outside did.
+    async fn await_turn(&self, turn: serial::Turn, wake: Wake) {
         loop {
-            let notified = self.activity.notified();
-            if self.lock().may_run(turn) {
-                return;
+            let notified = self.granted.notified();
+            let granted = {
+                let mut state = self.lock();
+                if state.may_run(turn) {
+                    return;
+                }
+                match wake {
+                    Wake::Server => state.make_ready(turn),
+                    Wake::Outside => state.woke(turn),
+                }
+                state.schedule()
+            };
+            if granted {
+                self.turn_granted();
             }
             let _ = tokio::time::timeout(Duration::from_millis(2), notified).await;
         }
     }
 
+    /// Serial scheduling: an ingress request the handler of a turn issued
+    /// was dropped unanswered.
+    fn ingress_abandoned(&self, ticket: u64) {
+        self.lock().ingress_abandoned(ticket);
+        self.activity.notify_waiters();
+    }
+
     /// Serial scheduling: wait until an ingress request from outside every
-    /// attempt may land. [`landed`](Self::landed) must follow once it has
-    /// reached the server.
-    async fn wait_to_land(&self, url: &str, body: &bytes::Bytes) {
+    /// attempt may land. The request has landed once the returned guard
+    /// drops: drop it once the request has reached the server. A request
+    /// its caller drops once admitted frees the next one all the same.
+    async fn wait_to_land(self: &Arc<Self>, url: &str, body: &bytes::Bytes) -> Landing {
         let (admit, admitted) = tokio::sync::oneshot::channel();
         self.lock()
             .wait_to_land(url.to_owned(), body.clone(), admit);
         self.activity.notify_waiters();
-        let _ = admitted.await;
-    }
-
-    fn landed(&self) {
-        self.lock().landed();
-        self.activity.notify_waiters();
+        let mut landing = Landing {
+            shared: Arc::clone(self),
+            admitted,
+        };
+        let _ = (&mut landing.admitted).await;
+        landing
     }
 
     /// Serial scheduling: the turn of the attempt whose task is running
@@ -499,6 +622,7 @@ impl RestateTestServer {
             runtime,
             state: Mutex::new(state),
             activity: Arc::new(Notify::new()),
+            granted: Notify::new(),
             time_listener: OnceLock::new(),
             tasks: Arc::new(AtomicUsize::new(0)),
         });
@@ -534,6 +658,14 @@ impl RestateTestServer {
         let server = Self::new(config)?;
         server.register(endpoint).await?;
         Ok(server)
+    }
+
+    /// Where a test declares the gates it holds handlers on: see
+    /// [`OutsideGates`].
+    pub fn outside_gates(&self) -> OutsideGates {
+        OutsideGates {
+            shared: Arc::downgrade(&self.shared),
+        }
     }
 
     /// A watch on this server's release, for tests that prove a dropped

@@ -48,6 +48,14 @@ impl InputProbe {
         self.set(false);
     }
 
+    /// Whether the handler is parked: the attempt task's last poll of the
+    /// response body returned with nothing to apply, so the handler waits
+    /// on something — its input, a request it issued, or work outside the
+    /// server.
+    pub fn is_parked(&self) -> bool {
+        self.response_drained.load(Ordering::SeqCst)
+    }
+
     /// Whether the attempt task's last poll of the response body found
     /// nothing to apply.
     pub fn set_response_drained(&self, drained: bool) {

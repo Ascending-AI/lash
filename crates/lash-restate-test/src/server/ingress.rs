@@ -70,8 +70,16 @@ impl HttpTransport for IngressTransport {
             tokio::task::yield_now().await;
         }
         let waiting = turn.map(|turn| (turn, shared.ingress_began(turn)));
+        // A caller may drop the request before it answers (a `select!`, a
+        // timeout): its handler no longer waits on it.
+        let mut abandoned = waiting.map(|(_, ticket)| Abandoned {
+            shared: Arc::clone(&shared),
+            ticket,
+            answered: false,
+        });
         let routes = Routes {
             shared: Arc::clone(&shared),
+            ticket: waiting.map(|(_, ticket)| ticket),
         };
         let message = request
             .response_start_timeout_message
@@ -87,13 +95,13 @@ impl HttpTransport for IngressTransport {
                 // server in its first poll — it submits, signals or reads
                 // under the lock before it first waits — so the request has
                 // landed once that poll returns.
-                routes
+                let landing = routes
                     .shared
                     .wait_to_land(&request.url, &request.body)
                     .await;
                 let mut route = std::pin::pin!(routes.route(request));
                 let first = std::future::poll_fn(|cx| Poll::Ready(route.as_mut().poll(cx))).await;
-                routes.shared.landed();
+                drop(landing);
                 Ok(match first {
                     Poll::Ready(response) => response,
                     Poll::Pending => route.await,
@@ -104,14 +112,37 @@ impl HttpTransport for IngressTransport {
         )
         .await;
         if let Some((turn, ticket)) = waiting {
+            if let Some(abandoned) = &mut abandoned {
+                abandoned.answered = true;
+            }
             shared.ingress_ended(turn, ticket).await;
         }
         response
     }
 }
 
+/// Serial scheduling: a handler's ingress request its caller dropped
+/// unanswered ends there, so the server does not count the handler as
+/// waiting on it.
+struct Abandoned {
+    shared: Arc<Shared>,
+    ticket: u64,
+    answered: bool,
+}
+
+impl Drop for Abandoned {
+    fn drop(&mut self) {
+        if !self.answered {
+            self.shared.ingress_abandoned(self.ticket);
+        }
+    }
+}
+
 struct Routes {
     shared: Arc<Shared>,
+    /// The serial scheduler's ticket of the request, when an attempt's
+    /// handler issued it.
+    ticket: Option<u64>,
 }
 
 fn respond(status: u16, body: impl Into<Bytes>) -> HttpResponse {
@@ -355,7 +386,14 @@ impl Routes {
             let id = state.invocations[invocation.0].id.as_str().to_owned();
             let receiver = (!send && submitted != Submitted::WorkflowRunExists).then(|| {
                 let (sender, receiver) = oneshot::channel();
-                state.add_waiter(&self.shared, invocation, Waiter::Ingress(sender));
+                state.add_waiter(
+                    &self.shared,
+                    invocation,
+                    Waiter::Ingress {
+                        sender,
+                        ticket: self.ticket,
+                    },
+                );
                 receiver
             });
             (receiver, submitted, id)
@@ -404,7 +442,14 @@ impl Routes {
                 _ => {}
             }
             let (sender, receiver) = oneshot::channel();
-            state.add_waiter(&self.shared, invocation, Waiter::Ingress(sender));
+            state.add_waiter(
+                &self.shared,
+                invocation,
+                Waiter::Ingress {
+                    sender,
+                    ticket: self.ticket,
+                },
+            );
             receiver
         };
         match receiver.await {
