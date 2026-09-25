@@ -66,6 +66,9 @@ use lash_core::runtime::{
     PendingTurnInputRead, PendingTurnInputSuffixCancelOutcome, QueuedWorkBatch, QueuedWorkClaim,
     TurnInputAcceptanceReceipt, TurnInputClaim, TurnInputIngress,
 };
+use lash_core::store::{
+    IngressItemRead, IngressSuffixWithdrawOutcome, IngressWithdrawReceipt, IngressWithdrawTarget,
+};
 use lash_sansio::SessionId;
 use tokio::sync::OnceCell;
 
@@ -295,6 +298,55 @@ impl DurableSession {
         Ok(self
             .ops
             .cancel_pending_turn_input_suffix(store, &anchor)
+            .await?)
+    }
+
+    /// Every open item of this session's one ingress (ADR 0101): host input,
+    /// process wakes and session commands, in `(lane, enqueue_seq)` order.
+    ///
+    /// An item a live claim holds is still reported, as
+    /// [`IngressReadStatus::Held`](lash_core::store::IngressReadStatus::Held)
+    /// with the drive epoch that holds it. Nothing expires a hold: only a
+    /// later drive admission supersedes it.
+    pub async fn ingress_items(&self) -> Result<Vec<IngressItemRead>> {
+        let store = self.store().await?;
+        Ok(store.list_ingress_items(&self.session_id).await?)
+    }
+
+    /// Withdraw items from the ingress by item id or source key, atomically
+    /// (ADR 0101 §10).
+    ///
+    /// Every target gets its own receipt. A withdrawn item gets a `cancelled`
+    /// tombstone and its affected-item record, and a withdrawn process wake
+    /// raises its redelivery floor in the same transaction. An item a live
+    /// claim holds is answered
+    /// [`Held`](lash_core::store::IngressWithdrawOutcome::Held) and left alone:
+    /// it has crossed into a drive and is reconciliation state, not an
+    /// editable draft.
+    pub async fn withdraw(
+        &self,
+        targets: &[IngressWithdrawTarget],
+    ) -> Result<Vec<IngressWithdrawReceipt>> {
+        let store = self.store().await?;
+        Ok(store
+            .withdraw_ingress_items(&self.session_id, targets)
+            .await?)
+    }
+
+    /// Withdraw `anchor` and every later item in its lane, atomically, each
+    /// with its own outcome in `enqueue_seq` order.
+    ///
+    /// Hosts that let users edit earlier product messages map the edited
+    /// message to its item id or source key, call this, and restore as drafts
+    /// only the items answered
+    /// [`Withdrawn`](lash_core::store::IngressWithdrawOutcome::Withdrawn).
+    pub async fn withdraw_suffix(
+        &self,
+        anchor: &IngressWithdrawTarget,
+    ) -> Result<IngressSuffixWithdrawOutcome> {
+        let store = self.store().await?;
+        Ok(store
+            .withdraw_ingress_suffix(&self.session_id, anchor)
             .await?)
     }
 

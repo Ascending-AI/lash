@@ -104,6 +104,15 @@ pub use lash_core::facade_support::{
     TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
 };
 pub use lash_core::runtime::ExternalCompletionError;
+/// The one session ingress as a host reads and withdraws it (ADR 0101):
+/// [`DurableSession::ingress_items`], [`DurableSession::withdraw`] and
+/// [`DurableSession::withdraw_suffix`].
+pub use lash_core::store::{
+    Delivery, IngressAffectedItem, IngressCancelReason, IngressItem, IngressItemId,
+    IngressItemRead, IngressKind, IngressPayload, IngressReadStatus, IngressState,
+    IngressSuffixWithdrawOutcome, IngressTerminalCause, IngressUndeliveredDisposition,
+    IngressWithdrawOutcome, IngressWithdrawReceipt, IngressWithdrawSelector, IngressWithdrawTarget,
+};
 pub use lash_core::{
     AwaitEventKey, AwaitEventWaitIdentity, BatchId, ChargeSafetyPolicy,
     ChargeSafetyRefusalEvidence, CommitBudget, CommitBudgetLimit, DrainMode, DrainModePolicy,
