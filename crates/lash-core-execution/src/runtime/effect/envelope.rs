@@ -456,6 +456,15 @@ pub enum RuntimeEffectCommand {
     CloseRootScope {
         root: crate::TurnId,
     },
+    /// Begin closing a session (FIG-3600 S7, FIG-3607 item 7): the store half
+    /// of its `CloseSession` control intent, recorded under the session's
+    /// `SessionDelete` scope at
+    /// [`begin_session_close_replay_key`](crate::engine::begin_session_close_replay_key).
+    /// It is the point of no return of a deletion: every refusal is asked
+    /// before it, and after it the deletion only retries.
+    BeginSessionClose {
+        session: crate::SessionId,
+    },
     Checkpoint {
         checkpoint: CheckpointKind,
     },
@@ -554,6 +563,7 @@ impl RuntimeEffectCommand {
             Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
             Self::CloseRootScope { .. } => RuntimeEffectKind::CloseRootScope,
+            Self::BeginSessionClose { .. } => RuntimeEffectKind::BeginSessionClose,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
             Self::LoadExecutionEnv { .. } => RuntimeEffectKind::LoadExecutionEnv,
@@ -1207,6 +1217,11 @@ pub enum RuntimeEffectOutcome {
     CloseRootScope {
         terminal: Box<crate::store::RootTerminal>,
     },
+    /// The session's `CloseSession` intent, boxed; `None` when the session
+    /// had no durable record and nothing was closed.
+    BeginSessionClose {
+        intent: Option<Box<crate::store::ControlIntent>>,
+    },
     Checkpoint {
         result: CheckpointOutcome,
         #[serde(default)]
@@ -1664,6 +1679,7 @@ impl RuntimeEffectOutcome {
             Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
             Self::CloseRootScope { .. } => RuntimeEffectKind::CloseRootScope,
+            Self::BeginSessionClose { .. } => RuntimeEffectKind::BeginSessionClose,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
             Self::LoadExecutionEnv { .. } => RuntimeEffectKind::LoadExecutionEnv,

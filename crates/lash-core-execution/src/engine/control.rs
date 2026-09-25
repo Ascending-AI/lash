@@ -57,6 +57,14 @@ impl ScopeCloseSink for NoScopeClose {
     }
 }
 
+/// The replay key of a session's `BeginSessionClose` step, inside its
+/// `SessionDelete` scope: one close per session, so every retry of the
+/// deletion replays the recorded close.
+#[must_use]
+pub fn begin_session_close_replay_key(session: &SessionId) -> String {
+    format!("{}:begin-close", session.as_str())
+}
+
 /// One logical root, as an engine's control verbs address it.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub struct RootRef {

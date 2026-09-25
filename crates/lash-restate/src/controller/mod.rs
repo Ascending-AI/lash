@@ -1621,6 +1621,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::AdmitDrive { .. }
         | RuntimeEffectCommand::SealDriveAdmission { .. }
         | RuntimeEffectCommand::CloseRootScope { .. }
+        | RuntimeEffectCommand::BeginSessionClose { .. }
         | RuntimeEffectCommand::AssistantResponseHooks { .. }
         | RuntimeEffectCommand::SyncExecutionEnvironment
         | RuntimeEffectCommand::LlmCall { .. }) => RestateEffectExecution::JournaledRun {
