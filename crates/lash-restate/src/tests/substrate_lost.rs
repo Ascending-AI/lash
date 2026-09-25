@@ -975,3 +975,44 @@ pub(super) async fn a_retired_journal_generation_is_refused_before_any_command()
         );
     }
 }
+
+/// FIG-3818 → FIG-3820: after the SubstrateLost recovery stored the
+/// process's `Abandoned` terminal, a zombie root execution (killed, purged,
+/// still running on its deployment) can still park its handover and send
+/// its successor. Segment 1's admission finds the handover and the root's
+/// start, admits it, and drives the runner under a process that already
+/// ended: nothing on the segment path fences on the recovery. The recovery
+/// must revoke the zombie execution (FIG-3820).
+#[tokio::test]
+#[ignore = "FIG-3820: the SubstrateLost recovery does not revoke the zombie execution; its successor segment runs the body under an Abandoned process"]
+pub(super) async fn a_zombie_successor_after_substrate_lost_recovery_runs_no_body() {
+    let segment = HandedOverSegment::new("fig3818-zombie-successor").await;
+    let abandoned = ProcessAwaitOutput::Abandoned {
+        evidence: Box::new(lash_core::AbandonEvidence {
+            writer: lash_core::AbandonWriter::ResumeRefused {
+                reason: lash_core::ProcessResumeRefusal::SubstrateLost,
+            },
+            owner: Some(segment.root_start.owner.clone()),
+            epoch_ms: 1,
+        }),
+        control: None,
+    };
+    segment
+        .registry
+        .complete_process(
+            &segment.registration.id,
+            abandoned.clone(),
+            crate::process::workflow_key_authority(&segment.registration.id),
+        )
+        .await
+        .expect("the recovery stores Abandoned");
+    // The zombie's handover is already parked (the fixture); its successor
+    // send lands as a fresh invocation of segment 1.
+    let _ = segment.invoke_fresh(true).await;
+    assert_eq!(
+        segment.runs(),
+        0,
+        "a successor of a revoked execution must not run its body"
+    );
+    assert_eq!(segment.outcome().await, Some(abandoned));
+}

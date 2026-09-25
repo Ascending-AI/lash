@@ -37,5 +37,8 @@ thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "rt", "sync", "time"] }
 
 [dev-dependencies]
-lash ={ workspace = true }
+lash = { workspace = true, features = ["rlm"] }
+lash-lashlang-runtime = { workspace = true }
+lash-protocol-rlm = { workspace = true }
+lashlang = { workspace = true }
 tokio ={ workspace = true, features = ["macros", "rt", "rt-multi-thread", "sync", "time", "test-util"] }
