@@ -549,11 +549,6 @@ async fn start_later_segment(
     nonce: String,
 ) -> Result<StartOutcome, HandlerError> {
     let record = read_record(registry, process_id).await?;
-    if let Some(output) = record.outcome.clone().filter(|_| record.is_terminal()) {
-        return Ok(StartOutcome::Ended {
-            output: Box::new(output),
-        });
-    }
     let root = match retained_start(&record, segment_ordinal) {
         Ok(root) => root,
         Err(message) => return Ok(StartOutcome::Invariant { message }),
@@ -569,7 +564,11 @@ async fn start_later_segment(
             ),
         });
     };
-    let recorded = continuations
+    // The marker is refused on an ended process in the transaction that
+    // writes it, so no terminal lands between the check and the start
+    // (FIG-3819). A terminal is permanent: the record read after the refusal
+    // carries it.
+    let recorded = match continuations
         .mark_segment_started(
             &ProcessSegmentKey::new(process_id.clone(), segment_ordinal),
             SegmentStartMarker {
@@ -578,7 +577,24 @@ async fn start_later_segment(
             },
         )
         .await
-        .map_err(store_fault)?;
+    {
+        Ok(recorded) => recorded,
+        Err(PluginError::ProcessAlreadyTerminal { .. }) => {
+            let ended = read_record(registry, process_id).await?;
+            return match ended.outcome {
+                Some(output) => Ok(StartOutcome::Ended {
+                    output: Box::new(output),
+                }),
+                None => Ok(StartOutcome::Invariant {
+                    message: format!(
+                        "process `{process_id}` refused segment {segment_ordinal}'s start as \
+                         ended but stores no terminal"
+                    ),
+                }),
+            };
+        }
+        Err(error) => return Err(store_fault(error)),
+    };
     Ok(if recorded.nonce == nonce {
         StartOutcome::Started {
             execution_id,

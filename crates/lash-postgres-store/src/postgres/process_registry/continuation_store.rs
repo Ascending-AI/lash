@@ -93,6 +93,16 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
         let (process_id, segment_ordinal) = (&segment.process_id, segment.segment_ordinal);
         let encoded = serde_json::to_string(&marker).map_err(process_decode_error)?;
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        // An ended process starts no segment. The row lock the load takes
+        // holds to the commit, so a terminal append serialises fully before or
+        // after this marker (FIG-3819).
+        let record = require_process_tx(&mut tx, process_id).await?;
+        if record.is_terminal() {
+            return Err(PluginError::ProcessAlreadyTerminal {
+                process_id: record.id.clone(),
+                status: record.status,
+            });
+        }
         sqlx::query(process_sql().handover.mark_started.sql())
             .bind(process_id.as_str())
             .bind(segment_ordinal as i64)
