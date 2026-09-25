@@ -139,11 +139,12 @@ fn a_read_answers_the_value_when_it_runs() {
     for (source, expected) in cases {
         assert_eq!(finished(source), expected, "{source}");
     }
-    let error = lash_typescript::testing::compile(
-        "var x = 1; const f = () => x; globalThis.x = 2; finish(f());",
-    )
-    .expect_err("a bare-name capture a globalThis write reaches still refuses");
-    assert_eq!(error.code, DiagnosticCode::MutableCaptureUnsupported);
+    // A bare-name read of the same global is live too (FIG-3707): the closure
+    // reads the session slot the write assigned.
+    assert_eq!(
+        finished("var x = 1; const f = () => x; globalThis.x = 2; finish(f());"),
+        Value::Number(2.0),
+    );
 }
 
 #[test]
@@ -281,5 +282,35 @@ fn a_process_body_refuses_every_global_this_form() {
         );
         assert!(error.message.contains("`budget`"), "{source}: {error}");
         assert!(!error.suggestions.is_empty(), "{source}: {error}");
+    }
+}
+
+/// A function declaration is hoisted ahead of the `globalThis` write that
+/// creates a session slot, and reads the slot by name when it runs after the
+/// write (FIG-3707's generated sessions, seed 390). Each was refused as
+/// `TS_UNKNOWN_BINDING` before: the hoisted body lowered before the write
+/// declared the slot.
+#[test]
+fn a_hoisted_function_reads_a_slot_a_later_global_this_write_creates() {
+    let cases = [
+        (
+            "globalThis.shared = 'b'; function read() { return shared + '!'; } finish(read());",
+            Value::String("b!".into()),
+        ),
+        (
+            "function read() { return typeof shared; } const before = read(); globalThis.shared = 1; finish([before, read(), shared]);",
+            list([
+                Value::String("undefined".into()),
+                Value::String("number".into()),
+                Value::Number(1.0),
+            ]),
+        ),
+        (
+            "function bump() { globalThis.hits = (globalThis.hits ?? 0) + 1; return hits; } bump(); finish(bump());",
+            Value::Number(2.0),
+        ),
+    ];
+    for (source, expected) in cases {
+        assert_eq!(finished(source), expected, "{source}");
     }
 }

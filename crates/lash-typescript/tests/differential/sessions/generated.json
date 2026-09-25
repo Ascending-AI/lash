@@ -310,8 +310,8 @@
           }
         },
         {
-          "source": "const r = /((((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))))/;\n",
-          "reject": "TS_REGEX_PATTERN_NESTING_LIMIT",
+          "source": "const it = 'a'.matchAll(/a/g);\n",
+          "reject": "TS_REGEX_ITERATOR_POSITION",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -658,7 +658,7 @@
           }
         },
         {
-          "source": "switch (delta % 3) {\n  case 0: {\n    console.log(turn1, delta);\n    break;\n  }\n  case 1: {\n    const phi = turn1;\n    break;\n  }\n  default: {\n    let beta = { ...{ e: turn1, f: [Math.min(turn1, delta), turn1, 4] } };\n  }\n}\nconst [alpha, ...kappa] = [5, psi.indexOf('b'), Array.from({ length: 1 }, (slot, index) => index * 2).length];\nlet turn2 = 0;\nwhile (turn2 < 3) {\n  turn2++;\n  for (const field in kappa) {\n    console.log(field);\n    const iota = new URL('https://example.com/p?x=1');\n    console.log(iota.href, iota.pathname, iota.searchParams.get('x'), iota.origin);\n  }\n}\nconst sigma = (value, ...rest) => Math.max(turn1, 11) + rest.length;\nconsole.log(sigma(7));\nconst { a: theta, b: zeta = 0 } = { a: 'ab', b: 0 };\nvar omega = psi;\n",
+          "source": "switch (delta % 3) {\n  case 0: {\n    console.log(turn1, delta);\n    break;\n  }\n  case 1: {\n    const phi = turn1;\n    break;\n  }\n  default: {\n    let beta = { ...{ e: turn1, f: [Math.min(turn1, delta), turn1, 4] } };\n  }\n}\nconst [alpha, ...kappa] = [5, psi.indexOf('b'), Array.from({ length: 1 }, (slot, index) => index * 2).length];\nlet turn2 = 0;\nwhile (turn2 < 3) {\n  turn2++;\n  for (const field in kappa) {\n    console.log(field);\n    const iota = new URL('https://example.com/p?x=1');\n    console.log(iota.href, iota.pathname, iota.searchParams.get('x'), iota.origin);\n  }\n}\nconst sigma = (value, ...rest) => Math.max(alpha, 11) + rest.length;\nconsole.log(sigma(7));\nconst { a: theta, b: zeta = 0 } = { a: 'ab', b: 0 };\nvar omega = psi;\n",
           "node": {
             "outcome": "normal",
             "prints": [
@@ -898,6 +898,7 @@
         "iota",
         "item",
         "kappa",
+        "lambda",
         "omega",
         "phi",
         "problem",
@@ -906,7 +907,6 @@
         "slot",
         "tau",
         "theta",
-        "total",
         "value",
         "zeta"
       ],
@@ -935,6 +935,7 @@
               "iota": "string \"***ab\"",
               "item": "unbound",
               "kappa": "unbound",
+              "lambda": "unbound",
               "omega": "unbound",
               "phi": "unbound",
               "problem": "unbound",
@@ -943,7 +944,6 @@
               "slot": "unbound",
               "tau": "unbound",
               "theta": "unbound",
-              "total": "unbound",
               "value": "unbound",
               "zeta": "unbound"
             }
@@ -969,6 +969,7 @@
               "iota": "string \"***ab\"",
               "item": "unbound",
               "kappa": "object [8]",
+              "lambda": "unbound",
               "omega": "unbound",
               "phi": "unbound",
               "problem": "unbound",
@@ -977,14 +978,13 @@
               "slot": "unbound",
               "tau": "unbound",
               "theta": "unbound",
-              "total": "unbound",
               "value": "unbound",
               "zeta": "unbound"
             }
           }
         },
         {
-          "source": "function sigma(count) {\n  var chi = JSON.parse(JSON.stringify(kappa));\n  return 8;\n}\nconsole.log(sigma(9));\nvar omega = { c: 0, a: (kappa.findLastIndex((value) => value < 3) >= 0), d: sigma(...delta, 1) };\n{\n  for (const entry of iota) {\n    const alpha = sigma(Number.parseInt(`${2}:${entry}` + '7', 10));\n    console.info(alpha, alpha, String(sigma(alpha)).includes('a'));\n  }\n  switch (10 % 3) {\n    case 0: {\n      console.warn(7, 'a,b');\n      kappa.push(...[12, (true ? 8.5 : Number.parseInt(iota + '7', 10))]);\n    }\n    case 1: {\n      const alpha = [JSON.stringify(iota).replaceAll('b', 'B'), iota];\n      const tau = new URLSearchParams('b=2&a=1&b=3');\n      console.log(tau.toString(), tau.get('b'), tau.getAll('b'), tau.size, tau.has('q'));\n    }\n    default: {\n      delta.unshift(9.5);\n    }\n  }\n  let phi = new RangeError('x');\n}\nif (true) {\n  const kappa = ((4 ** 2) >= 10);\n  {\n    const gamma = (item) => Number.parseInt('  pad '.slice(0, 2) + '7', 10);\n    console.log(gamma((delta.at(-1) ?? 0)));\n    omega.d = (Math.min(8, 7) % (kappa ? 5 : 11));\n    let sigma = [10, (true ? (delta.at(-1) ?? 0) : (-2)), 4];\n  }\n}\n",
+          "source": "function sigma(count) {\n  var chi = JSON.parse(JSON.stringify(kappa));\n  return 8;\n}\nconsole.log(sigma(9));\nvar omega = { c: 0, a: (kappa.findLastIndex((value) => value < 3) >= 0), d: sigma(...delta, 1) };\n{\n  for (const entry of iota) {\n    const alpha = sigma(Number.parseInt(`${2}:${entry}` + '7', 10));\n    console.info(alpha, alpha, String(sigma(alpha)).includes('a'));\n  }\n  switch (10 % 3) {\n    case 0: {\n      console.warn(7, 'a,b');\n      kappa.push(...[12, (true ? 8.5 : Number.parseInt(iota + '7', 10))]);\n    }\n    case 1: {\n      const alpha = [JSON.stringify(iota).replaceAll('b', 'B'), iota];\n      const tau = new URLSearchParams('b=2&a=1&b=3');\n      console.log(tau.toString(), tau.get('b'), tau.getAll('b'), tau.size, tau.has('q'));\n    }\n    default: {\n      delta.unshift(9.5);\n    }\n  }\n  let phi = new RangeError('x');\n}\nif (true) {\n  const kappa = ((4 ** 2) >= 10);\n  {\n    const psi = (item) => Number.parseInt(iota.slice(0, 2) + '7', 10);\n    console.log(psi(iota.trimEnd().length));\n    const gamma = /(?<first>[a-z])(b)?/.exec('b.c');\n    console.log(gamma?.[0] ?? 'none', gamma?.index ?? -1, gamma?.groups?.first ?? '-', gamma === null);\n    const lambda = new RegExp('[a-z]+', 'i');\n    console.log(lambda.test('zz'), lambda.source, lambda.flags, lambda.lastIndex, String(lambda));\n  }\n} else {\n  console.log({ ...omega, z: 0 }, iota);\n}\n",
           "node": {
             "outcome": "normal",
             "prints": [
@@ -995,7 +995,9 @@
               "8 8 false",
               "8 8 false",
               "b=2&a=1&b=3 2 [\"2\",\"3\"] 3 false",
-              "7"
+              "NaN",
+              "b 0 b false",
+              "true [a-z]+ i 0 /[a-z]+/i"
             ],
             "probes": {
               "alpha": "unbound",
@@ -1010,7 +1012,8 @@
               "iota": "string \"***ab\"",
               "item": "unbound",
               "kappa": "object [8]",
-              "omega": "object {\"c\":0,\"a\":false,\"d\":2}",
+              "lambda": "unbound",
+              "omega": "object {\"c\":0,\"a\":false,\"d\":8}",
               "phi": "unbound",
               "problem": "unbound",
               "psi": "unbound",
@@ -1018,7 +1021,6 @@
               "slot": "unbound",
               "tau": "unbound",
               "theta": "unbound",
-              "total": "unbound",
               "value": "unbound",
               "zeta": "unbound"
             },
@@ -1028,7 +1030,7 @@
           }
         },
         {
-          "source": "let psi = [0, (delta.at(-1) ?? 0), kappa.reduce((total, item) => total + item, 0)];\nif ((0 < (2 % 1))) {\n  for (const field in delta) {\n    console.log(field);\n  }\n}\nswitch (6.5 % 3) {\n  case 0: {\n    try {\n      kappa.pop();\n      let sigma = [kappa.join('-'), 'ab'];\n      throw new RangeError('hi');\n    } catch (error) {\n      console.log(error.name, error.message, error instanceof RangeError);\n    }\n    break;\n  }\n  default: {\n    let gamma = 0;\n  }\n}\n",
+          "source": "for (const entry of kappa) {\n  if (kappa.length > 0) kappa[kappa.length - 1] = 2.5;\n  delta.unshift(((-5) << entry));\n}\ntry {\n  let delta = [iota];\n} catch (error) {\n  console.log(error.name, error.message, error instanceof RangeError);\n} finally {\n  omega.c = 0;\n}\n",
           "node": {
             "outcome": "normal",
             "prints": [],
@@ -1036,7 +1038,7 @@
               "alpha": "unbound",
               "chi": "unbound",
               "count": "unbound",
-              "delta": "object [9.5,1,-2,4]",
+              "delta": "object [-1280,9.5,1,-2,4]",
               "entry": "unbound",
               "error": "unbound",
               "field": "unbound",
@@ -1044,16 +1046,16 @@
               "index": "unbound",
               "iota": "string \"***ab\"",
               "item": "unbound",
-              "kappa": "object [8]",
-              "omega": "object {\"c\":0,\"a\":false,\"d\":2}",
+              "kappa": "object [2.5]",
+              "lambda": "unbound",
+              "omega": "object {\"c\":0,\"a\":false,\"d\":8}",
               "phi": "unbound",
               "problem": "unbound",
-              "psi": "object [0,4,8]",
+              "psi": "unbound",
               "sigma": "function undefined",
               "slot": "unbound",
               "tau": "unbound",
               "theta": "unbound",
-              "total": "unbound",
               "value": "unbound",
               "zeta": "unbound"
             },
@@ -1338,9 +1340,7 @@
         "beta",
         "chi",
         "count",
-        "delta",
         "entry",
-        "field",
         "gamma",
         "index",
         "iota",
@@ -1350,14 +1350,11 @@
         "omega",
         "part",
         "phi",
-        "psi",
         "rho",
-        "scaled",
         "sigma",
         "slot",
         "tau",
         "theta",
-        "turn1",
         "value",
         "zeta"
       ],
@@ -1372,9 +1369,7 @@
               "beta": "unbound",
               "chi": "unbound",
               "count": "unbound",
-              "delta": "unbound",
               "entry": "unbound",
-              "field": "unbound",
               "gamma": "unbound",
               "index": "unbound",
               "iota": "unbound",
@@ -1384,34 +1379,29 @@
               "omega": "unbound",
               "part": "unbound",
               "phi": "unbound",
-              "psi": "unbound",
               "rho": "unbound",
-              "scaled": "unbound",
               "sigma": "unbound",
               "slot": "unbound",
               "tau": "unbound",
               "theta": "unbound",
-              "turn1": "unbound",
               "value": "unbound",
               "zeta": "unbound"
             }
           }
         },
         {
-          "source": "let tau = { ...{ b: false } };\ntau = { b: ('x' === 'a,b') };\nif (true) {\n  const chi = { a: `${9}:${'x'}`, f: [] };\n}\nfunction omega(count) {\n  const kappa = (n, step = 2) => (count % (11 + n)) + step;\n  var phi = { g: 0.5, e: Math.max(3.5, 0) };\n  return count;\n}\nconsole.log(omega(3));\n",
+          "source": "let tau = { ...{ b: false } };\ntau = { b: ('x' === 'a,b') };\nif (true) {\n  const chi = { a: `${9}:${'x'}`, f: [] };\n}\nfunction omega(count) {\n  const kappa = (n, step = 2) => (count % (11 + n)) + step;\n  var iota = JSON.parse(JSON.stringify(tau));\n  return 'x'.length;\n}\nconsole.log(omega(7));\n",
           "node": {
             "outcome": "normal",
             "prints": [
-              "3"
+              "1"
             ],
             "probes": {
               "alpha": "unbound",
               "beta": "unbound",
               "chi": "unbound",
               "count": "unbound",
-              "delta": "unbound",
               "entry": "unbound",
-              "field": "unbound",
               "gamma": "unbound",
               "index": "unbound",
               "iota": "unbound",
@@ -1421,14 +1411,11 @@
               "omega": "function undefined",
               "part": "unbound",
               "phi": "unbound",
-              "psi": "unbound",
               "rho": "unbound",
-              "scaled": "unbound",
               "sigma": "unbound",
               "slot": "unbound",
               "tau": "object {\"b\":false}",
               "theta": "unbound",
-              "turn1": "unbound",
               "value": "unbound",
               "zeta": "unbound"
             },
@@ -1438,84 +1425,80 @@
           }
         },
         {
-          "source": "tau.f = 'b.c';\nconst psi = ('  pad ' + 'x'.split(',').reverse().join('|')).length;\nif (true) {\n  let turn1 = 0;\n  do {\n    turn1++;\n    tau.f = ((-12)).toFixed(1);\n  } while (turn1 < 2);\n  const alpha = (n) => { const scaled = 11; return Math.min(Math.abs(n), 4); };\n  console.log(alpha(turn1));\n} else {\n  kappa.b += 7;\n  try {\n    const beta = (value, step = 2) => Array.from({ length: 1 }, (slot, index) => index * 2).length + step;\n    console.log(beta(Math.min(psi, '  pad '.indexOf('b'))));\n    throw new RangeError('ab');\n  } catch {\n    console.log('caught');\n  } finally {\n    console.log(psi, tau);\n  }\n}\n{\n  const [zeta, ...theta] = [1, Math.max(Math.min(psi, psi), 'ab'.length), (12 >>> kappa?.b)];\n}\nkappa.d.push(0);\nthrow new Error('x');\n",
+          "source": "kappa.a = (1.5).toFixed(1);\nconst phi = (value, step = 2) => 5 + step;\nconsole.log(phi(Array.from({ length: 1 }, (slot, index) => index * 2).length));\n",
           "node": {
-            "outcome": "throw",
-            "error": "Error",
+            "outcome": "normal",
             "prints": [
-              "2"
+              "7"
             ],
             "probes": {
               "alpha": "unbound",
               "beta": "unbound",
               "chi": "unbound",
               "count": "unbound",
-              "delta": "unbound",
               "entry": "unbound",
-              "field": "unbound",
               "gamma": "unbound",
               "index": "unbound",
               "iota": "unbound",
-              "kappa": "object {\"d\":[3.5,1,0],\"b\":9}",
+              "kappa": "object {\"d\":[3.5,1],\"b\":9,\"a\":\"1.5\"}",
               "lambda": "unbound",
               "n": "unbound",
               "omega": "function undefined",
               "part": "unbound",
-              "phi": "unbound",
-              "psi": "number 7",
+              "phi": "function undefined",
               "rho": "unbound",
-              "scaled": "unbound",
               "sigma": "unbound",
               "slot": "unbound",
-              "tau": "object {\"b\":false,\"f\":\"-12.0\"}",
+              "tau": "object {\"b\":false}",
               "theta": "unbound",
-              "turn1": "unbound",
               "value": "unbound",
               "zeta": "unbound"
             },
             "closures": [
-              "omega"
+              "omega",
+              "phi"
             ]
           }
         },
         {
-          "source": "for (const field in kappa) {\n  console.log(field);\n}\nconst { a: iota, b: lambda = 0 } = { a: 'hi', b: Math.min(6.5, 'Lash'.indexOf('b')) };\nconst { a: rho, b: delta = 0 } = { a: Object.keys(kappa).join(''), b: 8 };\n",
+          "source": "{\n  let beta = true;\n  var theta = [];\n}\nfunction lambda(count) {\n  return count <= 1 ? 1 : count + lambda(count - 1);\n}\nconsole.log(lambda(1));\nswitch ('b.c'.slice(0, 2).length % 3) {\n  case 0: {\n    try {\n      tau.b = 'hi'.includes('a');\n      console.log('b.c'.indexOf('b'), kappa?.a.toUpperCase().slice(0, 2), (-11));\n      throw new RangeError('hi');\n    } catch {\n      console.log('caught');\n    }\n    break;\n  }\n  case 1: {\n    try {\n      const beta = (value, step = 2) => Array.from({ length: 1 }, (slot, index) => index * 2).length + step;\n      console.log(beta(Math.min(4, '  pad '.indexOf('b'))));\n      throw new RangeError('ab');\n    } catch {\n      console.log('caught');\n    } finally {\n      console.log(theta, tau);\n    }\n  }\n  default: {\n    {\n      console.info('hi');\n      theta.pop();\n      const gamma = ['hi', 'hi', 'b.c'];\n    }\n  }\n}\nswitch ((theta.at(-1) ?? 0) % 3) {\n  case 0: {\n    {\n      console.info(((theta instanceof Map) && (6.5 !== 'Lash'.indexOf('b'))));\n      const sigma = new URL('https://example.com/p?x=1');\n      console.log(sigma.href, sigma.pathname, sigma.searchParams.get('x'), sigma.origin);\n      const alpha = new URLSearchParams({ q: 'a b', r: '+' });\n      console.log(alpha.toString(), alpha.get('b'), alpha.getAll('b'), alpha.size, alpha.has('q'));\n    }\n  }\n  case 1: {\n    switch (Array.from({ length: 3 }, (slot, index) => index * 2).length % 3) {\n      case 0: {\n        let phi = true;\n        theta.push(12);\n        break;\n      }\n      case 1: {\n        tau.b = ('h' in tau);\n        console.log(theta, 'ab');\n      }\n      default: {\n        const rho = (value, step = 2) => 6 + step;\n        console.log(rho(0));\n      }\n    }\n    console.log({ ...kappa, z: 0 }, (theta.join('-').toUpperCase() + 'hi'));\n    break;\n  }\n  default: {\n    const zeta = { e: 'x'.toLowerCase() };\n  }\n}\n",
           "node": {
             "outcome": "normal",
             "prints": [
-              "d",
-              "b"
+              "1",
+              "hi",
+              "false",
+              "https://example.com/p?x=1 /p 1 https://example.com",
+              "q=a+b&r=%2B null [] 2 true",
+              "{\"d\":[3.5,1],\"b\":9,\"a\":\"1.5\",\"z\":0} 12hi"
             ],
             "probes": {
               "alpha": "unbound",
               "beta": "unbound",
               "chi": "unbound",
               "count": "unbound",
-              "delta": "number 8",
               "entry": "unbound",
-              "field": "unbound",
               "gamma": "unbound",
               "index": "unbound",
-              "iota": "string \"hi\"",
-              "kappa": "object {\"d\":[3.5,1,0],\"b\":9}",
-              "lambda": "number -1",
+              "iota": "unbound",
+              "kappa": "object {\"d\":[3.5,1],\"b\":9,\"a\":\"1.5\"}",
+              "lambda": "function undefined",
               "n": "unbound",
               "omega": "function undefined",
               "part": "unbound",
-              "phi": "unbound",
-              "psi": "number 7",
-              "rho": "string \"db\"",
-              "scaled": "unbound",
+              "phi": "function undefined",
+              "rho": "unbound",
               "sigma": "unbound",
               "slot": "unbound",
-              "tau": "object {\"b\":false,\"f\":\"-12.0\"}",
-              "theta": "unbound",
-              "turn1": "unbound",
+              "tau": "object {\"b\":false}",
+              "theta": "object [12]",
               "value": "unbound",
               "zeta": "unbound"
             },
             "closures": [
-              "omega"
+              "lambda",
+              "omega",
+              "phi"
             ]
           }
         }
@@ -1916,8 +1899,8 @@
           }
         },
         {
-          "source": "isNaN(1, 2);\n",
-          "reject": "TS_EXPRESSION_UNSUPPORTED",
+          "source": "const d = new Date(0); d.setUTCHours(1);\n",
+          "reject": "TS_DATE_IMMUTABLE",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -1974,7 +1957,7 @@
           }
         },
         {
-          "source": "globalThis.shared2 = false;\nlet turn3 = 0;\nwhile (turn3 < 3) {\n  turn3++;\n  {\n    const lambda = new URLSearchParams({ q: 'a b', r: '+' });\n    const rho = new Set([9, 0, 9]);\n    console.log(rho.size, rho.has(1), [...rho.union(new Set([7]))], rho instanceof Set);\n  }\n  {\n    console.log(omega);\n    const lambda = (item, step = 2) => (turn1 ** 2) + step;\n    console.log(lambda('Lash'.length));\n    const delta = (item, ...rest) => ([[6], [2]].flat().includes(2) ? 1.5 : turn1) + rest.length;\n    console.log(delta((lambda(1) + 5)));\n  }\n}\nconsole.info(Math.min(3.5, Array.from({ length: 3 }, (slot, index) => index * 2).length), (Math.max(Math.max(turn1, turn1), 11) !== Number.parseInt(String(5) + '7', 10)));\n{\n  const lambda = new Map([['b', 5], ['a', 10]]);\n  console.log(lambda.size, lambda.get('a'), lambda.has('ab'), [...lambda.keys()], lambda instanceof Map);\n  console.log([...lambda.entries()], 'b.c', 'zz');\n  let gamma = ['zz', '  pad ', String(1.5)];\n}\nfunction beta(count) {\n  return count <= 1 ? 1 : count + beta(count - 1);\n}\nconsole.log(beta(6));\n",
+          "source": "globalThis.shared2 = false;\nlet turn3 = 0;\nwhile (turn3 < 3) {\n  turn3++;\n  {\n    const lambda = new URLSearchParams({ q: 'a b', r: '+' });\n    const rho = new Set([9, 0, 9]);\n    console.log(rho.size, rho.has(1), [...rho.union(new Set([7]))], rho instanceof Set);\n  }\n  {\n    console.log(omega);\n    const lambda = (item, step = 2) => (turn1 ** 2) + step;\n    console.log(lambda('Lash'.length));\n    const delta = (item, ...rest) => ([[6], [2]].flat().includes(2) ? 1.5 : turn3) + rest.length;\n    console.log(delta((lambda(1) + 5)));\n  }\n}\nconsole.info(Math.min(3.5, Array.from({ length: 3 }, (slot, index) => index * 2).length), (Math.max(Math.max(turn1, turn1), 11) !== Number.parseInt(String(5) + '7', 10)));\n{\n  const lambda = new Map([['b', 5], ['a', 10]]);\n  console.log(lambda.size, lambda.get('a'), lambda.has('ab'), [...lambda.keys()], lambda instanceof Map);\n  console.log([...lambda.entries()], 'b.c', 'zz');\n  let gamma = ['zz', '  pad ', String(1.5)];\n}\nfunction beta(count) {\n  return count <= 1 ? 1 : count + beta(count - 1);\n}\nconsole.log(beta(6));\n",
           "node": {
             "outcome": "normal",
             "prints": [
@@ -2737,58 +2720,62 @@
       "seed": 22,
       "probe": [
         "alpha",
+        "beta",
         "chi",
         "count",
         "delta",
         "entry",
-        "error",
         "gamma",
         "index",
         "iota",
+        "item",
+        "j",
         "kappa",
         "lambda",
+        "n",
         "omega",
         "phi",
+        "problem",
         "psi",
         "rho",
         "sigma",
         "slot",
         "tau",
         "theta",
-        "turn1",
-        "value",
         "zeta"
       ],
       "cells": [
         {
-          "source": "let lambda = false;\nlambda = false;\nfor (const entry of []) {\n  let gamma = 'ab'.padStart(5, '*').padStart(5, '*');\n}\nfunction iota(count) {\n  const kappa = new Map(Object.entries({ z: 10, y: 12 }));\n  return 12;\n}\nconsole.log(iota((11 ** 2)));\n",
+          "source": "let lambda = false;\nlambda = false;\nfor (const entry of []) {\n  let gamma = 'ab'.padStart(5, '*').padStart(5, '*');\n}\nfunction iota(count) {\n  lambda = ('ab'.includes('a') && [[11], [2]].flat().includes(2));\n  return Math.round(count);\n}\nconsole.log(iota(7));\n",
           "node": {
             "outcome": "normal",
             "prints": [
-              "12"
+              "7"
             ],
             "probes": {
               "alpha": "unbound",
+              "beta": "unbound",
               "chi": "unbound",
               "count": "unbound",
               "delta": "unbound",
               "entry": "unbound",
-              "error": "unbound",
               "gamma": "unbound",
               "index": "unbound",
               "iota": "function undefined",
+              "item": "unbound",
+              "j": "unbound",
               "kappa": "unbound",
-              "lambda": "boolean false",
+              "lambda": "boolean true",
+              "n": "unbound",
               "omega": "unbound",
               "phi": "unbound",
+              "problem": "unbound",
               "psi": "unbound",
               "rho": "unbound",
               "sigma": "unbound",
               "slot": "unbound",
               "tau": "unbound",
               "theta": "unbound",
-              "turn1": "unbound",
-              "value": "unbound",
               "zeta": "unbound"
             },
             "closures": [
@@ -2797,111 +2784,124 @@
           }
         },
         {
-          "source": "let turn1 = 0;\nwhile (turn1 < 2) {\n  turn1++;\n  switch ((turn1 % 7) % 3) {\n    case 0: {\n      let alpha = ((true && (lambda instanceof Error)) && lambda);\n      alpha = false;\n      break;\n    }\n    case 1: {\n      let zeta = (typeof turn1).padStart(5, '*');\n      break;\n    }\n    default: {\n      let kappa = [[(turn1 ** 2)], [2]].flat().includes(2);\n    }\n  }\n  {\n    let sigma = String(turn1);\n    var theta = turn1;\n    const tau = /(?<first>[a-z])(b)?/.exec('Lash');\n    console.log(tau?.[0] ?? 'none', tau?.index ?? -1, tau?.groups?.first ?? '-', tau === null);\n  }\n}\nlet omega = { c: 5, h: [(-turn1)], a: false };\nlet chi = lambda;\nconst [rho, ...phi] = [2, 12, 12];\nchi = lambda;\nthrow new TypeError('ab');\n",
-          "node": {
-            "outcome": "throw",
-            "error": "TypeError",
-            "prints": [
-              "a 1 a false",
-              "a 1 a false"
-            ],
-            "probes": {
-              "alpha": "unbound",
-              "chi": "boolean false",
-              "count": "unbound",
-              "delta": "unbound",
-              "entry": "unbound",
-              "error": "unbound",
-              "gamma": "unbound",
-              "index": "unbound",
-              "iota": "function undefined",
-              "kappa": "unbound",
-              "lambda": "boolean false",
-              "omega": "object {\"c\":5,\"h\":[-2],\"a\":false}",
-              "phi": "object [12,12]",
-              "psi": "unbound",
-              "rho": "number 2",
-              "sigma": "unbound",
-              "slot": "unbound",
-              "tau": "unbound",
-              "theta": "number 2",
-              "turn1": "number 2",
-              "value": "unbound",
-              "zeta": "unbound"
-            },
-            "closures": [
-              "iota"
-            ]
-          }
-        },
-        {
-          "source": "if (((-rho) !== (turn1 + rho))) {\n  const iota = 'a,b';\n  const zeta = new Date(Date.UTC(2024, 5, 2));\n} else {\n  try {\n    phi.push(('  pad '.includes('a') ? 7 : turn1));\n    throw new SyntaxError('b.c');\n  } catch (error) {\n    console.log(error.name, error.message, error instanceof RangeError);\n  } finally {\n    const delta = new Map(Object.entries({ z: 6, y: 7.5 }));\n  }\n  if ('zz'.includes('a')) {\n    let sigma = 'x'.indexOf('b');\n    const psi = theta;\n  } else {\n    const delta = new Map([['b', 7], ['a', 7]]);\n    console.log(delta.size, delta.get('a'), delta.has('a,b'), [...delta.keys()], delta instanceof Map);\n  }\n}\nomega.a = true;\nglobalThis.theta = 2.5;\n",
-          "node": {
-            "outcome": "normal",
-            "prints": [],
-            "probes": {
-              "alpha": "unbound",
-              "chi": "boolean false",
-              "count": "unbound",
-              "delta": "unbound",
-              "entry": "unbound",
-              "error": "unbound",
-              "gamma": "unbound",
-              "index": "unbound",
-              "iota": "function undefined",
-              "kappa": "unbound",
-              "lambda": "boolean false",
-              "omega": "object {\"c\":5,\"h\":[-2],\"a\":true}",
-              "phi": "object [12,12]",
-              "psi": "unbound",
-              "rho": "number 2",
-              "sigma": "unbound",
-              "slot": "unbound",
-              "tau": "unbound",
-              "theta": "number 2.5",
-              "turn1": "number 2",
-              "value": "unbound",
-              "zeta": "unbound"
-            },
-            "closures": [
-              "iota"
-            ]
-          }
-        },
-        {
-          "source": "if (((4 ** 2) >= 9)) {\n  phi.pop();\n}\nconsole.info(rho, omega, Array.from({ length: 0 }, (slot, index) => index * 2).length);\nomega.g = chi;\nswitch (Array.from({ length: 3 }, (slot, index) => index * 2).length % 3) {\n  case 0: {\n    const chi = false;\n    omega.h.push(((phi.findLastIndex((value) => value < turn1) >= 0) ? (9 << rho) : 'ab'.indexOf('b')));\n    break;\n  }\n  default: {\n    phi.unshift(turn1);\n  }\n}\n{\n  if (true) {\n    const alpha = { e: 'ab', g: false };\n  } else {\n    omega.a = true;\n    const chi = true;\n  }\n  const tau = /a(b*)/g;\n  console.log(tau.test('  pad '), tau.source, tau.flags, tau.lastIndex, String(tau));\n}\n",
+          "source": "switch ((7 % 7) % 3) {\n  case 0: {\n    let alpha = ((true && (lambda instanceof Error)) && lambda);\n    const psi = '  pad ';\n    break;\n  }\n  case 1: {\n    for (const entry of []) {\n      let rho = { f: [7, (12 ** 2), 5], a: [9, (8 - 7), 0] };\n    }\n  }\n  default: {\n    let beta = ('Lash' === 'a,b');\n  }\n}\nconst theta = [];\nvar zeta = [((theta.at(-1) ?? 0) ** 2)];\nswitch (0 % 3) {\n  case 0: {\n    const gamma = new Set([8, 0, 8]);\n    console.log(gamma.size, gamma.has(1), [...gamma.union(new Set([7]))], gamma instanceof Set);\n  }\n  case 1: {\n    if (((3 << 9.5) >= 5)) {\n      let beta = [];\n      console.log(lambda);\n    }\n    break;\n  }\n  default: {\n    for (let j = 0; j < 1; j++) {\n      const iota = 'a,b';\n      const lambda = new Date(Date.UTC(2024, 5, 2));\n    }\n  }\n}\ntry {\n  {\n    let delta = new Date(1129851428000);\n  }\n  throw new RangeError('a,b', { cause: 1 });\n} catch (problem) {\n  console.log(problem.name, problem.message, problem instanceof RangeError);\n}\nfor (const entry of zeta) {\n  const kappa = (item, step = 2) => 6.5 + step;\n  console.log(kappa((8 % Math.abs(4))));\n  const phi = JSON.parse(JSON.stringify(theta));\n}\n",
           "node": {
             "outcome": "normal",
             "prints": [
-              "2 {\"c\":5,\"h\":[-2],\"a\":true} 0",
-              "true a(b*) g 4 /a(b*)/g"
+              "2 false [8,0,7] true",
+              "true",
+              "RangeError a,b true",
+              "8.5"
             ],
             "probes": {
               "alpha": "unbound",
-              "chi": "boolean false",
+              "beta": "unbound",
+              "chi": "unbound",
               "count": "unbound",
               "delta": "unbound",
               "entry": "unbound",
-              "error": "unbound",
               "gamma": "unbound",
               "index": "unbound",
               "iota": "function undefined",
+              "item": "unbound",
+              "j": "unbound",
               "kappa": "unbound",
-              "lambda": "boolean false",
-              "omega": "object {\"c\":5,\"h\":[-2,1],\"a\":true,\"g\":false}",
-              "phi": "object [12]",
+              "lambda": "boolean true",
+              "n": "unbound",
+              "omega": "unbound",
+              "phi": "unbound",
+              "problem": "unbound",
               "psi": "unbound",
-              "rho": "number 2",
+              "rho": "unbound",
               "sigma": "unbound",
               "slot": "unbound",
               "tau": "unbound",
-              "theta": "number 2.5",
-              "turn1": "number 2",
-              "value": "unbound",
-              "zeta": "unbound"
+              "theta": "object []",
+              "zeta": "object [0]"
             },
             "closures": [
               "iota"
+            ]
+          }
+        },
+        {
+          "source": "if ((lambda && Array.isArray(theta))) {\n  const iota = new URL('https://example.com/a/b?x=1');\n  console.log(iota.href, iota.pathname, iota.searchParams.get('x'), iota.origin);\n}\ntheta.unshift(Number.parseInt(`${2}:${'b.c'}` + '7', 10));\nconst [sigma, ...omega] = [Math.min(Math.max(...zeta, 1), Math.sign(0)), ('hi'.length ** 2), 7];\nconst chi = [];\n",
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "https://example.com/a/b?x=1 /a/b 1 https://example.com"
+            ],
+            "probes": {
+              "alpha": "unbound",
+              "beta": "unbound",
+              "chi": "object []",
+              "count": "unbound",
+              "delta": "unbound",
+              "entry": "unbound",
+              "gamma": "unbound",
+              "index": "unbound",
+              "iota": "function undefined",
+              "item": "unbound",
+              "j": "unbound",
+              "kappa": "unbound",
+              "lambda": "boolean true",
+              "n": "unbound",
+              "omega": "object [4,7]",
+              "phi": "unbound",
+              "problem": "unbound",
+              "psi": "unbound",
+              "rho": "unbound",
+              "sigma": "number 0",
+              "slot": "unbound",
+              "tau": "unbound",
+              "theta": "object [2]",
+              "zeta": "object [0]"
+            },
+            "closures": [
+              "iota"
+            ]
+          }
+        },
+        {
+          "source": "for (const entry of [Array.from({ length: 0 }, (slot, index) => index * 2).length, Math.min(4, sigma), 'zz'.indexOf('b')]) {\n  {\n    const gamma = new Error('a,b');\n    console.log(gamma.name, gamma.message, String(gamma), gamma instanceof Error);\n    const phi = new RangeError('ab');\n    omega.splice(0, 1);\n  }\n}\nconst tau = (n, step = 2) => n + step;\nconsole.log(tau('ab'.indexOf('b')));\n{\n  const beta = new Map(Object.entries({ z: 3, y: 3.5 }));\n  console.log(beta.size, beta.get('a'), beta.has('x'), [...beta.keys()], beta instanceof Map);\n}\n",
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "Error a,b Error: a,b true",
+              "Error a,b Error: a,b true",
+              "Error a,b Error: a,b true",
+              "3",
+              "2 undefined false [\"z\",\"y\"] true"
+            ],
+            "probes": {
+              "alpha": "unbound",
+              "beta": "unbound",
+              "chi": "object []",
+              "count": "unbound",
+              "delta": "unbound",
+              "entry": "unbound",
+              "gamma": "unbound",
+              "index": "unbound",
+              "iota": "function undefined",
+              "item": "unbound",
+              "j": "unbound",
+              "kappa": "unbound",
+              "lambda": "boolean true",
+              "n": "unbound",
+              "omega": "object []",
+              "phi": "unbound",
+              "problem": "unbound",
+              "psi": "unbound",
+              "rho": "unbound",
+              "sigma": "number 0",
+              "slot": "unbound",
+              "tau": "function undefined",
+              "theta": "object [2]",
+              "zeta": "object [0]"
+            },
+            "closures": [
+              "iota",
+              "tau"
             ]
           }
         }
@@ -3363,8 +3363,8 @@
           }
         },
         {
-          "source": "const o = { m() { super.x; } };\n",
-          "reject": "TS_SUPER_UNSUPPORTED",
+          "source": "const m = import('mod');\n",
+          "reject": "TS_DYNAMIC_IMPORT_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -3449,20 +3449,18 @@
         "chi",
         "count",
         "delta",
-        "entry",
-        "field",
-        "gamma",
         "index",
-        "iota",
+        "item",
         "kappa",
         "lambda",
         "n",
+        "omega",
         "phi",
-        "problem",
+        "rest",
         "rho",
+        "scaled",
         "sigma",
         "slot",
-        "step",
         "tau",
         "theta",
         "value"
@@ -3482,20 +3480,18 @@
               "chi": "object [10]",
               "count": "unbound",
               "delta": "unbound",
-              "entry": "unbound",
-              "field": "unbound",
-              "gamma": "unbound",
               "index": "unbound",
-              "iota": "unbound",
+              "item": "unbound",
               "kappa": "boolean true",
               "lambda": "unbound",
               "n": "unbound",
+              "omega": "unbound",
               "phi": "unbound",
-              "problem": "unbound",
+              "rest": "unbound",
               "rho": "unbound",
+              "scaled": "unbound",
               "sigma": "function undefined",
               "slot": "unbound",
-              "step": "unbound",
               "tau": "unbound",
               "theta": "unbound",
               "value": "unbound"
@@ -3506,120 +3502,108 @@
           }
         },
         {
-          "source": "function phi(count) {\n  var delta = new Map(Object.entries({ z: 7, y: 7 }));\n  return (true ? 11 : count);\n}\nconsole.log(phi((Math.abs(4) | 4)));\nfor (const entry of [(1 ** 2), Array.from({ length: 0 }, (slot, index) => index * 2).length]) {\n  let rho = chi.includes(7);\n  chi[0] = (entry - entry);\n}\ntry {\n  const sigma = new RegExp('[a-z]+', 'i');\n  console.log(sigma.test('Lash'), sigma.source, sigma.flags, sigma.lastIndex, String(sigma));\n} catch (problem) {\n  console.log(problem.name, problem.message, problem instanceof RangeError);\n} finally {\n  let beta = { e: 4, d: [[0], [2]].flat().includes(2) };\n}\nconst [alpha, ...iota] = [3, 3.5, (1 - 12)];\niota.forEach((value) => { chi.push(value); });\n",
+          "source": "function phi(count) {\n  var delta = new Map(Object.entries({ z: 7, y: 7 }));\n  return (true ? (count % count) : Math.abs(4));\n}\nconsole.log(phi(4));\nif (chi.some((value) => value > value)) {\n  if (kappa) {\n    chi.reverse();\n    chi.push(...[11, 8]);\n  } else {\n    globalThis.kappa = (chi.findLastIndex((value) => value < value) >= 0);\n    chi.push(...[(Number.parseInt('hi' + '7', 10) << (0 - 5)), 8]);\n  }\n} else {\n  chi[0] = 0;\n}\nconst [tau, ...omega] = [3, 3.5, (1 - 12)];\nomega.forEach((value) => { chi.push(value); });\nif (false) {\n  {\n    omega.push(...[chi.length, 0]);\n  }\n  let tau = { c: kappa, b: ('  pad '.toUpperCase() === 'zz'), g: [6, 'b.c'.length, Math.round(10)] };\n} else {\n  switch (6 % 3) {\n    case 0: {\n      console.log(omega, chi);\n      break;\n    }\n    case 1: {\n      const tau = (n, step = 2) => 5 + step;\n      console.log(tau(11));\n      omega[0] = 0;\n      break;\n    }\n    default: {\n      chi.reverse();\n    }\n  }\n}\n",
           "node": {
             "outcome": "normal",
             "prints": [
-              "11",
-              "true [a-z]+ i 0 /[a-z]+/i"
-            ],
-            "probes": {
-              "alpha": "number 3",
-              "beta": "unbound",
-              "chi": "object [0,3.5,-11]",
-              "count": "unbound",
-              "delta": "unbound",
-              "entry": "unbound",
-              "field": "unbound",
-              "gamma": "unbound",
-              "index": "unbound",
-              "iota": "object [3.5,-11]",
-              "kappa": "boolean true",
-              "lambda": "unbound",
-              "n": "unbound",
-              "phi": "function undefined",
-              "problem": "unbound",
-              "rho": "unbound",
-              "sigma": "function undefined",
-              "slot": "unbound",
-              "step": "unbound",
-              "tau": "unbound",
-              "theta": "unbound",
-              "value": "unbound"
-            },
-            "closures": [
-              "phi",
-              "sigma"
-            ]
-          }
-        },
-        {
-          "source": "{\n  const theta = new URLSearchParams('b=2&a=1&b=3');\n  console.log(theta.toString(), theta.get('b'), theta.getAll('b'), theta.size, theta.has('q'));\n  globalThis.kappa = kappa;\n}\niota.push(...[8, alpha]);\nconst tau = new URLSearchParams('b=2&a=1&b=3');\nthrow new TypeError('x');\n",
-          "node": {
-            "outcome": "throw",
-            "error": "TypeError",
-            "prints": [
-              "b=2&a=1&b=3 2 [\"2\",\"3\"] 3 false"
-            ],
-            "probes": {
-              "alpha": "number 3",
-              "beta": "unbound",
-              "chi": "object [0,3.5,-11]",
-              "count": "unbound",
-              "delta": "unbound",
-              "entry": "unbound",
-              "field": "unbound",
-              "gamma": "unbound",
-              "index": "unbound",
-              "iota": "object [3.5,-11,8,3]",
-              "kappa": "boolean true",
-              "lambda": "unbound",
-              "n": "unbound",
-              "phi": "function undefined",
-              "problem": "unbound",
-              "rho": "unbound",
-              "sigma": "function undefined",
-              "slot": "unbound",
-              "step": "unbound",
-              "tau": "object {}",
-              "theta": "unbound",
-              "value": "unbound"
-            },
-            "closures": [
-              "phi",
-              "sigma"
-            ]
-          }
-        },
-        {
-          "source": "if ([[alpha], [2]].flat().includes(2)) {\n  const iota = (value) => (-7);\n  console.log(iota(2));\n} else {\n  globalThis.kappa = false;\n  for (let step = 0; step < 2; step++) {\n    const iota = new Map(Object.entries({ z: 0, y: 5 }));\n    console.log(iota.size, iota.get('a'), iota.has('b.c'), [...iota.keys()], iota instanceof Map);\n    console.info(`${5}:${'a,b'}`, 'a,b', alpha);\n    if (kappa) { continue; }\n  }\n}\ntry {\n  for (const field in iota) {\n    console.log(field);\n  }\n  chi[0] = (iota.length - Number.parseInt('ab' + '7', 10));\n  throw new RangeError('ab');\n} catch {\n  console.log('caught');\n} finally {\n  {\n    console.info('x');\n    chi.push(alpha);\n    const gamma = (n, step = 2) => n + step;\n    console.log(gamma((-1)));\n  }\n}\n",
-          "node": {
-            "outcome": "normal",
-            "prints": [
-              "-7",
               "0",
-              "1",
-              "2",
-              "3",
-              "caught",
-              "x",
-              "1"
+              "[3.5,-11] [0,3.5,-11]"
             ],
             "probes": {
-              "alpha": "number 3",
+              "alpha": "unbound",
               "beta": "unbound",
-              "chi": "object [null,3.5,-11,3]",
+              "chi": "object [0,3.5,-11]",
               "count": "unbound",
               "delta": "unbound",
-              "entry": "unbound",
-              "field": "unbound",
-              "gamma": "unbound",
               "index": "unbound",
-              "iota": "object [3.5,-11,8,3]",
+              "item": "unbound",
               "kappa": "boolean true",
               "lambda": "unbound",
               "n": "unbound",
+              "omega": "object [3.5,-11]",
               "phi": "function undefined",
-              "problem": "unbound",
+              "rest": "unbound",
               "rho": "unbound",
+              "scaled": "unbound",
               "sigma": "function undefined",
               "slot": "unbound",
-              "step": "unbound",
-              "tau": "object {}",
+              "tau": "number 3",
               "theta": "unbound",
               "value": "unbound"
             },
             "closures": [
+              "phi",
+              "sigma"
+            ]
+          }
+        },
+        {
+          "source": "class A { static { } }\n",
+          "reject": "TS_CLASS_UNSUPPORTED",
+          "node": {
+            "outcome": "rejected",
+            "prints": [],
+            "probes": {
+              "alpha": "unbound",
+              "beta": "unbound",
+              "chi": "object [0,3.5,-11]",
+              "count": "unbound",
+              "delta": "unbound",
+              "index": "unbound",
+              "item": "unbound",
+              "kappa": "boolean true",
+              "lambda": "unbound",
+              "n": "unbound",
+              "omega": "object [3.5,-11]",
+              "phi": "function undefined",
+              "rest": "unbound",
+              "rho": "unbound",
+              "scaled": "unbound",
+              "sigma": "function undefined",
+              "slot": "unbound",
+              "tau": "number 3",
+              "theta": "unbound",
+              "value": "unbound"
+            },
+            "closures": [
+              "phi",
+              "sigma"
+            ]
+          }
+        },
+        {
+          "source": "switch (3 % 3) {\n  case 0: {\n    switch (0 % 3) {\n      case 0: {\n        console.log(omega);\n        chi.push(1);\n        break;\n      }\n      default: {\n        omega.push(tau);\n      }\n    }\n    break;\n  }\n  case 1: {\n    {\n      console.log(chi);\n    }\n    break;\n  }\n  default: {\n    chi.forEach((value) => { omega.push(value); });\n  }\n}\nconst alpha = (item, ...rest) => omega.length + rest.length;\nconsole.log(alpha(7));\n{\n  globalThis.kappa = (('  pad ' + 'b.c') === 'b.c');\n  const theta = 'b.c'.replaceAll('b', 'B');\n  const rho = (item) => { const scaled = Math.min(8.5, (-tau)); return alpha(8); };\n  console.log(rho(Math.min((omega.at(-1) ?? 0), tau)));\n}\nlet beta = /(?<first>[a-z])(b)?/.exec('hi');\n",
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "[3.5,-11]",
+              "2",
+              "2"
+            ],
+            "probes": {
+              "alpha": "function undefined",
+              "beta": "object [\"h\",\"h\",null]",
+              "chi": "object [0,3.5,-11,1]",
+              "count": "unbound",
+              "delta": "unbound",
+              "index": "unbound",
+              "item": "unbound",
+              "kappa": "boolean false",
+              "lambda": "unbound",
+              "n": "unbound",
+              "omega": "object [3.5,-11]",
+              "phi": "function undefined",
+              "rest": "unbound",
+              "rho": "unbound",
+              "scaled": "unbound",
+              "sigma": "function undefined",
+              "slot": "unbound",
+              "tau": "number 3",
+              "theta": "unbound",
+              "value": "unbound"
+            },
+            "closures": [
+              "alpha",
               "phi",
               "sigma"
             ]
@@ -3690,7 +3674,7 @@
           }
         },
         {
-          "source": "globalThis.chi = { b: chi.b };\npsi.push(...[omega.a, psi.indexOf(9)]);\nconsole.log(8, (3).toFixed(1));\nfor (let i = 0; i < 2; i++) {\n  {\n    let gamma = chi;\n    console.info(omega, gamma);\n    psi.sort((left, right) => (String(left) < String(right) ? 1 : String(left) > String(right) ? -1 : 0));\n  }\n  const beta = (n) => { const local = 9; return 1; };\n  console.log(beta(((8 ** 2) ** 2)));\n}\n",
+          "source": "globalThis.chi = { b: chi.b };\npsi.push(...[omega.a, psi.indexOf(9)]);\nconsole.log(8, (3).toFixed(1));\nfor (let i = 0; i < 2; i++) {\n  {\n    let gamma = chi;\n    console.info(omega, gamma);\n    psi.sort((left, right) => (String(left) < String(right) ? 1 : String(left) > String(right) ? -1 : 0));\n  }\n  const beta = (n) => { const local = Math.max(...psi, 1); return 1; };\n  console.log(beta(((8 ** 2) ** 2)));\n}\n",
           "node": {
             "outcome": "normal",
             "prints": [
@@ -4087,12 +4071,12 @@
       ],
       "cells": [
         {
-          "source": "var kappa = 7;\n{\n  const omega = new RangeError('b.c');\n  console.log(omega.name, omega.message, String(omega), omega instanceof Error);\n  const delta = (n, step = 2) => n + step;\n  console.log(delta(6));\n  const alpha = (5 - 6);\n}\nlet gamma = ((false ? Math.max(kappa, 7) : 0)).toFixed(1);\nswitch (5 % 3) {\n  case 0: {\n    for (const field in { a: Array.from({ length: 0 }, (slot, index) => index * 2).length, c: (kappa * 5) }) {\n      console.log(field);\n    }\n    break;\n  }\n  default: {\n    const beta = { a: [kappa] };\n  }\n}\nconsole.log(kappa, gamma, true);\nconsole.log(kappa);\n",
+          "source": "var kappa = 7;\n{\n  const omega = new RangeError('b.c');\n  console.log(omega.name, omega.message, String(omega), omega instanceof Error);\n  const delta = (n, step = 2) => kappa + step;\n  console.log(delta(6));\n  const alpha = (5 - 6);\n}\nlet gamma = ((false ? Math.max(kappa, 7) : 0)).toFixed(1);\nswitch (5 % 3) {\n  case 0: {\n    for (const field in { a: Array.from({ length: 0 }, (slot, index) => index * 2).length, c: (kappa * 5) }) {\n      console.log(field);\n    }\n    break;\n  }\n  default: {\n    const beta = { a: [kappa] };\n  }\n}\nconsole.log(kappa, gamma, true);\nconsole.log(kappa);\n",
           "node": {
             "outcome": "normal",
             "prints": [
               "RangeError b.c RangeError: b.c true",
-              "8",
+              "9",
               "7 0.0 true",
               "7"
             ],
@@ -5030,8 +5014,8 @@
           }
         },
         {
-          "source": "class A { x = 1; }\n",
-          "reject": "TS_CLASS_UNSUPPORTED",
+          "source": "const r = new RegExp(null);\n",
+          "reject": "TS_NEW_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5365,8 +5349,8 @@
           }
         },
         {
-          "source": "async function f() { return 1; } f();\n",
-          "reject": "TS_AWAIT_REQUIRED",
+          "source": "Uint8Array.fromBase64('AAA=');\n",
+          "reject": "TS_METHOD_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5635,8 +5619,8 @@
           }
         },
         {
-          "source": "class A { static #m() { } }\n",
-          "reject": "TS_CLASS_UNSUPPORTED",
+          "source": "'a'.isWellFormed();\n",
+          "reject": "TS_METHOD_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5704,8 +5688,8 @@
           }
         },
         {
-          "source": "Error.isError(new Error('x'));\n",
-          "reject": "TS_METHOD_UNSUPPORTED",
+          "source": "const o: any = {}; o.__proto__ = {};\n",
+          "reject": "TS_PROTOTYPE_MUTATION_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -5835,7 +5819,7 @@
       ],
       "cells": [
         {
-          "source": "console.log(false);\nconst chi = /(?<head>[a-z])(?<tail>[a-z]*)/;\nlet turn1 = 0;\ndo {\n  turn1++;\n  chi.lastIndex = 0;\n} while (turn1 < 2);\nconst tau = (item) => { const scaled = item; return 5; };\nconsole.log(tau((turn1 << 2)));\n",
+          "source": "console.log(false);\nconst chi = /(?<head>[a-z])(?<tail>[a-z]*)/;\nlet turn1 = 0;\ndo {\n  turn1++;\n  chi.lastIndex = 0;\n} while (turn1 < 2);\nconst tau = (item) => { const scaled = turn1; return 5; };\nconsole.log(tau((turn1 << 2)));\n",
           "node": {
             "outcome": "normal",
             "prints": [
@@ -6350,12 +6334,13 @@
         "problem",
         "psi",
         "slot",
+        "tau",
         "theta",
         "zeta"
       ],
       "cells": [
         {
-          "source": "let iota = Math.max(0, 7);\ntry {\n  const zeta = 2;\n  const delta = { d: zeta };\n  throw new SyntaxError('hi', { cause: 1 });\n} catch (problem) {\n  console.log(problem.name, problem.message, problem instanceof RangeError);\n} finally {\n  for (const field in { e: [], b: [5, iota], c: 'b.c' }) {\n    console.log(field);\n    console.log(field);\n  }\n}\nswitch (12 % 3) {\n  case 0: {\n    for (const field in { g: [], c: (iota).toFixed(1) }) {\n      console.log(field);\n      console.warn(iota, iota);\n    }\n  }\n  default: {\n    for (const field in { a: [], g: [1.5, iota, 12] }) {\n      console.log(field);\n      const psi = (item, step = 2) => Math.min(item, 12) + step;\n      console.log(psi(Array.from({ length: 3 }, (slot, index) => index * 2).length));\n    }\n  }\n}\nlet gamma = iota;\nconst theta = true;\nconst alpha = ['Lash', String(10)];\n",
+          "source": "let iota = Math.max(0, 7);\ntry {\n  const zeta = 2;\n  const delta = { d: zeta };\n  throw new SyntaxError('hi', { cause: 1 });\n} catch (problem) {\n  console.log(problem.name, problem.message, problem instanceof RangeError);\n} finally {\n  for (const field in { e: [], b: [5, iota], c: 'b.c' }) {\n    console.log(field);\n    console.log(field);\n  }\n}\nswitch (12 % 3) {\n  case 0: {\n    for (const field in { g: [], c: (iota).toFixed(1) }) {\n      console.log(field);\n      console.warn(iota, iota);\n    }\n  }\n  default: {\n    for (const field in { a: [], g: [1.5, iota, 12] }) {\n      console.log(field);\n      const tau = (item, step = 2) => Math.min(iota, 12) + step;\n      console.log(tau(Array.from({ length: 3 }, (slot, index) => index * 2).length));\n    }\n  }\n}\nlet gamma = iota;\nconst theta = true;\nconst alpha = ['Lash', String(10)];\n",
           "node": {
             "outcome": "normal",
             "prints": [
@@ -6371,9 +6356,9 @@
               "c",
               "7 7",
               "a",
-              "5",
+              "9",
               "g",
-              "5"
+              "9"
             ],
             "probes": {
               "alpha": "object [\"Lash\",\"10\"]",
@@ -6387,6 +6372,7 @@
               "problem": "unbound",
               "psi": "unbound",
               "slot": "unbound",
+              "tau": "unbound",
               "theta": "boolean true",
               "zeta": "unbound"
             }
@@ -6412,6 +6398,7 @@
               "problem": "unbound",
               "psi": "unbound",
               "slot": "unbound",
+              "tau": "unbound",
               "theta": "boolean true",
               "zeta": "unbound"
             }
@@ -6514,8 +6501,8 @@
           }
         },
         {
-          "source": "const r = /((((((((((((((((((((((((((((((((((x))))))))))))))))))))))))))))))))))/;\n",
-          "reject": "TS_REGEX_PATTERN_NESTING_LIMIT",
+          "source": "Uint8Array.fromBase64('AAA=');\n",
+          "reject": "TS_METHOD_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -6953,15 +6940,14 @@
       "seed": 58,
       "probe": [
         "beta",
+        "chi",
         "delta",
-        "gamma",
         "iota",
         "item",
         "lambda",
         "local",
         "rho",
-        "tau",
-        "theta",
+        "sigma",
         "turn1",
         "value"
       ],
@@ -6975,15 +6961,14 @@
             ],
             "probes": {
               "beta": "function undefined",
+              "chi": "unbound",
               "delta": "unbound",
-              "gamma": "unbound",
               "iota": "unbound",
               "item": "unbound",
               "lambda": "unbound",
               "local": "unbound",
               "rho": "unbound",
-              "tau": "unbound",
-              "theta": "unbound",
+              "sigma": "unbound",
               "turn1": "unbound",
               "value": "unbound"
             },
@@ -6993,13 +6978,13 @@
           }
         },
         {
-          "source": "let delta = (-11);\nlet turn1 = 0;\nwhile (turn1 < 2) {\n  turn1++;\n  console.log(turn1, false, turn1);\n  if ((delta instanceof Date)) {\n    delta = Math.sign((11 ** 2));\n  }\n}\n{\n  {\n    let lambda = false;\n  }\n  {\n    const gamma = (item) => { const local = (9 << (item ** 2)); return item; };\n    console.log(gamma(4));\n    console.log(delta, delta);\n    const theta = { e: !!false };\n  }\n  console.info(6, turn1);\n}\nlet tau = String(delta).replaceAll('b', 'B').toLowerCase();\n{\n  const iota = new Set([4, 6.5, 4]);\n  console.log(iota.size, iota.has(1), [...iota.union(new Set([7]))], iota instanceof Set);\n}\nconsole.warn(tau);\n",
+          "source": "let delta = (-11);\nlet turn1 = 0;\nwhile (turn1 < 2) {\n  turn1++;\n  console.log(turn1, false, turn1);\n  if ((delta instanceof Date)) {\n    delta = Math.sign((11 ** 2));\n  }\n}\n{\n  {\n    let lambda = false;\n  }\n  {\n    const chi = (item) => { const local = (9 << (item ** 2)); return delta; };\n    console.log(chi(4));\n    console.log(delta, delta);\n    const sigma = { e: !!false };\n  }\n  console.info(6, turn1);\n}\nlet iota = String(delta).replaceAll('b', 'B').toLowerCase();\n{\n  const iota = new Set([4, 6.5, 4]);\n  console.log(iota.size, iota.has(1), [...iota.union(new Set([7]))], iota instanceof Set);\n}\nconsole.warn(iota);\n",
           "node": {
             "outcome": "normal",
             "prints": [
               "1 false 1",
               "2 false 2",
-              "4",
+              "-11",
               "-11 -11",
               "6 2",
               "2 false [4,6.5,7] true",
@@ -7007,15 +6992,14 @@
             ],
             "probes": {
               "beta": "function undefined",
+              "chi": "unbound",
               "delta": "number -11",
-              "gamma": "unbound",
-              "iota": "unbound",
+              "iota": "string \"-11\"",
               "item": "unbound",
               "lambda": "unbound",
               "local": "unbound",
               "rho": "unbound",
-              "tau": "string \"-11\"",
-              "theta": "unbound",
+              "sigma": "unbound",
               "turn1": "number 2",
               "value": "unbound"
             },
@@ -7341,7 +7325,7 @@
           }
         },
         {
-          "source": "const zeta = (n) => { const scaled = 4; return 12; };\nconsole.log(zeta(7));\nconst kappa = { d: (theta instanceof Map), g: 10, e: zeta(2) };\nconsole.log(false);\nif (false) {\n  kappa.g -= 2;\n  const tau = (value) => { const scaled = zeta((value + value)); return scaled; };\n  console.log(tau(('x'.indexOf('b') - theta)));\n} else {\n  kappa.d = false;\n  for (let j = 0; j < 3; j++) {\n    console.log(false, theta);\n    if (false) { continue; }\n  }\n}\nlet phi = [(theta).toFixed(1)];\nconst omega = (item, ...rest) => item + rest.length;\nconsole.log(omega(theta));\n",
+          "source": "const zeta = (n) => { const scaled = 4; return 12; };\nconsole.log(zeta(7));\nconst kappa = { d: (theta instanceof Map), g: 10, e: zeta(2) };\nconsole.log(false);\nif (false) {\n  kappa.g -= 2;\n  const tau = (value) => { const scaled = zeta((theta + theta)); return theta; };\n  console.log(tau(('x'.indexOf('b') - theta)));\n} else {\n  kappa.d = false;\n  for (let j = 0; j < 3; j++) {\n    console.log(false, theta);\n    if (false) { continue; }\n  }\n}\nlet phi = [(theta).toFixed(1)];\nconst omega = (item, ...rest) => item + rest.length;\nconsole.log(omega(theta));\n",
           "node": {
             "outcome": "normal",
             "prints": [
@@ -7669,7 +7653,7 @@
       ],
       "cells": [
         {
-          "source": "let turn1 = 0;\nwhile (turn1 < 2) {\n  turn1++;\n  let turn2 = 0;\n  do {\n    turn2++;\n    console.info(!true, true);\n    const alpha = /(?<first>[a-z])(b)?/.exec('ab');\n  } while (turn2 < 3);\n}\nvar beta = 'Lash'.padStart(5, '*');\nfor (const field in { d: 'hi'.slice(0, 2), h: 'hi', c: 7 }) {\n  console.log(field);\n  for (const entry of beta) {\n    let delta = new URL('https://example.com/p?x=1');\n    const kappa = (item) => item;\n    console.log(kappa(0));\n  }\n}\nlet turn3 = 0;\nwhile (turn3 < 2) {\n  turn3++;\n  const zeta = (item) => { const scaled = ((0 + item) | item); return Math.min(Math.min(item, scaled), Math.max(item, 7)); };\n  console.log(zeta(8));\n  {\n    const chi = { ['b']: 'x'.slice(0, 2).padStart(5, '*') };\n    console.log(chi, turn1, turn3);\n  }\n}\nconsole.warn(true, beta);\n",
+          "source": "let turn1 = 0;\nwhile (turn1 < 2) {\n  turn1++;\n  let turn2 = 0;\n  do {\n    turn2++;\n    console.info(!true, true);\n    const alpha = /(?<first>[a-z])(b)?/.exec('ab');\n  } while (turn2 < 3);\n}\nvar beta = 'Lash'.padStart(5, '*');\nfor (const field in { d: 'hi'.slice(0, 2), h: 'hi', c: 7 }) {\n  console.log(field);\n  for (const entry of beta) {\n    let delta = new URL('https://example.com/p?x=1');\n    const kappa = (item) => turn1;\n    console.log(kappa(0));\n  }\n}\nlet turn3 = 0;\nwhile (turn3 < 2) {\n  turn3++;\n  const zeta = (item) => { const scaled = ((0 + item) | item); return Math.min(Math.min(turn1, scaled), Math.max(turn1, 7)); };\n  console.log(zeta(8));\n  {\n    const chi = { ['b']: 'x'.slice(0, 2).padStart(5, '*') };\n    console.log(chi, turn1, turn3);\n  }\n}\nconsole.warn(true, beta);\n",
           "node": {
             "outcome": "normal",
             "prints": [
@@ -7680,26 +7664,26 @@
               "false true",
               "false true",
               "d",
-              "0",
-              "0",
-              "0",
-              "0",
-              "0",
+              "2",
+              "2",
+              "2",
+              "2",
+              "2",
               "h",
-              "0",
-              "0",
-              "0",
-              "0",
-              "0",
+              "2",
+              "2",
+              "2",
+              "2",
+              "2",
               "c",
-              "0",
-              "0",
-              "0",
-              "0",
-              "0",
-              "8",
+              "2",
+              "2",
+              "2",
+              "2",
+              "2",
+              "2",
               "{\"b\":\"****x\"} 2 1",
-              "8",
+              "2",
               "{\"b\":\"****x\"} 2 2",
               "true *Lash"
             ],
@@ -7878,7 +7862,7 @@
           }
         },
         {
-          "source": "var tau = new Map(Object.entries({ z: 2, y: 8 }));\nfor (const field in { c: lambda }) {\n  console.log(field);\n  {\n    const iota = new Error('ab');\n    console.log(iota.name, iota.message, String(iota), iota instanceof Error);\n    console.log((typeof (tau.size ** 2)));\n  }\n}\nlet turn1 = 0;\ndo {\n  turn1++;\n  if (false) {\n    let phi = tau;\n    console.warn([...phi.entries()]);\n  }\n  switch (2.5 % 3) {\n    case 0: {\n      console.warn(beta, alpha);\n    }\n    case 1: {\n      console.log(turn1, lambda);\n    }\n    default: {\n      tau.set('hi', ((7 ** 2) ** 2));\n    }\n  }\n} while (turn1 < 1);\nfor (const entry of [turn1]) {\n  console.log('zz');\n  if ((`${lambda}:${'zz'}` === 'Lash')) {\n    const kappa = false;\n    psi.searchParams.append('k', 'hi');\n  } else {\n    globalThis.psi = new URL('https://example.com/a/b?x=1');\n    globalThis.psi = new URL('https://example.com/p?x=1');\n  }\n}\nconst omega = (item) => Math.floor(item);\nconsole.log(omega(11));\npsi.hash = 'h';\n",
+          "source": "var tau = new Map(Object.entries({ z: 2, y: 8 }));\nfor (const field in { c: lambda }) {\n  console.log(field);\n  {\n    const iota = new Error('ab');\n    console.log(iota.name, iota.message, String(iota), iota instanceof Error);\n    console.log((typeof (tau.size ** 2)));\n  }\n}\nlet turn1 = 0;\ndo {\n  turn1++;\n  if (false) {\n    let phi = tau;\n    console.warn([...phi.entries()]);\n  }\n  switch (2.5 % 3) {\n    case 0: {\n      console.warn(beta, alpha);\n    }\n    case 1: {\n      console.log(turn1, lambda);\n    }\n    default: {\n      tau.set('hi', ((7 ** 2) ** 2));\n    }\n  }\n} while (turn1 < 1);\nfor (const entry of [turn1]) {\n  console.log('zz');\n  if ((`${lambda}:${'zz'}` === 'Lash')) {\n    const kappa = false;\n    psi.searchParams.append('k', 'hi');\n  } else {\n    globalThis.psi = new URL('https://example.com/a/b?x=1');\n    globalThis.psi = new URL('https://example.com/p?x=1');\n  }\n}\nconst omega = (item) => Math.floor(lambda);\nconsole.log(omega(11));\npsi.hash = 'h';\n",
           "node": {
             "outcome": "normal",
             "prints": [
@@ -7886,7 +7870,7 @@
               "Error ab Error: ab true",
               "number",
               "zz",
-              "11"
+              "12"
             ],
             "probes": {
               "alpha": "boolean false",
@@ -7967,8 +7951,8 @@
           }
         },
         {
-          "source": "const it = 'a'.matchAll(/a/g);\n",
-          "reject": "TS_REGEX_ITERATOR_POSITION",
+          "source": "import data from 'data.json' with { type: 'json' };\n",
+          "reject": "TS_IMPORT_EXPORT_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -8487,6 +8471,7 @@
         "gamma",
         "index",
         "iota",
+        "item",
         "kappa",
         "lambda",
         "n",
@@ -8499,6 +8484,7 @@
         "slot",
         "step",
         "theta",
+        "total",
         "turn1",
         "turn3",
         "value",
@@ -8525,6 +8511,7 @@
               "gamma": "unbound",
               "index": "unbound",
               "iota": "boolean true",
+              "item": "unbound",
               "kappa": "unbound",
               "lambda": "unbound",
               "n": "unbound",
@@ -8537,6 +8524,7 @@
               "slot": "unbound",
               "step": "unbound",
               "theta": "unbound",
+              "total": "unbound",
               "turn1": "unbound",
               "turn3": "unbound",
               "value": "unbound",
@@ -8545,11 +8533,11 @@
           }
         },
         {
-          "source": "let turn1 = 0;\nwhile (turn1 < 1) {\n  turn1++;\n  let gamma = [Math.round((-turn1)), 2, turn1];\n  {\n    const rho = (n) => 1;\n    console.log(rho(1));\n    console.warn(turn1);\n  }\n}\nglobalThis.shared2 = 7;\nconst { a: delta, b: alpha = 0 } = { a: '  pad ', b: 5 };\nlet turn3 = 0;\nwhile (turn3 < 3) {\n  turn3++;\n  switch (6 % 3) {\n    case 0: {\n      let lambda = [];\n      const chi = '  pad ';\n      break;\n    }\n    default: {\n      const delta = new URL('https://example.com/p?x=1');\n    }\n  }\n}\nconst [theta, ...phi] = [((turn3 === alpha) ? Array.from({ length: 0 }, (slot, index) => index * 2).length : 0), 1, 1];\n",
+          "source": "let turn1 = 0;\nwhile (turn1 < 1) {\n  turn1++;\n  let gamma = [Math.round((-turn1)), 2, turn1];\n  {\n    const beta = (n) => gamma.reduce((total, item) => total + item, 0);\n    console.log(beta(1));\n    console.warn(turn1);\n  }\n}\nglobalThis.shared2 = 7;\nconst { a: delta, b: alpha = 0 } = { a: '  pad ', b: 5 };\nlet turn3 = 0;\nwhile (turn3 < 3) {\n  turn3++;\n  switch (6 % 3) {\n    case 0: {\n      let lambda = [];\n      const chi = '  pad ';\n      break;\n    }\n    default: {\n      const delta = new URL('https://example.com/p?x=1');\n    }\n  }\n}\nconst [theta, ...phi] = [((turn3 === alpha) ? Array.from({ length: 0 }, (slot, index) => index * 2).length : 0), 1, 1];\n",
           "node": {
             "outcome": "normal",
             "prints": [
-              "1",
+              "2",
               "1"
             ],
             "probes": {
@@ -8561,6 +8549,7 @@
               "gamma": "unbound",
               "index": "unbound",
               "iota": "boolean true",
+              "item": "unbound",
               "kappa": "unbound",
               "lambda": "unbound",
               "n": "unbound",
@@ -8573,6 +8562,7 @@
               "slot": "unbound",
               "step": "unbound",
               "theta": "number 0",
+              "total": "unbound",
               "turn1": "number 1",
               "turn3": "number 3",
               "value": "unbound",
@@ -8604,8 +8594,8 @@
           }
         },
         {
-          "source": "isNaN(1, 2);\n",
-          "reject": "TS_EXPRESSION_UNSUPPORTED",
+          "source": "class A { #m() { } }\n",
+          "reject": "TS_CLASS_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -8999,8 +8989,8 @@
           }
         },
         {
-          "source": "import defer * as ns from 'mod';\n",
-          "reject": "TS_IMPORT_EXPORT_UNSUPPORTED",
+          "source": "const s = String.raw`a`;\n",
+          "reject": "TS_TAGGED_TEMPLATE_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -9257,22 +9247,22 @@
       "seed": 76,
       "probe": [
         "alpha",
+        "beta",
+        "chi",
         "count",
         "delta",
         "error",
-        "field",
         "index",
         "iota",
         "item",
-        "kappa",
         "lambda",
         "local",
         "omega",
         "phi",
         "psi",
+        "rho",
         "slot",
         "tau",
-        "theta",
         "zeta"
       ],
       "cells": [
@@ -9285,22 +9275,22 @@
             ],
             "probes": {
               "alpha": "function undefined",
+              "beta": "unbound",
+              "chi": "unbound",
               "count": "unbound",
               "delta": "unbound",
               "error": "unbound",
-              "field": "unbound",
               "index": "unbound",
               "iota": "unbound",
               "item": "unbound",
-              "kappa": "unbound",
               "lambda": "unbound",
               "local": "unbound",
               "omega": "number 3",
               "phi": "unbound",
               "psi": "object [0,11]",
+              "rho": "unbound",
               "slot": "unbound",
               "tau": "unbound",
-              "theta": "unbound",
               "zeta": "unbound"
             },
             "closures": [
@@ -9309,34 +9299,32 @@
           }
         },
         {
-          "source": "psi.reverse();\nif (true) {\n  if (false) {\n    let delta = psi;\n  }\n}\nvar iota = 0.5;\nfunction zeta(count) {\n  return Math.min(count, 7);\n}\nconsole.log(zeta(iota));\nconst tau = true;\n{\n  console.log(psi, (('ab' + '  pad ').includes('a') || true));\n  const kappa = (item) => { const local = 11; return 8; };\n  console.log(kappa(11));\n  for (const field in psi) {\n    console.log(field);\n  }\n}\n",
+          "source": "psi.reverse();\nif (true) {\n  if (false) {\n    let delta = psi;\n  }\n}\nvar iota = 0.5;\nfunction zeta(count) {\n  return Math.min(omega, Math.max(...psi, 1));\n}\nconsole.log(zeta(iota));\nconst tau = true;\n{\n  console.log(psi, (('ab' + '  pad ').includes('a') || true));\n  const chi = (item) => { const local = 11; return Math.min(...psi, 1); };\n  console.log(chi(((omega < omega) ? 9 : chi(3))));\n  try {\n    let phi = tau;\n    psi.reverse();\n  } catch (error) {\n    console.log(error.name, error.message, error instanceof RangeError);\n  } finally {\n    const lambda = '  pad '.toLowerCase();\n  }\n}\n",
           "node": {
             "outcome": "normal",
             "prints": [
-              "0.5",
+              "3",
               "[11,0] true",
-              "8",
-              "0",
-              "1"
+              "0"
             ],
             "probes": {
               "alpha": "function undefined",
+              "beta": "unbound",
+              "chi": "unbound",
               "count": "unbound",
               "delta": "unbound",
               "error": "unbound",
-              "field": "unbound",
               "index": "unbound",
               "iota": "number 0.5",
               "item": "unbound",
-              "kappa": "unbound",
               "lambda": "unbound",
               "local": "unbound",
               "omega": "number 3",
               "phi": "unbound",
-              "psi": "object [11,0]",
+              "psi": "object [0,11]",
+              "rho": "unbound",
               "slot": "unbound",
               "tau": "boolean true",
-              "theta": "unbound",
               "zeta": "function undefined"
             },
             "closures": [
@@ -9346,32 +9334,31 @@
           }
         },
         {
-          "source": "console.log(tau);\nif (true) {\n  try {\n    let phi = tau;\n    psi.reverse();\n  } catch (error) {\n    console.log(error.name, error.message, error instanceof RangeError);\n  } finally {\n    const lambda = '  pad '.toLowerCase();\n  }\n} else {\n  psi.splice(0, 1);\n  let zeta = Math.max(...psi, 1);\n}\nlet theta = { e: tau, c: [omega], g: 'zz' };\nfor (const field in psi) {\n  console.log(field);\n}\ntry {\n  {\n    const theta = new Map(Object.entries({ z: 4, y: 6 }));\n    psi.push(Math.floor((iota * omega)));\n    globalThis.psi = [];\n  }\n  theta.c.push((-Number.parseInt('zz' + '7', 10)));\n} catch {\n  console.log('caught');\n}\n",
+          "source": "try {\n  if (tau) {\n    let lambda = { f: String(omega), d: 3 };\n    console.log(omega, tau);\n  } else {\n    psi[0] = Math.max((-omega), 6.5);\n    let beta = new Map(Object.entries({ z: 8, y: 5 }));\n  }\n} catch {\n  console.log('caught');\n}\nlet rho = 'hi';\npsi.reverse();\npsi.sort();\nthrow new Error('b.c');\n",
           "node": {
-            "outcome": "normal",
+            "outcome": "throw",
+            "error": "Error",
             "prints": [
-              "true",
-              "0",
-              "1"
+              "3 true"
             ],
             "probes": {
               "alpha": "function undefined",
+              "beta": "unbound",
+              "chi": "unbound",
               "count": "unbound",
               "delta": "unbound",
               "error": "unbound",
-              "field": "unbound",
               "index": "unbound",
               "iota": "number 0.5",
               "item": "unbound",
-              "kappa": "unbound",
               "lambda": "unbound",
               "local": "unbound",
               "omega": "number 3",
               "phi": "unbound",
-              "psi": "object []",
+              "psi": "object [0,11]",
+              "rho": "string \"hi\"",
               "slot": "unbound",
               "tau": "boolean true",
-              "theta": "object {\"e\":true,\"c\":[3,null],\"g\":\"zz\"}",
               "zeta": "function undefined"
             },
             "closures": [
@@ -9404,7 +9391,7 @@
       ],
       "cells": [
         {
-          "source": "let turn1 = 0;\nwhile (turn1 < 1) {\n  turn1++;\n  console.log(turn1);\n}\nconst theta = [0, 10];\nfor (const entry of theta) {\n  theta.pop();\n  const tau = (value) => { const scaled = entry; return (0 & 9.5); };\n  console.log(tau(Math.abs((true ? turn1 : 5.5))));\n  if (true) { break; }\n}\ntry {\n  for (let i = 0; i < 1; i++) {\n    theta.sort((left, right) => (String(left) < String(right) ? 1 : String(left) > String(right) ? -1 : 0));\n    theta.reverse();\n  }\n  theta.push(...[6, (0 + turn1)]);\n  throw new TypeError('hi');\n} catch (problem) {\n  console.log(problem.name, problem.message, problem instanceof RangeError);\n} finally {\n  {\n    console.log(false, Number.parseInt(theta.join('-') + '7', 10));\n    console.info(turn1, 'a,b', turn1);\n    const chi = (turn1 >= Math.min(...theta, 1));\n  }\n}\ntheta.push(((1 >= turn1) ? turn1 : Array.from({ length: 2 }, (slot, index) => index * 2).length));\nswitch (((-9) & 8.5) % 3) {\n  case 0: {\n    console.warn(theta);\n    switch ((-(1 | 10)) % 3) {\n      case 0: {\n        let gamma = 7;\n        break;\n      }\n      case 1: {\n        const gamma = new Set([1, 7.5, 1]);\n        console.log(gamma.size, gamma.has(1), [...gamma.union(new Set([7]))], gamma instanceof Set);\n        break;\n      }\n      default: {\n        theta.sort((left, right) => (String(left) < String(right) ? 1 : String(left) > String(right) ? -1 : 0));\n      }\n    }\n    break;\n  }\n  case 1: {\n    const sigma = new Map([['b', 8.5], ['a', 5]]);\n    console.log(sigma.size, sigma.get('a'), sigma.has('  pad '), [...sigma.keys()], sigma instanceof Map);\n    const tau = { ...{ g: [turn1], f: false, d: theta.slice(1) } };\n  }\n  default: {\n    {\n      console.warn(String(turn1), theta, 'x'.slice(0, 2).toLowerCase());\n    }\n  }\n}\nthrow new RangeError('Lash');\n",
+          "source": "let turn1 = 0;\nwhile (turn1 < 1) {\n  turn1++;\n  console.log(turn1);\n}\nconst theta = [0, 10];\nfor (const entry of theta) {\n  theta.pop();\n  const tau = (value) => { const scaled = turn1; return (0 & 9.5); };\n  console.log(tau(Math.abs((true ? turn1 : 5.5))));\n  if (true) { break; }\n}\ntry {\n  for (let i = 0; i < 1; i++) {\n    theta.sort((left, right) => (String(left) < String(right) ? 1 : String(left) > String(right) ? -1 : 0));\n    theta.reverse();\n  }\n  theta.push(...[6, (0 + turn1)]);\n  throw new TypeError('hi');\n} catch (problem) {\n  console.log(problem.name, problem.message, problem instanceof RangeError);\n} finally {\n  {\n    console.log(false, Number.parseInt(theta.join('-') + '7', 10));\n    console.info(turn1, 'a,b', turn1);\n    const chi = (turn1 >= Math.min(...theta, 1));\n  }\n}\ntheta.push(((1 >= turn1) ? turn1 : Array.from({ length: 2 }, (slot, index) => index * 2).length));\nswitch (((-9) & 8.5) % 3) {\n  case 0: {\n    console.warn(theta);\n    switch ((-(1 | 10)) % 3) {\n      case 0: {\n        let gamma = 7;\n        break;\n      }\n      case 1: {\n        const gamma = new Set([1, 7.5, 1]);\n        console.log(gamma.size, gamma.has(1), [...gamma.union(new Set([7]))], gamma instanceof Set);\n        break;\n      }\n      default: {\n        theta.sort((left, right) => (String(left) < String(right) ? 1 : String(left) > String(right) ? -1 : 0));\n      }\n    }\n    break;\n  }\n  case 1: {\n    const sigma = new Map([['b', 8.5], ['a', 5]]);\n    console.log(sigma.size, sigma.get('a'), sigma.has('  pad '), [...sigma.keys()], sigma instanceof Map);\n    const tau = { ...{ g: [turn1], f: false, d: theta.slice(1) } };\n  }\n  default: {\n    {\n      console.warn(String(turn1), theta, 'x'.slice(0, 2).toLowerCase());\n    }\n  }\n}\nthrow new RangeError('Lash');\n",
           "node": {
             "outcome": "throw",
             "error": "RangeError",
@@ -9462,8 +9449,8 @@
           }
         },
         {
-          "source": "const x = Math.extra();\n",
-          "reject": "TS_METHOD_UNSUPPORTED",
+          "source": "async function f() { return 1; } f();\n",
+          "reject": "TS_AWAIT_REQUIRED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -9554,8 +9541,8 @@
           }
         },
         {
-          "source": "for (let i = 0; i < 2; i++) { try { continue; } finally { } }\n",
-          "reject": "TS_FOR_UNSUPPORTED",
+          "source": "RegExp.escape('a');\n",
+          "reject": "TS_METHOD_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -10015,8 +10002,8 @@
           }
         },
         {
-          "source": "eval('1');\n",
-          "reject": "TS_EVAL_UNSUPPORTED",
+          "source": "import text from 'mod' with { type: 'text' };\n",
+          "reject": "TS_IMPORT_EXPORT_UNSUPPORTED",
           "node": {
             "outcome": "rejected",
             "prints": [],
@@ -12193,6 +12180,25 @@
           "outcome": "normal",
           "prints": [
             "1 1"
+          ],
+          "probes": {}
+        }
+      ]
+    },
+    {
+      "name": "closure-assigned-global",
+      "create": "let value = 0;\n[1, 2, 3].forEach((n) => { value += n; });",
+      "uses": "console.log(value, value * 2);",
+      "node": [
+        {
+          "outcome": "normal",
+          "prints": [],
+          "probes": {}
+        },
+        {
+          "outcome": "normal",
+          "prints": [
+            "6 12"
           ],
           "probes": {}
         }

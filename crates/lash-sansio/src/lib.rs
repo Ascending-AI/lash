@@ -51,7 +51,12 @@ pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 /// (`x.includes`) means the built-in function object where it meant
 /// `undefined`, so an unchanged artifact that reads one no longer means what
 /// it did.
-pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v21";
+///
+/// v22 (FIG-3707): the TypeScript builtin vocabulary gains the binding-cell
+/// intrinsics (`__typescript_cell_new`, `__typescript_cell_get`,
+/// `__typescript_cell_set`), and a closure's capture of a binding something
+/// assigns means that shared binding, not a copy.
+pub const LASHLANG_SEMANTIC_HASH_VERSION: &str = "lashlang-semantic-v22";
 
 pub use attachment::{
     AttachmentCreateMeta, AttachmentId, AttachmentRef, AttachmentTypeMetadata, InvalidAttachmentId,

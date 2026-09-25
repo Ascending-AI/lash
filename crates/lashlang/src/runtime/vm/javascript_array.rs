@@ -331,3 +331,53 @@ fn relative_index(value: f64, len: usize) -> Option<usize> {
     };
     (index >= 0.0 && index < len as f64).then_some(index as usize)
 }
+
+/// `flatMap` appends each callback result by reference: an array's elements
+/// are the values it holds (a closure among them keeps the binding cells it
+/// shares), and anything else is itself. Crossing the host boundary would copy
+/// them, and refuse a function outright. `None` leaves a RegExp match array,
+/// or an output that is not an array, to the exported path.
+pub(super) fn append_flat_map_by_reference(
+    heap: &Heap,
+    output: HeapId,
+    value: &Value,
+) -> Result<Option<Value>, RuntimeError> {
+    let (HeapObject::List(existing) | HeapObject::Tuple(existing)) = heap.get(output)? else {
+        return Ok(None);
+    };
+    let spread = match value {
+        Value::Ref(id) => match heap.get(*id)? {
+            HeapObject::List(values) | HeapObject::Tuple(values) => values.as_slice(),
+            HeapObject::RegExpMatch(_) => return Ok(None),
+            _ => std::slice::from_ref(value),
+        },
+        Value::List(values) | Value::Tuple(values) => &values[..],
+        value => std::slice::from_ref(value),
+    };
+    let appended = existing.iter().chain(spread).cloned().collect::<Vec<_>>();
+    Ok(Some(Value::List(appended.into())))
+}
+
+/// The source an `Array.from` mapper walks (`Lash.ArrayIterationSource`): an
+/// array is iterated live, as its iterator reads each index and the length at
+/// every step, so the walk sees what the mapper writes; any other iterable is
+/// copied first, exactly as `Lash.ArrayFromIterable` copies it, by rewriting
+/// the call to that selector and answering `None`.
+pub(super) fn array_iteration_source(
+    heap: &Heap,
+    values: &mut [Value],
+) -> Result<Option<Value>, RuntimeError> {
+    let Some(Value::String(method)) = values.first() else {
+        return Ok(None);
+    };
+    if method.as_str() != "Lash.ArrayIterationSource" {
+        return Ok(None);
+    }
+    if let [_, Value::Ref(source)] = &*values
+        && matches!(heap.get(*source)?, HeapObject::List(_))
+    {
+        return Ok(Some(Value::Ref(*source)));
+    }
+    values[0] = Value::String("Lash.ArrayFromIterable".into());
+    Ok(None)
+}

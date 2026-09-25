@@ -9,7 +9,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 
-use super::captures::BindingId;
+use super::captures::{BindingId, SlotKey};
 use super::{
     BinaryOp, CallArg, Expr, Function, FunctionBody, MemberProperty, Pattern, Stmt, TsAssignTarget,
     VarKind, is_reserved_name, pattern_names, reserved_identifier,
@@ -133,7 +133,20 @@ impl super::Lowerer {
         // is open. Elsewhere it keeps the authored spelling the workflow-graph
         // lens prints back.
         let shares_a_global_slot = block_private && self.global_this_names.contains(name);
-        let preserve_name = !shares_a_global_slot && (preserve_name || !self.has_binding(name));
+        // A function's parameter expressions run before its body declares
+        // anything, so a default can capture an outer binding the body then
+        // redeclares (ECMA-262 gives such a body its own variable
+        // environment). The frame holds the captured binding under its
+        // internal name, so the body's binding of the same name takes a
+        // generated slot rather than sharing that one.
+        let captured_by_frame = owner_function != 0
+            && self
+                .functions
+                .last()
+                .is_some_and(|function| function.captures.contains(name));
+        let preserve_name = !shares_a_global_slot
+            && !captured_by_frame
+            && (preserve_name || !self.has_binding(name));
         if self
             .scopes
             .last()
@@ -153,7 +166,7 @@ impl super::Lowerer {
         if block_private {
             self.private_bindings.insert(internal.clone());
         }
-        let id = self.declare_in_ledger(name, kind);
+        let id = self.declare_in_ledger(kind, (owner_function, internal.clone()));
         #[expect(
             clippy::expect_used,
             reason = "the lowerer pushes the program root scope before any declaration and never pops past it"
@@ -251,33 +264,99 @@ impl super::Lowerer {
                     span,
                 ));
             }
-            let first_capturing_function = self
-                .functions
-                .iter()
-                .position(|function| function.id == binding.owner_function)
-                .map_or(0, |owner| owner + 1);
-            for function in &mut self.functions[first_capturing_function..] {
-                function.captures.insert(binding.internal.clone());
-            }
-            // The outermost capturing closure is the one the owning frame
-            // creates, so its creation is when the value is copied; the
-            // closures inside it copy from that copy.
-            let creation = self.functions[first_capturing_function].creation.clone();
-            self.capture_ledger.capture(binding.id, creation, span);
+            self.capture(&binding);
         }
         Ok(binding.internal)
     }
 
-    /// Registers a binding with the capture ledger. A `var` (and an enum,
-    /// which is one) belongs to its whole function frame, so no loop makes it
-    /// fresh; every other binding is fresh in each loop around its
-    /// declaration.
-    pub(super) fn declare_in_ledger(&mut self, name: &str, kind: BindingKind) -> BindingId {
+    /// Captures `binding`, which an enclosing frame owns, into every closure
+    /// between that frame and the current one.
+    pub(super) fn capture(&mut self, binding: &Binding) {
+        let first_capturing_function = self
+            .functions
+            .iter()
+            .position(|function| function.id == binding.owner_function)
+            .map_or(0, |owner| owner + 1);
+        for function in &mut self.functions[first_capturing_function..] {
+            function.captures.insert(binding.internal.clone());
+        }
+        // The outermost capturing closure is the one the owning frame
+        // creates, so its creation is when the value is copied; the closures
+        // inside it copy from that copy.
+        let creation = self.functions[first_capturing_function].creation.clone();
+        self.capture_ledger.capture(binding.id, creation);
+    }
+
+    /// The body's own `var` of a parameter's name. In a function whose
+    /// parameters contain expressions it is a new binding in a generated slot
+    /// that starts with the parameter's value, replacing the parameter for the
+    /// body (ECMA-262 FunctionDeclarationInstantiation step 28); otherwise it
+    /// is the parameter itself, and `None`.
+    pub(super) fn separate_parameter_var(
+        &mut self,
+        name: &str,
+        parameter: &str,
+    ) -> Option<lashlang::Expr> {
+        if !self
+            .functions
+            .last()
+            .is_some_and(|function| function.separate_var_environment)
+        {
+            return None;
+        }
+        let owner_function = self.current_function();
+        let internal = self.generated_binding(name);
+        let id = self.declare_in_ledger(BindingKind::Var, (owner_function, internal.clone()));
+        let binding = Binding {
+            id,
+            internal: internal.clone(),
+            kind: BindingKind::Var,
+            initialized: true,
+            owner_function,
+            role: BindingRole::Plain,
+        };
+        let value =
+            self.binding_initial_value(&binding, lashlang::Expr::Variable(parameter.into()));
+        #[expect(
+            clippy::expect_used,
+            reason = "the function body's scope declared the parameter being replaced"
+        )]
+        self.scopes
+            .last_mut()
+            .expect("a scope is always active")
+            .bindings
+            .insert(name.to_string(), binding);
+        Some(lashlang::Expr::Assign {
+            target: lashlang::AssignTarget::variable(internal.into()),
+            expr: Box::new(value),
+        })
+    }
+
+    /// Registers a binding, which lives in `slot`, with the capture ledger. A
+    /// `var` (and an enum, which is one) belongs to its whole function frame,
+    /// so no loop makes it fresh; every other binding is fresh in each loop
+    /// around its declaration.
+    pub(super) fn declare_in_ledger(&mut self, kind: BindingKind, slot: SlotKey) -> BindingId {
         let loops = match kind {
             BindingKind::Var => Vec::new(),
             _ => self.position.loops.clone(),
         };
-        self.capture_ledger.declare(name, loops)
+        self.capture_ledger.declare(slot, loops)
+    }
+
+    /// Whether `binding` lives in a binding cell: its slot is one the capture
+    /// ledger boxed (FIG-3707), and it is not a top-level session slot, which
+    /// closures reach live through the session instead.
+    pub(super) fn is_cell(&self, binding: &Binding) -> bool {
+        self.cells
+            .contains(&(binding.owner_function, binding.internal.clone()))
+            && !self.is_session_slot(binding)
+    }
+
+    /// Whether `binding` is a top-level session slot: owned by the cell's root
+    /// frame and not one of its private slots.
+    pub(super) fn is_session_slot(&self, binding: &Binding) -> bool {
+        binding.owner_function == 0 && !self.private_bindings.contains(&binding.internal)
     }
 
     /// Records an assignment to `binding` at the current point of its frame.

@@ -374,6 +374,26 @@ async fn an_invalid_exception_state_bypasses_a_surrounding_catch() {
     );
 }
 
+/// `NotABindingCell` means the front end lowered a captured binding without
+/// its cell (FIG-3707): a lowering defect, not a guest failure, so a guest
+/// `try`/`catch` must never swallow it (review of #2211; it was catchable).
+#[tokio::test(flavor = "current_thread")]
+async fn a_binding_cell_fault_bypasses_a_surrounding_catch() {
+    let program = exception_finish(exception_try(
+        super::typescript_exotic_cases::private_builtin(
+            "__typescript_cell_get",
+            vec![Expr::Number(1.0)],
+        ),
+        Some(("error", Expr::String("caught".into()))),
+        None,
+    ));
+    let outcome = run_exception_program(program, &Host).await;
+    assert!(
+        matches!(outcome, Err(RuntimeError::NotABindingCell { .. })),
+        "the surrounding catch must not observe it: {outcome:?}"
+    );
+}
+
 // The shapes the scope extents cannot see. A handler's extent is a region, so
 // every record in the next two blobs sits inside the scope it names and passes
 // every per-record and nesting rule above. What they get wrong is which

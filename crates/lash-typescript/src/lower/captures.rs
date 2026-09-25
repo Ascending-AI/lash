@@ -1,14 +1,14 @@
-//! Mutable captures: the read path of ADR 0062 deviation register entry 5.
+//! Mutable captures: which bindings live in a binding cell (FIG-3707).
 //!
 //! A closure captures by value: it copies every binding it closes over at the
 //! moment it is created. That is exact for a binding nothing assigns after the
-//! copy, and a silent stale read for one that something does, because
-//! ECMA-262 closes over the binding itself and reads its current value. Until
-//! durable lexical cells exist, the dialect therefore refuses both halves of a
-//! mutable capture. The write half (assigning to a captured binding from
-//! inside the closure) refuses where the assignment is lowered. The read half
+//! copy, and it is the fast path every other binding keeps. ECMA-262 closes
+//! over the binding itself, so a binding that an assignment can reach after a
+//! closure copied it, or that a closure assigns, is shared instead: it lives
+//! in one binding cell that the frame owning it and every closure over it
+//! reference. This ledger decides which bindings those are. The judgement
 //! needs the whole frame, because the assignment that makes a copy stale may
-//! come after the closure in source order, so this ledger collects the facts
+//! come after the closure in source order, so the ledger collects the facts
 //! while the frame lowers and judges them once lowering is done.
 //!
 //! Per binding, it records where each capturing closure is created and where
@@ -19,8 +19,8 @@
 //! - its point is later than the closure's, or
 //! - both sit inside a loop the binding outlives, so a later iteration's
 //!   assignment follows an earlier iteration's closure, or
-//! - it is a `globalThis.name` write inside a function, which runs whenever
-//!   that function is called.
+//! - it runs whenever a function is called: an assignment inside a closure,
+//!   or a `globalThis.name` write inside a function.
 //!
 //! A binding declared inside a loop is fresh on every iteration, so that loop
 //! does not count against it. A classic `for` binding is one of those, and its
@@ -36,10 +36,14 @@
 //! the cell that made it (a binding whose value reaches a function does not
 //! survive its cell), so every assignment that could follow a capture is in
 //! the same program as the capture.
+//!
+//! The answer is per slot, not per binding: [`CaptureLedger::cell_slots`]
+//! names the (frame, internal name) pairs to box. Every binding that shares a
+//! slot boxes with it (sibling scopes share internal names, and a classic
+//! `for` head and its per-iteration copies share one slot), so a slot never
+//! holds a cell on one path and a raw value on another.
 
-use std::collections::BTreeMap;
-
-use crate::{Diagnostic, DiagnosticCode, SourceSpan};
+use std::collections::{BTreeMap, BTreeSet};
 
 /// One binding's identity for the ledger. Internal names are unique only
 /// where a binding is visibly shadowed, so sibling scopes can share one; the
@@ -55,8 +59,12 @@ pub(super) struct Site {
     loops: Vec<usize>,
 }
 
+/// The slot a binding lives in: its owning frame's function id and its
+/// internal name. Boxing is decided per slot.
+pub(super) type SlotKey = (usize, String);
+
 struct Declared {
-    name: String,
+    slot: SlotKey,
     /// The loops the binding is declared inside. A loop in this list makes a
     /// fresh binding each iteration; a loop outside it is one the binding
     /// outlives.
@@ -66,13 +74,12 @@ struct Declared {
 struct Capture {
     binding: BindingId,
     site: Site,
-    span: Option<SourceSpan>,
 }
 
 enum Write {
     At(Site),
-    /// A write inside a function body to a root binding, through
-    /// `globalThis`: it runs whenever the function is called.
+    /// A write that runs whenever a function is called: an assignment inside
+    /// a closure, or a `globalThis` write inside a function body.
     Anytime,
 }
 
@@ -87,16 +94,10 @@ pub(super) struct CaptureLedger {
 }
 
 impl CaptureLedger {
-    pub(super) fn declare(&mut self, name: &str, loops: Vec<usize>) -> BindingId {
+    pub(super) fn declare(&mut self, slot: SlotKey, loops: Vec<usize>) -> BindingId {
         let id = BindingId(self.next_binding);
         self.next_binding += 1;
-        self.declared.insert(
-            id,
-            Declared {
-                name: name.to_string(),
-                loops,
-            },
-        );
+        self.declared.insert(id, Declared { slot, loops });
         id
     }
 
@@ -115,12 +116,8 @@ impl CaptureLedger {
         id
     }
 
-    pub(super) fn capture(&mut self, binding: BindingId, site: Site, span: Option<SourceSpan>) {
-        self.captures.push(Capture {
-            binding,
-            site,
-            span,
-        });
+    pub(super) fn capture(&mut self, binding: BindingId, site: Site) {
+        self.captures.push(Capture { binding, site });
     }
 
     pub(super) fn write(&mut self, binding: BindingId, site: Site) {
@@ -131,15 +128,18 @@ impl CaptureLedger {
         self.writes.push((binding, Write::Anytime));
     }
 
-    /// Refuses the first capture, in evaluation order, that an assignment may
-    /// reach after the closure holding it was created.
-    pub(super) fn refuse_stale_reads(&self) -> Result<(), Diagnostic> {
-        let mut captures = self.captures.iter().collect::<Vec<_>>();
-        captures.sort_by_key(|capture| capture.site.point);
-        for capture in captures {
+    /// The slots that live in a binding cell: every slot one of whose
+    /// captures an assignment may reach after the closure holding it was
+    /// created.
+    pub(super) fn cell_slots(&self) -> BTreeSet<SlotKey> {
+        let mut slots = BTreeSet::new();
+        for capture in &self.captures {
             let Some(declared) = self.declared.get(&capture.binding) else {
                 continue;
             };
+            if slots.contains(&declared.slot) {
+                continue;
+            }
             let stale = self
                 .writes
                 .iter()
@@ -152,21 +152,10 @@ impl CaptureLedger {
                     }
                 });
             if stale {
-                return Err(Diagnostic::with_repair(
-                    DiagnosticCode::MutableCaptureUnsupported,
-                    format!(
-                        "a closure reads `{}`, which is assigned after the closure is created; a closure copies what it captures until durable lexical cells exist, so it would read a stale value",
-                        declared.name
-                    ),
-                    format!(
-                        "copy the value into a `const` before creating the closure and read that, or pass `{}` into the function as a parameter",
-                        declared.name
-                    ),
-                    capture.span,
-                ));
+                slots.insert(declared.slot.clone());
             }
         }
-        Ok(())
+        slots
     }
 }
 

@@ -527,7 +527,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
             };
             {
                 if matches!(callback.completion, CallbackCompletion::Collect) {
-                    callback.results.push(self.heap.isolate_value(&result)?);
+                    // A heap reference is the value the callback returned: a
+                    // copy would be a different object (ECMA identity) and
+                    // would copy the binding cells a returned closure shares.
+                    // Only an inline compound is given its own object.
+                    let result = match result {
+                        Value::Ref(_) => result,
+                        result => self.heap.isolate_value(&result)?,
+                    };
+                    callback.results.push(result);
                 }
                 let call = if callback.live_url_search_params {
                     let Value::Ref(receiver) = callback.calls[0] else {
@@ -932,4 +940,52 @@ fn callback_arguments(call: Value) -> Result<ListValue, RuntimeError> {
         });
     };
     Ok(arguments)
+}
+
+impl<H: ExecutionHost> Vm<'_, H> {
+    /// Makes, reads or writes a binding cell (FIG-3707): the one storage a
+    /// captured, assigned binding has, shared by its frame and every closure
+    /// over it.
+    pub(super) fn execute_binding_cell(&mut self, op: IntrinsicOp) -> Result<(), RuntimeError> {
+        match op {
+            IntrinsicOp::BindingCellNew => {
+                let popped = self.pop_stack()?;
+                let value = self.binding_cell_member(popped)?;
+                let cell = self.heap.allocate_cell(value)?;
+                self.stack.push(cell);
+            }
+            IntrinsicOp::BindingCellGet => {
+                let cell = self.pop_stack()?;
+                let value = self.heap.cell_value(&cell)?;
+                self.stack.push(value);
+            }
+            IntrinsicOp::BindingCellSet => {
+                let popped = self.pop_stack()?;
+                let value = self.binding_cell_member(popped)?;
+                let cell = self.pop_stack()?;
+                self.heap.set_cell(&cell, value.clone())?;
+                self.stack.push(value);
+            }
+            _ => unreachable!("only the binding cell operations dispatch here"),
+        }
+        Ok(())
+    }
+
+    /// The value a binding cell stores, admitted the way a slot admits one: a
+    /// host projection is read, and an inline compound goes through the same
+    /// heap import a slot's value does (`heapify_vm_state`), so a member write
+    /// through the binding reaches the object every reader of the binding
+    /// sees.
+    fn binding_cell_member(&mut self, value: Value) -> Result<Value, RuntimeError> {
+        match materialize_value(value)? {
+            value @ (Value::Tuple(_) | Value::List(_) | Value::Record(_)) => {
+                let imported = self.heap.import_values(vec![value], 1)?;
+                let Ok([value]) = <[Value; 1]>::try_from(imported) else {
+                    unreachable!("an import returns one value per value it imports")
+                };
+                Ok(value)
+            }
+            value => Ok(value),
+        }
+    }
 }

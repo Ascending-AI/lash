@@ -1380,23 +1380,152 @@
     },
     {
       "id": "mutable-capture-read",
-      "about": "a closure made before its binding is reassigned is refused rather than reading its stale copy (FIG-3604)",
+      "about": "a closure made before its binding is reassigned reads the binding, not a copy (FIG-3707)",
       "probe": [
         "x",
+        "f"
+      ],
+      "deviations": [
+        "closure-boundary"
+      ],
+      "cells": [
+        {
+          "source": "let x = 1;\nconst f = () => x;\nx = 2;\nconsole.log(f());\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "2"
+            ],
+            "probes": {
+              "x": "number 2",
+              "f": "function undefined"
+            },
+            "closures": [
+              "f"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "closure-written-global-persists",
+      "about": "a closure assigns a top-level binding, and the next cell reads the value it left, live and after a reload (FIG-3707)",
+      "probe": [
+        "n",
+        "bump",
+        "total",
+        "by",
+        "v"
+      ],
+      "deviations": [
+        "closure-boundary"
+      ],
+      "cells": [
+        {
+          "source": "let n = 0;\nconst bump = (by) => { n = n + by; };\nbump(2);\nbump(3);\nconsole.log(n);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "5"
+            ],
+            "probes": {
+              "n": "number 5",
+              "bump": "function undefined",
+              "total": "unbound",
+              "by": "unbound",
+              "v": "unbound"
+            },
+            "closures": [
+              "bump"
+            ]
+          }
+        },
+        {
+          "source": "let total = 0;\n[1, 2, 3].forEach((v) => { total += v * n; });\nconsole.log(n, total);\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "5 30"
+            ],
+            "probes": {
+              "n": "number 5",
+              "bump": "function undefined",
+              "total": "number 30",
+              "by": "unbound",
+              "v": "unbound"
+            },
+            "closures": [
+              "bump"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "id": "binding-cells-stay-in-their-cell",
+      "about": "closures share the bindings they assign, per call and per iteration, and only the values they leave reach the session (FIG-3707)",
+      "probe": [
+        "counts",
+        "counter",
+        "a",
+        "b",
+        "c",
+        "fns",
+        "i",
         "f"
       ],
       "deviations": [],
       "cells": [
         {
-          "source": "let x = 1;\nconst f = () => x;\nx = 2;\nconsole.log(f());\n",
-          "reject": "TS_MUTABLE_CAPTURE_UNSUPPORTED",
+          "source": "const counts = [];\n{\n  const counter = () => { let c = 0; return () => { c += 1; return c; }; };\n  const a = counter();\n  const b = counter();\n  a();\n  a();\n  b();\n  counts.push(a(), b());\n  const fns = [];\n  for (let i = 0; i < 3; i++) {\n    fns.push(() => i);\n    i += 0;\n  }\n  counts.push(...fns.map((f) => f()));\n}\nconsole.log(JSON.stringify(counts));\n",
+          "reject": null,
           "deviation": null,
           "defect": null,
           "node": {
-            "outcome": "rejected",
-            "prints": [],
+            "outcome": "normal",
+            "prints": [
+              "[3,2,0,1,2]"
+            ],
             "probes": {
-              "x": "unbound",
+              "counts": "object [3,2,0,1,2]",
+              "counter": "unbound",
+              "a": "unbound",
+              "b": "unbound",
+              "c": "unbound",
+              "fns": "unbound",
+              "i": "unbound",
+              "f": "unbound"
+            },
+            "closures": []
+          }
+        },
+        {
+          "source": "counts.push(counts.length);\nconsole.log(JSON.stringify(counts));\n",
+          "reject": null,
+          "deviation": null,
+          "defect": null,
+          "node": {
+            "outcome": "normal",
+            "prints": [
+              "[3,2,0,1,2,5]"
+            ],
+            "probes": {
+              "counts": "object [3,2,0,1,2,5]",
+              "counter": "unbound",
+              "a": "unbound",
+              "b": "unbound",
+              "c": "unbound",
+              "fns": "unbound",
+              "i": "unbound",
               "f": "unbound"
             },
             "closures": []

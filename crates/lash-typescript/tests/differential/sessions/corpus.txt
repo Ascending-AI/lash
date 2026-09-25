@@ -450,13 +450,56 @@ console.log(Object.keys(ordered), JSON.stringify(nested));
 end
 
 session mutable-capture-read
-about a closure made before its binding is reassigned is refused rather than reading its stale copy (FIG-3604)
+about a closure made before its binding is reassigned reads the binding, not a copy (FIG-3707)
 probe x f
-cell reject TS_MUTABLE_CAPTURE_UNSUPPORTED
+deviation closure-boundary
+cell
 let x = 1;
 const f = () => x;
 x = 2;
 console.log(f());
+end
+
+session closure-written-global-persists
+about a closure assigns a top-level binding, and the next cell reads the value it left, live and after a reload (FIG-3707)
+probe n bump total by v
+deviation closure-boundary
+cell
+let n = 0;
+const bump = (by) => { n = n + by; };
+bump(2);
+bump(3);
+console.log(n);
+cell
+let total = 0;
+[1, 2, 3].forEach((v) => { total += v * n; });
+console.log(n, total);
+end
+
+session binding-cells-stay-in-their-cell
+about closures share the bindings they assign, per call and per iteration, and only the values they leave reach the session (FIG-3707)
+probe counts counter a b c fns i f
+cell
+const counts = [];
+{
+  const counter = () => { let c = 0; return () => { c += 1; return c; }; };
+  const a = counter();
+  const b = counter();
+  a();
+  a();
+  b();
+  counts.push(a(), b());
+  const fns = [];
+  for (let i = 0; i < 3; i++) {
+    fns.push(() => i);
+    i += 0;
+  }
+  counts.push(...fns.map((f) => f()));
+}
+console.log(JSON.stringify(counts));
+cell
+counts.push(counts.length);
+console.log(JSON.stringify(counts));
 end
 
 session capture-of-a-settled-binding

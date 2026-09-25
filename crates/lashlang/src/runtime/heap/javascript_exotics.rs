@@ -1094,6 +1094,11 @@ impl Heap {
                     reason: "TS_FUNCTION_STRING_COERCION: converting a function to a primitive needs its source text, which this runtime does not keep; call the function or compare it by identity".to_string(),
                 });
             }
+            Some(HeapObject::Cell(_)) => {
+                return Err(RuntimeError::NotABindingCell {
+                    actual: "value being coerced".to_string(),
+                });
+            }
             // A built-in function value used in a coercion is a function: the
             // same refusal applies (FIG-3652, FIG-3701).
             Some(HeapObject::BuiltinFunction(_)) => {

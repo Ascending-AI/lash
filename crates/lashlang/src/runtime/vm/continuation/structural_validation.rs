@@ -127,6 +127,10 @@ impl<'a> ContinuationValidator<'a> {
             HeapObject::Closure { captures, .. } => {
                 self.validate_heap_values(captures, &format!("heap closure {}", id.get()))
             }
+            HeapObject::Cell(value) => self.validate_heap_values(
+                std::slice::from_ref(value),
+                &format!("heap cell {}", id.get()),
+            ),
             HeapObject::Map(map) => self.validate_heap_map(id, map),
             HeapObject::Set(set) => {
                 self.validate_heap_values(&set.values, &format!("heap Set {}", id.get()))

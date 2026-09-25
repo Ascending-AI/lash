@@ -3,12 +3,16 @@
 # whose program now round-trips, or whose refusal changed, fails the law
 # until it is deleted or corrected.
 # program id	refusal	reason
+session:binding-cells-stay-in-their-cell:0	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+session:binding-cells-stay-in-their-cell:1	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
 session:block-name-then-top-level-name:0	generated binding `__typescript_0_first` has no authored TypeScript spelling	a binding that shadows one in scope lowers to a generated slot, which has no authored spelling
 session:builtin-call-spread:0	cannot render a block in expression position as TypeScript	a call with a spread argument lowers to a statement sequence (its argument list), which has no expression spelling
 session:builtin-method-call-spread:0	cannot render a block in expression position as TypeScript	a call with a spread argument lowers to a statement sequence (its argument list), which has no expression spelling
 session:catch-and-switch-binders:0	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 session:caught-runtime-fault:0	generated binding `__typescript_heap_instanceof` has no authored TypeScript spelling	`instanceof` lowers to a heap builtin, which the lens printer does not re-sugar
 session:closure-refused-in-a-later-cell:0	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+session:closure-written-global-persists:0	generated binding `__typescript_global_set` has no authored TypeScript spelling	a closure's write to a top-level binding lowers to the live session-slot write (FIG-3707), which the lens printer does not re-sugar
+session:closure-written-global-persists:1	generated binding `__typescript_global_set` has no authored TypeScript spelling	a compound assignment a closure makes to a top-level binding lowers to the live session-slot write (FIG-3707), which the lens printer does not re-sugar
 session:collection-copy-constructors:0	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 session:collection-methods-through-aliases:0	generated binding `__typescript_heap_new` has no authored TypeScript spelling	a constructor call lowers to the heap builtin, which the lens printer does not re-sugar
 session:computed-literal-keys:0	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar

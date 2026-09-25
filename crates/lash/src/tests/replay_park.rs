@@ -498,9 +498,16 @@ async fn a_cell_whose_sync_predates_the_grammar_stamp_parks_its_turn() -> Result
             .journal()
             .execute(
                 "UPDATE runtime_effect_replay
-                    SET outcome_json = replace(outcome_json, ',\"cell_replay_grammar\":4', ?2)
+                    SET outcome_json = replace(outcome_json, ?2, ?3)
                   WHERE replay_key LIKE ?1 AND outcome_json LIKE '%cell_replay_grammar%'",
-                [format!("%{session_id}%"), stamp.to_string()],
+                [
+                    format!("%{session_id}%"),
+                    format!(
+                        ",\"cell_replay_grammar\":{}",
+                        lash_lashlang_runtime::LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION
+                    ),
+                    stamp.to_string(),
+                ],
             )
             .expect("restamp the sync's grammar");
         assert!(restamped >= 1, "the turn journaled a stamped sync");

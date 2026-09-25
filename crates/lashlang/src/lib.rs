@@ -172,7 +172,12 @@ pub const LANGUAGE_RUNTIME_RANDOM_OPERATION: &str = "random";
 /// its owner scope rather than a prototype — built-in values now include
 /// constructors, namespaces, and static methods — so a v27 stream's reader
 /// meets an unknown field and is refused.
-pub const BYTECODE_FORMAT_VERSION: u32 = 28;
+/// v29 (FIG-3707): a captured binding that something assigns lives in a
+/// binding cell, which the `BindingCellNew`/`BindingCellGet`/`BindingCellSet`
+/// intrinsics make, read and write, and the continuation's heap-object wire
+/// carries a `cell` kind and the `NotABindingCell` error. A v28 stream is
+/// refused.
+pub const BYTECODE_FORMAT_VERSION: u32 = 29;
 pub use lash_sansio::WorkflowExecutionSite;
 pub use tracking::{
     LashlangBranchSite, LashlangEffectFailure, LashlangExecutionCallSite, LashlangExecutionChild,

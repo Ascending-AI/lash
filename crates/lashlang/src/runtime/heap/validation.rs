@@ -188,8 +188,21 @@ impl Heap {
                 }
                 match colors.get(&id).copied() {
                     Some(1) => {
+                        // The objects still being visited are the path the
+                        // cycle closes over. A binding cell on it is a closure
+                        // held by a binding it captures (FIG-3707): say so,
+                        // and how to break it, as the compile-time refusal
+                        // that preceded cells did.
+                        let through_cell = colors.iter().any(|(visiting, color)| {
+                            *color == 1 && matches!(self.get(*visiting), Ok(HeapObject::Cell(_)))
+                        });
+                        let hint = if through_cell {
+                            "; a closure is held by a `let`/`var` binding it captures, so the pause cannot be recorded (register entry 4): declare it as `function name() {}`, whose own name needs no captured binding, or pass it to the code that calls it as a parameter"
+                        } else {
+                            ""
+                        };
                         return Err(format!(
-                            "heap object graph must be acyclic; cycle reaches object {}",
+                            "heap object graph must be acyclic; cycle reaches object {}{hint}",
                             id.get()
                         ));
                     }

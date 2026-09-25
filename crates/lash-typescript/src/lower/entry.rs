@@ -8,8 +8,8 @@
 use lashlang::{Expr as LashExpr, Program as LashProgram};
 
 use super::{Binding, BindingKind, BindingRole, Lowerer, Scope};
-use crate::Diagnostic;
 use crate::adapter;
+use crate::{Diagnostic, DiagnosticCode};
 
 pub(crate) fn lower(program: &adapter::Program) -> Result<LashProgram, Diagnostic> {
     lower_with_context(
@@ -115,6 +115,62 @@ fn lower_with_ambient_kind(
     ambient_processes: &std::collections::BTreeSet<String>,
     expired_functions: &std::collections::BTreeSet<String>,
 ) -> Result<LashProgram, Diagnostic> {
+    let pass = |cells| {
+        lower_pass(
+            program,
+            ambient,
+            session_globals,
+            process_handles,
+            module_authority_roots,
+            ambient_kind,
+            ambient_processes,
+            expired_functions,
+            cells,
+        )
+    };
+    // The first pass judges which slots a closure shares with an assignment
+    // (FIG-3707). Only a program with such a slot lowers again, knowing them,
+    // so every declaration of one mints its cell.
+    let (lowerer, main) = pass(std::collections::BTreeSet::new())?;
+    let cells = lowerer.capture_ledger.cell_slots();
+    if cells.is_empty() {
+        return Ok(finish(lowerer, main));
+    }
+    let (mut lowerer, mut main) = pass(cells)?;
+    // The boxing pass lowers the same program, so it must judge the same
+    // slots; a disagreement would leave a slot boxed on one path only.
+    if lowerer.capture_ledger.cell_slots() != lowerer.cells {
+        return Err(Diagnostic::defect(
+            DiagnosticCode::UnsupportedExpression,
+            "the lowering passes disagree on which captured bindings share a binding cell",
+            None,
+        ));
+    }
+    let session_slots = lowerer
+        .cells
+        .iter()
+        .filter(|(owner, internal)| *owner == 0 && !lowerer.private_bindings.contains(internal))
+        .map(|(_, internal)| internal.clone())
+        .collect();
+    super::cells::box_captured_bindings(&mut main, &session_slots, &mut lowerer);
+    Ok(finish(lowerer, main))
+}
+
+#[expect(
+    clippy::too_many_arguments,
+    reason = "each set is one caller's ambient fact"
+)]
+fn lower_pass(
+    program: &adapter::Program,
+    ambient: &std::collections::BTreeSet<String>,
+    session_globals: &std::collections::BTreeSet<String>,
+    process_handles: &std::collections::BTreeSet<String>,
+    module_authority_roots: &std::collections::BTreeSet<String>,
+    ambient_kind: BindingKind,
+    ambient_processes: &std::collections::BTreeSet<String>,
+    expired_functions: &std::collections::BTreeSet<String>,
+    cells: std::collections::BTreeSet<super::captures::SlotKey>,
+) -> Result<(Lowerer, LashExpr), Diagnostic> {
     let mut lowerer = Lowerer {
         root_scope_depth: 2,
         module_authority_roots: module_authority_roots.clone(),
@@ -122,6 +178,7 @@ fn lower_with_ambient_kind(
         global_this_names: super::binding::global_this_names(&program.statements),
         global_this_writes: super::binding::global_this_writes(&program.statements),
         expired_functions: expired_functions.clone(),
+        cells,
         ..Lowerer::default()
     };
     let mut ambient_scope = Scope::default();
@@ -129,7 +186,9 @@ fn lower_with_ambient_kind(
     // the cell's link bound it, and the fragment's own ambient names still
     // shadow them.
     for name in session_globals {
-        let id = lowerer.capture_ledger.declare(name, Vec::new());
+        let id = lowerer
+            .capture_ledger
+            .declare((0, name.clone()), Vec::new());
         ambient_scope.bindings.insert(
             name.clone(),
             Binding {
@@ -143,7 +202,9 @@ fn lower_with_ambient_kind(
         );
     }
     for name in ambient.union(ambient_processes) {
-        let id = lowerer.capture_ledger.declare(name, Vec::new());
+        let id = lowerer
+            .capture_ledger
+            .declare((0, name.clone()), Vec::new());
         ambient_scope.bindings.insert(
             name.clone(),
             Binding {
@@ -163,11 +224,13 @@ fn lower_with_ambient_kind(
     lowerer.scopes.push(ambient_scope);
     lowerer.scopes.push(Scope::default());
     let expressions = lowerer.lower_statements(&program.statements, true)?;
-    lowerer.capture_ledger.refuse_stale_reads()?;
-    let main = LashExpr::Block(expressions);
+    Ok((lowerer, LashExpr::Block(expressions)))
+}
+
+fn finish(mut lowerer: Lowerer, main: LashExpr) -> LashProgram {
     let mut program = LashProgram {
         language: lashlang::SourceLanguage::new(crate::TYPESCRIPT_LANGUAGE),
-        declarations: lowerer.declarations,
+        declarations: std::mem::take(&mut lowerer.declarations),
         main,
         private_bindings: std::mem::take(&mut lowerer.private_bindings)
             .into_iter()
@@ -176,5 +239,5 @@ fn lower_with_ambient_kind(
         spans: Default::default(),
     };
     lowerer.span_markers.resolve(&mut program);
-    Ok(program)
+    program
 }

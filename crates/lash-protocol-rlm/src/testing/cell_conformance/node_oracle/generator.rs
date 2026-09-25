@@ -35,10 +35,9 @@
 //!   field an object literal's type lacks (`TS_LINK_ERROR`; a later cell may
 //!   add one), block-level function declarations (Annex B, skipped by the
 //!   census), an effect inside a builtin callback (`EffectInBuiltinCallback`),
-//!   a closure reading a binding assigned after it copies it
-//!   (`TS_MUTABLE_CAPTURE_UNSUPPORTED`; a closure reads only bindings nothing
-//!   reassigns), a reassigned `var`, parameter or catch binding
-//!   (`TS_ASSIGN_CONST`).
+//!   a reassigned `var`, parameter or catch binding (`TS_ASSIGN_CONST`).
+//!   Closures read and assign the bindings they capture freely: a capture is
+//!   exact (FIG-3707).
 //! * what ECMA-262 leaves to the implementation, where Node's answer is not
 //!   the only right one: `sort` with an inconsistent comparator (a `NaN`
 //!   among the items of `right - left`), keys added to an object while
@@ -513,21 +512,12 @@ impl Generator {
         self.scopes.len() == 1
     }
 
-    /// Whether the innermost function scope (if any) lies inside the scope
-    /// at `index`: a binding there is a capture.
-    fn captured_from(&self, index: usize) -> bool {
-        self.scopes[index + 1..]
-            .iter()
-            .any(|scope| scope.kind == ScopeKind::Function)
-    }
-
-    /// Every binding a read may name: the innermost of each name, its
-    /// capture rules applied, the session globals beneath the cell.
+    /// Every binding a read may name: the innermost of each name, the session
+    /// globals beneath the cell.
     fn visible(&self) -> Vec<Binding> {
         let mut seen = BTreeSet::new();
         let mut out = Vec::new();
-        for (index, scope) in self.scopes.iter().enumerate().rev() {
-            let captured = self.captured_from(index);
+        for scope in self.scopes.iter().rev() {
             for binding in scope.bindings.iter().rev() {
                 if !seen.insert(binding.name.clone()) {
                     continue;
@@ -535,23 +525,11 @@ impl Generator {
                 if binding.hidden {
                     continue;
                 }
-                // `TS_MUTABLE_CAPTURE_UNSUPPORTED`: a closure reads only
-                // what nothing reassigns.
-                if captured && matches!(binding.decl, Decl::Let | Decl::Var) {
-                    continue;
-                }
                 out.push(binding.clone());
             }
         }
-        let captured = self
-            .scopes
-            .iter()
-            .any(|scope| scope.kind == ScopeKind::Function);
         for binding in self.globals.iter().rev() {
             if !seen.insert(binding.name.clone()) || binding.hidden {
-                continue;
-            }
-            if captured && binding.decl == Decl::SessionVar {
                 continue;
             }
             out.push(binding.clone());
@@ -953,13 +931,15 @@ impl Generator {
             Ty::Set => Ty::Num,
             _ => Ty::Str,
         };
-        // The sink is captured, so nothing reassigns it
-        // (`TS_MUTABLE_CAPTURE_UNSUPPORTED`), and it is not the source: an
-        // array's `forEach` would not visit what it appends.
+        // The sink is not the source: an array's `forEach` would not visit
+        // what it appends.
         let sinks = self.visible_where(|b| {
             b.ty == Ty::Arr(Box::new(item.clone()))
                 && b.name != source.name
-                && matches!(b.decl, Decl::Const | Decl::Local | Decl::Session)
+                && matches!(
+                    b.decl,
+                    Decl::Const | Decl::Let | Decl::Local | Decl::Session
+                )
         });
         if sinks.is_empty() {
             return self.mutation();
@@ -991,20 +971,15 @@ impl Generator {
         }
     }
 
-    /// A reassignment: of a `let` or `var` declared in this cell, or across
-    /// cells through `globalThis`.
+    /// A reassignment: of a `let` declared in this cell, from its own frame
+    /// or a closure over it, or across cells through `globalThis`.
     fn reassignment(&mut self) {
         let in_function = self
             .scopes
             .iter()
             .any(|scope| scope.kind == ScopeKind::Function);
-        let current_scopes = self
-            .scopes
-            .iter()
-            .rposition(|scope| scope.kind == ScopeKind::Function)
-            .unwrap_or(0);
         let mut locals = Vec::new();
-        for scope in &self.scopes[current_scopes..] {
+        for scope in &self.scopes {
             for binding in &scope.bindings {
                 // A `var`, like a parameter or catch binding, is not
                 // assignable after its declaration (`TS_ASSIGN_CONST`).

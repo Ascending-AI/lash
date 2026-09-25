@@ -592,6 +592,9 @@ fn javascript_json_stringify_with_errors(
                 HeapObject::Closure { .. } | HeapObject::BuiltinFunction(_) => {
                     Ok("null".to_string())
                 }
+                HeapObject::Cell(_) => Err(RuntimeError::NotABindingCell {
+                    actual: "value being serialized".to_string(),
+                }),
                 HeapObject::Url(url) => serde_json::to_string(&url.href)
                     .map_err(|error| js_stdlib_error(format!("JSON.stringify: {error}"))),
                 HeapObject::List(values) | HeapObject::Tuple(values) => {

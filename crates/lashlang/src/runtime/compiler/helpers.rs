@@ -45,6 +45,9 @@ pub(super) fn intrinsic_for_builtin(name: &str, argc: usize) -> Option<Intrinsic
         "__typescript_global_get" => IntrinsicOp::JavaScriptGlobalGet,
         "__typescript_global_has" => IntrinsicOp::JavaScriptGlobalHas,
         "__typescript_global_set" => IntrinsicOp::JavaScriptGlobalSet,
+        "__typescript_cell_new" => IntrinsicOp::BindingCellNew,
+        "__typescript_cell_get" => IntrinsicOp::BindingCellGet,
+        "__typescript_cell_set" => IntrinsicOp::BindingCellSet,
         "__typescript_encode_uri_component" => {
             IntrinsicOp::JavaScriptUriCodec(JavaScriptUriCodec::EncodeComponent)
         }

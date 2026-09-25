@@ -7,6 +7,9 @@ use thiserror::Error;
 /// wiring a store; the history below is why each boundary is a version rather
 /// than a decode failure.
 ///
+// v26 carries Lashlang snapshot v13 and VM continuation v25, whose heaps may
+// hold a binding cell (FIG-3707). A v25 body embeds the v12/v24 substrate
+// shapes this reader does not decode, so the boundary is a version.
 // v25 carries Lashlang snapshot v12 and VM continuation v24, whose heaps may
 // hold a built-in method value (`'x'.includes`, FIG-3701). A v24 body embeds
 // the v11/v23 substrate shapes this reader does not decode, so the boundary is
@@ -62,7 +65,7 @@ use thiserror::Error;
 // persisted value body is the canonical Lashlang envelope, which now carries
 // heap meters. Neither v8 is decodable — a store written by either one drains
 // or is recreated, like every version boundary before it.
-pub const RLM_SNAPSHOT_VERSION: u32 = 25;
+pub const RLM_SNAPSHOT_VERSION: u32 = 26;
 
 const CUTOVER_REMEDY: &str = "drain in-flight sessions on the old build before deploying this build, or recreate development/test stores";
 

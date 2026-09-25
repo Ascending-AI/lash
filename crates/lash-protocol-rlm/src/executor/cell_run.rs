@@ -206,18 +206,23 @@ mod tests {
     /// FIG-3672 P9: a cell journal written before cancel checkpoints were
     /// journaled (grammar 3) holds no checkpoint peeks, so replaying it under
     /// the instruction-accounting grammar would meet them at positions the
-    /// journal never recorded: it is refused before the cell runs.
+    /// journal never recorded: it is refused before the cell runs. FIG-3707's
+    /// binding-cell emission moved the accounting again, so a grammar-4
+    /// journal — checkpoints placed by the retired accounting — is refused
+    /// too.
     #[test]
     fn a_cell_journaled_before_instruction_accounting_is_refused() {
         assert_eq!(
             lash_lashlang_runtime::LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION,
-            4
+            5
         );
-        let refusal =
-            admit_replay_key_grammar(Some(3)).expect_err("a grammar-3 cell journal is refused");
-        assert_eq!(
-            refusal.code,
-            lash_core::RuntimeErrorCode::LashlangCellReplayKeyFormatCutover
-        );
+        for served in [Some(3), Some(4)] {
+            let refusal = admit_replay_key_grammar(served)
+                .expect_err("a cell journal written under retired accounting is refused");
+            assert_eq!(
+                refusal.code,
+                lash_core::RuntimeErrorCode::LashlangCellReplayKeyFormatCutover
+            );
+        }
     }
 }

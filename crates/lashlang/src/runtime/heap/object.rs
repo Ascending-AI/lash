@@ -29,6 +29,13 @@ pub(crate) enum HeapObject {
     Error(ErrorObject),
     Url(UrlObject),
     UrlSearchParams(UrlSearchParamsObject),
+    /// A binding cell: the one storage location of a captured binding that
+    /// something assigns (FIG-3707). The frame that owns the binding and
+    /// every closure that captures it hold a reference to the same cell, so
+    /// an assignment through any of them is what every other one reads. The
+    /// guest never sees a cell as a value: only the cell intrinsics a front
+    /// end emits touch one, and a cell never reaches a session global.
+    Cell(Value),
 }
 
 pub(super) const OBJECT_HEADER_BYTES: u64 = 16;
@@ -105,7 +112,7 @@ pub(super) fn compound_identity(value: &Value) -> Option<(u8, usize)> {
 /// kinds a durable session can hold. The snapshot round-trip law (FIG-3608)
 /// holds each one to a row, or to the stated reason no program builds it, so
 /// a new kind cannot enter the heap without a law row.
-pub(crate) const HEAP_OBJECT_KINDS: [&str; 13] = [
+pub(crate) const HEAP_OBJECT_KINDS: [&str; 14] = [
     "tuple",
     "list",
     "record",
@@ -119,6 +126,7 @@ pub(crate) const HEAP_OBJECT_KINDS: [&str; 13] = [
     "Error",
     "URL",
     "URLSearchParams",
+    "binding cell",
 ];
 
 impl HeapObject {
@@ -139,6 +147,7 @@ impl HeapObject {
             Self::Error(_) => HEAP_OBJECT_KINDS[10],
             Self::Url(_) => HEAP_OBJECT_KINDS[11],
             Self::UrlSearchParams(_) => HEAP_OBJECT_KINDS[12],
+            Self::Cell(_) => HEAP_OBJECT_KINDS[13],
         }
     }
 
@@ -223,6 +232,7 @@ impl HeapObject {
                         .saturating_add(value.len() as u64)
                 })
             }
+            Self::Cell(value) => value_logical_bytes(value),
         };
         OBJECT_HEADER_BYTES.saturating_add(payload)
     }
@@ -271,6 +281,7 @@ impl HeapObject {
             Self::Set(set) => Box::new(set.values.iter()),
             Self::Error(error) => Box::new(error.cause.iter().chain(error.errors.iter())),
             Self::Url(url) => Box::new(std::iter::once(&url.search_params)),
+            Self::Cell(value) => Box::new(std::iter::once(value)),
         }
     }
 }

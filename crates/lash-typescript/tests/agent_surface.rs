@@ -1805,25 +1805,26 @@ fn the_selected_rejection_is_replay_deterministic() {
 /// carries the consumer mode, timer leaves and the immediate-prefix boundary,
 /// and its reply is the four-way response algebra instead of a settlement
 /// order. The consumer mode did not move the snapshot: nothing about an
-/// aggregate is persisted in a session snapshot. It is at v13 for unrelated
+/// aggregate is persisted in a session snapshot. It is at v14 for unrelated
 /// reasons: record property order (FIG-3606, v8), the functions a cell
 /// boundary dropped (FIG-3608, v9), an error's own `message` presence
 /// (FIG-3657, v10), the closure's own `name`/`length` metadata
-/// (FIG-3655, v11), the built-in method value (FIG-3653, v12), and the
-/// built-in object's owner-scoped wire name (FIG-3656, v13). The continuation
+/// (FIG-3655, v11), the built-in method value (FIG-3653, v12), the
+/// built-in object's owner-scoped wire name (FIG-3656, v13), and the
+/// binding cells closures share (FIG-3707, v14). The continuation
 /// moved separately, for the timer entries in its pending-request map and the
 /// refusals it can carry.
 #[test]
 fn the_consumer_mode_moves_the_vm_abi_and_not_the_snapshot() {
     assert_eq!(
         lashlang::LASHLANG_SNAPSHOT_VERSION,
-        13,
-        "snapshot v13 keeps property order, the dropped functions, error message presence, closure name/length, built-in method values and the owner-scoped built-in name; no aggregate state rides it"
+        14,
+        "snapshot v14 keeps property order, the dropped functions, error message presence, closure name/length, built-in method values, the owner-scoped built-in name and binding cells; no aggregate state rides it"
     );
     assert_eq!(
         lashlang::LASHLANG_VM_ABI_VERSION,
-        "lashlang-vm-abi-v13",
-        "the aggregate consumer mode moved the VM ABI, and call receivers (FIG-3700) moved it again"
+        "lashlang-vm-abi-v14",
+        "the aggregate consumer mode moved the VM ABI, and call receivers (FIG-3700) and binding cells (FIG-3707) moved it again"
     );
 }
 

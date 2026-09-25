@@ -312,14 +312,23 @@ fn bridge(source: &str) -> String {
     }
     for at in identifier_offsets(&mask, "new") {
         let class = skip_spaces(&mask, at + "new".len());
-        if identifier_at(&mask, class)
-            .is_some_and(|(start, end)| &source[start..end] == "Test262Error")
+        if let Some((start, end)) = identifier_at(&mask, class)
+            && &source[start..end] == "Test262Error"
         {
             edits.push(Edit {
                 start: at,
                 end: class,
                 text: String::new(),
             });
+            // `new Test262Error` with no argument list constructs with no
+            // arguments: the factory is called, not thrown as a value.
+            if mask.get(skip_spaces(&mask, end)) != Some(&b'(') {
+                edits.push(Edit {
+                    start: end,
+                    end,
+                    text: "()".to_owned(),
+                });
+            }
         }
     }
     for at in identifier_offsets(&mask, "Test262Error") {
@@ -463,6 +472,7 @@ mod tests {
             "assert.throws(TypeError, f); /assert(/.test(s); `assert(${assert(q)})`;\n",
             "throw new Test262Error('new Test262Error(');\n",
             "o.assert(1); Test262Error.thrower('m');\n",
+            "throw new Test262Error;\n",
         );
         assert_eq!(
             bridge(source),
@@ -471,6 +481,7 @@ mod tests {
                 "assert[\"throws\"](\"TypeError\", f); /assert(/.test(s); `assert(${__test262Assert(q)})`;\n",
                 "throw Test262Error('new Test262Error(');\n",
                 "o.assert(1); __test262ErrorThrower('m');\n",
+                "throw Test262Error();\n",
             )
         );
     }

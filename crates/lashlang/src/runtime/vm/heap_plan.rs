@@ -123,7 +123,10 @@ pub(super) fn instruction_heap_plan(
             | IntrinsicOp::JavaScriptGlobalGet
             | IntrinsicOp::JavaScriptGlobalHas
             | IntrinsicOp::JavaScriptGlobalSet
-            | IntrinsicOp::JavaScriptUriCodec(_),
+            | IntrinsicOp::JavaScriptUriCodec(_)
+            | IntrinsicOp::BindingCellNew
+            | IntrinsicOp::BindingCellGet
+            | IntrinsicOp::BindingCellSet,
         )
         | I::IsNullish => InstructionHeapPlan::heap_native(),
         I::StoreName(_) => InstructionHeapPlan::heap_native(),

@@ -1,0 +1,46 @@
+# Corpus programs the lens printer refuses, typed (FIG-3599). Each row names
+# the program, the exact refusal and why the printer cannot spell it. A row
+# whose program now round-trips, or whose refusal changed, fails the law
+# until it is deleted or corrected.
+# program id	refusal	reason
+differential:FIG-3707:1	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:10	generated binding `__typescript_cell_0` has no authored TypeScript spelling	a parameter or catch binding a closure shares arrives in a generated slot its binding cell is made from (FIG-3707), which has no authored spelling
+differential:FIG-3707:11	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:12	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:13	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:14	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:15	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:16	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:17	generated binding `__typescript_0_switch_value` has no authored TypeScript spelling	a switch lowers through generated temporaries, which have no authored spelling
+differential:FIG-3707:18	generated binding `__typescript_cell_0` has no authored TypeScript spelling	a parameter or catch binding a closure shares arrives in a generated slot its binding cell is made from (FIG-3707), which has no authored spelling
+differential:FIG-3707:19	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:2	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:20	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:21	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3707:22	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:23	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:25	generated binding `__typescript_stdlib` has no authored TypeScript spelling	a standard-library call lowers to the stdlib builtin, which the lens printer does not re-sugar
+differential:FIG-3707:26	generated binding `__typescript_0_array_pattern` has no authored TypeScript spelling	destructuring lowers through generated temporaries, which have no authored spelling
+differential:FIG-3707:27	generated binding `__typescript_0_parameter` has no authored TypeScript spelling	a destructured or defaulted parameter lowers through a generated temporary, which has no authored spelling
+differential:FIG-3707:28	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:29	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:3	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:30	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:31	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:32	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:33	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:36	generated binding `__typescript_cell_0` has no authored TypeScript spelling	a parameter or catch binding a closure shares arrives in a generated slot its binding cell is made from (FIG-3707), which has no authored spelling
+differential:FIG-3707:37	generated binding `__typescript_cell_0` has no authored TypeScript spelling	a parameter or catch binding a closure shares arrives in a generated slot its binding cell is made from (FIG-3707), which has no authored spelling
+differential:FIG-3707:38	generated binding `__typescript_0_parameter` has no authored TypeScript spelling	a defaulted parameter, and the body's separate `var` of its name (FIG-3707), lower through generated slots, which have no authored spelling
+differential:FIG-3707:39	generated binding `__typescript_0_parameter` has no authored TypeScript spelling	a defaulted parameter, and the body's separate `var` of its name (FIG-3707), lower through generated slots, which have no authored spelling
+differential:FIG-3707:4	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:40	generated binding `__typescript_0_parameter` has no authored TypeScript spelling	a defaulted parameter, and the body's separate `var` of its name (FIG-3707), lower through generated slots, which have no authored spelling
+differential:FIG-3707:41	generated binding `__typescript_0_parameter` has no authored TypeScript spelling	a defaulted parameter, and the body's separate `var` of its name (FIG-3707), lower through generated slots, which have no authored spelling
+differential:FIG-3707:42	generated binding `__typescript_0_parameter` has no authored TypeScript spelling	a defaulted parameter, and the body's separate `var` of its name (FIG-3707), lower through generated slots, which have no authored spelling
+differential:FIG-3707:43	generated binding `__typescript_cell_0` has no authored TypeScript spelling	a parameter or catch binding a closure shares arrives in a generated slot its binding cell is made from (FIG-3707), which has no authored spelling
+differential:FIG-3707:44	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:5	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:6	cannot render a destructuring loop binding as TypeScript	a for...of binding a closure shares binds into a binding cell (FIG-3707), which the lens printer does not spell as a loop binding
+differential:FIG-3707:7	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:8	generated binding `__typescript_cell_new` has no authored TypeScript spelling	a binding a closure shares lowers through a binding cell (FIG-3707), which the lens printer does not re-sugar
+differential:FIG-3707:9	generated binding `__typescript_cell_0` has no authored TypeScript spelling	a parameter or catch binding a closure shares arrives in a generated slot its binding cell is made from (FIG-3707), which has no authored spelling

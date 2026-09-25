@@ -503,3 +503,24 @@ async fn length_over_a_projection_counts_its_elements() {
         assert_eq!(finished_over_rows(source).await, expected, "{source}");
     }
 }
+
+/// FIG-3707 (review of #2211): a projected value stored in a binding cell is
+/// imported into the heap the way a slot's value is, so a member write through
+/// the binding reaches the object every later read of the binding sees. The
+/// cell held the materialized inline record, every read imported a fresh copy,
+/// and the write went to that copy (`tool`, where Node answers `changed`).
+#[tokio::test(flavor = "current_thread")]
+async fn a_projection_in_a_binding_cell_keeps_member_writes() {
+    for source in [
+        // Stored by an assignment into a cell the closure shares.
+        r#"function run() { let r: any = null; const set = () => { r.kind = "changed"; }; r = row; set(); return r.kind; } finish(run());"#,
+        // Stored by the declaration that mints the cell.
+        r#"function run() { let r: any = row; const touch = () => { r.kind = "changed"; r = r; }; touch(); return r.kind; } finish(run());"#,
+    ] {
+        assert_eq!(
+            finished(source).await,
+            Value::String("changed".into()),
+            "{source}"
+        );
+    }
+}

@@ -77,6 +77,13 @@ pub enum RuntimeError {
     /// Function values cannot cross host-facing value boundaries.
     #[error("function values cannot cross a lashlang host boundary")]
     FunctionValueAtHostBoundary,
+    /// A binding-cell operation met something that is not a binding cell: the
+    /// front end read or wrote a captured binding without the cell it
+    /// declared for it. A lowering defect, never a guest program's fault.
+    #[error(
+        "binding cell operation on a {actual}: a captured binding was lowered without its cell"
+    )]
+    NotABindingCell { actual: String },
     /// JavaScript exotic objects have no detached host-facing value shape.
     #[error("JavaScript {kind} values cannot cross a lashlang host boundary")]
     JavaScriptExoticAtHostBoundary { kind: String },
@@ -582,6 +589,8 @@ impl RuntimeError {
             Self::UnknownFunction { .. } => ErrorTaxonomy::Catchable,
             Self::ClosureCaptureCountMismatch { .. } => ErrorTaxonomy::Catchable,
             Self::FunctionValueAtHostBoundary => ErrorTaxonomy::Catchable,
+            // A lowering defect: a guest `try`/`catch` must never swallow it.
+            Self::NotABindingCell { .. } => ErrorTaxonomy::UncatchableTerminal,
             Self::JavaScriptExoticAtHostBoundary { .. } => ErrorTaxonomy::Catchable,
             Self::EffectInBuiltinCallback => ErrorTaxonomy::Catchable,
             // Never raised past its instruction; were it to escape, it is an
@@ -723,6 +732,7 @@ impl RuntimeError {
             Self::UnknownFunction { .. } => "UnknownFunction",
             Self::ClosureCaptureCountMismatch { .. } => "ClosureCaptureCountMismatch",
             Self::FunctionValueAtHostBoundary => "FunctionValueAtHostBoundary",
+            Self::NotABindingCell { .. } => "NotABindingCell",
             Self::JavaScriptExoticAtHostBoundary { .. } => "JavaScriptExoticAtHostBoundary",
             Self::EffectInBuiltinCallback => "EffectInBuiltinCallback",
             Self::GuestCoercionPending => "GuestCoercionPending",
@@ -1010,6 +1020,9 @@ mod tests {
                 actual: 2,
             },
             RuntimeError::FunctionValueAtHostBoundary,
+            RuntimeError::NotABindingCell {
+                actual: "number".into(),
+            },
             RuntimeError::JavaScriptExoticAtHostBoundary { kind: "Map".into() },
             RuntimeError::EffectInBuiltinCallback,
             RuntimeError::GuestCoercionPending,
@@ -1331,6 +1344,9 @@ mod tests {
                 RuntimeError::FunctionValueAtHostBoundary => {
                     "function values cannot cross a lashlang host boundary"
                 }
+                RuntimeError::NotABindingCell { .. } => {
+                    "binding cell operation on a number: a captured binding was lowered without its cell"
+                }
                 RuntimeError::JavaScriptExoticAtHostBoundary { .. } => {
                     "JavaScript Map values cannot cross a lashlang host boundary"
                 }
@@ -1649,6 +1665,7 @@ mod tests {
     RuntimeError::UnknownFunction { .. } => "UnknownFunction",
     RuntimeError::ClosureCaptureCountMismatch { .. } => "ClosureCaptureCountMismatch",
     RuntimeError::FunctionValueAtHostBoundary => "FunctionValueAtHostBoundary",
+    RuntimeError::NotABindingCell { .. } => "NotABindingCell",
     RuntimeError::JavaScriptExoticAtHostBoundary { .. } => "JavaScriptExoticAtHostBoundary",
     RuntimeError::EffectInBuiltinCallback => "EffectInBuiltinCallback",
     RuntimeError::GuestCoercionPending => "GuestCoercionPending",

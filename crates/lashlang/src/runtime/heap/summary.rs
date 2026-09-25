@@ -159,6 +159,9 @@ impl Heap {
                 }
             }
             HeapObject::Closure { .. } => out.push_str("function"),
+            // Never a guest value; a summary only meets one through a frame
+            // slot, where it stands for the binding's current value.
+            HeapObject::Cell(value) => self.summarize_into(value, depth, out),
             HeapObject::BuiltinFunction(function) => {
                 out.push_str("function ");
                 out.push_str(function.name());

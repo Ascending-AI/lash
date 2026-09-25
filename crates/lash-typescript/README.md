@@ -17,6 +17,10 @@ head, condition and update form, `for...of`, `for...in`, `switch`,
 `break`, `continue`, `try`/`catch`/`finally`, `throw`, `return`, destructuring in
 every binding and assignment position, defaults/rest, optional chains, array/call/object
 spread, compound/logical assignment, update operators, arrays, records, and calls.
+Closures capture exactly (FIG-3707): a closure reads the current value of every
+binding it closes over and may assign it, sharing one binding with its
+enclosing frame and every other closure over it, and each per-iteration loop
+binding is its own.
 A spread argument passes the array's items as the call's arguments, to a
 function the program defines and to a builtin alike (`Math.max(...xs)`,
 `items.push(...more)`, `console.log(...parts)`). A builtin whose lowering
@@ -415,9 +419,9 @@ no probe that fires it fails that test.
   [Source nesting budget](#source-nesting-budget) for what a unit costs.
 - Mutually recursive function declarations reject with
   `TS_MUTUAL_RECURSION_UNSUPPORTED`, naming the cycle
-  (`cycle: isEven -> isOdd -> isEven`). v1 captures by value, so a declaration
-  cycle has no emission order; routing it through a shared mutable record would
-  build a heap cycle reachable from a durable root, which is exactly what the
+  (`cycle: isEven -> isOdd -> isEven`). A declaration copies its captures when
+  it is created, so a declaration cycle has no emission order; routing it
+  through shared binding cells would build a heap cycle reachable from a durable root, which is exactly what the
   deferred cycle-capable durable graph encoding below cannot hold — the program
   would run and then fail to suspend or snapshot. Failing closed at compile time
   is the honest form of that same deferral. Self-recursion, named self-recursive
@@ -429,18 +433,6 @@ no probe that fires it fails that test.
   therefore detects an existing cycle before invoking a function replacer: a
   replacer cannot erase that cycle first, unlike Node. This is an explicit v1
   deviation until the durable graph encoding can represent cycles.
-- Captures are by value: a closure copies each binding it captures when it is
-  created, which is exact only while nothing assigns that binding afterwards.
-  Until durable lexical cells exist, a capture that an assignment can reach
-  after the closure is created rejects with `TS_MUTABLE_CAPTURE_UNSUPPORTED`,
-  on the read path as well as the write path: an assignment later in the same
-  frame, one in a later iteration of a loop the binding outlives, a
-  `globalThis.name` write, or an assignment from inside the closure itself. A
-  `const`, a `let` assigned only before the closure exists, and a binding
-  declared inside the loop body or head (including a classic-for iteration
-  value, whose `i++` writes the next iteration's copy) are captured exactly.
-  A closure never outlives its cell (`closure-boundary`), so only its own
-  cell can reassign what it captured.
 - The host boundary is JSON-shaped: object properties whose value is
   `undefined` are omitted and array elements become `null`; incoming JSON
   cannot manufacture `undefined`.
@@ -592,7 +584,11 @@ corpus cites:
   or as `globalThis.name` it does not write) is refused as
   `TS_FUNCTION_NOT_PERSISTED` rather than degraded to an unknown or undefined
   name, until something binds the name again. A closure used within its own
-  cell, capturing earlier cells' globals, is exact.
+  cell, capturing earlier cells' globals, is exact. A closure reads and writes
+  a top-level binding live, through its session slot, so a global a closure
+  assigned keeps that value into the next cell; the binding cells that share
+  every other captured, assigned binding (FIG-3707) live only in function
+  frames, block-private slots and closures, so none reaches a cell boundary.
 - `cross-cell-redeclaration`: a cell's top-level declaration may rebind a name
   an earlier cell declared, whatever either declaration's kind. ECMA-262's
   GlobalDeclarationInstantiation throws a `SyntaxError` for `let`/`const` over

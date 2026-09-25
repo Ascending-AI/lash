@@ -78,6 +78,19 @@ those paths raised. Register entry 13's refusal of string coercion for a
 plain object, a `Map` or a `Set` is retired in the same change: those are
 supported constructs, and they answer ECMA's type tags.
 
+Amended 2026-09-25 (FIG-3707, decision 44): mutable captures are ruled in.
+A closure may read a binding assigned after it was created and may assign a
+binding it captured (`let n = 0; items.forEach(x => { n++ })`), with ECMA's
+sharing: such a binding lives in one binding cell the frame and every closure
+over it share, and each per-iteration binding is its own cell (see
+[ADR 0062](0062-the-typescript-dialect-is-an-exact-ecma-262-subset.md#status)).
+The cell-boundary question is ruled without a new refusal: a cell never
+reaches a session cell boundary. Cells live only in function frames,
+block-private top-level slots and closure captures, and a closure never
+persists (`TS_FUNCTION_NOT_PERSISTED`); a top-level binding a closure writes is
+the session slot itself, reached live, so the next cell reads its current
+value. `TS_MUTABLE_CAPTURE_UNSUPPORTED` is deleted.
+
 ## Context
 
 ADR 0062 fixed the dialect's contract shape: everything accepted behaves
