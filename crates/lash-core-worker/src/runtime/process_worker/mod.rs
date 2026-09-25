@@ -514,11 +514,8 @@ impl DurableProcessWorker {
                 registration.id
             )));
         }
-        // The substrate's handler minted this controller from its own
-        // invocation context, not from this worker's effect host, so it
-        // crosses that host's stack here, once: a layer over the host sees the
-        // segment's effects as it sees those of a controller the host lends
-        // (FIG-3738).
+        // The substrate's handler minted this controller from its own context;
+        // it crosses this worker's effect host's stack here, once (FIG-3738).
         let scoped_effect_controller = self
             .config
             .runtime_host
