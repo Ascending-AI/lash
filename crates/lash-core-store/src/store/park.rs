@@ -623,7 +623,7 @@ impl<Target> Default for ParkFeedPage<Target> {
 }
 
 /// The engine's own handle on parked work: what its redrive and release find
-/// the stopped execution by (for Restate, the paused invocation's id).
+/// the stopped execution by (an engine-owned, opaque id).
 ///
 /// Opaque to lash: stored beside the park as the engine wrote it and handed
 /// back to the same engine, never parsed outside it.
