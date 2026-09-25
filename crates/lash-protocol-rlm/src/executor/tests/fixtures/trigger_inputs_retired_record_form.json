@@ -3,7 +3,7 @@
     "exports": {
       "processes": {
         "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf": {
-          "component": "b82599b177953397a7a5d370775723ef8cece205c380df7168d465a82298b105",
+          "component": "ed39657187ee332286b7635e295aee325eb3d90862a4a870d6cd2bb377fa10a5",
           "pos": 0
         }
       }
@@ -132,7 +132,7 @@
         }
       }
     },
-    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:e5142d20d2848f37c6260ce197d2a8293d2f92aa5a8ae0e39354e606e3a1b791",
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:cc51671eb324fba2e41946a48447decbf396f5bb7f86d585a919385680cccb70",
     "ir": {
       "declarations": [
         {
@@ -355,25 +355,25 @@
         ]
       }
     },
-    "module_ref": "lashlang:v2:blake3:1b7e544dd2ba52eb2420e973c531bf1bb5a779e4ca26aa7f20700b9f624d6666"
+    "module_ref": "lashlang:v2:blake3:23e04450708ab5fe5b5f4077877f0e70f1626ae4c3d64ede53b216d034dbc44d"
   },
   "compiled_program_debug": "CompiledProgram { instruction_count: 21, compile_stats: CompileStats { type_literals_total: 0, type_literals_const_folded: 0, type_literals_dynamic: 0, type_ref_sites: 0 } }",
   "exports": {
     "processes": {
       "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf": {
-        "component": "b82599b177953397a7a5d370775723ef8cece205c380df7168d465a82298b105",
+        "component": "ed39657187ee332286b7635e295aee325eb3d90862a4a870d6cd2bb377fa10a5",
         "pos": 0
       }
     }
   },
-  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:e5142d20d2848f37c6260ce197d2a8293d2f92aa5a8ae0e39354e606e3a1b791",
-  "module_ref": "lashlang:v2:blake3:1b7e544dd2ba52eb2420e973c531bf1bb5a779e4ca26aa7f20700b9f624d6666",
+  "host_requirements_ref": "lashlang-host-requirements:v2:blake3:cc51671eb324fba2e41946a48447decbf396f5bb7f86d585a919385680cccb70",
+  "module_ref": "lashlang:v2:blake3:23e04450708ab5fe5b5f4077877f0e70f1626ae4c3d64ede53b216d034dbc44d",
   "process_definition_identity": {
-    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:e5142d20d2848f37c6260ce197d2a8293d2f92aa5a8ae0e39354e606e3a1b791",
-    "module_ref": "lashlang:v2:blake3:1b7e544dd2ba52eb2420e973c531bf1bb5a779e4ca26aa7f20700b9f624d6666",
+    "host_requirements_ref": "lashlang-host-requirements:v2:blake3:cc51671eb324fba2e41946a48447decbf396f5bb7f86d585a919385680cccb70",
+    "module_ref": "lashlang:v2:blake3:23e04450708ab5fe5b5f4077877f0e70f1626ae4c3d64ede53b216d034dbc44d",
     "process_name": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf",
     "process_ref": {
-      "component": "b82599b177953397a7a5d370775723ef8cece205c380df7168d465a82298b105",
+      "component": "ed39657187ee332286b7635e295aee325eb3d90862a4a870d6cd2bb377fa10a5",
       "pos": 0
     }
   },
@@ -469,11 +469,11 @@
       "kind": "lashlang",
       "payload": {
         "args": {},
-        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:e5142d20d2848f37c6260ce197d2a8293d2f92aa5a8ae0e39354e606e3a1b791",
-        "module_ref": "lashlang:v2:blake3:1b7e544dd2ba52eb2420e973c531bf1bb5a779e4ca26aa7f20700b9f624d6666",
+        "host_requirements_ref": "lashlang-host-requirements:v2:blake3:cc51671eb324fba2e41946a48447decbf396f5bb7f86d585a919385680cccb70",
+        "module_ref": "lashlang:v2:blake3:23e04450708ab5fe5b5f4077877f0e70f1626ae4c3d64ede53b216d034dbc44d",
         "process_name": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf",
         "process_ref": {
-          "component": "b82599b177953397a7a5d370775723ef8cece205c380df7168d465a82298b105",
+          "component": "ed39657187ee332286b7635e295aee325eb3d90862a4a870d6cd2bb377fa10a5",
           "pos": 0
         }
       },
@@ -483,11 +483,11 @@
       "definition": {
         "definition": {
           "$lash_process": true,
-          "host_requirements_ref": "lashlang-host-requirements:v2:blake3:e5142d20d2848f37c6260ce197d2a8293d2f92aa5a8ae0e39354e606e3a1b791",
-          "module_ref": "lashlang:v2:blake3:1b7e544dd2ba52eb2420e973c531bf1bb5a779e4ca26aa7f20700b9f624d6666",
+          "host_requirements_ref": "lashlang-host-requirements:v2:blake3:cc51671eb324fba2e41946a48447decbf396f5bb7f86d585a919385680cccb70",
+          "module_ref": "lashlang:v2:blake3:23e04450708ab5fe5b5f4077877f0e70f1626ae4c3d64ede53b216d034dbc44d",
           "process_name": "__process_dc9b5d545f4f2fc421c4c6db61a2d8b9496d02e655b5b778fd03b525696c4faf",
           "process_ref": {
-            "component": "b82599b177953397a7a5d370775723ef8cece205c380df7168d465a82298b105",
+            "component": "ed39657187ee332286b7635e295aee325eb3d90862a4a870d6cd2bb377fa10a5",
             "pos": 0
           }
         },

@@ -1690,6 +1690,13 @@ pub(super) fn executor_reports_a_disabled_lashlang_ability_at_link_time() {
 /// FIG-3707 re-pinned them again: `LASHLANG_SEMANTIC_HASH_VERSION` moved to
 /// v22 for the binding-cell intrinsics, so the module, host-requirement and
 /// component hashes moved; the artifact's IR did not.
+///
+/// FIG-3728 and FIG-3745 re-pinned them again: `LASHLANG_SEMANTIC_HASH_VERSION`
+/// moved to `v23` because the lowerer converts a computed member key once at
+/// reference creation, probes a composite dispatch's own member before the
+/// arguments, and converts a computed object-literal key before its value.
+/// This source spells none of those, so the artifact's IR is unchanged and
+/// only the hashes moved.
 /// The arrow spelling under test. The capture's own `source` field records the
 /// *retired* record form it was taken from, so a re-pin compiles this one.
 const TRIGGER_INPUTS_ARROW_SOURCE: &str = r#"
