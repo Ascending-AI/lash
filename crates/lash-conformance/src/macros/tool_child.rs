@@ -157,6 +157,29 @@ macro_rules! cell_binding_drift_tests {
     };
 }
 
+/// Register the empty-orchestration redrive law (FIG-3680): an RLM cell
+/// that called an orchestrating tool whose body journals no nested effect,
+/// crashed before the cell sealed, redrives to the turn's end with nothing
+/// dispatched twice. The fixture is [`cell_binding_drift_tests!`]'s: its
+/// runner reads its journal's replay keys and cuts a turn at a
+/// [`JournalCut`](crate::JournalCut).
+#[macro_export]
+macro_rules! cell_orchestration_redrive_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::cell_orchestration_redrive_tests!(@law [$(#[$attr])*] $fixture;
+            (an_empty_orchestrating_call_redrives_from_its_cell, "cell-empty-orchestration-redrive"));
+    };
+    (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
+        $($attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, prefix, host, stores, runner, rlm) = $fixture;
+            $crate::registration_macro_support::$law(prefix, host, stores, runner, rlm).await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
+    };
+}
+
 /// Register one turn-runner law.
 #[macro_export]
 macro_rules! __turn_runner_register {

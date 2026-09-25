@@ -81,6 +81,33 @@ lash_conformance::cell_binding_drift_tests!({
     )
 });
 
+lash_conformance::cell_orchestration_redrive_tests!({
+    let Some((database_lock, storage)) = storage().await else {
+        eprintln!(
+            "skipping Postgres empty-orchestration redrive conformance: LASH_POSTGRES_DATABASE_URL is not set"
+        );
+        return;
+    };
+    reset(storage.pool()).await;
+    // The law's host is a bare effect host with no backend; the RLM factory
+    // keeps its Lashlang artifacts in a memory backend of its own.
+    let artifacts = lash_sqlite_store::SqliteBackend::memory()
+        .await
+        .expect("open the artifact backend");
+    let host = Arc::new(storage.effect_host());
+    let faults = host.effect_journal_faults();
+    let host = host as Arc<dyn EffectHost>;
+    let (attachments, stores) = pg_law_stores(&storage);
+    (
+        (database_lock, attachments),
+        "postgres",
+        Arc::clone(&host),
+        stores,
+        lash_conformance::HostTurnRunner::with_journal_faults(host, faults),
+        vec![rlm_factory(&artifacts, false)],
+    )
+});
+
 lash_conformance::model_call_drift_park_tests!({
     let Some((database_lock, storage)) = storage().await else {
         eprintln!(

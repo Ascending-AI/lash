@@ -1,5 +1,6 @@
-//! The SQLite registrations of the FIG-3587 laws: the cell binding-drift law
-//! and the model-call drift park law.
+//! The SQLite registrations of the FIG-3587 laws — the cell binding-drift law
+//! and the model-call drift park law — and of FIG-3680's empty-orchestration
+//! redrive law.
 //!
 //! The law lives in lash-conformance; this file supplies what that crate
 //! cannot construct — the RLM protocol plugin factory whose cells the law
@@ -31,12 +32,24 @@ fn rlm_factory(
     )
 }
 
-lash_conformance::cell_binding_drift_tests!({
+/// A file-backed SQLite effect host with its journal fault injector, the
+/// law's store set and RLM factory: the fixture of the laws whose runner cuts
+/// a turn at a journal point.
+async fn journal_cut_fixture(
+    database: &str,
+) -> (
+    tempfile::TempDir,
+    &'static str,
+    Arc<dyn EffectHost>,
+    Arc<dyn lash_core::StoreSet>,
+    Arc<dyn lash_conformance::ConformanceTurnRunner>,
+    Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
+) {
     let dir = tempfile::tempdir().unwrap_or_else(|error| panic!("tempdir: {error}"));
     let host = Arc::new(
-        lash_sqlite_store::SqliteEffectHost::open(&dir.path().join("cell-binding-drift.db"))
+        lash_sqlite_store::SqliteEffectHost::open(&dir.path().join(database))
             .await
-            .unwrap_or_else(|error| panic!("open the SQLite binding-drift effect host: {error}")),
+            .unwrap_or_else(|error| panic!("open the SQLite {database} effect host: {error}")),
     );
     let faults = host.effect_journal_faults();
     let host = host as Arc<dyn EffectHost>;
@@ -53,6 +66,12 @@ lash_conformance::cell_binding_drift_tests!({
         lash_conformance::HostTurnRunner::with_journal_faults(host, faults),
         vec![rlm_factory(&artifacts)],
     )
+}
+
+lash_conformance::cell_binding_drift_tests!({ journal_cut_fixture("cell-binding-drift.db").await });
+
+lash_conformance::cell_orchestration_redrive_tests!({
+    journal_cut_fixture("cell-empty-orchestration.db").await
 });
 
 lash_conformance::model_call_drift_park_tests!({
