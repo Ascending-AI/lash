@@ -256,10 +256,12 @@ impl Heap {
         }))
     }
 
+    /// Returns the reference and the count of entries the dedup scan read —
+    /// one per comparison, so the caller can charge the quadratic it runs.
     pub(crate) fn allocate_map(
         &mut self,
         entries: Vec<(Value, Value)>,
-    ) -> Result<Value, RuntimeError> {
+    ) -> Result<(Value, usize), RuntimeError> {
         let entry_count = entries.len();
         let values = entries
             .into_iter()
@@ -267,35 +269,49 @@ impl Heap {
             .collect::<Vec<_>>();
         let mut values = self.import_values(values, 0)?.into_iter();
         let mut normalized = Vec::<(Value, Value)>::with_capacity(entry_count);
+        let mut scanned = 0usize;
         while let (Some(key), Some(value)) = (values.next(), values.next()) {
             let key = normalize_same_value_zero_storage(key);
-            if let Some((_, stored)) = normalized
-                .iter_mut()
-                .find(|(candidate, _)| same_value_zero(candidate, &key))
-            {
-                *stored = value;
-            } else {
-                normalized.push((key, value));
+            let position = normalized
+                .iter()
+                .position(|(candidate, _)| same_value_zero(candidate, &key));
+            scanned = scanned.saturating_add(position.map_or(normalized.len(), |found| found + 1));
+            match position {
+                Some(index) => normalized[index].1 = value,
+                None => normalized.push((key, value)),
             }
         }
-        self.allocate_object(HeapObject::Map(MapObject {
-            entries: normalized,
-        }))
+        Ok((
+            self.allocate_object(HeapObject::Map(MapObject {
+                entries: normalized,
+            }))?,
+            scanned,
+        ))
     }
 
-    pub(crate) fn allocate_set(&mut self, values: Vec<Value>) -> Result<Value, RuntimeError> {
+    /// Returns the reference and the count of members the dedup scan read —
+    /// one per comparison, so the caller can charge the quadratic it runs.
+    pub(crate) fn allocate_set(
+        &mut self,
+        values: Vec<Value>,
+    ) -> Result<(Value, usize), RuntimeError> {
         let values = self.import_values(values, 0)?;
         let mut normalized = Vec::with_capacity(values.len());
+        let mut scanned = 0usize;
         for value in values {
             let value = normalize_same_value_zero_storage(value);
-            if !normalized
+            let position = normalized
                 .iter()
-                .any(|candidate| same_value_zero(candidate, &value))
-            {
+                .position(|candidate| same_value_zero(candidate, &value));
+            scanned = scanned.saturating_add(position.map_or(normalized.len(), |found| found + 1));
+            if position.is_none() {
                 normalized.push(value);
             }
         }
-        self.allocate_object(HeapObject::Set(SetObject { values: normalized }))
+        Ok((
+            self.allocate_object(HeapObject::Set(SetObject { values: normalized }))?,
+            scanned,
+        ))
     }
 
     pub(crate) fn allocate_date(&mut self, milliseconds: f64) -> Result<Value, RuntimeError> {
@@ -432,6 +448,20 @@ impl Heap {
         Ok(match self.get(id)? {
             HeapObject::Set(set) => Some(set.values.clone()),
             _ => None,
+        })
+    }
+
+    pub(crate) fn map_len(&self, id: HeapId) -> Result<usize, RuntimeError> {
+        Ok(match self.get(id)? {
+            HeapObject::Map(map) => map.entries.len(),
+            _ => 0,
+        })
+    }
+
+    pub(crate) fn set_len(&self, id: HeapId) -> Result<usize, RuntimeError> {
+        Ok(match self.get(id)? {
+            HeapObject::Set(set) => set.values.len(),
+            _ => 0,
         })
     }
 

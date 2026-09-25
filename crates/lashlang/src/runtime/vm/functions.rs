@@ -108,6 +108,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         key: &Value,
         value: &Value,
     ) -> Result<(), RuntimeError> {
+        // `has`, `set`, `entries` and the `find` below each scan the entries.
+        self.charge_intrinsic_work(self.heap.map_len(receiver)?.saturating_mul(4));
         let existed = self.heap.map_has(receiver, key)?;
         self.heap.map_set(receiver, key.clone(), value.clone())?;
         let (stored_key, stored_value) = self
@@ -126,6 +128,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         receiver: HeapId,
         key: &Value,
     ) -> Result<bool, RuntimeError> {
+        // The delete scans the entries once, then shifts the tail it removes.
+        self.charge_intrinsic_work(self.heap.map_len(receiver)?.saturating_mul(2));
         let deleted = self.heap.map_delete(receiver, key)?;
         if deleted {
             self.map_for_each_delete(receiver, key);
@@ -142,6 +146,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         receiver: HeapId,
         value: &Value,
     ) -> Result<(), RuntimeError> {
+        // `has`, `add`, `values` and the `find` below each scan the members.
+        self.charge_intrinsic_work(self.heap.set_len(receiver)?.saturating_mul(4));
         let existed = self.heap.set_has(receiver, value)?;
         self.heap.set_add(receiver, value.clone())?;
         let stored = self
@@ -160,6 +166,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         receiver: HeapId,
         value: &Value,
     ) -> Result<bool, RuntimeError> {
+        // The delete scans the members once, then shifts the tail it removes.
+        self.charge_intrinsic_work(self.heap.set_len(receiver)?.saturating_mul(2));
         let deleted = self.heap.set_delete(receiver, value)?;
         if deleted {
             self.set_for_each_delete(receiver, value);
@@ -175,13 +183,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
         existed: bool,
     ) {
         if !existed {
-            update_live_cursors(
+            // Every live cursor over this map rewrites its pending tail.
+            let work = update_live_cursors(
                 self.all_iterators(),
                 receiver,
                 &CollectionMutation::Added(key.clone()),
             );
+            self.charge_intrinsic_work(work);
         }
         for callback in live_collection_callbacks(&mut self.frames, receiver) {
+            // Maintaining the durable queue scans its pending calls once.
+            charge_collection_work(&mut self.instructions_executed, callback.calls.len());
             if existed {
                 if let Some(call) = callback.calls[callback.next_index..]
                     .iter_mut()
@@ -199,31 +211,37 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     pub(super) fn map_for_each_delete(&mut self, receiver: HeapId, key: &Value) {
-        update_live_cursors(
+        let work = update_live_cursors(
             self.all_iterators(),
             receiver,
             &CollectionMutation::Deleted(key),
         );
+        self.charge_intrinsic_work(work);
         for callback in live_collection_callbacks(&mut self.frames, receiver) {
+            charge_collection_work(&mut self.instructions_executed, callback.calls.len());
             retain_pending_calls(callback, |call| !callback_argument_matches(call, 1, key));
         }
     }
 
     pub(super) fn map_for_each_clear(&mut self, receiver: HeapId) {
-        update_live_cursors(self.all_iterators(), receiver, &CollectionMutation::Cleared);
-        clear_pending_calls(&mut self.frames, receiver);
+        let work =
+            update_live_cursors(self.all_iterators(), receiver, &CollectionMutation::Cleared)
+                .saturating_add(clear_pending_calls(&mut self.frames, receiver));
+        self.charge_intrinsic_work(work);
     }
 
     pub(super) fn set_for_each_add(&mut self, receiver: HeapId, value: Value, existed: bool) {
         if existed {
             return;
         }
-        update_live_cursors(
+        let work = update_live_cursors(
             self.all_iterators(),
             receiver,
             &CollectionMutation::Added(value.clone()),
         );
+        self.charge_intrinsic_work(work);
         for callback in live_collection_callbacks(&mut self.frames, receiver) {
+            charge_collection_work(&mut self.instructions_executed, callback.calls.len());
             callback.calls.push(collection_callback(
                 vec![value.clone(), value.clone()],
                 receiver,
@@ -232,19 +250,23 @@ impl<H: ExecutionHost> Vm<'_, H> {
     }
 
     pub(super) fn set_for_each_delete(&mut self, receiver: HeapId, value: &Value) {
-        update_live_cursors(
+        let work = update_live_cursors(
             self.all_iterators(),
             receiver,
             &CollectionMutation::Deleted(value),
         );
+        self.charge_intrinsic_work(work);
         for callback in live_collection_callbacks(&mut self.frames, receiver) {
+            charge_collection_work(&mut self.instructions_executed, callback.calls.len());
             retain_pending_calls(callback, |call| !callback_argument_matches(call, 0, value));
         }
     }
 
     pub(super) fn set_for_each_clear(&mut self, receiver: HeapId) {
-        update_live_cursors(self.all_iterators(), receiver, &CollectionMutation::Cleared);
-        clear_pending_calls(&mut self.frames, receiver);
+        let work =
+            update_live_cursors(self.all_iterators(), receiver, &CollectionMutation::Cleared)
+                .saturating_add(clear_pending_calls(&mut self.frames, receiver));
+        self.charge_intrinsic_work(work);
     }
 
     /// How a member call `receiver.name(..)` on a built-in method name
@@ -533,7 +555,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     // Only an inline compound is given its own object.
                     let result = match result {
                         Value::Ref(_) => result,
-                        result => self.heap.isolate_value(&result)?,
+                        result => {
+                            let (isolated, staged) = self.heap.isolate_value_with_work(&result)?;
+                            // The result copy walks every object it reaches.
+                            charge_collection_work(&mut self.instructions_executed, staged);
+                            isolated
+                        }
                     };
                     callback.results.push(result);
                 }
@@ -543,8 +570,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
                             reason: "invalid live URLSearchParams callback receiver".to_string(),
                         });
                     };
-                    self.heap
-                        .url_search_params_entries(receiver)?
+                    let entries = self.heap.url_search_params_entries(receiver)?;
+                    if let Some(entries) = &entries {
+                        // Each step re-reads the live entry list whole.
+                        self.charge_intrinsic_work(entries.len());
+                    }
+                    entries
                         .and_then(|entries| entries.get(callback.next_index).cloned())
                         .map(|(name, value)| {
                             Value::Tuple(
@@ -670,10 +701,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     _ => None,
                 };
                 let errors = if kind == crate::runtime::ErrorKind::AggregateError {
-                    Some(
-                        self.heap
-                            .isolate_value(args.first().unwrap_or(&Value::Undefined))?,
-                    )
+                    let (isolated, staged) = self
+                        .heap
+                        .isolate_value_with_work(args.first().unwrap_or(&Value::Undefined))?;
+                    // The `errors` copy walks every object it reaches.
+                    self.charge_intrinsic_work(staged);
+                    Some(isolated)
                 } else {
                     None
                 };
@@ -685,10 +718,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let mut call = Vec::with_capacity(args.len() + 1);
                 call.push(Value::String(format!("Number.{name}").into()));
                 call.extend(args.iter().cloned());
-                super::javascript::javascript_stdlib(&self.heap, &call)?
+                super::javascript::javascript_stdlib(
+                    &self.heap,
+                    &call,
+                    &mut self.instructions_executed,
+                )?
             }
             "isNaN" | "isFinite" => {
                 let value = args.first().unwrap_or(&Value::Undefined);
+                // Coercing a string argument scans it whole.
+                self.charge_intrinsic_work(proportional_units(value));
                 let number = self.heap.javascript_to_number(value)?;
                 Value::Bool(if name == "isNaN" {
                     number.is_nan()
@@ -700,6 +739,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let input = self
                     .heap
                     .javascript_to_string(args.first().unwrap_or(&Value::Undefined))?;
+                // Encoding or decoding reads every input byte once.
+                self.charge_intrinsic_work(input.len());
                 let result = match name {
                     "encodeURIComponent" => Ok(super::javascript_codec::encode(&input, false)),
                     "encodeURI" => Ok(super::javascript_codec::encode(&input, true)),
@@ -709,6 +750,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 match result {
                     Ok(value) => {
                         crate::runtime::ensure_javascript_string_size(value.len())?;
+                        self.charge_intrinsic_work(value.len());
                         Value::String(value.into())
                     }
                     Err(()) => {
@@ -783,7 +825,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 let mut call = Vec::with_capacity(args.len() + 1);
                 call.push(Value::String(name.into()));
                 call.extend(args.iter().cloned());
-                super::javascript::javascript_stdlib(&self.heap, &call)?
+                super::javascript::javascript_stdlib(
+                    &self.heap,
+                    &call,
+                    &mut self.instructions_executed,
+                )?
             }
             _ if name == "Function" || name.ends_with("Function") => {
                 return Err(RuntimeError::ValidationFailed {
@@ -831,6 +877,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
             });
             return Ok(());
         }
+        // The queue writes one call per element it was built from.
+        self.charge_intrinsic_work(calls.len());
         let first = callback_arguments(calls[0].clone())?;
         let callback = CallbackDriver {
             function: function.clone(),
@@ -866,6 +914,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
             .heap
             .url_search_params_entries(receiver)?
             .expect("URLSearchParams receiver was checked");
+        // Snapshotting the live list reads every stored entry once.
+        self.charge_intrinsic_work(entries.len());
         let Some((name, value)) = entries.first() else {
             self.stack.push(Value::Undefined);
             return Ok(());
@@ -927,10 +977,13 @@ fn retain_pending_calls(callback: &mut CallbackDriver, mut retain: impl FnMut(&V
     callback.calls.extend(pending);
 }
 
-fn clear_pending_calls(frames: &mut [CallFrame], receiver: HeapId) {
+fn clear_pending_calls(frames: &mut [CallFrame], receiver: HeapId) -> usize {
+    let mut work = 0usize;
     for callback in live_collection_callbacks(frames, receiver) {
+        work = work.saturating_add(callback.calls.len());
         callback.calls.truncate(callback.next_index);
     }
+    work
 }
 
 fn callback_arguments(call: Value) -> Result<ListValue, RuntimeError> {
@@ -979,6 +1032,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
     fn binding_cell_member(&mut self, value: Value) -> Result<Value, RuntimeError> {
         match materialize_value(value)? {
             value @ (Value::Tuple(_) | Value::List(_) | Value::Record(_)) => {
+                // Importing the captured value walks its whole graph once.
+                self.charge_intrinsic_work(deep_proportional_units(&value));
                 let imported = self.heap.import_values(vec![value], 1)?;
                 let Ok([value]) = <[Value; 1]>::try_from(imported) else {
                     unreachable!("an import returns one value per value it imports")

@@ -1,13 +1,13 @@
 use super::super::{
     ErrorKind, ensure_javascript_string_size, javascript_string_size_error, javascript_to_number,
-    javascript_to_string, javascript_to_uint32, nullish_property_read,
+    javascript_to_string, nullish_property_read,
 };
 use super::javascript_array::{
     append_flat_map_by_reference, array_iteration_source, copy_within,
     javascript_array_method_for_value,
 };
-use super::javascript_json::{javascript_json_stringify, parse_javascript_json};
 pub(super) use super::javascript_number::*;
+use super::javascript_static::javascript_static_stdlib;
 pub(super) use super::javascript_stdlib::*;
 use super::*;
 use std::collections::BTreeSet;
@@ -96,16 +96,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
         &mut self,
         iterable: Value,
     ) -> Result<ListValue, RuntimeError> {
-        match iterable {
+        let values = match iterable {
             Value::Ref(id) => match self.heap.get(id)? {
-                HeapObject::Map(map) => Ok(map
+                HeapObject::Map(map) => map
                     .entries
                     .iter()
                     .map(|(key, value)| Value::List(vec![key.clone(), value.clone()].into()))
                     .collect::<Vec<_>>()
-                    .into()),
-                HeapObject::Set(set) => Ok(set.values.clone().into()),
-                HeapObject::UrlSearchParams(params) => Ok(params
+                    .into(),
+                HeapObject::Set(set) => set.values.clone().into(),
+                HeapObject::UrlSearchParams(params) => params
                     .entries
                     .iter()
                     .map(|(name, value)| {
@@ -114,22 +114,27 @@ impl<H: ExecutionHost> Vm<'_, H> {
                         )
                     })
                     .collect::<Vec<_>>()
-                    .into()),
+                    .into(),
                 HeapObject::RegExp(_) | HeapObject::Date(_) | HeapObject::Url(_) => {
-                    Err(RuntimeError::ValidationFailed {
+                    return Err(RuntimeError::ValidationFailed {
                         reason: format!(
                             "TS_FOR_OF_EXOTIC_UNSUPPORTED: {} is not iterable",
                             self.heap.get(id)?.kind_name()
                         ),
-                    })
+                    });
                 }
                 _ => {
                     let exported = self.heap.export_for_instruction(&Value::Ref(id))?;
-                    iterable_values(exported).await
+                    // Exporting reads the iterable's whole graph once.
+                    self.charge_intrinsic_work(deep_proportional_units(&exported));
+                    iterable_values(exported).await?
                 }
             },
-            iterable => iterable_values(iterable).await,
-        }
+            iterable => iterable_values(iterable).await?,
+        };
+        // Materializing the iteration writes every yielded value once.
+        self.charge_intrinsic_work(values.len());
+        Ok(values)
     }
 
     pub(super) fn execute_javascript_split(&mut self) -> Result<(), RuntimeError> {
@@ -137,7 +142,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let value = self.pop_stack()?;
         let separator = self.heap.export_for_instruction(&separator)?;
         let value = self.heap.export_for_instruction(&value)?;
+        // Splitting reads the text once and writes each part once.
+        self.charge_intrinsic_work(
+            proportional_units(&value).saturating_add(proportional_units(&separator)),
+        );
         let values = javascript_split(&value, &separator)?;
+        self.charge_intrinsic_work(values.len());
         self.stack.push(self.heap.allocate_list(values)?);
         Ok(())
     }
@@ -147,8 +157,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
         let value = self.pop_stack()?;
         let separator = self.heap.export_for_instruction(&separator)?;
         let value = self.heap.export_for_instruction(&value)?;
-        self.stack
-            .push(Value::String(javascript_join(&value, &separator)?.into()));
+        // Joining reads every member and writes each output byte once.
+        self.charge_intrinsic_work(deep_proportional_units(&value));
+        let joined = javascript_join(&value, &separator)?;
+        self.charge_intrinsic_work(joined.len());
+        self.stack.push(Value::String(joined.into()));
         Ok(())
     }
 
@@ -186,6 +199,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if let [Value::String(selector), key] = values.as_slice()
             && selector.as_str() == "Lash.ToPropertyKey"
         {
+            // Coercing a string key reads it whole.
+            self.charge_intrinsic_work(proportional_units(key));
             let key = self.heap.javascript_to_string(key)?;
             self.stack.push(Value::String(key.into()));
             return Ok(());
@@ -257,18 +272,24 @@ impl<H: ExecutionHost> Vm<'_, H> {
             && method.as_str() == "__appendFlatMap"
             && let Some(appended) = append_flat_map_by_reference(&self.heap, *output, value)?
         {
+            // Appending copies each member the output list holds once.
+            self.charge_intrinsic_work(proportional_units(&appended));
             self.stack.push(appended);
             return Ok(());
         }
         if let [Value::String(method), value] = values.as_slice()
             && method.as_str() == "__jsonHasCycle"
         {
+            let mut work = 0usize;
             let has_cycle = javascript_json_has_cycle(
                 &self.heap,
                 value,
                 &mut BTreeSet::new(),
                 &mut BTreeSet::new(),
+                &mut work,
             )?;
+            // The walk visited each reachable object and member once.
+            self.charge_intrinsic_work(work);
             self.stack.push(Value::Bool(has_cycle));
             return Ok(());
         }
@@ -280,14 +301,19 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     "JSON stringify active stack must be an array",
                 ));
             };
-            self.stack
-                .push(Value::Bool(values.iter().any(|value| value == needle)));
+            // The membership probe scans the whole active list once.
+            let present = values.iter().any(|value| value == needle);
+            let scan = values.len();
+            self.charge_intrinsic_work(scan);
+            self.stack.push(Value::Bool(present));
             return Ok(());
         }
         if let [Value::String(method), arguments @ ..] = values.as_slice()
             && method.as_str() == "String.raw"
         {
             let result = self.javascript_string_raw(arguments)?;
+            // The join writes each output byte once.
+            self.charge_intrinsic_work(proportional_units(&result));
             self.stack.push(result);
             return Ok(());
         }
@@ -296,6 +322,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         {
             let text =
                 javascript_substrate::javascript_console_observation_text(&self.heap, arguments)?;
+            // Rendering writes each output byte once.
+            self.charge_intrinsic_work(text.len());
             self.stack.push(Value::String(text.into()));
             return Ok(());
         }
@@ -390,6 +418,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 _ => None,
             };
             if let Some(output) = output {
+                // The shallow copy writes one element per member.
+                self.charge_intrinsic_work(output.len());
                 self.stack.push(Value::List(output.into()));
                 return Ok(());
             }
@@ -397,7 +427,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if let [Value::String(method), args @ ..] = values.as_slice()
             && method.as_str() == "URL.canParse"
         {
-            self.stack.push(self.execute_url_can_parse(args)?);
+            let parsed = self.execute_url_can_parse(args)?;
+            self.stack.push(parsed);
             return Ok(());
         }
         if let [Value::String(method), args @ ..] = values.as_slice()
@@ -413,7 +444,11 @@ impl<H: ExecutionHost> Vm<'_, H> {
         // unavailable.
         for value in &mut values {
             match value {
-                Value::Ref(_) => *value = self.heap.export_for_instruction(value)?,
+                Value::Ref(_) => {
+                    *value = self.heap.export_for_instruction(value)?;
+                    // Exporting reads the argument's whole graph once.
+                    self.charge_intrinsic_work(deep_proportional_units(value));
+                }
                 Value::Projected(_) => *value = materialize_value(value.clone())?,
                 _ => {}
             }
@@ -429,13 +464,7 @@ impl<H: ExecutionHost> Vm<'_, H> {
             self.stack.push(Value::List(elements.into()));
             return Ok(());
         }
-        if let [Value::String(method), Value::String(source), ..] = values.as_slice()
-            && method.as_str() == "JSON.parse"
-        {
-            // Parsing reads every byte of the text once.
-            self.charge_intrinsic_work(source.len());
-        }
-        let result = javascript_stdlib(&self.heap, &values)?;
+        let result = javascript_stdlib(&self.heap, &values, &mut self.instructions_executed)?;
         if let Value::String(value) = &result {
             ensure_javascript_string_size(value.len())?;
         }
@@ -458,7 +487,10 @@ impl<H: ExecutionHost> Vm<'_, H> {
     /// `Math.max(...xs)` dispatches exactly as `Math.max(x0, x1, ...)` does.
     /// Its elements are read in place, so an object passed through a spread
     /// keeps its identity.
-    fn applied_stdlib_arguments(&self, mut values: Vec<Value>) -> Result<Vec<Value>, RuntimeError> {
+    fn applied_stdlib_arguments(
+        &mut self,
+        mut values: Vec<Value>,
+    ) -> Result<Vec<Value>, RuntimeError> {
         let arguments = match values.pop() {
             Some(Value::List(items) | Value::Tuple(items)) => items.to_vec(),
             Some(Value::Ref(id)) => match self.heap.get(id)? {
@@ -467,6 +499,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
             },
             _ => Vec::new(),
         };
+        // A spread splices every element of its arguments array into the call.
+        self.charge_intrinsic_work(arguments.len());
         values.remove(0);
         values.extend(arguments);
         Ok(values)
@@ -487,6 +521,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         }
         let length = length as usize;
         self.heap.ensure_list_allocation_len(length)?;
+        // The materialization writes `length` members, whatever the record holds.
+        self.charge_intrinsic_work(length);
         Ok((0..length)
             .map(|index| {
                 record
@@ -523,6 +559,17 @@ impl<H: ExecutionHost> Vm<'_, H> {
             }
             return Ok(());
         }
+        // Every Map or Set method but `toString`/`valueOf` scans or rewrites
+        // its member list once; `forEach` queues one callback per member.
+        match kind {
+            "Map" if !matches!(method, "toString" | "valueOf") => {
+                self.charge_intrinsic_work(self.heap.map_len(receiver)?);
+            }
+            "Set" if !matches!(method, "toString" | "valueOf") => {
+                self.charge_intrinsic_work(self.heap.set_len(receiver)?);
+            }
+            _ => {}
+        }
         let result = match (kind, method, args) {
             ("RegExp", "valueOf", []) | ("Map", "valueOf", []) | ("Set", "valueOf", []) => {
                 Some(Value::Ref(receiver))
@@ -554,12 +601,20 @@ impl<H: ExecutionHost> Vm<'_, H> {
             (kind, "valueOf", []) if ErrorKind::from_name(kind).is_some() => {
                 Some(Value::Ref(receiver))
             }
-            ("Map", "get", [key]) => Some(
-                self.heap
-                    .map_get(receiver, key)?
-                    .unwrap_or(Value::Undefined),
-            ),
-            ("Map", "has", [key]) => Some(Value::Bool(self.heap.map_has(receiver, key)?)),
+            ("Map", "get", [key]) => {
+                // The lookup scans the entries once.
+                self.charge_intrinsic_work(self.heap.map_len(receiver)?);
+                Some(
+                    self.heap
+                        .map_get(receiver, key)?
+                        .unwrap_or(Value::Undefined),
+                )
+            }
+            ("Map", "has", [key]) => {
+                // The lookup scans the entries once.
+                self.charge_intrinsic_work(self.heap.map_len(receiver)?);
+                Some(Value::Bool(self.heap.map_has(receiver, key)?))
+            }
             ("Map", "set", [key, value]) => {
                 self.map_set_live(receiver, key, value)?;
                 Some(Value::Ref(receiver))
@@ -570,48 +625,72 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.map_for_each_clear(receiver);
                 Some(Value::Undefined)
             }
-            ("Map", "keys", []) => Some(Value::List(
-                self.heap
+            ("Map", "keys", []) => {
+                let entries = self
+                    .heap
                     .map_entries(receiver)?
-                    .expect("Map receiver was checked")
-                    .into_iter()
-                    .map(|(key, _)| key)
-                    .collect::<Vec<_>>()
-                    .into(),
-            )),
-            ("Map", "values", []) => Some(Value::List(
-                self.heap
+                    .expect("Map receiver was checked");
+                // Enumerating reads and writes one result per entry.
+                self.charge_intrinsic_work(entries.len());
+                Some(Value::List(
+                    entries
+                        .into_iter()
+                        .map(|(key, _)| key)
+                        .collect::<Vec<_>>()
+                        .into(),
+                ))
+            }
+            ("Map", "values", []) => {
+                let entries = self
+                    .heap
                     .map_entries(receiver)?
-                    .expect("Map receiver was checked")
-                    .into_iter()
-                    .map(|(_, value)| value)
-                    .collect::<Vec<_>>()
-                    .into(),
-            )),
-            ("Map", "entries", []) => Some(Value::List(
-                self.heap
+                    .expect("Map receiver was checked");
+                // Enumerating reads and writes one result per entry.
+                self.charge_intrinsic_work(entries.len());
+                Some(Value::List(
+                    entries
+                        .into_iter()
+                        .map(|(_, value)| value)
+                        .collect::<Vec<_>>()
+                        .into(),
+                ))
+            }
+            ("Map", "entries", []) => {
+                let entries = self
+                    .heap
                     .map_entries(receiver)?
-                    .expect("Map receiver was checked")
-                    .into_iter()
-                    .map(|(key, value)| Value::List(vec![key, value].into()))
-                    .collect::<Vec<_>>()
-                    .into(),
-            )),
+                    .expect("Map receiver was checked");
+                // Enumerating reads and writes one pair per entry.
+                self.charge_intrinsic_work(entries.len());
+                Some(Value::List(
+                    entries
+                        .into_iter()
+                        .map(|(key, value)| Value::List(vec![key, value].into()))
+                        .collect::<Vec<_>>()
+                        .into(),
+                ))
+            }
             ("Map", "forEach", [function]) => {
                 // The durable call queue is updated by Map mutations while the
                 // callback is active. It therefore acts like ECMA's live ordered
                 // entry list, including delete-and-reinsert at the tail.
-                let calls = self
+                let calls: Vec<Vec<Value>> = self
                     .heap
                     .map_entries(receiver)?
                     .expect("Map receiver was checked")
                     .into_iter()
                     .map(|(key, value)| vec![value, key, Value::Ref(receiver)])
                     .collect();
+                // The queue holds one call per entry.
+                self.charge_intrinsic_work(calls.len());
                 self.begin_callback_driver(function.clone(), calls, false, true)?;
                 None
             }
-            ("Set", "has", [value]) => Some(Value::Bool(self.heap.set_has(receiver, value)?)),
+            ("Set", "has", [value]) => {
+                // The lookup scans the members once.
+                self.charge_intrinsic_work(self.heap.set_len(receiver)?);
+                Some(Value::Bool(self.heap.set_has(receiver, value)?))
+            }
             ("Set", "add", [value]) => {
                 self.set_add_live(receiver, value)?;
                 Some(Value::Ref(receiver))
@@ -627,6 +706,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .heap
                     .set_values(receiver)?
                     .expect("Set receiver was checked");
+                // Enumerating reads and writes one result per member.
+                self.charge_intrinsic_work(values.len());
                 Some(Value::List(
                     if method == "entries" {
                         values
@@ -642,13 +723,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
             ("Set", "forEach", [function]) => {
                 // As with Map, mutation maintains this durable pending queue as
                 // the live ordered Set contents change.
-                let calls = self
+                let calls: Vec<Vec<Value>> = self
                     .heap
                     .set_values(receiver)?
                     .expect("Set receiver was checked")
                     .into_iter()
                     .map(|value| vec![value.clone(), value, Value::Ref(receiver)])
                     .collect();
+                // The queue holds one call per member.
+                self.charge_intrinsic_work(calls.len());
                 self.begin_callback_driver(function.clone(), calls, false, true)?;
                 None
             }
@@ -682,6 +765,7 @@ fn javascript_json_has_cycle(
     value: &Value,
     active: &mut BTreeSet<HeapId>,
     visited: &mut BTreeSet<HeapId>,
+    work: &mut usize,
 ) -> Result<bool, RuntimeError> {
     let Value::Ref(id) = value else {
         return Ok(false);
@@ -702,9 +786,10 @@ fn javascript_json_has_cycle(
         HeapObject::Record(record) => record.values().collect(),
         _ => return Ok(false),
     };
+    *work = work.saturating_add(children.len());
     active.insert(*id);
     for child in children {
-        if javascript_json_has_cycle(heap, child, active, visited)? {
+        if javascript_json_has_cycle(heap, child, active, visited, work)? {
             return Ok(true);
         }
     }
@@ -713,7 +798,11 @@ fn javascript_json_has_cycle(
     Ok(false)
 }
 
-pub(super) fn javascript_stdlib(heap: &Heap, values: &[Value]) -> Result<Value, RuntimeError> {
+pub(super) fn javascript_stdlib(
+    heap: &Heap,
+    values: &[Value],
+    instructions_executed: &mut u64,
+) -> Result<Value, RuntimeError> {
     let Some(Value::String(method)) = values.first() else {
         return Err(js_stdlib_error("missing method discriminator"));
     };
@@ -724,368 +813,65 @@ pub(super) fn javascript_stdlib(heap: &Heap, values: &[Value]) -> Result<Value, 
         ));
     }
     if method.contains('.') {
-        return javascript_static_stdlib(method, args);
+        let result = javascript_static_stdlib(method, args, instructions_executed)?;
+        // Whatever the call wrote — text bytes or members — it wrote once.
+        charge_collection_work(instructions_executed, proportional_units(&result));
+        return Ok(result);
     }
     let Some((target, args)) = args.split_first() else {
         return Err(js_stdlib_error("missing receiver"));
     };
-    match target {
-        Value::String(value) => javascript_string_method(method, value, args),
-        Value::List(items) | Value::Tuple(items) => {
-            javascript_array_method_for_value(heap, method, target, items.as_ref(), args)
+    let result = match target {
+        Value::String(value) => {
+            javascript_string_method(method, value, args, instructions_executed)?
         }
-        Value::Number(value) => javascript_number_method(method, *value, args),
+        Value::List(items) | Value::Tuple(items) => javascript_array_method_for_value(
+            heap,
+            method,
+            target,
+            items.as_ref(),
+            args,
+            instructions_executed,
+        )?,
+        Value::Number(value) => javascript_number_method(method, *value, args)?,
         // Reading a member of `null`/`undefined` is an ECMA `TypeError` about
         // the *receiver*, not a statement about the method: `globalThis.missing`
         // is `undefined`, and reporting `.get` as an unsupported method sent
         // readers looking for a missing builtin instead of at the undefined
         // value one step to the left. Named the way ECMA names it, so the
         // diagnostic matches what the guest would have seen in a browser.
-        Value::Null | Value::Undefined => Err(nullish_property_read(
-            target,
-            &Value::String(method.clone()),
-        )),
+        Value::Null | Value::Undefined => {
+            return Err(nullish_property_read(
+                target,
+                &Value::String(method.clone()),
+            ));
+        }
         _ if method == "toString" && args.is_empty() => {
-            Ok(Value::String(javascript_to_string(target).into()))
+            Value::String(javascript_to_string(target).into())
         }
-        _ if method == "valueOf" && args.is_empty() => Ok(target.clone()),
-        _ => Err(js_stdlib_error(format!(
-            "TS_METHOD_UNSUPPORTED: method `{method}` is unavailable on this value"
-        ))),
-    }
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "code points were validated as valid above before from_u32, per the message"
-)]
-fn javascript_static_stdlib(method: &str, args: &[Value]) -> Result<Value, RuntimeError> {
-    use crate::runtime::javascript::{javascript_strict_equal, javascript_to_number};
-    let args = normalized_static_arguments(method, args);
-    match (method, args.as_slice()) {
-        // ToObject of the receiver throws before anything is read.
-        (
-            "Object.keys" | "Object.values" | "Object.entries" | "Object.hasOwn",
-            [Value::Null | Value::Undefined, ..],
-        ) => Err(RuntimeError::type_error(
-            "Cannot convert undefined or null to object",
-        )),
-        ("Object.keys", [Value::Record(record)]) => Ok(Value::List(
-            ecma_record_entries(record)
-                .into_iter()
-                .map(|(key, _)| Value::String(key.into()))
-                .collect::<Vec<_>>()
-                .into(),
-        )),
-        ("Object.values", [Value::Record(record)]) => Ok(Value::List(
-            ecma_record_entries(record)
-                .into_iter()
-                .map(|(_, value)| value.clone())
-                .collect::<Vec<_>>()
-                .into(),
-        )),
-        ("Object.entries", [Value::Record(record)]) => Ok(Value::List(
-            ecma_record_entries(record)
-                .into_iter()
-                .map(|(key, value)| {
-                    Value::List(vec![Value::String(key.into()), value.clone()].into())
-                })
-                .collect::<Vec<_>>()
-                .into(),
-        )),
-        ("Object.keys", [Value::List(values) | Value::Tuple(values)]) => Ok(Value::List(
-            (0..values.len())
-                .map(|index| Value::String(index.to_string().into()))
-                .collect::<Vec<_>>()
-                .into(),
-        )),
-        ("Object.values", [Value::List(values) | Value::Tuple(values)]) => {
-            Ok(Value::List(values.to_vec().into()))
+        _ if method == "valueOf" && args.is_empty() => target.clone(),
+        _ => {
+            return Err(js_stdlib_error(format!(
+                "TS_METHOD_UNSUPPORTED: method `{method}` is unavailable on this value"
+            )));
         }
-        ("Object.entries", [Value::List(values) | Value::Tuple(values)]) => Ok(Value::List(
-            values
-                .iter()
-                .enumerate()
-                .map(|(index, value)| {
-                    Value::List(vec![Value::String(index.to_string().into()), value.clone()].into())
-                })
-                .collect::<Vec<_>>()
-                .into(),
-        )),
-        ("Object.keys", [Value::String(value)]) => Ok(Value::List(
-            value
-                .encode_utf16()
-                .enumerate()
-                .map(|(index, _)| Value::String(index.to_string().into()))
-                .collect::<Vec<_>>()
-                .into(),
-        )),
-        ("Object.values", [Value::String(value)]) => Ok(Value::List(
-            value
-                .encode_utf16()
-                .map(|unit| utf16_value(vec![unit]))
-                .collect::<Result<Vec<_>, _>>()?
-                .into(),
-        )),
-        ("Object.entries", [Value::String(value)]) => Ok(Value::List(
-            value
-                .encode_utf16()
-                .enumerate()
-                .map(|(index, unit)| {
-                    Ok(Value::List(
-                        vec![
-                            Value::String(index.to_string().into()),
-                            utf16_value(vec![unit])?,
-                        ]
-                        .into(),
-                    ))
-                })
-                .collect::<Result<Vec<_>, RuntimeError>>()?
-                .into(),
-        )),
-        (
-            "Object.keys" | "Object.values" | "Object.entries",
-            [Value::Bool(_) | Value::Number(_)],
-        ) => Ok(Value::List(Vec::new().into())),
-        ("Object.fromEntries", [Value::List(entries) | Value::Tuple(entries)]) => {
-            let mut record = record_with_capacity(entries.len());
-            // Each entry is an object read at "0" and "1"; a missing one
-            // reads `undefined`, and a primitive entry is not an object.
-            for entry in entries.iter() {
-                let (key, value) = match entry {
-                    Value::List(pair) | Value::Tuple(pair) => (pair.first(), pair.get(1)),
-                    Value::Record(pair) => (pair.get("0"), pair.get("1")),
-                    _ => {
-                        return Err(RuntimeError::type_error(format!(
-                            "Iterator value {} is not an entry object",
-                            javascript_to_string(entry)
-                        )));
-                    }
-                };
-                record.insert(
-                    javascript_to_string(key.unwrap_or(&Value::Undefined)),
-                    value.cloned().unwrap_or(Value::Undefined),
-                );
-            }
-            Ok(Value::Record(std::sync::Arc::new(record)))
-        }
-        ("Object.assign", [target, sources @ ..]) => {
-            let target = match target {
-                Value::Record(target) => target,
-                // ToObject(target) throws on `null` and `undefined`.
-                Value::Null | Value::Undefined => {
-                    return Err(RuntimeError::type_error(
-                        "Cannot convert undefined or null to object",
-                    ));
-                }
-                // ToObject of any other primitive is a wrapper object, which
-                // this value model does not have.
-                Value::Bool(_) | Value::Number(_) | Value::String(_) => {
-                    return Err(js_stdlib_error(
-                        "TS_METHOD_UNSUPPORTED: Object.assign on a primitive target would return a wrapper object, which this value model does not have; assign onto a plain object",
-                    ));
-                }
-                _ => {
-                    return Err(js_stdlib_error(
-                        "TS_METHOD_UNSUPPORTED: Object.assign onto an array or a built-in object is unavailable; assign onto a plain object",
-                    ));
-                }
-            };
-            let mut output = target.as_ref().clone();
-            for source in sources {
-                if matches!(source, Value::Null | Value::Undefined) {
-                    continue;
-                }
-                let Value::Record(source) = source else {
-                    continue;
-                };
-                for (key, value) in ecma_record_entries(source) {
-                    output.insert(key.to_string(), value.clone());
-                }
-            }
-            Ok(Value::Record(std::sync::Arc::new(output)))
-        }
-        ("Object.hasOwn", [Value::Record(record), key]) => Ok(Value::Bool(
-            record.get(&javascript_to_string(key)).is_some(),
-        )),
-        ("Object.hasOwn", [Value::List(values) | Value::Tuple(values), key]) => {
-            let key = javascript_to_string(key);
-            Ok(Value::Bool(
-                key == "length"
-                    || array_index_property(&key).is_some_and(|index| index < values.len() as u32),
-            ))
-        }
-        ("Object.hasOwn", [Value::String(value), key]) => {
-            let key = javascript_to_string(key);
-            Ok(Value::Bool(
-                key == "length"
-                    || array_index_property(&key)
-                        .is_some_and(|index| index < value.encode_utf16().count() as u32),
-            ))
-        }
-        ("Object.hasOwn", [Value::Bool(_) | Value::Number(_), _]) => Ok(Value::Bool(false)),
-        ("Object.is", [left, right]) => Ok(Value::Bool(match (left, right) {
-            (Value::Number(left), Value::Number(right)) => {
-                (left.is_nan() && right.is_nan()) || left.to_bits() == right.to_bits()
-            }
-            _ => javascript_strict_equal(left, right),
-        })),
-        ("Array.isArray", [value]) => Ok(Value::Bool(matches!(
-            value,
-            Value::List(_) | Value::Tuple(_)
-        ))),
-        (
-            "Lash.ArrayFromIterable",
-            [value @ (Value::Null | Value::Undefined | Value::Bool(_) | Value::Number(_))],
-        ) => Err(crate::runtime::not_iterable_error(value)),
-        ("Lash.ArrayFromIterable", [Value::List(values) | Value::Tuple(values)]) => {
-            Ok(Value::List(values.to_vec().into()))
-        }
-        ("Lash.ArrayFromIterable", [Value::String(value)]) => Ok(Value::List(
-            value
-                .chars()
-                .map(|character| Value::String(character.to_string().into()))
-                .collect::<Vec<_>>()
-                .into(),
-        )),
-        ("Array.from", [Value::List(values) | Value::Tuple(values)]) => {
-            Ok(Value::List(values.to_vec().into()))
-        }
-        ("Array.from", [Value::String(value)]) => Ok(Value::List(
-            value
-                .chars()
-                .map(|character| Value::String(character.to_string().into()))
-                .collect::<Vec<_>>()
-                .into(),
-        )),
-        ("Array.of", values) => Ok(Value::List(values.to_vec().into())),
-        ("String.fromCharCode", values) => utf16_value(
-            values
-                .iter()
-                .map(|value| to_uint16(javascript_to_number(value)))
-                .collect(),
-        ),
-        ("String.fromCodePoint", values) => {
-            let mut output = String::new();
-            for value in values {
-                let point = javascript_to_number(value);
-                if !point.is_finite()
-                    || point.fract() != 0.0
-                    || !(0.0..=0x10ffff as f64).contains(&point)
-                {
-                    return Err(RuntimeError::range_error(format!(
-                        "Invalid code point {}",
-                        javascript_to_string(value)
-                    )));
-                }
-                // A surrogate code point is a valid argument: ECMA returns a
-                // string holding that lone code unit. The value model cannot
-                // hold one, which is the registered lone-surrogate refusal,
-                // not an invalid argument.
-                if (0xd800 as f64..=0xdfff as f64).contains(&point) {
-                    return Err(js_stdlib_error(
-                        "TS_LONE_SURROGATE_UNSUPPORTED: String.fromCodePoint would create an unrepresentable lone surrogate",
-                    ));
-                }
-                output.push(char::from_u32(point as u32).expect("validated code point"));
-            }
-            Ok(Value::String(output.into()))
-        }
-        ("Number.isFinite", [Value::Number(value)]) => Ok(Value::Bool(value.is_finite())),
-        ("Number.isFinite", [_]) => Ok(Value::Bool(false)),
-        ("Number.isInteger", [Value::Number(value)]) => {
-            Ok(Value::Bool(value.is_finite() && value.fract() == 0.0))
-        }
-        ("Number.isInteger", [_]) => Ok(Value::Bool(false)),
-        ("Number.isNaN", [Value::Number(value)]) => Ok(Value::Bool(value.is_nan())),
-        ("Number.isNaN", [_]) => Ok(Value::Bool(false)),
-        ("Number.isSafeInteger", [Value::Number(value)]) => Ok(Value::Bool(
-            value.is_finite() && value.fract() == 0.0 && value.abs() <= 9_007_199_254_740_991.0,
-        )),
-        ("Number.isSafeInteger", [_]) => Ok(Value::Bool(false)),
-        ("Number.parseFloat", [value]) => Ok(Value::Number(parse_float_prefix(
-            &javascript_to_string(value),
-        ))),
-        ("Number.parseInt", [value]) => Ok(Value::Number(parse_int_prefix(
-            &javascript_to_string(value),
-            None,
-        ))),
-        ("Number.parseInt", [value, radix]) => Ok(Value::Number(parse_int_prefix(
-            &javascript_to_string(value),
-            Some(javascript_to_number(radix)),
-        ))),
-        ("JSON.parse", [Value::String(value)]) => parse_javascript_json(value),
-        ("JSON.stringify", [Value::Undefined]) => Ok(Value::Undefined),
-        ("JSON.stringify", [value]) => {
-            javascript_json_stringify(value).map(|value| Value::String(value.into()))
-        }
-        ("Math.abs", [value]) => Ok(Value::Number(javascript_to_number(value).abs())),
-        ("Math.acos", [value]) => Ok(Value::Number(javascript_to_number(value).acos())),
-        ("Math.asin", [value]) => Ok(Value::Number(javascript_to_number(value).asin())),
-        ("Math.acosh", [value]) => Ok(Value::Number(javascript_to_number(value).acosh())),
-        ("Math.asinh", [value]) => Ok(Value::Number(javascript_to_number(value).asinh())),
-        ("Math.atan", [value]) => Ok(Value::Number(javascript_to_number(value).atan())),
-        ("Math.atan2", [y, x]) => Ok(Value::Number(
-            javascript_to_number(y).atan2(javascript_to_number(x)),
-        )),
-        ("Math.atanh", [value]) => Ok(Value::Number(javascript_to_number(value).atanh())),
-        ("Math.cbrt", [value]) => Ok(Value::Number(javascript_to_number(value).cbrt())),
-        ("Math.ceil", [value]) => Ok(Value::Number(javascript_to_number(value).ceil())),
-        ("Math.clz32", [value]) => Ok(Value::Number(
-            javascript_to_uint32(javascript_to_number(value)).leading_zeros() as f64,
-        )),
-        ("Math.cos", [value]) => Ok(Value::Number(javascript_to_number(value).cos())),
-        ("Math.cosh", [value]) => Ok(Value::Number(javascript_to_number(value).cosh())),
-        ("Math.exp", [value]) => Ok(Value::Number(javascript_to_number(value).exp())),
-        ("Math.expm1", [value]) => Ok(Value::Number(javascript_to_number(value).exp_m1())),
-        ("Math.floor", [value]) => Ok(Value::Number(javascript_to_number(value).floor())),
-        ("Math.fround", [value]) => Ok(Value::Number(javascript_to_number(value) as f32 as f64)),
-        ("Math.hypot", values) => Ok(Value::Number(javascript_hypot(values))),
-        ("Math.imul", [left, right]) => Ok(Value::Number(
-            (javascript_to_uint32(javascript_to_number(left))
-                .wrapping_mul(javascript_to_uint32(javascript_to_number(right)))
-                as i32) as f64,
-        )),
-        ("Math.log", [value]) => Ok(Value::Number(javascript_to_number(value).ln())),
-        ("Math.log1p", [value]) => Ok(Value::Number(javascript_to_number(value).ln_1p())),
-        ("Math.log10", [value]) => Ok(Value::Number(javascript_to_number(value).log10())),
-        ("Math.log2", [value]) => Ok(Value::Number(javascript_to_number(value).log2())),
-        ("Math.round", [value]) => Ok(Value::Number(javascript_round(javascript_to_number(value)))),
-        ("Math.trunc", [value]) => Ok(Value::Number(javascript_to_number(value).trunc())),
-        ("Math.max", values) => Ok(Value::Number(javascript_extreme(values, true))),
-        ("Math.min", values) => Ok(Value::Number(javascript_extreme(values, false))),
-        ("Math.pow", [base, exponent]) => Ok(Value::Number(javascript_pow(
-            javascript_to_number(base),
-            javascript_to_number(exponent),
-        ))),
-        ("Math.sqrt", [value]) => Ok(Value::Number(javascript_to_number(value).sqrt())),
-        ("Math.sin", [value]) => Ok(Value::Number(javascript_to_number(value).sin())),
-        ("Math.sinh", [value]) => Ok(Value::Number(javascript_to_number(value).sinh())),
-        ("Math.tan", [value]) => Ok(Value::Number(javascript_to_number(value).tan())),
-        ("Math.tanh", [value]) => Ok(Value::Number(javascript_to_number(value).tanh())),
-        ("Math.sign", [value]) => {
-            let value = javascript_to_number(value);
-            Ok(Value::Number(if value.is_nan() || value == 0.0 {
-                value
-            } else {
-                value.signum()
-            }))
-        }
-        _ => Err(js_stdlib_error(format!(
-            "TS_METHOD_UNSUPPORTED: unsupported call `{method}` with {} argument(s)",
-            args.len()
-        ))),
-    }
+    };
+    // Whatever the method wrote — text bytes or members — it wrote once.
+    charge_collection_work(instructions_executed, proportional_units(&result));
+    Ok(result)
 }
 
 pub(super) fn javascript_string_method(
     method: &str,
     value: &str,
     args: &[Value],
+    instructions_executed: &mut u64,
 ) -> Result<Value, RuntimeError> {
     use crate::runtime::javascript::javascript_to_number;
     let args = normalized_instance_arguments(method, args);
     let units = value.encode_utf16().collect::<Vec<_>>();
+    // Every string method reads the input's code units once.
+    charge_collection_work(instructions_executed, units.len());
     match (method, args.as_slice()) {
         ("at", [index]) => {
             let index = relative_index(javascript_to_number(index), units.len());
@@ -1107,6 +893,13 @@ pub(super) fn javascript_string_method(
         }
         ("concat", values) => {
             let values = values.iter().map(javascript_to_string).collect::<Vec<_>>();
+            // Converting each argument writes its text once.
+            charge_collection_work(
+                instructions_executed,
+                values
+                    .iter()
+                    .fold(0usize, |total, item| total.saturating_add(item.len())),
+            );
             let bytes = values
                 .iter()
                 .try_fold(value.len(), |total, item| total.checked_add(item.len()));
@@ -1119,31 +912,79 @@ pub(super) fn javascript_string_method(
             }
             Ok(Value::String(output.into()))
         }
-        ("startsWith", [needle, position]) => string_starts_with(
-            &units,
-            needle,
-            clamp_nonnegative_index(javascript_to_number(position), units.len()),
-        ),
-        ("endsWith", [needle, Value::Undefined]) => string_ends_with(&units, needle, units.len()),
-        ("endsWith", [needle, position]) => string_ends_with(
-            &units,
-            needle,
-            clamp_nonnegative_index(javascript_to_number(position), units.len()),
-        ),
-        ("includes", [needle, position]) => string_includes(
-            &units,
-            needle,
-            clamp_nonnegative_index(javascript_to_number(position), units.len()),
-        ),
-        ("indexOf", [needle, position]) => string_index_of(
-            &units,
-            needle,
-            clamp_nonnegative_index(javascript_to_number(position), units.len()),
-        ),
+        ("startsWith", [needle, position]) => {
+            // The comparison converts and reads the needle once.
+            charge_collection_work(
+                instructions_executed,
+                javascript_to_string(needle).encode_utf16().count(),
+            );
+            string_starts_with(
+                &units,
+                needle,
+                clamp_nonnegative_index(javascript_to_number(position), units.len()),
+            )
+        }
+        ("endsWith", [needle, Value::Undefined]) => {
+            charge_collection_work(
+                instructions_executed,
+                javascript_to_string(needle).encode_utf16().count(),
+            );
+            string_ends_with(&units, needle, units.len())
+        }
+        ("endsWith", [needle, position]) => {
+            charge_collection_work(
+                instructions_executed,
+                javascript_to_string(needle).encode_utf16().count(),
+            );
+            string_ends_with(
+                &units,
+                needle,
+                clamp_nonnegative_index(javascript_to_number(position), units.len()),
+            )
+        }
+        ("includes", [needle, position]) => {
+            // A substring scan can compare the needle at every position.
+            charge_collection_work(
+                instructions_executed,
+                units
+                    .len()
+                    .saturating_mul(javascript_to_string(needle).encode_utf16().count().max(1)),
+            );
+            string_includes(
+                &units,
+                needle,
+                clamp_nonnegative_index(javascript_to_number(position), units.len()),
+            )
+        }
+        ("indexOf", [needle, position]) => {
+            charge_collection_work(
+                instructions_executed,
+                units
+                    .len()
+                    .saturating_mul(javascript_to_string(needle).encode_utf16().count().max(1)),
+            );
+            string_index_of(
+                &units,
+                needle,
+                clamp_nonnegative_index(javascript_to_number(position), units.len()),
+            )
+        }
         ("lastIndexOf", [needle, Value::Undefined]) => {
+            charge_collection_work(
+                instructions_executed,
+                units
+                    .len()
+                    .saturating_mul(javascript_to_string(needle).encode_utf16().count().max(1)),
+            );
             string_last_index_of(&units, needle, units.len())
         }
         ("lastIndexOf", [needle, position]) => {
+            charge_collection_work(
+                instructions_executed,
+                units
+                    .len()
+                    .saturating_mul(javascript_to_string(needle).encode_utf16().count().max(1)),
+            );
             let position = javascript_to_number(position);
             string_last_index_of(
                 &units,
@@ -1158,21 +999,19 @@ pub(super) fn javascript_string_method(
         ("padStart", [length, Value::Undefined]) => {
             pad_string(value, javascript_to_number(length), " ", true)
         }
-        ("padStart", [length, fill]) => pad_string(
-            value,
-            javascript_to_number(length),
-            &javascript_to_string(fill),
-            true,
-        ),
+        ("padStart", [length, fill]) => {
+            let fill = javascript_to_string(fill);
+            charge_collection_work(instructions_executed, fill.len());
+            pad_string(value, javascript_to_number(length), &fill, true)
+        }
         ("padEnd", [length, Value::Undefined]) => {
             pad_string(value, javascript_to_number(length), " ", false)
         }
-        ("padEnd", [length, fill]) => pad_string(
-            value,
-            javascript_to_number(length),
-            &javascript_to_string(fill),
-            false,
-        ),
+        ("padEnd", [length, fill]) => {
+            let fill = javascript_to_string(fill);
+            charge_collection_work(instructions_executed, fill.len());
+            pad_string(value, javascript_to_number(length), &fill, false)
+        }
         ("repeat", [count]) => {
             let count = javascript_to_number(count);
             let count = if count.is_nan() { 0.0 } else { count };
@@ -1190,25 +1029,37 @@ pub(super) fn javascript_string_method(
             ensure_javascript_string_size(output_bytes)?;
             Ok(Value::String(value.repeat(count).into()))
         }
-        ("replace", [needle, replacement]) => replace_string(
-            value,
-            &javascript_to_string(needle),
-            &javascript_to_string(replacement),
-        )
-        .map(|value| Value::String(value.into())),
-        ("replaceAll", [needle, replacement]) => replace_all_string(
-            value,
-            &javascript_to_string(needle),
-            &javascript_to_string(replacement),
-        )
-        .map(|value| Value::String(value.into())),
+        ("replace", [needle, replacement]) => {
+            let needle = javascript_to_string(needle);
+            let replacement = javascript_to_string(replacement);
+            // The scan converts and reads both operands once.
+            charge_collection_work(
+                instructions_executed,
+                needle.len().saturating_add(replacement.len()),
+            );
+            replace_string(value, &needle, &replacement).map(|value| Value::String(value.into()))
+        }
+        ("replaceAll", [needle, replacement]) => {
+            let needle = javascript_to_string(needle);
+            let replacement = javascript_to_string(replacement);
+            charge_collection_work(
+                instructions_executed,
+                needle.len().saturating_add(replacement.len()),
+            );
+            replace_all_string(value, &needle, &replacement)
+                .map(|value| Value::String(value.into()))
+        }
         ("slice", bounds) => slice_utf16(&units, bounds, true),
         ("substring", bounds) => substring_utf16(&units, bounds),
         ("split", []) => Ok(Value::List(vec![Value::String(value.into())].into())),
-        ("split", [separator]) => Ok(Value::List(
-            javascript_split(&Value::String(value.into()), separator)?.into(),
-        )),
+        ("split", [separator]) => {
+            charge_collection_work(instructions_executed, proportional_units(separator));
+            Ok(Value::List(
+                javascript_split(&Value::String(value.into()), separator)?.into(),
+            ))
+        }
         ("split", [separator, limit]) => {
+            charge_collection_work(instructions_executed, proportional_units(separator));
             let mut values = javascript_split(&Value::String(value.into()), separator)?;
             let limit = javascript_to_number(limit);
             let limit = if limit.is_nan() || limit <= 0.0 {
@@ -1248,10 +1099,13 @@ pub(super) fn javascript_array_method(
     method: &str,
     items: &[Value],
     args: &[Value],
+    instructions_executed: &mut u64,
 ) -> Result<Value, RuntimeError> {
     use crate::runtime::javascript::javascript_to_number;
     let argument_count = args.len();
     let args = normalized_instance_arguments(method, args);
+    // Every array method reads its elements once.
+    charge_collection_work(instructions_executed, items.len());
     match (method, args.as_slice()) {
         ("__singleCallbackResult", []) => Ok(items.first().cloned().unwrap_or(Value::Undefined)),
         ("__appendFlatMap", [value]) => {
@@ -1270,6 +1124,13 @@ pub(super) fn javascript_array_method(
             Ok(Value::List(values.into()))
         }
         ("concat", values) => {
+            // Each argument list is copied member by member.
+            charge_collection_work(
+                instructions_executed,
+                values.iter().fold(0usize, |total, value| {
+                    total.saturating_add(proportional_units(value))
+                }),
+            );
             let mut output = items.to_vec();
             for value in values {
                 match value {
@@ -1300,9 +1161,18 @@ pub(super) fn javascript_array_method(
                     array_last_index_of(items, needle, end)
                 })
         }
-        ("join", [separator]) => Ok(Value::String(
-            javascript_join(&Value::List(items.to_vec().into()), separator)?.into(),
-        )),
+        ("join", [separator]) => {
+            // Joining reads every element's text.
+            charge_collection_work(
+                instructions_executed,
+                items.iter().fold(0usize, |total, value| {
+                    total.saturating_add(proportional_units(value))
+                }),
+            );
+            Ok(Value::String(
+                javascript_join(&Value::List(items.to_vec().into()), separator)?.into(),
+            ))
+        }
         ("flat", depth) => {
             // Omitted and explicit `undefined` both select the ECMA default
             // depth 1; coercing the padded `Undefined` to a number would give
@@ -1320,6 +1190,13 @@ pub(super) fn javascript_array_method(
                     }
                 }
             };
+            // Flattening descends through every nested member.
+            charge_collection_work(
+                instructions_executed,
+                items.iter().fold(0usize, |total, value| {
+                    total.saturating_add(deep_proportional_units(value))
+                }),
+            );
             let mut output = Vec::new();
             flatten_array(items, depth, &mut output);
             Ok(Value::List(output.into()))
@@ -1338,9 +1215,17 @@ pub(super) fn javascript_array_method(
             let end = clamp_relative_index(end, items.len()).max(start);
             Ok(Value::List(items[start..end].to_vec().into()))
         }
-        ("toString", []) => Ok(Value::String(
-            javascript_join(&Value::List(items.to_vec().into()), &Value::Undefined)?.into(),
-        )),
+        ("toString", []) => {
+            charge_collection_work(
+                instructions_executed,
+                items.iter().fold(0usize, |total, value| {
+                    total.saturating_add(proportional_units(value))
+                }),
+            );
+            Ok(Value::String(
+                javascript_join(&Value::List(items.to_vec().into()), &Value::Undefined)?.into(),
+            ))
+        }
         // Pair each item with its index so a two-parameter `map` callback can
         // be driven by the VM's one-argument map. Not a guest-visible method:
         // the lowerer emits it and nothing parses it.
@@ -1373,26 +1258,4 @@ fn flatten_array(items: &[Value], depth: usize, output: &mut Vec<Value>) {
         }
         output.push(item.clone());
     }
-}
-
-fn javascript_hypot(values: &[Value]) -> f64 {
-    let values = values.iter().map(javascript_to_number).collect::<Vec<_>>();
-    if values.iter().any(|value| value.is_infinite()) {
-        return f64::INFINITY;
-    }
-    if values.iter().any(|value| value.is_nan()) {
-        return f64::NAN;
-    }
-    let scale = values
-        .iter()
-        .fold(0.0_f64, |scale, value| scale.max(value.abs()));
-    if scale == 0.0 {
-        return 0.0;
-    }
-    scale
-        * values
-            .iter()
-            .map(|value| (value / scale).powi(2))
-            .sum::<f64>()
-            .sqrt()
 }

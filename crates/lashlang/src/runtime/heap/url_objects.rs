@@ -192,6 +192,28 @@ impl Heap {
         })
     }
 
+    pub(crate) fn url_search_params_len(&self, id: HeapId) -> Result<usize, RuntimeError> {
+        Ok(match self.get(id)? {
+            HeapObject::UrlSearchParams(params) => params.entries.len(),
+            _ => 0,
+        })
+    }
+
+    /// The units a `URLSearchParams` scan or serialization reads in
+    /// `charge_intrinsic_work`'s terms: every entry, plus every stored name
+    /// and value byte.
+    pub(crate) fn url_search_params_work(&self, id: HeapId) -> Result<usize, RuntimeError> {
+        Ok(match self.get(id)? {
+            HeapObject::UrlSearchParams(params) => params
+                .entries
+                .iter()
+                .fold(params.entries.len(), |total, (name, value)| {
+                    total.saturating_add(name.len()).saturating_add(value.len())
+                }),
+            _ => 0,
+        })
+    }
+
     pub(crate) fn url_search_params_mutate(
         &mut self,
         id: HeapId,

@@ -53,6 +53,19 @@ pub async fn execute<H: ExecutionHost>(
         .map_err(ExecuteError::Runtime)
 }
 
+/// Compiles a `Program` written against the IR directly — for the builtin
+/// intrinsics no dialect spells — and runs it against `state`.
+pub async fn execute_program<H: ExecutionHost>(
+    program: &lashlang::Program,
+    state: &mut State,
+    host: &H,
+) -> Result<ExecutionOutcome, ExecuteError> {
+    let compiled = lashlang_compile_program(program)?;
+    lashlang::execute(&compiled, state, host)
+        .await
+        .map_err(ExecuteError::Runtime)
+}
+
 /// Compiles an IR program as the main entry of the raw module artifact it
 /// forms, through the one public compile entry.
 fn lashlang_compile_program(

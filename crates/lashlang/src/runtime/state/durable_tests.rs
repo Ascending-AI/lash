@@ -88,10 +88,12 @@ fn exotic_session() -> State {
             (Value::String("b".into()), Value::Number(1.0)),
             (Value::String("a".into()), shared.clone()),
         ])
-        .expect("Map");
+        .expect("Map")
+        .0;
     let set = heap
         .allocate_set(vec![Value::Number(3.0), Value::Number(1.0), shared])
-        .expect("Set");
+        .expect("Set")
+        .0;
     let date = heap.allocate_date(86_400_000.0).expect("Date");
     let regexp = heap
         .allocate_regexp("a+".to_string(), "g".to_string())

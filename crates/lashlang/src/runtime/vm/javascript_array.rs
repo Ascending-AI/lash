@@ -12,13 +12,14 @@ pub(super) fn javascript_array_method_for_value(
     target: &Value,
     items: &[Value],
     args: &[Value],
+    instructions_executed: &mut u64,
 ) -> Result<Value, RuntimeError> {
     if method == "valueOf" && args.is_empty() {
         // Defensive arm for non-heap dispatch paths; currently unreachable via
         // guest code.
         return Ok(target.clone());
     }
-    super::javascript::javascript_array_method(heap, method, items, args)
+    super::javascript::javascript_array_method(heap, method, items, args, instructions_executed)
 }
 
 /// A regexp match is array-shaped to JavaScript, so its method dispatch lives
@@ -30,11 +31,12 @@ pub(super) fn javascript_regexp_match_method(
     receiver: HeapId,
     items: &[Value],
     args: &[Value],
+    instructions_executed: &mut u64,
 ) -> Result<Value, RuntimeError> {
     if method == "valueOf" && args.is_empty() {
         return Ok(Value::Ref(receiver));
     }
-    super::javascript::javascript_array_method(heap, method, items, args)
+    super::javascript::javascript_array_method(heap, method, items, args, instructions_executed)
 }
 
 impl<H: ExecutionHost> Vm<'_, H> {
@@ -54,6 +56,8 @@ impl<H: ExecutionHost> Vm<'_, H> {
         if matches!(method, "indexOf" | "includes" | "lastIndexOf") {
             let argument_count = args.len();
             let args = normalized_instance_arguments(method, args);
+            // A search scans the array's elements once.
+            charge_collection_work(&mut self.instructions_executed, current.len());
             let (needle, from) = (args[0].clone(), args[1].clone());
             // An empty array answers before `fromIndex` is converted, so its
             // `valueOf` never runs (ECMA-262 steps 3-4).
@@ -88,11 +92,15 @@ impl<H: ExecutionHost> Vm<'_, H> {
         // grows the vector the heap already owns instead of cloning it, and
         // returns ECMA's new length like the rebuild did (FIG-3063).
         if method == "push" {
+            // Appending writes each pushed element once.
+            self.charge_intrinsic_work(args.len());
             let length = self.heap.append_javascript_list(receiver, args)?;
             self.stack.push(Value::Number(length as f64));
             return Ok(true);
         }
         let mut values = current.clone();
+        // Every remaining method rebuilds or rewrites the whole vector.
+        self.charge_intrinsic_work(values.len());
         let result = match method {
             "fill" => {
                 let value = args.first().cloned().unwrap_or(Value::Undefined);
@@ -173,6 +181,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
                     .map(|(_, value)| value)
                     .collect();
                 let holes = length - present.len();
+                // Keying converts each element once; the sort compares n log n.
+                self.charge_intrinsic_work(sorting_work(present.len()).saturating_add(
+                    present.iter().fold(0usize, |total, value| {
+                        total.saturating_add(proportional_units(value))
+                    }),
+                ));
                 let mut keyed = present
                     .into_iter()
                     .map(|value| {
@@ -204,6 +218,12 @@ impl<H: ExecutionHost> Vm<'_, H> {
                 self.heap.allocate_list(values)?
             }
             "toSorted" if args.is_empty() || matches!(args, [Value::Undefined]) => {
+                // Keying converts each element once; the sort compares n log n.
+                self.charge_intrinsic_work(sorting_work(values.len()).saturating_add(
+                    values.iter().fold(0usize, |total, value| {
+                        total.saturating_add(proportional_units(value))
+                    }),
+                ));
                 let mut keyed = values
                     .into_iter()
                     .map(|value| {

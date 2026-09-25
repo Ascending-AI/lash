@@ -207,16 +207,16 @@ mod tests {
     /// journaled (grammar 3) holds no checkpoint peeks, so replaying it under
     /// the instruction-accounting grammar would meet them at positions the
     /// journal never recorded: it is refused before the cell runs. FIG-3707's
-    /// binding-cell emission moved the accounting again, so a grammar-4
-    /// journal — checkpoints placed by the retired accounting — is refused
-    /// too.
+    /// binding-cell emission and FIG-3672 P2b's intrinsic charges each moved
+    /// the accounting again, so grammar-4 and grammar-5 journals — checkpoints
+    /// placed by a retired accounting — are refused too.
     #[test]
     fn a_cell_journaled_before_instruction_accounting_is_refused() {
         assert_eq!(
             lash_lashlang_runtime::LASHLANG_CELL_JOURNAL_GRAMMAR_VERSION,
-            5
+            6
         );
-        for served in [Some(3), Some(4)] {
+        for served in [Some(3), Some(4), Some(5)] {
             let refusal = admit_replay_key_grammar(served)
                 .expect_err("a cell journal written under retired accounting is refused");
             assert_eq!(

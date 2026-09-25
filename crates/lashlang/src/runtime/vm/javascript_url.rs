@@ -3,21 +3,25 @@ use super::*;
 use crate::runtime::ensure_javascript_string_size;
 
 impl<H: ExecutionHost> Vm<'_, H> {
-    pub(super) fn execute_url_can_parse(&self, args: &[Value]) -> Result<Value, RuntimeError> {
+    pub(super) fn execute_url_can_parse(&mut self, args: &[Value]) -> Result<Value, RuntimeError> {
         let result = match args {
             [input] => {
                 let input = self.heap.javascript_to_string(input)?;
                 ensure_javascript_string_size(input.len())?;
+                // Parsing reads every byte of the input once.
+                self.charge_intrinsic_work(input.len());
                 crate::runtime::heap::parse_url(&input, None).is_ok()
             }
             [input, base] => {
                 let input = self.heap.javascript_to_string(input)?;
                 ensure_javascript_string_size(input.len())?;
                 if matches!(base, Value::Undefined) {
+                    self.charge_intrinsic_work(input.len());
                     crate::runtime::heap::parse_url(&input, None).is_ok()
                 } else {
                     let base = self.heap.javascript_to_string(base)?;
                     ensure_javascript_string_size(base.len())?;
+                    self.charge_intrinsic_work(input.len().saturating_add(base.len()));
                     crate::runtime::heap::parse_url(&input, Some(&base)).is_ok()
                 }
             }
@@ -42,11 +46,25 @@ impl<H: ExecutionHost> Vm<'_, H> {
         receiver: HeapId,
         args: &[Value],
     ) -> Result<Option<Value>, RuntimeError> {
+        // A URLSearchParams method scans, serializes or rewrites the stored
+        // pairs — `valueOf` alone is constant — and `sort` compares utf16
+        // names pairwise.
+        if kind == "URLSearchParams" && method != "valueOf" {
+            let work = self.heap.url_search_params_work(receiver)?;
+            self.charge_intrinsic_work(work);
+            if method == "sort" {
+                self.charge_intrinsic_work(sorting_work(
+                    self.heap.url_search_params_len(receiver)?,
+                ));
+            }
+        }
         let result = match (kind, method, args) {
             ("URL", "toString" | "toJSON", []) => {
                 let HeapObject::Url(url) = self.heap.get(receiver)? else {
                     unreachable!("URL receiver kind was checked")
                 };
+                // Serializing writes the whole href once.
+                charge_collection_work(&mut self.instructions_executed, url.href.len());
                 Some(Value::String(url.href.as_str().into()))
             }
             ("URL", "valueOf", []) | ("URLSearchParams", "valueOf", []) => {
