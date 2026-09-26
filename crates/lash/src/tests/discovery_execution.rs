@@ -1,5 +1,7 @@
 use super::*;
 
+const SEED: u64 = 0x5c_f108;
+
 struct DiscoveryTools {
     calls: Arc<StdMutex<Vec<String>>>,
 }
@@ -43,6 +45,7 @@ impl ToolProvider for DiscoveryTools {
 async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_native() -> Result<()>
 {
     for mode in ["rlm", "batch", "native"] {
+        let double = restate_double(SEED).await;
         let calls = Arc::new(StdMutex::new(Vec::new()));
         let first = if mode == "rlm" {
             text_response(&typescript_block("finish(await tools.hidden({}));"))
@@ -88,9 +91,9 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
             .build()
             .into_handle();
         let builder = if mode == "rlm" {
-            let backend = memory_backend().await;
+            let backend = double.lash_backend();
             LashCore::rlm_builder(
-                backend.clone().into(),
+                backend.clone(),
                 crate::TurnBudget::Unbounded,
                 lash_protocol_rlm::RlmProtocolPluginFactory::new(
                     lash_protocol_rlm::RlmProtocolPluginConfig::builder()
@@ -103,11 +106,11 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                         .with_discovery(lash_core::ToolDiscovery {
                             operation: "tools.search".into(),
                         }),
-                    &backend.clone().into(),
+                    &backend.clone(),
                 ),
             )
         } else {
-            LashCore::standard_builder(memory_backend().await.into(), crate::TurnBudget::Unbounded)
+            LashCore::standard_builder(double.lash_backend(), crate::TurnBudget::Unbounded)
                 .protocol_plugin(Arc::new(
                     lash_protocol_standard::StandardProtocolPluginFactory::with_config(
                         lash_protocol_standard::StandardProtocolConfig {
@@ -118,7 +121,7 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
                     ),
                 ))
         };
-        let core = explicit_ephemeral_facets(builder)
+        let core = explicit_ephemeral_facets_with_backend_work(builder)
             .provider(provider)
             .model(mock_model_spec())
             .tools(Arc::new(DiscoveryTools {
@@ -127,8 +130,8 @@ async fn discovery_hidden_tool_executes_through_rlm_and_standard_batch_but_not_n
             .build(crate::testing::runtime_lease_owner())?;
         let session = core.session(format!("discovery-{mode}")).open().await?;
         let output = session
-            .turn(TurnInput::text("read the hidden tool"))
-            .run()
+            .send(TurnInput::text("read the hidden tool"))
+            .output()
             .await?;
         if mode == "native" {
             assert!(

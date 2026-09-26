@@ -19,8 +19,8 @@ async fn conflicting_provider_at_open_is_refused_before_any_turn() -> Result<()>
 
     let pinning = core.session("provider-pin-conflict").open().await?;
     pinning
-        .turn(TurnInput::text("pin the provider"))
-        .run()
+        .send(TurnInput::text("pin the provider"))
+        .output()
         .await?;
     assert_eq!(
         pinning.policy_snapshot().recorded_provider_id(),

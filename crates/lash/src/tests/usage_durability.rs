@@ -7,6 +7,8 @@
 
 use super::*;
 
+const SEED: u64 = 0x5c_f10a;
+
 use lash_core::provider::ReconciledUsage;
 use std::sync::atomic::AtomicBool;
 use std::time::Duration;
@@ -89,23 +91,32 @@ fn aborting_provider(
         .into_handle()
 }
 
-async fn usage_durability_core(provider: ProviderHandle) -> Result<LashCore> {
-    Ok(usage_durability_core_with_store(provider).await?.0)
+#[cfg(feature = "rlm")]
+async fn usage_durability_core(
+    provider: ProviderHandle,
+) -> Result<(LashCore, lash_restate_test::RestateTestBackend)> {
+    let (core, _store_factory, double) = usage_durability_core_with_store(provider).await?;
+    Ok((core, double))
 }
 
 async fn usage_durability_core_with_store(
     provider: ProviderHandle,
-) -> Result<(LashCore, Arc<lash_sqlite_store::SqliteSessionStoreFactory>)> {
-    let backend = memory_backend().await;
+) -> Result<(
+    LashCore,
+    Arc<dyn lash_core::SessionStoreFactory>,
+    lash_restate_test::RestateTestBackend,
+)> {
+    let double = restate_double(SEED).await;
+    let backend = double.lash_backend();
     let store_factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
+    let core = explicit_ephemeral_facets_with_backend_work(rlm_core_builder_over(backend.clone()))
     .provider(provider)
     .model(mock_model_spec())
     // The default 2000 ms drain would make every witness below wait on a
     // deadline that is not what is under test.
     .abort_drain_grace(Duration::from_millis(50))
     .build(crate::testing::runtime_lease_owner())?;
-    Ok((core, store_factory))
+    Ok((core, store_factory, double))
 }
 
 /// The defect this closes: before the fix both store read paths rebuilt every
@@ -115,7 +126,7 @@ async fn usage_durability_core_with_store(
 fn unreported_holes_survive_close_and_reopen_with_their_attribution() -> Result<()> {
     run_async_test_on_stack_budget("fig2765-hole-survives-reopen", || async {
         let log = Arc::new(LookupLog::default());
-        let core = usage_durability_core(aborting_provider(
+        let (core, _double) = usage_durability_core(aborting_provider(
             "fig2765-hole",
             vec![Some("gen-alpha"), None],
             |_| None,
@@ -124,8 +135,8 @@ fn unreported_holes_survive_close_and_reopen_with_their_attribution() -> Result<
         .await?;
 
         let session = core.session("fig2765-hole").open().await?;
-        let first = session.turn(TurnInput::text("one")).run().await?;
-        let second = session.turn(TurnInput::text("two")).run().await?;
+        let first = session.send(TurnInput::text("one")).output().await?;
+        let second = session.send(TurnInput::text("two")).output().await?;
         let first_call = first.result.llm_calls[0].call_id.0.clone();
         let second_call = second.result.llm_calls[0].call_id.0.clone();
         assert_ne!(first_call, second_call);
@@ -181,7 +192,7 @@ fn unreported_holes_survive_close_and_reopen_with_their_attribution() -> Result<
 fn a_correction_survives_close_and_repeat_reconciliation_is_a_no_op() -> Result<()> {
     run_async_test_on_stack_budget("fig2765-correction-survives-close", || async {
         let log = Arc::new(LookupLog::default());
-        let core = usage_durability_core(aborting_provider(
+        let (core, _double) = usage_durability_core(aborting_provider(
             "fig2765-correction",
             vec![Some("gen-alpha")],
             |generation_id| (generation_id == "gen-alpha").then(|| reconciled(334)),
@@ -190,7 +201,7 @@ fn a_correction_survives_close_and_repeat_reconciliation_is_a_no_op() -> Result<
         .await?;
 
         let session = core.session("fig2765-correction").open().await?;
-        session.turn(TurnInput::text("one")).run().await?;
+        session.send(TurnInput::text("one")).output().await?;
         Box::pin(session.close()).await?;
 
         let reopened = core.session("fig2765-correction").open().await?;
@@ -240,7 +251,7 @@ fn dropping_a_reconciliation_future_keeps_unfinished_attempts_registered() -> Re
         let log = Arc::new(LookupLog::default());
         let block = Arc::new(AtomicBool::new(true));
         let entered = Arc::new(tokio::sync::Notify::new());
-        let core = {
+        let (core, _double) = {
             let block = Arc::clone(&block);
             let entered = Arc::clone(&entered);
             let log = Arc::clone(&log);
@@ -299,8 +310,8 @@ fn dropping_a_reconciliation_future_keeps_unfinished_attempts_registered() -> Re
         };
 
         let session = core.session("fig2765-cancel").open().await?;
-        session.turn(TurnInput::text("one")).run().await?;
-        session.turn(TurnInput::text("two")).run().await?;
+        session.send(TurnInput::text("one")).output().await?;
+        session.send(TurnInput::text("two")).output().await?;
         assert_eq!(session.unreported_usage_attempts().await.len(), 2);
 
         let mut pending = Box::pin(session.reconcile_unreported_usage());
@@ -370,7 +381,7 @@ fn dropping_a_reconciliation_future_keeps_unfinished_attempts_registered() -> Re
 fn park_commits_for_a_pending_correction_and_stays_a_no_op_otherwise() -> Result<()> {
     run_async_test_on_stack_budget("fig2765-park-head-revision", || async {
         let log = Arc::new(LookupLog::default());
-        let (core, store_factory) = usage_durability_core_with_store(aborting_provider(
+        let (core, store_factory, _double) = usage_durability_core_with_store(aborting_provider(
             "fig2765-park",
             vec![Some("gen-alpha")],
             |generation_id| (generation_id == "gen-alpha").then(|| reconciled(334)),
@@ -397,7 +408,7 @@ fn park_commits_for_a_pending_correction_and_stays_a_no_op_otherwise() -> Result
         };
 
         let session = core.session(session_id).open().await?;
-        session.turn(TurnInput::text("one")).run().await?;
+        session.send(TurnInput::text("one")).output().await?;
         Box::pin(session.close()).await?;
         let after_turn = head_revision().await;
 

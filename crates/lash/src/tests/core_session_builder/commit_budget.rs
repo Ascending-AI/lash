@@ -1,5 +1,7 @@
 use super::*;
 
+const SEED: u64 = 0x5c_f101;
+
 #[tokio::test]
 async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> Result<()> {
     const CONFIGURED_ROW_LIMIT: usize = 3;
@@ -8,8 +10,9 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
         .complete(|_request| async move { Ok(text_response("assistant response")) })
         .build()
         .into_handle();
+    let double = restate_double(SEED).await;
     let core = backend_work_facets_with_budget(
-        LashCore::standard_builder(memory_backend().await.into(), crate::TurnBudget::Unbounded),
+        LashCore::standard_builder(double.lash_backend(), crate::TurnBudget::Unbounded),
         crate::CommitBudget::new(
             crate::CommitBudgetLimit::Unbounded,
             crate::CommitBudgetLimit::bounded(CONFIGURED_ROW_LIMIT),
@@ -22,9 +25,9 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
     core.session("commit-graph-only-budget-surface")
         .open()
         .await?
-        .turn(TurnInput::text("graph rows only"))
-        .turn_id("commit-graph-only-budget-turn")
-        .run()
+        .send(TurnInput::text("graph rows only"))
+        .id("commit-graph-only-budget-turn")
+        .output()
         .await?;
 
     let session = core
@@ -32,14 +35,14 @@ async fn adopted_attachment_intent_rows_fail_the_node_budget_before_commit() -> 
         .open()
         .await?;
     let error = session
-        .turn(TurnInput::text("adopt one attachment").with_attachment(
+        .send(TurnInput::text("adopt one attachment").with_attachment(
             lash_core::AttachmentSource::inline(
                 lash_core::MediaType::parse("image/png").expect("image media type"),
                 vec![1, 2, 3],
             ),
         ))
-        .turn_id("commit-adoption-row-budget-turn")
-        .run()
+        .id("commit-adoption-row-budget-turn")
+        .output()
         .await
         .expect_err("the adoption row must push the commit past its row limit");
 

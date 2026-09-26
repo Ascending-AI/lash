@@ -1,4 +1,7 @@
 use super::*;
+use crate::rlm::RlmSendBuilderExt as _;
+
+const SEED: u64 = 0x5c_f104;
 
 // Facade-level tests for the durable RLM session facts: what a session records
 // on the production path, what makes those facts durable, and what cannot
@@ -95,9 +98,9 @@ async fn typescript_is_served_on_the_production_session_path_and_survives_resume
 
     let session = core.session("rlm-typescript-production").open().await?;
     let first = session
-        .turn(TurnInput::text("compute"))
+        .send(TurnInput::text("compute"))
         .require_finish()?
-        .run()
+        .output()
         .await?;
     assert!(matches!(
         first.result.outcome,
@@ -122,9 +125,9 @@ async fn typescript_is_served_on_the_production_session_path_and_survives_resume
     let parked = Box::pin(session.park()).await?;
     let resumed = Box::pin(core.resume(parked)).await?;
     let second = resumed
-        .turn(TurnInput::text("compute again"))
+        .send(TurnInput::text("compute again"))
         .require_finish()?
-        .run()
+        .output()
         .await?;
     assert!(matches!(
         second.result.outcome,
@@ -155,23 +158,23 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
         .complete(|_| async { Ok(text_response("<typescript>\nfinish(42);\n</typescript>")) })
         .build()
         .into_handle();
-    let backend = memory_backend().await;
+    let double = restate_double(SEED).await;
+    let backend = double.lash_backend();
     let store_factory = backend.session_store_factory();
-    let core =
-        explicit_ephemeral_facets_with_backend_work(rlm_core_builder_over(backend.clone().into()))
-            .provider(provider)
-            .model(mock_model_spec())
-            .tools(Arc::clone(&tools) as Arc<dyn lash_core::ToolProvider>)
-            .build(crate::testing::runtime_lease_owner())?;
+    let core = explicit_ephemeral_facets_with_backend_work(rlm_core_builder_over(backend.clone()))
+        .provider(provider)
+        .model(mock_model_spec())
+        .tools(Arc::clone(&tools) as Arc<dyn lash_core::ToolProvider>)
+        .build(crate::testing::runtime_lease_owner())?;
 
     let session = core
         .session("rlm-typescript-queued-session-command")
         .open()
         .await?;
     session
-        .turn(TurnInput::text("create a typescript execution snapshot"))
+        .send(TurnInput::text("create a typescript execution snapshot"))
         .require_finish()?
-        .run()
+        .output()
         .await?;
     assert!(
         session
@@ -286,17 +289,18 @@ async fn a_per_turn_protocol_override_cannot_name_a_retired_dialect() -> Result<
         .into_handle();
     // One store factory across both opens: the reopen has to read what the
     // first session's commit actually wrote.
-    let backend = memory_backend().await;
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
+    let double = restate_double(SEED).await;
+    let backend = double.lash_backend();
+    let core = explicit_ephemeral_facets_with_backend_work(rlm_core_builder_over(backend.clone()))
         .provider(provider)
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
 
     let session = core.session("rlm-dialect-turn-override").open().await?;
     session
-        .turn(TurnInput::text("open the session"))
+        .send(TurnInput::text("open the session"))
         .require_finish()?
-        .run()
+        .output()
         .await?;
 
     // The attack: a host-supplied per-turn override naming the retired field.
@@ -304,7 +308,7 @@ async fn a_per_turn_protocol_override_cannot_name_a_retired_dialect() -> Result<
         "dialect": "lashlang"
     }));
     let attacked = session
-        .turn(TurnInput::text("switch me"))
+        .send(TurnInput::text("switch me"))
         .protocol_turn_options(attack)
         // `require_finish` writes through the same seam and merges shallowly,
         // so the attack has to survive it — otherwise the turn below would be
@@ -319,7 +323,7 @@ async fn a_per_turn_protocol_override_cannot_name_a_retired_dialect() -> Result<
         serde_json::json!("lashlang"),
         "the override must actually reach the turn for this to be an attack"
     );
-    attacked.run().await?;
+    attacked.output().await?;
     drop(session);
 
     // Every prompt the provider was handed, including the attacked turn's.
@@ -425,8 +429,8 @@ async fn projected_bindings_reach_a_served_prompt_once() -> Result<()> {
         ))
         .await?;
     session
-        .turn(TurnInput::text("read the projected binding"))
-        .run()
+        .send(TurnInput::text("read the projected binding"))
+        .output()
         .await?;
 
     let prompts = served.lock_recover().clone();
@@ -617,10 +621,11 @@ async fn a_guarded_write_that_disagrees_is_refused_with_a_typed_conflict() -> Re
 async fn an_invalidated_guarded_write_refuses_a_concurrently_recorded_termination() -> Result<()> {
     use crate::rlm::RlmSessionExt as _;
 
-    let backend = memory_backend().await;
+    let double = restate_double(SEED).await;
+    let backend = double.lash_backend();
 
     let build_core = || {
-        explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
+        explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
             .provider(mock_provider())
             .model(mock_model_spec())
             .build(crate::testing::runtime_lease_owner())
@@ -690,10 +695,11 @@ async fn an_invalidated_guarded_write_refuses_a_concurrently_recorded_terminatio
 async fn an_invalidated_same_value_guarded_write_publishes_the_reloaded_config() -> Result<()> {
     use crate::rlm::RlmSessionExt as _;
 
-    let backend = memory_backend().await;
+    let double = restate_double(SEED).await;
+    let backend = double.lash_backend();
 
     let build_core = || {
-        explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
+        explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
             .provider(mock_provider())
             .model(mock_model_spec())
             .build(crate::testing::runtime_lease_owner())
@@ -751,9 +757,10 @@ async fn an_invalidated_same_value_guarded_write_publishes_the_reloaded_config()
 async fn a_guarded_write_survives_a_cold_reopen() -> Result<()> {
     use crate::rlm::RlmSessionExt as _;
 
-    let backend = memory_backend().await;
+    let double = restate_double(SEED).await;
+    let backend = double.lash_backend();
 
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;
@@ -787,8 +794,9 @@ async fn a_guarded_write_survives_a_cold_reopen() -> Result<()> {
 #[cfg(feature = "rlm")]
 #[tokio::test]
 async fn stating_a_dialect_at_open_refuses_instead_of_being_dropped() -> Result<()> {
-    let backend = memory_backend().await;
-    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone().into()))
+    let double = restate_double(SEED).await;
+    let backend = double.lash_backend();
+    let core = explicit_ephemeral_facets(rlm_core_builder_over(backend.clone()))
         .provider(mock_provider())
         .model(mock_model_spec())
         .build(crate::testing::runtime_lease_owner())?;

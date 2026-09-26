@@ -1,12 +1,15 @@
 use super::*;
 use lash_sansio::SessionId;
 
+const SEED: u64 = 0x5c_f103;
+
 #[tokio::test]
 async fn reopen_generation_merges_durable_options_and_allows_explicit_clear() -> Result<()> {
-    let backend = memory_backend().await;
+    let double = restate_double(SEED).await;
+    let backend = double.lash_backend();
     let factory = backend.session_store_factory();
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        backend.into(),
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        backend,
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -35,8 +38,8 @@ async fn reopen_generation_merges_durable_options_and_allows_explicit_clear() ->
         .open()
         .await?;
     session
-        .turn(TurnInput::text("commit the initial generation seed"))
-        .run()
+        .send(TurnInput::text("commit the initial generation seed"))
+        .output()
         .await?;
     assert_eq!(
         store

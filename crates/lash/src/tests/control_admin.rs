@@ -126,7 +126,7 @@ async fn session_operations_delegate_to_runtime() -> Result<()> {
     let core = standard_core().await;
     let session = core.session("session-ops").open().await?;
 
-    session.turn(TurnInput::text("usage")).run().await?;
+    session.send(TurnInput::text("usage")).output().await?;
     let usage = session.usage_report();
     assert_eq!(usage.usage.usage.output_tokens, 2);
     Box::pin(
@@ -180,8 +180,8 @@ async fn compact_context_opens_compaction_frame_and_preserves_prior_frame() -> R
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("compact-context").open().await?;
     session
-        .turn(TurnInput::text("old durable request"))
-        .run()
+        .send(TurnInput::text("old durable request"))
+        .output()
         .await?;
     let before = session.admin().state().persist_current().await?;
     let previous_frame_node_id = before.current_frame_node_id.clone();
@@ -377,8 +377,8 @@ async fn compact_context_system_prompt_carries_the_full_prompt_stack() -> Result
         .open()
         .await?;
     session
-        .turn(TurnInput::text("content to compact"))
-        .run()
+        .send(TurnInput::text("content to compact"))
+        .output()
         .await?;
     assert!(
         Box::pin(session.admin().state().compact_context(
@@ -1270,8 +1270,8 @@ async fn observation_updates_after_completed_turn() -> Result<()> {
 
     assert!(session.read_view().messages().is_empty());
     session
-        .turn(TurnInput::text("hello observation"))
-        .run()
+        .send(TurnInput::text("hello observation"))
+        .output()
         .await?;
 
     let observed = session.observe();
@@ -1388,7 +1388,7 @@ async fn related_session_opens_with_parent_and_runs_a_turn() -> Result<()> {
 
     assert_eq!(child.parent_session_id(), Some("parent-control"));
     assert_eq!(child.policy_snapshot().recorded_provider_id(), "embed-test");
-    child.turn(TurnInput::text("child turn")).run().await?;
+    child.send(TurnInput::text("child turn")).output().await?;
     assert!(
         store_factory
             .open_existing_store_by_id(&SessionId::from("child-control"))
@@ -1538,7 +1538,7 @@ async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("direct-turn-acceptance").open().await?;
 
-    let first = session.turn(TurnInput::text("same words")).run().await?;
+    let first = session.send(TurnInput::text("same words")).output().await?;
     let acceptance = first
         .result
         .acceptance
@@ -1565,7 +1565,7 @@ async fn direct_turn_reports_the_acceptance_it_was_admitted_under() -> Result<()
     // The documented double-submit window: resubmitting the same content after
     // an unacknowledged crash is a second admission, not a deduplicated retry,
     // because the caller named no identity Lash could recognise it by.
-    let second = session.turn(TurnInput::text("same words")).run().await?;
+    let second = session.send(TurnInput::text("same words")).output().await?;
     assert_ne!(
         acceptance.input_id,
         second

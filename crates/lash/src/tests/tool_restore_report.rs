@@ -85,8 +85,8 @@ async fn seed_session_with_a_persisted_tool(
     .build(crate::testing::runtime_lease_owner())?;
     let granted = granting_core.session(session_id.clone()).open().await?;
     granted
-        .turn(TurnInput::text("persist a checkpoint with tool state"))
-        .run()
+        .send(TurnInput::text("persist a checkpoint with tool state"))
+        .output()
         .await?;
     Box::pin(granted.close()).await?;
     Ok((backend, factory))
