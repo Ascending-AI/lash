@@ -46,6 +46,19 @@ pub(crate) fn session_ingress_sql() -> &'static SessionIngressSql {
     &SESSION_INGRESS_SQL
 }
 
+/// Every caller holds the database write lock for the entire allocation.
+pub(crate) fn allocate_sequence(
+    conn: &rusqlite::Connection,
+    session_id: &lash_sansio::SessionId,
+) -> Result<i64, crate::StoreError> {
+    conn.query_row(
+        session_ingress_sql().shared.allocate_sequence.sql(),
+        rusqlite::params![session_id.as_str()],
+        |row| row.get(0),
+    )
+    .map_err(crate::sqlite_error)
+}
+
 #[cfg(test)]
 mod tests {
     /// FIG-3607 contract 5, over the DDL: no column of the session ingress
@@ -61,17 +74,4 @@ mod tests {
             assert!(!table.contains(forbidden), "`{forbidden}` in {table}");
         }
     }
-}
-
-/// Every caller holds the database write lock for the entire allocation.
-pub(crate) fn allocate_sequence(
-    conn: &rusqlite::Connection,
-    session_id: &lash_sansio::SessionId,
-) -> Result<i64, crate::StoreError> {
-    conn.query_row(
-        session_ingress_sql().shared.allocate_sequence.sql(),
-        rusqlite::params![session_id.as_str()],
-        |row| row.get(0),
-    )
-    .map_err(crate::sqlite_error)
 }
