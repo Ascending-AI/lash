@@ -10,6 +10,11 @@
 use super::*;
 use lash_llm_transport::{LlmByteStream, LlmHttpResponse, run_with_timeout};
 
+/// The Restate double's seeded `SeedFact` for the runtime-level tests below
+/// (D1 F1): lash-restate's engine over a SQLite memory store set on an
+/// in-process server double.
+const SEED: u64 = 0xf10_a01;
+
 #[tokio::test]
 async fn unsuccessful_http_response_emits_no_response_establishment_marker() {
     let transport = Arc::new(ScriptedHttpTransport {
@@ -66,20 +71,20 @@ const BUFFERED_RESPONSES_WITH_TWO_REASONING_PARTS: &str = r#"{
     ]
 }"#;
 
-async fn reasoning_visibility_core(expose_thinking: bool) -> lash::LashCore {
+async fn reasoning_visibility_core(
+    expose_thinking: bool,
+) -> (lash::LashCore, lash_restate_test::RestateTestBackend) {
     let provider = openrouter_provider()
         .with_options(ProviderOptions {
             expose_thinking,
             ..ProviderOptions::default()
         })
         .with_transport(single_stream_transport(CHAT_REASONING_AND_TEXT_STREAM));
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("memory backend"),
-    );
-    lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
-        .without_queued_work()
+    let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("build the Restate server double");
+    let backend = double.lash_backend();
+    let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .provider(ProviderHandle::new(provider.into_components()))
         .model(
             lash::ModelSpec::builder("provider/model")
@@ -93,7 +98,8 @@ async fn reasoning_visibility_core(expose_thinking: bool) -> lash::LashCore {
             "openai-reasoning-visibility-test",
             "openai-reasoning-visibility-test-boot",
         ))
-        .expect("core")
+        .expect("core");
+    (core, double)
 }
 
 #[tokio::test]
@@ -101,15 +107,15 @@ async fn openai_chat_runtime_respects_expose_thinking() {
     for (expose_thinking, expected_reasoning) in
         [(false, Vec::new()), (true, vec!["private chain"])]
     {
-        let core = reasoning_visibility_core(expose_thinking).await;
+        let (core, _double) = reasoning_visibility_core(expose_thinking).await;
         let session = core
             .session(format!("openai-reasoning-visible-{expose_thinking}"))
             .open()
             .await
             .expect("session");
         let output = session
-            .turn(lash::TurnInput::text("answer privately"))
-            .run()
+            .send(lash::TurnInput::text("answer privately"))
+            .output()
             .await
             .expect("turn");
         let reasoning = output
@@ -142,13 +148,10 @@ async fn openai_buffered_responses_runtime_preserves_reasoning_part_boundaries()
             ..ProviderOptions::default()
         })
         .with_transport(transport);
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("memory backend"),
-    );
-    let core = lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
-        .without_queued_work()
+    let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("build the Restate server double");
+    let core = lash::LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
         .provider(ProviderHandle::new(provider.into_components()))
         .model(
             lash::ModelSpec::builder("gpt-5.4")
@@ -170,8 +173,8 @@ async fn openai_buffered_responses_runtime_preserves_reasoning_part_boundaries()
         .expect("session");
 
     let output = session
-        .turn(lash::TurnInput::text("reason in two parts"))
-        .run()
+        .send(lash::TurnInput::text("reason in two parts"))
+        .output()
         .await
         .expect("turn");
     let activities = output

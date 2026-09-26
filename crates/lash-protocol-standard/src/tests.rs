@@ -399,69 +399,75 @@ impl lash_core::testing::EffectLayer for CountingEffectController {
     }
 }
 
-/// A SQLite memory backend (ADR 0102) and the runtime host config over it.
+/// The Restate double's seeded `SeedFact` for the kernel tests below (D1 F2):
+/// lash-restate's engine over a SQLite memory store set on an in-process
+/// server double.
+pub(super) const SEED: u64 = 0xf10_a04;
+
+/// The Restate double a kernel test runs on (D1 F2), and the runtime host
+/// config over its backend. The test holds the double to the end; a turn's
+/// scope comes from [`open_turn_handler`], never the backend's host.
 pub(super) async fn test_host() -> (
-    lash_core::Backend,
+    lash_restate_test::RestateTestBackend,
     lash_core::facade_support::RuntimeHostConfig,
 ) {
-    host_over(
-        Arc::new(
-            lash_sqlite_store::SqliteBackend::memory()
-                .await
-                .expect("open a SQLite memory backend"),
-        )
-        .into(),
-    )
-}
-
-/// [`test_host`] with the backend's effect host under `layer`.
-pub(super) async fn layered_test_host(
-    layer: Arc<dyn lash_core::testing::EffectLayer>,
-) -> (
-    lash_core::Backend,
-    lash_core::facade_support::RuntimeHostConfig,
-) {
-    // Layered before any host config is built over the backend: the first
-    // config installs the host's one tool-child resolver, and a batch's
-    // children must reach their controllers through the layer.
-    host_over(
-        lash_core::testing::runtime_helpers::LayeredBackend::over(
-            Arc::new(
-                lash_sqlite_store::SqliteBackend::memory()
-                    .await
-                    .expect("open a SQLite memory backend"),
-            )
-            .into(),
-        )
-        .map_effect_host(|host| Arc::new(lash_core::testing::LayeredEffectHost::new(host, layer)))
-        .into_backend(),
-    )
-}
-
-fn host_over(
-    backend: lash_core::Backend,
-) -> (
-    lash_core::Backend,
-    lash_core::facade_support::RuntimeHostConfig,
-) {
+    let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("build the Restate server double");
     let host = lash_core::facade_support::RuntimeHostConfig::new(
-        backend.clone(),
+        double.lash_backend(),
         lash_core::CommitBudget::bounded(1024 * 1024, 512),
         lash_core::QueuedWorkBatchingConfig::new(1),
     );
-    (backend, host)
+    (double, host)
 }
 
-/// `backend`'s effect host, scoped to `session_id`'s first turn.
-pub(super) fn test_turn_scope(
-    backend: &lash_core::Backend,
+/// [`test_host`] with the double backend's effect host under `layer`: the
+/// first host config installs the host's one tool-child resolver, and a
+/// batch's group children mint their own controllers through the host, so
+/// they reach their controllers through the layer only when the backend's
+/// host is layered (D1 F2 keeps the rest of the layering on the lent scope).
+pub(super) async fn layered_test_host(
+    layer: Arc<dyn lash_core::testing::EffectLayer>,
+) -> (
+    lash_restate_test::RestateTestBackend,
+    lash_core::facade_support::RuntimeHostConfig,
+) {
+    let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("build the Restate server double");
+    let host = lash_core::facade_support::RuntimeHostConfig::new(
+        lash_core::testing::runtime_helpers::LayeredBackend::over(double.lash_backend())
+            .map_effect_host(|host| {
+                Arc::new(lash_core::testing::LayeredEffectHost::new(host, layer))
+            })
+            .into_backend(),
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1),
+    );
+    (double, host)
+}
+
+/// Open a workflow handler on `double` for `session_id`'s first turn: the
+/// scope a kernel turn runs on is lent by the handler (D1 F2).
+pub(super) async fn open_turn_handler(
+    double: &lash_restate_test::RestateTestBackend,
     session_id: &str,
-) -> lash_core::ScopedEffectController<'static> {
-    backend
-        .effect_host()
-        .scoped_static(lash_core::AdmittedScope::turn(session_id, "turn-1"))
-        .expect("scoped controller")
-        .expect("the backend host lends a static controller")
+) -> lash_restate_test::OpenHandler {
+    double
+        .open_handler(lash_core::AdmittedScope::turn(session_id, "turn-1"))
+        .await
+        .expect("open the turn's handler")
+}
+
+/// `handler`'s lent scope under `layer`: the effects a turn journals and the
+/// group children it mints cross the layer before the Restate controller.
+pub(super) fn layered_scope<'handler>(
+    handler: &'handler lash_restate_test::OpenHandler,
+    layer: Arc<dyn lash_core::testing::EffectLayer>,
+) -> lash_core::ScopedEffectController<'handler> {
+    lash_core::testing::LayeredEffectHost::layer_scoped(handler.scoped(), layer)
+        .expect("layer the turn's scope")
 }
 
 #[tokio::test]
@@ -469,8 +475,8 @@ async fn whitespace_only_text_does_not_split_terminal_history() {
     let provider_handle = lash_core::facade_support::ProviderHandle::new(
         lash_core::facade_support::ProviderComponents::new(Box::new(WhitespaceInterleavedProvider)),
     );
-    let (backend, mut host) =
-        layered_test_host(Arc::new(CountingEffectController::default())).await;
+    let controller = CountingEffectController::default();
+    let (double, mut host) = layered_test_host(Arc::new(controller.clone())).await;
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider_handle),
     );
@@ -486,7 +492,8 @@ async fn whitespace_only_text_does_not_split_terminal_history() {
         // failing. The budget is well above the iterations the scenario needs.
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::bounded(8))
     };
-    let scoped_controller = test_turn_scope(&backend, "whitespace-response-session");
+    let handler = open_turn_handler(&double, "whitespace-response-session").await;
+    let scoped_controller = layered_scope(&handler, Arc::new(controller));
     let mut runtime = Box::pin(
         lash_core::facade_support::LashRuntime::builder(
             host,
@@ -513,6 +520,7 @@ async fn whitespace_only_text_does_not_split_terminal_history() {
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     let finish_text = match &turn.outcome {
         lash_core::facade_support::TurnOutcome::Finished(
@@ -570,11 +578,12 @@ async fn standard_batch_is_runtime_owned_orchestration_without_an_enclosing_atte
     let provider_handle = lash_core::facade_support::ProviderHandle::new(
         lash_core::facade_support::ProviderComponents::new(Box::new(provider)),
     );
-    // The counting layer sits over the backend's effect host, so the group
-    // children the batch mints run under it too and their attempts land on
-    // the same frame log the turn scope's counter reads.
+    // The counting layer sits over the lent turn scope *and* the backend's
+    // effect host, so the group children the batch mints — whose controllers
+    // come from the host, not the scope — run under it too and their attempts
+    // land on the same frame log the counter reads.
     let controller = CountingEffectController::default();
-    let (backend, mut host) = layered_test_host(Arc::new(controller.clone())).await;
+    let (double, mut host) = layered_test_host(Arc::new(controller.clone())).await;
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider_handle),
     );
@@ -609,7 +618,8 @@ async fn standard_batch_is_runtime_owned_orchestration_without_an_enclosing_atte
         // failing. The budget is well above the iterations the scenario needs.
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::bounded(8))
     };
-    let scoped_controller = test_turn_scope(&backend, "standard-batch-session");
+    let handler = open_turn_handler(&double, "standard-batch-session").await;
+    let scoped_controller = layered_scope(&handler, Arc::new(controller.clone()));
     let mut runtime = Box::pin(
         lash_core::facade_support::LashRuntime::builder(
             host,
@@ -636,6 +646,7 @@ async fn standard_batch_is_runtime_owned_orchestration_without_an_enclosing_atte
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(matches!(
         turn.outcome,
@@ -756,8 +767,8 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
             second_request: Arc::clone(&second_request),
         })),
     );
-    let (backend, mut host) =
-        layered_test_host(Arc::new(CountingEffectController::default())).await;
+    let controller = CountingEffectController::default();
+    let (double, mut host) = layered_test_host(Arc::new(controller.clone())).await;
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider_handle),
     );
@@ -781,7 +792,8 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
             .expect("valid model"),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::bounded(8))
     };
-    let scoped_controller = test_turn_scope(&backend, "malformed-args-session");
+    let handler = open_turn_handler(&double, "malformed-args-session").await;
+    let scoped_controller = layered_scope(&handler, Arc::new(controller));
     let mut runtime = Box::pin(
         lash_core::facade_support::LashRuntime::builder(
             host,
@@ -808,6 +820,7 @@ async fn malformed_tool_arguments_are_refused_not_dispatched() {
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(matches!(
         turn.outcome,

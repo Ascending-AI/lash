@@ -44,6 +44,8 @@ uuid = { workspace = true, features = ["v4"] }
 
 [dev-dependencies]
 # Kernel tests whose effects need an engine run on the Restate server double
+# (FIG-3668, D1 PR-S2).
+lash-restate-test = { workspace = true }
 # Self dev-dependency so `testing` is on for every test build of this crate:
 # a bare `cargo test -p lash-internal-provider-openai` runs the conformance law instead of
 # quietly compiling it out (FIG-1266).

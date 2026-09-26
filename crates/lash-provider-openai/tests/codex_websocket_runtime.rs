@@ -29,6 +29,10 @@ use lash_provider_openai::codex::ws_testing::{
 };
 use serde_json::{Value, json};
 
+/// The Restate double's seeded `SeedFact` (D1 F1): lash-restate's engine over a
+/// SQLite memory store set on an in-process server double.
+const SEED: u64 = 0xf10_a02;
+
 fn websocket_provider(server: &ScriptedWsServer) -> ProviderHandle {
     let provider = CodexProvider::new("access", "refresh", 0)
         .force_websocket_transport()
@@ -45,14 +49,13 @@ fn websocket_provider(server: &ScriptedWsServer) -> ProviderHandle {
     ProviderHandle::new(provider.into_components())
 }
 
-async fn websocket_core(provider: ProviderHandle) -> LashCore {
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("memory backend"),
-    );
-    LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
-        .without_queued_work()
+async fn websocket_core(
+    provider: ProviderHandle,
+) -> (LashCore, lash_restate_test::RestateTestBackend) {
+    let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("build the Restate server double");
+    let core = LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
         .provider(provider)
         .model(
             lash::ModelSpec::builder("gpt-5.4")
@@ -66,10 +69,11 @@ async fn websocket_core(provider: ProviderHandle) -> LashCore {
             "codex-websocket-runtime-test",
             "codex-websocket-runtime-test-boot",
         ))
-        .expect("core")
+        .expect("core");
+    (core, double)
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn codex_websocket_facade_turn_streams_text_from_local_server() {
     let server = spawn_scripted_websocket(vec![ScriptedWsAction::Complete {
         response_id: "resp_ws_1",
@@ -77,17 +81,18 @@ async fn codex_websocket_facade_turn_streams_text_from_local_server() {
         text: "hello over the websocket",
     }])
     .await;
-    let core = websocket_core(websocket_provider(&server)).await;
+    let (core, _double) = websocket_core(websocket_provider(&server)).await;
     let session = core
         .session("codex-ws-runtime-text")
         .open()
         .await
         .expect("session");
 
-    let mut stream = session
-        .turn(TurnInput::text("say hello"))
-        .stream()
-        .expect("turn stream");
+    let handle = session
+        .send(TurnInput::text("say hello"))
+        .await
+        .expect("send");
+    let mut stream = handle.events();
     let mut streamed = String::new();
     while let Some(activity) = stream.next_activity().await {
         let activity = activity.expect("turn activity");
@@ -95,7 +100,7 @@ async fn codex_websocket_facade_turn_streams_text_from_local_server() {
             streamed.push_str(&text);
         }
     }
-    let result = stream.finish().await.expect("turn result");
+    let result = handle.output().await.expect("turn result").result;
 
     assert_eq!(
         result.assistant_message().unwrap_or_default(),
@@ -155,7 +160,7 @@ fn echo_probe_definition() -> ToolDefinition {
     )
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn codex_websocket_facade_turn_round_trips_a_tool_call() {
     let server = spawn_scripted_websocket(vec![
         ScriptedWsAction::ToolCall {
@@ -172,13 +177,10 @@ async fn codex_websocket_facade_turn_round_trips_a_tool_call() {
     ])
     .await;
     let seen = Arc::new(Mutex::new(Vec::new()));
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("memory backend"),
-    );
-    let core = LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
-        .without_queued_work()
+    let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("build the Restate server double");
+    let core = LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
         .provider(websocket_provider(&server))
         .model(
             lash::ModelSpec::builder("gpt-5.4")
@@ -206,8 +208,8 @@ async fn codex_websocket_facade_turn_round_trips_a_tool_call() {
         .expect("session");
 
     let output = session
-        .turn(TurnInput::text("probe the echo tool"))
-        .run()
+        .send(TurnInput::text("probe the echo tool"))
+        .output()
         .await
         .expect("turn");
 

@@ -244,10 +244,10 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
             .expect("clock")
             .as_nanos()
     ));
-    // The turn's scope comes from the runtime's own effect host: group opens
-    // issued by the turn and the tool-child resolver `RuntimeHostConfig::new`
-    // installs meet on that host.
-    let (backend, mut host) = super::tests::test_host().await;
+    // The turn's scope is lent by a handler on the Restate double (D1 F2):
+    // group opens issued by the turn and the tool-child resolver
+    // `RuntimeHostConfig::new` installs meet on that scope.
+    let (double, mut host) = super::tests::test_host().await;
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider_handle),
     );
@@ -288,7 +288,8 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
     } else {
         "discovery-refusal-all"
     };
-    let scoped_controller = super::tests::test_turn_scope(&backend, session_id);
+    let handler = super::tests::open_turn_handler(&double, session_id).await;
+    let scoped_controller = handler.scoped();
     let mut runtime = Box::pin(
         lash_core::facade_support::LashRuntime::builder(
             host,
@@ -317,6 +318,7 @@ async fn assert_discovery_refusal_is_reported_and_accounted(mixed: bool) {
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(matches!(
         turn.outcome,
