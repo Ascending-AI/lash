@@ -10,16 +10,15 @@ mod tests {
         AttachmentSource, LlmEventSender, LlmMessage, LlmProviderTraceSender, LlmToolChoice,
     };
     use crate::runtime::effect::*;
-    use crate::support::memory_backend;
     use crate::support::prelude::*;
     use crate::{SessionId, TurnId};
 
+    const SEED: u64 = 0x5_f700;
+
     #[tokio::test]
     async fn runtime_effect_envelope_and_request_specs_round_trip_without_live_fields() {
-        let backend = memory_backend().await;
-        let attachment_store = crate::SessionAttachmentStore::ephemeral(
-            crate::Backend::from(backend.clone()).attachment_store(),
-        );
+        let backend = crate::support::memory_store_backend().await;
+        let attachment_store = crate::SessionAttachmentStore::ephemeral(backend.attachment_store());
         let llm_request = CoreLlmRequest {
             instructions: Some(Arc::from("I")),
             model: "model".to_string(),
@@ -131,8 +130,10 @@ mod tests {
             assert_eq!(error.code.as_str(), "await_event_unsupported");
         }
 
-        let backend = memory_backend().await;
-        let key = backend
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let key = double
+            .lash_backend()
             .effect_host()
             .await_event_key(&scope, AwaitEventWaitIdentity::TurnCancelGate)
             .await
@@ -164,8 +165,9 @@ mod tests {
 
     #[tokio::test]
     async fn await_event_key_is_stable_for_scope_and_wait_identity() {
-        let backend = memory_backend().await;
-        let host = backend.effect_host();
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let host = double.lash_backend().effect_host();
         let scope = ExecutionScope::turn("session", "turn");
         let wait = AwaitEventWaitIdentity::tool_completion("call");
 
@@ -183,8 +185,9 @@ mod tests {
 
     #[tokio::test]
     async fn duplicate_await_event_resolution_reports_existing_terminal() {
-        let backend = memory_backend().await;
-        let host = backend.effect_host();
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let host = double.lash_backend().effect_host();
         let scope = ExecutionScope::turn("session-dupe", "turn-dupe");
         let key = host
             .await_event_key(&scope, AwaitEventWaitIdentity::tool_completion("call-dupe"))

@@ -23,6 +23,8 @@ use lash_sansio::core_support::ModelToolReturnCoreSupport as _;
 use crate::session::ToolInvocation;
 use lash_sansio::sync::MutexExt as _;
 
+const SEED: u64 = 0x5_f740;
+
 /// A one-shot signal raised when a named leaf's reply has been projected, which
 /// happens only once that leaf's child future has run to completion.
 #[derive(Clone)]
@@ -184,53 +186,58 @@ impl crate::ToolProvider for LatencyProbeTools {
     }
 }
 
-fn probe_context(
-    backend: &lash_sqlite_store::SqliteBackend,
+fn probe_context<'run>(
+    backend: &crate::Backend,
     provider: Arc<dyn crate::ToolProvider>,
-    controller: Arc<dyn crate::RuntimeEffectController>,
-) -> crate::RuntimeExecutionContext<'static> {
+    scoped: crate::ScopedEffectController<'run>,
+) -> crate::RuntimeExecutionContext<'run> {
     probe_context_with(
         backend,
         provider,
-        controller,
+        scoped,
         None,
         Arc::new(crate::UnavailableProcessService),
     )
 }
 
-fn probe_context_with_presentation_step(
-    backend: &lash_sqlite_store::SqliteBackend,
+fn probe_context_with_presentation_step<'run>(
+    backend: &crate::Backend,
     provider: Arc<dyn crate::ToolProvider>,
-    controller: Arc<dyn crate::RuntimeEffectController>,
+    scoped: crate::ScopedEffectController<'run>,
     step: Option<crate::plugin::ToolPresentationStep>,
-) -> crate::RuntimeExecutionContext<'static> {
+) -> crate::RuntimeExecutionContext<'run> {
     probe_context_with(
         backend,
         provider,
-        controller,
+        scoped,
         step,
         Arc::new(crate::UnavailableProcessService),
     )
 }
 
-/// The backend host's own controller for the probe turn, which the
-/// dispatch admits under that same turn.
-fn probe_controller(
-    backend: &lash_sqlite_store::SqliteBackend,
-) -> Arc<dyn crate::RuntimeEffectController> {
-    crate::support::scoped_controller(
-        backend,
-        crate::AdmittedScope::turn(SessionId::from("session"), crate::TurnId::from("test-turn")),
-    )
+/// The backend host's own controller for the probe turn's out-of-band
+/// completion resolutions: an ingress-backed resolver, never the lent
+/// controller a borrowed handle carries.
+fn probe_controller(backend: &crate::Backend) -> Arc<dyn crate::RuntimeEffectController> {
+    backend
+        .effect_host()
+        .scoped_static(crate::AdmittedScope::turn(
+            SessionId::from("session"),
+            crate::TurnId::from("test-turn"),
+        ))
+        .expect("the backend host admits the scope")
+        .expect("the backend host lends a static controller")
+        .owned_controller()
+        .expect("a static controller is shared")
 }
 
-fn probe_context_with(
-    backend: &lash_sqlite_store::SqliteBackend,
+fn probe_context_with<'run>(
+    backend: &crate::Backend,
     provider: Arc<dyn crate::ToolProvider>,
-    controller: Arc<dyn crate::RuntimeEffectController>,
+    scoped: crate::ScopedEffectController<'run>,
     step: Option<crate::plugin::ToolPresentationStep>,
     processes: Arc<dyn crate::ProcessService>,
-) -> crate::RuntimeExecutionContext<'static> {
+) -> crate::RuntimeExecutionContext<'run> {
     let spec = crate::PluginSpec::new().with_tool_provider(Arc::clone(&provider));
     let spec = match step {
         Some(step) => spec.with_presentation_step(step),
@@ -258,13 +265,7 @@ fn probe_context_with(
         trigger_router: None,
         process_definitions: None,
         process_engines: Default::default(),
-        effect_controller: crate::runtime::RuntimeEffectControllerHandle::Shared {
-            controller: controller.clone(),
-            admitted: crate::AdmittedScope::turn(
-                SessionId::from("session"),
-                crate::TurnId::from("test-turn"),
-            ),
-        },
+        effect_controller: crate::runtime::RuntimeEffectControllerHandle::borrowed(scoped),
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
         ),
@@ -305,29 +306,32 @@ fn probe_context_with(
     context
 }
 
-async fn latency_probe_context() -> crate::RuntimeExecutionContext<'static> {
-    let backend = crate::support::memory_backend().await;
-    let controller = probe_controller(&backend);
+async fn latency_probe_context<'run>(
+    backend: &crate::Backend,
+    scoped: crate::ScopedEffectController<'run>,
+) -> crate::RuntimeExecutionContext<'run> {
+    let resolver = probe_controller(backend);
     let provider: Arc<dyn crate::ToolProvider> = Arc::new(LatencyProbeTools {
-        controller: Arc::clone(&controller),
+        controller: resolver,
         awaited_leaf: None,
     });
-    probe_context(&backend, provider, controller)
+    probe_context(backend, provider, scoped)
 }
 
 /// A probe context whose synchronous leaf waits for `awaited_leaf` to settle,
 /// and whose presentation step raises that signal.
-async fn handshake_probe_context(
+async fn handshake_probe_context<'run>(
     awaited_leaf: LeafSettledSignal,
-) -> crate::RuntimeExecutionContext<'static> {
-    let backend = crate::support::memory_backend().await;
-    let controller = probe_controller(&backend);
+    backend: &crate::Backend,
+    scoped: crate::ScopedEffectController<'run>,
+) -> crate::RuntimeExecutionContext<'run> {
+    let resolver = probe_controller(backend);
     let step = awaited_leaf.presentation_step();
     let provider: Arc<dyn crate::ToolProvider> = Arc::new(LatencyProbeTools {
-        controller: Arc::clone(&controller),
+        controller: resolver,
         awaited_leaf: Some(awaited_leaf),
     });
-    probe_context_with_presentation_step(&backend, provider, controller, Some(step))
+    probe_context_with_presentation_step(backend, provider, scoped, Some(step))
 }
 
 struct GrantedRetryProbeTools {
@@ -371,9 +375,17 @@ async fn granted_in_catalog_call_uses_same_manifest_retry_policy_scalar_and_batc
         catalog_definition,
         attempts: Arc::clone(&attempts),
     });
-    let backend = crate::support::memory_backend().await;
-    let controller = probe_controller(&backend);
-    let context = probe_context(&backend, provider, controller);
+    let double =
+        crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let handler = double
+        .open_handler(crate::AdmittedScope::turn(
+            SessionId::from("session"),
+            crate::TurnId::from("test-turn"),
+        ))
+        .await
+        .expect("open the probe handler");
+    let context = probe_context(&backend, provider, handler.scoped());
 
     let scalar = context
         .call_command_tool(
@@ -407,6 +419,8 @@ async fn granted_in_catalog_call_uses_same_manifest_retry_policy_scalar_and_batc
     assert_eq!(batch_attempts, scalar_attempts, "batch matches scalar");
     assert!(!scalar.output.is_success());
     assert!(!batch.replies[0].output.is_success());
+    drop(context);
+    handler.close().await.expect("close the probe handler");
 }
 
 /// The headline claim: a batch whose leaves both park reports the order their
@@ -417,7 +431,18 @@ async fn granted_in_catalog_call_uses_same_manifest_retry_policy_scalar_and_batc
 /// the wrong rejection. The true order is `[1, 0]`.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn deferred_leaves_settle_in_completion_order_not_launch_order() {
-    let context = latency_probe_context().await;
+    let double =
+        crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let _gate = double.server().outside_gates().enter();
+    let handler = double
+        .open_handler(crate::AdmittedScope::turn(
+            SessionId::from("session"),
+            crate::TurnId::from("test-turn"),
+        ))
+        .await
+        .expect("open the probe handler");
+    let context = latency_probe_context(&backend, handler.scoped()).await;
     let replies = context
         .call_tool_batch(vec![
             ToolInvocation::new(
@@ -461,6 +486,8 @@ async fn deferred_leaves_settle_in_completion_order_not_launch_order() {
         "the leading position carries the fast tool's rejection: {}",
         first_settled.output.value_for_projection()
     );
+    drop(context);
+    handler.close().await.expect("close the probe handler");
 }
 
 /// A later leaf must be able to settle while an earlier leaf still holds its
@@ -520,7 +547,19 @@ async fn a_later_leaf_that_settles_first_leads_the_settlement_order() {
 /// The handshake batch: leaf 0 holds the earliest drain slot until leaf 1's
 /// reply has been projected, and the batch asserts leaf 0 saw it.
 async fn drain_slot_handshake_batch() -> crate::session::ToolBatchReplies {
-    let context = handshake_probe_context(LeafSettledSignal::new("fast")).await;
+    let double =
+        crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let _gate = double.server().outside_gates().enter();
+    let handler = double
+        .open_handler(crate::AdmittedScope::turn(
+            SessionId::from("session"),
+            crate::TurnId::from("test-turn"),
+        ))
+        .await
+        .expect("open the probe handler");
+    let context =
+        handshake_probe_context(LeafSettledSignal::new("fast"), &backend, handler.scoped()).await;
     let replies = context
         .call_tool_batch(vec![
             ToolInvocation::new(
@@ -542,6 +581,8 @@ async fn drain_slot_handshake_batch() -> crate::session::ToolBatchReplies {
         !synchronous_leaf.contains("awaited_leaf_never_settled"),
         "the deferred leaf must settle while the synchronous leaf holds slot 0: {synchronous_leaf}"
     );
+    drop(context);
+    handler.close().await.expect("close the probe handler");
     replies
 }
 
@@ -551,7 +592,18 @@ async fn drain_slot_handshake_batch() -> crate::session::ToolBatchReplies {
 /// implementation that reverses the launch order, which would be just as wrong.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn completion_order_follows_the_delays_in_both_directions() {
-    let context = latency_probe_context().await;
+    let double =
+        crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let _gate = double.server().outside_gates().enter();
+    let handler = double
+        .open_handler(crate::AdmittedScope::turn(
+            SessionId::from("session"),
+            crate::TurnId::from("test-turn"),
+        ))
+        .await
+        .expect("open the probe handler");
+    let context = latency_probe_context(&backend, handler.scoped()).await;
     let replies = context
         .call_tool_batch(vec![
             ToolInvocation::new(
@@ -572,6 +624,8 @@ async fn completion_order_follows_the_delays_in_both_directions() {
         vec![0, 1],
         "launching the fast tool first puts it first for the honest reason"
     );
+    drop(context);
+    handler.close().await.expect("close the probe handler");
 }
 
 // ---------------------------------------------------------------------------
@@ -692,8 +746,18 @@ async fn mixed_batch(
     process: LeafSchedule,
     tool_first: bool,
 ) -> crate::session::ToolBatchReplies {
-    let backend = crate::support::memory_backend().await;
+    let double =
+        crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let _gate = double.server().outside_gates().enter();
     let controller = probe_controller(&backend);
+    let handler = double
+        .open_handler(crate::AdmittedScope::turn(
+            SessionId::from("session"),
+            crate::TurnId::from("test-turn"),
+        ))
+        .await
+        .expect("open the probe handler");
     let processes = Arc::new(crate::testing::MockSessionManager::default());
     let provider: Arc<dyn crate::ToolProvider> = Arc::new(MixedBatchProbeTools {
         controller: Arc::clone(&controller),
@@ -703,7 +767,7 @@ async fn mixed_batch(
     let context = probe_context_with(
         &backend,
         provider,
-        Arc::clone(&controller),
+        handler.scoped(),
         None,
         Arc::clone(&processes) as Arc<dyn crate::ProcessService>,
     );
@@ -770,6 +834,8 @@ async fn mixed_batch(
     };
     let replies = context.call_tool_batch(calls).await;
     terminal.abort();
+    drop(context);
+    handler.close().await.expect("close the probe handler");
     replies
 }
 

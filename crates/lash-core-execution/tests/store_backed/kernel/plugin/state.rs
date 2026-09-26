@@ -7,7 +7,7 @@ mod tests {
     /// A fresh session store in a memory backend, for the session the
     /// test commits.
     async fn session_store(session_id: &str) -> Arc<dyn crate::RuntimePersistence> {
-        crate::support::memory_backend()
+        crate::support::memory_store_set()
             .await
             .session_store_factory()
             .create_store(&crate::testing::store_fixtures::session_store_request(

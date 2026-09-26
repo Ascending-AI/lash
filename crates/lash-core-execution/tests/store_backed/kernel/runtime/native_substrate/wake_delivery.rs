@@ -7,7 +7,7 @@ mod tests {
     use crate::runtime::{WakeDeliveryDriver, WorkCadencePolicy};
     use crate::{ProcessId, SessionId};
 
-    use crate::support::memory_backend;
+    use crate::support::memory_store_set;
 
     fn external_registration(process_id: &ProcessId) -> crate::ProcessRegistration {
         crate::ProcessRegistration::new(
@@ -26,7 +26,7 @@ mod tests {
 
     #[tokio::test]
     async fn superseded_wake_delivery_is_refused_before_enqueueing_the_successor() {
-        let backend = memory_backend().await;
+        let backend = memory_store_set().await;
         let registry = Arc::new(ProcessRegistryFaults::new(backend.process_registry()));
         let old = registry
             .register_process(external_registration(&ProcessId::from(
@@ -100,7 +100,7 @@ mod tests {
 
     #[tokio::test]
     async fn terminal_constructor_rejects_zero_poll_delay_directly() {
-        let backend = memory_backend().await;
+        let backend = memory_store_set().await;
         let work_cadence = WorkCadencePolicy {
             poll_initial: Duration::ZERO,
             ..WorkCadencePolicy::default()

@@ -22,7 +22,7 @@ mod tests {
 
     #[tokio::test]
     async fn await_process_requires_visibility_then_allows_observed_process() {
-        let registry = crate::support::memory_backend().await.process_registry();
+        let registry = crate::support::memory_store_set().await.process_registry();
         let host = Arc::new(
             crate::testing::MockSessionManager::default().with_process_registry(registry.clone()),
         );

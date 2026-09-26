@@ -1601,7 +1601,7 @@ async fn retry_ladder_survives_a_later_pending_completion() {
     let execution = crate::RuntimeExecutionContext::new(
         SessionId::from("session"),
         Arc::new(context),
-        crate::support::memory_backend().await.process_env_store(),
+        crate::support::memory_store_set().await.process_env_store(),
         attachment_store,
         Arc::new(crate::ChronologicalProjection::default()),
         None,
@@ -2347,7 +2347,7 @@ async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinat
             },
         })
     });
-    let backend = crate::support::memory_backend().await;
+    let backend = crate::support::memory_store_set().await;
     let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
     let event_types = ["signal.resume", "attempt.intent.note"]
         .into_iter()

@@ -12,7 +12,7 @@ struct IntentLawWorld {
 }
 
 async fn intent_law_world() -> IntentLawWorld {
-    let backend = crate::support::memory_backend().await;
+    let backend = crate::support::memory_store_set().await;
     IntentLawWorld {
         registry: backend.process_registry(),
         env_store: backend.process_env_store(),
