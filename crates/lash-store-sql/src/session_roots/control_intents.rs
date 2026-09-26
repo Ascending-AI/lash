@@ -11,6 +11,12 @@ pub const TABLE: &str = "control_intents";
 pub const ROW_COLUMNS: &str =
     "intent_id, session_id, format, kind_json, state_json, attempts, created_at_ms, engine_ref";
 
+/// What recording an intent writes: [`ROW_COLUMNS`] minus the allocated
+/// `intent_id`, plus the `kind`/`state` tags beside their JSON bodies so a
+/// reader filters on the tag without decoding.
+pub const INSERT_COLUMNS: &str =
+    "session_id, format, kind, kind_json, state, state_json, attempts, created_at_ms, engine_ref";
+
 crate::statements! {
     /// `control_intents` statements both backends issue verbatim.
     pub struct ControlIntentStatements @ "control_intent" {

@@ -114,7 +114,6 @@ impl crate::store::ControlIntentStore for ParentBoundSessionStoreFactory {
         session_id: &SessionId,
         at_ms: u64,
     ) -> std::result::Result<Option<crate::store::ControlIntent>, crate::StoreError> {
-        use crate::store::ControlIntentStore as _;
         self.inner.begin_session_close(session_id, at_ms).await
     }
 
@@ -122,7 +121,6 @@ impl crate::store::ControlIntentStore for ParentBoundSessionStoreFactory {
         &self,
         id: crate::store::ControlIntentId,
     ) -> std::result::Result<crate::store::IntentApplication, crate::StoreError> {
-        use crate::store::ControlIntentStore as _;
         self.inner.claim_intent_application(id).await
     }
 
@@ -131,7 +129,6 @@ impl crate::store::ControlIntentStore for ParentBoundSessionStoreFactory {
         id: crate::store::ControlIntentId,
         at_ms: u64,
     ) -> std::result::Result<(), crate::StoreError> {
-        use crate::store::ControlIntentStore as _;
         self.inner.acknowledge_intent(id, at_ms).await
     }
 
@@ -142,7 +139,6 @@ impl crate::store::ControlIntentStore for ParentBoundSessionStoreFactory {
         retryable: bool,
         at_ms: u64,
     ) -> std::result::Result<crate::store::ControlIntent, crate::StoreError> {
-        use crate::store::ControlIntentStore as _;
         self.inner
             .record_intent_failure(id, error, retryable, at_ms)
             .await
@@ -152,7 +148,6 @@ impl crate::store::ControlIntentStore for ParentBoundSessionStoreFactory {
         &self,
         id: crate::store::ControlIntentId,
     ) -> std::result::Result<Option<crate::store::ControlIntent>, crate::StoreError> {
-        use crate::store::ControlIntentStore as _;
         self.inner.load_intent(id).await
     }
 }

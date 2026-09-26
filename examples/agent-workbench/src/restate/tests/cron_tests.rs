@@ -453,14 +453,14 @@ async fn disabling_a_trigger_cancels_its_armed_cron_before_the_route_returns() {
         trace_path.clone(),
     )));
 
-    let _ = crate::set_trigger_enabled(
+    let _ = Box::pin(crate::set_trigger_enabled(
         axum::extract::Path(record.subscription_key),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
             session_id: Some(session_id.clone()),
         }),
         axum::Json(crate::TriggerEnabledRequest { enabled: false }),
-    )
+    ))
     .await
     .expect("disable route must synchronize Restate cron");
 
@@ -520,14 +520,14 @@ async fn enabling_a_trigger_rearms_its_cron_before_the_route_returns() {
         trace_path.clone(),
     )));
 
-    let axum::Json(response) = crate::set_trigger_enabled(
+    let axum::Json(response) = Box::pin(crate::set_trigger_enabled(
         axum::extract::Path(record.subscription_key),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
             session_id: Some(session_id.clone()),
         }),
         axum::Json(crate::TriggerEnabledRequest { enabled: true }),
-    )
+    ))
     .await
     .expect("enable route must synchronize Restate cron");
 
@@ -749,14 +749,14 @@ async fn disabling_a_button_trigger_makes_zero_cron_ingress_calls() {
     );
     drop(dead_listener);
 
-    let axum::Json(response) = crate::set_trigger_enabled(
+    let axum::Json(response) = Box::pin(crate::set_trigger_enabled(
         axum::extract::Path(record.subscription_key),
         axum::extract::State(state.clone()),
         axum::extract::Query(crate::SessionQuery {
             session_id: Some(session_id),
         }),
         axum::Json(crate::TriggerEnabledRequest { enabled: false }),
-    )
+    ))
     .await
     .expect("non-cron mutation must succeed with cron ingress dead");
 
@@ -800,14 +800,14 @@ async fn a_redundant_disable_reconciles_a_stale_armed_cron() {
     surface.arm(&job_key);
     state.restate_ingress_url = spawn_scripted_cron_object_surface(surface.clone()).await;
 
-    let axum::Json(response) = crate::set_trigger_enabled(
+    let axum::Json(response) = Box::pin(crate::set_trigger_enabled(
         axum::extract::Path(receipt.record_snapshot.subscription_key),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
             session_id: Some(session_id),
         }),
         axum::Json(crate::TriggerEnabledRequest { enabled: false }),
-    )
+    ))
     .await
     .expect("redundant disable must reconcile Restate");
 
@@ -844,14 +844,14 @@ async fn a_failed_disable_sync_still_traces_the_committed_mutation() {
         trace_path.clone(),
     )));
 
-    let result = crate::set_trigger_enabled(
+    let result = Box::pin(crate::set_trigger_enabled(
         axum::extract::Path(record.subscription_key.clone()),
         axum::extract::State(state),
         axum::extract::Query(crate::SessionQuery {
             session_id: Some(session_id.clone()),
         }),
         axum::Json(crate::TriggerEnabledRequest { enabled: false }),
-    )
+    ))
     .await;
 
     assert!(result.is_err(), "dead cron ingress must fail the route");
@@ -1125,6 +1125,63 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
     }
 }
 
+#[async_trait::async_trait]
+impl lash::persistence::ControlIntentStore for ContendedSessionStoreFactory {
+    async fn begin_session_close(
+        &self,
+        session_id: &SessionId,
+        at_ms: u64,
+    ) -> Result<Option<lash::persistence::ControlIntent>, lash::persistence::StoreError> {
+        lash::persistence::ControlIntentStore::begin_session_close(
+            self.inner.as_ref(),
+            session_id,
+            at_ms,
+        )
+        .await
+    }
+
+    async fn claim_intent_application(
+        &self,
+        id: lash::persistence::ControlIntentId,
+    ) -> Result<lash::persistence::IntentApplication, lash::persistence::StoreError> {
+        lash::persistence::ControlIntentStore::claim_intent_application(self.inner.as_ref(), id)
+            .await
+    }
+
+    async fn acknowledge_intent(
+        &self,
+        id: lash::persistence::ControlIntentId,
+        at_ms: u64,
+    ) -> Result<(), lash::persistence::StoreError> {
+        lash::persistence::ControlIntentStore::acknowledge_intent(self.inner.as_ref(), id, at_ms)
+            .await
+    }
+
+    async fn record_intent_failure(
+        &self,
+        id: lash::persistence::ControlIntentId,
+        error: &str,
+        retryable: bool,
+        at_ms: u64,
+    ) -> Result<lash::persistence::ControlIntent, lash::persistence::StoreError> {
+        lash::persistence::ControlIntentStore::record_intent_failure(
+            self.inner.as_ref(),
+            id,
+            error,
+            retryable,
+            at_ms,
+        )
+        .await
+    }
+
+    async fn load_intent(
+        &self,
+        id: lash::persistence::ControlIntentId,
+    ) -> Result<Option<lash::persistence::ControlIntent>, lash::persistence::StoreError> {
+        lash::persistence::ControlIntentStore::load_intent(self.inner.as_ref(), id).await
+    }
+}
+
 impl MetaLossSessionStoreFactory {
     pub(crate) fn new() -> Self {
         Self {
@@ -1283,6 +1340,63 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
     ) -> Result<(), lash::persistence::StoreError> {
         lash::persistence::SessionStoreFactory::compact_turn_park_feed(self.inner.as_ref(), through)
             .await
+    }
+}
+
+#[async_trait::async_trait]
+impl lash::persistence::ControlIntentStore for MetaLossSessionStoreFactory {
+    async fn begin_session_close(
+        &self,
+        session_id: &SessionId,
+        at_ms: u64,
+    ) -> Result<Option<lash::persistence::ControlIntent>, lash::persistence::StoreError> {
+        lash::persistence::ControlIntentStore::begin_session_close(
+            self.inner.as_ref(),
+            session_id,
+            at_ms,
+        )
+        .await
+    }
+
+    async fn claim_intent_application(
+        &self,
+        id: lash::persistence::ControlIntentId,
+    ) -> Result<lash::persistence::IntentApplication, lash::persistence::StoreError> {
+        lash::persistence::ControlIntentStore::claim_intent_application(self.inner.as_ref(), id)
+            .await
+    }
+
+    async fn acknowledge_intent(
+        &self,
+        id: lash::persistence::ControlIntentId,
+        at_ms: u64,
+    ) -> Result<(), lash::persistence::StoreError> {
+        lash::persistence::ControlIntentStore::acknowledge_intent(self.inner.as_ref(), id, at_ms)
+            .await
+    }
+
+    async fn record_intent_failure(
+        &self,
+        id: lash::persistence::ControlIntentId,
+        error: &str,
+        retryable: bool,
+        at_ms: u64,
+    ) -> Result<lash::persistence::ControlIntent, lash::persistence::StoreError> {
+        lash::persistence::ControlIntentStore::record_intent_failure(
+            self.inner.as_ref(),
+            id,
+            error,
+            retryable,
+            at_ms,
+        )
+        .await
+    }
+
+    async fn load_intent(
+        &self,
+        id: lash::persistence::ControlIntentId,
+    ) -> Result<Option<lash::persistence::ControlIntent>, lash::persistence::StoreError> {
+        lash::persistence::ControlIntentStore::load_intent(self.inner.as_ref(), id).await
     }
 }
 

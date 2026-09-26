@@ -164,7 +164,6 @@ impl lash_core::store::ControlIntentStore for CountingSessionStoreFactory {
         session_id: &SessionId,
         at_ms: u64,
     ) -> std::result::Result<Option<lash_core::store::ControlIntent>, lash_core::StoreError> {
-        use lash_core::store::ControlIntentStore as _;
         self.inner.begin_session_close(session_id, at_ms).await
     }
 
@@ -172,7 +171,6 @@ impl lash_core::store::ControlIntentStore for CountingSessionStoreFactory {
         &self,
         id: lash_core::store::ControlIntentId,
     ) -> std::result::Result<lash_core::store::IntentApplication, lash_core::StoreError> {
-        use lash_core::store::ControlIntentStore as _;
         self.inner.claim_intent_application(id).await
     }
 
@@ -181,7 +179,6 @@ impl lash_core::store::ControlIntentStore for CountingSessionStoreFactory {
         id: lash_core::store::ControlIntentId,
         at_ms: u64,
     ) -> std::result::Result<(), lash_core::StoreError> {
-        use lash_core::store::ControlIntentStore as _;
         self.inner.acknowledge_intent(id, at_ms).await
     }
 
@@ -192,7 +189,6 @@ impl lash_core::store::ControlIntentStore for CountingSessionStoreFactory {
         retryable: bool,
         at_ms: u64,
     ) -> std::result::Result<lash_core::store::ControlIntent, lash_core::StoreError> {
-        use lash_core::store::ControlIntentStore as _;
         self.inner
             .record_intent_failure(id, error, retryable, at_ms)
             .await
@@ -202,7 +198,6 @@ impl lash_core::store::ControlIntentStore for CountingSessionStoreFactory {
         &self,
         id: lash_core::store::ControlIntentId,
     ) -> std::result::Result<Option<lash_core::store::ControlIntent>, lash_core::StoreError> {
-        use lash_core::store::ControlIntentStore as _;
         self.inner.load_intent(id).await
     }
 }
@@ -1093,7 +1088,6 @@ impl lash_core::store::ControlIntentStore for NoByIdLookupFactory {
         session_id: &SessionId,
         at_ms: u64,
     ) -> std::result::Result<Option<lash_core::store::ControlIntent>, lash_core::StoreError> {
-        use lash_core::store::ControlIntentStore as _;
         self.inner.begin_session_close(session_id, at_ms).await
     }
 
@@ -1101,7 +1095,6 @@ impl lash_core::store::ControlIntentStore for NoByIdLookupFactory {
         &self,
         id: lash_core::store::ControlIntentId,
     ) -> std::result::Result<lash_core::store::IntentApplication, lash_core::StoreError> {
-        use lash_core::store::ControlIntentStore as _;
         self.inner.claim_intent_application(id).await
     }
 
@@ -1110,7 +1103,6 @@ impl lash_core::store::ControlIntentStore for NoByIdLookupFactory {
         id: lash_core::store::ControlIntentId,
         at_ms: u64,
     ) -> std::result::Result<(), lash_core::StoreError> {
-        use lash_core::store::ControlIntentStore as _;
         self.inner.acknowledge_intent(id, at_ms).await
     }
 
@@ -1121,7 +1113,6 @@ impl lash_core::store::ControlIntentStore for NoByIdLookupFactory {
         retryable: bool,
         at_ms: u64,
     ) -> std::result::Result<lash_core::store::ControlIntent, lash_core::StoreError> {
-        use lash_core::store::ControlIntentStore as _;
         self.inner
             .record_intent_failure(id, error, retryable, at_ms)
             .await
@@ -1131,7 +1122,6 @@ impl lash_core::store::ControlIntentStore for NoByIdLookupFactory {
         &self,
         id: lash_core::store::ControlIntentId,
     ) -> std::result::Result<Option<lash_core::store::ControlIntent>, lash_core::StoreError> {
-        use lash_core::store::ControlIntentStore as _;
         self.inner.load_intent(id).await
     }
 }
