@@ -1,4 +1,6 @@
 use super::*;
+
+const SEED: u64 = 0x5c_f109;
 use lash_sansio::SessionId;
 
 struct ShutdownRecordingPluginFactory {
@@ -60,8 +62,9 @@ impl lash_core::facade_support::PluginFactory for ShutdownRecordingPluginFactory
 async fn core_shutdown_visits_protocol_then_common_factories_and_continues_after_error()
 -> Result<()> {
     let calls = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double.lash_backend(),
         lash_core::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -111,8 +114,9 @@ fn persisted_tool_state_at_generation(
 
 #[tokio::test]
 async fn plugin_surface_streams_as_semantic_turn_event() -> Result<()> {
-    let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+    let double = restate_double(SEED).await;
+    let core = explicit_ephemeral_facets_with_backend_work(LashCore::standard_builder(
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -123,8 +127,8 @@ async fn plugin_surface_streams_as_semantic_turn_event() -> Result<()> {
     let events = RecordingEvents::default();
 
     session
-        .turn(TurnInput::text("hello"))
-        .stream_to(&events)
+        .send(TurnInput::text("hello"))
+        .output_into(&events)
         .await?;
 
     let surface = events
@@ -158,8 +162,9 @@ async fn embedded_sessions_always_expose_tool_state() -> Result<()> {
 
 #[tokio::test]
 async fn registered_static_tools_appear_in_tool_state() -> Result<()> {
+    let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -176,8 +181,9 @@ async fn registered_static_tools_appear_in_tool_state() -> Result<()> {
 
 #[tokio::test]
 async fn apply_tool_state_and_membership_update_live_catalog() -> Result<()> {
+    let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -229,8 +235,9 @@ async fn apply_tool_state_and_membership_update_live_catalog() -> Result<()> {
 
 #[tokio::test]
 async fn persisted_session_restores_tool_state() -> Result<()> {
+    let double = restate_double(SEED).await;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        memory_backend().await.into(),
+        double.lash_backend(),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -339,10 +346,10 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
             })
             .build()
             .into_handle();
-        let standard_core = explicit_ephemeral_facets(LashCore::standard_builder(
-            memory_backend().await.into(),
-            crate::TurnBudget::Unbounded,
-        ))
+        let double = restate_double(SEED).await;
+        let standard_core = explicit_ephemeral_facets_with_backend_work(
+            LashCore::standard_builder(double.lash_backend(), crate::TurnBudget::Unbounded),
+        )
         .provider(standard_provider)
         .model(mock_model_spec())
         .tools(Arc::new(LongTextTools))
@@ -353,8 +360,8 @@ fn tool_completed_activity_is_canonical_while_model_observation_is_projected() -
         let standard_session = standard_core.session("standard-projection").open().await?;
         let standard_events = RecordingEvents::default();
         let _ = standard_session
-            .turn(TurnInput::text("use tool"))
-            .stream_to(&standard_events)
+            .send(TurnInput::text("use tool"))
+            .output_into(&standard_events)
             .await?;
         let standard_view = standard_events
             .snapshot()
@@ -393,8 +400,8 @@ finish("done");"#,
             let rlm_session = rlm_core.session("rlm-projection").open().await?;
             let rlm_events = RecordingEvents::default();
             let _ = rlm_session
-                .turn(TurnInput::text("use tool"))
-                .stream_to(&rlm_events)
+                .send(TurnInput::text("use tool"))
+                .output_into(&rlm_events)
                 .await?;
             let rlm_view = rlm_events
                 .snapshot()

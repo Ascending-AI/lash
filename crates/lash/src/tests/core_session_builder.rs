@@ -1,6 +1,6 @@
 use super::*;
 #[cfg(feature = "rlm")]
-use crate::rlm::{RlmFinalAnswerFormat, RlmTurnBuilderExt as _};
+use crate::rlm::RlmFinalAnswerFormat;
 use lash_sansio::sync::MutexExt;
 
 #[cfg(test)]
