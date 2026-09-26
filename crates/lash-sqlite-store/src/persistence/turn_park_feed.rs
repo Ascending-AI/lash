@@ -36,6 +36,7 @@ fn insert_turn_park_event_conn(
     park_id: i64,
     kind: &lash_core_execution::store::ParkEventKind,
     at_ms: i64,
+    build_generation: Option<&str>,
 ) -> Result<(), StoreError> {
     let (cause, reason_json) = kind.encode_columns();
     conn.execute(
@@ -51,7 +52,8 @@ fn insert_turn_park_event_conn(
             kind.kind_code(),
             cause,
             reason_json,
-            at_ms
+            at_ms,
+            build_generation
         ],
     )
     .map_err(sqlite_error)?;
@@ -59,13 +61,16 @@ fn insert_turn_park_event_conn(
 }
 
 /// Append the `Parked` event that opens a park, returning the feed sequence
-/// the park record stores as its `park_id`.
+/// the park record stores as its `park_id`. `build_generation` stamps the
+/// drain generation of the build whose checkpoint the park resumes
+/// (FIG-3795).
 pub(crate) fn log_turn_parked_conn(
     conn: &rusqlite::Connection,
     session_id: &SessionId,
     turn_id: &str,
     reason: &lash_core_execution::store::ParkReason,
     at_ms: i64,
+    build_generation: Option<&str>,
 ) -> Result<i64, StoreError> {
     let seq = allocate_turn_park_seq_conn(conn)?;
     insert_turn_park_event_conn(
@@ -78,12 +83,14 @@ pub(crate) fn log_turn_parked_conn(
             reason: reason.clone(),
         },
         at_ms,
+        build_generation,
     )?;
     Ok(seq)
 }
 
 /// Append the event a park clear writes — `Unparked` or `Cancelled` — naming
-/// the park `park_id` the delete returned.
+/// the park `park_id` the delete returned. A closing transition names no
+/// checkpoint, so its `park_build_generation` is NULL.
 pub(crate) fn log_turn_park_closed_conn(
     conn: &rusqlite::Connection,
     session_id: &SessionId,
@@ -93,5 +100,5 @@ pub(crate) fn log_turn_park_closed_conn(
     at_ms: i64,
 ) -> Result<(), StoreError> {
     let seq = allocate_turn_park_seq_conn(conn)?;
-    insert_turn_park_event_conn(conn, seq, session_id, turn_id, park_id, kind, at_ms)
+    insert_turn_park_event_conn(conn, seq, session_id, turn_id, park_id, kind, at_ms, None)
 }

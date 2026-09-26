@@ -611,8 +611,15 @@ where
         let group_key = group.group_key().to_string();
         let handle = EffectGroupHandle::new(&group);
         let shape = EffectGroupShape::from_group(&group, opener)?;
+        // The route the dispatch is sent under is data (FIG-3795 S10): the
+        // opener declares it to the index, which retains it, and the submit
+        // below goes to the recorded route the open response reports.
+        // Generation lanes are FIG-3795 part D; until then the route is the
+        // stable name.
+        let dispatch_route = crate::LashService::EffectGroupDispatch.name().to_string();
         let open_request = EffectGroupOpenRequest {
             shape,
+            dispatch_route: dispatch_route.clone(),
             content_checked: group.reopen() == lash_core::GroupReopen::RetainedContent,
         };
         self.refuse_over_budget_group_open(group.invocation(), &open_request)
@@ -626,7 +633,11 @@ where
         if matches!(probe, EffectGroupProbeResponse::Absent)
             && let Some(position) = self
                 .context
-                .effect_group_preflight(group_key.clone(), group.children().to_vec())
+                .effect_group_preflight(
+                    group_key.clone(),
+                    group.children().to_vec(),
+                    dispatch_route.clone(),
+                )
                 .await
                 .map_err(|error| {
                     effect_group_engine_error("EffectGroupDispatch/preflight", error)
@@ -648,11 +659,15 @@ where
             .await
             .map_err(|error| effect_group_engine_error("EffectGroupIndex/open", error))?;
         match opened {
-            EffectGroupOpenResponse::OpenedFresh | EffectGroupOpenResponse::ReopenedPreparing => {
+            EffectGroupOpenResponse::OpenedFresh { dispatch_route }
+            | EffectGroupOpenResponse::ReopenedPreparing { dispatch_route } => {
                 self.context
-                    .effect_group_submit(EffectGroupDispatchRequest {
-                        group_key: group_key.clone(),
-                    })
+                    .effect_group_submit(
+                        EffectGroupDispatchRequest {
+                            group_key: group_key.clone(),
+                        },
+                        dispatch_route,
+                    )
                     .await
                     .map_err(|error| effect_group_engine_error("EffectGroupDispatch/run", error))?;
                 let request = ready_wait_request(&shape.wait_scope, &group_key)?;

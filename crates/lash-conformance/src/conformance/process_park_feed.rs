@@ -77,6 +77,7 @@ async fn start_attempt(
                 fencing_token: lease.fencing_token,
                 attempt,
                 started_at_ms: lease.claimed_at_epoch_ms,
+                build_generation: None,
                 generation: None,
             },
             &ProcessExecutionWriteAuthority::lease(lease.clone()),
@@ -284,7 +285,23 @@ pub async fn parked_processes_list_by_since_with_filters_and_keyset_pages(
 pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let (id, lease, first) = parked(&registry, cell_divergence()).await;
+    // S8: a park whose writer knows the checkpoint's build generation records
+    // it on the park and stamps the `Parked` feed event it opens.
+    let id = register(&registry, None).await;
+    let (lease, _) = start_attempt(&registry, &id, 1).await;
+    let checkpoint_generation = lash_core::engine::BuildGeneration::for_test("f3795c");
+    let first = registry
+        .park_process_with_authority(
+            &id,
+            crate::store::ProcessParkWrite {
+                reason: cell_divergence(),
+                engine: None,
+                build_generation: Some(checkpoint_generation.clone()),
+            },
+            &ProcessExecutionWriteAuthority::lease(lease.clone()),
+        )
+        .await
+        .expect("park the process");
     let authority = ProcessExecutionWriteAuthority::lease(lease.clone());
     let opened = first
         .park
@@ -296,6 +313,11 @@ pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
     assert!(!first.is_terminal(), "a park is never terminal");
     assert_eq!(first.outcome, None, "a park writes no terminal evidence");
     assert_eq!(
+        opened.build_generation,
+        Some(checkpoint_generation.clone()),
+        "the park keeps the checkpoint's recorded build generation"
+    );
+    assert_eq!(
         transitions_of(&registry, &id).await,
         vec![(
             opened.park_id,
@@ -304,6 +326,18 @@ pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
             }
         )],
         "the first refusal opens the park in the feed"
+    );
+    let feed = registry
+        .process_park_feed(ParkFeedCursor::initial(), limit(256))
+        .await
+        .expect("read the process park feed");
+    assert_eq!(
+        feed.events
+            .iter()
+            .find(|event| event.target == id)
+            .map(|event| event.build_generation.clone()),
+        Some(Some(checkpoint_generation)),
+        "the `Parked` event carries the checkpoint's build generation"
     );
 
     let repeated = registry

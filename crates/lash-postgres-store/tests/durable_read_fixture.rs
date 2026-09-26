@@ -537,6 +537,16 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     .execute(&pool)
     .await
     .expect("re-seed the process change clock the registry recreate dropped");
+    // The park feed's parked event stamps the checkpoint's build generation
+    // (FIG-3795 S5). The refusal fixture's feed predates the column; its rows
+    // predate stamping, so they keep NULL — a missing stamp is never derived.
+    sqlx::raw_sql(
+        "ALTER TABLE lash_process_park_events
+             ADD COLUMN IF NOT EXISTS park_build_generation TEXT;",
+    )
+    .execute(&pool)
+    .await
+    .expect("add the park-event build generation to the refusal fixture catalog");
     sqlx::raw_sql(schema_artifact_owner_ddl())
         .execute(&pool)
         .await

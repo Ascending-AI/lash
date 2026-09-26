@@ -22,6 +22,7 @@ async fn drain_reports_claim_backend_error_and_retries() {
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: 1,
+                build_generation: None,
                 generation: None,
             },
         )
@@ -79,6 +80,7 @@ async fn drain_reports_lease_renewal_backend_error_and_retries() {
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: 1,
+                build_generation: None,
                 generation: None,
             },
         )
@@ -136,6 +138,7 @@ async fn drain_reports_registry_read_error_instead_of_absent() {
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: 1,
+                build_generation: None,
                 generation: None,
             },
         )
@@ -197,6 +200,7 @@ async fn drain_reports_release_failure_over_absent() {
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: 1,
+                build_generation: None,
                 generation: None,
             },
         )
@@ -248,6 +252,7 @@ async fn drain_distinguishes_busy_and_absent_rows() {
                     fencing_token: 0,
                     attempt: 1,
                     started_at_ms: 1,
+                    build_generation: None,
                     generation: None,
                 },
             )
@@ -290,6 +295,7 @@ async fn drain_distinguishes_busy_and_absent_rows() {
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: 1,
+                build_generation: None,
                 generation: None,
             },
         )

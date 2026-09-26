@@ -628,6 +628,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 let since_ms: i64 = row.get(5);
                 let last_refused_ms: i64 = row.get(6);
                 let attempts: i64 = row.get(7);
+                let build_generation: Option<String> = row.get(8);
                 lash_core_execution::store::TurnPark::decode(
                     SessionId::from(session_id),
                     lash_sansio::TurnId::from(turn_id),
@@ -639,6 +640,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                     u64::try_from(since_ms).unwrap_or_default(),
                     u64::try_from(last_refused_ms).unwrap_or_default(),
                     u32::try_from(attempts).unwrap_or(u32::MAX),
+                    build_generation.as_deref(),
                 )
             })
             .collect()
@@ -699,11 +701,25 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             let cause: Option<String> = row.get(5);
             let reason_json: Option<String> = row.get(6);
             let at_ms: i64 = row.get(7);
+            let build_generation: Option<String> = row.get(8);
             let kind = lash_core_execution::store::ParkEventKind::decode_columns(
                 &kind,
                 cause.as_deref(),
                 reason_json.as_deref(),
             )?;
+            let build_generation = build_generation
+                .map(|stored| {
+                    lash_core_execution::engine::BuildGeneration::parse(&stored).map_err(|error| {
+                        StoreError::StoredDataCorrupt {
+                            record_kind: "TurnParkEvent",
+                            message: format!(
+                                "stored turn park event carries park_build_generation \
+                                 `{stored}`: {error}"
+                            ),
+                        }
+                    })
+                })
+                .transpose()?;
             page.events.push(lash_core_execution::store::ParkFeedEvent {
                 seq: u64::try_from(seq).unwrap_or_default(),
                 at_ms: u64::try_from(at_ms).unwrap_or_default(),
@@ -715,6 +731,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                     u64::try_from(park_id).unwrap_or_default(),
                 ),
                 kind,
+                build_generation,
             });
             page.next = lash_core_execution::store::ParkFeedCursor::from_store_sequence(
                 u64::try_from(seq).unwrap_or_default(),

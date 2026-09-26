@@ -1207,6 +1207,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 .bind(&reason_json)
                 .bind(at_ms)
                 .bind(park.reason.retired_executable_generation_key())
+                .bind(park.build_generation.as_ref().map(|g| g.as_str()))
                 .execute(&mut *tx)
                 .await
                 .map_err(store_sqlx_error)?;
@@ -1223,6 +1224,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 since_ms: u64::try_from(since_ms).unwrap_or_default(),
                 last_refused_ms: u64::try_from(at_ms).unwrap_or_default(),
                 attempts: u32::try_from(attempts.saturating_add(1)).unwrap_or(u32::MAX),
+                build_generation: park.build_generation.clone(),
             };
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(recorded);
@@ -1263,6 +1265,7 @@ impl SessionCommitStore for PostgresSessionStore {
             park.turn_id.as_str(),
             &park.reason,
             park.at_ms,
+            park.build_generation.as_ref().map(|g| g.as_str()),
         )
         .await?;
         sqlx::query(turn_parks.insert.sql())
@@ -1275,6 +1278,7 @@ impl SessionCommitStore for PostgresSessionStore {
             .bind(at_ms)
             .bind(1_i64)
             .bind(park.reason.retired_executable_generation_key())
+            .bind(park.build_generation.as_ref().map(|g| g.as_str()))
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -1289,6 +1293,7 @@ impl SessionCommitStore for PostgresSessionStore {
             since_ms: u64::try_from(at_ms).unwrap_or_default(),
             last_refused_ms: u64::try_from(at_ms).unwrap_or_default(),
             attempts: 1,
+            build_generation: park.build_generation.clone(),
         })
     }
 
@@ -1314,6 +1319,7 @@ impl SessionCommitStore for PostgresSessionStore {
             let since_ms: i64 = row.get(5);
             let last_refused_ms: i64 = row.get(6);
             let attempts: i64 = row.get(7);
+            let build_generation: Option<String> = row.get(8);
             lash_core_execution::store::TurnPark::decode(
                 session_id.clone(),
                 turn_id.into(),
@@ -1325,6 +1331,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 u64::try_from(since_ms).unwrap_or_default(),
                 u64::try_from(last_refused_ms).unwrap_or_default(),
                 u32::try_from(attempts).unwrap_or(u32::MAX),
+                build_generation.as_deref(),
             )
         })
         .transpose()

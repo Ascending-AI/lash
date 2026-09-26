@@ -24,7 +24,10 @@
 use std::sync::Arc;
 
 use lash_core::store::{EnginePark, ParkReason, ProcessParkWrite};
-use lash_core::{PluginError, ProcessExecutionWriteAuthority, ProcessRecord, ProcessRegistry};
+use lash_core::{
+    PluginError, ProcessContinuationStore, ProcessExecutionWriteAuthority, ProcessRecord,
+    ProcessRegistry, ProcessSegmentKey,
+};
 use lash_sansio::ProcessId;
 
 use crate::ingress::{RestateAdminClient, RestateInvocationId, RestatePausedInvocation};
@@ -51,6 +54,7 @@ pub struct ProcessParkReconcileReport {
 pub async fn reconcile_process_parks(
     admin: &RestateAdminClient,
     registry: &Arc<dyn ProcessRegistry>,
+    continuations: &Arc<dyn ProcessContinuationStore>,
 ) -> Result<ProcessParkReconcileReport, PluginError> {
     let paused = admin
         .paused_invocations(LashService::ProcessWorkflow.name())
@@ -65,7 +69,7 @@ pub async fn reconcile_process_parks(
         .into_iter()
         .filter(|invocation| invocation.target_handler_name == "run")
     {
-        let Some(record) = segment_process(registry, &invocation).await? else {
+        let Some((record, segment_ordinal)) = segment_process(registry, &invocation).await? else {
             report.unchanged += 1;
             continue;
         };
@@ -77,9 +81,15 @@ pub async fn reconcile_process_parks(
             report.unchanged += 1;
             continue;
         };
+        // The park carries the generation of the build whose checkpoint it
+        // resumes (FIG-3795 S8): the paused segment's recorded admission
+        // stamp, never the reconciling build's own.
+        let build_generation =
+            segment_checkpoint_generation(&record, continuations, segment_ordinal).await?;
         let park = ProcessParkWrite {
             reason: exhausted_reason(&invocation),
             engine: Some(EnginePark::new(invocation.id.clone())),
+            build_generation,
         };
         let parked = registry
             .park_process_with_authority(&record.id, park, &authority)
@@ -178,26 +188,52 @@ fn segment_key_names(key: &str, process_id: &ProcessId) -> bool {
             .is_some_and(|ordinal| ordinal.parse::<u64>().is_ok())
 }
 
-/// The process a paused segment invocation runs, read by its workflow key.
+/// The process a paused segment invocation runs and the segment the key
+/// names, read by its workflow key.
 async fn segment_process(
     registry: &Arc<dyn ProcessRegistry>,
     invocation: &RestatePausedInvocation,
-) -> Result<Option<ProcessRecord>, PluginError> {
+) -> Result<Option<(ProcessRecord, u64)>, PluginError> {
     let Some(key) = invocation.target_service_key.as_deref() else {
         return Ok(None);
     };
     // A later segment's key is `<id>#<ordinal>`; segment 0's is the id. A
     // minted id carries no `#`, so the split is exact, and a key that names
     // no minted id is no process of this registry.
-    let id = match key.split_once('#') {
-        Some((id, ordinal)) if ordinal.parse::<u64>().is_ok() => id,
-        Some(_) => return Ok(None),
-        None => key,
+    let (id, segment_ordinal) = match key.split_once('#') {
+        Some((id, ordinal)) => match ordinal.parse::<u64>() {
+            Ok(ordinal) => (id, ordinal),
+            Err(_) => return Ok(None),
+        },
+        None => (key, 0),
     };
     let Ok(process_id) = ProcessId::parse(id) else {
         return Ok(None);
     };
-    read(registry, &process_id).await
+    Ok(read(registry, &process_id)
+        .await?
+        .map(|record| (record, segment_ordinal)))
+}
+
+/// The generation of the build whose checkpoint the paused segment's park
+/// resumes (FIG-3795 S8): segment 0's is the retained start's stamp, a later
+/// segment's is the marker its admission recorded. `None` when the record
+/// carries no stamp — a missing stamp is never derived.
+async fn segment_checkpoint_generation(
+    record: &ProcessRecord,
+    continuations: &Arc<dyn ProcessContinuationStore>,
+    segment_ordinal: u64,
+) -> Result<Option<lash_core::engine::BuildGeneration>, PluginError> {
+    if segment_ordinal == 0 {
+        return Ok(record
+            .first_started
+            .as_deref()
+            .and_then(|started| started.build_generation.clone()));
+    }
+    Ok(continuations
+        .segment_start(&ProcessSegmentKey::new(record.id.clone(), segment_ordinal))
+        .await?
+        .and_then(|marker| marker.build_generation))
 }
 
 async fn read(

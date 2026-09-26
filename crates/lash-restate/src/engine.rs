@@ -144,7 +144,9 @@ impl RestateEngine {
                 effect_host: &self.effect_host,
                 ingress: RestateIngressClient::new(self.connection.clone()),
                 sessions: self.stores.session_store_factory(),
-                process_workflow: self.process.workflow(processes.into()),
+                process_workflow: self
+                    .process
+                    .workflow(processes.into(), self.build_generation.clone()),
                 session_driver: self.session_work.driver_slot().clone(),
                 build_generation: self.build_generation.clone(),
             },

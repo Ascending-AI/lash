@@ -96,6 +96,7 @@ async fn an_incarnation_started_under_another_generation_parks_before_its_engine
                     fencing_token: 0,
                     attempt: 1,
                     started_at_ms: 1,
+                    build_generation: None,
                     generation: found.clone(),
                 },
             )

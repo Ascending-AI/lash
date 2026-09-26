@@ -889,6 +889,11 @@ impl RestateEffectHostController {
             )));
         }
         let content_checked = group.reopen() == lash_core::GroupReopen::RetainedContent;
+        // The dispatch route is data (FIG-3795 S10): declared at open,
+        // retained by the index, and the submit goes to the route the open
+        // response reports. Generation lanes are FIG-3795 part D; until then
+        // the route is the stable name.
+        let dispatch_route = LashService::EffectGroupDispatch.name().to_string();
         let opened = ingress
             .call_object_json::<_, EffectGroupOpenResponse>(
                 LashService::EffectGroupState.name(),
@@ -896,16 +901,18 @@ impl RestateEffectHostController {
                 "open",
                 &EffectGroupOpenRequest {
                     shape: shape.clone(),
+                    dispatch_route,
                     content_checked,
                 },
             )
             .await
             .map_err(|error| ingress_group_error("EffectGroupIndex/open", error))?;
         match opened {
-            EffectGroupOpenResponse::OpenedFresh | EffectGroupOpenResponse::ReopenedPreparing => {
+            EffectGroupOpenResponse::OpenedFresh { dispatch_route }
+            | EffectGroupOpenResponse::ReopenedPreparing { dispatch_route } => {
                 ingress
                     .send_workflow_json(
-                        LashService::EffectGroupDispatch.name(),
+                        &dispatch_route,
                         &group_key,
                         "run",
                         &EffectGroupDispatchRequest {

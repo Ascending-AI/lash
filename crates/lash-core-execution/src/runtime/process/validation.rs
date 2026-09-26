@@ -568,11 +568,25 @@ pub fn apply_process_event_projection(
                         event.event_type
                     ))
                 })?;
+            let build_generation: Option<crate::engine::BuildGeneration> = event
+                .payload
+                .get("build_generation")
+                .map(|generation| serde_json::from_value(generation.clone()))
+                .transpose()
+                .map_err(|error| {
+                    PluginError::Session(format!(
+                        "process event `{}` has an invalid park build generation: {error}",
+                        event.event_type
+                    ))
+                })?;
             match record.park.as_deref_mut() {
                 Some(park) => {
                     park.reason = reason;
                     if engine.is_some() {
                         park.engine = engine;
+                    }
+                    if build_generation.is_some() {
+                        park.build_generation = build_generation;
                     }
                     park.last_refused_ms = event.occurred_at;
                     park.attempts = park.attempts.saturating_add(1);
@@ -587,6 +601,7 @@ pub fn apply_process_event_projection(
                         attempts: 1,
                         refusing: true,
                         engine,
+                        build_generation,
                     }));
                 }
             }

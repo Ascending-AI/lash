@@ -811,6 +811,9 @@ pub async fn park_turn_of_refused_group_child(
             turn_id: turn_id.clone(),
             reason,
             at_ms,
+            // The checkpoint's build generation is stamped where the
+            // admission record carries it (FIG-3795 E), never derived.
+            build_generation: None,
         })
         .await?;
     crate::operational_metrics::record_work_parked("turn", park.reason.code().as_str());
@@ -873,6 +876,9 @@ pub async fn park_turn_refused_by_generation(
             turn_id: TurnId::from(scope.id()),
             reason: crate::store::ParkReason::session_state_generation_refused(refusal),
             at_ms,
+            // The checkpoint's build generation is stamped where the
+            // admission record carries it (FIG-3795 E), never derived.
+            build_generation: None,
         })
         .await?;
     crate::operational_metrics::record_work_parked("turn", park.reason.code().as_str());

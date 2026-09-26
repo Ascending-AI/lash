@@ -522,6 +522,12 @@ impl ProcessSegmentKey {
 pub struct SegmentStartMarker {
     pub nonce: String,
     pub started_at_ms: u64,
+    /// The drain generation of the build that admitted the segment
+    /// (FIG-3795 S1): the deployment the marker's writer ran as. `None` for a
+    /// substrate whose segments carry no drain generation; a recorded stamp
+    /// is never derived.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_generation: Option<crate::engine::BuildGeneration>,
 }
 
 /// Substrate-scoped durable continuation storage. This is not part of the

@@ -15,25 +15,28 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "turn_park_events";
 
-/// Every column an event row carries, in insert order.
+/// Every column an event row carries, in insert order. `park_build_generation`
+/// is the generation stamped on the checkpoint a `Parked` row records
+/// (FIG-3795): NULL on the closing rows, which name no checkpoint.
 pub const INSERT_COLUMNS: &str =
-    "seq, session_id, turn_id, park_id, kind, cause, reason_json, at_ms";
+    "seq, session_id, turn_id, park_id, kind, cause, reason_json, at_ms, park_build_generation";
 
 /// The read projection a feed page decodes.
 pub const EVENT_COLUMNS: &str =
-    "seq, session_id, turn_id, park_id, kind, cause, reason_json, at_ms";
+    "seq, session_id, turn_id, park_id, kind, cause, reason_json, at_ms, park_build_generation";
 
 crate::statements! {
     /// `turn_park_events` statements both backends issue verbatim.
     pub struct TurnParkEventStatements @ "turn_park_event" {
         /// Append transition `?5`/`?6` of park `?4` in session `?2`'s turn
         /// `?3`, sequenced `?1`, carrying reason `?7` when it is a `Parked`,
-        /// at `?8`.
-        insert_event = "INSERT INTO turn_park_events (seq, session_id, turn_id, park_id, kind, cause, reason_json, at_ms)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)";
+        /// at `?8`, stamped `?9` with the checkpoint's build generation when
+        /// the park's writer records one (FIG-3795).
+        insert_event = "INSERT INTO turn_park_events (seq, session_id, turn_id, park_id, kind, cause, reason_json, at_ms, park_build_generation)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
 
         /// The `?2` oldest events strictly after cursor `?1`, in commit order.
-        select_events_after = "SELECT seq, session_id, turn_id, park_id, kind, cause, reason_json, at_ms
+        select_events_after = "SELECT seq, session_id, turn_id, park_id, kind, cause, reason_json, at_ms, park_build_generation
              FROM turn_park_events
              WHERE seq > ?1
              ORDER BY seq

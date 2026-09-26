@@ -52,7 +52,12 @@ impl SqliteProcessRegistry {
                         params![
                             process_id.as_str(),
                             handover.segment_ordinal as i64,
-                            encoded
+                            encoded,
+                            handover
+                                .written_generation
+                                .as_ref()
+                                .map(|generation| generation.as_str()),
+                            handover.route
                         ],
                     )
                     .map_err(process_sqlite_error)?;
@@ -183,7 +188,25 @@ impl SqliteProcessRegistry {
                             "process `{process_id}` segment {segment_ordinal} has no retained handover to mark started"
                         )));
                     };
-                    serde_json::from_str(&recorded).map_err(process_decode_error)
+                    let recorded: lash_core_execution::SegmentStartMarker =
+                        serde_json::from_str(&recorded).map_err(process_decode_error)?;
+                    // The recorded marker's admission stamp projects onto the
+                    // process row in the same transaction (FIG-3795 S2): the
+                    // drain's live-generation index reads the generation the
+                    // segment's start actually recorded, never a losing
+                    // caller's.
+                    tx.execute(
+                        process_sql().process.set_segment_generation.sql(),
+                        params![
+                            process_id.as_str(),
+                            recorded
+                                .build_generation
+                                .as_ref()
+                                .map(|generation| generation.as_str())
+                        ],
+                    )
+                    .map_err(process_sqlite_error)?;
+                    Ok(recorded)
                 })()))
             })
             .await

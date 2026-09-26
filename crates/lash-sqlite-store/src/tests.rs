@@ -1071,6 +1071,8 @@ async fn segment_handover_persist_keeps_current_input_for_crash_replay() {
     let handover = |segment_ordinal| PersistedSegmentHandover {
         writer: String::new(),
         segment_ordinal,
+        written_generation: Some(lash_core_execution::engine::BuildGeneration::for_test("t0")),
+        route: "LashProcessWorkflow".to_string(),
         handover: lash_core_execution::SegmentHandover {
             reason: lash_core_execution::BoundaryReason::JournalBudget,
             program_hash: "program-v1".to_string(),
@@ -1120,6 +1122,10 @@ async fn terminal_segment_handover_cleanup_removes_continuation_state() {
             PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 1,
+                written_generation: Some(lash_core_execution::engine::BuildGeneration::for_test(
+                    "t0",
+                )),
+                route: "LashProcessWorkflow".to_string(),
                 handover: lash_core_execution::SegmentHandover {
                     reason: lash_core_execution::BoundaryReason::JournalBudget,
                     program_hash: "program-v1".to_string(),

@@ -1192,7 +1192,12 @@ pub(super) async fn process_deployment_driver_and_workflow_share_registry() {
         lash_core::testing::runtime_lease_owner(),
     ))
     .expect("valid test native substrate config");
-    let service = deployment.workflow(worker.into()).serve();
+    let service = deployment
+        .workflow(
+            worker.into(),
+            lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
+        )
+        .serve();
     let discovery = discover_service(&service);
     let endpoint = Endpoint::builder().bind(service).build();
 
@@ -1502,6 +1507,7 @@ pub(super) async fn run_registration_abandons_restarted_owner_bound_without_runn
                 fencing_token: 0,
                 attempt: 1,
                 started_at_ms: 42,
+                build_generation: None,
                 generation: None,
             },
         )

@@ -169,6 +169,11 @@ pub struct EffectGroupStateLiveRecord {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct EffectGroupStateRecord {
     pub(crate) shape_digest: String,
+    /// The route — the full Restate service name — the group's dispatch was
+    /// sent under (FIG-3795 S10), fixed at `open`. Dispatcher self-calls and
+    /// host-side group calls address this recorded route; it is never
+    /// recomputed from the running build.
+    pub(crate) dispatch_route: String,
     pub(crate) lifecycle: EffectGroupLifecycle,
 }
 
@@ -207,6 +212,7 @@ impl EffectGroupStateRecord {
 fn completed_retirement_index_serializes_as_tombstone_only() {
     let record = EffectGroupStateRecord {
         shape_digest: "shape-digest".to_owned(),
+        dispatch_route: "EffectGroupDispatch".to_owned(),
         lifecycle: EffectGroupLifecycle::Retired {
             cleanup: EffectGroupCleanup::Complete,
         },
@@ -216,6 +222,7 @@ fn completed_retirement_index_serializes_as_tombstone_only() {
         serde_json::to_value(record).expect("serialize completed retirement tombstone"),
         serde_json::json!({
             "shape_digest": "shape-digest",
+            "dispatch_route": "EffectGroupDispatch",
             "lifecycle": {
                 "type": "retired",
                 "cleanup": { "type": "complete" }
@@ -229,6 +236,7 @@ fn completed_retirement_index_serializes_as_tombstone_only() {
 fn retired_index_live_read_is_a_typed_terminal_error() {
     let record = EffectGroupStateRecord {
         shape_digest: "shape-digest".to_owned(),
+        dispatch_route: "EffectGroupDispatch".to_owned(),
         lifecycle: EffectGroupLifecycle::Retired {
             cleanup: EffectGroupCleanup::Complete,
         },

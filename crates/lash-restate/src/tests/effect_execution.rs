@@ -14,6 +14,8 @@ pub(super) async fn ingress_sweep_resumes_latest_segment_without_duplicate_segme
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 3,
+                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                route: "LashProcessWorkflow".to_string(),
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
                     program_hash: "program-v1".to_string(),

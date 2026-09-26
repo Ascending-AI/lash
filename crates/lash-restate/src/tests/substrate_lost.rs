@@ -195,6 +195,8 @@ impl HandedOverSegment {
                 lash_core::PersistedSegmentHandover {
                     writer: String::new(),
                     segment_ordinal: 1,
+                    written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                    route: "LashProcessWorkflow".to_string(),
                     handover: lash_core::SegmentHandover {
                         reason: lash_core::BoundaryReason::JournalBudget,
                         program_hash: "program-v1".to_string(),
@@ -463,6 +465,8 @@ pub(super) async fn law_d_a_real_tool_call_is_never_executed_twice() {
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 1,
+                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                route: "LashProcessWorkflow".to_string(),
                 handover: boundary,
             },
         )
@@ -630,6 +634,8 @@ pub(super) async fn a_completed_segment_is_superseded_not_refused() {
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 2,
+                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                route: "LashProcessWorkflow".to_string(),
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
                     program_hash: "program-v1".to_string(),
@@ -1434,6 +1440,8 @@ impl ZombieRoot {
                 &self.process_id,
                 lash_core::PersistedSegmentHandover {
                     segment_ordinal: 1,
+                    written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                    route: "LashProcessWorkflow".to_string(),
                     writer: String::new(),
                     handover: lash_core::SegmentHandover {
                         reason: lash_core::BoundaryReason::JournalBudget,
@@ -1567,6 +1575,8 @@ pub(super) async fn a_handover_put_on_an_ended_process_is_refused_typed() {
             &root.process_id,
             lash_core::PersistedSegmentHandover {
                 segment_ordinal: 1,
+                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                route: "LashProcessWorkflow".to_string(),
                 writer: String::new(),
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,

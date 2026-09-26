@@ -32,6 +32,8 @@ pub async fn process_continuation_store(
     let handover = PersistedSegmentHandover {
         writer: String::new(),
         segment_ordinal: 1,
+        written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+        route: "LashProcessWorkflow".to_string(),
         handover: SegmentHandover {
             reason: BoundaryReason::JournalBudget,
             program_hash: "program-v1".to_string(),
@@ -77,6 +79,8 @@ pub async fn process_continuation_store(
     let written = PersistedSegmentHandover {
         writer: "segment-nonce-a".to_string(),
         segment_ordinal: 2,
+        written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+        route: "LashProcessWorkflow".to_string(),
         handover: SegmentHandover {
             reason: BoundaryReason::JournalBudget,
             program_hash: "program-v1".to_string(),
@@ -126,6 +130,7 @@ pub async fn process_continuation_store(
     let first = crate::SegmentStartMarker {
         nonce: "nonce-first".to_string(),
         started_at_ms: 10,
+        build_generation: Some(lash_core::engine::BuildGeneration::for_test("conformance")),
     };
     assert_eq!(
         store
@@ -148,6 +153,7 @@ pub async fn process_continuation_store(
                 crate::SegmentStartMarker {
                     nonce: "nonce-other".to_string(),
                     started_at_ms: 20,
+                    build_generation: None,
                 },
             )
             .await
@@ -166,6 +172,7 @@ pub async fn process_continuation_store(
                 crate::SegmentStartMarker {
                     nonce: "nonce-unretained".to_string(),
                     started_at_ms: 30,
+                    build_generation: None,
                 },
             )
             .await
@@ -215,6 +222,8 @@ pub async fn process_continuation_store(
     let pruned_handover = PersistedSegmentHandover {
         writer: String::new(),
         segment_ordinal: 1,
+        written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+        route: "LashProcessWorkflow".to_string(),
         handover: SegmentHandover {
             reason: BoundaryReason::JournalBudget,
             program_hash: "pruned-program-v1".to_string(),
@@ -243,6 +252,8 @@ pub async fn process_continuation_store(
             &pruned_process_id,
             PersistedSegmentHandover {
                 segment_ordinal: 2,
+                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                route: "LashProcessWorkflow".to_string(),
                 writer: String::new(),
                 handover: SegmentHandover {
                     reason: BoundaryReason::JournalBudget,
@@ -277,6 +288,7 @@ pub async fn process_continuation_store(
             crate::SegmentStartMarker {
                 nonce: "nonce-after-terminal".to_string(),
                 started_at_ms: 40,
+                build_generation: None,
             },
         )
         .await;

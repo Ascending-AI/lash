@@ -262,6 +262,10 @@ impl LashRuntime {
             turn_id: turn_id.clone(),
             reason,
             at_ms: self.host.core.clock.timestamp_ms(),
+            // The checkpoint's build generation is the generation_fence entry
+            // function's stamp (FIG-3795 E); it is never derived here, so the
+            // column stays NULL until that stamp exists.
+            build_generation: None,
         };
         let reason_code = write.reason.code().as_str();
         let effect_kind = write.reason.effect_kind();

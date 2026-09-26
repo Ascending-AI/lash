@@ -20,6 +20,8 @@ pub(super) async fn persisted_handover_is_change_feed_and_event_invariant() {
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 1,
+                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                route: "LashProcessWorkflow".to_string(),
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
                     program_hash: "program-v1".to_string(),
@@ -63,6 +65,7 @@ pub(super) async fn cancel_redrives_successor_engine() {
             signal_transport.clone(),
         )),
         test_restate_authority_id(),
+        lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
     );
     let registration = rerunnable_registration();
     let process_id = registry
@@ -1080,6 +1083,10 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
                         lash_core::PersistedSegmentHandover {
                             writer: String::new(),
                             segment_ordinal: next,
+                            written_generation: Some(lash_core::engine::BuildGeneration::for_test(
+                                "t0",
+                            )),
+                            route: "LashProcessWorkflow".to_string(),
                             handover: boundary,
                         },
                     )

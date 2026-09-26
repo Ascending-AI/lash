@@ -979,6 +979,8 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
     let persisted = lash_core::PersistedSegmentHandover {
         writer: String::new(),
         segment_ordinal: 1,
+        written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+        route: "LashProcessWorkflow".to_string(),
         handover: lash_core::SegmentHandover {
             reason: lash_core::BoundaryReason::JournalBudget,
             program_hash: "fig788-terminal-program".to_string(),
@@ -1099,6 +1101,8 @@ pub(super) async fn fig2083_a_terminal_segment_whose_handover_is_gone_replays_it
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 1,
+                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                route: "LashProcessWorkflow".to_string(),
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
                     program_hash: "fig788-terminal-program".to_string(),
@@ -1249,6 +1253,8 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 1,
+                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                route: "LashProcessWorkflow".to_string(),
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
                     program_hash: "fig811-effectful-terminal-program".to_string(),

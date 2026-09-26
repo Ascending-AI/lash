@@ -494,6 +494,7 @@ mod tests {
                     fencing_token: 0,
                     attempt: 1,
                     started_at_ms: 1,
+                    build_generation: None,
                     generation: None,
                 },
             )

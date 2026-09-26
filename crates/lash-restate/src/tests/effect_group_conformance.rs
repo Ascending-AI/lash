@@ -948,12 +948,18 @@ impl LiveConformanceHarness {
                 "open",
                 &EffectGroupOpenRequest {
                     shape,
+                    dispatch_route: "EffectGroupDispatch".to_string(),
                     content_checked: false,
                 },
             )
             .await
             .expect("the wait group opens");
-        assert_eq!(opened, EffectGroupOpenResponse::OpenedFresh);
+        assert_eq!(
+            opened,
+            EffectGroupOpenResponse::OpenedFresh {
+                dispatch_route: "EffectGroupDispatch".to_owned()
+            }
+        );
         let adopted: EffectGroupProbeAdoptResponse = ingress
             .call_object_json(
                 "EffectGroupIndex",
@@ -1089,12 +1095,18 @@ impl LiveConformanceHarness {
                 "open",
                 &EffectGroupOpenRequest {
                     shape: shape.clone(),
+                    dispatch_route: "EffectGroupDispatch".to_string(),
                     content_checked: false,
                 },
             )
             .await
             .expect("the admitting group opens");
-        assert_eq!(opened, EffectGroupOpenResponse::OpenedFresh);
+        assert_eq!(
+            opened,
+            EffectGroupOpenResponse::OpenedFresh {
+                dispatch_route: "EffectGroupDispatch".to_owned()
+            }
+        );
         let _: EffectGroupProbeAdoptResponse = ingress
             .call_object_json(
                 "EffectGroupIndex",
@@ -1285,12 +1297,18 @@ impl LiveConformanceHarness {
                 "open",
                 &EffectGroupOpenRequest {
                     shape: shape.clone(),
+                    dispatch_route: "EffectGroupDispatch".to_string(),
                     content_checked: false,
                 },
             )
             .await
             .expect("the witness group opens");
-        assert_eq!(opened, EffectGroupOpenResponse::OpenedFresh);
+        assert_eq!(
+            opened,
+            EffectGroupOpenResponse::OpenedFresh {
+                dispatch_route: "EffectGroupDispatch".to_owned()
+            }
+        );
         ingress
             .send_workflow_json(
                 "EffectGroupDispatch",
@@ -1575,12 +1593,18 @@ async fn run_design_witnesses(
             "open",
             &EffectGroupOpenRequest {
                 shape: shape.clone(),
+                dispatch_route: "EffectGroupDispatch".to_string(),
                 content_checked: false,
             },
         )
         .await
         .expect("witness group opens");
-    assert_eq!(opened, EffectGroupOpenResponse::OpenedFresh);
+    assert_eq!(
+        opened,
+        EffectGroupOpenResponse::OpenedFresh {
+            dispatch_route: "EffectGroupDispatch".to_owned()
+        }
+    );
     let request = EffectGroupDispatchRequest {
         group_key: group_key.clone(),
     };
@@ -1628,6 +1652,7 @@ async fn run_design_witnesses(
             "open",
             &EffectGroupOpenRequest {
                 shape: shape.clone(),
+                dispatch_route: "EffectGroupDispatch".to_string(),
                 content_checked: false,
             },
         )
@@ -1719,12 +1744,18 @@ async fn run_design_witnesses(
             "open",
             &EffectGroupOpenRequest {
                 shape: admission_shape.clone(),
+                dispatch_route: "EffectGroupDispatch".to_string(),
                 content_checked: false,
             },
         )
         .await
         .expect("admission witness opens");
-    assert_eq!(opened, EffectGroupOpenResponse::OpenedFresh);
+    assert_eq!(
+        opened,
+        EffectGroupOpenResponse::OpenedFresh {
+            dispatch_route: "EffectGroupDispatch".to_owned()
+        }
+    );
     let adopted: EffectGroupProbeAdoptResponse = ingress
         .call_object_json(
             "EffectGroupIndex",
@@ -1831,6 +1862,7 @@ async fn run_design_witnesses(
             "open",
             &EffectGroupOpenRequest {
                 shape: gap_shape.clone(),
+                dispatch_route: "EffectGroupDispatch".to_string(),
                 content_checked: false,
             },
         )
@@ -1887,12 +1919,18 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
             "open",
             &EffectGroupOpenRequest {
                 shape: shape.clone(),
+                dispatch_route: "EffectGroupDispatch".to_string(),
                 content_checked: false,
             },
         )
         .await
         .expect("drained-wake witness opens");
-    assert_eq!(opened, EffectGroupOpenResponse::OpenedFresh);
+    assert_eq!(
+        opened,
+        EffectGroupOpenResponse::OpenedFresh {
+            dispatch_route: "EffectGroupDispatch".to_owned()
+        }
+    );
     let mut commit_seqs = Vec::new();
     for child in &children {
         let committed: EffectGroupCommitChildResponse = ingress
@@ -1962,6 +2000,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
             "open",
             &EffectGroupOpenRequest {
                 shape: stale_shape.clone(),
+                dispatch_route: "EffectGroupDispatch".to_string(),
                 content_checked: false,
             },
         )

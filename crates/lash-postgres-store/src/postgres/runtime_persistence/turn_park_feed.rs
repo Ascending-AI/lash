@@ -36,6 +36,7 @@ async fn insert_turn_park_event_tx(
     park_id: i64,
     kind: &lash_core_execution::store::ParkEventKind,
     at_ms: u64,
+    build_generation: Option<&str>,
 ) -> Result<(), StoreError> {
     let (cause, reason_json) = kind.encode_columns();
     sqlx::query(
@@ -52,6 +53,7 @@ async fn insert_turn_park_event_tx(
     .bind(cause)
     .bind(reason_json)
     .bind(i64::try_from(at_ms).unwrap_or(i64::MAX))
+    .bind(build_generation)
     .execute(&mut **tx)
     .await
     .map_err(store_sqlx_error)?;
@@ -59,13 +61,16 @@ async fn insert_turn_park_event_tx(
 }
 
 /// Append the `Parked` event that opens a park, returning the feed sequence
-/// the park record stores as its `park_id`.
+/// the park record stores as its `park_id`. `build_generation` stamps the
+/// drain generation of the build whose checkpoint the park resumes
+/// (FIG-3795).
 pub(crate) async fn log_turn_parked_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     turn_id: &str,
     reason: &lash_core_execution::store::ParkReason,
     at_ms: u64,
+    build_generation: Option<&str>,
 ) -> Result<i64, StoreError> {
     let seq = allocate_turn_park_seq_tx(tx).await?;
     insert_turn_park_event_tx(
@@ -78,13 +83,15 @@ pub(crate) async fn log_turn_parked_tx(
             reason: reason.clone(),
         },
         at_ms,
+        build_generation,
     )
     .await?;
     Ok(seq)
 }
 
 /// Append the event a park clear writes — `Unparked` or `Cancelled` — naming
-/// the park `park_id` the delete returned.
+/// the park `park_id` the delete returned. A closing transition names no
+/// checkpoint, so its `park_build_generation` is NULL.
 pub(crate) async fn log_turn_park_closed_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
@@ -94,5 +101,5 @@ pub(crate) async fn log_turn_park_closed_tx(
     at_ms: u64,
 ) -> Result<(), StoreError> {
     let seq = allocate_turn_park_seq_tx(tx).await?;
-    insert_turn_park_event_tx(tx, seq, session_id, turn_id, park_id, kind, at_ms).await
+    insert_turn_park_event_tx(tx, seq, session_id, turn_id, park_id, kind, at_ms, None).await
 }

@@ -16,11 +16,10 @@
 pub const TABLE: &str = "turn_parks";
 
 /// Every column a park row carries, in insert order.
-pub const INSERT_COLUMNS: &str = "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, park_executable_generation";
+pub const INSERT_COLUMNS: &str = "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, park_executable_generation, park_build_generation";
 
 /// The stored record's read projection.
-pub const RECORD_COLUMNS: &str =
-    "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts";
+pub const RECORD_COLUMNS: &str = "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, park_build_generation";
 
 /// The grouped count `count_parks_by_reason` reads for drain status.
 ///
@@ -47,17 +46,21 @@ crate::statements! {
         /// code, `?5` the reason payload, `?6` the park instant, `?7` the same
         /// instant as `last_refused_ms`, `?8` = 1 attempt, `?9` the retired
         /// generation the reason names (`park_executable_generation`, NULL for any other
-        /// reason; FIG-3571).
-        insert = "INSERT INTO turn_parks (session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, park_executable_generation)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)";
+        /// reason; FIG-3571), `?10` the build generation of the parked
+        /// checkpoint (`park_build_generation`, NULL when the writer records
+        /// none; FIG-3795).
+        insert = "INSERT INTO turn_parks (session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, park_executable_generation, park_build_generation)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)";
 
         /// Re-park of the same turn `?2` in session `?1`: `park_id` and
         /// `since_ms` are kept, the reason refreshes, `last_refused_ms` moves
-        /// to `?5`, `park_executable_generation` to `?6`, and `attempts` counts the
+        /// to `?5`, `park_executable_generation` to `?6`,
+        /// `park_build_generation` to `?7`, and `attempts` counts the
         /// refusal.
         update_same_turn = "UPDATE turn_parks
              SET reason_code = ?3, reason_json = ?4,
-                 last_refused_ms = ?5, attempts = attempts + 1, park_executable_generation = ?6
+                 last_refused_ms = ?5, attempts = attempts + 1, park_executable_generation = ?6,
+                 park_build_generation = ?7
              WHERE session_id = ?1 AND turn_id = ?2";
 
         /// Drop the park a different turn `?2` supersedes in session `?1`,
@@ -66,7 +69,7 @@ crate::statements! {
              WHERE session_id = ?1 AND turn_id <> ?2
              RETURNING turn_id, park_id";
 
-        select_by_session = "SELECT session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts
+        select_by_session = "SELECT session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, park_build_generation
              FROM turn_parks
              WHERE session_id = ?1";
 

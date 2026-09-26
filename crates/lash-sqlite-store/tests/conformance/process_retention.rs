@@ -319,16 +319,16 @@ fn sqlite_status_list_literals_derive_from_the_shared_constant() {
          two observer-scoped listings"
     );
     // FIG-2844 generated every query-site predicate from `ProcessStatus`, so
-    // the registry sources hold none: the only literals left are the three
+    // the registry sources hold none: the only literals left are the four
     // partial-index predicates in the DDL - the live worklist, the retention
-    // complement and the parent-end pending-cancel scan - whose vocabulary
-    // FIG-2811 owns. `store_statements_never_retype_a_lifecycle_literal`
-    // (lash-sim) is the gate that keeps a query-site literal from coming back;
-    // this count is the inventory that keeps a new DDL literal from arriving
-    // unnoticed.
+    // complement, the parent-end pending-cancel scan, and FIG-3795's
+    // live-generation route index - whose vocabulary FIG-2811 owns.
+    // `store_statements_never_retype_a_lifecycle_literal` (lash-sim) is the
+    // gate that keeps a query-site literal from coming back; this count is
+    // the inventory that keeps a new DDL literal from arriving unnoticed.
     assert_eq!(
-        live_sites, 3,
-        "expected exactly three live-status list literal sites in the SQLite backend, \
+        live_sites, 4,
+        "expected exactly four live-status list literal sites in the SQLite backend, \
          all partial indexes in schema.rs; a query-site literal belongs in a \
          generated fragment, not here"
     );

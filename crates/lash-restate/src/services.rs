@@ -149,6 +149,7 @@ pub(crate) fn bind_lash_services<R: RestateProcessRunner>(
                 ingress.clone(),
                 RunRetryPolicy::new(),
                 Arc::clone(&sessions),
+                LashService::EffectGroupDispatch.name().to_string(),
             )),
             // Both run lash turns: a parked root fails its attempt
             // retryably, and the handler pauses after its attempt budget

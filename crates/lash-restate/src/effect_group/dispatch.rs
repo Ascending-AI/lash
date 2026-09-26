@@ -38,6 +38,10 @@ pub(crate) struct EffectGroupDispatch {
     /// The catalog a session-scope child reads its owning session's state
     /// generation from at invocation entry (FIG-3619).
     pub(super) sessions: Arc<dyn lash_core::SessionStoreFactory>,
+    /// The service name this dispatcher is bound under (FIG-3795 S10): the
+    /// route its self-calls — the child sends — address, recorded on each
+    /// group's index record at `open`.
+    pub(super) route: String,
 }
 
 impl EffectGroupDispatch {
@@ -46,6 +50,7 @@ impl EffectGroupDispatch {
         ingress: RestateIngressClient,
         infinite_retry_policy: RunRetryPolicy,
         sessions: Arc<dyn lash_core::SessionStoreFactory>,
+        route: String,
     ) -> Self {
         Self {
             executors: host.group_executors(),
@@ -53,6 +58,7 @@ impl EffectGroupDispatch {
             authority_id: host.authority_id().clone(),
             infinite_retry_policy,
             sessions,
+            route,
         }
     }
 }
@@ -257,14 +263,23 @@ impl EffectGroupDispatch {
         let mut calls = Vec::with_capacity(children.len());
         for (position, envelope) in children.into_iter().enumerate() {
             let replay_key = shape.replay_key(position)?.to_string();
+            // A child call goes to this dispatcher's own route (FIG-3795
+            // S10): the recorded name the index retains for the group's
+            // dispatch, never a name recomputed from the running build.
             let call = ctx
-                .workflow_client::<EffectGroupDispatchClient>(request.group_key.clone())
-                .child(Json(EffectGroupChildRequest {
-                    group_key: request.group_key.clone(),
-                    shape: shape.clone(),
-                    position,
-                    envelope,
-                }))
+                .request::<Json<EffectGroupChildRequest>, Json<()>>(
+                    restate_sdk::context::RequestTarget::workflow(
+                        self.route.clone(),
+                        request.group_key.clone(),
+                        "child",
+                    ),
+                    Json(EffectGroupChildRequest {
+                        group_key: request.group_key.clone(),
+                        shape: shape.clone(),
+                        position,
+                        envelope,
+                    }),
+                )
                 .idempotency_key(replay_key.clone())
                 .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key)
                 .call();

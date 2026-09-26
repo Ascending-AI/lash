@@ -54,6 +54,7 @@ async fn started(registry: &Arc<dyn ProcessRegistry>, label: &str) -> (ProcessId
                 attempt: 1,
                 started_at_ms: lease.claimed_at_epoch_ms,
                 generation: None,
+                build_generation: None,
             },
             &ProcessExecutionWriteAuthority::lease(lease.clone()),
         )

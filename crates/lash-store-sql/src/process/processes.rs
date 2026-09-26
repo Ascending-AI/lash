@@ -21,8 +21,11 @@ pub const INSERT_COLUMNS: &str = "process_id, start_key, originator_id,
 
 /// The parked projection's columns, written by every fold that changes the
 /// park and `NULL` at registration (FIG-3659 NOW-B). A `retired_generation`
-/// park also names its retired executable generation (FIG-3571).
-pub const PARKED_COLUMNS: &str = "parked_since_ms, parked_reason_code, park_executable_generation";
+/// park also names its retired executable generation (FIG-3571); a park whose
+/// writer records one names the build generation of the checkpoint it resumes
+/// (FIG-3795).
+pub const PARKED_COLUMNS: &str =
+    "parked_since_ms, parked_reason_code, park_executable_generation, park_build_generation";
 
 /// The grouped read `summarize_parked` answers drain and the parked-work
 /// gauges from: each reason's live park count and its oldest `since_ms`, and
@@ -103,11 +106,21 @@ crate::statements! {
         /// `?8`/`?9` are the parked projection: the live park's `since_ms`
         /// and reason code, both `NULL` while the process is not parked.
         /// `?10` is the retired executable generation a `retired_generation`
-        /// park names, `NULL` for any other park (FIG-3571).
+        /// park names, `NULL` for any other park (FIG-3571). `?11` is the
+        /// build generation of the parked checkpoint, `NULL` when the park's
+        /// writer records none (FIG-3795).
         update_mutable_columns = "UPDATE processes
              SET updated_at_ms = ?2, change_seq = ?3, status = ?4,
                  last_event_sequence = ?5, cancel_requested_at_ms = ?6, record_json = ?7,
-                 parked_since_ms = ?8, parked_reason_code = ?9, park_executable_generation = ?10
+                 parked_since_ms = ?8, parked_reason_code = ?9, park_executable_generation = ?10,
+                 park_build_generation = ?11
+             WHERE process_id = ?1";
+
+        /// Record the build generation of the build that admitted the
+        /// process's current segment (FIG-3795 S2): written in the same
+        /// transaction as the segment's start stamp — `first_started` for
+        /// segment 0, the retained handover's start marker past it.
+        set_segment_generation = "UPDATE processes SET segment_generation = ?2
              WHERE process_id = ?1";
 
         /// Live process parks per reason code, with each code's oldest

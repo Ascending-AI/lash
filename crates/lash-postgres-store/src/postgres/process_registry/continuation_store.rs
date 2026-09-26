@@ -25,6 +25,13 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
             .bind(process_id.as_str())
             .bind(handover.segment_ordinal as i64)
             .bind(encoded)
+            .bind(
+                handover
+                    .written_generation
+                    .as_ref()
+                    .map(|generation| generation.as_str()),
+            )
+            .bind(handover.route.as_str())
             .execute(&mut *tx)
             .await
             .map_err(plugin_sqlx_error)?;
@@ -117,13 +124,30 @@ impl ProcessContinuationStore for PostgresProcessRegistry {
                 .fetch_optional(&mut *tx)
                 .await
                 .map_err(plugin_sqlx_error)?;
-        tx.commit().await.map_err(plugin_sqlx_error)?;
         let Some(Some(recorded)) = started else {
             return Err(PluginError::Session(format!(
                 "process `{process_id}` segment {segment_ordinal} has no retained handover to mark started"
             )));
         };
-        serde_json::from_str(&recorded).map_err(process_decode_error)
+        let recorded: lash_core_execution::SegmentStartMarker =
+            serde_json::from_str(&recorded).map_err(process_decode_error)?;
+        // The recorded marker's admission stamp projects onto the process
+        // row in the same transaction (FIG-3795 S2): the drain's
+        // live-generation index reads the generation the segment's start
+        // actually recorded, never a losing caller's.
+        sqlx::query(process_sql().process.set_segment_generation.sql())
+            .bind(process_id.as_str())
+            .bind(
+                recorded
+                    .build_generation
+                    .as_ref()
+                    .map(|generation| generation.as_str()),
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
+        tx.commit().await.map_err(plugin_sqlx_error)?;
+        Ok(recorded)
     }
 
     async fn retire_segment_handovers_through(

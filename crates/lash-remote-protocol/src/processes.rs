@@ -474,6 +474,10 @@ pub struct RemoteProcessPark {
     /// parked the process itself.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine: Option<String>,
+    /// The drain generation of the build whose checkpoint the park resumes
+    /// (FIG-3795 S8), spelled as the store holds it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_generation: Option<String>,
 }
 
 impl RemoteProcessPark {
@@ -1073,6 +1077,10 @@ pub struct RemoteProcessStarted {
     /// (FIG-3571), spelled as the store holds it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<String>,
+    /// The drain generation of the build that admitted the incarnation
+    /// (FIG-3795 S1), spelled as the store holds it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_generation: Option<String>,
 }
 
 const fn remote_first_process_attempt() -> u32 {

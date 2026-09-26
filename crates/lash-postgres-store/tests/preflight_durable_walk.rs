@@ -574,8 +574,8 @@ async fn seed_segment(
     scratch
         .apply(&format!(
             "INSERT INTO lash_process_segment_handovers
-                 (process_id, segment_ordinal, handover_json)
-             VALUES ('{process_id}', {ordinal}, '{handover}')"
+                 (process_id, segment_ordinal, handover_json, route)
+             VALUES ('{process_id}', {ordinal}, '{handover}', 'LashProcessWorkflow')"
         ))
         .await;
 }

@@ -511,7 +511,11 @@ impl SqliteProcessRegistry {
                 record
                     .park
                     .as_deref()
-                    .and_then(|park| park.reason.retired_executable_generation_key())
+                    .and_then(|park| park.reason.retired_executable_generation_key()),
+                record.park.as_deref().and_then(|park| park
+                    .build_generation
+                    .as_ref()
+                    .map(|g| g.as_str().to_string()))
             ],
         )
         .map_err(process_sqlite_error)?;
@@ -738,6 +742,10 @@ impl SqliteProcessRegistry {
                     &record.park_key(),
                     &park_transitions,
                     occurred_at_ms,
+                    record
+                        .park
+                        .as_deref()
+                        .and_then(|park| park.build_generation.as_ref().map(|g| g.as_str())),
                 )?;
                 // A process that just reached a terminal status is an ended
                 // parent scope: its ledger row rides the same transaction as

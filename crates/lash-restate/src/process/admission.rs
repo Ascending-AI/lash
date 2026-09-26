@@ -140,6 +140,7 @@ pub struct SegmentStarted {
     segment_ordinal: u64,
     authority: ProcessExecutionWriteAuthority,
     generation: Option<Box<lash_core::ExecutableGeneration>>,
+    build_generation: Option<Box<lash_core::engine::BuildGeneration>>,
 }
 
 impl SegmentStarted {
@@ -148,6 +149,7 @@ impl SegmentStarted {
         segment_ordinal: u64,
         execution_id: String,
         generation: Option<lash_core::ExecutableGeneration>,
+        build_generation: Option<lash_core::engine::BuildGeneration>,
     ) -> Self {
         let authority =
             ProcessExecutionWriteAuthority::invocation(process_id.clone(), execution_id);
@@ -156,6 +158,7 @@ impl SegmentStarted {
             segment_ordinal,
             authority,
             generation: generation.map(Box::new),
+            build_generation: build_generation.map(Box::new),
         }
     }
 
@@ -163,6 +166,13 @@ impl SegmentStarted {
     /// the runner's engine must run the segment as (FIG-3571).
     pub fn generation(&self) -> Option<&lash_core::ExecutableGeneration> {
         self.generation.as_deref()
+    }
+
+    /// The drain generation the segment's start marker recorded (FIG-3795
+    /// S1): the build that admitted it, which the segment's checkpoint
+    /// resumes under — never the build now executing.
+    pub fn build_generation(&self) -> Option<&lash_core::engine::BuildGeneration> {
+        self.build_generation.as_deref()
     }
 
     /// The process scope the segment's effects are admitted under.
@@ -199,6 +209,7 @@ impl SegmentStarted {
                 ProcessExecutionWriteAuthority::invocation(process_id, "test-segment-execution")
             }),
             generation: None,
+            build_generation: None,
         }
     }
 }
@@ -255,6 +266,12 @@ enum StartOutcome {
         /// to the stamp it was admitted under.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         generation: Option<lash_core::ExecutableGeneration>,
+        /// The drain generation the segment's start marker recorded
+        /// (FIG-3795 S1), journaled with the start so a replay — and any
+        /// park the segment writes — sees the checkpoint's stamp, not the
+        /// build now executing.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        build_generation: Option<lash_core::engine::BuildGeneration>,
     },
     SubstrateLost {
         lost: ProcessStarted,
@@ -362,6 +379,11 @@ async fn read_record(
 /// generation exactly as the runner would; the start returns the stamp the
 /// record holds, and a segment whose runner names another is parked before
 /// its body runs.
+///
+/// `build_generation` is the drain generation of the build this admission
+/// runs under (FIG-3795 S1): the marker stamps it, and the start journals it
+/// so the returned proof carries the recorded stamp, never the executing
+/// build's own.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn admit_segment(
     ctx: &WorkflowContext<'_>,
@@ -370,6 +392,7 @@ pub(crate) async fn admit_segment(
     process_id: &lash_sansio::ProcessId,
     segment_ordinal: u64,
     generation: Option<lash_core::ExecutableGeneration>,
+    build_generation: lash_core::engine::BuildGeneration,
     effect_budget: impl Fn() -> u64 + Send + Sync + 'static,
 ) -> Result<SegmentAdmission, HandlerError> {
     let effect_budget = Arc::new(effect_budget);
@@ -491,7 +514,14 @@ pub(crate) async fn admit_segment(
             let nonce = nonce.clone();
             async move {
                 if segment_ordinal == 0 {
-                    start_root_segment(&registry, &process_id, nonce, generation.clone()).await
+                    start_root_segment(
+                        &registry,
+                        &process_id,
+                        nonce,
+                        generation.clone(),
+                        build_generation.clone(),
+                    )
+                    .await
                 } else {
                     start_later_segment(
                         &registry,
@@ -499,6 +529,7 @@ pub(crate) async fn admit_segment(
                         &process_id,
                         segment_ordinal,
                         nonce,
+                        build_generation.clone(),
                     )
                     .await
                 }
@@ -513,8 +544,15 @@ pub(crate) async fn admit_segment(
             execution_id,
             process_id,
             generation,
+            build_generation,
         } => Ok(SegmentAdmission::Started(Box::new(AdmittedSegment {
-            started: SegmentStarted::new(process_id, segment_ordinal, execution_id, generation),
+            started: SegmentStarted::new(
+                process_id,
+                segment_ordinal,
+                execution_id,
+                generation,
+                build_generation,
+            ),
             handover,
             policy,
             writer,
@@ -532,6 +570,7 @@ async fn start_root_segment(
     process_id: &lash_sansio::ProcessId,
     nonce: String,
     generation: Option<lash_core::ExecutableGeneration>,
+    build_generation: lash_core::engine::BuildGeneration,
 ) -> Result<StartOutcome, HandlerError> {
     let record = read_record(registry, process_id).await?;
     if record.disposition == lash_core::RecoveryContract::ExternallyOwned {
@@ -553,6 +592,7 @@ async fn start_root_segment(
                     execution_id: nonce,
                     process_id: record.id.clone(),
                     generation: existing.generation.clone(),
+                    build_generation: existing.build_generation.clone(),
                 }
             } else {
                 StartOutcome::SubstrateLost {
@@ -570,6 +610,7 @@ async fn start_root_segment(
     };
     started.started_at_ms = super::restate_now_ms();
     started.generation = generation.clone();
+    started.build_generation = Some(build_generation.clone());
     match registry
         .record_first_started_with_authority(process_id, started, &authority)
         .await
@@ -580,6 +621,7 @@ async fn start_root_segment(
             execution_id: nonce,
             process_id: record.id.clone(),
             generation,
+            build_generation: Some(build_generation),
         }),
         lash_core::ProcessStartOutcome::AlreadyStarted { current, .. }
         | lash_core::ProcessStartOutcome::AttemptsExhausted { current, .. } => {
@@ -601,6 +643,7 @@ async fn start_later_segment(
     process_id: &lash_sansio::ProcessId,
     segment_ordinal: u64,
     nonce: String,
+    build_generation: lash_core::engine::BuildGeneration,
 ) -> Result<StartOutcome, HandlerError> {
     let record = read_record(registry, process_id).await?;
     let root = match retained_start(&record, segment_ordinal) {
@@ -628,6 +671,7 @@ async fn start_later_segment(
             SegmentStartMarker {
                 nonce: nonce.clone(),
                 started_at_ms: super::restate_now_ms(),
+                build_generation: Some(build_generation.clone()),
             },
         )
         .await
@@ -654,6 +698,9 @@ async fn start_later_segment(
             execution_id,
             process_id: record.id.clone(),
             generation: root.generation.clone(),
+            // The recorded marker's stamp, not the executing build's: a
+            // redrive returns the same proof the first execution journaled.
+            build_generation: recorded.build_generation,
         }
     } else {
         StartOutcome::SubstrateLost { lost: root }

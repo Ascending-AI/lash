@@ -22,6 +22,12 @@ pub struct ProcessStarted {
     /// `None` for an engine whose runs carry no generation.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub generation: Option<crate::ExecutableGeneration>,
+    /// The drain generation of the build that admitted this execution
+    /// (FIG-3795 S1): the build the admitting deployment ran as, stamped once
+    /// at the first claim and never derived on recovery. `None` for a
+    /// substrate whose runs carry no drain generation.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_generation: Option<crate::engine::BuildGeneration>,
 }
 
 const fn first_process_attempt() -> u32 {
@@ -139,6 +145,7 @@ impl ProcessExecutionWriteAuthority {
                 attempt: *attempt,
                 started_at_ms: 0,
                 generation: None,
+                build_generation: None,
             }),
             Self::Invocation { attempt: None, .. } => None,
         }

@@ -165,6 +165,12 @@ pub(crate) async fn save_process_tx(
                 .as_deref()
                 .and_then(|park| park.reason.retired_executable_generation_key()),
         )
+        .bind(
+            record
+                .park
+                .as_deref()
+                .and_then(|park| park.build_generation.as_ref().map(|g| g.as_str())),
+        )
         .execute(&mut **tx)
         .await
         .map_err(plugin_sqlx_error)?;
@@ -499,6 +505,10 @@ async fn stage_process_event_append_tx(
                 &record.park_key(),
                 &park_transitions,
                 occurred_at_ms,
+                record
+                    .park
+                    .as_deref()
+                    .and_then(|park| park.build_generation.as_ref().map(|g| g.as_str())),
             )
             .await?;
             // A process that just reached a terminal status is an ended parent
