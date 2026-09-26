@@ -88,7 +88,9 @@ mod tests {
                     timestamp: node.timestamp.clone(),
                 })
                 .collect();
-            let manifest = commit.checkpoint.manifest()?;
+            let manifest = commit
+                .checkpoint
+                .manifest(super::super::FleetFormat::current())?;
             Ok(RuntimeCommitReceipt {
                 schema_version: crate::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
                 head_revision: commit.expected_head_revision + u64::from(self.advances_revision),

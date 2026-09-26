@@ -105,11 +105,15 @@ impl PostgresSessionStore {
             let Some(bytes) = bytes else {
                 continue;
             };
-            let manifest: SessionCheckpoint = decode_versioned_msgpack_record(
-                &bytes,
-                "SessionCheckpoint",
-                lash_core_execution::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
-            )?;
+            let manifest: SessionCheckpoint =
+                lash_core_execution::store::decode_versioned_msgpack_record_for_fleet(
+                    &bytes,
+                    "SessionCheckpoint",
+                    lash_core_execution::surface_format!(
+                        lash_core_execution::store::SESSION_CHECKPOINT_SCHEMA_VERSION
+                    ),
+                    self.fleet_format,
+                )?;
             // GC interprets only the root's ref graph, never component bodies.
             // Retain refs even when a newer writer used an unknown component
             // codec so an older binary cannot turn incompatibility into loss.

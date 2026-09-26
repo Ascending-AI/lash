@@ -27,6 +27,7 @@ use super::direct_turn_acceptance::{
     JournalLayer, acceptance_runtime_for_session, direct_input, text_response,
 };
 use crate::admit;
+use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
@@ -191,7 +192,9 @@ async fn admit_checkpoint_row(
             let process_id = crate::ProcessId::fixture(&format!("{SESSION_ID}-producer"));
             let wake_id = format!("wake:{SESSION_ID}:1");
             let wake = crate::ProcessWakeDelivery {
-                version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+                version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
+                    PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+                )),
                 wake_id: wake_id.clone(),
                 target_session_id: SessionId::from(SESSION_ID),
                 process_id: process_id.clone(),

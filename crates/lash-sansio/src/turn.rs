@@ -67,6 +67,7 @@ pub fn build_turn<M: TurnProtocol>(input: SansIoTurnInput<M>) -> PreparedTurnMac
             session_id: input.session_id,
             agent_frame_id: input.agent_frame_id,
             turn_id: input.turn_id,
+            writer_formats: Arc::clone(&input.turn_driver_preamble.writer_formats),
             emit_llm_trace: input.emit_llm_trace,
             termination: input.termination,
         },
@@ -162,6 +163,7 @@ mod tests {
             tool_names_fingerprint: tool_catalog.tool_names_fingerprint(),
             execution_prompt: Arc::from("test prompt"),
             prompt_contributions: Vec::new(),
+            writer_formats: crate::build_newest_writer_formats(),
         });
         let template = default_prompt_template();
         let prompt_contributions =

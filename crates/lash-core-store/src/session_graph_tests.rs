@@ -455,7 +455,9 @@ fn storage_body_excludes_indexed_graph_identity_and_parent_edge() {
         },
     };
 
-    let encoded = node.encode_storage_body().expect("encode storage body");
+    let encoded = node
+        .encode_storage_body(crate::store::FleetFormat::current())
+        .expect("encode storage body");
     assert!(!encoded.contains("node_id"));
     assert!(!encoded.contains("parent_node_id"));
     let decoded = SessionNodeRecord::decode_storage_body(
@@ -482,7 +484,9 @@ fn storage_body_states_its_node_body_generation() {
         },
     };
 
-    let encoded = node.encode_storage_body().expect("encode storage body");
+    let encoded = node
+        .encode_storage_body(crate::store::FleetFormat::current())
+        .expect("encode storage body");
     let stamped: serde_json::Value = serde_json::from_str(&encoded).expect("stored body is JSON");
 
     assert_eq!(
@@ -504,8 +508,9 @@ fn unstamped_stored_bodies_are_refused() {
     assert_eq!(
         error.to_string(),
         format!(
-            "graph node body carries no schema_version stamp; this build reads exactly \
-             generation {SESSION_NODE_BODY_SCHEMA_VERSION}; remedy: the body is pre-cutover \
+            "graph node body carries no schema_version stamp; this build reads generation \
+             {SESSION_NODE_BODY_SCHEMA_VERSION} and the fleet's recorded \
+             {SESSION_NODE_BODY_SCHEMA_VERSION} (FIG-3796); remedy: the body is pre-cutover \
              data, so recreate the session store under this build"
         ),
     );
@@ -547,7 +552,9 @@ fn stored_bodies_from_an_older_generation_are_refused() {
             event: SessionHistoryRecord::Protocol(protocol_event()),
         },
     };
-    let encoded = node.encode_storage_body().expect("encode storage body");
+    let encoded = node
+        .encode_storage_body(crate::store::FleetFormat::current())
+        .expect("encode storage body");
     let mut stamped: serde_json::Value =
         serde_json::from_str(&encoded).expect("stored body is JSON");
     stamped["schema_version"] = serde_json::json!(SESSION_NODE_BODY_SCHEMA_VERSION - 1);
@@ -559,9 +566,11 @@ fn stored_bodies_from_an_older_generation_are_refused() {
     assert_eq!(
         error.to_string(),
         format!(
-            "graph node body is schema version {}, but this build reads exactly {}; remedy: \
-             the body is pre-cutover data, so recreate the session store under this build",
+            "graph node body is schema version {}, but this build reads generation {} and the \
+             fleet's recorded {} (FIG-3796); remedy: the body is pre-cutover data, so recreate \
+             the session store under this build",
             SESSION_NODE_BODY_SCHEMA_VERSION - 1,
+            SESSION_NODE_BODY_SCHEMA_VERSION,
             SESSION_NODE_BODY_SCHEMA_VERSION
         ),
     );
@@ -584,9 +593,11 @@ fn stored_bodies_from_a_newer_generation_are_refused() {
     assert_eq!(
         error.to_string(),
         format!(
-            "graph node body is schema version {}, but this build reads exactly {}; remedy: \
-             run a Lash build at that node-body generation",
+            "graph node body is schema version {}, but this build reads generation {} and the \
+             fleet's recorded {} (FIG-3796); remedy: run a Lash build at that node-body \
+             generation",
             SESSION_NODE_BODY_SCHEMA_VERSION + 1,
+            SESSION_NODE_BODY_SCHEMA_VERSION,
             SESSION_NODE_BODY_SCHEMA_VERSION
         ),
     );
@@ -613,7 +624,7 @@ fn stored_frame_open_rejects_a_raw_frame_key() {
     };
     let mut stored: serde_json::Value = serde_json::from_str(
         &node
-            .encode_storage_body()
+            .encode_storage_body(crate::store::FleetFormat::current())
             .expect("encode current frame-open body"),
     )
     .expect("frame-open body is JSON");

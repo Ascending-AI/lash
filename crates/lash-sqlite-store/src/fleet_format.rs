@@ -1,14 +1,17 @@
 //! The fleet-format row of this SQLite deployment (ADR 0106 §1 `F`).
 //!
 //! One `fleet_format` singleton records the durable-format generation every
-//! writer in the fleet emits. SQLite runs in a single process, so it
-//! *finalizes on open*: the schema-open transaction stamps the build's own
-//! fleet format unconditionally, and durable writers consult the recorded
-//! value — through [`FleetFormat::writer_version`] — rather than a constant
-//! they baked in.
+//! writer in the fleet emits. The row moves forward only: the schema-open
+//! transaction provisions it when absent and leaves a recorded value alone —
+//! the same insert-if-absent the PostgreSQL backend runs — and durable
+//! writers consult the recorded value rather than a constant they baked in.
+//! A build that opens a store recording a generation its writable range does
+//! not admit is refused with a typed error instead of winding `F` back.
 //!
 //! The row lives in the durable-core database beside `release_stamp`: both are
 //! facts about the store itself that every deployment carries exactly once.
+
+use std::ops::RangeInclusive;
 
 use lash_core_execution::{FleetFormat, FleetFormatState};
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
@@ -59,15 +62,35 @@ pub(crate) fn read(conn: &Connection) -> rusqlite::Result<FleetFormatState> {
     }
 }
 
-/// The fleet format the just-opened database records.
+/// Admit a recorded `version` under the writable range `writable` of the
+/// build doing the opening.
+///
+/// The row is fail-closed (ADR 0106 §7): a generation the opening build
+/// cannot write is refused with the typed
+/// [`StoreError::FleetFormatOutsideWritableRange`] an operator can route,
+/// carried inside the `rusqlite::Error` this layer returns so [`crate::sqlite_error`]
+/// hands the typed variant back to callers that convert.
+fn admit(version: u32, writable: RangeInclusive<u32>) -> rusqlite::Result<FleetFormat> {
+    FleetFormat::admit_recorded(version, writable).map_err(crate::sqlite_conversion_error)
+}
+
+/// The fleet format the just-opened database records, admitted against this
+/// build's writable range.
 ///
 /// Called only after `prepare_versioned_schema` has provisioned or admitted
 /// the durable-core schema, so the row is there: [`write`] ran in the same
 /// transaction the open committed. Anything else is an internal defect, not a
 /// deployment state.
-pub(crate) fn read_recorded(conn: &Connection) -> rusqlite::Result<FleetFormat> {
+///
+/// `writable` is the opening build's `[min_F, max_F]` — production opens pass
+/// [`FleetFormat::writable_range`], and a test simulating a different build
+/// passes that build's range instead.
+pub(crate) fn read_recorded(
+    conn: &Connection,
+    writable: RangeInclusive<u32>,
+) -> rusqlite::Result<FleetFormat> {
     match read(conn)? {
-        FleetFormatState::Recorded(format) => Ok(format),
+        FleetFormatState::Recorded(format) => admit(format.version(), writable),
         state => Err(rusqlite::Error::SqliteFailure(
             rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_INTERNAL),
             Some(format!(
@@ -77,16 +100,16 @@ pub(crate) fn read_recorded(conn: &Connection) -> rusqlite::Result<FleetFormat> 
     }
 }
 
-/// Finalize the fleet format inside the open transaction that just
+/// Provision the fleet-format row inside the open transaction that just
 /// provisioned or admitted the durable-core schema.
 ///
-/// A single-process deployment has no peers to disagree with, so the row
-/// always lands on this build's own [`lash_core_execution::FLEET_FORMAT_VERSION`]
-/// — the "finalizes on open" arm of ADR 0106. When that constant moves, this
-/// write is the move.
+/// `F` moves forward only, so the write is insert-if-absent — the same arm
+/// the shared PostgreSQL backend takes: an absent row records this build's
+/// [`lash_core_execution::FLEET_FORMAT_VERSION`], and a recorded row wins.
+/// When that constant moves, this write is the move.
 pub(crate) fn write(tx: &Transaction<'_>) -> rusqlite::Result<()> {
     tx.execute(
-        session_sql().fleet_format.upsert.sql(),
+        session_sql().fleet_format.insert_if_absent.sql(),
         params![i64::from(lash_core_execution::FLEET_FORMAT_VERSION)],
     )?;
     Ok(())
@@ -97,23 +120,28 @@ pub(crate) fn write(tx: &Transaction<'_>) -> rusqlite::Result<()> {
 /// A read-only open never runs the schema transaction, so a store only ever
 /// opened by builds that predate the row reports the build's own fleet format
 /// — the same answer a recording store would give — rather than failing an
-/// open for a fact the handle cannot act on anyway.
+/// open for a fact the handle cannot act on anyway. A recorded generation the
+/// build's writable range does not admit is still refused: a reader that
+/// cannot decode what the fleet writes is not a reader.
 pub(crate) fn recorded_or_current(conn: &Connection) -> rusqlite::Result<FleetFormat> {
     match read(conn)? {
-        FleetFormatState::Recorded(format) => Ok(format),
+        FleetFormatState::Recorded(format) => {
+            admit(format.version(), FleetFormat::writable_range())
+        }
         _ => Ok(FleetFormat::current()),
     }
 }
 
-impl crate::Store {
+impl lash_core_execution::FleetFormatStore for crate::Store {
     /// The fleet format this store's durable writers emit — the `F` of ADR
     /// 0106 §1 as the fleet-format row recorded it at open.
     ///
     /// This is the hook durable writers consult for their writer version:
-    /// `self.fleet_format.writer_version(CURRENT_…)` maps a format's
-    /// build-newest version onto the generation the fleet agreed to write,
-    /// which is the identity map until `finalize-upgrade` (FIG-3800) exists.
-    pub fn fleet_format(&self) -> FleetFormat {
+    /// `self.fleet_format().writer_version(surface_format!(…))` maps a
+    /// format's build-newest version onto the generation the fleet agreed to
+    /// write, which is the identity map until `finalize-upgrade` (FIG-3800)
+    /// exists.
+    fn fleet_format(&self) -> FleetFormat {
         self.fleet_format
     }
 }

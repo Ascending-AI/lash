@@ -31,7 +31,11 @@ fn pair(step: RlmTrajectoryEntry) -> Vec<SessionHistoryRecord> {
         }),
     )];
     vec![
-        crate::native::transport::execution_event(step.id.clone(), parts),
+        crate::native::transport::execution_event(
+            step.id.clone(),
+            parts,
+            crate::native::transport::NATIVE_TRANSPORT_VERSION,
+        ),
         SessionHistoryRecord::Protocol(crate::projection::rlm_protocol_event(
             RlmProtocolEvent::RlmTrajectoryEntry(step),
         )),

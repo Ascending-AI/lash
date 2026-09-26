@@ -33,7 +33,11 @@ use super::finish::{
 use super::stall::{
     LLM_EXTRACTION_PHASE, NO_PROGRESS_BUDGET_PHASE, native_reply_fingerprint, stalled_attempts,
 };
-use super::state::{RlmDriverState, RlmReasoningPart, decode_rlm_driver_state, rlm_driver_state};
+use super::state::{
+    NATIVE_DRIVER_STATE_VERSION, RlmDriverState, RlmReasoningPart, decode_rlm_driver_state,
+    rlm_driver_state,
+};
+use super::transport::NATIVE_TRANSPORT_VERSION;
 use crate::protocol::actions::{invalid_driver_state_actions, invalid_turn_options_actions};
 use crate::protocol::stall::{ExtractionCounts, ExtractionDiagnostic};
 
@@ -85,7 +89,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
         }
         actions.push(DriverAction::StartLlm {
             request: ctx.project_llm_request(false),
-            driver_state: Some(rlm_driver_state(RlmDriverState::default())),
+            driver_state: Some(rlm_driver_state(
+                RlmDriverState::default(),
+                lash_core::driver_writer_version!(ctx, NATIVE_DRIVER_STATE_VERSION),
+            )),
         });
         actions
     }
@@ -199,6 +206,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                     ctx.protocol_iteration(),
                     parts,
                     copy,
+                    lash_core::driver_writer_version!(ctx, NATIVE_TRANSPORT_VERSION),
                 ));
             }
             if let Err(error) = continue_or_stop_after_nonterminal(
@@ -244,6 +252,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                     ctx.protocol_iteration(),
                     parts,
                     repair_copy,
+                    lash_core::driver_writer_version!(ctx, NATIVE_TRANSPORT_VERSION),
                 )];
                 if let Err(error) = continue_or_stop_after_nonterminal(
                     &ctx,
@@ -317,7 +326,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 let Some(raw_state) = waiting.take_driver_state() else {
                     return invalid_driver_state_actions("missing native driver state".to_string());
                 };
-                let mut state = match decode_rlm_driver_state(raw_state) {
+                let mut state = match decode_rlm_driver_state(
+                    raw_state,
+                    lash_core::driver_writer_version!(ctx, NATIVE_DRIVER_STATE_VERSION),
+                ) {
                     Ok(state) => state,
                     Err(error) => return invalid_driver_state_actions(error),
                 };
@@ -331,7 +343,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 actions.push(DriverAction::StartExec {
                     language: self.dialect.language_id().to_string(),
                     code,
-                    driver_state: rlm_driver_state(state),
+                    driver_state: rlm_driver_state(
+                        state,
+                        lash_core::driver_writer_version!(ctx, NATIVE_DRIVER_STATE_VERSION),
+                    ),
                 });
             }
         }
@@ -352,7 +367,10 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
         waiting: WaitingExecState<lash_core::HostTurnProtocol>,
         result: Result<ExecResponse, String>,
     ) -> Vec<DriverAction> {
-        let mut state = match decode_rlm_driver_state(waiting.into_driver_state()) {
+        let mut state = match decode_rlm_driver_state(
+            waiting.into_driver_state(),
+            lash_core::driver_writer_version!(ctx, NATIVE_DRIVER_STATE_VERSION),
+        ) {
             Ok(state) => state,
             Err(err) => return invalid_driver_state_actions(err),
         };
@@ -417,6 +435,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                         ctx.protocol_iteration(),
                         &state,
                         None,
+                        lash_core::driver_writer_version!(ctx, NATIVE_TRANSPORT_VERSION),
                     )));
                     actions.push(DriverAction::StartCheckpoint {
                         checkpoint: CheckpointKind::BeforeCompletion,
@@ -455,6 +474,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                         ctx.protocol_iteration(),
                         &state,
                         Some(CellOutcome::Failed(error_text.clone())),
+                        lash_core::driver_writer_version!(ctx, NATIVE_TRANSPORT_VERSION),
                     ),
                     vec![conversation_event(finish_schema_mismatch_message(
                         self.dialect.as_ref(),
@@ -473,6 +493,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 ctx.protocol_iteration(),
                 &state,
                 Some(CellOutcome::Finished(finish_value.clone())),
+                lash_core::driver_writer_version!(ctx, NATIVE_TRANSPORT_VERSION),
             )));
             actions.push(DriverAction::StartCheckpoint {
                 checkpoint: CheckpointKind::BeforeCompletion,
@@ -494,6 +515,7 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
                 ctx.protocol_iteration(),
                 &state,
                 None,
+                lash_core::driver_writer_version!(ctx, NATIVE_TRANSPORT_VERSION),
             ),
             Vec::new(),
             if state.outcome.is_failed() {
@@ -797,6 +819,7 @@ fn trajectory_events(
     protocol_iteration: usize,
     state: &RlmDriverState,
     entry_outcome: Option<CellOutcome<String>>,
+    transport_version: u32,
 ) -> Vec<SessionHistoryRecord> {
     let entry = trajectory_entry(
         vocabulary,
@@ -806,7 +829,11 @@ fn trajectory_events(
         entry_outcome,
     );
     vec![
-        super::transport::execution_event(entry.id.clone(), state.assistant_parts.clone()),
+        super::transport::execution_event(
+            entry.id.clone(),
+            state.assistant_parts.clone(),
+            transport_version,
+        ),
         trajectory_event(entry),
     ]
 }

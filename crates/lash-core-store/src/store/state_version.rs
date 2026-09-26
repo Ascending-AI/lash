@@ -28,19 +28,29 @@ pub struct SessionStateAdmission {
 }
 
 /// Interpret an independently read physical marker.
-pub fn resolve_session_state_version(marker: Option<u32>) -> Result<u32, StoreError> {
+///
+/// `fleet` is the store's recorded `F`: the marker admits the build's newest
+/// generation and the version `F` records for the session-state surface —
+/// the `[N-1, N]` window the fleet reads through while a finalize is pending
+/// (FIG-3796, ADR 0106 §2). Anything outside the pair reports the same
+/// unsupported/newer refusal the exact-version gate reported.
+pub fn resolve_session_state_version(
+    marker: Option<u32>,
+    fleet: super::FleetFormat,
+) -> Result<u32, StoreError> {
     let version = marker.unwrap_or(0);
-    if version == CURRENT_SESSION_STATE_VERSION {
+    let window = fleet.read_window(crate::surface_format!(CURRENT_SESSION_STATE_VERSION));
+    if window.admits(version) {
         Ok(version)
-    } else if version < CURRENT_SESSION_STATE_VERSION {
+    } else if version < window.newest() {
         Err(StoreError::SessionStateVersionUnsupported {
             found: version,
-            current: CURRENT_SESSION_STATE_VERSION,
+            current: window.newest(),
         })
     } else {
         Err(StoreError::SessionStateVersionNewerThanRuntime {
             found: version,
-            current: CURRENT_SESSION_STATE_VERSION,
+            current: window.newest(),
         })
     }
 }

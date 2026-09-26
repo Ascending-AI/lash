@@ -47,9 +47,13 @@ pub(crate) fn supported_version(version: Option<i32>) -> bool {
 /// both recorded by the transaction that admitted the database. A database
 /// that opens is a database whose shape lash has read — never one whose
 /// version stamp merely claimed the right number.
+/// `writable` is the opening build's fleet-format writable range: the
+/// recorded row is admitted against it, so a generation this build cannot
+/// write refuses the open rather than being wound back (FIG-3796).
 pub(crate) async fn ensure_schema(
     pool: &PgPool,
     check: SchemaCheck,
+    writable: std::ops::RangeInclusive<u32>,
 ) -> Result<(String, lash_core_execution::FleetFormat), StoreError> {
     let mut tx = pool.begin().await.map_err(store_sqlx_error)?;
     // Serializes lash's own openers with each other and with a `lash migrate`
@@ -117,7 +121,7 @@ pub(crate) async fn ensure_schema(
     // writers consult rather than a build constant. A recorded generation this
     // build cannot write is refused here, inside the transaction, so nothing
     // half-opens.
-    let fleet_format = crate::fleet_format::admit(&mut tx).await?;
+    let fleet_format = crate::fleet_format::admit(&mut tx, writable).await?;
     tx.commit().await.map_err(store_sqlx_error)?;
     Ok((catalog_id, fleet_format))
 }

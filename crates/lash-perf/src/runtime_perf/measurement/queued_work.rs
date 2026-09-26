@@ -359,6 +359,7 @@ async fn enqueue_queued_work_stress_turn(
             session_id,
             &format!("queued work stress turn {turn_index} batch {batch_index}"),
             (turn_index * QUEUED_WORK_JOIN_BATCHES_PER_TURN + batch_index + 1) as u64,
+            lash_core::store::FleetFormatStore::fleet_format(store),
         );
         let draft = lash_core::runtime::process_wake_batch_draft(wake)
             .with_merge_key("runtime-perf-queued-work-stress");
@@ -369,6 +370,7 @@ async fn enqueue_queued_work_stress_turn(
         session_id,
         &format!("queued work stress exclusive {turn_index}"),
         ((turn_index + 1) * 10_000) as u64,
+        lash_core::store::FleetFormatStore::fleet_format(store),
     );
     store
         .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(wake))
@@ -380,10 +382,13 @@ pub(super) fn queued_work_stress_wake(
     session_id: &SessionId,
     input: &str,
     sequence: u64,
+    fleet_format: lash_core::FleetFormat,
 ) -> lash_core::ProcessWakeDelivery {
     let process_id = ProcessId::fixture(&format!("runtime-perf-process-{sequence}"));
     lash_core::ProcessWakeDelivery {
-        version: lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        version: fleet_format.writer_version(lash_core::surface_format!(
+            lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+        )),
         wake_id: format!("wake:{session_id}:{sequence}"),
         target_session_id: SessionId::from(session_id.to_string()),
         process_id: process_id.clone(),

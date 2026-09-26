@@ -16,12 +16,14 @@ pub(super) async fn claim_process_lease(
     let process_id = process_id.clone();
     let owner = owner.clone();
     let now = registry.clock.timestamp_ms();
+    let fleet_format = registry.fleet_format;
     registry
         .conn
         .write_flow(move |tx| {
             Ok(tx_outcome((|| {
                 SqliteProcessRegistry::require_process_conn(tx, &process_id)?;
-                let current = SqliteProcessRegistry::load_process_lease_conn(tx, &process_id)?;
+                let current =
+                    SqliteProcessRegistry::load_process_lease_conn(tx, &process_id, fleet_format)?;
                 let fencing_token = match registry_transitions::decide_process_lease_claim(
                     current.as_ref(),
                     &owner,
@@ -63,6 +65,7 @@ pub(super) async fn claim_process_lease(
                         fencing_token,
                         now,
                         lease_ttl_ms,
+                        fleet_format,
                     )?,
                 ))
             })()))
@@ -81,12 +84,14 @@ pub(super) async fn reclaim_process_lease(
     let process_id = process_id.clone();
     let owner = owner.clone();
     let now = registry.clock.timestamp_ms();
+    let fleet_format = registry.fleet_format;
     registry
         .conn
         .write_flow(move |tx| {
             Ok(tx_outcome((|| {
                 SqliteProcessRegistry::require_process_conn(tx, &process_id)?;
-                let current = SqliteProcessRegistry::load_process_lease_conn(tx, &process_id)?;
+                let current =
+                    SqliteProcessRegistry::load_process_lease_conn(tx, &process_id, fleet_format)?;
                 let fencing_token = match registry_transitions::decide_process_lease_reclaim(
                     current.as_ref(),
                     now,
@@ -116,6 +121,7 @@ pub(super) async fn reclaim_process_lease(
                         fencing_token,
                         now,
                         lease_ttl_ms,
+                        fleet_format,
                     )?,
                 ))
             })()))
@@ -131,12 +137,16 @@ pub(super) async fn renew_process_lease(
 ) -> Result<ProcessLease, lash_core_execution::PluginError> {
     let lease = lease.clone();
     let now = registry.clock.timestamp_ms();
+    let fleet_format = registry.fleet_format;
     registry
         .conn
         .write_flow(move |tx| {
             Ok(tx_outcome((|| {
-                let current =
-                    SqliteProcessRegistry::load_process_lease_conn(tx, &lease.process_id)?;
+                let current = SqliteProcessRegistry::load_process_lease_conn(
+                    tx,
+                    &lease.process_id,
+                    fleet_format,
+                )?;
                 registry_transitions::authorize_process_lease_write(
                     &lease.process_id,
                     &lease,
@@ -168,12 +178,14 @@ pub(super) async fn get_process_lease(
     process_id: &ProcessId,
 ) -> Result<Option<ProcessLease>, lash_core_execution::PluginError> {
     let process_id = process_id.clone();
+    let fleet_format = registry.fleet_format;
     registry
         .conn
         .call(move |conn| {
             Ok(SqliteProcessRegistry::load_process_lease_conn(
                 conn,
                 &process_id,
+                fleet_format,
             ))
         })
         .await
@@ -189,6 +201,7 @@ pub(super) async fn get_process_leases(
     }
     let process_ids = process_ids.to_vec();
     let process_ids_json = serde_json::to_string(&process_ids).map_err(process_decode_error)?;
+    let fleet_format = registry.fleet_format;
     registry
         .conn
         .call(move |conn| {
@@ -207,7 +220,7 @@ pub(super) async fn get_process_leases(
                             claimed_at_ms: row.get(4)?,
                             expires_at_ms: row.get(5)?,
                         }
-                        .project(&process_id);
+                        .project(&process_id, fleet_format);
                         Ok((process_id, lease))
                     })
                     .map_err(process_sqlite_error)?;

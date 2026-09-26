@@ -720,15 +720,20 @@ impl RlmExecutionState {
 
     /// Encode the canonical RLM root and only the leaf bodies whose logical
     /// values were assigned since the previous capture.
+    ///
+    /// `fleet_format` is the `F` the bound session's store recorded: the root
+    /// and every durable part stamp `F`'s writer versions (FIG-3796), never
+    /// the bare build constants.
     pub fn snapshot_execution_state(
         &mut self,
+        fleet_format: lash_core::FleetFormat,
     ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
         if !self.capture_dirty
             && let Some(snapshot) = &self.pending_snapshot
         {
             return Ok(snapshot.clone());
         }
-        let prepared = self.build_capture(CaptureMode::Incremental)?;
+        let prepared = self.build_capture(CaptureMode::Incremental, fleet_format)?;
         Ok(self.install_capture(prepared))
     }
 
@@ -738,11 +743,15 @@ impl RlmExecutionState {
     /// The whole fallible part of a capture is building it — canonical encoding
     /// of every changed fragment — so this proves capturability by building the
     /// same capture and dropping it. It advances no capture bookkeeping.
-    pub fn probe_execution_state_capture(&mut self) -> Result<(), SessionError> {
+    pub fn probe_execution_state_capture(
+        &mut self,
+        fleet_format: lash_core::FleetFormat,
+    ) -> Result<(), SessionError> {
         if !self.capture_dirty && self.pending_snapshot.is_some() {
             return Ok(());
         }
-        self.build_capture(CaptureMode::Incremental).map(|_| ())
+        self.build_capture(CaptureMode::Incremental, fleet_format)
+            .map(|_| ())
     }
 
     /// The complete live execution state, with every leaf body present and no
@@ -751,8 +760,9 @@ impl RlmExecutionState {
     /// still resident in the runtime's checkpoint state.
     pub fn hydrated_execution_state(
         &self,
+        fleet_format: lash_core::FleetFormat,
     ) -> Result<lash_core::plugin::HydratedExecutionState, SessionError> {
-        let prepared = self.build_capture(CaptureMode::Complete)?;
+        let prepared = self.build_capture(CaptureMode::Complete, fleet_format)?;
         let mut components = BTreeMap::new();
         for (key, component) in prepared.snapshot.components {
             match component {
@@ -775,16 +785,23 @@ impl RlmExecutionState {
         })
     }
 
-    fn build_capture(&self, mode: CaptureMode) -> Result<PreparedCapture, SessionError> {
+    fn build_capture(
+        &self,
+        mode: CaptureMode,
+        fleet_format: lash_core::FleetFormat,
+    ) -> Result<PreparedCapture, SessionError> {
         let complete = mode == CaptureMode::Complete;
         let complete_baseline = DurableBaseline::default();
         let parts = self
             .rlm
-            .durable_parts(if complete {
-                &complete_baseline
-            } else {
-                &self.persisted_baseline
-            })
+            .durable_parts(
+                if complete {
+                    &complete_baseline
+                } else {
+                    &self.persisted_baseline
+                },
+                fleet_format,
+            )
             .map_err(|error| {
                 SessionError::Protocol(format!(
                     "failed to snapshot RLM execution state as canonical state: {error}"
@@ -840,7 +857,7 @@ impl RlmExecutionState {
         }
 
         let root = RlmSnapshotRoot {
-            version: RLM_SNAPSHOT_VERSION,
+            version: fleet_format.writer_version(lash_core::surface_format!(RLM_SNAPSHOT_VERSION)),
             engine: self.engine_id.to_string(),
             state_header: parts.header,
             globals: next_globals.clone(),
@@ -930,14 +947,25 @@ impl RlmExecutionState {
         self.encoded_globals_in_last_snapshot
     }
 
+    /// Restores a persisted execution-state snapshot.
+    ///
+    /// `fleet_format` is the `F` the bound store recorded: the read admits the
+    /// pair `{fleet's writer version, this build's newest}` — ADR 0106 §2's
+    /// `[N-1, N]` window (FIG-3796). A payload at the fleet's older recorded
+    /// version would climb to the newest through a surface-owned lift step
+    /// before it decodes; this canonical binary root has no lift step yet, so
+    /// an admitted older version is refused closed rather than decoded on
+    /// shape alone.
     pub fn restore_execution_state(
         &mut self,
         state: &lash_core::plugin::HydratedExecutionState,
+        fleet_format: lash_core::FleetFormat,
     ) -> Result<(), RlmSnapshotError> {
+        let window = fleet_format.read_window(lash_core::surface_format!(RLM_SNAPSHOT_VERSION));
         let found_version = probe_snapshot_version(&state.root)?;
-        if found_version != RLM_SNAPSHOT_VERSION {
+        if !window.admits(found_version) {
             return Err(RlmSnapshotError::VersionMismatch {
-                expected: RLM_SNAPSHOT_VERSION,
+                expected: window.newest(),
                 found: found_version,
             });
         }
@@ -948,9 +976,9 @@ impl RlmExecutionState {
             }
         })?;
 
-        if parsed.version != RLM_SNAPSHOT_VERSION {
+        if parsed.version != window.newest() {
             return Err(RlmSnapshotError::VersionMismatch {
-                expected: RLM_SNAPSHOT_VERSION,
+                expected: window.newest(),
                 found: parsed.version,
             });
         }
@@ -985,7 +1013,7 @@ impl RlmExecutionState {
             fragments.push((name.as_str(), body));
         }
         let (mut next_rlm, baseline) =
-            FlowState::from_durable_parts(&parsed.state_header, fragments)?;
+            FlowState::from_durable_parts(&parsed.state_header, fragments, fleet_format)?;
         prune_reserved_projected_bindings(&mut next_rlm);
 
         let next_live_names = next_rlm

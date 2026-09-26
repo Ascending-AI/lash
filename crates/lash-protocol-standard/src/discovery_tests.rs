@@ -46,6 +46,7 @@ fn standard_discovery_filters_provider_specs_and_requires_an_inline_member() {
             plugin_extensions: Default::default(),
             trigger_events: Default::default(),
             extra_prompt_contributions: Vec::new(),
+            writer_formats: lash_core::build_newest_writer_formats(),
         });
         assert_eq!(preamble.tool_specs.len(), expected);
     }

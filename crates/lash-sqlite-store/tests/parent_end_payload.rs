@@ -159,7 +159,9 @@ async fn a_payload_that_disagrees_with_its_projection_is_refused() {
     ) as Arc<dyn ProcessRegistry>;
 
     let scope = turn_scope("mismatch-session", "mismatch-turn");
-    let payload = scope.storage_payload().expect("encode the payload");
+    let payload = scope
+        .storage_payload(lash_core_execution::FleetFormat::current())
+        .expect("encode the payload");
     // The payload names one turn; the projection names another. A reader that
     // trusted either side alone would resurrect the wrong scope.
     inject(dir.path(), "turn", "mismatch-session/other-turn", &payload);

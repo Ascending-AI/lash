@@ -14,6 +14,7 @@
 
 use std::sync::Arc;
 
+use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 use lash_core::store::{AdmissionId, DriveEpochSeal, DriveEpochStore, DriveFence};
 use lash_core::store::{
     BeginQueuedRun, ClaimMode, Delivery, IngressClaim, IngressClaimPolicy, IngressClaimRef,
@@ -67,7 +68,9 @@ pub(crate) fn session() -> SessionId {
 
 fn wake_delivery(process: &str, sequence: u64, text: &str) -> crate::ProcessWakeDelivery {
     crate::ProcessWakeDelivery {
-        version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
+            PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+        )),
         wake_id: format!("{process}-wake-{sequence}"),
         target_session_id: session(),
         process_id: crate::ProcessId::fixture(process),

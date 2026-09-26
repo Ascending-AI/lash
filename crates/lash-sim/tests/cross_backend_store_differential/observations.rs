@@ -46,7 +46,7 @@ pub(super) fn checkpoint_observation(
     checkpoint: HydratedSessionCheckpoint,
 ) -> CheckpointObservation {
     let manifest = checkpoint
-        .manifest()
+        .manifest(lash_core::FleetFormat::current())
         .expect("project checkpoint manifest for raw comparison");
     let components = manifest
         .components

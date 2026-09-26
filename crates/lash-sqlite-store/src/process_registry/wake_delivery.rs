@@ -3,6 +3,7 @@ use super::*;
 pub(super) fn load_wake_delivery_conn(
     conn: &Connection,
     delivery_id: &str,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<lash_core_execution::WakeDelivery, lash_core_execution::PluginError> {
     let row = conn
         .query_row(
@@ -35,7 +36,7 @@ pub(super) fn load_wake_delivery_conn(
         discard_reason_label: row.6,
         delivery_json: row.7,
     }
-    .project()
+    .project(fleet_format)
 }
 
 pub(super) fn wake_delivery_report<'a>(

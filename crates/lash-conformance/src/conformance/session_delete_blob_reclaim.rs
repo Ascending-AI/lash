@@ -192,7 +192,7 @@ pub(super) async fn commit_content_aliased_checkpoint_roots(
             );
             let manifest = commit
                 .checkpoint
-                .manifest()
+                .manifest(crate::FleetFormat::current())
                 .expect("project dependent root");
             let root = crate::BlobRef::for_content(&encoded_checkpoint_manifest(&manifest));
             (aliased.checkpoint_ref.as_str() < root.as_str()).then_some(root)

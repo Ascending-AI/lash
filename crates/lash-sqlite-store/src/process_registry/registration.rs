@@ -15,6 +15,7 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
         let process_id_mint = self.process_id_mint.clone();
+        let fleet_format = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -99,6 +100,7 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                             ),
                             now,
                             wake_delivery_config,
+                            fleet_format,
                         )?;
                     }
                     Ok(lash_core_execution::ProcessRegistrationOutcome::created(
@@ -129,6 +131,7 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
         let process_id = process_id.clone();
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
+        let fleet_format = self.fleet_format;
         let record = self
             .conn
             .write_flow(move |tx| {
@@ -146,6 +149,7 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                                 *request,
                                 now,
                                 wake_delivery_config,
+                                fleet_format,
                             )?;
                         }
                     }

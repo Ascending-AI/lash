@@ -685,8 +685,15 @@ impl<T> ConformanceProcessRegistry for T where
 /// [`ConformanceProcessRegistry`] by the conformance suites (see
 /// [`StoreMaintenance`](crate::store::StoreMaintenance) for the store-side
 /// norm).
+/// The registry also answers the `F` its backend recorded through
+/// [`FleetFormatStore`](crate::store::FleetFormatStore): durable readers on
+/// the handle — the wake-delivery and parent-end projections, the
+/// effect-summary fold — resolve their `[N-1, N]` read windows from it
+/// (FIG-3796). A registry with no recorded row — an in-memory fake — answers
+/// [`FleetFormat::current`](crate::FleetFormat::current).
 pub trait ProcessRegistry:
-    ProcessQuery
+    crate::store::FleetFormatStore
+    + ProcessQuery
     + ProcessRegistrar
     + ProcessObserverRegistry
     + ProcessEventLog
@@ -700,7 +707,8 @@ pub trait ProcessRegistry:
 }
 
 impl<T> ProcessRegistry for T where
-    T: ProcessQuery
+    T: crate::store::FleetFormatStore
+        + ProcessQuery
         + ProcessRegistrar
         + ProcessObserverRegistry
         + ProcessEventLog

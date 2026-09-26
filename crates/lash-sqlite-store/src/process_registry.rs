@@ -246,6 +246,7 @@ impl lash_core_execution::ProcessObserverRegistry for SqliteProcessRegistry {
         let process_ids = process_ids.to_vec();
         let now = self.clock.timestamp_ms();
         let config = self.wake_delivery_config;
+        let fleet_format = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -277,6 +278,7 @@ impl lash_core_execution::ProcessObserverRegistry for SqliteProcessRegistry {
                             ),
                             now,
                             config,
+                            fleet_format,
                         )?;
                         Self::append_event_conn(
                             tx,
@@ -288,6 +290,7 @@ impl lash_core_execution::ProcessObserverRegistry for SqliteProcessRegistry {
                             ),
                             now,
                             config,
+                            fleet_format,
                         )?;
                     }
                     Ok(())
@@ -471,6 +474,7 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
         let process_id = process_id.clone();
         let occurred_at_ms = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
+        let fleet_format = self.fleet_format;
         let (result, _appended) = self
             .conn
             .write_flow(move |tx| {
@@ -482,6 +486,7 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
                         request,
                         occurred_at_ms,
                         wake_delivery_config,
+                        fleet_format,
                     )
                 })()))
             })
@@ -503,6 +508,7 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
         let authority = authority.clone();
         let occurred_at_ms = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
+        let fleet_format = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -514,6 +520,7 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
                         &authority,
                         None,
                         occurred_at_ms,
+                        fleet_format,
                     )?;
                     Self::append_event_batch_conn(
                         tx,
@@ -521,6 +528,7 @@ impl lash_core_execution::ProcessEventLog for SqliteProcessRegistry {
                         requests,
                         occurred_at_ms,
                         wake_delivery_config,
+                        fleet_format,
                     )
                 })()))
             })
@@ -765,6 +773,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
         let authority = authority.clone();
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
+        let fleet_format = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -776,6 +785,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                         &authority,
                         Some(&started),
                         now,
+                        fleet_format,
                     )?;
                     match lash_core_execution::runtime::prepare_process_start(
                         &record, &started, &authority,
@@ -810,7 +820,14 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                         &started,
                         resumed_from_handover,
                     );
-                    Self::append_event_conn(tx, &mut record, request, now, wake_delivery_config)?;
+                    Self::append_event_conn(
+                        tx,
+                        &mut record,
+                        request,
+                        now,
+                        wake_delivery_config,
+                        fleet_format,
+                    )?;
                     Ok(ProcessStartOutcome::Started(record))
                 })()))
             })
@@ -849,6 +866,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
         let now = self.clock.timestamp_ms();
         let request = lash_core_execution::CancelRequest::new(origin, requester, now);
         let wake_delivery_config = self.wake_delivery_config;
+        let fleet_format = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -870,6 +888,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                                 *append,
                                 now,
                                 wake_delivery_config,
+                                fleet_format,
                             )?;
                         }
                     }
@@ -888,6 +907,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
         let process_id = process_id.clone();
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
+        let fleet_format = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -904,6 +924,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                                 *append,
                                 now,
                                 wake_delivery_config,
+                                fleet_format,
                             )?;
                         }
                     }
@@ -921,6 +942,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
         let process_id = process_id.clone();
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
+        let fleet_format = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -937,6 +959,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                                 *append,
                                 now,
                                 wake_delivery_config,
+                                fleet_format,
                             )?;
                         }
                     }
@@ -958,6 +981,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
         let authority = authority.clone();
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
+        let fleet_format = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -969,10 +993,11 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                         &authority,
                         None,
                         now,
+                        fleet_format,
                     )?;
                     // The run's pending prelude commits ahead of the
                     // transition, in its transaction (FIG-3571).
-                    let mut batch = ProcessEventBatch::default();
+                    let mut batch = ProcessEventBatch::for_fleet(fleet_format);
                     for request in prelude {
                         batch.stage(tx, &mut record, request, now, wake_delivery_config)?;
                     }
@@ -1002,6 +1027,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
         let authority = authority.clone();
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
+        let fleet_format = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -1013,10 +1039,11 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                         &authority,
                         None,
                         now,
+                        fleet_format,
                     )?;
                     // The run's pending prelude commits ahead of the
                     // transition, in its transaction (FIG-3571).
-                    let mut batch = ProcessEventBatch::default();
+                    let mut batch = ProcessEventBatch::for_fleet(fleet_format);
                     for request in prelude {
                         batch.stage(tx, &mut record, request, now, wake_delivery_config)?;
                     }
@@ -1046,6 +1073,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
         let authority = authority.clone();
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
+        let fleet_format = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -1057,6 +1085,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                         &authority,
                         None,
                         now,
+                        fleet_format,
                     )?;
                     match lash_core_execution::runtime::prepare_process_transition(
                         &record,
@@ -1070,6 +1099,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                                 *request,
                                 now,
                                 wake_delivery_config,
+                                fleet_format,
                             )?;
                         }
                     }
@@ -1089,6 +1119,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
         let authority = authority.clone();
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
+        let fleet_format = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -1100,6 +1131,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                         &authority,
                         None,
                         now,
+                        fleet_format,
                     )?;
                     match lash_core_execution::runtime::prepare_process_transition(
                         &record,
@@ -1113,6 +1145,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
                                 *request,
                                 now,
                                 wake_delivery_config,
+                                fleet_format,
                             )?;
                         }
                     }
@@ -1159,6 +1192,7 @@ impl lash_core_execution::ProcessWakeOutbox for SqliteProcessRegistry {
         }
         let now = self.clock.timestamp_ms();
         let enqueuing_stale_after_ms = self.wake_delivery_config.enqueuing_stale_after_ms;
+        let fleet_format = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -1203,7 +1237,7 @@ impl lash_core_execution::ProcessWakeOutbox for SqliteProcessRegistry {
                         .map_err(process_sqlite_error)?;
                     }
                     ids.iter()
-                        .map(|id| load_wake_delivery_conn(tx, id))
+                        .map(|id| load_wake_delivery_conn(tx, id, fleet_format))
                         .collect()
                 })()))
             })
@@ -1215,6 +1249,7 @@ impl lash_core_execution::ProcessWakeOutbox for SqliteProcessRegistry {
         &self,
         state: Option<lash_core_execution::WakeDeliveryState>,
     ) -> Result<Vec<lash_core_execution::WakeDelivery>, lash_core_execution::PluginError> {
+        let fleet_format = self.fleet_format;
         self.conn
             .call(move |conn| {
                 Ok((|| {
@@ -1237,7 +1272,7 @@ impl lash_core_execution::ProcessWakeOutbox for SqliteProcessRegistry {
                             .map_err(process_sqlite_error)?
                     };
                     ids.iter()
-                        .map(|id| load_wake_delivery_conn(conn, id))
+                        .map(|id| load_wake_delivery_conn(conn, id, fleet_format))
                         .collect()
                 })())
             })
@@ -1313,6 +1348,7 @@ impl lash_core_execution::ProcessWakeOutbox for SqliteProcessRegistry {
     {
         let delivery_id = delivery_id.to_string();
         let claim_token = claim_token.to_string();
+        let fleet_format = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -1323,7 +1359,7 @@ impl lash_core_execution::ProcessWakeOutbox for SqliteProcessRegistry {
                         )
                         .map_err(process_sqlite_error)?;
                     if changed == 0 {
-                        let delivery = load_wake_delivery_conn(tx, &delivery_id)?;
+                        let delivery = load_wake_delivery_conn(tx, &delivery_id, fleet_format)?;
                         return Ok(lash_core_execution::WakeDeliveryClaimOutcome::ClaimLost {
                             state: delivery.state(),
                         });
@@ -1335,6 +1371,12 @@ impl lash_core_execution::ProcessWakeOutbox for SqliteProcessRegistry {
             .map_err(process_sqlite_error)?
     }
 }
+impl lash_core_execution::FleetFormatStore for SqliteProcessRegistry {
+    fn fleet_format(&self) -> lash_core_execution::FleetFormat {
+        self.fleet_format
+    }
+}
+
 impl lash_core_execution::ProcessClockRebind for SqliteProcessRegistry {
     fn with_runtime_clock(
         &self,
@@ -1346,6 +1388,7 @@ impl lash_core_execution::ProcessClockRebind for SqliteProcessRegistry {
             process_session_catalog: self.process_session_catalog.clone(),
             wake_delivery_config: self.wake_delivery_config,
             scope_fence_hosts: self.scope_fence_hosts.clone(),
+            fleet_format: self.fleet_format,
             location: self.location.clone(),
             process_id_mint: self.process_id_mint.clone(),
         }))
@@ -1359,6 +1402,7 @@ fn validate_process_execution_authority_conn(
     authority: &ProcessExecutionWriteAuthority,
     start: Option<&ProcessStarted>,
     now: u64,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(), lash_core_execution::PluginError> {
     match authority {
         ProcessExecutionWriteAuthority::Invocation { .. } => {
@@ -1380,7 +1424,8 @@ fn validate_process_execution_authority_conn(
                     process_id: process_id.clone(),
                 });
             }
-            let current = SqliteProcessRegistry::load_process_lease_conn(conn, process_id)?;
+            let current =
+                SqliteProcessRegistry::load_process_lease_conn(conn, process_id, fleet_format)?;
             registry_transitions::authorize_process_lease_write(
                 process_id,
                 lease,

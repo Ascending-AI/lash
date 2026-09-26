@@ -35,10 +35,12 @@ pub use lash_core_llm::llm;
 pub(crate) use lash_core_llm::model;
 pub use lash_core_store::attachments;
 pub use lash_core_store::chronological;
+pub use lash_core_store::impl_current_fleet_format;
 pub use lash_core_store::impl_noop_attachment_manifest;
 pub use lash_core_store::protocol_turn_options::{
     PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION, ProtocolTurnOptions, ProtocolTurnOptionsError,
 };
+pub use lash_core_store::surface_format;
 pub(crate) use model_clamp::ModelGenerationClamp;
 /// The session drive (FIG-3600): admission as recorded steps, then the
 /// admitted root's turns.
@@ -658,6 +660,9 @@ pub use lash_core_execution::{
     TurnMachine, TurnMachineConfig,
 };
 pub use lash_sansio::{
+    BuildNewestWriterFormats, WriterFormats, build_newest_writer_formats, driver_writer_version,
+};
+pub use lash_sansio::{
     FailureCode, HostNamespace, InvalidNamespace, Namespace, TurnFailureCode, TurnFailureKind,
 };
 #[cfg(feature = "otel-trace")]
@@ -851,10 +856,10 @@ pub use store::{
     AttachmentOwnerKind, AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken,
     BlobRef, CURRENT_SESSION_STATE_VERSION, CheckpointComponentDescriptor, CommitBudget,
     CommitBudgetLimit, DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface,
-    FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, GcReport, HydratedCheckpointComponent,
-    HydratedSessionCheckpoint, LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure,
-    MaintenanceRefusal, MaintenanceReport, MaintenanceResult, MaintenanceStop, MaintenanceSweep,
-    OLDEST_SUPPORTED_SESSION_STATE_VERSION, OperationId, OrphanedTurnInputScope,
+    FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, FleetFormatStore, GcReport,
+    HydratedCheckpointComponent, HydratedSessionCheckpoint, LeaseClaimNonce, LeaseOwnerIdentity,
+    MaintenanceFailure, MaintenanceRefusal, MaintenanceReport, MaintenanceResult, MaintenanceStop,
+    MaintenanceSweep, OLDEST_SUPPORTED_SESSION_STATE_VERSION, OperationId, OrphanedTurnInputScope,
     QueuedWorkClaimOutcome, QueuedWorkClaimRefusal, QueuedWorkStore, RetentionBound,
     RetentionReport, RuntimeCommit, RuntimePersistence, RuntimeTurnCommitStamp, RuntimeUsageDelta,
     RuntimeUsageDeltaIdentity, ScanCoverage, SelectedQueuedWorkClaimOutcome,
@@ -865,9 +870,9 @@ pub use store::{
     SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionMeta,
     SessionStateAdmission, StoreBackend, StoreComponentVersion, StoreError, StoreMaintenance,
     StorePreflight, StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome,
-    StoreSchemaStatus, StoreSchemaVerdict, TurnCancelRepairDecision, TurnCancelRepairResult,
-    TurnInputStore, VacuumReport, WorkClaim, WorkCompletion, compare_releases,
-    release_stamp_advances,
+    StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnCancelRepairDecision,
+    TurnCancelRepairResult, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion, WriterPin,
+    compare_releases, release_stamp_advances,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

@@ -212,6 +212,8 @@ impl SnapshotStore {
 
 lash_core::impl_noop_attachment_manifest!(SnapshotStore);
 
+lash_core::impl_current_fleet_format!(SnapshotStore);
+
 #[async_trait]
 impl lash_core::SessionCommitStore for SnapshotStore {
     async fn raise_pending_follow_on_attempts(
@@ -826,6 +828,8 @@ struct BoundSessionStore {
 }
 
 lash_core::impl_noop_attachment_manifest!(BoundSessionStore);
+
+lash_core::impl_current_fleet_format!(BoundSessionStore);
 
 #[async_trait]
 impl lash_core::SessionCommitStore for BoundSessionStore {

@@ -415,12 +415,12 @@ pub(super) fn restored_projection_degradation_fixture()
         .expect("insert ordinary global");
     let snapshot = hydrate_snapshot(
         source
-            .snapshot_execution_state()
+            .snapshot_execution_state(lash_core::FleetFormat::current())
             .expect("snapshot projected globals"),
     );
     let mut restored = RlmExecutionState::new();
     restored
-        .restore_execution_state(&snapshot)
+        .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
         .expect("restore projected globals as unavailable references");
     (restored, registry)
 }
@@ -646,7 +646,11 @@ pub(super) fn executor_snapshot_does_not_materialize_projected_tool_result_globa
         )
         .expect("insert projected global");
 
-    let snapshot = hydrate_snapshot(state.snapshot_execution_state().expect("executor snapshot"));
+    let snapshot = hydrate_snapshot(
+        state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .expect("executor snapshot"),
+    );
     assert_eq!(projected.render_count.load(Ordering::SeqCst), 0);
     assert_eq!(projected.materialize_count.load(Ordering::SeqCst), 0);
     let mut encoded = snapshot.root.to_vec();
@@ -659,7 +663,7 @@ pub(super) fn executor_snapshot_does_not_materialize_projected_tool_result_globa
 
     let mut restored_execution = RlmExecutionState::new();
     restored_execution
-        .restore_execution_state(&snapshot)
+        .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
         .expect("restore runtime");
     let restored = restored_execution.rlm;
     assert!(matches!(
@@ -680,7 +684,9 @@ pub(super) fn measured_commit_budget_carries_only_changed_leaf_bodies() {
             source.push_str(&format!("let small_{index} = {index};\n"));
         }
         let mut state = execute_test_code_chunked(RlmExecutionState::new(), source).await;
-        let initial = state.snapshot_execution_state().expect("initial snapshot");
+        let initial = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .expect("initial snapshot");
         assert_eq!(
             initial
                 .components
@@ -705,7 +711,9 @@ pub(super) fn measured_commit_budget_carries_only_changed_leaf_bodies() {
             ),
         )
         .await;
-        let changed = state.snapshot_execution_state().expect("changed snapshot");
+        let changed = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .expect("changed snapshot");
         let changed_bodies = changed
             .components
             .values()
@@ -762,7 +770,7 @@ pub(super) fn progress_capture_then_later_assignment_survives_final_cold_reopen(
         )
         .await;
         let progress_snapshot = state
-            .snapshot_execution_state()
+            .snapshot_execution_state(lash_core::FleetFormat::current())
             .expect("progress-boundary capture");
 
         state = execute_test_code(
@@ -771,7 +779,7 @@ pub(super) fn progress_capture_then_later_assignment_survives_final_cold_reopen(
         )
         .await;
         let final_snapshot = state
-            .snapshot_execution_state()
+            .snapshot_execution_state(lash_core::FleetFormat::current())
             .expect("final capture after later assignment");
         assert_ne!(
             final_snapshot.root, progress_snapshot.root,
@@ -793,7 +801,7 @@ pub(super) fn progress_capture_then_later_assignment_survives_final_cold_reopen(
         let hydrated = hydrate_snapshot(final_snapshot);
         let mut reopened = RlmExecutionState::new();
         reopened
-            .restore_execution_state(&hydrated)
+            .restore_execution_state(&hydrated, lash_core::FleetFormat::current())
             .expect("cold reopen final capture");
         assert_eq!(
             reopened.rlm.snapshot().globals().get("large"),
@@ -803,12 +811,12 @@ pub(super) fn progress_capture_then_later_assignment_survives_final_cold_reopen(
 
         state.abort_execution_state_capture();
         let retry_snapshot = state
-            .snapshot_execution_state()
+            .snapshot_execution_state(lash_core::FleetFormat::current())
             .expect("retry superseded capture after commit failure");
         let retry_hydrated = hydrate_snapshot(retry_snapshot);
         let mut retry_reopened = RlmExecutionState::new();
         retry_reopened
-            .restore_execution_state(&retry_hydrated)
+            .restore_execution_state(&retry_hydrated, lash_core::FleetFormat::current())
             .expect("cold reopen retry capture");
         assert_eq!(
             retry_reopened.rlm.snapshot().globals().get("large"),
@@ -828,7 +836,9 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
             format!("let large = [\"{payload_a}\"];"),
         )
         .await;
-        let durable_a = state.snapshot_execution_state().expect("durable A capture");
+        let durable_a = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .expect("durable A capture");
         state.acknowledge_execution_state_capture();
         let mut staged_runtime = lash_core::RuntimeSessionState {
             session_id: SessionId::from("progress-a-b-a-staged"),
@@ -852,7 +862,7 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
 
         state = execute_test_code(state, format!("let large = [\"{payload_b}\"];")).await;
         let progress_b = state
-            .snapshot_execution_state()
+            .snapshot_execution_state(lash_core::FleetFormat::current())
             .expect("progress-boundary B capture");
         lash_core::testing::stage_execution_state_components(
             &mut staged_runtime,
@@ -860,7 +870,9 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
         )
         .expect("stage progress B");
         state = execute_test_code(state, format!("let large = [\"{payload_a}\"];")).await;
-        let final_a = state.snapshot_execution_state().expect("final A capture");
+        let final_a = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .expect("final A capture");
         assert_ne!(final_a.root, progress_b.root);
         assert_eq!(
             final_a
@@ -883,7 +895,7 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
             .expect("final A root");
         let mut reopened = RlmExecutionState::new();
         reopened
-            .restore_execution_state(&final_hydration)
+            .restore_execution_state(&final_hydration, lash_core::FleetFormat::current())
             .expect("cold reopen final A capture");
         assert_eq!(
             reopened.rlm.snapshot().globals().get("large"),
@@ -892,7 +904,7 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
 
         state.abort_execution_state_capture();
         let retry_a = state
-            .snapshot_execution_state()
+            .snapshot_execution_state(lash_core::FleetFormat::current())
             .expect("retry A after final commit failure");
         lash_core::testing::stage_execution_state_components(&mut retry_runtime, retry_a)
             .expect("stage retry A over durable A");
@@ -902,7 +914,7 @@ pub(super) fn progress_capture_a_to_b_then_final_a_resends_the_evicted_leaf() {
             .expect("retry A root");
         let mut retry_reopened = RlmExecutionState::new();
         retry_reopened
-            .restore_execution_state(&retry_hydration)
+            .restore_execution_state(&retry_hydration, lash_core::FleetFormat::current())
             .expect("cold reopen retry A capture");
         assert_eq!(
             retry_reopened.rlm.snapshot().globals().get("large"),
@@ -929,7 +941,9 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
             .to_canonical_bytes()
             .expect("pre-arc flat snapshot baseline")
             .len();
-        let _initial = state.snapshot_execution_state().expect("initial snapshot");
+        let _initial = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .expect("initial snapshot");
         state.acknowledge_execution_state_capture();
 
         let mut measured = Vec::new();
@@ -943,7 +957,9 @@ pub(super) fn measured_commit_growth_tracks_changed_state_not_session_size() {
                 ),
             )
             .await;
-            let snapshot = state.snapshot_execution_state().expect("turn snapshot");
+            let snapshot = state
+                .snapshot_execution_state(lash_core::FleetFormat::current())
+                .expect("turn snapshot");
             assert_eq!(
                 state.encoded_globals_in_last_snapshot(),
                 1,
@@ -1004,7 +1020,9 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
             .expect("accumulated canonical state")
             .len();
         assert_eq!(full_state_bytes, 1_104_953);
-        let _initial = state.snapshot_execution_state().expect("initial snapshot");
+        let _initial = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .expect("initial snapshot");
         state.acknowledge_execution_state_capture();
 
         let mut measured = Vec::new();
@@ -1018,7 +1036,9 @@ pub(super) fn measured_commit_growth_stays_flat_for_many_mid_size_bindings() {
                 ),
             )
             .await;
-            let snapshot = state.snapshot_execution_state().expect("turn snapshot");
+            let snapshot = state
+                .snapshot_execution_state(lash_core::FleetFormat::current())
+                .expect("turn snapshot");
             assert_eq!(
                 state.encoded_globals_in_last_snapshot(),
                 1,
@@ -1067,7 +1087,9 @@ pub(super) fn many_short_bindings_stay_inline_and_hold_the_per_commit_floor() {
             source.push_str(&format!("let short_{index} = [\"{payload}\"];\n"));
         }
         let mut state = execute_test_code_chunked(RlmExecutionState::new(), source).await;
-        let initial = state.snapshot_execution_state().expect("initial snapshot");
+        let initial = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .expect("initial snapshot");
         assert_eq!(initial.components.len(), 0);
         state.acknowledge_execution_state_capture();
 
@@ -1079,7 +1101,9 @@ pub(super) fn many_short_bindings_stay_inline_and_hold_the_per_commit_floor() {
             ),
         )
         .await;
-        let changed = state.snapshot_execution_state().expect("changed snapshot");
+        let changed = state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .expect("changed snapshot");
         let commit_bytes = state::measure_snapshot(&changed).checkpoint_bytes;
         println!(
             "FIG1195_SHORT_BINDING_FLOOR commit_bytes={commit_bytes} leaves={}",
@@ -1332,11 +1356,15 @@ pub(super) fn executor_snapshot_round_trips_projection_ref_metadata() {
         )
         .expect("insert projected global");
 
-    let snapshot = hydrate_snapshot(state.snapshot_execution_state().expect("executor snapshot"));
+    let snapshot = hydrate_snapshot(
+        state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .expect("executor snapshot"),
+    );
 
     let mut restored_execution = RlmExecutionState::new();
     restored_execution
-        .restore_execution_state(&snapshot)
+        .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
         .expect("restore runtime");
     let restored = restored_execution.rlm;
     let restored_snapshot = restored.snapshot();

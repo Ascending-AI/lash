@@ -458,12 +458,10 @@ pub async fn session_prompt_layer_round_trips_through_the_committed_head(
 pub async fn session_protocol_turn_options_round_trip_through_the_committed_head(
     store: Arc<dyn RuntimePersistence>,
 ) {
-    let expected = crate::ProtocolTurnOptions {
-        payload: serde_json::json!({
-            "dialect": "conformance-dialect",
-            "termination": {"kind": "conformance-termination"},
-        }),
-    };
+    let expected = crate::ProtocolTurnOptions::from_payload(serde_json::json!({
+        "dialect": "conformance-dialect",
+        "termination": {"kind": "conformance-termination"},
+    }));
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("session-protocol-turn-options"),
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
@@ -816,6 +814,7 @@ pub async fn commit_with_every_payload_family_inside_budget_succeeds(
             crate::CommitBudgetLimit::bounded(BYTE_LIMIT),
             crate::CommitBudgetLimit::Unbounded,
         ),
+        crate::FleetFormat::current(),
     )
     .expect("build the all-families commit");
     let attachment_id =

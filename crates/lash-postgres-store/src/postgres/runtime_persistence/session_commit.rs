@@ -39,7 +39,9 @@ impl SessionCommitStore for PostgresSessionStore {
     async fn read_session_state_version(&self) -> Result<u32, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        let version = read_session_state_version_tx(&mut tx, &self.session_id, false).await?;
+        let version =
+            read_session_state_version_tx(&mut tx, &self.session_id, false, self.fleet_format)
+                .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(version)
     }
@@ -54,7 +56,9 @@ impl SessionCommitStore for PostgresSessionStore {
         self.set_transaction_lease_clock_for_testing(&mut tx)
             .await?;
         ensure_session_execution_lease_tx(&mut tx, &lease.session_id, lease).await?;
-        let version = read_session_state_version_tx(&mut tx, &lease.session_id, true).await?;
+        let version =
+            read_session_state_version_tx(&mut tx, &lease.session_id, true, self.fleet_format)
+                .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core_execution::store::SessionStateAdmission {
             session_id: lease.session_id.clone(),
@@ -141,7 +145,8 @@ impl SessionCommitStore for PostgresSessionStore {
         self.read_session_state_version().await?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
-        let meta = load_session_head_meta_tx(&mut tx, &self.session_id, false).await?;
+        let meta =
+            load_session_head_meta_tx(&mut tx, &self.session_id, false, self.fleet_format).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(meta)
     }
@@ -254,11 +259,16 @@ impl SessionCommitStore for PostgresSessionStore {
                 current_generation -= 1;
             }
         }
-        let node = SessionNodeRecord::decode_storage_body(candidate_id, parent_node_id, &json)
-            .map_err(|err| StoreError::StoredDataCorrupt {
-                record_kind: "SessionGraph node",
-                message: err.to_string(),
-            })?;
+        let node = SessionNodeRecord::decode_storage_body_for_fleet(
+            candidate_id,
+            parent_node_id,
+            &json,
+            self.fleet_format,
+        )
+        .map_err(|err| StoreError::StoredDataCorrupt {
+            record_kind: "SessionGraph node",
+            message: err.to_string(),
+        })?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(Some(node))
     }
@@ -306,7 +316,9 @@ impl SessionCommitStore for PostgresSessionStore {
         // Read without a lock for early validation and receipt replay. Before
         // mutating graph reachability, existing sessions lock and recheck this
         // revision so commit, maintenance, and deletion share one authority.
-        let existing = load_session_head_meta_tx(&mut tx, &commit.session_id, false).await?;
+        let existing =
+            load_session_head_meta_tx(&mut tx, &commit.session_id, false, self.fleet_format)
+                .await?;
         planner.validate_session_binding(existing.as_ref().map(|meta| &meta.session_id))?;
         let direct_meta = SessionMeta {
             session_id: commit.session_id.clone(),
@@ -353,10 +365,11 @@ impl SessionCommitStore for PostgresSessionStore {
                         stored_version.map(i64::from),
                         stored_requested_node_count,
                     )?;
-                let result = lash_core_execution::store::decode_runtime_commit_receipt(
+                let result = lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
                     &commit.session_id,
                     planner.operation_key(),
                     &result_json,
+                    self.fleet_format,
                 )?;
                 let prior = lash_core_execution::store::RuntimeCommitReceiptRecord {
                     turn_commit_hash: hash,
@@ -521,7 +534,8 @@ impl SessionCommitStore for PostgresSessionStore {
         }
         // Publication owns the complete sorted blob-row set before this fresh
         // commit locks or writes any checkpoint owner edge, graph row, or head.
-        let (checkpoint_ref, manifest) = put_checkpoint_tx(&mut tx, &commit.checkpoint).await?;
+        let (checkpoint_ref, manifest) =
+            put_checkpoint_tx(&mut tx, &commit.checkpoint, self.fleet_format).await?;
         crate::session_meta::write_session_meta_tx(
             &mut tx,
             &direct_meta,
@@ -536,7 +550,9 @@ impl SessionCommitStore for PostgresSessionStore {
                 &commit.session_id,
                 SessionHeadPayload {
                     schema_version: self.fleet_format.writer_version(
-                        lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                        lash_core_execution::surface_format!(
+                            lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION
+                        ),
                     ),
                     session_id: commit.session_id.clone(),
                     config: commit.config.clone(),
@@ -744,7 +760,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 .map_err(store_sqlx_error)?;
         }
         for (node, facts) in commit.graph.nodes().iter().zip(plan.planned_node_facts()) {
-            let node_json = node.encode_storage_body().map_err(|err| {
+            let node_json = node.encode_storage_body(self.fleet_format).map_err(|err| {
                 StoreError::Backend(format!("failed to encode graph node body: {err}"))
             })?;
             sqlx::query(session_sql().graph.insert.sql())
@@ -1367,8 +1383,10 @@ impl PostgresSessionStore {
         .execute(&mut *tx)
         .await
         .map_err(store_sqlx_error)?;
-        read_session_state_version_tx(&mut tx, session_id, false).await?;
-        let Some(meta) = load_session_head_meta_tx(&mut tx, session_id, false).await? else {
+        read_session_state_version_tx(&mut tx, session_id, false, self.fleet_format).await?;
+        let Some(meta) =
+            load_session_head_meta_tx(&mut tx, session_id, false, self.fleet_format).await?
+        else {
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(None);
         };
@@ -1386,17 +1404,20 @@ impl PostgresSessionStore {
             leaf_node_id
                 .clone()
                 .map(lash_core_execution::NodeId::into_inner),
+            self.fleet_format,
         )
         .await?;
         let checkpoint = match checkpoint_ref.as_ref() {
-            Some(blob_ref) => match get_checkpoint_tx(&mut tx, blob_ref).await? {
-                None if base.is_some() => {
-                    return Err(StoreError::TurnBaseNotRetained {
-                        revision: head_revision,
-                    });
+            Some(blob_ref) => {
+                match get_checkpoint_tx(&mut tx, blob_ref, self.fleet_format).await? {
+                    None if base.is_some() => {
+                        return Err(StoreError::TurnBaseNotRetained {
+                            revision: head_revision,
+                        });
+                    }
+                    checkpoint => checkpoint,
                 }
-                checkpoint => checkpoint,
-            },
+            }
             None => None,
         };
         // A turn is admitted only while the head owes no follow-on (ADR 0101
@@ -1433,10 +1454,11 @@ impl PostgresSessionStore {
         for row in turn_failure_rows {
             let turn_id = row.get::<String, _>("turn_id");
             let result_json = row.get::<String, _>("result_json");
-            let receipt = lash_core_execution::store::decode_runtime_commit_receipt(
+            let receipt = lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
                 session_id,
                 &turn_id,
                 &result_json,
+                self.fleet_format,
             )?;
             if !receipt.failure_evidence.is_empty() {
                 turn_failure_settlements.push(lash_core_execution::TurnFailureSettlement {

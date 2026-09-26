@@ -93,8 +93,9 @@ pub(crate) fn write_session_meta(
                 stored.source_session_id.as_deref(),
                 stored.source_node_id,
                 crate::clamp_epoch_ms(created_at_ms),
-                fleet_format
-                    .writer_version(lash_core_execution::store::CURRENT_SESSION_STATE_VERSION),
+                fleet_format.writer_version(lash_core_execution::surface_format!(
+                    lash_core_execution::store::CURRENT_SESSION_STATE_VERSION
+                )),
             ],
         )
         .map_err(sqlite_error)?;

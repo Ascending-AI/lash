@@ -98,6 +98,7 @@ impl UsageCapability {
                 staged.deltas(),
                 operation,
                 current.host.core.durability.commit_budget,
+                current.fleet_format(),
             )
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         // Stamp last: the semantic-boundary identity hashes the commit's

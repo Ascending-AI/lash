@@ -29,6 +29,7 @@ fn process_event_old_system_time_json_is_rejected() {
         None,
         1_700_000_000_000,
         None,
+        crate::FleetFormat::current(),
     )
     .expect("prepare process event");
     let ProcessEventAppendPlan::Insert { event, .. } = plan else {
@@ -250,9 +251,17 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
         &crate::process_id_for_test("process-repair-waiting"),
         &wait,
     );
-    let waiting =
-        prepare_process_event_append(&record, waiting_request.clone(), 1, None, None, 42, None)
-            .expect("prepare waiting event");
+    let waiting = prepare_process_event_append(
+        &record,
+        waiting_request.clone(),
+        1,
+        None,
+        None,
+        42,
+        None,
+        crate::FleetFormat::current(),
+    )
+    .expect("prepare waiting event");
     let ProcessEventAppendPlan::Insert {
         event: waiting_event,
         projected_record: waiting_record,
@@ -278,6 +287,7 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
         None,
         43,
         None,
+        crate::FleetFormat::current(),
     )
     .expect("prepare terminal event");
     let ProcessEventAppendPlan::Insert {
@@ -296,6 +306,7 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
         Some(waiting_event),
         100,
         None,
+        crate::FleetFormat::current(),
     )
     .expect("stale waiting event should replay without repair");
     let ProcessEventAppendPlan::Replay {
@@ -328,8 +339,17 @@ fn replayed_terminal_event_repairs_non_terminal_status_projection() {
         }),
     )
     .with_replay_key("process-repair-terminal");
-    let first = prepare_process_event_append(&record, request.clone(), 1, None, None, 42, None)
-        .expect("prepare first terminal event");
+    let first = prepare_process_event_append(
+        &record,
+        request.clone(),
+        1,
+        None,
+        None,
+        42,
+        None,
+        crate::FleetFormat::current(),
+    )
+    .expect("prepare first terminal event");
     let ProcessEventAppendPlan::Insert {
         event: first_event, ..
     } = first
@@ -337,9 +357,17 @@ fn replayed_terminal_event_repairs_non_terminal_status_projection() {
         panic!("first terminal event should insert");
     };
 
-    let replayed =
-        prepare_process_event_append(&record, request, 99, Some(1), Some(first_event), 100, None)
-            .expect("prepare replayed terminal event");
+    let replayed = prepare_process_event_append(
+        &record,
+        request,
+        99,
+        Some(1),
+        Some(first_event),
+        100,
+        None,
+        crate::FleetFormat::current(),
+    )
+    .expect("prepare replayed terminal event");
 
     let ProcessEventAppendPlan::Replay {
         event,
@@ -375,9 +403,17 @@ fn replayed_generic_tail_repairs_projection_across_sender_floor_gap() {
     let request =
         ProcessEventAppendRequest::new("producer.progress", serde_json::json!({"value": 1}))
             .with_replay_key("process-generic-repair:progress");
-    let first =
-        prepare_process_event_append(&stale_record, request.clone(), 7, None, None, 42, None)
-            .expect("prepare generic event at a sender-floor boundary");
+    let first = prepare_process_event_append(
+        &stale_record,
+        request.clone(),
+        7,
+        None,
+        None,
+        42,
+        None,
+        crate::FleetFormat::current(),
+    )
+    .expect("prepare generic event at a sender-floor boundary");
     let ProcessEventAppendPlan::Insert { event, .. } = first else {
         panic!("first generic event should insert")
     };
@@ -390,6 +426,7 @@ fn replayed_generic_tail_repairs_projection_across_sender_floor_gap() {
         Some(event),
         100,
         None,
+        crate::FleetFormat::current(),
     )
     .expect("replay generic tail across a sender-floor gap");
     let ProcessEventAppendPlan::Replay { repair_record, .. } = replay else {
@@ -416,9 +453,17 @@ fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
     let first_request =
         ProcessEventAppendRequest::new("producer.progress", serde_json::json!({"value": 1}))
             .with_replay_key("process-generic-stale-replay:1");
-    let first =
-        prepare_process_event_append(&record, first_request.clone(), 1, None, None, 42, None)
-            .expect("prepare first generic event");
+    let first = prepare_process_event_append(
+        &record,
+        first_request.clone(),
+        1,
+        None,
+        None,
+        42,
+        None,
+        crate::FleetFormat::current(),
+    )
+    .expect("prepare first generic event");
     let ProcessEventAppendPlan::Insert {
         event: first_event,
         projected_record: first_record,
@@ -437,6 +482,7 @@ fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
         None,
         100,
         None,
+        crate::FleetFormat::current(),
     )
     .expect("prepare second generic event");
     let ProcessEventAppendPlan::Insert {
@@ -456,6 +502,7 @@ fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
         Some(first_event),
         200,
         None,
+        crate::FleetFormat::current(),
     )
     .expect("stale generic event should replay without repair");
     let ProcessEventAppendPlan::Replay { repair_record, .. } = replay else {

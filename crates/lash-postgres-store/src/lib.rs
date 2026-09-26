@@ -679,6 +679,10 @@ pub struct PostgresProcessRegistry {
     scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts,
     /// Where registration mints process ids (ADR 0107).
     process_id_mint: lash_core_execution::ProcessIdMint,
+    /// `F` this storage admitted at open: every wake-delivery and process-event
+    /// payload the registry stamps goes through `writer_version`, never a bare
+    /// build constant (FIG-3796).
+    fleet_format: lash_core_execution::FleetFormat,
 }
 
 impl PostgresProcessRegistry {
@@ -822,7 +826,12 @@ impl PostgresStorage {
             .connect(database_url)
             .await
             .map_err(store_sqlx_error)?;
-        let (catalog_id, fleet_format) = ensure_schema(&pool, config.schema_check).await?;
+        let (catalog_id, fleet_format) = ensure_schema(
+            &pool,
+            config.schema_check,
+            lash_core_execution::FleetFormat::writable_range(),
+        )
+        .await?;
         Ok(Self {
             pool,
             catalog_id: catalog_id.into(),
@@ -889,7 +898,36 @@ impl PostgresStorage {
         pool: PgPool,
         config: PostgresStoreConfig,
     ) -> Result<Self, StoreError> {
-        let (catalog_id, fleet_format) = ensure_schema(&pool, config.schema_check).await?;
+        let (catalog_id, fleet_format) = ensure_schema(
+            &pool,
+            config.schema_check,
+            lash_core_execution::FleetFormat::writable_range(),
+        )
+        .await?;
+        Ok(Self {
+            pool,
+            catalog_id: catalog_id.into(),
+            fleet_format,
+        })
+    }
+
+    /// Build storage over an already-constructed pool, admitting `writable`
+    /// as the opening build's fleet-format writable range.
+    ///
+    /// Testing seam for FIG-3796's rollout proofs: the recorded fleet-format
+    /// row is read against `writable` rather than this binary's own
+    /// [`lash_core_execution::FleetFormat::writable_range`], so a test can
+    /// stand in for a build whose range does — or does not — still write the
+    /// generation the fleet recorded. Production opens always pass this
+    /// build's range.
+    #[cfg(feature = "testing")]
+    pub async fn from_pool_with_fleet_writable_range_for_testing(
+        pool: PgPool,
+        config: PostgresStoreConfig,
+        writable: std::ops::RangeInclusive<u32>,
+    ) -> Result<Self, StoreError> {
+        let (catalog_id, fleet_format) =
+            ensure_schema(&pool, config.schema_check, writable).await?;
         Ok(Self {
             pool,
             catalog_id: catalog_id.into(),
@@ -1229,6 +1267,7 @@ impl PostgresStorage {
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
             process_id_mint: lash_core_execution::ProcessIdMint::default(),
+            fleet_format: self.fleet_format,
         }
     }
 
@@ -1242,6 +1281,7 @@ impl PostgresStorage {
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
             process_id_mint: lash_core_execution::ProcessIdMint::default(),
+            fleet_format: self.fleet_format,
         }
     }
 

@@ -191,7 +191,11 @@ async fn paged_summary(
         assert!(events.len() <= 2);
         for event in events {
             table
-                .fold_event(&event.event_type, &event.payload)
+                .fold_event(
+                    &event.event_type,
+                    &event.payload,
+                    lash_core::FleetFormat::current(),
+                )
                 .expect("fold a paged effect-summary event");
             if event.event_type.starts_with("process.effect_") {
                 folded.push((event.event_type, event.payload));

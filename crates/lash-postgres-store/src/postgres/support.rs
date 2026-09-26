@@ -95,9 +95,12 @@ pub(crate) async fn retention_source_holds_checkpoint_tx(
         .map_err(store_sqlx_error)
 }
 
+/// `fleet` is the store's recorded `F`: the retained frame node's body admits
+/// the `[N-1, N]` reader window `F` names (FIG-3796).
 pub(crate) async fn retained_fork_config_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     node_id: &str,
+    fleet: lash_core_execution::FleetFormat,
 ) -> Result<lash_core_execution::PersistedSessionConfig, StoreError> {
     let frame_node_id = crate::runtime_persistence::nearest_frame_node_id_tx(tx, node_id)
         .await?
@@ -114,10 +117,11 @@ pub(crate) async fn retained_fork_config_tx(
         })?;
     let parent_node_id = row.get(0);
     let node_json: String = row.get(1);
-    lash_core_execution::SessionNodeRecord::decode_storage_body(
+    lash_core_execution::SessionNodeRecord::decode_storage_body_for_fleet(
         frame_node_id.clone(),
         parent_node_id,
         &node_json,
+        fleet,
     )
     .map_err(|error| {
         StoreError::Backend(format!(
@@ -316,6 +320,9 @@ fn encode_msgpack<T: serde::Serialize>(
     Ok(buf)
 }
 
+/// The test-only exact-version decode: production reads route through
+/// [`lash_core_execution::store::decode_versioned_msgpack_record_for_fleet`].
+#[cfg(test)]
 pub(crate) fn decode_versioned_msgpack_record<T>(
     bytes: &[u8],
     record_kind: &'static str,
@@ -480,8 +487,9 @@ async fn checkpoint_component_bodies_tx(
 pub(crate) async fn put_checkpoint_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     checkpoint: &HydratedSessionCheckpoint,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(BlobRef, SessionCheckpoint), StoreError> {
-    let manifest = checkpoint.manifest()?;
+    let manifest = checkpoint.manifest(fleet_format)?;
     let bytes = encode_msgpack(&manifest, "checkpoint root")?;
     let checkpoint_ref = BlobRef::for_content(&bytes);
 
@@ -547,20 +555,27 @@ pub(crate) async fn put_checkpoint_tx(
     Ok((checkpoint_ref, manifest))
 }
 
+/// `fleet` is the store's recorded `F`: the manifest and its component
+/// encodings admit the `[N-1, N]` reader window `F` names (FIG-3796).
 pub(crate) async fn get_checkpoint_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     blob_ref: &BlobRef,
+    fleet: lash_core_execution::FleetFormat,
 ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
     let bytes = get_blob_tx(tx, blob_ref).await?;
     let Some(bytes) = bytes else {
         return Ok(None);
     };
-    let manifest: SessionCheckpoint = decode_versioned_msgpack_record(
-        &bytes,
-        "SessionCheckpoint",
-        lash_core_execution::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
-    )?;
-    manifest.validate_component_encoding_versions()?;
+    let manifest: SessionCheckpoint =
+        lash_core_execution::store::decode_versioned_msgpack_record_for_fleet(
+            &bytes,
+            "SessionCheckpoint",
+            lash_core_execution::surface_format!(
+                lash_core_execution::store::SESSION_CHECKPOINT_SCHEMA_VERSION
+            ),
+            fleet,
+        )?;
+    manifest.validate_component_encoding_versions_for_fleet(fleet)?;
     let bodies = checkpoint_component_bodies_tx(tx, &manifest).await?;
     let mut components = std::collections::BTreeMap::new();
     for (key, descriptor) in &manifest.components {
@@ -619,10 +634,13 @@ pub(crate) async fn count_checkpoint_data_statements<F: std::future::Future>(
     (output, count)
 }
 
+/// `fleet` is the store's recorded `F`: the head-meta JSON admits the
+/// `[N-1, N]` reader window `F` names (FIG-3796).
 pub(crate) async fn load_session_head_meta_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     for_update: bool,
+    fleet: lash_core_execution::FleetFormat,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let sql = if for_update {
         session_sql().head.select_meta_for_update.sql()
@@ -634,12 +652,13 @@ pub(crate) async fn load_session_head_meta_tx(
         .fetch_optional(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
-    decode_session_head_meta_row(session_id, row)
+    decode_session_head_meta_row(session_id, row, fleet)
 }
 
 fn decode_session_head_meta_row(
     session_id: &SessionId,
     row: Option<sqlx::postgres::PgRow>,
+    fleet: lash_core_execution::FleetFormat,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let Some(row) = row else {
         return Ok(None);
@@ -654,18 +673,22 @@ fn decode_session_head_meta_row(
             session_id,
             pending_follow_on.as_deref(),
         )?;
-    let payload: SessionHeadPayload = lash_core_execution::store::decode_versioned_json_record(
-        &head_json,
-        "SessionHeadMeta",
-        lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION,
-    )
-    .map_err(|error| match error {
-        StoreError::Backend(message) => StoreError::StoredDataCorrupt {
-            record_kind: "SessionHeadMeta",
-            message,
-        },
-        error => error,
-    })?;
+    let payload: SessionHeadPayload =
+        lash_core_execution::store::decode_versioned_json_record_for_fleet(
+            &head_json,
+            "SessionHeadMeta",
+            lash_core_execution::surface_format!(
+                lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION
+            ),
+            fleet,
+        )
+        .map_err(|error| match error {
+            StoreError::Backend(message) => StoreError::StoredDataCorrupt {
+                record_kind: "SessionHeadMeta",
+                message,
+            },
+            error => error,
+        })?;
     Ok(Some(
         SessionHeadMeta::assemble(
             session_id,
@@ -708,10 +731,13 @@ pub(crate) async fn load_usage_deltas_tx(
         .collect()
 }
 
+/// `fleet` is the store's recorded `F`: stored node bodies admit the
+/// `[N-1, N]` reader window `F` names (FIG-3796).
 pub(crate) async fn load_graph_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     leaf_node_id: Option<String>,
+    fleet: lash_core_execution::FleetFormat,
 ) -> Result<lash_core_execution::SessionGraph, StoreError> {
     let Some(leaf_node_id) = leaf_node_id else {
         return Ok(lash_core_execution::SessionGraph::default());
@@ -726,7 +752,14 @@ pub(crate) async fn load_graph_tx(
                 record_kind: "SessionGraph",
                 message: format!("leaf `{leaf_node_id}` is missing or tombstoned"),
             })?;
-    load_readable_graph_tx(tx, session_id, Some(leaf_generation), Some(leaf_node_id)).await
+    load_readable_graph_tx(
+        tx,
+        session_id,
+        Some(leaf_generation),
+        Some(leaf_node_id),
+        fleet,
+    )
+    .await
 }
 
 #[cfg(test)]
@@ -734,8 +767,9 @@ pub(crate) async fn load_whole_graph_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     leaf_node_id: Option<String>,
+    fleet: lash_core_execution::FleetFormat,
 ) -> Result<lash_core_execution::SessionGraph, StoreError> {
-    load_readable_graph_tx(tx, session_id, None, leaf_node_id).await
+    load_readable_graph_tx(tx, session_id, None, leaf_node_id, fleet).await
 }
 
 async fn load_readable_graph_tx(
@@ -743,6 +777,7 @@ async fn load_readable_graph_tx(
     session_id: &SessionId,
     generation_ceiling: Option<i64>,
     leaf_node_id: Option<String>,
+    fleet: lash_core_execution::FleetFormat,
 ) -> Result<lash_core_execution::SessionGraph, StoreError> {
     // One statement per filter shape, chosen exhaustively: a single statement
     // carrying `$2::BIGINT IS NULL OR generation <= $2` cannot use an index for
@@ -778,8 +813,13 @@ async fn load_readable_graph_tx(
                 ),
             });
         }
-        let node = SessionNodeRecord::decode_storage_body(node_id.clone(), parent_node_id, &json)
-            .map_err(|error| StoreError::StoredDataCorrupt {
+        let node = SessionNodeRecord::decode_storage_body_for_fleet(
+            node_id.clone(),
+            parent_node_id,
+            &json,
+            fleet,
+        )
+        .map_err(|error| StoreError::StoredDataCorrupt {
             record_kind: "SessionGraph node",
             message: error.to_string(),
         })?;

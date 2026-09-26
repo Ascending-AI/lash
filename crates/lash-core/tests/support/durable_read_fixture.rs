@@ -362,20 +362,24 @@ fn fixture_effect_outcome() -> lash_core::ProcessEffectSummaryOccurrence {
             .failure_code(),
         ),
         "durable-read-tool-effect:1",
+        lash_core::FleetFormat::current(),
     )
 }
 
 const FIXTURE_EFFECT_OMISSIONS_KEY: &str = "durable-read-effect-omissions";
 
 fn fixture_effect_omissions() -> lash_core::ProcessEffectOmissions {
-    lash_core::ProcessEffectOmissions::new(std::collections::BTreeMap::from([(
-        "durable-read-tool-node".to_string(),
-        lash_core::ProcessEffectOmittedCounts {
-            success: 3,
-            failure: 1,
-            cancelled: 0,
-        },
-    )]))
+    lash_core::ProcessEffectOmissions::new(
+        std::collections::BTreeMap::from([(
+            "durable-read-tool-node".to_string(),
+            lash_core::ProcessEffectOmittedCounts {
+                success: 3,
+                failure: 1,
+                cancelled: 0,
+            },
+        )]),
+        lash_core::FleetFormat::current(),
+    )
 }
 
 #[allow(dead_code)]
@@ -1648,8 +1652,11 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE
     );
     assert_eq!(
-        lash_core::ProcessEffectSummaryOccurrence::decode(process_events[2].payload.clone())
-            .expect("decode durable fixture effect outcome"),
+        lash_core::ProcessEffectSummaryOccurrence::decode(
+            process_events[2].payload.clone(),
+            lash_core::FleetFormat::current()
+        )
+        .expect("decode durable fixture effect outcome"),
         fixture_effect_outcome()
     );
     assert_eq!(
@@ -1657,8 +1664,11 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         lash_core::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE
     );
     assert_eq!(
-        lash_core::ProcessEffectOmissions::decode(process_events[3].payload.clone())
-            .expect("decode durable fixture effect omissions"),
+        lash_core::ProcessEffectOmissions::decode(
+            process_events[3].payload.clone(),
+            lash_core::FleetFormat::current()
+        )
+        .expect("decode durable fixture effect omissions"),
         fixture_effect_omissions()
     );
     assert_eq!(
@@ -2308,6 +2318,7 @@ pub fn expected_process_lease() -> lash_core::ProcessLease {
         1,
         FIXTURE_WRITE_MS,
         PINNED_PROCESS_LEASE_TTL_MS,
+        lash_core::FleetFormat::current(),
     )
 }
 

@@ -746,6 +746,7 @@ fn rlm_contract_config_with_turn_options(
         agent_frame_id: "rlm-contract-frame".to_string(),
         turn_id: TurnId::from("rlm-contract-turn"),
         emit_llm_trace: false,
+        writer_formats: lash_core::build_newest_writer_formats(),
         termination,
     })
 }

@@ -660,6 +660,7 @@ impl TurnInputStore for Store {
         session_id: &SessionId,
     ) -> Result<Vec<lash_core_execution::TurnInputApplication>, StoreError> {
         let session_id = SessionId::from(session_id.to_string());
+        let fleet = self.fleet_format();
         self.conn
             .call(move |conn| {
                 let outcome = (|| {
@@ -679,11 +680,13 @@ impl TurnInputStore for Store {
                     let mut commits = Vec::new();
                     for row in rows {
                         let (turn_id, result_json) = row.map_err(sqlite_error)?;
-                        let result = lash_core_execution::store::decode_runtime_commit_receipt(
-                            &session_id,
-                            &turn_id,
-                            &result_json,
-                        )?;
+                        let result =
+                            lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
+                                &session_id,
+                                &turn_id,
+                                &result_json,
+                                fleet,
+                            )?;
                         commits.push((
                             result.head_revision,
                             turn_id,

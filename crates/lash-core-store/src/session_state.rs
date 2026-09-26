@@ -111,20 +111,25 @@ impl RuntimeCheckpointComponents {
         }
     }
 
-    fn descriptor(blob_ref: crate::store::BlobRef) -> crate::CheckpointComponentDescriptor {
+    fn descriptor(
+        blob_ref: crate::store::BlobRef,
+        fleet_format: crate::store::FleetFormat,
+    ) -> crate::CheckpointComponentDescriptor {
         crate::CheckpointComponentDescriptor {
             blob_ref,
-            encoding_version: crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
+            encoding_version: fleet_format.writer_version(crate::surface_format!(
+                crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION
+            )),
         }
     }
 
-    fn from_snapshot(snapshot: &SessionSnapshot) -> Self {
+    fn from_snapshot(snapshot: &SessionSnapshot, fleet_format: crate::store::FleetFormat) -> Self {
         let mut result = Self::unproven();
         if let Some(blob_ref) = snapshot.tool_state_ref.clone() {
             result.entries.insert(
                 crate::store::TOOL_STATE_CHECKPOINT_COMPONENT.to_string(),
                 ResidentCheckpointComponent::Unchanged {
-                    descriptor: Self::descriptor(blob_ref),
+                    descriptor: Self::descriptor(blob_ref, fleet_format),
                     body: ResidentCheckpointComponentBody::ToolState {
                         snapshot: None,
                         generation: snapshot.tool_state_generation,
@@ -136,7 +141,7 @@ impl RuntimeCheckpointComponents {
             result.entries.insert(
                 crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT.to_string(),
                 ResidentCheckpointComponent::Unchanged {
-                    descriptor: Self::descriptor(blob_ref),
+                    descriptor: Self::descriptor(blob_ref, fleet_format),
                     body: ResidentCheckpointComponentBody::PluginState {
                         snapshot: None,
                         generations: snapshot.plugin_state_generations.clone(),
@@ -148,7 +153,7 @@ impl RuntimeCheckpointComponents {
             result.entries.insert(
                 crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT.to_string(),
                 ResidentCheckpointComponent::Unchanged {
-                    descriptor: Self::descriptor(blob_ref),
+                    descriptor: Self::descriptor(blob_ref, fleet_format),
                     body: ResidentCheckpointComponentBody::ExecutionState(None),
                 },
             );
@@ -162,8 +167,9 @@ impl RuntimeCheckpointComponents {
     )]
     fn from_hydrated(
         checkpoint: &crate::store::HydratedSessionCheckpoint,
+        fleet_format: crate::store::FleetFormat,
     ) -> Result<Self, crate::StoreError> {
-        let manifest = checkpoint.manifest()?;
+        let manifest = checkpoint.manifest(fleet_format)?;
         let mut entries = std::collections::BTreeMap::new();
         for key in checkpoint.components.keys() {
             let descriptor = manifest.components.get(key).cloned().ok_or_else(|| {
@@ -175,7 +181,7 @@ impl RuntimeCheckpointComponents {
             let body = match key.as_str() {
                 crate::store::TOOL_STATE_CHECKPOINT_COMPONENT => {
                     let snapshot = checkpoint
-                        .decode_component::<crate::ToolState>(key)?
+                        .decode_component_for_fleet::<crate::ToolState>(key, fleet_format)?
                         .ok_or_else(|| crate::StoreError::StoredDataCorrupt {
                             record_kind: "HydratedSessionCheckpoint",
                             message: format!("component `{key}` disappeared during decode"),
@@ -188,7 +194,7 @@ impl RuntimeCheckpointComponents {
                 }
                 crate::store::PLUGIN_STATE_CHECKPOINT_COMPONENT => {
                     let snapshot = checkpoint
-                        .decode_component::<crate::PluginState>(key)?
+                        .decode_component_for_fleet::<crate::PluginState>(key, fleet_format)?
                         .expect("present plugin-state component");
                     ResidentCheckpointComponentBody::PluginState {
                         generations: plugin_generations(&snapshot),
@@ -197,12 +203,12 @@ impl RuntimeCheckpointComponents {
                 }
                 crate::store::EXECUTION_STATE_CHECKPOINT_COMPONENT => {
                     ResidentCheckpointComponentBody::ExecutionState(
-                        checkpoint.checked_component_body(key)?,
+                        checkpoint.checked_component_body_for_fleet(key, fleet_format)?,
                     )
                 }
-                _ => {
-                    ResidentCheckpointComponentBody::Opaque(checkpoint.checked_component_body(key)?)
-                }
+                _ => ResidentCheckpointComponentBody::Opaque(
+                    checkpoint.checked_component_body_for_fleet(key, fleet_format)?,
+                ),
             };
             entries.insert(
                 key.clone(),
@@ -226,7 +232,10 @@ impl RuntimeCheckpointComponents {
                 (
                     key,
                     ResidentCheckpointComponent::Unchanged {
-                        descriptor: Self::descriptor(blob_ref),
+                        descriptor: Self::descriptor(
+                            blob_ref,
+                            crate::store::FleetFormat::current(),
+                        ),
                         body: ResidentCheckpointComponentBody::Opaque(None),
                     },
                 )
@@ -242,6 +251,7 @@ impl RuntimeCheckpointComponents {
     pub fn build_checkpoint(
         &self,
         turn_state: crate::PersistedTurnState,
+        fleet_format: crate::store::FleetFormat,
     ) -> Result<crate::store::HydratedSessionCheckpoint, crate::StoreError> {
         if self.completeness != CheckpointComponentCompleteness::Complete {
             return Err(crate::StoreError::IncompleteCheckpointComponentSet);
@@ -264,7 +274,7 @@ impl RuntimeCheckpointComponents {
                             std::sync::Arc::clone(bytes)
                         }
                     };
-                    crate::HydratedCheckpointComponent::changed(body)
+                    crate::HydratedCheckpointComponent::changed_for_fleet(body, fleet_format)
                 }
                 ResidentCheckpointComponent::Unchanged { descriptor, .. } => {
                     crate::HydratedCheckpointComponent::unchanged(descriptor)
@@ -532,9 +542,12 @@ impl RuntimeCheckpointComponents {
         // This compares the store result with the complete intent already held
         // in process. It performs no store lookup and does not infer permission
         // from the bodiless descriptor shape produced after adoption.
-        self.build_checkpoint(crate::PersistedTurnState::default())
-            .and_then(|checkpoint| checkpoint.manifest())
-            .is_ok_and(|resident| resident.components == manifest.components)
+        self.build_checkpoint(
+            crate::PersistedTurnState::default(),
+            crate::store::FleetFormat::current(),
+        )
+        .and_then(|checkpoint| checkpoint.manifest(crate::store::FleetFormat::current()))
+        .is_ok_and(|resident| resident.components == manifest.components)
     }
 
     fn discard_known_bodies(
@@ -692,9 +705,20 @@ impl RuntimeSessionState {
     /// Builds a `RuntimeSessionState` from snapshot data for protocol and process-engine
     /// implementors while materializing or restoring protocol session state.
     pub fn from_snapshot(snapshot: SessionSnapshot) -> Self {
+        Self::from_snapshot_for_fleet(snapshot, crate::store::FleetFormat::current())
+    }
+
+    /// The fleet-aware restore: descriptors reconstructed for components the
+    /// snapshot names only by ref stamp the fleet's writer version for the
+    /// component-encoding surface (FIG-3796).
+    pub fn from_snapshot_for_fleet(
+        snapshot: SessionSnapshot,
+        fleet_format: crate::store::FleetFormat,
+    ) -> Self {
         // Authority deliberately defaults here and must be restored by adopt_durable_head;
         // consuming a snapshot without the subsequent head adoption would widen authority.
-        let checkpoint_components = RuntimeCheckpointComponents::from_snapshot(&snapshot);
+        let checkpoint_components =
+            RuntimeCheckpointComponents::from_snapshot(&snapshot, fleet_format);
         let agent_frames = snapshot
             .session_graph
             .agent_frame_records(&snapshot.session_id);
@@ -1336,6 +1360,7 @@ fn validate_restored_token_usage(usage: &TokenUsage) -> Result<(), crate::StoreE
 pub(crate) fn apply_session_checkpoint(
     state: &mut RuntimeSessionState,
     checkpoint: Option<crate::store::HydratedSessionCheckpoint>,
+    fleet_format: crate::store::FleetFormat,
 ) -> Result<(), crate::StoreError> {
     let Some(checkpoint) = checkpoint else {
         state.checkpoint_components = RuntimeCheckpointComponents::complete_empty();
@@ -1351,7 +1376,8 @@ pub(crate) fn apply_session_checkpoint(
     state.token_usage = checkpoint.turn_state.token_usage.clone();
     state.last_prompt_usage = checkpoint.turn_state.last_prompt_usage.clone();
     state.protocol_turn_options = checkpoint.turn_state.protocol_turn_options.clone();
-    state.checkpoint_components = RuntimeCheckpointComponents::from_hydrated(&checkpoint)?;
+    state.checkpoint_components =
+        RuntimeCheckpointComponents::from_hydrated(&checkpoint, fleet_format)?;
     state.ensure_agent_frame_initialized();
     Ok(())
 }
@@ -1393,6 +1419,7 @@ pub fn adopt_durable_head(
     head: &crate::store::SessionHead,
     checkpoint: Option<crate::store::HydratedSessionCheckpoint>,
     live_owned: LiveOwnedSessionFacts,
+    fleet_format: crate::store::FleetFormat,
 ) -> Result<(), crate::StoreError> {
     state.session_id = head.session_id.clone();
     state.session_graph = head.graph.clone();
@@ -1421,7 +1448,7 @@ pub fn adopt_durable_head(
     // it again after (the head row is authoritative over the checkpoint's
     // turn-state copy; `None` is a pre-v6-content head, which keeps the
     // checkpoint fallback). FIG-2479.
-    apply_session_checkpoint(state, checkpoint)?;
+    apply_session_checkpoint(state, checkpoint, fleet_format)?;
     if let Some(options) = head.config.protocol_turn_options.as_ref() {
         state.protocol_turn_options = options.clone();
     }

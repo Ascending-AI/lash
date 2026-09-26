@@ -28,8 +28,13 @@ fn ledger_key(parent: &ParentScope) -> Result<(&'static str, String), PluginErro
 }
 
 /// The typed payload a ledger row persists beside the projection key.
-fn ledger_payload(parent: &ParentScope) -> Result<String, PluginError> {
-    parent.storage_payload().map_err(process_decode_error)
+fn ledger_payload(
+    parent: &ParentScope,
+    fleet_format: lash_core_execution::FleetFormat,
+) -> Result<String, PluginError> {
+    parent
+        .storage_payload(fleet_format)
+        .map_err(process_decode_error)
 }
 
 fn decode_plan(
@@ -38,9 +43,11 @@ fn decode_plan(
     payload: String,
     ended_at_ms: i64,
     settled_at_ms: Option<i64>,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<ParentEndPlan, PluginError> {
-    let parent = ParentScope::from_storage_columns(&kind, Some(id.as_str()), &payload)
-        .map_err(|error| PluginError::Session(error.to_string()))?;
+    let parent =
+        ParentScope::from_storage_columns(&kind, Some(id.as_str()), &payload, fleet_format)
+            .map_err(|error| PluginError::Session(error.to_string()))?;
     Ok(ParentEndPlan {
         parent,
         ended_at_ms: ended_at_ms.max(0) as u64,
@@ -81,13 +88,14 @@ pub(crate) async fn record_tx(
     tx: &mut Transaction<'_, Postgres>,
     parent: &ParentScope,
     ended_at_ms: u64,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(), PluginError> {
     lock_parent_scope_tx(tx, parent).await?;
     let (kind, id) = ledger_key(parent)?;
     sqlx::query(process_sql().plan.insert_if_absent.sql())
         .bind(kind)
         .bind(id)
-        .bind(ledger_payload(parent)?)
+        .bind(ledger_payload(parent, fleet_format)?)
         .bind(ended_at_ms as i64)
         .execute(&mut **tx)
         .await
@@ -119,15 +127,17 @@ pub(super) async fn record(
     pool: &PgPool,
     parent: &ParentScope,
     ended_at_ms: u64,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(), PluginError> {
     let mut tx = pool.begin().await.map_err(plugin_sqlx_error)?;
-    record_tx(&mut tx, parent, ended_at_ms).await?;
+    record_tx(&mut tx, parent, ended_at_ms, fleet_format).await?;
     tx.commit().await.map_err(plugin_sqlx_error)
 }
 
 pub(super) async fn list_pending(
     pool: &PgPool,
     limit: NonZeroUsize,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<Vec<ParentEndPlan>, PluginError> {
     let rows = sqlx::query(process_sql().plan.list_pending.sql())
         .bind(limit.get() as i64)
@@ -135,13 +145,23 @@ pub(super) async fn list_pending(
         .await
         .map_err(plugin_sqlx_error)?;
     rows.into_iter()
-        .map(|row| decode_plan(row.get(0), row.get(1), row.get(2), row.get(3), row.get(4)))
+        .map(|row| {
+            decode_plan(
+                row.get(0),
+                row.get(1),
+                row.get(2),
+                row.get(3),
+                row.get(4),
+                fleet_format,
+            )
+        })
         .collect()
 }
 
 pub(super) async fn get(
     pool: &PgPool,
     parent: &ParentScope,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<Option<ParentEndPlan>, PluginError> {
     let (kind, id) = ledger_key(parent)?;
     let row = sqlx::query(process_sql().plan.select_stamps.sql())
@@ -150,8 +170,17 @@ pub(super) async fn get(
         .fetch_optional(pool)
         .await
         .map_err(plugin_sqlx_error)?;
-    row.map(|row| decode_plan(kind.to_string(), id, row.get(0), row.get(1), row.get(2)))
-        .transpose()
+    row.map(|row| {
+        decode_plan(
+            kind.to_string(),
+            id,
+            row.get(0),
+            row.get(1),
+            row.get(2),
+            fleet_format,
+        )
+    })
+    .transpose()
 }
 
 /// Turn and queue-drain scopes with live `Cancel` children and no ledger row

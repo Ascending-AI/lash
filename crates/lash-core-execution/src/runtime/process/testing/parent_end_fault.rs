@@ -48,6 +48,12 @@ pub fn fail_parent_end_once(
     })
 }
 
+impl crate::FleetFormatStore for ParentEndFault {
+    fn fleet_format(&self) -> crate::FleetFormat {
+        self.inner.fleet_format()
+    }
+}
+
 delegate_process_query!(ParentEndFault, inner);
 
 delegate_process_registrar!(

@@ -96,6 +96,7 @@ impl ProtocolDriverPlugin for Driver {
             tool_names_fingerprint,
             execution_prompt: Arc::from("facade protocol witness"),
             prompt_contributions: input.extra_prompt_contributions,
+            writer_formats: input.writer_formats,
         }
     }
 }
@@ -125,6 +126,7 @@ fn protocol_integrator_traits_are_implementable_from_the_facade() {
         plugin_extensions: PluginExtensions::default(),
         trigger_events: TriggerEventCatalog::default(),
         extra_prompt_contributions: Vec::new(),
+        writer_formats: lash_core::build_newest_writer_formats(),
     });
     assert!(preamble.config.sync_execution_environment);
     assert!(preamble.tool_specs.is_empty());

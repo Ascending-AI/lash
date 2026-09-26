@@ -336,6 +336,7 @@ floor:
     'python3 scripts/check_version_bump_fixtures.py' \
     'python3 scripts/check_format_registry.py' \
     'python3 scripts/check_upgrade_paths.py' \
+    'python3 scripts/check_writer_stamps.py' \
     'python3 scripts/check_checkpoint_component_flatten.py' \
     | scripts/gate-table.sh
 
@@ -352,6 +353,7 @@ bump-check:
     'python3 scripts/check_version_bump_fixtures.py' \
     'python3 scripts/check_format_registry.py' \
     'python3 scripts/check_upgrade_paths.py' \
+    'python3 scripts/check_writer_stamps.py' \
     'python3 scripts/check-store-sql-ownership.py' \
     'kiln test //crates/lash-sim:schema_congruence__test //crates/lash-core-store:lash-core-store__unit_test' \
     | scripts/gate-table.sh

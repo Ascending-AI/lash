@@ -3,7 +3,7 @@
 use super::{
     BlobRef, GraphAppend, HydratedSessionCheckpoint, OperationId, RealizedNodeTimestamp,
     SessionCheckpoint, SessionExecutionLeaseAuthority, StoreError, commit_identity,
-    ensure_supported_record_schema_version, ensure_supported_schema_version,
+    ensure_supported_record_schema_version_for_fleet, ensure_supported_schema_version_for_fleet,
 };
 use crate::SessionId;
 use crate::TurnId;
@@ -253,6 +253,7 @@ impl RuntimeCommit {
             usage_deltas,
             operation,
             commit_budget,
+            crate::store::FleetFormat::current(),
         )
         .expect("test commit must be hashable")
     }
@@ -276,6 +277,7 @@ impl RuntimeCommit {
             usage_deltas,
             operation,
             Self::recommended_test_commit_budget(),
+            crate::store::FleetFormat::current(),
         )
         .expect("fixed-identity test commit must be hashable")
     }
@@ -309,6 +311,7 @@ impl RuntimeCommit {
             usage_deltas,
             operation,
             Self::recommended_test_commit_budget(),
+            crate::store::FleetFormat::current(),
         )
         .expect("test graph commit must be hashable")
     }
@@ -323,6 +326,7 @@ impl RuntimeCommit {
             usage_deltas,
             operation,
             Self::recommended_test_commit_budget(),
+            crate::store::FleetFormat::current(),
         )
     }
 
@@ -336,6 +340,7 @@ impl RuntimeCommit {
             usage_deltas,
             operation,
             Self::recommended_test_commit_budget(),
+            crate::store::FleetFormat::current(),
         )
     }
 
@@ -351,6 +356,7 @@ impl RuntimeCommit {
             usage_deltas,
             operation,
             Self::recommended_test_commit_budget(),
+            crate::store::FleetFormat::current(),
         )
     }
 }
@@ -753,23 +759,59 @@ pub const RUNTIME_COMMIT_RECEIPT_RECORD_KIND: &str = "RuntimeCommitReceipt";
 /// version this binary does not support, or a body outside the current shape
 /// is a refusal, never a skipped row. `turn_id` is the row's operation storage
 /// key, named so a refusal identifies the exact durable record.
+///
+/// This is the no-store form: it answers what a context with no recorded `F`
+/// can admit — this build's newest version alone. Reads on a bound store go
+/// through [`decode_runtime_commit_receipt_for_fleet`].
 pub fn decode_runtime_commit_receipt(
     session_id: &SessionId,
     turn_id: &str,
     json: &str,
 ) -> Result<RuntimeCommitReceipt, StoreError> {
-    let value: serde_json::Value =
+    decode_runtime_commit_receipt_for_fleet(
+        session_id,
+        turn_id,
+        json,
+        super::FleetFormat::current(),
+    )
+}
+
+/// The fleet leg of [`decode_runtime_commit_receipt`]: the receipt admits the
+/// version `fleet` records for the surface as well as this build's newest —
+/// the `[N-1, N]` reader window of ADR 0106 §2 (FIG-3796). An admitted older
+/// payload climbs to the newest through the surface's [`RecordUpcaster`]
+/// hooks before it decodes.
+pub fn decode_runtime_commit_receipt_for_fleet(
+    session_id: &SessionId,
+    turn_id: &str,
+    json: &str,
+    fleet: super::FleetFormat,
+) -> Result<RuntimeCommitReceipt, StoreError> {
+    let mut value: serde_json::Value =
         serde_json::from_str(json).map_err(|error| StoreError::StoredDataCorrupt {
             record_kind: RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
             message: format!(
                 "session `{session_id}` receipt `{turn_id}` is not valid JSON: {error}"
             ),
         })?;
-    ensure_supported_record_schema_version(
+    let actual = ensure_supported_record_schema_version_for_fleet(
         RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
         &value,
-        RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
+        crate::surface_format!(RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION),
+        fleet,
     )?;
+    let window = fleet.read_window(crate::surface_format!(
+        RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION
+    ));
+    if actual != window.newest() {
+        super::upcast_json_record(
+            RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
+            crate::surface_format!(RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION),
+            actual,
+            window.newest(),
+            &mut value,
+        )?;
+    }
     serde_json::from_value(value).map_err(|error| StoreError::StoredDataCorrupt {
         record_kind: RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
         message: format!(
@@ -782,11 +824,24 @@ pub fn decode_runtime_commit_receipt(
 ///
 /// Backends that hold the receipt as a value rather than serialized bytes
 /// apply the same refusal the JSON codec does.
+///
+/// This is the no-store form; a bound store's reads go through
+/// [`ensure_supported_receipt_version_for_fleet`].
 pub fn ensure_supported_receipt_version(receipt: &RuntimeCommitReceipt) -> Result<(), StoreError> {
-    ensure_supported_schema_version(
+    ensure_supported_receipt_version_for_fleet(receipt, super::FleetFormat::current())
+}
+
+/// The fleet leg of [`ensure_supported_receipt_version`]: admits the version
+/// `fleet` records for the surface alongside this build's newest (FIG-3796).
+pub fn ensure_supported_receipt_version_for_fleet(
+    receipt: &RuntimeCommitReceipt,
+    fleet: super::FleetFormat,
+) -> Result<(), StoreError> {
+    ensure_supported_schema_version_for_fleet(
         RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
         receipt.schema_version,
-        RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
+        crate::surface_format!(RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION),
+        fleet,
     )
 }
 

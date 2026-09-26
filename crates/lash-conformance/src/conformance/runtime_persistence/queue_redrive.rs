@@ -1,4 +1,5 @@
 use super::*;
+use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 use pretty_assertions::assert_eq;
 
 #[expect(
@@ -1670,7 +1671,9 @@ pub(super) fn policy_test_wake(
     sequence: u64,
 ) -> ProcessWakeDelivery {
     ProcessWakeDelivery {
-        version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
+            PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+        )),
         wake_id: format!("wake:{process_id}:{sequence}"),
         target_session_id: SessionId::from(session_id.to_string()),
         process_id: process_id.clone(),

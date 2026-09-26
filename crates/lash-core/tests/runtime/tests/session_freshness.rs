@@ -453,9 +453,7 @@ async fn freshness_skips_hydration_when_nothing_changed() {
 }
 
 fn commanded_turn_options(dialect: &str) -> lash_core::ProtocolTurnOptions {
-    lash_core::ProtocolTurnOptions {
-        payload: serde_json::json!({ "dialect": dialect }),
-    }
+    lash_core::ProtocolTurnOptions::from_payload(serde_json::json!({ "dialect": dialect }))
 }
 
 /// FIG-2479: the protocol-turn-options setter settles through the commanded

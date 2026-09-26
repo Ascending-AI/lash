@@ -157,6 +157,7 @@ impl LashRuntime {
             ResidentSessionState::Valid => {}
         }
         let recorded_options = self.state.protocol_turn_options.payload.clone();
+        let fleet_format = self.fleet_format();
         let protocol_session = self
             .session
             .as_ref()
@@ -170,6 +171,7 @@ impl LashRuntime {
                 .configure_runtime_on_materialize(
                     crate::plugin::ProtocolRuntimeContext::new(
                         &mut self.state.protocol_turn_options,
+                        fleet_format,
                     ),
                     materialization,
                 )
@@ -487,11 +489,17 @@ impl LashRuntime {
         // durable head.
         let live_owned = crate::runtime::state::LiveOwnedSessionFacts::of(&self.state.policy);
         let mut adopted = self.state.clone();
-        crate::runtime::state::adopt_durable_head(&mut adopted, &head, read.checkpoint, live_owned)
-            .map_err(|source| SessionError::Store {
-                context: "failed to restore session checkpoint".to_string(),
-                source,
-            })?;
+        crate::runtime::state::adopt_durable_head(
+            &mut adopted,
+            &head,
+            read.checkpoint,
+            live_owned,
+            self.fleet_format(),
+        )
+        .map_err(|source| SessionError::Store {
+            context: "failed to restore session checkpoint".to_string(),
+            source,
+        })?;
         Box::pin(self.adopt_resident_state(adopted)).await?;
         self.resident_session.mark_graph_head_current();
         // The adopted head is authoritative for usage too: rebuild the attempts
@@ -893,6 +901,7 @@ impl LashRuntime {
             &self.state,
             &pending_usage,
             self.host.core.durability.commit_budget,
+            self.fleet_format(),
         )
         .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
         let operation = super::lifecycle::initial_park_operation(&proposed)
@@ -907,12 +916,14 @@ impl LashRuntime {
             )
             .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
         }
+        let fleet_format = self.fleet_format();
         let (commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_staged_usage_and_budget(
                 &mut self.state,
                 staged.deltas(),
                 operation,
                 self.host.core.durability.commit_budget,
+                fleet_format,
             )
             .map_err(|err| PluginOperationInvokeError::Unknown(err.to_string()))?;
         let commit_result = commit_runtime_state_with_fresh_session_execution_lease(
@@ -1510,7 +1521,7 @@ impl LashRuntime {
                 let crate::SessionCommand::ApplyConfigPatch { patch } = command else {
                     unreachable!("config-only command group was checked above")
                 };
-                patch.validate()?;
+                patch.validate_for_fleet(self.fleet_format())?;
                 if self.refuses_route_at_apply(patch, next_state.effective_policy()) {
                     continue;
                 }
@@ -1563,6 +1574,7 @@ impl LashRuntime {
                     "persisted session commands require a claimed queue boundary",
                 )
             })?;
+        let fleet_format = self.fleet_format();
         let commit_state = next_config_state.as_mut().unwrap_or(&mut self.state);
         if let Some(session) = self.session.as_ref() {
             commit_state.capture_plugin_states(session.plugins());
@@ -1573,6 +1585,7 @@ impl LashRuntime {
                 &[],
                 operation,
                 self.host.core.durability.commit_budget,
+                fleet_format,
             )
             .map_err(super::runtime_error_from_store_commit)?;
         let Some(session_execution_lease) = session_execution_lease else {

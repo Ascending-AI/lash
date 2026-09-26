@@ -656,7 +656,7 @@ pub async fn run_lashlang_process(
         if let lash_core::ProcessRunOutcome::Terminal { prelude, .. } = &mut output {
             *prelude = host
                 .effect_summary
-                .terminal_prelude(host.identities.effect_omissions());
+                .terminal_prelude(host.identities.effect_omissions(), host.ctx.fleet_format());
         }
     }
     drop(env);

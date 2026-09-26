@@ -284,6 +284,7 @@ async fn durable_effect_outcome_event_crash_windows(
             "fixture:refused",
         )),
         "lashlang:recorded-effect:1",
+        lash_core::FleetFormat::current(),
     );
 
     assert!(

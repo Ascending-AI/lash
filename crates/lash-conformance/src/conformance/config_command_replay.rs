@@ -7,6 +7,8 @@
 //! settle the claim — outcomes and refused windows — in the same pass. These
 //! laws drive that drain against the real store and read the rows back.
 
+use lash_core::store::SESSION_HEAD_META_SCHEMA_VERSION;
+
 use lash_core::store::{
     ConfigCommandPlan, ConfigRefusalCode, DriveFence, IngressCommandOutcome, IngressCommandResult,
     IngressEnqueueOutcome, IngressItemDraft, IngressLane, IngressPayload, IngressRefusedWindow,
@@ -397,7 +399,9 @@ pub async fn pre_contract_head_and_patch_are_refused_typed(handles: SessionIngre
 
     // A patch from before the contract refuses at validation, before any CAS.
     let legacy_patch = crate::ApplyConfigPatch {
-        schema_version: crate::store::SESSION_HEAD_META_SCHEMA_VERSION - 1,
+        schema_version: crate::FleetFormat::current()
+            .writer_version(lash_core::surface_format!(SESSION_HEAD_META_SCHEMA_VERSION))
+            - 1,
         ..crate::ApplyConfigPatch::default()
     };
     let refusal = legacy_patch

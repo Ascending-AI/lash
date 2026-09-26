@@ -46,18 +46,42 @@ struct ProcessWakeDeliveryFormatVersionProbe {
     version: Option<u32>,
 }
 
-fn decode_process_wake_delivery(delivery_json: &str) -> Result<ProcessWakeDelivery, PluginError> {
+/// `fleet_format` is the `F` the bound registry store recorded: the read
+/// admits the pair `{fleet's writer version, this build's newest}` — ADR 0106
+/// §2's `[N-1, N]` window (FIG-3796). An admitted older payload climbs to the
+/// newest through the surface's `RecordUpcaster` hooks; anything else is
+/// refused as unsupported.
+fn decode_process_wake_delivery(
+    delivery_json: &str,
+    fleet_format: crate::FleetFormat,
+) -> Result<ProcessWakeDelivery, PluginError> {
     let probe: ProcessWakeDeliveryFormatVersionProbe =
         serde_json::from_str(delivery_json).map_err(registry_row_decode_error)?;
     // A delivery written before the format carried a stamp is format 2.
     let found = probe.version.unwrap_or(2);
-    if found != PROCESS_WAKE_DELIVERY_FORMAT_VERSION {
+    let window = fleet_format.read_window(lash_core_store::surface_format!(
+        PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+    ));
+    if !window.admits(found) {
         return Err(PluginError::ProcessWakeDeliveryFormatVersionMismatch {
-            expected: PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+            expected: window.newest(),
             found,
         });
     }
-    serde_json::from_str(delivery_json).map_err(registry_row_decode_error)
+    if found == window.newest() {
+        return serde_json::from_str(delivery_json).map_err(registry_row_decode_error);
+    }
+    let mut value: serde_json::Value =
+        serde_json::from_str(delivery_json).map_err(registry_row_decode_error)?;
+    lash_core_store::store::upcast_json_record(
+        "process wake delivery",
+        lash_core_store::surface_format!(PROCESS_WAKE_DELIVERY_FORMAT_VERSION),
+        found,
+        window.newest(),
+        &mut value,
+    )
+    .map_err(|error| PluginError::Session(error.to_string()))?;
+    serde_json::from_value(value).map_err(registry_row_decode_error)
 }
 
 // ---------------------------------------------------------------------------
@@ -111,12 +135,18 @@ impl ProcessLeaseRow {
     /// is the point — yet the retained counter still fences the next holder
     /// against a stale writer that predates the release
     /// (see [`next_process_lease_fencing_token`]).
-    pub fn project(self, process_id: &ProcessId) -> Option<ProcessLease> {
+    pub fn project(
+        self,
+        process_id: &ProcessId,
+        fleet_format: crate::FleetFormat,
+    ) -> Option<ProcessLease> {
         let (Some(owner_id), Some(lease_token)) = (self.owner_id, self.lease_token) else {
             return None;
         };
         Some(ProcessLease {
-            schema_version: PROCESS_LEASE_SCHEMA_VERSION,
+            schema_version: fleet_format.writer_version(lash_core_store::surface_format!(
+                PROCESS_LEASE_SCHEMA_VERSION
+            )),
             process_id: process_id.clone(),
             owner: LeaseOwnerIdentity {
                 incarnation_id: self.incarnation_id.unwrap_or_else(|| owner_id.clone()),
@@ -304,9 +334,12 @@ pub fn acquired_process_lease(
     fencing_token: u64,
     now_ms: u64,
     lease_ttl_ms: u64,
+    fleet_format: crate::FleetFormat,
 ) -> ProcessLease {
     ProcessLease {
-        schema_version: PROCESS_LEASE_SCHEMA_VERSION,
+        schema_version: fleet_format.writer_version(lash_core_store::surface_format!(
+            PROCESS_LEASE_SCHEMA_VERSION
+        )),
         process_id: process_id.clone(),
         owner: owner.clone(),
         lease_token: crate::stable_hash::blake3_hex(
@@ -469,8 +502,9 @@ impl WakeDeliveryRow {
     ///
     /// The two label columns are parsed before the payload is decoded, so a row
     /// with an unrecognised state reports the state refusal rather than a decode
-    /// failure.
-    pub fn project(self) -> Result<WakeDelivery, PluginError> {
+    /// failure. `fleet_format` is the `F` the bound store recorded: the
+    /// delivery payload's read window comes from it (FIG-3796).
+    pub fn project(self, fleet_format: crate::FleetFormat) -> Result<WakeDelivery, PluginError> {
         let state = wake_delivery_state_from_label(&self.delivery_id, &self.state_label)?;
         let discard_reason = wake_discard_reason_from_label(
             &self.delivery_id,
@@ -493,7 +527,7 @@ impl WakeDeliveryRow {
                 None => WakeDeliveryDisposition::DiscardedUnattributed,
             },
         };
-        let wake = decode_process_wake_delivery(&self.delivery_json)?;
+        let wake = decode_process_wake_delivery(&self.delivery_json, fleet_format)?;
         Ok(WakeDelivery {
             delivery_id: self.delivery_id,
             wake,

@@ -563,6 +563,7 @@ fn standard_config() -> TurnMachineConfig {
         agent_frame_id: "standard-frame".to_string(),
         turn_id: TurnId::from("standard-protocol-turn"),
         emit_llm_trace: false,
+        writer_formats: lash_core::build_newest_writer_formats(),
         termination: lash_core::ProtocolTurnOptions::empty(),
     }
 }

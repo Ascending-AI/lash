@@ -1,5 +1,11 @@
+mod graph_nodes;
+
 use super::*;
 use crate::session_sql::session_sql;
+use graph_nodes::{
+    insert_graph_nodes_conn, occupied_node_ids_conn, release_undelivered_turn_input_claims_conn,
+};
+use lash_core_execution::FleetFormatStore;
 
 #[async_trait::async_trait]
 impl SessionCommitStore for Store {
@@ -52,8 +58,9 @@ impl SessionCommitStore for Store {
         let Some(session_id) = self.resolve_session_id_for_read().await? else {
             return Ok(lash_core_execution::store::OLDEST_SUPPORTED_SESSION_STATE_VERSION);
         };
+        let fleet = self.fleet_format();
         self.conn
-            .call(move |conn| Ok(read_session_state_version_conn(conn, &session_id)))
+            .call(move |conn| Ok(read_session_state_version_conn(conn, &session_id, fleet)))
             .await
             .map_err(sqlite_error)?
     }
@@ -64,11 +71,12 @@ impl SessionCommitStore for Store {
     ) -> Result<lash_core_execution::store::SessionStateAdmission, StoreError> {
         let lease = lease.clone();
         let now = self.clock.timestamp_ms();
+        let fleet = self.fleet_format();
         self.conn
             .write_flow(move |tx| {
                 let outcome = (|| {
                     ensure_session_execution_lease_conn(tx, &lease.session_id, &lease, now)?;
-                    let version = read_session_state_version_conn(tx, &lease.session_id)?;
+                    let version = read_session_state_version_conn(tx, &lease.session_id, fleet)?;
                     Ok(lash_core_execution::store::SessionStateAdmission {
                         session_id: lease.session_id.clone(),
                         version,
@@ -281,11 +289,13 @@ impl SessionCommitStore for Store {
             })
             .await
             .map_err(sqlite_error)?;
+        let fleet = self.fleet_format();
         row.map(|(node_id, parent_node_id, node_json)| {
-            lash_core_execution::SessionNodeRecord::decode_storage_body(
+            lash_core_execution::SessionNodeRecord::decode_storage_body_for_fleet(
                 node_id,
                 parent_node_id,
                 &node_json,
+                fleet,
             )
             .map_err(|error| stored_data_corrupt("SessionGraph node", error))
         })
@@ -502,7 +512,7 @@ impl SessionCommitStore for Store {
         self.bind_session(&planner.commit().session_id)?;
         let blob_profile = self.options.blob_profile;
         let now = self.clock.timestamp_ms();
-        let planner_fleet_format = self.fleet_format();
+        let fleet = self.fleet_format();
         let result = self
             .conn
             .write_flow(move |tx| {
@@ -511,7 +521,7 @@ impl SessionCommitStore for Store {
                     ensure_session_not_deleted_conn(tx, &commit.session_id)?;
                     super::session_ingress::require_commit_fences_conn(tx, commit, now)?;
                     let existing =
-                        try_load_session_head_meta_from_conn(tx, &commit.session_id)?;
+                        try_load_session_head_meta_from_conn(tx, &commit.session_id, fleet)?;
                     planner.validate_session_binding(
                         existing.as_ref().map(|meta| &meta.session_id),
                     )?;
@@ -524,7 +534,7 @@ impl SessionCommitStore for Store {
                         },
                         crate::session_meta::SessionMetaWrite::Insert,
                         now,
-                        planner_fleet_format,
+                        fleet,
                     )?;
                     planner.validate_node_derivation()?;
                     // A turn's commit settles its park (FIG-3586), in the
@@ -594,11 +604,13 @@ impl SessionCommitStore for Store {
                                     stored_version,
                                     stored_requested_node_count,
                                 )?;
-                            let result = lash_core_execution::store::decode_runtime_commit_receipt(
-                                &commit.session_id,
-                                planner.operation_key(),
-                                &result_json,
-                            )?;
+                            let result =
+                                lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
+                                    &commit.session_id,
+                                    planner.operation_key(),
+                                    &result_json,
+                                    fleet,
+                                )?;
                             let prior = lash_core_execution::store::RuntimeCommitReceiptRecord {
                                 turn_commit_hash: stored_hash,
                                 result,
@@ -869,7 +881,7 @@ impl SessionCommitStore for Store {
                     }
 
                     let stored_checkpoint =
-                        Self::put_checkpoint_conn(tx, &commit.checkpoint, blob_profile)?;
+                        Self::put_checkpoint_conn(tx, &commit.checkpoint, blob_profile, fleet)?;
 
                     if !commit.usage_deltas.is_empty() {
                         let mut stmt = tx
@@ -904,12 +916,7 @@ impl SessionCommitStore for Store {
                         }
                     }
 
-                    insert_graph_nodes_conn(
-                        tx,
-                        &commit.session_id,
-                        commit.graph.nodes(),
-                        plan.planned_node_facts(),
-                    )?;
+                    insert_graph_nodes_conn(tx, &commit.session_id, commit.graph.nodes(), &plan)?;
                     let meta = plan.head_meta(stored_checkpoint.checkpoint_ref.clone());
                     // Divergence ruling (FIG-3381): SQLite carries no CAS
                     // predicate on its head upsert and needs none. `existing`
@@ -1367,170 +1374,6 @@ impl SessionCommitStore for Store {
     }
 }
 
-/// Release the turn-input claims a cancelled turn withheld from its terminal
-/// checkpoint (FIG-3531), each under its own fence, inside the commit
-/// transaction.
-///
-/// Each row returns to the open spelling its ingress carries —
-/// `pending_active` for the active-turn rows a terminal checkpoint claims — so
-/// the cancellation's disposition, which runs next, settles and records it
-/// exactly as it does an unclaimed row. A claim this turn no longer holds
-/// matches no row and is left to its new holder.
-fn release_undelivered_turn_input_claims_conn(
-    tx: &rusqlite::Connection,
-    claims: &[lash_core_execution::TurnInputClaim],
-) -> Result<(), StoreError> {
-    let sql = crate::turn_ingress::turn_ingress_sql();
-    for claim in claims {
-        tx.execute(
-            sql.pending_inputs_sqlite.abandon_claim.sql(),
-            params![
-                claim.session_id.as_str(),
-                claim.claim_id.as_str(),
-                claim.lease_token,
-                lash_core_execution::runtime::TurnInputStateKind::PendingActive.as_str(),
-                lash_core_execution::runtime::TurnInputStateKind::DeferredNextTurn.as_str(),
-            ],
-        )
-        .map_err(sqlite_error)?;
-    }
-    Ok(())
-}
-
-/// The subset of `nodes` whose ids already occupy a `graph_nodes` row.
-///
-/// Asked as one statement per commit rather than one per node: the planner
-/// needs the whole occupied set before it decides anything, so walking the
-/// nodes one query at a time bought nothing and cost a round trip per node.
-/// The id list is bound as a single JSON array, the same idiom the checkpoint
-/// ref batches use, so the scalar-parameter ceiling is never in play.
-fn occupied_node_ids_conn(
-    tx: &rusqlite::Connection,
-    nodes: &[lash_core_execution::SessionNodeRecord],
-) -> Result<std::collections::HashSet<lash_core_execution::NodeId>, StoreError> {
-    let mut occupied = std::collections::HashSet::new();
-    if nodes.is_empty() {
-        return Ok(occupied);
-    }
-    let node_ids = nodes
-        .iter()
-        .map(|node| node.node_id.as_str())
-        .collect::<Vec<_>>();
-    for chunk in node_ids.chunks(OCCUPIED_NODE_ID_CHUNK_SIZE) {
-        let encoded = serde_json::to_string(chunk).map_err(|error| {
-            StoreError::Backend(format!("failed to encode commit node id batch: {error}"))
-        })?;
-        let mut statement = tx
-            .prepare(session_sql().graph_sqlite.select_occupied.sql())
-            .map_err(sqlite_error)?;
-        let rows = statement
-            .query_map(params![encoded], |row| row.get::<_, String>(0))
-            .map_err(sqlite_error)?;
-        for node_id in rows.collect::<Result<Vec<_>, _>>().map_err(sqlite_error)? {
-            occupied.insert(lash_core_execution::NodeId::from(node_id));
-        }
-    }
-    Ok(occupied)
-}
-
-/// One JSON-array bind per commit keeps the encoded id list around a MiB while
-/// staying far above any realistic per-commit node count.
-const OCCUPIED_NODE_ID_CHUNK_SIZE: usize = 16_384;
-
-/// Asked as one multi-row `INSERT` rather than one statement per node: the rows
-/// are already known in full before any of them is written, and they all land or
-/// none of them do regardless, so a statement per node bought no atomicity — it
-/// bought a round trip per node.
-///
-/// A constraint violation is where the batch would lose something real. The
-/// per-node errors name the colliding generation or node id, and SQLite reports
-/// only that the batch failed, not which row failed it. So a failed batch is
-/// replayed one node at a time to find the offender and raise exactly the error
-/// the loop used to raise. That replay runs only on the failing path, where a
-/// commit is being refused anyway.
-fn insert_graph_nodes_conn(
-    tx: &rusqlite::Connection,
-    session_id: &SessionId,
-    nodes: &[lash_core_execution::SessionNodeRecord],
-    facts: &[lash_core_execution::store::PlannedNodeFacts],
-) -> Result<(), StoreError> {
-    for (nodes, facts) in nodes
-        .chunks(GRAPH_NODE_INSERT_CHUNK_SIZE)
-        .zip(facts.chunks(GRAPH_NODE_INSERT_CHUNK_SIZE))
-    {
-        let mut rows = Vec::with_capacity(nodes.len());
-        for (node, facts) in nodes.iter().zip(facts) {
-            let node_json = node.encode_storage_body().map_err(|err| {
-                StoreError::Backend(format!("failed to encode graph node body: {err}"))
-            })?;
-            let generation = i64::try_from(facts.generation).map_err(|_| {
-                StoreError::Backend("node generation does not fit SQLite INTEGER".to_string())
-            })?;
-            rows.push(serde_json::json!([
-                session_id.as_str(),
-                node.node_id.as_str(),
-                node.parent_node_id.as_deref(),
-                generation,
-                facts.frame_node_id.as_str(),
-                node_json,
-            ]));
-        }
-        let encoded = serde_json::to_string(&rows).map_err(|error| {
-            StoreError::Backend(format!("failed to encode commit node batch: {error}"))
-        })?;
-        if tx
-            .execute(
-                session_sql().graph_sqlite.insert_batch.sql(),
-                params![encoded],
-            )
-            .is_err()
-        {
-            insert_graph_nodes_one_at_a_time(tx, session_id, nodes, facts)?;
-        }
-    }
-    Ok(())
-}
-
-/// The batch rides as one JSON array bound to a single parameter, so SQLite's
-/// 32,766-parameter ceiling is not in play at all; the chunk bounds the encoded
-/// array's size instead, and sits far above any per-commit node count, so the
-/// chunking never runs in practice.
-const GRAPH_NODE_INSERT_CHUNK_SIZE: usize = 512;
-
-/// Replay a failed node batch row by row so the refusal names the offending row.
-///
-/// Reached only after the batch has already failed and the transaction is headed
-/// for a rollback, so the extra statements cost nothing a successful commit pays.
-fn insert_graph_nodes_one_at_a_time(
-    tx: &rusqlite::Connection,
-    session_id: &SessionId,
-    nodes: &[lash_core_execution::SessionNodeRecord],
-    facts: &[lash_core_execution::store::PlannedNodeFacts],
-) -> Result<(), StoreError> {
-    for (node, facts) in nodes.iter().zip(facts) {
-        let node_json = node.encode_storage_body().map_err(|err| {
-            StoreError::Backend(format!("failed to encode graph node body: {err}"))
-        })?;
-        tx.execute(
-            session_sql().graph.insert.sql(),
-            params![
-                session_id.as_str(),
-                node.node_id.as_str(),
-                node.parent_node_id.as_deref(),
-                i64::try_from(facts.generation).map_err(|_| StoreError::Backend(
-                    "node generation does not fit SQLite INTEGER".to_string()
-                ))?,
-                facts.frame_node_id.as_str(),
-                node_json
-            ],
-        )
-        .map_err(|error| {
-            sqlite_graph_node_insert_error(error, session_id, facts.generation, &node.node_id)
-        })?;
-    }
-    Ok(())
-}
-
 impl Store {
     /// The live session (`base: None`), or the session as it stood at the head
     /// one of its turns was admitted on (FIG-3682).
@@ -1547,12 +1390,14 @@ impl Store {
         let Some(session_id) = self.resolve_session_id_for_read().await? else {
             return Ok(None);
         };
+        let fleet = self.fleet_format();
         self.conn
             .call(move |conn| {
                 let tx = conn.transaction()?;
                 let outcome: Result<Option<PersistedSessionRead>, StoreError> = (|| {
-                    read_session_state_version_conn(&tx, &session_id)?;
-                    let Some(meta) = try_load_session_head_meta_from_conn(&tx, &session_id)? else {
+                    read_session_state_version_conn(&tx, &session_id, fleet)?;
+                    let Some(meta) = try_load_session_head_meta_from_conn(&tx, &session_id, fleet)?
+                    else {
                         return Ok(None);
                     };
                     let (head_revision, leaf_node_id, checkpoint_ref) = match base.as_ref() {
@@ -1569,22 +1414,25 @@ impl Store {
                         leaf_node_id
                             .clone()
                             .map(lash_core_execution::NodeId::into_inner),
+                        fleet,
                     )?;
                     let checkpoint = match checkpoint_ref.as_ref() {
-                        Some(blob_ref) => Some(match Self::get_checkpoint_conn(&tx, blob_ref)? {
-                            Some(checkpoint) => checkpoint,
-                            None if base.is_some() => {
-                                return Err(StoreError::TurnBaseNotRetained {
-                                    revision: head_revision,
-                                });
-                            }
-                            None => {
-                                return Err(StoreError::CheckpointComponentMissing {
-                                    key: "manifest".to_string(),
-                                    blob_ref: blob_ref.clone(),
-                                });
-                            }
-                        }),
+                        Some(blob_ref) => {
+                            Some(match Self::get_checkpoint_conn(&tx, blob_ref, fleet)? {
+                                Some(checkpoint) => checkpoint,
+                                None if base.is_some() => {
+                                    return Err(StoreError::TurnBaseNotRetained {
+                                        revision: head_revision,
+                                    });
+                                }
+                                None => {
+                                    return Err(StoreError::CheckpointComponentMissing {
+                                        key: "manifest".to_string(),
+                                        blob_ref: blob_ref.clone(),
+                                    });
+                                }
+                            })
+                        }
                         None => None,
                     };
                     // A turn is admitted only while the head owes no follow-on
@@ -1627,6 +1475,7 @@ impl Store {
                         turn_failure_settlements: load_turn_failure_settlements_conn(
                             &tx,
                             &session_id,
+                            fleet,
                         )?,
                     }))
                 })(

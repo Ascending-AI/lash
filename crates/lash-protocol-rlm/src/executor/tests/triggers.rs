@@ -209,12 +209,12 @@ fn deferred_trigger_record_and_provider_route_survive_snapshot_restore() {
 
         let hydration = hydrate_snapshot(
             state
-                .snapshot_execution_state()
+                .snapshot_execution_state(lash_core::FleetFormat::current())
                 .expect("trigger-bearing state snapshots"),
         );
         let mut restored = RlmExecutionState::for_engine("typescript");
         restored
-            .restore_execution_state(&hydration)
+            .restore_execution_state(&hydration, lash_core::FleetFormat::current())
             .expect("trigger-bearing state restores");
 
         assert!(matches!(

@@ -87,6 +87,7 @@ impl ProtocolDriverPlugin for EffectControllerTestProtocolDriver {
             tool_names_fingerprint: input.tool_catalog.tool_names_fingerprint(),
             execution_prompt: Arc::from(""),
             prompt_contributions: input.extra_prompt_contributions,
+            writer_formats: input.writer_formats,
         }
     }
 }

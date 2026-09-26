@@ -42,6 +42,7 @@
 //! [`RuntimePersistence`]: lash_core_execution::RuntimePersistence
 //! [`AttachmentManifest`]: lash_core_execution::AttachmentManifest
 
+use lash_core_execution::FleetFormatStore;
 use lash_sansio::SessionId;
 mod namespace;
 #[cfg(test)]
@@ -234,6 +235,19 @@ impl Store {
         self.commit_count = AtomicU64::new(seed);
         self
     }
+
+    /// Stand this store's writers up on `fleet_format` — typically one
+    /// carrying a pin table via [`lash_core_execution::FleetFormat::with_writer_pins`]
+    /// — so a test proves they emit the version `F` assigns rather than the
+    /// build constant they would stamp anyway (FIG-3796).
+    #[cfg(any(test, feature = "testing"))]
+    pub fn with_fleet_format_for_testing(
+        mut self,
+        fleet_format: lash_core_execution::FleetFormat,
+    ) -> Self {
+        self.fleet_format = fleet_format;
+        self
+    }
 }
 
 /// SQLite-backed process registry for one configured runtime deployment.
@@ -256,6 +270,10 @@ pub struct SqliteProcessRegistry {
     location: DatabaseLocation,
     /// Where registration mints process ids (ADR 0107).
     process_id_mint: lash_core_execution::ProcessIdMint,
+    /// `F` from the fleet's durable-core catalog: wake-delivery, lease and
+    /// parent-end payloads the registry stamps go through `writer_version`,
+    /// never a bare build constant (FIG-3796).
+    fleet_format: lash_core_execution::FleetFormat,
 }
 
 fn sqlite_error(err: rusqlite::Error) -> StoreError {
@@ -278,6 +296,19 @@ fn sqlite_error(err: rusqlite::Error) -> StoreError {
         err => StoreError::StorageFailure {
             backend: "sqlite",
             message: err.to_string(),
+        },
+    }
+}
+
+/// The `conn.call`/`conn.write` boundary returns [`tokio_rusqlite::Error`];
+/// the synchronous arm unwraps to the rusqlite error [`sqlite_error`] already
+/// reads, and anything else is the async driver failing.
+fn sqlite_async_error(error: tokio_rusqlite::Error) -> StoreError {
+    match error {
+        tokio_rusqlite::Error::Error(error) => sqlite_error(error),
+        error => StoreError::StorageFailure {
+            backend: "sqlite",
+            message: error.to_string(),
         },
     }
 }
@@ -330,7 +361,7 @@ fn sqlite_graph_node_insert_error(
     sqlite_error(err)
 }
 
-fn sqlite_conversion_error(error: StoreError) -> rusqlite::Error {
+pub(crate) fn sqlite_conversion_error(error: StoreError) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(error))
 }
 

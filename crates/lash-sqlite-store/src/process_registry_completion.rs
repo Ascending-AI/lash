@@ -27,6 +27,7 @@ pub(super) async fn complete_process(
     let process_id = process_id.clone();
     let now = registry.clock.timestamp_ms();
     let wake_delivery_config = registry.wake_delivery_config;
+    let fleet_format = registry.fleet_format;
     registry
         .conn
         .write_flow(move |tx| {
@@ -49,7 +50,7 @@ pub(super) async fn complete_process(
                 // complete→prune→re-register with a different disposition cannot
                 // slip between the check and the append.
                 authority.validate(&record, &await_output)?;
-                let mut batch = ProcessEventBatch::default();
+                let mut batch = ProcessEventBatch::for_fleet(fleet_format);
                 for request in prelude {
                     batch.stage(tx, &mut record, request, now, wake_delivery_config)?;
                 }
@@ -91,6 +92,7 @@ pub(super) async fn complete_process_with_lease(
     let lease = lease.clone();
     let now = registry.clock.timestamp_ms();
     let wake_delivery_config = registry.wake_delivery_config;
+    let fleet_format = registry.fleet_format;
     registry
         .conn
         .write_flow(move |tx| {
@@ -126,6 +128,7 @@ pub(super) async fn complete_process_with_lease(
                     now,
                     wake_delivery_config,
                     ProcessEventWriteAuthorization::Lease(&lease),
+                    fleet_format,
                 )?;
                 if matches!(arm, ProcessEventAppendArm::Replayed { .. }) {
                     return Ok(

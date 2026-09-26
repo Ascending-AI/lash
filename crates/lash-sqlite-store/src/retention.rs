@@ -283,6 +283,7 @@ impl SqliteSessionStoreFactory {
                 .as_ref()
                 .filter(|_| attach_process_registry),
             self.turn_cancel_closure_owner_binding(),
+            lash_core_execution::FleetFormat::writable_range(),
             #[cfg(feature = "testing")]
             self.fault_injector.clone(),
         )

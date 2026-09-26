@@ -14,6 +14,8 @@
 //! outside this build's writable range is refused with a typed error rather
 //! than allowed to emit a format the fleet has retired.
 
+use std::ops::RangeInclusive;
+
 use lash_core_execution::{FleetFormat, FleetFormatState, StoreError};
 use sqlx::{PgPool, Postgres, Transaction};
 
@@ -41,26 +43,23 @@ async fn read_in_tx(tx: &mut Transaction<'_, Postgres>) -> Result<Option<i32>, s
         .await
 }
 
-/// The fleet format a recorded `format_version` names, checked against this
-/// build's writable range.
+/// The fleet format a recorded `format_version` names, admitted against the
+/// writable range `writable` of the build doing the opening.
 ///
 /// Before the first format upgrade the range is one version wide, so any other
 /// recorded value means the fleet has moved past — or never agreed with — this
 /// build, and the open is refused with the typed error an operator can route.
-fn recorded_fleet_format(version: i64) -> Result<FleetFormat, StoreError> {
+fn recorded_fleet_format(
+    version: i64,
+    writable: RangeInclusive<u32>,
+) -> Result<FleetFormat, StoreError> {
     let Ok(version) = u32::try_from(version) else {
         return Err(StoreError::StoredDataCorrupt {
             record_kind: "lash_fleet_format.format_version",
             message: format!("not a fleet-format version: {version}"),
         });
     };
-    if version != lash_core_execution::FLEET_FORMAT_VERSION {
-        return Err(StoreError::FleetFormatOutsideWritableRange {
-            recorded: version,
-            current: lash_core_execution::FLEET_FORMAT_VERSION,
-        });
-    }
-    Ok(FleetFormat::from_version(version))
+    FleetFormat::admit_recorded(version, writable)
 }
 
 /// Provision and read the fleet-format row inside the open transaction that
@@ -75,7 +74,13 @@ fn recorded_fleet_format(version: i64) -> Result<FleetFormat, StoreError> {
 /// open against a catalog that predates the table itself — the transaction is
 /// aborted by the missing-relation error, which `commit` turns into a
 /// rollback, matching [`read`]'s `Unrecorded` verdict.
-pub(crate) async fn admit(tx: &mut Transaction<'_, Postgres>) -> Result<FleetFormat, StoreError> {
+/// `writable` is the opening build's `[min_F, max_F]` — production opens
+/// pass [`FleetFormat::writable_range`], and a test simulating a different
+/// build passes that build's range instead.
+pub(crate) async fn admit(
+    tx: &mut Transaction<'_, Postgres>,
+    writable: RangeInclusive<u32>,
+) -> Result<FleetFormat, StoreError> {
     if fleet_format_is_writable(tx)
         .await
         .map_err(crate::store_sqlx_error)?
@@ -87,7 +92,7 @@ pub(crate) async fn admit(tx: &mut Transaction<'_, Postgres>) -> Result<FleetFor
             .map_err(crate::store_sqlx_error)?;
     }
     match read_in_tx(tx).await {
-        Ok(Some(version)) => recorded_fleet_format(i64::from(version)),
+        Ok(Some(version)) => recorded_fleet_format(i64::from(version), writable),
         Ok(None) => Ok(FleetFormat::current()),
         Err(err) if missing_relation(&err) => Ok(FleetFormat::current()),
         Err(err) => Err(crate::store_sqlx_error(err)),
@@ -127,4 +132,18 @@ fn missing_relation(err: &sqlx::Error) -> bool {
     err.as_database_error()
         .and_then(|db| db.code().map(|code| code.into_owned()))
         .is_some_and(|code| code == "42P01")
+}
+
+impl lash_core_execution::FleetFormatStore for crate::PostgresSessionStore {
+    /// The fleet format this store's durable writers emit — the `F` of ADR
+    /// 0106 §1 the opening `PostgresStorage` admitted.
+    ///
+    /// This is the hook durable writers consult for their writer version:
+    /// `self.fleet_format().writer_version(surface_format!(…))` maps a
+    /// format's build-newest version onto the generation the fleet agreed to
+    /// write, which is the identity map until `finalize-upgrade` (FIG-3800)
+    /// exists.
+    fn fleet_format(&self) -> FleetFormat {
+        self.fleet_format
+    }
 }

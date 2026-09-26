@@ -37,17 +37,27 @@ impl fmt::Display for ProcessLeaseSchemaVersionError {
 
 impl std::error::Error for ProcessLeaseSchemaVersionError {}
 
-/// Refuses a persisted process lease whose exact schema version is unsupported.
+/// Refuses a persisted process lease whose schema version is unsupported.
+///
+/// The serde decode cannot consult a store's `F`, so the row admits the
+/// build's newest version plus any recorded version an upcaster chain can
+/// lift to it — the fleetless leg of the `[N-1, N]` reader window (FIG-3796).
+/// No chain is registered while no `N-1` exists, so the admit set is exactly
+/// `{N}`.
 pub fn ensure_process_lease_schema_version(
     actual: u32,
 ) -> Result<(), ProcessLeaseSchemaVersionError> {
-    if actual == PROCESS_LEASE_SCHEMA_VERSION {
+    let expected = PROCESS_LEASE_SCHEMA_VERSION;
+    if actual == expected
+        || lash_core_store::store::upcast_chain_covers(
+            lash_core_store::surface_format!(PROCESS_LEASE_SCHEMA_VERSION),
+            actual,
+            expected,
+        )
+    {
         Ok(())
     } else {
-        Err(ProcessLeaseSchemaVersionError {
-            actual,
-            expected: PROCESS_LEASE_SCHEMA_VERSION,
-        })
+        Err(ProcessLeaseSchemaVersionError { actual, expected })
     }
 }
 

@@ -168,6 +168,7 @@ impl ProtocolDriverPlugin for StandardProtocolDriver {
             tool_names_fingerprint,
             execution_prompt: Arc::from(STANDARD_EXECUTION_SECTION),
             prompt_contributions: input.extra_prompt_contributions,
+            writer_formats: input.writer_formats,
         }
     }
 }

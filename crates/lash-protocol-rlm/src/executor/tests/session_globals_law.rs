@@ -138,11 +138,11 @@ async fn process_context() -> lash_core::RuntimeExecutionContext<'static> {
 
 fn cold_reload(state: &RlmExecutionState) -> RlmExecutionState {
     let hydrated = state
-        .hydrated_execution_state()
+        .hydrated_execution_state(lash_core::FleetFormat::current())
         .expect("the live execution state captures");
     let mut restored = RlmExecutionState::for_engine("typescript");
     restored
-        .restore_execution_state(&hydrated)
+        .restore_execution_state(&hydrated, lash_core::FleetFormat::current())
         .expect("the captured execution state restores");
     restored
 }

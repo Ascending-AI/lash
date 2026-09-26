@@ -116,6 +116,12 @@ pub fn watch_process_registry_with_sink(
     WatchedRegistry::new(inner, sink)
 }
 
+impl crate::FleetFormatStore for WatchedProcessRegistry {
+    fn fleet_format(&self) -> crate::FleetFormat {
+        self.inner.fleet_format()
+    }
+}
+
 delegate_process_query!(WatchedProcessRegistry, inner);
 
 delegate_process_registrar!(
