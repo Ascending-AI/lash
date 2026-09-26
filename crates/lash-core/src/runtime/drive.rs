@@ -161,6 +161,11 @@ impl DriveRootRun {
         ))
     }
 
+    /// The logical root this run's evidence and park name.
+    pub(crate) fn root(&self) -> &TurnId {
+        &self.root
+    }
+
     pub(crate) fn mark_terminal_written(&mut self) {
         self.terminal_written = true;
     }

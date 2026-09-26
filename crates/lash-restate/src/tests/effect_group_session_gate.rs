@@ -169,6 +169,7 @@ impl lash_core::store::ControlIntentStore for OneSessionCatalog {
     async fn claim_intent_application(
         &self,
         _id: lash_core::store::ControlIntentId,
+        _at_ms: u64,
     ) -> std::result::Result<lash_core::store::IntentApplication, StoreError> {
         Err(StoreError::UnsupportedStoreOperation {
             operation: "ControlIntentStore::claim_intent_application",

@@ -132,8 +132,9 @@ pub use maintenance::{
 pub use park::{
     EnginePark, ParkCancelCause, ParkEventKind, ParkFeedCursor, ParkFeedEvent, ParkFeedPage,
     ParkId, ParkReason, ParkReasonCode, ParkSummary, ProcessPark, ProcessParkKey, ProcessParkQuery,
-    ProcessParkWrite, StoredTurnParkHead, TurnPark, TurnParkQuery, TurnParkTarget, TurnParkWrite,
-    TurnParkWriteDecision, UnparkCause, UnsettledTurnCounts, decide_turn_park_write,
+    ProcessParkWrite, StoredParkRedrive, StoredTurnParkHead, TurnPark, TurnParkQuery,
+    TurnParkTarget, TurnParkWrite, TurnParkWriteDecision, UnparkCause, UnsettledTurnCounts,
+    decide_turn_park_write,
 };
 pub use pending_follow_on::{
     DEFAULT_MAX_FOLLOW_ON_RECOVERIES, FollowOnBlocked, FollowOnClaim, FollowOnRecovery,
@@ -687,6 +688,7 @@ impl RuntimeCommit {
             session_execution_lease_fence: _,
             drive_fence: _,
             root_terminal,
+            park_root,
             release_session_execution_lease: _,
             config: _,
             execution_config: _,
@@ -721,7 +723,8 @@ impl RuntimeCommit {
                 && *adopted_intent_rows == 0
                 && failure_evidence.is_empty()
                 && committed_attachment_ids.is_empty()
-                && root_terminal.is_none(),
+                && root_terminal.is_none()
+                && park_root.is_none(),
             "append-session-nodes constructor gained unrelated settlement side effects"
         );
     }
@@ -886,6 +889,7 @@ impl RuntimeCommit {
             session_execution_lease_fence: None,
             drive_fence: None,
             root_terminal: None,
+            park_root: None,
             release_session_execution_lease: None,
             config,
             execution_config,

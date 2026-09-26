@@ -19,6 +19,16 @@ pub async fn record_root_park(
 /// nothing. A root with terminal evidence answers `TargetTerminal`, and a
 /// deleted session `TargetGone`: the engine releases the execution instead.
 ///
+/// The engine names the execution by the root its drive admitted; a
+/// follow-on's recovery is admitted under a name of its own, and is parked
+/// under the logical root it continues, as its own abort would park it.
+///
+/// A park that names a redrive which already resumed the execution is
+/// re-parked only when the engine confirms, after the park was read, that
+/// the execution is still stopped: an engine listing read before the resume
+/// is stale, and re-parking from it would clear the redrive while the root
+/// runs.
+///
 /// Processes park through their registry, which the engine's own process
 /// reconcile writes; this writer refuses a process target.
 pub struct StoreParkRecovery<'a> {
@@ -40,6 +50,7 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
         target: &crate::engine::ParkTarget,
         reason: crate::store::ParkReason,
         engine: crate::store::EnginePark,
+        execution: &dyn crate::engine::StalledExecution,
     ) -> Result<crate::engine::EngineParkRecorded, StoreError> {
         use crate::engine::{EngineParkRecorded, ParkTarget};
         let ParkTarget::Root { session, root } = target else {
@@ -47,19 +58,49 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
                 operation: "record_engine_park: a process parks through its registry",
             });
         };
-        if self.sessions.root_terminal(session, root).await?.is_some() {
+        let Some(store) = self.sessions.open_existing_store_by_id(session).await? else {
+            return Ok(
+                if self.sessions.root_terminal(session, root).await?.is_some() {
+                    EngineParkRecorded::TargetTerminal
+                } else {
+                    EngineParkRecorded::TargetGone
+                },
+            );
+        };
+        let root = match store.load_pending_follow_on().await? {
+            Some(owed) if owed.names_recovery(root) => owed.root_turn_id(),
+            _ => root.clone(),
+        };
+        if self.sessions.root_terminal(session, &root).await?.is_some() {
             return Ok(EngineParkRecorded::TargetTerminal);
         }
-        let Some(store) = self.sessions.open_existing_store_by_id(session).await? else {
-            return Ok(EngineParkRecorded::TargetGone);
-        };
         let held = store
             .load_turn_park(session)
             .await?
-            .filter(|park| park.turn_id == *root)
-            .map(|park| park.park_id);
+            .filter(|park| park.turn_id == root);
+        let mut after_redrive = None;
+        if let Some(intent) = held.as_ref().and_then(|park| park.resume_intent)
+            && !self
+                .sessions
+                .load_intent(intent)
+                .await?
+                .is_some_and(|intent| intent.state.is_open())
+        {
+            // The redrive already resumed the execution: the engine listed
+            // it before or after. Only an execution still stopped now
+            // stopped again after the resume.
+            if !execution
+                .still_stopped()
+                .await
+                .map_err(|refusal| StoreError::Backend(refusal.to_string()))?
+            {
+                return Ok(EngineParkRecorded::Redriven);
+            }
+            after_redrive = Some(intent);
+        }
         let write = crate::store::TurnParkWrite {
             engine: Some(engine),
+            after_redrive,
             ..crate::store::TurnParkWrite::refusal(
                 session.clone(),
                 root.clone(),
@@ -67,7 +108,9 @@ impl crate::engine::ParkRecoveryWriter for StoreParkRecovery<'_> {
                 self.clock.timestamp_ms(),
             )
         };
+        let held = held.map(|park| park.park_id);
         match store.record_turn_park(&write).await {
+            Ok(park) if park.resume_intent.is_some() => Ok(EngineParkRecorded::Redriven),
             Ok(park) if held == Some(park.park_id) => {
                 Ok(EngineParkRecorded::AttachedToExisting(park.park_id))
             }

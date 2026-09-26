@@ -128,6 +128,15 @@ pub struct RuntimeCommit {
     /// fences, it is excluded from the commit's serialized form.
     #[serde(skip)]
     pub root_terminal: Option<Box<super::RootTerminalWrite>>,
+    /// The logical root this commit's physical turn runs under, whose park
+    /// the commit clears in its own transaction (FIG-3600 S7, D2 §1.3 P3): a
+    /// root is parked by its logical root, so any commit of any of its
+    /// physical turns — a frame switch's follow-on, an S4 follow-on, the
+    /// final turn — settles the park. `None` for a commit that runs under no
+    /// root; see [`RuntimeCommit::settled_park_root`]. Like the fences, a
+    /// store instruction excluded from the commit's serialized form.
+    #[serde(skip)]
+    pub park_root: Option<crate::TurnId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_session_execution_lease: Option<SessionExecutionLeaseAuthority>,
     pub config: crate::PersistedSessionConfig,
@@ -989,6 +998,17 @@ impl RuntimeTurnCommitStamp {
 }
 
 impl RuntimeCommit {
+    /// The root whose park this commit clears: [`Self::park_root`], else the
+    /// root whose end it records, else the physical turn it commits (a turn
+    /// that runs under no root parks under its own id).
+    #[must_use]
+    pub fn settled_park_root(&self) -> Option<&crate::TurnId> {
+        self.park_root
+            .as_ref()
+            .or_else(|| self.root_terminal.as_deref().map(|terminal| &terminal.root))
+            .or_else(|| self.turn_commit.operation.turn_id())
+    }
+
     /// Stamp the semantic-boundary replay identity derived from this commit's
     /// operation and canonical request content (FIG-2480).
     ///

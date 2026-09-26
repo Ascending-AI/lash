@@ -697,20 +697,29 @@ impl LiveConformanceHarness {
         }
     }
 
-    pub(super) fn session_work(&self) -> crate::RestateSessionWork {
-        let admin = match &self.admin {
+    /// The admin API of the server this harness runs on.
+    pub(super) fn admin_connection(&self) -> RestateConnection {
+        match &self.admin {
             HarnessAdmin::Live { admin_url } => RestateConnection::new(admin_url.clone()),
             HarnessAdmin::InProcess { server } => {
                 RestateConnection::with_transport(server.ingress_url(), server.transport())
             }
-        };
+        }
+    }
+
+    /// A client of [`Self::admin_connection`].
+    pub(super) fn admin_client(&self) -> crate::RestateAdminClient {
+        crate::RestateAdminClient::new(self.admin_connection())
+    }
+
+    pub(super) fn session_work(&self) -> crate::RestateSessionWork {
         crate::RestateSessionWork::new(
             crate::RestateIngressClient::new(self.connection.clone()),
             crate::RestateAdminClient::new(admin.clone()),
             self.session_driver.clone(),
             lash_core::engine::BuildGeneration::for_test("effect-group-conformance"),
             Arc::new(crate::session_control::RestateSessionControl {
-                admin: Some(crate::RestateAdminClient::new(admin)),
+                admin: self.admin_client(),
                 processes: self.stores.process_registry(),
             }),
         )
@@ -836,8 +845,10 @@ impl LiveConformanceHarness {
     + Sync
     + 'static {
         let connection = self.connection.clone();
+        let admin = self.admin_connection();
         move || {
             let connection = connection.clone();
+            let admin = admin.clone();
             Box::pin(async move {
                 lash_core::Backend::new(Arc::new(crate::RestateEngine::new(
                     Arc::new(
@@ -847,6 +858,7 @@ impl LiveConformanceHarness {
                     ),
                     crate::RestateConfig::new(
                         connection,
+                        admin,
                         crate::RestateAuthorityId::new("lash-conformance-backend-laws")
                             .expect("valid authority"),
                         lash_core::engine::BuildGeneration::for_test("effect-group-conformance"),

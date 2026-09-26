@@ -74,6 +74,27 @@ impl PendingFollowOn {
         QueuedRunPosition::split_turn_id(&self.follow_on_turn_id).0
     }
 
+    /// The root a drive admits this follow-on's recovery under: named by
+    /// its recovery count, so every recovery runs as an execution of its
+    /// own. Its evidence and its park name [`Self::root_turn_id`], the
+    /// logical root the follow-on continues.
+    pub fn recovery_root(&self) -> TurnId {
+        TurnId::from(format!(
+            "follow-on:{}#{}",
+            self.follow_on_turn_id, self.attempts
+        ))
+    }
+
+    /// Whether `root` is the admitted root of one of this follow-on's
+    /// recoveries ([`Self::recovery_root`] at any recovery count).
+    pub fn names_recovery(&self, root: &TurnId) -> bool {
+        root.as_str()
+            .strip_prefix("follow-on:")
+            .and_then(|rest| rest.strip_prefix(self.follow_on_turn_id.as_str()))
+            .and_then(|rest| rest.strip_prefix('#'))
+            .is_some_and(|count| count.parse::<u32>().is_ok_and(|n| n.to_string() == count))
+    }
+
     /// The follow-on's physical-turn index within its logical run.
     pub fn physical_index(&self) -> u64 {
         QueuedRunPosition::split_turn_id(&self.follow_on_turn_id).1
@@ -291,6 +312,30 @@ mod tests {
 
     fn terminal(turn: &str) -> super::super::OperationId {
         super::super::OperationId::turn("s", turn, TURN_TERMINAL_OPERATION_KEY)
+    }
+
+    /// A recovery's admitted root names its follow-on and count, and maps
+    /// back to the logical root the follow-on continues.
+    #[test]
+    fn a_recovery_root_names_its_follow_on_at_any_count() {
+        let mut owed = fact("root:agent-frame:1", "f");
+        assert_eq!(
+            owed.recovery_root(),
+            TurnId::from("follow-on:root:agent-frame:1#0")
+        );
+        owed.attempts = 3;
+        assert!(owed.names_recovery(&TurnId::from("follow-on:root:agent-frame:1#0")));
+        assert!(owed.names_recovery(&owed.recovery_root()));
+        for other in [
+            "root",
+            "follow-on:root:agent-frame:2#0",
+            "follow-on:root:agent-frame:1#",
+            "follow-on:root:agent-frame:1#01",
+            "follow-on:root:agent-frame:1#x",
+        ] {
+            assert!(!owed.names_recovery(&TurnId::from(other)), "{other}");
+        }
+        assert_eq!(owed.root_turn_id(), TurnId::from("root"));
     }
 
     #[test]

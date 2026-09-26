@@ -816,6 +816,7 @@ pub(super) async fn assert_reopened_session_agrees(
         storage,
         Arc::new(s3_store_from_env()?),
         ingress_url.to_string(),
+        lash_restate_postgres_workers_e2e::restate_admin_url(),
         restate_authority_id()?,
     );
     let core = build_e2e_core(lash_restate_postgres_workers_e2e::E2eCoreConfig {

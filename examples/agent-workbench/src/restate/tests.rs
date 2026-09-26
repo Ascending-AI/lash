@@ -605,6 +605,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
         ),
         lash::restate::config(
             lash_restate::RestateConnection::new("http://127.0.0.1:8080"),
+            lash_restate::RestateConnection::new("http://127.0.0.1:9070"),
             lash_restate::RestateAuthorityId::new("agent-workbench-tests").unwrap(),
         ),
     ));

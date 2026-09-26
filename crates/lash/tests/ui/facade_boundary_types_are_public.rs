@@ -522,6 +522,7 @@ fn persistence_types_are_nameable(
         session_execution_lease_fence: None,
         drive_fence: None,
         root_terminal: None,
+        park_root: None,
         release_session_execution_lease: None,
         config: PersistedSessionConfig::new(lash::TurnBudget::Unbounded),
         execution_config: None,

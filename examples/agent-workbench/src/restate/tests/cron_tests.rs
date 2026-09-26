@@ -1143,9 +1143,14 @@ impl lash::persistence::ControlIntentStore for ContendedSessionStoreFactory {
     async fn claim_intent_application(
         &self,
         id: lash::persistence::ControlIntentId,
+        at_ms: u64,
     ) -> Result<lash::persistence::IntentApplication, lash::persistence::StoreError> {
-        lash::persistence::ControlIntentStore::claim_intent_application(self.inner.as_ref(), id)
-            .await
+        lash::persistence::ControlIntentStore::claim_intent_application(
+            self.inner.as_ref(),
+            id,
+            at_ms,
+        )
+        .await
     }
 
     async fn acknowledge_intent(
@@ -1361,9 +1366,14 @@ impl lash::persistence::ControlIntentStore for MetaLossSessionStoreFactory {
     async fn claim_intent_application(
         &self,
         id: lash::persistence::ControlIntentId,
+        at_ms: u64,
     ) -> Result<lash::persistence::IntentApplication, lash::persistence::StoreError> {
-        lash::persistence::ControlIntentStore::claim_intent_application(self.inner.as_ref(), id)
-            .await
+        lash::persistence::ControlIntentStore::claim_intent_application(
+            self.inner.as_ref(),
+            id,
+            at_ms,
+        )
+        .await
     }
 
     async fn acknowledge_intent(

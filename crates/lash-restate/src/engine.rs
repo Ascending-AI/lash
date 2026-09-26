@@ -28,14 +28,20 @@ pub struct RestateConfig {
     authority: RestateAuthorityId,
     build_generation: BuildGeneration,
     process_event_sink: Option<Arc<dyn ProcessEventSink>>,
-    admin_connection: Option<RestateConnection>,
+    admin_connection: RestateConnection,
 }
 
 impl RestateConfig {
-    /// Reach Restate at `connection` under `authority` as a deployment of the
-    /// build whose drain generation is `build_generation`. The engine's
-    /// sessions' drives run on the `LashSession` and `LashTurn` services its
-    /// endpoint builder binds, and both record and stamp that generation.
+    /// Reach Restate's ingress at `connection` and its admin API at
+    /// `admin_connection`, under `authority`, as a deployment of the build
+    /// whose drain generation is `build_generation`. The engine's sessions'
+    /// drives run on the `LashSession` and `LashTurn` services its endpoint
+    /// builder binds, and both record and stamp that generation.
+    ///
+    /// The admin API is required: releasing a cancelled or forked root's
+    /// execution, resuming a redriven one, and reconciling executions Restate
+    /// stopped retrying all go through it, and a deployment without it would
+    /// refuse every such verb and hold its sessions behind them.
     ///
     /// `build_generation` is the facade's `formats::build_generation()`
     /// answer: lash-restate cannot compute it (the format manifest lives in
@@ -44,6 +50,7 @@ impl RestateConfig {
     /// instead.
     pub fn new(
         connection: impl Into<RestateConnection>,
+        admin_connection: impl Into<RestateConnection>,
         authority: RestateAuthorityId,
         build_generation: BuildGeneration,
     ) -> Self {
@@ -52,14 +59,8 @@ impl RestateConfig {
             authority,
             build_generation,
             process_event_sink: None,
-            admin_connection: None,
+            admin_connection: admin_connection.into(),
         }
-    }
-
-    /// The admin endpoint used by root control and park reconciliation.
-    pub fn with_admin_connection(mut self, connection: impl Into<RestateConnection>) -> Self {
-        self.admin_connection = Some(connection.into());
-        self
     }
 
     /// Install a host-facing [`ProcessEventSink`] on the process registry
@@ -114,7 +115,7 @@ impl RestateEngine {
             crate::RestateSessionDriverSlot::new(),
             build_generation.clone(),
             Arc::new(crate::session_control::RestateSessionControl {
-                admin: admin_connection.map(crate::RestateAdminClient::new),
+                admin: crate::RestateAdminClient::new(admin_connection),
                 processes: stores.process_registry(),
             }),
         ));

@@ -124,6 +124,7 @@ pub(super) async fn drive_turn_control_scenarios(
         storage,
         Arc::new(s3_store_from_env()?),
         ingress_url.to_string(),
+        lash_restate_postgres_workers_e2e::restate_admin_url(),
         restate_authority_id()?,
     )
     .turn_work_driver();
@@ -488,6 +489,7 @@ pub(super) async fn drive_suspended_sleep_cancel_scenario(
         storage,
         Arc::new(s3_store_from_env()?),
         ingress_url.to_string(),
+        lash_restate_postgres_workers_e2e::restate_admin_url(),
         restate_authority_id()?,
     )
     .turn_work_driver();
@@ -527,6 +529,7 @@ pub(super) async fn drive_engine_restart_scenario(
         storage,
         Arc::new(s3_store_from_env()?),
         ingress_url.to_string(),
+        lash_restate_postgres_workers_e2e::restate_admin_url(),
         restate_authority_id()?,
     )
     .turn_work_driver();

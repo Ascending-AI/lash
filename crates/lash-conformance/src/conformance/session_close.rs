@@ -200,6 +200,7 @@ pub async fn session_delete_closes_active_and_parked_roots_as_session_deleted(
             },
             at_ms: 1,
             engine: None,
+            after_redrive: None,
         })
         .await
         .expect("record parked root");

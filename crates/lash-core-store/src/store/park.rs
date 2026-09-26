@@ -87,6 +87,13 @@ pub struct TurnParkWrite {
     /// handle a redrive resumes and a cancel releases. `None` from the
     /// execution's own park write, which keeps any handle already stored.
     pub engine: Option<EnginePark>,
+    /// For an engine write: the settled redrive the stored park named when
+    /// the writer read it, after which the writer confirmed with the engine
+    /// that the execution is still stopped. The execution then stopped again
+    /// after that redrive resumed it, and the write re-parks the root; an
+    /// engine write naming no such redrive is from a listing that may predate
+    /// the resume, and leaves a redriven park as it is.
+    pub after_redrive: Option<super::ControlIntentId>,
 }
 
 impl TurnParkWrite {
@@ -100,6 +107,7 @@ impl TurnParkWrite {
             reason,
             at_ms,
             engine: None,
+            after_redrive: None,
         }
     }
 }
@@ -112,12 +120,19 @@ pub struct StoredTurnParkHead {
     pub root: TurnId,
     /// The engine handle the stored park carries.
     pub engine: Option<EnginePark>,
-    /// Whether the stored park's `resume_intent` names a redrive that is
-    /// still open (pending, or failed and retryable): its engine half has
-    /// not resumed the execution yet.
-    pub redrive_open: bool,
-    /// Whether the stored park names a `resume_intent` at all.
-    pub redrive_requested: bool,
+    /// The redrive the stored park's `resume_intent` names, if any.
+    pub redrive: Option<StoredParkRedrive>,
+}
+
+/// The redrive a stored park names, as the park write's transaction read it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct StoredParkRedrive {
+    /// The redrive intent.
+    pub intent: super::ControlIntentId,
+    /// Whether it is still open (pending, or failed and retryable): its
+    /// engine half has not resumed the execution yet, as far as the store
+    /// knows.
+    pub open: bool,
 }
 
 /// What a [`TurnParkWrite`] does to the session's park (D2 §1.3), decided in
@@ -132,14 +147,16 @@ pub enum TurnParkWriteDecision {
     /// The same root refused again, or its engine stopped again after a
     /// redrive resumed it: keep `park_id` and `since_ms`, refresh the reason,
     /// count the attempt, clear `resume_intent` (P3), and store the write's
-    /// engine handle if it carries one.
+    /// engine handle if it carries one. A redrive the park named that is
+    /// still open is settled with it: the root ran past it.
     Repark,
     /// The engine stopped the root's execution and the root already holds
     /// a park without a handle: keep its reason and attempts, store the
     /// handle (P4, `AttachedToExisting`).
     AttachEngine,
     /// Nothing to write: the park already carries this handle and no
-    /// redrive ran since, or a redrive is still on its way to resuming it.
+    /// redrive ran since, a redrive is still on its way to resuming it, or
+    /// the engine's listing may predate a redrive's resume.
     Unchanged,
 }
 
@@ -159,14 +176,16 @@ pub fn decide_turn_park_write(
         // The execution itself refused again.
         return TurnParkWriteDecision::Repark;
     };
-    if stored.redrive_open {
-        // A redrive owns the stopped execution until it resumes it.
-        return TurnParkWriteDecision::Unchanged;
-    }
-    if stored.redrive_requested {
-        // A redrive resumed the execution, and the engine stopped it again
-        // without the execution refusing first.
-        return TurnParkWriteDecision::Repark;
+    if let Some(redrive) = stored.redrive {
+        // A redrive owns the stopped execution until it resumes it; once it
+        // did, only a writer that saw it settled and then found the
+        // execution stopped again re-parks: an engine listing read before
+        // the resume is stale and must not re-park the running root.
+        return if !redrive.open && write.after_redrive == Some(redrive.intent) {
+            TurnParkWriteDecision::Repark
+        } else {
+            TurnParkWriteDecision::Unchanged
+        };
     }
     match stored.engine.as_ref() {
         None => TurnParkWriteDecision::AttachEngine,
@@ -959,6 +978,65 @@ pub struct UnsettledTurnCounts {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn engine_write(after_redrive: Option<u64>) -> TurnParkWrite {
+        TurnParkWrite {
+            engine: Some(EnginePark::new("paused")),
+            after_redrive: after_redrive.map(super::super::ControlIntentId::from_sequence),
+            ..TurnParkWrite::refusal(
+                SessionId::from("s"),
+                TurnId::from("r"),
+                ParkReason::ReplayDivergence {
+                    message: "m".into(),
+                },
+                1,
+            )
+        }
+    }
+
+    fn redriven(open: bool) -> StoredTurnParkHead {
+        StoredTurnParkHead {
+            root: TurnId::from("r"),
+            engine: Some(EnginePark::new("paused")),
+            redrive: Some(StoredParkRedrive {
+                intent: super::super::ControlIntentId::from_sequence(4),
+                open,
+            }),
+        }
+    }
+
+    /// M3 (FIG-3848): an engine write re-parks a redriven root only when its
+    /// writer saw the redrive settled and then found the execution stopped
+    /// again; a listing that may predate the resume leaves the park.
+    #[test]
+    fn an_engine_write_reparks_a_redriven_root_only_after_it_stopped_again() {
+        assert_eq!(
+            decide_turn_park_write(Some(&redriven(true)), &engine_write(None)),
+            TurnParkWriteDecision::Unchanged,
+            "an open redrive owns the execution"
+        );
+        assert_eq!(
+            decide_turn_park_write(Some(&redriven(false)), &engine_write(None)),
+            TurnParkWriteDecision::Unchanged,
+            "a listing that predates the resume is stale"
+        );
+        assert_eq!(
+            decide_turn_park_write(Some(&redriven(false)), &engine_write(Some(9))),
+            TurnParkWriteDecision::Unchanged,
+            "another redrive than the one stored"
+        );
+        assert_eq!(
+            decide_turn_park_write(Some(&redriven(false)), &engine_write(Some(4))),
+            TurnParkWriteDecision::Repark
+        );
+        let mut execution = engine_write(None);
+        execution.engine = None;
+        assert_eq!(
+            decide_turn_park_write(Some(&redriven(true)), &execution),
+            TurnParkWriteDecision::Repark,
+            "the execution's own refusal always re-parks"
+        );
+    }
 
     /// `effect_replay_divergence` — and the substrate hash-conflict code it
     /// replaced — must map to a parking reason: without the arm, a Restate

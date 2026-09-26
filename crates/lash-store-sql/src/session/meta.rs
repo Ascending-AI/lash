@@ -121,11 +121,14 @@ crate::statements! {
     /// `session_meta` statements both backends issue verbatim.
     pub struct SessionMetaStatements @ "session_meta" {
         /// Session `?1`'s drive epoch, the admission that last raised it, the
-        /// start marker of the execution that sealed that admission, and the
-        /// control intent the session is closing under.
+        /// start marker of the execution that sealed that admission, the
+        /// control intent the session is closing under, and whether a cancel
+        /// or fork still owes its engine half (pending, or failed and
+        /// retryable). A verb the engine refused for good owes nothing more:
+        /// it is surfaced on the intent, and the session drives on.
         select_drive_epoch = "SELECT drive_epoch, drive_admission_id, drive_root_start, closing_intent,
             EXISTS (SELECT 1 FROM control_intents WHERE control_intents.session_id = session_meta.session_id
-                AND kind IN ('cancel', 'fork') AND state NOT IN ('acknowledged', 'superseded'))
+                AND kind IN ('cancel', 'fork') AND state IN ('pending', 'failed_retryable'))
             FROM session_meta WHERE session_id = ?1";
 
         /// The seal's compare-and-set: raise session `?1`'s drive epoch from
@@ -179,6 +182,14 @@ crate::statements! {
     /// Statements for parked-root control and recovery.
     pub struct MetaRootVerbStatements @ "session_meta" {
         raise_epoch = "UPDATE session_meta SET drive_epoch = drive_epoch + 1, drive_admission_id = ?2, drive_root_start = NULL WHERE session_id = ?1 AND closing_intent IS NULL";
-        sessions = "SELECT session_id FROM session_meta WHERE session_id > ?1 AND closing_intent IS NULL ORDER BY session_id LIMIT ?2";
+        /// Live sessions after `?1`, at most `?2`, that a drive could admit
+        /// work for: not closing, and held by no park a verb has yet to
+        /// resolve (a park a redrive names is being resolved). A parked
+        /// session admits nothing, and the verb that resolves its park asks
+        /// for the drive itself.
+        sessions = "SELECT session_id FROM session_meta WHERE session_id > ?1 AND closing_intent IS NULL
+            AND NOT EXISTS (SELECT 1 FROM turn_parks WHERE turn_parks.session_id = session_meta.session_id
+                AND turn_parks.resume_intent IS NULL)
+            ORDER BY session_id LIMIT ?2";
     }
 }

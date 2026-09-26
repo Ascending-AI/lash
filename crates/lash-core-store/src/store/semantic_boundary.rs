@@ -106,6 +106,7 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         session_execution_lease_fence: _, // transaction predicate, not content
         drive_fence: _,            // transaction predicate, not content
         root_terminal: _,          // a turn root's end; no boundary carries one
+        park_root: _,              // a store instruction, not content
         release_session_execution_lease: _, // transport authority
         config,
         execution_config, // the root's view: the identity's config when present

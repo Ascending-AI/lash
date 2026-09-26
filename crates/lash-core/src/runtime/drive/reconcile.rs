@@ -10,11 +10,12 @@
 //!    parks: [`SessionControlEngine::reconcile_parks`] reads what the engine
 //!    stopped retrying (turns and processes) and records it through a
 //!    [`ParkRecoveryWriter`]; a paused admission-only drive is resumed, never
-//!    parked.
+//!    parked. One execution the pass cannot settle is reported and passed
+//!    over, never failing the page.
 //! 2. **Intents (O4).** Every open control intent (pending, or failed and
 //!    retryable) has its engine half re-applied by [`apply_control_intent`].
-//! 3. **Drives (O2).** Every live session with open ingress is asked for a
-//!    drive. Acceptance commits a row and then asks the engine to drive,
+//! 3. **Drives (O2).** Every live session with open ingress that no
+//!    unresolved park holds is asked for a drive. Acceptance commits a row and then asks the engine to drive,
 //!    fire-and-forget; a process that dies between the two, a lost send, a
 //!    re-ask the engine deduplicated, or a batch that only became available
 //!    later all leave a durable row nothing drives, and this arm asks again.
@@ -118,6 +119,17 @@ pub async fn reconcile_once(
     {
         Ok(parks) => {
             report.next.parks = parks.next.clone();
+            report
+                .failures
+                .extend(
+                    parks
+                        .failed
+                        .iter()
+                        .map(|(execution, error)| ReconcileFailure {
+                            arm: ReconcileArm::Parks,
+                            error: format!("execution {}: {error}", execution.as_str()),
+                        }),
+                );
             report.parks = Some(parks);
         }
         Err(error) => {
@@ -213,12 +225,20 @@ pub async fn reconcile_once(
                         }
                         _ => None,
                     };
+                    // A verb's root closes once its engine half is done:
+                    // acknowledged, or refused for good (the release that
+                    // did not happen is surfaced on the intent; the root's
+                    // end stands).
                     if let Some(intent) = controlling {
                         match parts.sessions.load_intent(intent).await {
                             Ok(Some(intent))
                                 if matches!(
                                     intent.state,
                                     crate::store::ControlIntentState::Acknowledged { .. }
+                                        | crate::store::ControlIntentState::Failed {
+                                            retryable: false,
+                                            ..
+                                        }
                                 ) => {}
                             Ok(_) => continue,
                             Err(error) => {
@@ -314,7 +334,10 @@ pub async fn drain_hand_over_slot(
 
 /// The drive arm: ask `engine` to drive every live session with open
 /// ingress, reading at most `page` sessions after `after` in session-id
-/// order.
+/// order. The catalog lists no session an unresolved park holds: it admits
+/// nothing until a verb resolves the park, and that verb asks for the drive
+/// itself, so an ask every tick would only pile up drives that admit
+/// nothing.
 ///
 /// A session whose store cannot be read is reported, not fatal: one broken
 /// session never stops the others' recovery. Only a catalog that cannot be

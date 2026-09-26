@@ -196,10 +196,10 @@ impl RestateTestBackend {
             Arc::clone(&engine_stores),
             RestateConfig::new(
                 connection.clone(),
+                connection.clone(),
                 authority.clone(),
                 server.config().build_generation.clone(),
-            )
-            .with_admin_connection(connection.clone()),
+            ),
         ));
         // The endpoint exists before any core over this backend does, so it
         // serves processes on whatever worker the fixture installs later.

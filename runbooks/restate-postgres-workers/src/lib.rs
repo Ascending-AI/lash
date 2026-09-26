@@ -463,6 +463,7 @@ pub fn e2e_backend(
     storage: &lash_postgres_store::PostgresStorage,
     attachment_store: Arc<dyn AttachmentStore>,
     restate_ingress_url: impl Into<lash_restate::RestateConnection>,
+    restate_admin_url: impl Into<lash_restate::RestateConnection>,
     restate_authority_id: lash_restate::RestateAuthorityId,
 ) -> Arc<E2eBackend> {
     Arc::new(lash_restate::RestateEngine::new(
@@ -470,8 +471,14 @@ pub fn e2e_backend(
             storage,
             attachment_store,
         )),
-        lash::restate::config(restate_ingress_url, restate_authority_id),
+        lash::restate::config(restate_ingress_url, restate_admin_url, restate_authority_id),
     ))
+}
+
+/// The Restate admin API the harness's processes reach: parked-root verbs
+/// and park recovery run through it.
+pub fn restate_admin_url() -> String {
+    env("RESTATE_ADMIN_URL", "http://restate:9070")
 }
 
 #[derive(Clone)]

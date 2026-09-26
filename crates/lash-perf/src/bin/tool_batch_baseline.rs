@@ -427,6 +427,7 @@ impl ToolBatchProbe for ToolBatchProbeImpl {
 /// every lash service, processes included, so it needs one.
 async fn restate_deployment(
     ingress_url: &str,
+    admin_url: &str,
     authority: &lash_restate::RestateAuthorityId,
 ) -> anyhow::Result<(
     Arc<lash_restate::RestateEngine>,
@@ -439,6 +440,7 @@ async fn restate_deployment(
         Arc::new(stores) as Arc<dyn lash_core::StoreSet>,
         lash_restate::RestateConfig::new(
             ingress_url,
+            admin_url,
             authority.clone(),
             lash::formats::build_generation(),
         ),
@@ -579,7 +581,8 @@ async fn run_restate(
         .map_err(|error| anyhow::anyhow!(error.to_string()))?;
 
     use restate_sdk::http_server::HttpServer;
-    let (backend, process_worker) = restate_deployment(&ingress_url, &authority).await?;
+    let (backend, process_worker) =
+        restate_deployment(&ingress_url, &admin_url, &authority).await?;
     let endpoint = backend
         .endpoint_builder(process_worker)
         .bind(

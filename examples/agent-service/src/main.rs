@@ -190,6 +190,10 @@ async fn async_main() -> anyhow_like::Result<()> {
     #[cfg(feature = "restate")]
     let restate_ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .unwrap_or_else(|_| "http://127.0.0.1:8080".to_string());
+    // Parked-root verbs and park recovery run through Restate's admin API.
+    #[cfg(feature = "restate")]
+    let restate_admin_url =
+        std::env::var("RESTATE_ADMIN_URL").unwrap_or_else(|_| "http://127.0.0.1:9070".to_string());
     #[cfg(feature = "restate")]
     let restate_authority_id = (durability == AgentServiceDurability::Restate)
         .then(|| {
@@ -296,6 +300,7 @@ async fn async_main() -> anyhow_like::Result<()> {
                     Arc::new(stores),
                     lash::restate::config(
                         restate_ingress_url.clone(),
+                        restate_admin_url.clone(),
                         restate_authority_id
                             .clone()
                             .unwrap_or_else(|| panic!("Restate authority configured")),

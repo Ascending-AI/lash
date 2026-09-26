@@ -120,8 +120,9 @@ impl crate::store::ControlIntentStore for ParentBoundSessionStoreFactory {
     async fn claim_intent_application(
         &self,
         id: crate::store::ControlIntentId,
+        at_ms: u64,
     ) -> std::result::Result<crate::store::IntentApplication, crate::StoreError> {
-        self.inner.claim_intent_application(id).await
+        self.inner.claim_intent_application(id, at_ms).await
     }
 
     async fn acknowledge_intent(

@@ -248,15 +248,21 @@ impl RestateSessionDriverSlot {
     /// Install `driver` unless a live one is installed already; returns the
     /// driver the slot now serves, which the caller keeps alive.
     pub fn install(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
+        self.install_new(driver).0
+    }
+
+    /// [`Self::install`], also answering whether the slot took `driver` —
+    /// false when a live driver was already installed and is kept.
+    fn install_new(&self, driver: Arc<dyn SessionDriver>) -> (Arc<dyn SessionDriver>, bool) {
         let mut slot = self
             .driver
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         if let Some(live) = slot.as_ref().and_then(Weak::upgrade) {
-            return live;
+            return (live, false);
         }
         *slot = Some(Arc::downgrade(&driver));
-        driver
+        (driver, true)
     }
 
     /// The installed driver, if one is installed and still alive.
@@ -488,8 +494,11 @@ impl SessionWorkEngine for RestateSessionWork {
     }
 
     fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
-        let installed = self.slot.install(driver);
-        if !installed.owns_reconciliation() {
+        // One recovery interval per installed driver: a re-install that
+        // keeps the live driver starts none, and the interval of a dropped
+        // driver ends at its next tick.
+        let (installed, new) = self.slot.install_new(driver);
+        if !new || !installed.owns_reconciliation() {
             return installed;
         }
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
