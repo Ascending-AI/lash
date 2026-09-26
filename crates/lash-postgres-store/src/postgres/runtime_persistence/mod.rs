@@ -386,7 +386,7 @@ async fn read_session_state_version_tx(
 mod claim_support;
 mod commit_claims;
 mod maintenance;
-mod queued_run;
+pub(crate) mod queued_run;
 mod queued_run_assignment;
 mod queued_run_selection;
 mod queued_work;

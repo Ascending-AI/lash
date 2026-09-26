@@ -137,6 +137,14 @@ pub(super) enum SurfaceMethod {
     AcknowledgeIntent {
         known: bool,
     },
+    RecordRootPark,
+    OpenRootIntent {
+        fork: bool,
+        stale: bool,
+    },
+    ListControlIntents,
+    ListTerminalRoots,
+    ListReconcilableSessions,
     AbortUnknownAttachmentWrite,
     CommitUnknownAttachmentRefs,
     ForgetUnknownAttachment,
@@ -215,6 +223,19 @@ impl SurfaceMethod {
             Self::RecordIntentFailure => "surface:record_intent_failure",
             Self::AcknowledgeIntent { known: true } => "surface:acknowledge_intent",
             Self::AcknowledgeIntent { known: false } => "surface:acknowledge_intent_unknown",
+            Self::RecordRootPark => "surface:record_root_park",
+            Self::OpenRootIntent { stale: true, .. } => "surface:open_root_intent_stale",
+            Self::OpenRootIntent {
+                stale: false,
+                fork: false,
+            } => "surface:open_root_intent_cancel",
+            Self::OpenRootIntent {
+                stale: false,
+                fork: true,
+            } => "surface:open_root_intent_fork",
+            Self::ListControlIntents => "surface:list_control_intents",
+            Self::ListTerminalRoots => "surface:list_terminal_roots",
+            Self::ListReconcilableSessions => "surface:list_reconcilable_sessions",
             Self::AbortUnknownAttachmentWrite => "surface:abort_attachment_write_unknown",
             Self::CommitUnknownAttachmentRefs => "surface:commit_refs_unknown",
             Self::ForgetUnknownAttachment => "surface:forget_attachment_unknown",
@@ -687,6 +708,30 @@ pub(super) fn session_close_ledger_case() -> GeneratedCase {
             surface(SurfaceMethod::LoadIntent { known: true }),
         ],
     }
+}
+
+pub(super) fn root_control_case(fork: bool) -> GeneratedCase {
+    let mut case = session_close_ledger_case();
+    case.name = if fork {
+        CaseName::RootForkLedger
+    } else {
+        CaseName::RootCancelLedger
+    };
+    case.operations.truncate(5);
+    case.operations.extend([
+        surface(SurfaceMethod::RecordRootPark),
+        surface(SurfaceMethod::OpenRootIntent { fork, stale: true }),
+        surface(SurfaceMethod::OpenRootIntent { fork, stale: false }),
+        surface(SurfaceMethod::LoadIntent { known: true }),
+        surface(SurfaceMethod::ListControlIntents),
+        surface(SurfaceMethod::ListTerminalRoots),
+        surface(SurfaceMethod::ListReconcilableSessions),
+        surface(SurfaceMethod::ListPendingTurnInputs),
+        surface(SurfaceMethod::RootBinding),
+        surface(SurfaceMethod::ClaimIntentApplication { known: true }),
+        surface(SurfaceMethod::AcknowledgeIntent { known: true }),
+    ]);
+    case
 }
 
 impl BackendRunner {
@@ -1308,6 +1353,68 @@ impl BackendRunner {
                     .await?;
                 "acknowledged".to_string()
             }
+            SurfaceMethod::RecordRootPark => {
+                let park = store
+                    .record_turn_park(&lash_core::store::TurnParkWrite::refusal(
+                        session_id.clone(),
+                        SURFACE_ROOT_ID.into(),
+                        lash_core::store::ParkReason::ReplayDivergence {
+                            message: "differential".into(),
+                        },
+                        CLOSE_AT_MS,
+                    ))
+                    .await?;
+                format!("parked={}", park.attempts)
+            }
+            SurfaceMethod::OpenRootIntent { fork, stale } => {
+                let park = store
+                    .load_turn_park(&session_id)
+                    .await?
+                    .ok_or(StoreError::Contended)?;
+                let request = lash_core::store::RootIntentRequest {
+                    session_id: session_id.clone(),
+                    root: SURFACE_ROOT_ID.into(),
+                    park: lash_core::store::ParkId::from_feed_sequence(
+                        park.park_id.feed_sequence() + u64::from(stale),
+                    ),
+                    verb: if fork {
+                        lash_core::store::RootVerb::Fork
+                    } else {
+                        lash_core::store::RootVerb::Cancel
+                    },
+                };
+                let intent = self
+                    .factory()
+                    .open_root_intent(&request, CLOSE_AT_MS)
+                    .await
+                    .map_err(|error| match error {
+                        lash_core::store::RootIntentRefused::Store(error) => error,
+                        error => StoreError::Backend(format!("root intent refused: {error}")),
+                    })?;
+                self.surface.close_intent = Some(intent.id);
+                control_intent_summary(&intent, &session_id, self.surface.close_intent)
+            }
+            SurfaceMethod::ListControlIntents => format!(
+                "intents={}",
+                self.factory()
+                    .list_control_intents(None, std::num::NonZeroUsize::MIN)
+                    .await?
+                    .len()
+            ),
+            SurfaceMethod::ListTerminalRoots => format!(
+                "terminals={}",
+                self.factory()
+                    .list_terminal_roots(None, std::num::NonZeroUsize::MIN)
+                    .await?
+                    .len()
+            ),
+            SurfaceMethod::ListReconcilableSessions => format!(
+                "sessions={}",
+                self.factory()
+                    .list_reconcilable_sessions(None, std::num::NonZeroUsize::MIN)
+                    .await?
+                    .len()
+            ),
             SurfaceMethod::AbortUnknownAttachmentWrite => {
                 let intent = unknown_attachment_intent(&session_id);
                 let outcome = match store.begin_attachment_write(intent.clone()).await? {

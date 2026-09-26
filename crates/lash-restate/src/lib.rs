@@ -91,7 +91,9 @@ mod process_attach;
 mod process_stop;
 mod services;
 mod session_administration;
+mod session_control;
 mod session_driver;
+mod session_reconcile;
 mod turn;
 mod turn_handler;
 

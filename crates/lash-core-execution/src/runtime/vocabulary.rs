@@ -552,6 +552,39 @@ pub trait SessionStoreFactory:
         root: &crate::TurnId,
     ) -> Result<Option<crate::store::RootTerminal>, crate::StoreError>;
 
+    /// Retained intents, including permanent engine refusals, in ID order.
+    async fn list_control_intents(
+        &self,
+        _after: Option<crate::store::ControlIntentId>,
+        _limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<crate::store::ControlIntent>, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "list_control_intents",
+        })
+    }
+
+    /// Live session identities in bounded keyset order for recovery.
+    async fn list_reconcilable_sessions(
+        &self,
+        _after: Option<&SessionId>,
+        _limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<SessionId>, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "list_reconcilable_sessions",
+        })
+    }
+
+    /// Terminal roots in bounded lexicographic order for at-least-once scope close.
+    async fn list_terminal_roots(
+        &self,
+        _after: Option<(SessionId, TurnId)>,
+        _limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<crate::store::RootTerminal>, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "list_terminal_roots",
+        })
+    }
+
     /// List the deployment's open control intents (pending, or failed and
     /// retryable) strictly after `after`, in id order, at most `limit`
     /// (FIG-3600 S7, ADR 0104 O4): what reconciliation re-applies, including
@@ -799,14 +832,11 @@ pub async fn park_turn_of_refused_group_child(
     let Some(store) = sessions.open_existing_store_by_id(session_id).await? else {
         return Ok(None);
     };
-    let park = store
-        .record_turn_park(&crate::store::TurnParkWrite::refusal(
-            session_id.clone(),
-            root,
-            reason,
-            at_ms,
-        ))
-        .await?;
+    let park = super::record_root_park(
+        store.as_ref(),
+        &crate::store::TurnParkWrite::refusal(session_id.clone(), root, reason, at_ms),
+    )
+    .await?;
     crate::operational_metrics::record_work_parked("turn", park.reason.code().as_str());
     Ok(Some(park))
 }
@@ -861,14 +891,16 @@ pub async fn park_turn_refused_by_generation(
     if !in_flight {
         return Ok(None);
     }
-    let park = store
-        .record_turn_park(&crate::store::TurnParkWrite::refusal(
+    let park = super::record_root_park(
+        store,
+        &crate::store::TurnParkWrite::refusal(
             session_id.clone(),
             TurnId::from(scope.id()),
             crate::store::ParkReason::session_state_generation_refused(refusal),
             at_ms,
-        ))
-        .await?;
+        ),
+    )
+    .await?;
     crate::operational_metrics::record_work_parked("turn", park.reason.code().as_str());
     Ok(Some(park))
 }

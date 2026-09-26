@@ -190,6 +190,7 @@ async fn drive_epoch_tx(
     let root_start: Option<String> = row.try_get(2).map_err(store_sqlx_error)?;
     let closing: Option<i64> = row.try_get(3).map_err(store_sqlx_error)?;
     Ok(StoredDriveEpoch {
+        control_pending: row.try_get(4).map_err(store_sqlx_error)?,
         epoch: u64_from_sql("SessionMeta", "drive_epoch", epoch)?,
         admission: admission.map(AdmissionId::new),
         root_start: root_start.map(RootStartNonce::new),

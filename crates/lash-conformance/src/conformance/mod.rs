@@ -84,6 +84,7 @@ pub mod registration_macro_support;
 mod release_stamp;
 mod restored_claim_cede;
 mod retention;
+mod root_control;
 mod root_start_marker;
 mod root_terminal;
 mod run_shape;

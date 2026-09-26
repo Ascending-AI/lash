@@ -2,7 +2,7 @@
 //! guaranteed owner of every piece of session work whose owner was lost.
 //!
 //! One tick, [`reconcile_once`], is engine-neutral and idempotent. It runs
-//! five arms, each bounded by the tick's page and resuming from its own
+//! six arms, each bounded by the tick's page and resuming from its own
 //! cursor, so a tick never serializes the fleet and one arm's failure never
 //! stops another:
 //!
@@ -18,9 +18,11 @@
 //!    fire-and-forget; a process that dies between the two, a lost send, a
 //!    re-ask the engine deduplicated, or a batch that only became available
 //!    later all leave a durable row nothing drives, and this arm asks again.
-//! 4. **Parent-end plans (FIG-3822).** A named slot:
+//! 4. **Scopes.** Terminal evidence is revisited for idempotent scope close
+//!    after a crash between the commit and its notification.
+//! 5. **Parent-end plans (FIG-3822).** A named slot:
 //!    [`reconcile_parent_end_plans_slot`].
-//! 5. **Drain hand-over (FIG-3799).** A named slot:
+//! 6. **Drain hand-over (FIG-3799).** A named slot:
 //!    [`drain_hand_over_slot`].
 //!
 //! The engine supplies only the schedule: on Restate a `LashReconcile`
@@ -48,8 +50,8 @@ use crate::engine::{
     ReconcileFailure, ReconcileTick, ScopeCloseSink, SlotPass,
 };
 use crate::{
-    Clock, ProcessRegistry, ProcessWorkSubstrate, SessionId, SessionListFilter,
-    SessionStoreFactory, SessionWorkEngine, StoreError,
+    Clock, ProcessRegistry, ProcessWorkSubstrate, SessionId, SessionStoreFactory,
+    SessionWorkEngine, StoreError,
 };
 
 /// What one tick reaches: the catalog, the engine, the scope owner, and the
@@ -190,6 +192,64 @@ pub async fn reconcile_once(
         }
     }
 
+    // Revisit terminal evidence after a crash between commit and scope close.
+    // The sink is idempotent, so no second completion ledger is needed here.
+    if parts.scopes.owns_scopes() {
+        match parts
+            .sessions
+            .list_terminal_roots(cursor.scopes.clone(), page)
+            .await
+        {
+            Ok(terminals) => {
+                let full = terminals.len() == page.get();
+                let mut next = None;
+                for terminal in terminals {
+                    next = Some((terminal.session_id.clone(), terminal.root.clone()));
+                    let controlling = match &terminal.cause {
+                        crate::store::RootTerminalCause::OperatorCancelled { intent }
+                        | crate::store::RootTerminalCause::Forked { intent, .. }
+                        | crate::store::RootTerminalCause::SessionDeleted { intent } => {
+                            Some(*intent)
+                        }
+                        _ => None,
+                    };
+                    if let Some(intent) = controlling {
+                        match parts.sessions.load_intent(intent).await {
+                            Ok(Some(intent))
+                                if matches!(
+                                    intent.state,
+                                    crate::store::ControlIntentState::Acknowledged { .. }
+                                ) => {}
+                            Ok(_) => continue,
+                            Err(error) => {
+                                report.failures.push(ReconcileFailure {
+                                    arm: ReconcileArm::Scopes,
+                                    error: error.to_string(),
+                                });
+                                continue;
+                            }
+                        }
+                    }
+                    match parts.scopes.close_root_scope(&terminal).await {
+                        Ok(()) => report.closed_scopes += 1,
+                        Err(error) => report.failures.push(ReconcileFailure {
+                            arm: ReconcileArm::Scopes,
+                            error: error.to_string(),
+                        }),
+                    }
+                }
+                report.next.scopes = if full { next } else { None };
+            }
+            Err(error) => {
+                report.next.scopes = cursor.scopes.clone();
+                report.failures.push(ReconcileFailure {
+                    arm: ReconcileArm::Scopes,
+                    error: error.to_string(),
+                });
+            }
+        }
+    }
+
     // 4–5. The slots other slices fill.
     if let Some(processes) = parts.processes {
         match reconcile_parent_end_plans_slot(&processes, parts.sessions, page).await {
@@ -270,16 +330,8 @@ pub async fn reconcile_session_drives(
     now_ms: u64,
 ) -> Result<DriveReconcileReport, StoreError> {
     let mut live = sessions
-        .list_sessions(&SessionListFilter {
-            deleted: Some(false),
-            ..SessionListFilter::default()
-        })
-        .await?
-        .into_iter()
-        .map(|summary| summary.session_id)
-        .filter(|session| after.is_none_or(|after| session > after))
-        .collect::<Vec<_>>();
-    live.sort();
+        .list_reconcilable_sessions(after, page.saturating_add(1))
+        .await?;
     let mut report = DriveReconcileReport::default();
     if live.len() > page.get() {
         live.truncate(page.get());

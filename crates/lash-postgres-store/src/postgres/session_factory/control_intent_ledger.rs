@@ -45,6 +45,23 @@ impl PostgresSessionStoreFactory {
 
 #[async_trait::async_trait]
 impl ControlIntentStore for PostgresSessionStoreFactory {
+    async fn open_root_intent(
+        &self,
+        request: &lash_core_execution::store::RootIntentRequest,
+        at_ms: u64,
+    ) -> Result<ControlIntent, lash_core_execution::store::RootIntentRefused> {
+        let host = self
+            .effect_host
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        lash_core_execution::runtime::require_root_groups_closed(host.as_deref(), request).await?;
+        let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+        let intent = crate::root_verbs::open_root_intent_tx(&mut tx, request, at_ms).await?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(intent)
+    }
+
     async fn begin_session_close(
         &self,
         session_id: &SessionId,

@@ -219,6 +219,7 @@ pub fn all_statements() -> Vec<Statement> {
     statements.extend_from_slice(session::usage_deltas::UsageDeltaStatements::NEUTRAL);
     statements.extend_from_slice(session_ingress::SessionIngressStatements::NEUTRAL);
     statements.extend_from_slice(session_roots::roots::SessionRootStatements::NEUTRAL);
+    statements.extend_from_slice(session_roots::roots::RootVerbStatements::NEUTRAL);
     statements.extend_from_slice(session_roots::root_inputs::SessionRootInputStatements::NEUTRAL);
     statements.extend_from_slice(session_roots::control_intents::ControlIntentStatements::NEUTRAL);
     statements.extend_from_slice(wait::waits::WaitStatements::NEUTRAL);

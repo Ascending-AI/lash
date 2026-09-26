@@ -58,7 +58,7 @@ pub(crate) fn decode_turn_park_row(row: &sqlx::postgres::PgRow) -> Result<TurnPa
 
 /// `session_id`'s park under a row lock, read on `conn`: the write that
 /// follows decides on what this read saw.
-async fn turn_park_for_update(
+pub(crate) async fn turn_park_for_update(
     conn: &mut PgConnection,
     session_id: &SessionId,
 ) -> Result<Option<TurnPark>, StoreError> {
@@ -85,6 +85,7 @@ pub(crate) async fn record_turn_park_tx(
     write: &TurnParkWrite,
 ) -> Result<TurnPark, StoreError> {
     let session_id = &write.session_id;
+    super::lock_session_history_mutation_tx(tx, session_id).await?;
     let turn_parks = &crate::turn_ingress::turn_ingress_sql().turn_parks;
     // The row lock first: a concurrent park of this session waits here, and
     // a terminal written by a concurrent commit is visible to the read after.

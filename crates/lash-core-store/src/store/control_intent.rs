@@ -351,6 +351,9 @@ pub enum RootIntentRefused {
     /// A cancel or fork of the root is still open.
     #[error("intent {intent} is still open on the root")]
     IntentOpen { intent: ControlIntentId },
+    /// The session was deleted; its close intent remains durable.
+    #[error("the session was deleted")]
+    SessionDeleted,
     /// The session is closing: its `CloseSession` intent ends every root.
     #[error("the session is closing")]
     SessionClosing,
@@ -399,15 +402,6 @@ pub fn decide_root_intent(
     if facts.closing.is_some() {
         return Err(RootIntentRefused::SessionClosing);
     }
-    let park = facts
-        .park
-        .filter(|park| park.turn_id == request.root)
-        .ok_or(RootIntentRefused::NotParked)?;
-    if park.park_id != request.park {
-        return Err(RootIntentRefused::ParkSuperseded {
-            current: park.park_id,
-        });
-    }
     let root_verb = |intent: &&ControlIntent| match &intent.kind {
         ControlIntentKind::Redrive { root, .. }
         | ControlIntentKind::Cancel { root, .. }
@@ -421,6 +415,15 @@ pub fn decide_root_intent(
         )
     }) {
         return Err(RootIntentRefused::IntentOpen { intent: open.id });
+    }
+    let park = facts
+        .park
+        .filter(|park| park.turn_id == request.root)
+        .ok_or(RootIntentRefused::NotParked)?;
+    if park.park_id != request.park {
+        return Err(RootIntentRefused::ParkSuperseded {
+            current: park.park_id,
+        });
     }
     // A redrive the park names: open means it has not resumed the root yet;
     // acknowledged means it did, and the root runs until it parks again
@@ -444,13 +447,12 @@ pub fn decide_root_intent(
     })
 }
 
-/// The root a fork of input root `root`'s park `park` drives its held
-/// inputs under (D2 §1.4): `{root}~fork{park}`. A park is forked at most
-/// once (the fork deletes it), so the name is unique, and it is known before
-/// the fork's intent is written.
+/// The root a fork of input root `root` drives its held inputs under:
+/// `{root}~fork{intent}` (D2 §1.4). The transaction reserves the intent id
+/// before binding the released members, so the name is unique and stable.
 #[must_use]
-pub fn forked_root(root: &TurnId, park: ParkId) -> TurnId {
-    TurnId::from(format!("{root}~fork{park}"))
+pub fn forked_root(root: &TurnId, intent: ControlIntentId) -> TurnId {
+    TurnId::from(format!("{root}~fork{intent}"))
 }
 
 /// The deployment's control-intent ledger (FIG-3600 S7, ADR 0104 O4, astra

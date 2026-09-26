@@ -186,6 +186,8 @@ lash_store_sql::statements! {
 
         /// Raise `?1`'s pending follow-on to `?2`, only while the head still
         /// owes the follow-on `?3`. The head revision does not move.
+        clear_pending_follow_on = "UPDATE sessions SET pending_follow_on_json = NULL WHERE session_id = ?1";
+
         raise_pending_follow_on = "UPDATE sessions SET pending_follow_on_json = ?2
          WHERE session_id = ?1
            AND (pending_follow_on_json::jsonb ->> 'follow_on_turn_id') = ?3";

@@ -17,8 +17,9 @@ use lash_core_execution::store::{
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::Dialect;
 use lash_store_sql::session_roots::{
-    control_intents::ControlIntentStatements, root_inputs::SessionRootInputStatements,
-    roots::SessionRootStatements,
+    control_intents::ControlIntentStatements,
+    root_inputs::SessionRootInputStatements,
+    roots::{RootVerbStatements, SessionRootStatements},
 };
 use sqlx::{PgConnection, Row};
 
@@ -28,6 +29,7 @@ use crate::{PostgresSessionStore, StoreError, acquire_runtime_connection};
 /// Every logical-root statement this store issues.
 pub(crate) struct SessionRootsSql {
     pub(crate) roots: SessionRootStatements,
+    pub(crate) verbs: RootVerbStatements,
     pub(crate) inputs: SessionRootInputStatements,
     pub(crate) intents: ControlIntentStatements,
 }
@@ -36,6 +38,9 @@ static SESSION_ROOTS_SQL: LazyLock<SessionRootsSql> = LazyLock::new(|| {
     let dialect = Dialect::postgres();
     SessionRootsSql {
         roots: SessionRootStatements::render(dialect),
+        verbs: RootVerbStatements::render(
+            dialect.with_vocabulary(crate::turn_ingress::TURN_INPUT_LIFECYCLE),
+        ),
         inputs: SessionRootInputStatements::render(dialect),
         intents: ControlIntentStatements::render(dialect),
     }
@@ -182,7 +187,7 @@ pub(crate) async fn bind_root_inputs_conn(
     Ok(())
 }
 
-fn decode_intent(row: &sqlx::postgres::PgRow) -> Result<ControlIntent, StoreError> {
+pub(crate) fn decode_intent(row: &sqlx::postgres::PgRow) -> Result<ControlIntent, StoreError> {
     let id: i64 = row.try_get(0).map_err(store_sqlx_error)?;
     let session_id: String = row.try_get(1).map_err(store_sqlx_error)?;
     let format: i64 = row.try_get(2).map_err(store_sqlx_error)?;

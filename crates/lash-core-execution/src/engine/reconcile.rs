@@ -29,6 +29,8 @@ pub struct ReconcileCursor {
     /// The last live session the previous tick's drive arm read.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub drives: Option<SessionId>,
+    /// Last terminal root whose scope close was attempted.
+    pub scopes: Option<(SessionId, crate::TurnId)>,
 }
 
 /// The arm of a tick a failure came from.
@@ -44,10 +46,12 @@ pub enum ReconcileArm {
     ParentEndPlans,
     /// The FIG-3799 drain hand-over slot.
     DrainHandOver,
+    /// Terminal roots whose scope close may have been interrupted.
+    Scopes,
 }
 
-/// One arm's failure in a tick. The arm's cursor does not move past what
-/// failed, so the next tick retries it.
+/// One arm's failure in a tick. A failed listing keeps its cursor; an
+/// individual failed item is revisited when the bounded scan wraps.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ReconcileFailure {
     pub arm: ReconcileArm,
@@ -95,4 +99,6 @@ pub struct ReconcileTick {
     pub drain_hand_over: SlotPass,
     /// Every arm failure, in arm order.
     pub failures: Vec<ReconcileFailure>,
+    /// Idempotent terminal-root close calls completed.
+    pub closed_scopes: usize,
 }

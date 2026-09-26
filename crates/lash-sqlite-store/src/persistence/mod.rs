@@ -199,7 +199,7 @@ pub(crate) fn nearest_frame_node_id_conn(
 
 mod claim_support;
 mod maintenance;
-mod queued_run;
+pub(crate) mod queued_run;
 mod queued_run_assignment;
 mod queued_run_selection;
 mod queued_work;

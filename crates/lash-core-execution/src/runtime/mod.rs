@@ -29,6 +29,8 @@ use lash_core_ids::worker_capacity;
 pub use lash_core_store::usage;
 #[cfg(not(feature = "testing"))]
 pub(crate) use lash_core_store::usage;
+mod park;
+pub use park::{StoreParkRecovery, record_root_park, require_root_groups_closed};
 mod vocabulary;
 pub use vocabulary::*;
 

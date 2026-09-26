@@ -82,3 +82,5 @@ pub fn effect_group_suite_executors() -> std::sync::Arc<dyn crate::GroupExecutor
 pub fn effect_group_test_prefix(label: &str) -> String {
     format!("{label}-{}", uuid::Uuid::new_v4().simple())
 }
+
+pub use super::root_control::*;

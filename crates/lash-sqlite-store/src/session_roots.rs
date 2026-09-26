@@ -16,8 +16,9 @@ use lash_core_execution::store::{
 };
 use lash_sansio::{InputId, SessionId, TurnId};
 use lash_store_sql::session_roots::{
-    control_intents::ControlIntentStatements, root_inputs::SessionRootInputStatements,
-    roots::SessionRootStatements,
+    control_intents::ControlIntentStatements,
+    root_inputs::SessionRootInputStatements,
+    roots::{RootVerbStatements, SessionRootStatements},
 };
 use rusqlite::{Connection, OptionalExtension, params};
 
@@ -28,6 +29,7 @@ use crate::{StoreError, sqlite_error, stored_data_corrupt};
 /// Every logical-root statement the session catalog issues.
 pub(crate) struct SessionRootsSql {
     pub(crate) roots: SessionRootStatements,
+    pub(crate) verbs: RootVerbStatements,
     pub(crate) inputs: SessionRootInputStatements,
     pub(crate) intents: ControlIntentStatements,
 }
@@ -36,6 +38,9 @@ static SESSION_ROOTS_SQL: LazyLock<SessionRootsSql> = LazyLock::new(|| {
     let dialect = Schema::Main.dialect();
     SessionRootsSql {
         roots: SessionRootStatements::render(dialect),
+        verbs: RootVerbStatements::render(
+            dialect.with_vocabulary(crate::turn_ingress::TURN_INPUT_LIFECYCLE),
+        ),
         inputs: SessionRootInputStatements::render(dialect),
         intents: ControlIntentStatements::render(dialect),
     }
@@ -200,7 +205,7 @@ pub(crate) fn bind_root_inputs_conn(
     Ok(())
 }
 
-fn intent_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredIntentRow> {
+pub(crate) fn intent_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredIntentRow> {
     Ok(StoredIntentRow {
         id: row.get(0)?,
         session_id: row.get(1)?,
@@ -213,7 +218,7 @@ fn intent_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<StoredIntentRow> {
     })
 }
 
-struct StoredIntentRow {
+pub(crate) struct StoredIntentRow {
     id: i64,
     session_id: String,
     format: i64,
@@ -225,7 +230,7 @@ struct StoredIntentRow {
 }
 
 impl StoredIntentRow {
-    fn decode(self) -> Result<ControlIntent, StoreError> {
+    pub(crate) fn decode(self) -> Result<ControlIntent, StoreError> {
         ControlIntent::from_stored(
             stored_u64("ControlIntent", self.id)?,
             SessionId::from(self.session_id),

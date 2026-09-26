@@ -156,6 +156,8 @@ pub struct StoredDriveEpoch {
     /// The `CloseSession` intent the session is closing under (FIG-3600 S7):
     /// a closing session admits nothing and seals nothing.
     pub closing: Option<super::ControlIntentId>,
+    /// An unacknowledged cancel or fork still owns release of the old execution.
+    pub control_pending: bool,
 }
 
 /// Decide one seal from the stored epoch (ADR 0105 §2).
@@ -191,7 +193,7 @@ pub fn decide_drive_epoch_seal(
             DriveFence::sealed_by_store(session_id.clone(), stored.epoch, admission.clone()),
         ));
     }
-    if stored.epoch == observed_epoch && stored.closing.is_none() {
+    if stored.epoch == observed_epoch && stored.closing.is_none() && !stored.control_pending {
         return DriveEpochSealDecision::Raise {
             next: observed_epoch.saturating_add(1),
         };
@@ -283,6 +285,7 @@ impl InMemoryDriveEpochs {
                 admission: None,
                 root_start: None,
                 closing: None,
+                control_pending: false,
             });
         match decide_drive_epoch_seal(session_id, stored, admission, observed_epoch, root_start) {
             DriveEpochSealDecision::Answer(seal) => seal,
@@ -292,6 +295,7 @@ impl InMemoryDriveEpochs {
                     admission: Some(admission.clone()),
                     root_start: Some(root_start.clone()),
                     closing: None,
+                    control_pending: false,
                 };
                 DriveEpochSeal::Sealed(DriveFence::sealed_by_store(
                     session_id.clone(),
@@ -314,6 +318,7 @@ impl InMemoryDriveEpochs {
                 admission: None,
                 root_start: None,
                 closing: None,
+                control_pending: false,
             })
     }
 
@@ -332,6 +337,7 @@ impl InMemoryDriveEpochs {
                 admission: None,
                 root_start: None,
                 closing: None,
+                control_pending: false,
             });
         if stored.closing.is_none() {
             *stored = StoredDriveEpoch {
@@ -339,6 +345,7 @@ impl InMemoryDriveEpochs {
                 admission: Some(close_admission(intent)),
                 root_start: None,
                 closing: Some(intent),
+                control_pending: false,
             };
         }
     }
@@ -361,6 +368,7 @@ mod tests {
             admission: admission.map(AdmissionId::new),
             root_start: admission.map(|_| RootStartNonce::new("n")),
             closing: None,
+            control_pending: false,
         }
     }
 
@@ -376,6 +384,7 @@ mod tests {
             admission: Some(AdmissionId::new("intent:1")),
             root_start: None,
             closing: Some(super::super::ControlIntentId::from_sequence(1)),
+            control_pending: false,
         };
         assert_eq!(
             decide_drive_epoch_seal(&session, &closing, &AdmissionId::new("a"), 5, &nonce()),

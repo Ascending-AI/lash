@@ -985,6 +985,17 @@ impl RestateAdminClient {
         .await
     }
 
+    pub(crate) async fn paused_work_page(
+        &self,
+        after: Option<&str>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<RestatePausedInvocation>, RestateHttpError> {
+        let after = sql_string_literal(after.unwrap_or(""));
+        self.query_json(&format!(
+            "SELECT {RESTATE_PAUSED_INVOCATION_COLUMNS} FROM sys_invocation WHERE status = 'paused' AND id > {after} AND ((target_service_name = 'LashSession' AND target_handler_name = 'drive') OR (target_service_name IN ('LashTurn', 'LashProcessWorkflow') AND target_handler_name = 'run')) ORDER BY id LIMIT {}", limit.get()
+        )).await
+    }
+
     /// Resume a paused invocation: a fresh retry loop over its kept journal.
     pub async fn resume_invocation(
         &self,

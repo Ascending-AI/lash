@@ -45,3 +45,37 @@ crate::statements! {
         delete_by_session = "DELETE FROM session_roots WHERE session_id = ?1";
     }
 }
+
+crate::statements! {
+    /// Atomic parked-root control writes, shared by both stores.
+    pub struct RootVerbStatements @ "root_verb" {
+        bound_inputs = "SELECT b.input_id FROM session_root_inputs b JOIN pending_turn_inputs i ON i.session_id = b.session_id AND i.input_id = b.input_id WHERE b.session_id = ?1 AND b.root = ?2 AND {{nonterminal_turn_input_state(i.state)}}";
+        rebind = "UPDATE session_root_inputs SET root = ?3 WHERE session_id = ?1 AND input_id = ?2";
+        unbind = "DELETE FROM session_root_inputs WHERE session_id = ?1 AND input_id = ?2";
+        set_kind = "UPDATE control_intents SET kind_json = ?2 WHERE intent_id = ?1";
+        raise_epoch = "UPDATE session_meta SET drive_epoch = drive_epoch + 1, drive_admission_id = ?2, drive_root_start = NULL WHERE session_id = ?1 AND closing_intent IS NULL";
+        input = "UPDATE pending_turn_inputs SET state = ?3,
+            claim_id = NULL, claim_owner_id = NULL, claim_owner_incarnation_id = NULL,
+            claim_token = NULL, claim_session_lease_generation = 0,
+            claim_bound_turn_id = NULL, claim_bound_receipt_input_id = NULL
+            WHERE session_id = ?1 AND input_id = ?2 AND {{nonterminal_turn_input_state(state)}}";
+        release_inputs = "UPDATE pending_turn_inputs SET
+            claim_id = NULL, claim_owner_id = NULL, claim_owner_incarnation_id = NULL,
+            claim_token = NULL, claim_session_lease_generation = 0,
+            claim_bound_turn_id = NULL, claim_bound_receipt_input_id = NULL
+            WHERE session_id = ?1 AND claim_token IS NOT NULL";
+        release_batches = "UPDATE queued_work_batches SET
+            claim_id = NULL,
+            claim_token = NULL, claim_session_lease_generation = 0
+            WHERE session_id = ?1 AND claim_token IS NOT NULL";
+        delete_batch_items = "DELETE FROM queued_work_items WHERE batch_id = ?1";
+        delete_batch = "DELETE FROM queued_work_batches WHERE session_id = ?1 AND batch_id = ?2";
+        terminals = "SELECT session_id, root, terminal_kind, terminal_cause_json, terminal_head_revision, terminal_at_ms
+            FROM session_roots WHERE terminal_kind IS NOT NULL
+              AND (session_id > ?1 OR (session_id = ?1 AND root > ?2))
+            ORDER BY session_id, root LIMIT ?3";
+        sessions = "SELECT session_id FROM session_meta WHERE session_id > ?1 AND closing_intent IS NULL ORDER BY session_id LIMIT ?2";
+        intents = "SELECT intent_id, session_id, format, kind_json, state_json, attempts, created_at_ms, engine_ref
+            FROM control_intents WHERE intent_id > ?1 ORDER BY intent_id LIMIT ?2";
+    }
+}

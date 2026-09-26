@@ -147,6 +147,18 @@ pub trait SessionControlEngine: Send + Sync {
         engine: Option<&EnginePark>,
     ) -> Result<EngineAck, EngineRefusal>;
 
+    /// Resume a process through the engine's existing process control path.
+    /// The park identity is checked before the engine resumes the invocation.
+    async fn resume_process(
+        &self,
+        _process: &crate::ProcessId,
+        _park: ParkId,
+    ) -> Result<EngineAck, EngineRefusal> {
+        Err(EngineRefusal::Retryable(
+            "process redrive is not supported by this engine".into(),
+        ))
+    }
+
     /// O4 release: stop the root's execution for good, AFTER the store
     /// recorded the root's terminal evidence. Never proof of a lash outcome
     /// (ADR 0104 O4): the evidence is the store's.

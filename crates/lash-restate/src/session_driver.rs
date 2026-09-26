@@ -194,13 +194,6 @@ pub fn turn_workflow_key(session: &SessionId, root: &lash_core::TurnId) -> Strin
 
 /// The `(session, root)` a [`turn_workflow_key`] names, or `None` for a key
 /// no build of this generation wrote.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "park reconciliation maps a paused LashTurn to its root by this parse (FIG-3600 S7-B)"
-    )
-)]
 pub(crate) fn parse_turn_workflow_key(key: &str) -> Option<(SessionId, lash_core::TurnId)> {
     let (len, rest) = key.split_once(':')?;
     if len.is_empty()
@@ -309,6 +302,7 @@ pub struct RestateSessionWork {
     /// The drain generation of the build scheduling drives: every drive
     /// request it sends is stamped with it.
     build_generation: BuildGeneration,
+    control: Arc<dyn lash_core::engine::SessionControlEngine>,
 }
 
 #[expect(
@@ -320,11 +314,13 @@ impl RestateSessionWork {
         ingress: RestateIngressClient,
         slot: RestateSessionDriverSlot,
         build_generation: BuildGeneration,
+        control: Arc<dyn lash_core::engine::SessionControlEngine>,
     ) -> Self {
         Self {
             ingress,
             slot,
             build_generation,
+            control,
         }
     }
 
@@ -422,6 +418,9 @@ impl std::fmt::Debug for RestateSessionWork {
 
 #[async_trait::async_trait]
 impl SessionWorkEngine for RestateSessionWork {
+    fn control(&self) -> Arc<dyn lash_core::engine::SessionControlEngine> {
+        Arc::clone(&self.control)
+    }
     fn schedule_drive(&self, session: &SessionId, request: DriveRequestId) {
         // The ask is fire-and-forget by contract: the row it follows is
         // already durable, and a send that never reached Restate is healed by
@@ -449,7 +448,31 @@ impl SessionWorkEngine for RestateSessionWork {
     }
 
     fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
-        self.slot.install(driver)
+        let installed = self.slot.install(driver);
+        if !installed.owns_reconciliation() {
+            return installed;
+        }
+        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            let ingress = self.ingress.clone();
+            runtime.spawn(async move {
+                if let Err(error) = ingress
+                    .send_object_json_idempotent(
+                        crate::LashService::Reconcile.name(),
+                        "recovery",
+                        "tick",
+                        &crate::session_reconcile::ReconcileRequest {
+                            version: LASH_SESSION_DRIVE_VERSION,
+                            sequence: 0,
+                        },
+                        &format!("reconcile-start:{LASH_SESSION_DRIVE_VERSION}"),
+                    )
+                    .await
+                {
+                    tracing::warn!(%error, "could not start session reconcile");
+                }
+            });
+        }
+        installed
     }
 
     /// Attach to `request`'s drive by its idempotency key, starting it if no

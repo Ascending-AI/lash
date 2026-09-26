@@ -273,6 +273,48 @@ impl OpenFailure {
 
 #[async_trait]
 impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
+    fn owns_reconciliation(&self) -> bool {
+        true
+    }
+
+    async fn reconcile(
+        &self,
+        cursor: &lash_core::engine::ReconcileCursor,
+        page: std::num::NonZeroUsize,
+        tick: &str,
+    ) -> std::result::Result<lash_core::engine::ReconcileCursor, lash_core::StoreError> {
+        let work = self.config.env.queued_work();
+        let process_port = self.config.env.process_work();
+        let processes = self
+            .config
+            .env
+            .process_registry()
+            .zip(process_port.as_ref())
+            .map(
+                |(registry, port)| lash_core::runtime::drive::ReconcileProcesses {
+                    registry: registry.as_ref(),
+                    port: port.as_ref(),
+                },
+            );
+        let report = lash_core::runtime::drive::reconcile_once(
+            &lash_core::runtime::drive::ReconcileParts {
+                sessions: self.config.store_factory.as_ref(),
+                work: work.as_ref(),
+                scopes: self.config.env.core.control.scope_close.as_ref(),
+                processes,
+                clock: self.config.env.core.clock.as_ref(),
+            },
+            cursor,
+            page,
+            tick,
+        )
+        .await;
+        for failure in &report.failures {
+            tracing::warn!(arm = ?failure.arm, error = %failure.error, "reconcile arm failed; a later pass retries it");
+        }
+        Ok(report.next)
+    }
+
     async fn drive(
         &self,
         request: lash_core::engine::DriveRequest,
