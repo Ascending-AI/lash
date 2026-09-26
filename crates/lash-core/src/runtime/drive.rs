@@ -2,8 +2,8 @@
 //! is a recorded step (FIG-3600, ADR 0104 O1/O2/O6, ADR 0105 §2).
 //!
 //! A drive of one session loops: a recorded `AdmitDrive` step decides what
-//! runs next (an unfinished root it resumes, or the queue prefix it takes,
-//! minting the root), a recorded `SealDriveAdmission` step raises the
+//! runs next (an unfinished root it resumes, a follow-on the head owes, or
+//! the queue prefix it takes, minting the root), a recorded `SealDriveAdmission` step raises the
 //! session's drive epoch for that admission, and the root's turns run to
 //! their terminal commit. It stops when admission answers anything but an
 //! admitted root. What the drive decides is recorded: a redrive replays the
@@ -90,6 +90,30 @@ pub(crate) struct RootRun {
     pub(crate) run: Option<AgentFrameRun>,
     /// The accepted inputs the root's recorded claim drove.
     pub(crate) driven_inputs: Vec<crate::InputId>,
+    /// A queued root that ran no turn here: the settled run it replayed, or
+    /// why its drain ran nothing.
+    pub(crate) queued_drain: Option<crate::runtime::turn_loop::QueuedTurnDrain<()>>,
+}
+
+/// Whether a drive recovers the follow-on the session head owes when
+/// admission names it (ADR 0101 §3, FIG-3542).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum FollowOnRecovery {
+    /// Run the recovery root: every drive an engine runs, and a queued
+    /// drain.
+    Recover,
+    /// Stop before it: a direct turn's own drive, whose input waits behind
+    /// the follow-on and is answered queued. The session's drive recovers
+    /// the follow-on and then answers the input.
+    Decline,
+}
+
+/// How a drive loop ended, with the roots it ran.
+pub(crate) struct DriveRun {
+    pub(crate) outcome: DriveOutcome,
+    pub(crate) runs: Vec<RootRun>,
+    /// The drive stopped at an admitted follow-on recovery it declined.
+    pub(crate) declined_follow_on: bool,
 }
 
 /// Drive `request` on `runtime`'s session to a stop: admit, seal and run
@@ -116,9 +140,16 @@ pub async fn drive_session_with(
     request: &DriveRequest,
     sinks: DriveSinks<'_>,
 ) -> Result<DriveOutcome, DriveAbort> {
-    Box::pin(runtime.drive_until(controller, request, &sinks, None, |_| false))
-        .await
-        .map(|(outcome, _)| outcome)
+    Box::pin(runtime.drive_until(
+        controller,
+        request,
+        &sinks,
+        None,
+        FollowOnRecovery::Recover,
+        |_| false,
+    ))
+    .await
+    .map(|run| run.outcome)
 }
 
 /// Admission `ordinal` of `request`: one recorded `AdmitDrive` step through
@@ -207,17 +238,20 @@ fn controller_abort(root: Option<&TurnId>, error: RuntimeEffectControllerError) 
 impl LashRuntime {
     /// The drive loop: admit, seal and run roots until admission stops, or
     /// until `done` says the root just run is the one the caller waited for.
+    /// A follow-on recovery is run or declined as `follow_on` says.
     pub(crate) async fn drive_until(
         &mut self,
         controller: &ScopedEffectController<'_>,
         request: &DriveRequest,
         sinks: &DriveSinks<'_>,
         live: Option<(&crate::InputId, &crate::TurnInput)>,
+        follow_on: FollowOnRecovery,
         mut done: impl FnMut(&RootRun) -> bool,
-    ) -> Result<(DriveOutcome, Vec<RootRun>), DriveAbort> {
+    ) -> Result<DriveRun, DriveAbort> {
         let mut runs: Vec<RootRun> = Vec::new();
         let mut ran_roots = BTreeSet::new();
         let mut ordinal = 0_u32;
+        let mut declined_follow_on = false;
         let stop = loop {
             let admitted = match Box::pin(self.admit_drive_step(controller, request, ordinal))
                 .await?
@@ -230,6 +264,15 @@ impl LashRuntime {
                     break DriveStop::RootTerminal { root, by };
                 }
             };
+            if follow_on == FollowOnRecovery::Decline
+                && matches!(
+                    admitted.work(),
+                    crate::engine::AdmittedWork::FollowOn { .. }
+                )
+            {
+                declined_follow_on = true;
+                break DriveStop::Idle;
+            }
             ordinal = ordinal.checked_add(1).ok_or_else(|| {
                 DriveAbort::Refused(RuntimeError::new(
                     RuntimeErrorCode::QueuedWork,
@@ -242,7 +285,7 @@ impl LashRuntime {
             if !ran_roots.insert(admitted.root().clone()) {
                 break DriveStop::Idle;
             }
-            let queued = matches!(admitted.work(), crate::engine::AdmittedWork::Queued);
+            let queued = !matches!(admitted.work(), crate::engine::AdmittedWork::Input { .. });
             let run =
                 Box::pin(self.run_admitted_root_step(controller, admitted, sinks, live)).await?;
             let ran_nothing = match &run.outcome {
@@ -266,7 +309,11 @@ impl LashRuntime {
             ran: runs.iter().map(|run| run.outcome.clone()).collect(),
             stop,
         };
-        Ok((outcome, runs))
+        Ok(DriveRun {
+            outcome,
+            runs,
+            declined_follow_on,
+        })
     }
 
     pub(crate) async fn admit_drive_step(
@@ -399,6 +446,7 @@ impl LashRuntime {
                 outcome: RootOutcome::Refused { root, verdict },
                 run: None,
                 driven_inputs: Vec::new(),
+                queued_drain: None,
             });
         }
         match admitted.work().clone() {
@@ -407,6 +455,19 @@ impl LashRuntime {
             }
             crate::engine::AdmittedWork::Queued => {
                 Box::pin(self.run_queued_root(&root_controller, &admitted, sinks)).await
+            }
+            crate::engine::AdmittedWork::FollowOn {
+                follow_on,
+                attempts,
+            } => {
+                Box::pin(self.run_follow_on_root(
+                    &root_controller,
+                    &admitted,
+                    &follow_on,
+                    attempts,
+                    sinks,
+                ))
+                .await
             }
         }
     }

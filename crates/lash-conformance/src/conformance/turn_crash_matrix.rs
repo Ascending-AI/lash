@@ -1575,25 +1575,51 @@ async fn try_build_runtime_over_host(
     .await
 }
 
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 async fn seed_reference_ingress(
     store: &Arc<dyn RuntimePersistence>,
     identity: &ReferenceIdentity,
     scenario: &str,
 ) {
+    seed_reference_ingress_as(store, identity, scenario, None).await;
+}
+
+/// The reference ingress for a drain through the session drive: the
+/// next-turn input carries the reference turn id as its host id, so the
+/// drive admits it as the root of that id and the active-turn input and any
+/// cancellation addressed to the turn reach the root (FIG-3600 ruling Q4).
+async fn seed_reference_ingress_for_drive(
+    store: &Arc<dyn RuntimePersistence>,
+    identity: &ReferenceIdentity,
+    scenario: &str,
+) {
+    seed_reference_ingress_as(store, identity, scenario, Some(&identity.turn_id)).await;
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn seed_reference_ingress_as(
+    store: &Arc<dyn RuntimePersistence>,
+    identity: &ReferenceIdentity,
+    scenario: &str,
+    root: Option<&TurnId>,
+) {
     super::bind_conformance_session(store, &identity.session_id).await;
     // FIG-1573: one scenario deliberately seeds no next-turn row, so a recovering
     // drain evaluates the drain-time orphan backstop.
     if !scenario.starts_with("peer-reclaim-pinned-active-input-") {
+        let draft = PendingTurnInputDraft::new(
+            &identity.session_id,
+            crate::TurnInputIngress::NextTurn,
+            crate::TurnInput::text("durable next-turn input"),
+        );
+        let draft = match root {
+            Some(root) => draft.with_source_key(root.as_str()),
+            None => draft,
+        };
         store
-            .enqueue_pending_turn_input(PendingTurnInputDraft::new(
-                &identity.session_id,
-                crate::TurnInputIngress::NextTurn,
-                crate::TurnInput::text("durable next-turn input"),
-            ))
+            .enqueue_pending_turn_input(draft)
             .await
             .expect("seed next-turn input");
     }
@@ -1628,6 +1654,20 @@ async fn drive_turn(
     Box::pin(runtime.stream_next_queued_work(crate::TurnOptions::new(
         tokio_util::sync::CancellationToken::new(),
         scoped_controller(effect_controller, identity),
+    )))
+    .await
+    .map(crate::facade_support::QueuedTurnDrain::ran)
+}
+
+/// Drain the reference turn through the session drive on the controller a
+/// tier's runner lent it.
+async fn drive_root_on(
+    mut runtime: crate::LashRuntime,
+    scoped: crate::ScopedEffectController<'_>,
+) -> Result<Option<crate::AssembledTurn>, crate::RuntimeError> {
+    Box::pin(runtime.drive_next_queued_root(crate::TurnOptions::new(
+        tokio_util::sync::CancellationToken::new(),
+        scoped,
     )))
     .await
     .map(crate::facade_support::QueuedTurnDrain::ran)

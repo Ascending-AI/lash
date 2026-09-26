@@ -248,6 +248,11 @@ pub enum AdmittedWork {
     /// The session's queued work: the unfinished queued run named by the
     /// root, or a new one under it.
     Queued,
+    /// The follow-on the session head owes (ADR 0101 §3), which no queued
+    /// run owns: its recovery, as recovery number `attempts + 1`. The
+    /// recorded count is what the recovery raises from, so a redrive of the
+    /// root never raises it twice.
+    FollowOn { follow_on: TurnId, attempts: u32 },
 }
 
 impl Admitted {

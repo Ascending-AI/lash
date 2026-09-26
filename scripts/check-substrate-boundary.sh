@@ -393,7 +393,10 @@ drive_allowlist=scripts/drive-determinism-allowlist.txt
 # and the session store factory's opener, called as methods. It sees direct
 # calls only: a helper the drive calls that reaches the store itself is
 # pinned where it is defined, if at all, not here. Entries use the rule-5
-# format in scripts/drive-store-allowlist.txt, capped by its count file.
+# format in scripts/drive-store-allowlist.txt. Its count file caps the
+# occurrences made outside any recorded step (every tag but RECORDED), which
+# may only shrink; a new call inside a recorded step's body is pinned
+# RECORDED and raises no cap, because a replay reads its step's output.
 drive_store_paths=(
   crates/lash-core/src/runtime/drive.rs
   crates/lash-core/src/runtime/drive
@@ -505,7 +508,10 @@ ratchet_rule() {
         printf '%s  |  %s  |  %s  # %s\n' "${key%%|*}" "${key#*|}" "${seen[$key]}" "${tags[$key]:-UNMAPPED}"
       done | LC_ALL=C sort
     } >"$allowlist.new"
-    for key in "${!seen[@]}"; do total=$(( total + seen[$key] )); done
+    for key in "${!seen[@]}"; do
+      [[ -n ${RATCHET_UNCAPPED_TAG:-} && ${tags[$key]:-UNMAPPED} == "$RATCHET_UNCAPPED_TAG" ]] && continue
+      total=$(( total + seen[$key] ))
+    done
     mv "$allowlist.new" "$allowlist"
     printf '%s\n' "$total" >"$count_file"
     echo "regenerated $allowlist: ${#seen[@]} entries, $total occurrences"
@@ -543,7 +549,7 @@ ratchet_rule() {
 }
 
 ratchet_rule 5 "nondeterministic facility" "$drive_forbidden" "$drive_allowlist" "${drive_paths[@]}"
-ratchet_rule 6 "unpinned store call" "$drive_store_forbidden" "$drive_store_allowlist" "${drive_store_paths[@]}"
+RATCHET_UNCAPPED_TAG=RECORDED ratchet_rule 6 "unpinned store call" "$drive_store_forbidden" "$drive_store_allowlist" "${drive_store_paths[@]}"
 if [[ ${DRIVE_DETERMINISM_REGENERATE:-0} == 1 ]]; then
   exit 0
 fi

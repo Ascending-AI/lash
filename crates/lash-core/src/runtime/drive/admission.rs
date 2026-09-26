@@ -119,9 +119,6 @@ impl AdmitDriveRunner {
             }));
         }
 
-        // FIG-3542 (S4): the pending follow-on recovery runs here, at drive
-        // admission, before any other work is admitted.
-
         let Some((root, work)) = self.next_root().await? else {
             return Ok(AdmitVerdict::Idle);
         };
@@ -150,7 +147,11 @@ impl AdmitDriveRunner {
     /// The work this admission drives next, and the root it runs under.
     ///
     /// An unfinished queued run owns the session until it ends, so it is
-    /// resumed first. Then the head of the accepted next-turn input, unless a
+    /// resumed first; it also owns any follow-on its own switch left owed.
+    /// Then a follow-on the head owes that no run owns (ADR 0101 §3,
+    /// FIG-3542): while it is owed every other claim is blocked, so it is
+    /// recovered before anything else is admitted. Then the head of the
+    /// accepted next-turn input, unless a
     /// session command was enqueued before it: commands are applied by the
     /// queued drain, in order. Then any other queued work. The root of an
     /// input is its host id (its source key) when it has one, else its input
@@ -166,6 +167,20 @@ impl AdmitDriveRunner {
             .map_err(|error| store_fault("unfinished queued run read", error))?
         {
             return Ok(Some((TurnId::from(run.scope.id()), AdmittedWork::Queued)));
+        }
+        if let Some(owed) = self
+            .store
+            .load_pending_follow_on()
+            .await
+            .map_err(|error| store_fault("pending follow-on read", error))?
+        {
+            return Ok(Some((
+                follow_on_root(&owed),
+                AdmittedWork::FollowOn {
+                    follow_on: owed.follow_on_turn_id,
+                    attempts: owed.attempts,
+                },
+            )));
         }
         let ordering = self
             .store
@@ -229,6 +244,16 @@ pub(in crate::runtime) fn input_root(input: &crate::PendingTurnInput) -> TurnId 
             .as_deref()
             .unwrap_or_else(|| input.input_id.as_str()),
     )
+}
+
+/// The root that recovers `owed` at its current attempt count: one root per
+/// recovery, so a redrive of the recovery names the same root and a later
+/// recovery never reuses it.
+fn follow_on_root(owed: &crate::store::PendingFollowOn) -> TurnId {
+    TurnId::from(format!(
+        "follow-on:{}#{}",
+        owed.follow_on_turn_id, owed.attempts
+    ))
 }
 
 /// The root a fresh queued run is admitted under: named by its admission, so

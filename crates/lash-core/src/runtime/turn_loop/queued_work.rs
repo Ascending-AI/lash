@@ -199,6 +199,144 @@ impl LashRuntime {
             .session_command_precedes_turn_input())
     }
 
+    /// Drain the session's next work through the session drive (FIG-3600):
+    /// one drive, named by the drain's identity, run until its first root has
+    /// run, answered in the automatic drain's contract.
+    ///
+    /// The drain's identity is its drive request, so a redrive of the same
+    /// drain replays that drive's recorded admissions and the root it
+    /// admitted replays at the head it was admitted on (FIG-3748). A drain
+    /// with no identity is refused. Idle next-turn input runs as an
+    /// input root here, not as a queued run: this is the entry the engine
+    /// witnesses drive through, while
+    /// [`stream_next_queued_work`](Self::stream_next_queued_work) keeps the
+    /// queued-run body until the SQL-engine tests go (FIG-3668).
+    pub async fn drive_next_queued_root<'a>(
+        &mut self,
+        opts: impl Into<QueuedTurnOptions<'a>>,
+    ) -> Result<QueuedTurnDrain<AssembledTurn>, RuntimeError> {
+        let opts = opts.into();
+        if self
+            .session
+            .as_ref()
+            .and_then(|session| session.history_store())
+            .is_none()
+        {
+            return Ok(QueuedTurnDrain::Empty(
+                EmptyQueuedDrainReason::NoDurableQueue,
+            ));
+        }
+        // The drain's identity names its drive: a redrive of the drain must
+        // name the same one, so an anonymous drain has none to replay.
+        let identity = opts.source.identity().ok_or_else(|| {
+            RuntimeError::new(
+                RuntimeErrorCode::QueuedWork,
+                "the drive entry needs a drain identity to name its drive request",
+            )
+        })?;
+        let bound = opts.bind(identity)?;
+        let controller = bound.scoped_effect_controller();
+        let request = crate::engine::DriveRequest {
+            session: self.state.session_id.clone(),
+            request: crate::engine::DriveRequestId::new(controller.scope_id()),
+            build_generation: self.host.core.backend().build_generation().clone(),
+        };
+        let sinks = crate::runtime::drive::DriveSinks {
+            events: bound.events_or_noop(),
+            turn_events: bound.turn_events_or_noop(),
+            local_stop: bound.local_stop().clone(),
+        };
+        let drive = Box::pin(self.drive_until(
+            &controller,
+            &request,
+            &sinks,
+            None,
+            crate::runtime::drive::FollowOnRecovery::Recover,
+            |_| true,
+        ))
+        .await;
+        let crate::runtime::drive::DriveRun { outcome, runs, .. } = match drive {
+            Ok(drive) => drive,
+            Err(abort) => {
+                let error = abort.into_error();
+                if error.code == RuntimeErrorCode::SessionExecutionLaneBusy {
+                    return Ok(QueuedTurnDrain::Empty(
+                        EmptyQueuedDrainReason::ExecutionLaneBusy,
+                    ));
+                }
+                return Err(error);
+            }
+        };
+        if let Some(run) = runs.into_iter().next() {
+            return Ok(match (run.outcome, run.run, run.queued_drain) {
+                (_, Some(run), _) => match run.into_final_turn() {
+                    Some(turn) => QueuedTurnDrain::Ran(turn),
+                    None => QueuedTurnDrain::Empty(EmptyQueuedDrainReason::ClaimRefused(
+                        crate::QueuedWorkClaimRefusal::ClaimRaceLost,
+                    )),
+                },
+                (_, None, Some(QueuedTurnDrain::Replayed(receipt))) => {
+                    QueuedTurnDrain::Replayed(receipt)
+                }
+                (_, None, Some(QueuedTurnDrain::Empty(reason))) => QueuedTurnDrain::Empty(reason),
+                // Another drive sealed the session first: it holds the lane.
+                (crate::engine::RootOutcome::Refused { .. }, None, _) => {
+                    QueuedTurnDrain::Empty(EmptyQueuedDrainReason::ExecutionLaneBusy)
+                }
+                // The root's rows were answered by another driver.
+                (_, None, _) => QueuedTurnDrain::Empty(EmptyQueuedDrainReason::ClaimRefused(
+                    crate::QueuedWorkClaimRefusal::ClaimRaceLost,
+                )),
+            });
+        }
+        match outcome.stop {
+            crate::engine::DriveStop::Idle => Ok(QueuedTurnDrain::Empty(
+                EmptyQueuedDrainReason::ClaimRefused(self.idle_drain_refusal().await?),
+            )),
+            crate::engine::DriveStop::Parked(park) => Err(RuntimeError::new(
+                RuntimeErrorCode::QueuedRunPending,
+                format!(
+                    "queued work on session `{}` waits behind parked root `{}` (park {}); it \
+                     is driven once that park is resolved",
+                    self.state.session_id,
+                    park.root,
+                    park.park.as_str()
+                ),
+            )),
+            stop => Err(RuntimeError::new(
+                RuntimeErrorCode::QueuedWork,
+                format!(
+                    "queued drain `{}` stopped: {stop:?}",
+                    request.request.as_str()
+                ),
+            )),
+        }
+    }
+
+    /// Why an idle drive ran nothing: queued work that is not due yet, or no
+    /// work at all.
+    async fn idle_drain_refusal(&self) -> Result<crate::QueuedWorkClaimRefusal, RuntimeError> {
+        let Some(store) = self
+            .session
+            .as_ref()
+            .and_then(|session| session.history_store())
+        else {
+            return Ok(crate::QueuedWorkClaimRefusal::Empty);
+        };
+        let pending = store
+            .list_pending_queued_work(&self.state.session_id)
+            .await
+            .map_err(super::runtime_error_from_store_commit)?;
+        Ok(if pending.is_empty() {
+            crate::QueuedWorkClaimRefusal::Empty
+        } else {
+            crate::QueuedWorkClaimRefusal::NotYetAvailable
+        })
+    }
+
+    /// One automatic queued-work drain: a queued run over the session's
+    /// queued work and idle input. A queued root of the session drive runs
+    /// it under that root's own drain scope.
     pub async fn stream_next_queued_work<'a>(
         &mut self,
         opts: impl Into<QueuedTurnOptions<'a>>,

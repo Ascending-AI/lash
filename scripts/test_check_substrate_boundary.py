@@ -127,15 +127,26 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
 
     def test_store_allowlist_only_shrinks(self) -> None:
         # The store-call rule pins every direct persistence call in the
-        # session drive the same way; its total is capped by its count file.
-        entries = parse_allowlist(STORE_ALLOWLIST.read_text())
-        for path, text, count in entries:
-            with self.subTest(path=path, text=text):
+        # session drive the same way. Its count file caps the calls made
+        # outside any recorded step (every tag but RECORDED): those may only
+        # shrink, while a call inside a recorded step's body is pinned
+        # RECORDED and raises no cap.
+        text = STORE_ALLOWLIST.read_text()
+        entries = parse_allowlist(text)
+        for path, entry, count in entries:
+            with self.subTest(path=path, text=entry):
                 self.assertTrue(path.startswith("crates/"), path)
-                self.assertTrue(text, path)
+                self.assertTrue(entry, path)
                 self.assertGreaterEqual(count, 1, path)
+        unrecorded = 0
+        for line in text.splitlines():
+            if not line.strip() or line.startswith("#"):
+                continue
+            body, _, tag = line.partition("  # ")
+            if tag.strip() != "RECORDED":
+                unrecorded += int(body.split(ENTRY_SEPARATOR)[2])
         cap = int(STORE_COUNT.read_text().strip())
-        self.assertLessEqual(sum(count for _, _, count in entries), cap)
+        self.assertLessEqual(unrecorded, cap)
 
     def test_unpinned_store_call_in_the_drive_fails(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

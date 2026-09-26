@@ -83,7 +83,7 @@ fn attempt(
             if crash {
                 runtime.set_turn_phase_probe(Arc::new(PanicAfterFirstCommit));
             }
-            let drive = Box::pin(runtime.stream_next_queued_work(crate::TurnOptions::new(
+            let drive = Box::pin(runtime.drive_next_queued_root(crate::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
                 scope,
             )))
@@ -268,19 +268,16 @@ pub async fn a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_
 #[macro_export]
 macro_rules! queued_after_commit_redrive_tests {
     ($(#[$attr:meta])* $fixture:block) => {
+        $crate::queued_after_commit_redrive_tests!(@law [$(#[$attr])*] $fixture;
+            (a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_once, "queued-after-commit-redrive"));
+    };
+    (@law [$(#[$attr:meta])*] $fixture:block; ($law:ident, $label:literal)) => {
         $(#[$attr])*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_once() {
+        async fn $law() {
             let (_guard, prefix, host, stores, runner) = $fixture;
-            $crate::registration_macro_support::a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_once(
-                prefix, host, stores, runner,
-            )
-            .await;
-            $crate::law_receipt::record(
-                module_path!(),
-                "a_queued_drive_redriven_after_its_first_commit_runs_the_next_input_once",
-                "queued-after-commit-redrive",
-            );
+            $crate::registration_macro_support::$law(prefix, host, stores, runner).await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }

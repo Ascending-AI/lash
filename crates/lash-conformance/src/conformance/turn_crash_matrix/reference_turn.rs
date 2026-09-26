@@ -33,6 +33,10 @@ pub(super) struct ReferenceTurn {
     /// Where an execution that ends reports its drain. A crashing turn has
     /// none: it must never end.
     pub(super) reports: Option<tokio::sync::mpsc::UnboundedSender<DrainReport>>,
+    /// Drain through the session drive
+    /// ([`drive_next_queued_root`](crate::LashRuntime::drive_next_queued_root))
+    /// instead of the queued-run body.
+    pub(super) through_drive: bool,
 }
 
 impl ReferenceTurn {
@@ -64,7 +68,16 @@ impl ReferenceTurn {
             lease_timings,
             before_drive: Arc::new(|_| {}),
             reports: None,
+            through_drive: false,
         }
+    }
+
+    /// Drain through the session drive: a recorded admission, seal and
+    /// claim, then the admitted root, so a redrive replays what the first
+    /// execution recorded (FIG-3748).
+    pub(super) fn through_drive(mut self) -> Self {
+        self.through_drive = true;
+        self
     }
 
     pub(super) fn before_drive(
@@ -121,11 +134,15 @@ impl ReferenceTurn {
                 .await
                 .expect("build the reference runtime");
                 (turn.before_drive)(&turn.seam.control);
-                let drain = Box::pin(runtime.stream_next_queued_work(crate::TurnOptions::new(
+                let options = crate::TurnOptions::new(
                     tokio_util::sync::CancellationToken::new(),
                     turn.seam.clone().over_scoped(scoped),
-                )))
-                .await;
+                );
+                let drain = if turn.through_drive {
+                    Box::pin(runtime.drive_next_queued_root(options)).await
+                } else {
+                    Box::pin(runtime.stream_next_queued_work(options)).await
+                };
                 let end = crate::ConformanceTurnEnd::of(&drain);
                 match &turn.reports {
                     Some(reports) => {

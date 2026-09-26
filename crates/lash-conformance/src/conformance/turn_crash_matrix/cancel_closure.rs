@@ -1,4 +1,5 @@
-//! The turn-cancel closure across a crash, on the tier's turn runner.
+//! The turn-cancel closure across a crash, on the tier's turn runner, with the
+//! turn run as a root of the session drive (FIG-3600).
 //!
 //! The reference turn carries a durable after-step cancellation that drops its
 //! undelivered active-turn input. The turn honours it and closes: it settles
@@ -6,8 +7,11 @@
 //! effects and consumes the authorization in one store write. The law crashes
 //! the turn at each of those eight cuts, before and inside each step, and the
 //! tier recovers the turn its own way: a fresh runtime over the same store in
-//! process, a redelivered invocation replaying its journal on Restate. Every
-//! recovery must finish the same closure once: the cancellation records its
+//! process, a redelivered invocation replaying its journal on Restate. The
+//! drive's recorded admission, seal and claim name the same root on every
+//! execution, so a recovery never re-decides from the store the crashed
+//! closure write already moved (FIG-3736). Every recovery must finish the
+//! same closure once: the cancellation records its
 //! input effects with the requested `Drop` disposition, no closure pin
 //! survives, and the turn's terminal commit lands.
 
@@ -39,7 +43,7 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
         let scenario = format!("cancel-closure-{}", point_key(&point));
         let identity = ReferenceIdentity::for_scenario(&scenario);
         let store = make(&scenario);
-        seed_reference_ingress(&store, &identity, &scenario).await;
+        seed_reference_ingress_for_drive(&store, &identity, &scenario).await;
         let address = crate::TurnAddress::new(&identity.session_id, &identity.turn_id);
         let receipt = crate::TurnWorkDriver::for_session(
             host.host(),
@@ -103,7 +107,7 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
                     ))
                     .await
                     .expect("build the cancelled reference runtime");
-                    let turn = Box::pin(drive_turn_on(runtime, seam.over_scoped(scoped))).await;
+                    let turn = Box::pin(drive_root_on(runtime, seam.over_scoped(scoped))).await;
                     let Some(ends) = ends else {
                         panic!("{point:?}: the armed cancellation cut was never reached: {turn:?}");
                     };
@@ -120,7 +124,12 @@ pub async fn turn_cancel_closure_recovers_from_a_crash_at_every_cut<F, S>(
                 crash,
             )
             .await;
-        wait_for_recovery_lease(&make, &scenario, &point, true).await;
+        // On the drive the closure write is the root's final commit, which
+        // releases the lane with the head: once it landed, no lane is left.
+        let lane_held = !(point.operation
+            == TurnSeamOperation::Store(StoreOperation::ApplyTurnCancelEffectsAndConsume)
+            && point.placement == CrashPlacement::InsideCall);
+        wait_for_recovery_lease(&make, &scenario, &point, lane_held).await;
         let recovery = make(&scenario);
         super::super::bind_conformance_session(&recovery, &identity.session_id).await;
 

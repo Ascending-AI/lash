@@ -142,7 +142,7 @@ fn attempt(
             if result_tx.is_none() {
                 runtime.set_turn_phase_probe(Arc::new(PanicAfterSwitchCommit));
             }
-            let drive = Box::pin(runtime.stream_next_queued_work(crate::TurnOptions::new(
+            let drive = Box::pin(runtime.drive_next_queued_root(crate::TurnOptions::new(
                 tokio_util::sync::CancellationToken::new(),
                 scope,
             )))
@@ -309,19 +309,16 @@ pub async fn a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_i
 #[macro_export]
 macro_rules! frame_switch_redrive_tests {
     ($(#[$attr:meta])* $fixture:block) => {
+        $crate::frame_switch_redrive_tests!(@law [$(#[$attr])*] $fixture;
+            (a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_its_admitted_head, "frame-switch-redrive"));
+    };
+    (@law [$(#[$attr:meta])*] $fixture:block; ($law:ident, $label:literal)) => {
         $(#[$attr])*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_its_admitted_head() {
+        async fn $law() {
             let (_guard, prefix, host, stores, runner) = $fixture;
-            $crate::registration_macro_support::a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_its_admitted_head(
-                prefix, host, stores, runner,
-            )
-            .await;
-            $crate::law_receipt::record(
-                module_path!(),
-                "a_frame_switched_driver_turn_redriven_after_its_commit_replays_at_its_admitted_head",
-                "frame-switch-redrive",
-            );
+            $crate::registration_macro_support::$law(prefix, host, stores, runner).await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }

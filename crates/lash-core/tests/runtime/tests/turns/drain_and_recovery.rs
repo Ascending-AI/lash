@@ -2,6 +2,20 @@ use super::*;
 
 #[tokio::test]
 pub(super) async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() {
+    Box::pin(renewal_failure_mid_turn(false)).await;
+}
+
+/// The drive path's half of the rule (FIG-3600, ADR 0105): the drive epoch is
+/// the only fence, so an observed lease loss alone refuses nothing. With no
+/// successor drive sealed, the root commits and exactly one durable branch
+/// exists. The other half, a successor that sealed a newer epoch refusing the
+/// stale root's commit, is S7-A's `RuntimeCommit.drive_fence` law.
+#[tokio::test]
+pub(super) async fn a_drive_root_commits_after_an_observed_lease_loss_when_no_successor_sealed() {
+    Box::pin(renewal_failure_mid_turn(true)).await;
+}
+
+async fn renewal_failure_mid_turn(through_drive: bool) {
     let backend = memory_backend().await;
     let lease_ttl = std::time::Duration::from_millis(120);
     let clock = Arc::new(ManualClock::new(1_000));
@@ -121,17 +135,20 @@ pub(super) async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() 
     .await;
 
     let turn = lash_core::task::spawn(async move {
-        runtime
-            .stream_next_queued_work(TurnOptions::new(
-                CancellationToken::new(),
-                backend_queued_scope(
-                    &backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("renewal-failure-mid-turn"),
-                ),
-            ))
-            .await
-            .map(lash_core::facade_support::QueuedTurnDrain::ran)
+        let options = TurnOptions::new(
+            CancellationToken::new(),
+            backend_queued_scope(
+                &backend,
+                &SessionId::from("root"),
+                &TurnId::from("renewal-failure-mid-turn"),
+            ),
+        );
+        let drain = if through_drive {
+            runtime.drive_next_queued_root(options).await
+        } else {
+            runtime.stream_next_queued_work(options).await
+        };
+        drain.map(lash_core::facade_support::QueuedTurnDrain::ran)
     });
     provider_stalled_rx
         .await
@@ -163,15 +180,39 @@ pub(super) async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() 
         .send(())
         .expect("provider should still be waiting");
 
-    let assembled = tokio::time::timeout(std::time::Duration::from_secs(5), turn)
+    let drained = tokio::time::timeout(std::time::Duration::from_secs(5), turn)
         .await
         .expect("turn should finish")
-        .expect("turn task")
-        .expect_err("queued progress requires the current lane fence");
+        .expect("turn task");
     assert!(
         store.session_execution_lease_renewal_count() > renewals_before_loss,
         "the live renewal task must observe the expired predecessor fence"
     );
+    if through_drive {
+        let turn = drained
+            .expect("no successor sealed, so the drive root's commit is admitted")
+            .expect("the drive ran the root");
+        assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
+        let applications = lash_core::store::TurnInputStore::list_turn_input_applications(
+            store.as_ref(),
+            &SessionId::from("root"),
+        )
+        .await
+        .expect("read the applied inputs");
+        assert_eq!(
+            applications.len(),
+            1,
+            "exactly one durable branch applies the input"
+        );
+        lash_core::store::SessionExecutionLeaseStore::release_session_execution_lease(
+            store.as_ref(),
+            &successor_lease.completion(),
+        )
+        .await
+        .expect("release successor lease");
+        return;
+    }
+    let assembled = drained.expect_err("queued progress requires the current lane fence");
     assert_eq!(
         assembled.code,
         lash_core::RuntimeErrorCode::QueuedRunPending
@@ -2107,4 +2148,85 @@ pub(super) async fn no_queued_work_submit_defers_without_refreshing_resident_sta
     .expect("inspect deferred durable command");
     assert_eq!(pending.len(), 1);
     assert_eq!(pending[0].batch_id, receipt.batch_id);
+}
+
+/// The drive path's test entry (FIG-3600): an idle session answers an empty
+/// claim, a drain runs one root whose claim takes the claimable input prefix,
+/// and a drain re-run under the same identity replays its recorded drive
+/// instead of admitting anything new.
+#[tokio::test]
+pub(super) async fn the_drive_entry_runs_one_root_per_drain_and_replays_a_repeated_drain() {
+    let backend = memory_backend().await;
+    let answer = |text: &str| MockCall {
+        stream_events: Vec::new(),
+        response: Ok(LlmResponse {
+            parts: vec![LlmOutputPart::Text {
+                text: text.to_string(),
+                response_meta: None,
+            }],
+            response_metadata: Default::default(),
+            ..LlmResponse::default()
+        }),
+    };
+    let (mut runtime, store) = standard_runtime_with_transport_and_queue_store(
+        &backend,
+        mock_provider(vec![answer("first answer")]),
+    )
+    .await;
+    let session = SessionId::from("root");
+    let drain = |id: &str| {
+        TurnOptions::new(
+            CancellationToken::new(),
+            backend_queued_scope(&backend, &session, &TurnId::from(id)),
+        )
+    };
+
+    let idle = runtime
+        .drive_next_queued_root(drain("drive-entry-idle"))
+        .await
+        .expect("an idle drive answers");
+    assert!(matches!(
+        idle,
+        lash_core::facade_support::QueuedTurnDrain::Empty(
+            lash_core::facade_support::EmptyQueuedDrainReason::ClaimRefused(
+                lash_core::QueuedWorkClaimRefusal::Empty
+            )
+        )
+    ));
+
+    enqueue_idle_turn_input(store.as_ref(), &session, "first question").await;
+    enqueue_idle_turn_input(store.as_ref(), &session, "second question").await;
+    let first = runtime
+        .drive_next_queued_root(drain("drive-entry-first"))
+        .await
+        .expect("the first drain runs")
+        .expect("the first drain runs a root");
+    assert_eq!(first.assistant_output.safe_text, "first answer");
+
+    let repeated = runtime
+        .drive_next_queued_root(drain("drive-entry-first"))
+        .await
+        .expect("the repeated drain replays")
+        .expect("the repeated drain answers its recorded root");
+    assert_eq!(
+        repeated.assistant_output.safe_text, "first answer",
+        "a repeated drain replays its recorded root, never the next input"
+    );
+
+    let after = runtime
+        .drive_next_queued_root(drain("drive-entry-second"))
+        .await
+        .expect("a later drain answers");
+    assert!(
+        after.ran().is_none(),
+        "the first root's claim took both inputs, so a later drain has nothing to run"
+    );
+    assert_eq!(
+        lash_core::store::TurnInputStore::list_turn_input_applications(store.as_ref(), &session)
+            .await
+            .expect("read the applied inputs")
+            .len(),
+        2,
+        "each input is applied exactly once"
+    );
 }

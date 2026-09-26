@@ -200,6 +200,7 @@ impl LashRuntime {
                     outcome: RootOutcome::Ceded { root },
                     run: None,
                     driven_inputs: Vec::new(),
+                    queued_drain: None,
                 });
             }
             Err(error) => {
@@ -266,6 +267,7 @@ impl LashRuntime {
             outcome,
             run: Some(run),
             driven_inputs,
+            queued_drain: None,
         })
     }
 
@@ -279,22 +281,39 @@ impl LashRuntime {
     ) -> Result<RootRun, DriveAbort> {
         let root = admitted.root().clone();
         let host = Arc::clone(&self.host.core.control.effect_host);
-        let drain_controller = super::step_controller(
-            root_controller,
-            host.as_ref(),
-            crate::AdmittedScope::queue_drain(admitted.session().clone(), root.as_str()),
-        )
-        .map_err(DriveAbort::Refused)?;
-        let options = crate::runtime::QueuedTurnOptions::new(
-            sinks.local_stop.immediate_token(),
-            crate::runtime::QueuedEffectSource::Scoped(drain_controller),
-        )
-        .with_local_stop(sinks.local_stop.clone())
-        .with_events(sinks.events)
-        .with_turn_events(sinks.turn_events);
+        let options = root_drain_options(root_controller, host.as_ref(), admitted, sinks)?;
         let drain = Box::pin(self.stream_next_queued_work(options))
             .await
             .map_err(|error| drive_abort(Some(&root), error))?;
+        self.root_run_of_drain(root, drain)
+    }
+
+    /// Recover the follow-on the session head owes under `admitted`'s root
+    /// (ADR 0101 §3, FIG-3542), raising its recovery count from the
+    /// `attempts` admission recorded.
+    pub(super) async fn run_follow_on_root(
+        &mut self,
+        root_controller: &ScopedEffectController<'_>,
+        admitted: &Admitted,
+        follow_on: &TurnId,
+        attempts: u32,
+        sinks: &DriveSinks<'_>,
+    ) -> Result<RootRun, DriveAbort> {
+        let root = admitted.root().clone();
+        let host = Arc::clone(&self.host.core.control.effect_host);
+        let options = root_drain_options(root_controller, host.as_ref(), admitted, sinks)?;
+        let drain = Box::pin(self.recover_admitted_follow_on(options, follow_on, attempts))
+            .await
+            .map_err(|error| drive_abort(Some(&root), error))?;
+        self.root_run_of_drain(root, drain)
+    }
+
+    /// A queued-work root's outcome from how its drain ended.
+    fn root_run_of_drain(
+        &self,
+        root: TurnId,
+        drain: crate::runtime::turn_loop::QueuedTurnDrain<crate::AssembledTurn>,
+    ) -> Result<RootRun, DriveAbort> {
         Ok(match drain {
             crate::runtime::turn_loop::QueuedTurnDrain::Ran(turn) => RootRun {
                 outcome: RootOutcome::Committed {
@@ -306,16 +325,23 @@ impl LashRuntime {
                     acceptance: None,
                 }),
                 driven_inputs: Vec::new(),
+                queued_drain: None,
             },
             crate::runtime::turn_loop::QueuedTurnDrain::Replayed(receipt) => RootRun {
-                outcome: match receipt.terminal {
+                outcome: match &receipt.terminal {
                     Some(crate::store::QueuedRunTerminal::Completed { outcome, .. }) => {
-                        RootOutcome::Committed { root, outcome }
+                        RootOutcome::Committed {
+                            root,
+                            outcome: outcome.clone(),
+                        }
                     }
                     _ => RootOutcome::Ceded { root },
                 },
                 run: None,
                 driven_inputs: Vec::new(),
+                queued_drain: Some(crate::runtime::turn_loop::QueuedTurnDrain::Replayed(
+                    receipt,
+                )),
             },
             crate::runtime::turn_loop::QueuedTurnDrain::Empty(
                 crate::runtime::turn_loop::EmptyQueuedDrainReason::ExecutionLaneBusy,
@@ -328,10 +354,11 @@ impl LashRuntime {
                     ),
                 )));
             }
-            crate::runtime::turn_loop::QueuedTurnDrain::Empty(_) => RootRun {
+            crate::runtime::turn_loop::QueuedTurnDrain::Empty(reason) => RootRun {
                 outcome: RootOutcome::Ceded { root },
                 run: None,
                 driven_inputs: Vec::new(),
+                queued_drain: Some(crate::runtime::turn_loop::QueuedTurnDrain::Empty(reason)),
             },
         })
     }
@@ -423,6 +450,29 @@ impl LashRuntime {
         self.admitted_turn_index = Some(turn_index);
         Ok(())
     }
+}
+
+/// The drain options a queued-work root runs under: its own drain scope,
+/// named by the root.
+fn root_drain_options<'a>(
+    root_controller: &ScopedEffectController<'a>,
+    host: &'a dyn crate::EffectHost,
+    admitted: &Admitted,
+    sinks: &DriveSinks<'a>,
+) -> Result<crate::runtime::QueuedTurnOptions<'a>, DriveAbort> {
+    let drain_controller = super::step_controller(
+        root_controller,
+        host,
+        crate::AdmittedScope::queue_drain(admitted.session().clone(), admitted.root().as_str()),
+    )
+    .map_err(DriveAbort::Refused)?;
+    Ok(crate::runtime::QueuedTurnOptions::new(
+        sinks.local_stop.immediate_token(),
+        crate::runtime::QueuedEffectSource::Scoped(drain_controller),
+    )
+    .with_local_stop(sinks.local_stop.clone())
+    .with_events(sinks.events)
+    .with_turn_events(sinks.turn_events))
 }
 
 /// Trace attribution for the claim decisions the runner makes.

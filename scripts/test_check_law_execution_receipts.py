@@ -667,10 +667,6 @@ class ParkedEntryTests(unittest.TestCase):
                 "tests::turn_laws_on_the_double::an_all_group_of_tool_children_yields_the_batch_replies",
                 "--skip",
                 "tests::turn_laws_on_the_double::session_store_factory_mid_stream_failure_evidence",
-                "--skip",
-                "tests::turn_crash_on_the_double::turn_cancel_closure_recovers_from_a_crash_at_every_cut",
-                "--skip",
-                "tests::turn_crash_on_the_double::turn_crash_after_commit_redrive_replays_the_committed_receipt",
             ],
         )
         self.assertEqual(MODULE.parked_skips("no_such_crate", MODULE.load_macros()), [])
