@@ -60,6 +60,7 @@ async fn an_unprovisioned_database_reports_not_scanned_rather_than_erroring() {
     for surface in [
         DurableSurface::ParkedSegment,
         DurableSurface::PendingWake,
+        DurableSurface::StartedProcess,
         DurableSurface::SessionCheckpoint,
         DurableSurface::SessionExecutionState,
     ] {
@@ -208,6 +209,53 @@ async fn a_parked_segment_is_enumerated_with_its_identity_and_terminal_ones_are_
         page.next.is_none(),
         "a page shorter than its limit is the end of the surface"
     );
+
+    scratch.cleanup().await;
+}
+
+/// C8 (FIG-3571): every live process is walked with its record, which carries
+/// the start stamp the probe judges; a terminal one is not.
+#[tokio::test]
+async fn a_live_process_is_walked_with_its_record_and_terminal_ones_are_not() {
+    let Some(database_url) = database_url() else {
+        eprintln!("skipping preflight durable walk: database URL is not set");
+        return;
+    };
+    let scratch = ScratchSchema::provision(&database_url).await;
+    seed_process(
+        &scratch,
+        &ProcessId::from("proc-live"),
+        "running",
+        Some("session-1"),
+    )
+    .await;
+    seed_process(
+        &scratch,
+        &ProcessId::from("proc-done"),
+        "completed",
+        Some("session-2"),
+    )
+    .await;
+
+    let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
+    let page = preflight
+        .scan_durable(&DurableScan::first(DurableSurface::StartedProcess, 10))
+        .await
+        .expect("a provisioned deployment walks");
+
+    assert_eq!(page.coverage, ScanCoverage::Scanned);
+    assert_eq!(page.items.len(), 1, "{:?}", page.items);
+    let item = &page.items[0];
+    assert_eq!(item.surface, DurableSurface::StartedProcess);
+    assert_eq!(item.cursor, "proc-live");
+    assert_eq!(item.process_id.as_deref(), Some("proc-live"));
+    assert_eq!(item.session_id.as_deref(), Some("session-1"));
+    assert_eq!(item.status.as_deref(), Some("running"));
+    assert_eq!(
+        item.payload,
+        DurablePayload::Json(r#"{"process":"proc-live"}"#.to_string())
+    );
+    assert!(page.next.is_none());
 
     scratch.cleanup().await;
 }

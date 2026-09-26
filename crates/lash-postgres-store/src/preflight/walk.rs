@@ -84,6 +84,7 @@ pub(crate) async fn scan_durable(
         DurableSurface::ModuleArtifact => scan_module_artifacts(pool, scan).await,
         DurableSurface::ParkedSegment => scan_parked_segments(pool, scan).await,
         DurableSurface::PendingWake => scan_pending_wakes(pool, scan).await,
+        DurableSurface::StartedProcess => scan_started_processes(pool, scan).await,
         DurableSurface::SessionCheckpoint => scan_session_checkpoints(pool, scan).await,
         DurableSurface::SessionExecutionState => scan_session_execution_state(pool, scan).await,
         // The surface set is `#[non_exhaustive]`, so a build against a newer
@@ -98,6 +99,47 @@ pub(crate) async fn scan_durable(
             },
         }),
     }
+}
+
+/// One start record per live process (FIG-3571), in key order. The payload is
+/// the process record: its start stamp names the executable generation the
+/// incarnation runs under, and only its input lets the probe recompute the
+/// generation this build would run it as.
+async fn scan_started_processes(
+    pool: &PgPool,
+    scan: &DurableScan,
+) -> Result<DurableScanPage, StoreError> {
+    let rows = sqlx::query_as::<_, (String, String, Option<String>, String)>(
+        crate::process_sql::process_sql()
+            .process_postgres
+            .list_live_for_preflight
+            .sql(),
+    )
+    .bind(scan.after.clone())
+    .bind(row_limit(scan))
+    .fetch_all(pool)
+    .await;
+    let rows = match rows {
+        Ok(rows) => rows,
+        Err(error) => return read_failure(scan.surface, error),
+    };
+    let returned = rows.len();
+    let items: Vec<DurableItem> = rows
+        .into_iter()
+        .map(
+            |(process_id, status, wake_session_id, record_json)| DurableItem {
+                surface: DurableSurface::StartedProcess,
+                cursor: process_id.clone(),
+                process_id: Some(ProcessId::from(process_id)),
+                session_id: wake_session_id.map(SessionId::from),
+                status: Some(status),
+                owner_record: Some(record_json.clone()),
+                payload: DurablePayload::Json(record_json),
+            },
+        )
+        .collect();
+    let next = page_cursor(scan, items.last().map(|item| item.cursor.clone()), returned);
+    Ok(scanned(items, next))
 }
 
 /// One persisted JSON module artifact per module reference.

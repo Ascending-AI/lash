@@ -101,6 +101,7 @@ pub(super) fn extract(item: &DurableItem) -> Vec<Extraction> {
     match item.surface {
         DurableSurface::ParkedSegment => parked_segment(payload, item.owner_record.as_deref()),
         DurableSurface::PendingWake => pending_wake(payload),
+        DurableSurface::StartedProcess => started_process(payload),
         DurableSurface::SessionCheckpoint => session_checkpoint(payload),
         DurableSurface::SessionExecutionState => session_execution_state(payload),
         DurableSurface::ModuleArtifact => module_artifact(payload),
@@ -307,6 +308,74 @@ fn program_identity(root: &serde_json::Value, owner_record: Option<&str>) -> Opt
 /// claiming one would be reporting a comparison this build cannot make.
 #[cfg(not(feature = "rlm"))]
 fn program_identity(_root: &serde_json::Value, _owner_record: Option<&str>) -> Option<Extraction> {
+    None
+}
+
+/// The start stamp of a started process (FIG-3571), a recompute like the
+/// handover's program identity: the stamp names the executable generation the
+/// incarnation runs under, and the only honest check is to recompute the
+/// generation this build would run its input as. A process that has not
+/// started carries no stamp and yields nothing; a started one whose stamp is
+/// missing or another build's parks at its next claim, so it is a refusal
+/// before any handover exists to report it.
+fn started_process(payload: Payload<'_>) -> Vec<Extraction> {
+    let format = DurableFormat::Bytecode;
+    let record = match payload.json(format) {
+        Ok(record) => record,
+        Err(extraction) => return vec![extraction],
+    };
+    let Some(started) = record
+        .get("first_started")
+        .filter(|started| !started.is_null())
+    else {
+        return Vec::new();
+    };
+    let stamp = started
+        .get("generation")
+        .and_then(serde_json::Value::as_str);
+    start_generation(&record, stamp).into_iter().collect()
+}
+
+#[cfg(feature = "rlm")]
+fn start_generation(record: &serde_json::Value, stamp: Option<&str>) -> Option<Extraction> {
+    let format = DurableFormat::Bytecode;
+    let input = record.get("input")?;
+    // Only a Lashlang engine process runs under a generation; a tool-call or
+    // session-turn process has nothing to recompute and is not a gap.
+    if input.get("type").and_then(serde_json::Value::as_str) != Some("engine")
+        || input.get("kind").and_then(serde_json::Value::as_str)
+            != Some(lash_lashlang_runtime::LASHLANG_ENGINE_KIND)
+    {
+        return None;
+    }
+    let payload = input.get("payload")?;
+    let Ok(parsed) =
+        serde_json::from_value::<lash_lashlang_runtime::LashlangProcessInput>(payload.clone())
+    else {
+        return Some(Extraction::Undecodable {
+            format,
+            reason: "started process payload is not a lashlang process input".to_string(),
+        });
+    };
+    let current = parsed.executable_generation();
+    Some(if stamp == Some(current.as_str()) {
+        Extraction::IdentityMatch { format }
+    } else {
+        Extraction::IdentityMismatch {
+            format,
+            detail: format!(
+                "the process was started under executable generation {}; bytecode v{} runs it \
+                 as {current}, so its next claim parks it as a retired generation",
+                stamp.unwrap_or("none"),
+                crate::formats::BYTECODE_FORMAT_VERSION
+            ),
+        }
+    })
+}
+
+/// A build without the language cannot recompute a start stamp.
+#[cfg(not(feature = "rlm"))]
+fn start_generation(_record: &serde_json::Value, _stamp: Option<&str>) -> Option<Extraction> {
     None
 }
 
@@ -830,6 +899,79 @@ mod tests {
                 }
             )),
             "a stale identity is a decided refusal, not an undecodable item"
+        );
+    }
+
+    /// C8 (FIG-3571): a started process carries its executable generation on
+    /// its start record, with no handover to restate it. The probe recomputes
+    /// the generation this build runs its input as: a matching stamp is
+    /// readable, a foreign or missing stamp is a decided refusal, and a
+    /// process that has not started yields nothing.
+    #[cfg(feature = "rlm")]
+    #[test]
+    fn a_started_process_is_judged_by_its_start_stamp() {
+        let hash = lashlang::ContentHash::new("00ff");
+        let input = lash_lashlang_runtime::LashlangProcessInput {
+            module_ref: lashlang::ModuleRef::new(&hash),
+            process_ref: lashlang::ProcessRef::new(hash.clone(), 0),
+            host_requirements_ref: lashlang::HostRequirementsRef::new(&hash),
+            process_name: "worker".to_string(),
+            args: serde_json::Map::new(),
+        };
+        let current = input.executable_generation();
+        let record = |first_started: serde_json::Value| {
+            item(
+                DurableSurface::StartedProcess,
+                DurablePayload::Json(
+                    serde_json::json!({
+                        "input": {
+                            "type": "engine",
+                            "kind": lash_lashlang_runtime::LASHLANG_ENGINE_KIND,
+                            "payload": serde_json::to_value(&input).expect("the input serializes"),
+                        },
+                        "first_started": first_started,
+                    })
+                    .to_string(),
+                ),
+            )
+        };
+        let refused = |extractions: &[Extraction]| {
+            extractions.iter().any(|extraction| {
+                matches!(
+                    extraction,
+                    Extraction::IdentityMismatch {
+                        format: DurableFormat::Bytecode,
+                        ..
+                    }
+                )
+            })
+        };
+
+        let stamped = extract(&record(
+            serde_json::json!({ "generation": current.as_str() }),
+        ));
+        assert!(
+            matches!(
+                stamped.as_slice(),
+                [Extraction::IdentityMatch {
+                    format: DurableFormat::Bytecode
+                }]
+            ),
+            "a start stamped with the generation this build runs is readable"
+        );
+        assert!(
+            refused(&extract(&record(
+                serde_json::json!({ "generation": "blake3:another-build" })
+            ))),
+            "a start another build stamped is a decided refusal"
+        );
+        assert!(
+            refused(&extract(&record(serde_json::json!({ "attempt": 1 })))),
+            "a start written before the stamp existed is a decided refusal"
+        );
+        assert!(
+            extract(&record(serde_json::Value::Null)).is_empty(),
+            "a process that has not started carries no stamp"
         );
     }
 }

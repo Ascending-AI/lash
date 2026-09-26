@@ -140,6 +140,7 @@ pub async fn probe_store(
         DurableSurface::ModuleArtifact,
         DurableSurface::ParkedSegment,
         DurableSurface::PendingWake,
+        DurableSurface::StartedProcess,
         DurableSurface::SessionCheckpoint,
         DurableSurface::SessionExecutionState,
     ] {
@@ -185,8 +186,9 @@ enum SurfaceRelation {
     NotPersisted,
 }
 
-const PRIMARY_FORMATS: [DurableFormat; 5] = [
+const PRIMARY_FORMATS: [DurableFormat; 6] = [
     DurableFormat::ModuleArtifact,
+    DurableFormat::Bytecode,
     DurableFormat::SessionCheckpointManifest,
     DurableFormat::ProcessWakeDelivery,
     DurableFormat::LashlangSegmentHandover,
@@ -259,9 +261,11 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
             "no bounded surface: one row per committed turn, each receipt refused at decode \
              rather than at rest",
         ),
+        // Every started process's start stamp is the program identity it runs
+        // under (FIG-3571); a parked handover restates it.
         DurableFormat::Bytecode => SurfaceRelation::Walk {
-            surface: DurableSurface::ParkedSegment,
-            primary: false,
+            surface: DurableSurface::StartedProcess,
+            primary: true,
         },
         DurableFormat::VmContinuation => SurfaceRelation::Walk {
             surface: DurableSurface::ParkedSegment,

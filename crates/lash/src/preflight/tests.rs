@@ -398,8 +398,8 @@ fn every_durable_format_has_one_explicit_surface_relation() {
         (
             DurableFormat::Bytecode,
             SurfaceRelation::Walk {
-                surface: DurableSurface::ParkedSegment,
-                primary: false,
+                surface: DurableSurface::StartedProcess,
+                primary: true,
             },
         ),
         (
@@ -579,9 +579,9 @@ fn named_formats_retain_walk_primary_and_evidence_answers() {
         ),
         (
             DurableFormat::Bytecode,
-            DurableSurface::ParkedSegment,
+            DurableSurface::StartedProcess,
             FormatProbe::IdentityOnly,
-            DurableFormat::LashlangSegmentHandover,
+            DurableFormat::Bytecode,
         ),
         (
             DurableFormat::ProcessWakeDelivery,

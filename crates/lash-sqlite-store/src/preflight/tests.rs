@@ -294,10 +294,11 @@ mod walk {
     use super::super::SqliteStorePreflight;
     use crate::{SqliteProcessRegistry, Store};
 
-    const EVERY_SURFACE: [DurableSurface; 5] = [
+    const EVERY_SURFACE: [DurableSurface; 6] = [
         DurableSurface::ModuleArtifact,
         DurableSurface::ParkedSegment,
         DurableSurface::PendingWake,
+        DurableSurface::StartedProcess,
         DurableSurface::SessionCheckpoint,
         DurableSurface::SessionExecutionState,
     ];
@@ -431,7 +432,11 @@ mod walk {
         let root = super::temp_root();
         let preflight = SqliteStorePreflight::for_session_store_root(root.path());
 
-        for surface in [DurableSurface::ParkedSegment, DurableSurface::PendingWake] {
+        for surface in [
+            DurableSurface::ParkedSegment,
+            DurableSurface::PendingWake,
+            DurableSurface::StartedProcess,
+        ] {
             let page = preflight
                 .scan_durable(&DurableScan::first(surface, 10))
                 .await
@@ -505,6 +510,43 @@ mod walk {
             "the cursor names its row: {}",
             item.cursor
         );
+    }
+
+    /// C8 (FIG-3571): every live process is walked with its record, which
+    /// carries the start stamp the probe judges; a terminal one is not.
+    #[tokio::test]
+    async fn a_live_process_is_walked_with_its_record_and_a_terminal_one_is_not() {
+        let root = super::temp_root();
+        let path = root.path().join("processes.db");
+        let registry = SqliteProcessRegistry::open(&path, root.path().join("sessions"))
+            .await
+            .expect("open registry");
+        for id in ["proc-live", "proc-done"] {
+            registry
+                .register_process(registration(id))
+                .await
+                .expect("register process");
+        }
+        complete(&registry, &ProcessId::from("proc-done")).await;
+        drop(registry);
+
+        let page = SqliteStorePreflight::for_session_store_root(root.path())
+            .with_process_registry(&path)
+            .scan_durable(&DurableScan::first(DurableSurface::StartedProcess, 10))
+            .await
+            .expect("walk started processes");
+
+        assert_eq!(page.coverage, ScanCoverage::Scanned);
+        assert_eq!(page.next, None, "a short page ends the surface");
+        assert_eq!(page.items.len(), 1, "{:?}", page.items);
+        let item = &page.items[0];
+        assert_eq!(item.surface, DurableSurface::StartedProcess);
+        assert_eq!(item.process_id.as_deref(), Some("proc-live"));
+        assert_eq!(item.cursor, "proc-live");
+        match &item.payload {
+            DurablePayload::Json(json) => assert!(json.contains("proc-live"), "{json}"),
+            other => panic!("expected the stored record JSON, got {other:?}"),
+        }
     }
 
     #[tokio::test]
