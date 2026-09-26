@@ -17,6 +17,7 @@ fn persisted_state_hydrates_provider_id_without_live_provider_rebinding() {
                 tool_access: crate::SessionToolAccess::default(),
                 subagent: None,
                 protocol_turn_options: None,
+                config_revision: 0,
             },
             checkpoint_ref: None,
             token_ledger: Vec::new(),

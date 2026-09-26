@@ -14,6 +14,7 @@
 
 use super::direct_turn_acceptance::{acceptance_runtime_for_session, direct_input, text_response};
 use crate::admit;
+use lash_core::testing::conformance_support::ActiveTurnControl;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
@@ -101,7 +102,30 @@ impl crate::store::RuntimePersistenceDecorator for StopAfterTerminalClaim {
                 .extend(claimed);
             let stop = self.armed.lock().expect("stop slot").take();
             match stop {
-                Some(Stop::Local(token)) => token.cancel(),
+                // A token-fired stop reaches the turn's cancellation gate
+                // through the drive's spawned forwarder, and the commit
+                // settles that gate first-writer-wins against its own
+                // completion seal: without a rendezvous the seal can win
+                // and the stop lands on the follow-on turn instead. This
+                // claim is still open, so the commit cannot run — hold it
+                // until the gate carries the stop.
+                Some(Stop::Local(token)) => {
+                    token.cancel();
+                    let control = ActiveTurnControl::new(
+                        self.effect_host.as_ref(),
+                        crate::TurnAddress::new(session_id, turn_id),
+                    )
+                    .await
+                    .expect("the running turn's cancellation gate");
+                    let delivered = control
+                        .watch_immediate(self.effect_host.as_ref())
+                        .await
+                        .expect("watch the turn's cancellation gate");
+                    assert!(
+                        delivered.is_some(),
+                        "the held checkpoint leaves the gate open for the stop it must carry"
+                    );
+                }
                 Some(Stop::Durable(request)) => {
                     crate::TurnWorkDriver::for_session(
                         Arc::clone(&self.effect_host),

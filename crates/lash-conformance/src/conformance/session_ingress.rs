@@ -61,7 +61,7 @@ pub fn session_ingress_session_request() -> crate::SessionStoreCreateRequest {
     }
 }
 
-fn session() -> SessionId {
+pub(crate) fn session() -> SessionId {
     SessionId::from(SESSION_INGRESS_SESSION_ID)
 }
 
@@ -91,7 +91,7 @@ fn wake_delivery(process: &str, sequence: u64, text: &str) -> crate::ProcessWake
     }
 }
 
-fn input(text: &str) -> IngressItemDraft {
+pub(crate) fn input(text: &str) -> IngressItemDraft {
     IngressItemDraft::input(session(), Delivery::NextTurn, crate::TurnInput::text(text))
 }
 
@@ -118,7 +118,7 @@ fn addressed(
     )
 }
 
-fn wake(process: &str, sequence: u64) -> IngressItemDraft {
+pub(crate) fn wake(process: &str, sequence: u64) -> IngressItemDraft {
     IngressItemDraft::process_wake(wake_delivery(process, sequence, "wake"))
 }
 
@@ -132,7 +132,7 @@ fn refresh(key: &str) -> IngressItemDraft {
     )
 }
 
-fn patch(key: &str) -> IngressItemDraft {
+pub(crate) fn patch(key: &str) -> IngressItemDraft {
     IngressItemDraft::session_command(
         session(),
         crate::SessionCommand::ApplyConfigPatch {
@@ -146,7 +146,7 @@ fn patch(key: &str) -> IngressItemDraft {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn admit(handles: &SessionIngressHandles, draft: IngressItemDraft) -> IngressItem {
+pub(crate) async fn admit(handles: &SessionIngressHandles, draft: IngressItemDraft) -> IngressItem {
     match handles
         .ingress
         .enqueue_ingress_item(draft)
@@ -162,7 +162,10 @@ async fn admit(handles: &SessionIngressHandles, draft: IngressItemDraft) -> Ingr
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn replay(handles: &SessionIngressHandles, draft: IngressItemDraft) -> IngressEnqueueOutcome {
+pub(crate) async fn replay(
+    handles: &SessionIngressHandles,
+    draft: IngressItemDraft,
+) -> IngressEnqueueOutcome {
     handles
         .ingress
         .enqueue_ingress_item(draft)
@@ -173,7 +176,7 @@ async fn replay(handles: &SessionIngressHandles, draft: IngressItemDraft) -> Ing
 /// The runtime session-execution lease the turn helpers commit and admit
 /// queued runs under. Ingress operations never use it: they are fenced by the
 /// drive epoch.
-async fn runtime_lease(
+pub(crate) async fn runtime_lease(
     handles: &SessionIngressHandles,
     owner: &str,
 ) -> crate::SessionExecutionLease {
@@ -186,7 +189,7 @@ async fn runtime_lease(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn seal(handles: &SessionIngressHandles, admission: &str) -> DriveFence {
+pub(crate) async fn seal(handles: &SessionIngressHandles, admission: &str) -> DriveFence {
     let observed = handles
         .ingress
         .drive_epoch(&session())
@@ -232,7 +235,7 @@ async fn claim(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn claim_commands(
+pub(crate) async fn claim_commands(
     handles: &SessionIngressHandles,
     fence: &DriveFence,
 ) -> Option<IngressClaim> {
@@ -256,7 +259,7 @@ fn checkpoint(turn_id: &TurnId, checkpoint: crate::CheckpointKind) -> ClaimMode 
     }
 }
 
-async fn settle(
+pub(crate) async fn settle(
     handles: &SessionIngressHandles,
     fence: &DriveFence,
     claims: &[&IngressClaim],
@@ -305,7 +308,7 @@ async fn deliver(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn rows(handles: &SessionIngressHandles) -> Vec<IngressItem> {
+pub(crate) async fn rows(handles: &SessionIngressHandles) -> Vec<IngressItem> {
     handles
         .ingress
         .session_ingress_rows_for_testing(&session())
@@ -313,7 +316,7 @@ async fn rows(handles: &SessionIngressHandles) -> Vec<IngressItem> {
         .expect("read every ingress row")
 }
 
-fn row<'a>(rows: &'a [IngressItem], item: &IngressItem) -> &'a IngressItem {
+pub(crate) fn row<'a>(rows: &'a [IngressItem], item: &IngressItem) -> &'a IngressItem {
     rows.iter()
         .find(|row| row.item_id == item.item_id)
         .unwrap_or_else(|| panic!("row `{}` is present", item.item_id))
@@ -321,13 +324,13 @@ fn row<'a>(rows: &'a [IngressItem], item: &IngressItem) -> &'a IngressItem {
 
 /// Turn commits of the ingress session, tracking the head revision and the
 /// one running logical run.
-struct Turns {
-    state: crate::RuntimeSessionState,
+pub(crate) struct Turns {
+    pub(crate) state: crate::RuntimeSessionState,
     running: Option<(crate::ExecutionScope, TurnId)>,
 }
 
 impl Turns {
-    fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             state: crate::RuntimeSessionState {
                 session_id: session(),
@@ -611,6 +614,7 @@ pub async fn command_lane_never_blocks_or_waits_for_the_turn_lane(handles: Sessi
                 item_id: first_command.item_id.clone(),
                 result: IngressCommandResult::Applied,
             }],
+            refused_windows: Vec::new(),
         },
     )
     .await
@@ -626,6 +630,7 @@ pub async fn command_lane_never_blocks_or_waits_for_the_turn_lane(handles: Sessi
         &[&next],
         IngressSettlementIntent::Commands {
             outcomes: Vec::new(),
+            refused_windows: Vec::new(),
         },
     )
     .await
@@ -815,6 +820,7 @@ pub async fn adjacent_config_patches_share_one_command_claim(handles: SessionIng
                         result: IngressCommandResult::Applied,
                     })
                     .collect(),
+                refused_windows: Vec::new(),
             },
         )
         .await

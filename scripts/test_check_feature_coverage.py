@@ -150,7 +150,7 @@ class FeatureCoverageContractTests(unittest.TestCase):
                   lint:
                     steps:
                       - name: Clippy (workspace, all targets, shared cache)
-                        run: bazel build //:workspace_clippy //:feature_lane_clippy
+                        run: bazel build //:workspace_clippy
 
                   repo-gates:
                     steps:
@@ -165,7 +165,7 @@ class FeatureCoverageContractTests(unittest.TestCase):
                     if: needs.plan.outputs.bazel_trusted == 'true'
                     steps:
                       - name: Compile every feature lane
-                        run: bazel build //:feature_lanes
+                        run: bazel build //:feature_lanes //:feature_lane_clippy
                       - name: Run the executable feature lanes
                         run: bazel test //:feature_lane_tests
 

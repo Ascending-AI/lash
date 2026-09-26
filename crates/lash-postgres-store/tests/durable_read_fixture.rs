@@ -174,6 +174,9 @@ const PG_ENGINE_CUT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const RETIRED_GENERATION_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-126-4f0359684/postgres-expected.json",
 ];
+const CONFIG_REVISION_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-127-ebb1defac/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -681,9 +684,13 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     sqlx::query(
         "UPDATE lash_sessions
             SET head_json = jsonb_set(
-                jsonb_set(head_json::jsonb, '{schema_version}', to_jsonb($1::bigint)),
-                '{config,tool_access}',
-                '{\"mode\":\"ambient\"}'::jsonb
+                jsonb_set(
+                    jsonb_set(head_json::jsonb, '{schema_version}', to_jsonb($1::bigint)),
+                    '{config,tool_access}',
+                    '{\"mode\":\"ambient\"}'::jsonb
+                ),
+                '{config,config_revision}',
+                '0'::jsonb
             )::text",
     )
     .bind(i64::from(

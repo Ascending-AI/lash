@@ -24,8 +24,8 @@
 
 use super::{DriveFence, StoreError};
 use crate::session_ingress_vocabulary::{
-    ClaimMode, IngressAffectedItem, IngressClaim, IngressClaimIdentity, IngressEnqueueOutcome,
-    IngressItemDraft, IngressItemId, IngressItemRead, IngressReclaimOutcome,
+    ClaimMode, ConfigRefusalCode, IngressAffectedItem, IngressClaim, IngressClaimIdentity,
+    IngressEnqueueOutcome, IngressItemDraft, IngressItemId, IngressItemRead, IngressReclaimOutcome,
     IngressSuffixWithdrawOutcome, IngressWithdrawReceipt, IngressWithdrawTarget,
 };
 use crate::{SessionId, TurnCancelDisposition, TurnCancelMode, TurnId};
@@ -91,6 +91,14 @@ pub enum IngressCommandResult {
         base: u64,
         head: u64,
     },
+    /// An `ApplyConfigPatch` cleared its revision check but route validation
+    /// refused the route it would move the head to. The command settles
+    /// `Refused { code }`, the running config and its revision stand, and the
+    /// command's window turns back the turn-lane items it covers (FIG-3541,
+    /// HoS decision 68).
+    Refused {
+        code: ConfigRefusalCode,
+    },
 }
 
 /// One drained command's settlement.
@@ -121,6 +129,20 @@ impl IngressClaimRef {
     }
 }
 
+/// The turn-lane window one refused config command turns back (FIG-3541, HoS
+/// decision 68): every open turn-lane row enqueued after the refused command
+/// and before the next config command of the same drain settles
+/// `Refused { code }` in the same transaction as the command.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct IngressRefusedWindow {
+    /// The refused command's `enqueue_seq`.
+    pub after: u64,
+    /// The next config command's `enqueue_seq` in the same drain; `None`
+    /// leaves the window open to the lane's tail.
+    pub before: Option<u64>,
+    pub code: ConfigRefusalCode,
+}
+
 /// What the committing operation did with its claims.
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -134,9 +156,14 @@ pub enum IngressSettlementIntent {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cancel: Option<IngressTurnCancel>,
     },
-    /// A command drain's commit at a turn boundary.
+    /// A command drain's commit at a turn boundary. `refused_windows` is the
+    /// drain planner's [`super::config_command_plan::ConfigCommandPlan`] field
+    /// carried verbatim: each window refuses the open turn-lane rows it
+    /// covers, in the same transaction as the commands' own tombstones.
     Commands {
         outcomes: Vec<IngressCommandOutcome>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        refused_windows: Vec<IngressRefusedWindow>,
     },
 }
 

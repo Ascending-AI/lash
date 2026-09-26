@@ -684,6 +684,14 @@ def command_serve(args: argparse.Namespace) -> int:
     workdir = Path(tempfile.mkdtemp(prefix="lash-restate-serve-"))
     overrides = dict(assignment.split("=", 1) for assignment in args.server_env)
     server = RestateServer(name=f"serve-{args.leg}", workdir=workdir, config={**LEGS[args.leg], **overrides})
+
+    # The server runs in a session of its own, so a signal to this process
+    # group never reaches it: a SIGTERM (a CI cancel, `timeout`) has to unwind
+    # through the `finally` below, which stops it, or it outlives the run.
+    def terminated(signum: int, _frame: object) -> None:
+        raise SystemExit(128 + signum)
+
+    signal.signal(signal.SIGTERM, terminated)
     try:
         server.start()
         env = dict(os.environ)

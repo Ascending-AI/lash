@@ -17,6 +17,7 @@ pub mod claim_plan;
 mod claim_settlement;
 pub mod commit_budget;
 mod commit_identity;
+mod config_command_plan;
 mod error;
 pub mod fencing;
 #[cfg(test)]
@@ -51,7 +52,7 @@ pub mod work_claim;
 
 pub use crate::session_graph::RealizedNodeTimestamp;
 pub use crate::session_ingress_vocabulary::{
-    ClaimMode, Delivery, IngressAffectedItem, IngressCancelReason, IngressClaim,
+    ClaimMode, ConfigRefusalCode, Delivery, IngressAffectedItem, IngressCancelReason, IngressClaim,
     IngressClaimIdentity, IngressEnqueueOutcome, IngressItem, IngressItemDraft, IngressItemId,
     IngressItemRead, IngressKind, IngressLane, IngressPayload, IngressReadStatus,
     IngressReclaimOutcome, IngressState, IngressSuffixWithdrawOutcome, IngressTerminalCause,
@@ -79,6 +80,7 @@ pub use commit_identity::{
     APPEND_REQUEST_IDENTITY_ENCODING_VERSION, OperationId, RuntimeCommitReceiptDecision,
     decide_runtime_commit_receipt, derive_history_node_id,
 };
+pub use config_command_plan::{ConfigCommandPlan, plan_config_commands};
 pub use drive_fence::{
     AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence,
     SessionHeadRef, StoredDriveEpoch, decide_drive_epoch_seal, require_current_drive_fence,
@@ -155,8 +157,8 @@ pub use session_execution_lease::{
 };
 pub use session_ingress::{
     IngressClaimPolicy, IngressClaimRef, IngressClaimSettlement, IngressCommandOutcome,
-    IngressCommandResult, IngressSettlementIntent, IngressSettlementReceipt, IngressTurnCancel,
-    SessionIngressStore,
+    IngressCommandResult, IngressRefusedWindow, IngressSettlementIntent, IngressSettlementReceipt,
+    IngressTurnCancel, SessionIngressStore,
 };
 pub use state_version::{
     CURRENT_SESSION_STATE_VERSION, OLDEST_SUPPORTED_SESSION_STATE_VERSION, SessionStateAdmission,
@@ -408,6 +410,7 @@ pub fn persisted_session_config_from_state(
     config.tool_access = state.authority.tool_access.clone();
     config.subagent = state.authority.subagent.clone();
     config.protocol_turn_options = Some(state.protocol_turn_options.clone());
+    config.config_revision = state.config_revision;
     config
 }
 

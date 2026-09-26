@@ -387,10 +387,11 @@ fn legacy_hash_reproduces_random_committed_message_id_conflict() {
 
 #[test]
 fn intent_hash_golden_vector() {
-    // Checkpoint manifest v3 and explicit ambient tool access are pinned in intent bytes.
+    // Checkpoint manifest v3, explicit ambient tool access, and the config
+    // revision are pinned in intent bytes.
     assert_eq!(
         intent_fixture().turn_commit_hash().expect("golden intent"),
-        "df11d09b3ffded5372100b1b9a80f9b14902f9fcaa44373dc3a5e3d1f37ab998"
+        "6c0375a05460048bce92fae0f8de60fca9c1ca8f22648613d812723fbb066d57"
     );
 }
 
@@ -399,7 +400,7 @@ fn cancellation_evidence_changes_intent_hash_from_current_shape() {
     let legacy = intent_fixture();
     assert_eq!(
         legacy.turn_commit_hash().expect("legacy intent"),
-        "df11d09b3ffded5372100b1b9a80f9b14902f9fcaa44373dc3a5e3d1f37ab998",
+        "6c0375a05460048bce92fae0f8de60fca9c1ca8f22648613d812723fbb066d57",
         "absent cancellation evidence keeps the current plain-commit preimage"
     );
 
@@ -433,7 +434,7 @@ fn failure_evidence_changes_intent_hash_from_current_shape() {
     let baseline_hash = baseline.turn_commit_hash().expect("baseline intent");
     assert_eq!(
         baseline_hash,
-        "df11d09b3ffded5372100b1b9a80f9b14902f9fcaa44373dc3a5e3d1f37ab998"
+        "6c0375a05460048bce92fae0f8de60fca9c1ca8f22648613d812723fbb066d57"
     );
 
     let mut with_evidence = baseline;

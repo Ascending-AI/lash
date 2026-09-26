@@ -31,6 +31,11 @@ receipts, exactly:
 * more receipts than invocations is a duplicate;
 * a claimant with receipts but no expectation fails too.
 
+A bare ``X_tests!({fixture})`` owes the suite's whole catalogue; a direct
+``X_tests!(@arm fixture; [rows])`` expands a single arm, so it owes only what
+that arm registers -- the rows the call lists plus any the arm body carries
+or delegates to.
+
 ``#[ignore]``d invocations are deferred laws, not exemptions: every ignored
 invocation must be named by a ``scripts/deferred-laws/*.toml`` shard with the
 recipe, CI job, and receipt artifact that owns its execution, and every
@@ -94,6 +99,11 @@ BLOCK_COMMENT = re.compile(r"/\*.*?\*/", re.DOTALL)
 TEST_TARGET = re.compile(r'name\s*=\s*"([^"]+)"')
 
 IGNORE_HEAD = re.compile(r"\s*\(\s*#\s*\[\s*ignore\b")
+PAREN_OPEN = re.compile(r"\s*\(")
+ARM_HEAD = re.compile(r"\s*@([a-z_][a-z0-9_]*)")
+# A Rust char literal ('x', '\n'); lifetimes like 'a never match: the
+# closing quote is required.
+CHAR_LIT = re.compile(r"'(?:\\.|[^'\\])'")
 
 # One module-tree token: a `#[path = "..."]` attribute (remembered for the
 # next `mod` declaration), a `mod x;` / `mod x {` declaration, an
@@ -115,13 +125,21 @@ class Macro:
 
 @dataclass(frozen=True)
 class Invocation:
-    """One ``*_tests!(`` call site, under the claimant it expands for."""
+    """One ``*_tests!(`` call site, under the claimant it expands for.
+
+    ``arm`` is the ``@name`` of a direct ``X_tests!(@arm ...)`` invocation --
+    a call that expands one arm instead of the entry arm -- and ``arg_rows``
+    the ``(law, "label")`` rows the call lists explicitly.  Both are empty
+    for the common ``X_tests!({fixture})`` shape.
+    """
 
     claimant: str
     suite: str
     ignored: bool
     file: Path
     line: int
+    arm: str | None = None
+    arg_rows: frozenset[tuple[str, str]] = frozenset()
 
 
 def split_top_level(text: str) -> list[str]:
@@ -231,6 +249,102 @@ def registered_pairs(macros: dict[str, Macro]) -> dict[tuple[str, str], set[str]
             for pair in arm_rows(arm_body):
                 pairs.setdefault(pair, set()).add(name)
     return pairs
+
+
+def group_close(text: str, open_index: int, open_c: str, close_c: str) -> int:
+    """The index just past the ``close_c`` matching ``open_c`` at
+    ``open_index`` (``len(text)`` when it never closes).
+
+    Strings and char literals are opaque: a bracket inside ``"…"`` or
+    ``'…'`` never moves the depth.
+    """
+    depth = 0
+    i = open_index
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            i += 1
+            while i < n and text[i] != '"':
+                i += 2 if text[i] == "\\" else 1
+            i += 1
+            continue
+        m = CHAR_LIT.match(text, i) if c == "'" else None
+        if m is not None:
+            i = m.end()
+            continue
+        if c == open_c:
+            depth += 1
+        elif c == close_c:
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return n
+
+
+def arg_rows(arg: str) -> frozenset[tuple[str, str]]:
+    """The ``(law, "label")`` rows a direct ``@arm`` call lists explicitly.
+
+    The call shape is ``@name [attrs] {fixture}; [(law, "label"), …]``: the
+    ``{fixture}`` block may carry ``(ident, "…")`` tuples of its own, so
+    ``{…}`` groups are dropped before the row scan.  Strings are kept --
+    row labels live in them.
+    """
+    out: list[str] = []
+    i = 0
+    n = len(arg)
+    while i < n:
+        c = arg[i]
+        if c == '"':
+            j = i + 1
+            while j < n and arg[j] != '"':
+                j += 2 if arg[j] == "\\" else 1
+            out.append(arg[i : j + 1])
+            i = j + 1
+            continue
+        m = CHAR_LIT.match(arg, i) if c == "'" else None
+        if m is not None:
+            i = m.end()
+            continue
+        if c == "{":
+            i = group_close(arg, i, "{", "}")
+            continue
+        out.append(c)
+        i += 1
+    return frozenset(CATALOGUE_ROW.findall("".join(out)))
+
+
+def invocation_expected(
+    macros: dict[str, Macro], inv: Invocation
+) -> set[tuple[str, str]]:
+    """The laws one invocation registers.
+
+    A bare ``X_tests!({fixture})`` registers the suite's whole catalogue.
+    A direct ``X_tests!(@arm fixture; [rows])`` expands one arm only: the
+    claimant owes the rows the call lists plus whatever the arm's own body
+    registers or delegates to -- never the suite's other arms.
+    """
+    if inv.arm is None:
+        return suite_expected(macros, inv.suite)
+    expected = set(inv.arg_rows)
+    macro = macros.get(inv.suite)
+    if macro is None:
+        return expected
+    for head, arm_body in macro.arms:
+        if f"@{inv.arm}" not in head:
+            continue
+        expected |= arm_rows(arm_body)
+        for target, arm_name in DELEGATE_CALL.findall(arm_body):
+            if target == inv.suite:
+                continue
+            target_macro = macros.get(target)
+            if target_macro is None:
+                continue
+            for t_head, t_body in target_macro.arms:
+                if f"@{arm_name}" in t_head:
+                    expected |= arm_rows(t_body)
+    return expected
 
 
 def suite_expected(macros: dict[str, Macro], name: str) -> set[tuple[str, str]]:
@@ -358,6 +472,17 @@ def _scan_module_text(
         suite = m.group("suite")
         suite_name = suite[: suite.index("!")].strip()
         if suite_name not in defined:
+            arm: str | None = None
+            rows: frozenset[tuple[str, str]] = frozenset()
+            open_paren = PAREN_OPEN.match(text, m.end())
+            if open_paren is not None:
+                arg = text[open_paren.end() : group_close(
+                    text, open_paren.end() - 1, "(", ")"
+                ) - 1]
+                head = ARM_HEAD.match(arg)
+                if head is not None:
+                    arm = head.group(1)
+                    rows = arg_rows(arg)
             out.append(
                 Invocation(
                     claimant="::".join(prefix),
@@ -365,6 +490,8 @@ def _scan_module_text(
                     ignored=bool(IGNORE_HEAD.match(text, m.end())),
                     file=file,
                     line=line_offset + text.count("\n", 0, m.start()) + 1,
+                    arm=arm,
+                    arg_rows=rows,
                 )
             )
         pos = m.end()
@@ -742,6 +869,8 @@ def deferred_invocations(
                 ignored=False,
                 file=inv.file,
                 line=inv.line,
+                arm=inv.arm,
+                arg_rows=inv.arg_rows,
             )
         )
     return invocations, None
@@ -762,7 +891,7 @@ def expected_from_invocations(
             continue
         seen.add(key)
         expected.setdefault(inv.claimant, Counter()).update(
-            suite_expected(macros, inv.suite)
+            invocation_expected(macros, inv)
         )
     return expected
 
