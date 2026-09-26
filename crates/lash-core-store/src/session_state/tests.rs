@@ -633,3 +633,89 @@ fn a_persisted_initial_frame_keeps_the_options_it_opened_under() {
     state.open_unpersisted_initial_frame_under_settled_protocol_options();
     assert_eq!(initial_frame_protocol_turn_options(&state), opened_under);
 }
+
+/// ADR 0101 §12: the config patch applies only against the revision it was
+/// written for, and every applied patch advances the revision by exactly one
+/// — including one that restates the current value.
+#[test]
+fn a_config_patch_applies_and_advances_the_revision_once() {
+    let mut state =
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    assert_eq!(state.config_revision, 0);
+
+    let patch = crate::ApplyConfigPatch {
+        base_config_revision: 0,
+        model: Some(
+            crate::ModelSpec::builder("applied-model")
+                .context_window_tokens(32_000)
+                .build()
+                .expect("model"),
+        ),
+        ..crate::ApplyConfigPatch::default()
+    };
+    patch
+        .apply_to_state(&mut state)
+        .expect("a patch written against the running revision applies");
+    assert_eq!(state.policy.model.id, "applied-model");
+    assert_eq!(state.config_revision, 1);
+
+    let restating = crate::ApplyConfigPatch {
+        base_config_revision: 1,
+        model: Some(state.policy.model.clone()),
+        ..crate::ApplyConfigPatch::default()
+    };
+    restating
+        .apply_to_state(&mut state)
+        .expect("a restating patch still applies");
+    assert_eq!(state.config_revision, 2);
+}
+
+/// A patch written against a revision the session no longer carries is
+/// refused typed and changes nothing.
+#[test]
+fn a_stale_config_patch_is_refused_and_changes_nothing() {
+    let mut state =
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    state.config_revision = 3;
+    let model = state.policy.model.clone();
+    let prompt = state.policy.prompt.clone();
+
+    let stale = crate::ApplyConfigPatch {
+        base_config_revision: 1,
+        model: Some(
+            crate::ModelSpec::builder("must-not-apply")
+                .context_window_tokens(32_000)
+                .build()
+                .expect("model"),
+        ),
+        turn_budget: Some(crate::TurnBudget::bounded(7)),
+        ..crate::ApplyConfigPatch::default()
+    };
+    let error = stale
+        .apply_to_state(&mut state)
+        .expect_err("a mismatched base refuses the whole patch");
+    assert_eq!(error, crate::StaleConfigRevision { base: 1, head: 3 });
+    assert_eq!(state.config_revision, 3);
+    assert_eq!(state.policy.model, model);
+    assert_eq!(state.policy.prompt, prompt);
+    assert_eq!(state.policy.turn_budget, crate::TurnBudget::Unbounded);
+}
+
+/// The head config is the revision's durable home: it round-trips through
+/// `persisted_session_config_from_state`, and adopting a durable head
+/// restores it.
+#[test]
+fn config_revision_round_trips_through_the_persisted_head_config() {
+    let mut state =
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    state.config_revision = 5;
+
+    let config = crate::store::persisted_session_config_from_state(&state);
+    assert_eq!(config.config_revision, 5);
+
+    let mut restored =
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    apply_persisted_session_config(&mut restored, &config);
+    assert_eq!(restored.config_revision, 5);
+    assert_eq!(restored.policy.model, config.model);
+}

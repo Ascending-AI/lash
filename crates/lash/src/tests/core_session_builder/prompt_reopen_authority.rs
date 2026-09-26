@@ -17,7 +17,8 @@ const LEGACY_PROMPTLESS_HEAD_JSON: &str = r#"{
       "limits": { "context_window_tokens": 1 }
     },
     "turn_budget": "unbounded",
-    "tool_access": { "mode": "ambient" }
+    "tool_access": { "mode": "ambient" },
+    "config_revision": 0
   }
 }"#;
 

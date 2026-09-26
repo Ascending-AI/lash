@@ -6,13 +6,16 @@ pub(super) async fn queued_config_patches_coalesce_into_one_head_commit() {
     let (mut runtime, store) =
         standard_runtime_with_transport_and_queue_store(&backend, mock_provider(Vec::new())).await;
     let models = ["queued-model-a", "queued-model-b", "queued-model-c"];
-    for model in models {
+    for (index, model) in models.iter().enumerate() {
         enqueue_config_patch_command(
             store.as_ref(),
             &SessionId::from("root"),
             lash_core::runtime::ApplyConfigPatch {
+                // Each patch is written against the revision the previous one
+                // leaves: consecutive bases all apply under the CAS.
+                base_config_revision: index as u64,
                 model: Some(
-                    lash_core::ModelSpec::builder(model)
+                    lash_core::ModelSpec::builder(*model)
                         .context_window_tokens(32_000)
                         .build()
                         .expect("model"),

@@ -639,6 +639,14 @@ pub struct RuntimeSessionState {
     /// empty runtime from a durable revision-zero fork.
     #[serde(skip)]
     pub head_revision: u64,
+    /// The resident mirror of the head config's `config_revision` (ADR 0101
+    /// §12): what a submitter reads to fill `ApplyConfigPatch::base_config_revision`,
+    /// and what the apply-time compare-and-set checks. `0` at creation, `+1`
+    /// per applied config patch, and restored head-authoritatively with the
+    /// rest of the config by [`adopt_durable_head`]. Skipped on serialize —
+    /// the durable copy lives in the session head's `PersistedSessionConfig`.
+    #[serde(skip)]
+    pub config_revision: u64,
     /// Node ids known to exist durably. This is deliberately independent of
     /// the resident graph: partial residency omits durable off-path nodes,
     /// while host-side edits can add resident nodes before they commit.
@@ -669,6 +677,7 @@ impl RuntimeSessionState {
             token_ledger: Vec::new(),
             checkpoint_ref: None,
             head_revision: 0,
+            config_revision: 0,
             persisted_node_ids: std::collections::HashSet::new(),
             preserve_tool_state_snapshot: false,
         }
@@ -698,6 +707,7 @@ impl RuntimeSessionState {
             token_ledger: snapshot.token_ledger,
             checkpoint_ref: snapshot.checkpoint_ref,
             head_revision: 0,
+            config_revision: 0,
             persisted_node_ids: std::collections::HashSet::new(),
             preserve_tool_state_snapshot: false,
         };
@@ -1245,16 +1255,20 @@ pub mod facade_ops {
 #[cfg(test)]
 mod tests;
 
+/// Adopt the durable head config's carried fields onto resident state: the
+/// policy-homed values plus the config compare-and-set revision, which moves
+/// only with the config itself (ADR 0101 §12).
 pub(super) fn apply_persisted_session_config(
-    policy: &mut SessionPolicy,
+    state: &mut RuntimeSessionState,
     config: &crate::PersistedSessionConfig,
 ) {
-    policy.model = config.model.clone();
-    policy.provider_id = config.provider_id.clone();
+    state.policy.model = config.model.clone();
+    state.policy.provider_id = config.provider_id.clone();
     if let Some(prompt) = config.prompt.as_ref() {
-        policy.prompt = prompt.clone();
+        state.policy.prompt = prompt.clone();
     }
-    policy.generation = config.generation.clone();
+    state.policy.generation = config.generation.clone();
+    state.config_revision = config.config_revision;
 }
 
 /// Restore-time headroom shared by every bare next-turn `turn_index + 1`.
@@ -1375,7 +1389,7 @@ pub fn adopt_durable_head(
         .collect();
     state.authority.tool_access = head.config.tool_access.clone();
     state.authority.subagent = head.config.subagent.clone();
-    apply_persisted_session_config(&mut state.policy, &head.config);
+    apply_persisted_session_config(state, &head.config);
     state.policy.session_id = live_owned.session_id;
     state.policy.turn_budget = live_owned.turn_budget;
     // Adopt the commanded head value before the checkpoint restore (so a

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Run a command against a throwaway service container.
+# Run a command against a throwaway service: a container, or for Restate the
+# pinned native `restate-server`.
 #
 # This is the single owner of "what a service-backed suite needs to talk to":
 # the image, the container port, the container environment, the readiness
@@ -16,14 +17,22 @@
 # every connection string interpolates the chosen port. The container is
 # removed on success, on failure, and on Ctrl-C alike.
 #
+# `restate` is lash's zero-infra effect engine (ADR 0104 section 4): one pinned
+# `restate-server` release binary on free loopback ports, not a container, so a
+# host binding its endpoint on 127.0.0.1 is reachable from the server. The
+# binary, its pin and its lifecycle belong to `scripts/ci/restate_suite.py
+# serve`; this wrapper names the service and hands the command its addresses.
+# `all` runs the store containers only: a command that needs Restate names it.
+#
 # Usage:
 #   scripts/ci/with-service.sh                       # list services and exit
 #   scripts/ci/with-service.sh --list
 #   scripts/ci/with-service.sh <service> -- <command...>
-#   scripts/ci/with-service.sh all -- <command...>   # each service in turn
+#   scripts/ci/with-service.sh all -- <command...>   # each store service in turn
 #
 # Example:
 #   scripts/ci/with-service.sh pg16 -- bash scripts/ci/store-tests.sh pg-store
+#   scripts/ci/with-service.sh restate -- cargo run -p agent-service
 set -euo pipefail
 
 readonly PROGRAM="scripts/ci/with-service.sh"
@@ -37,7 +46,10 @@ readonly PROGRAM="scripts/ci/with-service.sh"
 # which the runbooks and gates share.
 # shellcheck source=scripts/ci/s3-service.sh
 source "$(dirname "${BASH_SOURCE[0]}")/s3-service.sh"
-readonly SERVICES=(pg14 pg16 pg18 s3)
+readonly SERVICES=(pg14 pg16 pg18 s3 restate)
+# The services `all` expands to: the store containers. A store suite has
+# nothing to run against a Restate server.
+readonly ALL_SERVICES=(pg14 pg16 pg18 s3)
 # Databases a PostgreSQL service carries beside the default `lash`, one per
 # test that `scripts/ci/store-tests.sh pg-store` runs at once. Each is named
 # `lash_slot_<index>`; `tools/bazel/postgres_slot_runner.sh` hands one to each
@@ -50,6 +62,7 @@ service_description() {
     pg16) echo "PostgreSQL 16 primary lane (conformance, pool-wait, agent scenario, cross-backend)" ;;
     pg18) echo "PostgreSQL 18 compatibility lane (catalog artifact + version stamp)" ;;
     s3) echo "Garage S3 object store (S3 conformance + attachment blob-store differential)" ;;
+    restate) echo "Restate server, the zero-infra effect engine (RESTATE_INGRESS_URL, RESTATE_ADMIN_URL, RESTATE_AUTHORITY_ID)" ;;
   esac
 }
 
@@ -59,6 +72,7 @@ service_image() {
     pg16) echo "postgres:16-alpine" ;;
     pg18) echo "postgres:18-alpine" ;;
     s3) echo "$LASH_S3_IMAGE" ;;
+    restate) echo "restate-server (native binary pinned in scripts/ci/restate_suite.py)" ;;
   esac
 }
 
@@ -273,9 +287,37 @@ wait_ready() {
   return 1
 }
 
+# The Restate service: `restate_suite.py serve` starts the pinned server on
+# free loopback ports, exports RESTATE_INGRESS_URL and RESTATE_ADMIN_URL to the
+# command, and stops the server and deletes its data however the command ends.
+# The server's state lives for this one run, so the authority naming it does
+# too: a host's RESTATE_AUTHORITY_ID must change whenever the Restate state
+# behind it does, and a value left over from an earlier server would name
+# state that is gone.
+run_restate() {
+  local started rc
+  started="$SECONDS"
+  rc=0
+  set +e
+  RESTATE_AUTHORITY_ID="with-service-restate:$$-${RANDOM}-$(date +%s)" \
+    python3 "${repo_root}/scripts/ci/restate_suite.py" serve --leg live -- "$@"
+  rc=$?
+  set -e
+  if [ "$rc" -eq 0 ]; then
+    note "restate: command passed in $((SECONDS - started))s"
+  else
+    note "restate: FAILED (exit ${rc}) after $((SECONDS - started))s"
+  fi
+  return "$rc"
+}
+
 run_with_service() {
   local name="$1"
   shift
+  if [ "$name" = restate ]; then
+    run_restate "$@"
+    return
+  fi
   local port container image started rc
   port="$(free_port)"
   container="with-service-${name}-$$-${RANDOM}"
@@ -356,16 +398,21 @@ main() {
       fail "unknown service '${want}'; available: ${SERVICES[*]}, all"
     fi
   done
+  local containerised=0
   for name in "${SERVICES[@]}"; do
     for want in "${requested[@]}"; do
-      if [ "$want" = all ] || [ "$want" = "$name" ]; then
+      if { [ "$want" = all ] && printf '%s\n' "${ALL_SERVICES[@]}" | grep -qx -- "$name"; } ||
+        [ "$want" = "$name" ]; then
         chosen+=("$name")
+        if [ "$name" != restate ]; then
+          containerised=1
+        fi
         break
       fi
     done
   done
 
-  if ! docker version >/dev/null 2>&1; then
+  if [ "$containerised" -eq 1 ] && ! docker version >/dev/null 2>&1; then
     fail "docker is unavailable; the service suites need a container runtime"
   fi
 

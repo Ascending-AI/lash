@@ -109,7 +109,8 @@ impl LashRuntime {
         candidate = self
             .resolve_session_config_mutations(previous.clone(), candidate)
             .await;
-        let durable_patch = ApplyConfigPatch::between(&previous, &candidate);
+        let durable_patch =
+            ApplyConfigPatch::between(&previous, &candidate, self.state.config_revision);
         if !durable_patch.is_empty() {
             self.settle_config_patch(durable_patch).await?;
         }
@@ -155,6 +156,14 @@ impl LashRuntime {
             super::SessionCommandSettlement::Cancelled(receipt) => {
                 Err(SessionError::SessionCommandCancelled(receipt))
             }
+            super::SessionCommandSettlement::Stale { base, head } => {
+                Err(SessionError::Protocol(format!(
+                    "session config command was written against config revision {base}, but the running revision is {head}: the command settled without applying"
+                )))
+            }
+            super::SessionCommandSettlement::Refused { code } => Err(SessionError::Protocol(
+                format!("session config command refused at the drain: {code:?}"),
+            )),
         }
     }
 
@@ -201,6 +210,10 @@ impl LashRuntime {
         let Some(store) = self.services.store.clone() else {
             return Ok(());
         };
+        // A differing seed is a config write, so it advances the config
+        // revision by one (ADR 0101 §12): a patch written against the pre-seed
+        // revision must not compare-and-set onto the seeded config.
+        self.state.config_revision = self.state.config_revision.saturating_add(1);
         let operation = reopen_seed_operation(&self.state, self.host.core.durability.commit_budget)
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
         let (commit, persisted_node_ids) =
@@ -290,6 +303,7 @@ impl LashRuntime {
             return Ok(Ok(false));
         }
         self.settle_config_patch(ApplyConfigPatch {
+            base_config_revision: self.state.config_revision,
             protocol_turn_options: Some(options),
             ..ApplyConfigPatch::default()
         })
@@ -310,6 +324,7 @@ impl LashRuntime {
             return Ok(());
         }
         self.settle_config_patch(ApplyConfigPatch {
+            base_config_revision: self.state.config_revision,
             tool_access: Some(access),
             ..ApplyConfigPatch::default()
         })

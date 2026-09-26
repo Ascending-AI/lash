@@ -18,6 +18,7 @@ fn legacy_config_keeps_prompt_absence_distinct() {
         tool_access: crate::SessionToolAccess::default(),
         subagent: None,
         protocol_turn_options: None,
+        config_revision: 0,
     };
     let mut old_writer_value = serde_json::to_value(config).expect("serialize current config");
     let old_writer_object = old_writer_value
@@ -42,7 +43,8 @@ fn legacy_config_keeps_prompt_absence_distinct() {
             },
             "turn_budget": "unbounded",
             "tool_access": { "mode": "ambient" },
-            "subagent": null
+            "subagent": null,
+            "config_revision": 0
         }),
         "prompt/generation absence stays independently testable while access remains explicit"
     );
@@ -60,6 +62,56 @@ fn legacy_config_keeps_prompt_absence_distinct() {
     );
 }
 
+/// A head written before the config-revision contract carried no
+/// `config_revision`, and the contract has no serde default: the pre-contract
+/// config is refused at decode rather than silently assigned a revision.
+#[test]
+fn persisted_config_without_config_revision_is_refused() {
+    let pre_contract = serde_json::json!({
+        "provider_id": "provider",
+        "model": {
+            "id": "model",
+            "variant": "provider_default",
+            "limits": { "context_window_tokens": 4096 }
+        },
+        "turn_budget": "unbounded",
+        "prompt": {},
+        "generation": {},
+        "tool_access": { "mode": "ambient" },
+        "subagent": null
+    });
+
+    let error = serde_json::from_value::<crate::PersistedSessionConfig>(pre_contract)
+        .expect_err("a pre-contract config carries no config_revision and must refuse");
+    assert!(
+        error
+            .to_string()
+            .contains("missing field `config_revision`")
+    );
+}
+
+/// The same clean cutover covers the command side: a patch written before the
+/// contract carried no `base_config_revision` and does not decode.
+#[test]
+fn persisted_config_patch_without_base_revision_is_refused() {
+    let pre_contract = serde_json::json!({
+        "schema_version": SESSION_HEAD_META_SCHEMA_VERSION,
+        "model": {
+            "id": "model",
+            "variant": "provider_default",
+            "limits": { "context_window_tokens": 4096 }
+        }
+    });
+
+    let error = serde_json::from_value::<crate::ApplyConfigPatch>(pre_contract)
+        .expect_err("a pre-contract patch carries no base_config_revision and must refuse");
+    assert!(
+        error
+            .to_string()
+            .contains("missing field `base_config_revision`")
+    );
+}
+
 #[test]
 fn persisted_config_without_tool_access_is_refused() {
     let legacy = serde_json::json!({
@@ -71,7 +123,8 @@ fn persisted_config_without_tool_access_is_refused() {
         },
         "turn_budget": "unbounded",
         "prompt": {},
-        "generation": {}
+        "generation": {},
+        "config_revision": 0
     });
 
     let error = serde_json::from_value::<crate::PersistedSessionConfig>(legacy)
@@ -90,6 +143,7 @@ fn current_config_serializes_default_authority_explicitly() {
         tool_access: crate::SessionToolAccess::default(),
         subagent: None,
         protocol_turn_options: None,
+        config_revision: 0,
     })
     .expect("serialize current config");
 
@@ -111,6 +165,7 @@ fn explicit_empty_prompt_is_serialized_as_present() {
         tool_access: crate::SessionToolAccess::default(),
         subagent: None,
         protocol_turn_options: None,
+        config_revision: 0,
     })
     .expect("serialize explicit empty prompt");
 
@@ -136,6 +191,7 @@ fn committed_prompt_cold_loads_into_the_runtime_policy() {
             tool_access: crate::SessionToolAccess::default(),
             subagent: None,
             protocol_turn_options: None,
+            config_revision: 0,
         },
         current_frame_node_id: None,
     })
@@ -182,6 +238,7 @@ fn committed_generation_cold_loads_into_the_runtime_policy() {
             tool_access: crate::SessionToolAccess::default(),
             subagent: None,
             protocol_turn_options: None,
+            config_revision: 0,
         },
         current_frame_node_id: None,
     })

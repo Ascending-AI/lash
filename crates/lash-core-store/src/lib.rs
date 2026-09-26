@@ -214,6 +214,8 @@ pub(crate) use session_identity::{
     OpenAgentFrameRequest, OpenAgentFrameResult, SessionStoreCreateRequest,
 };
 pub(crate) use session_policy::ApplyConfigPatch;
+#[allow(unused_imports)]
+pub(crate) use session_policy::StaleConfigRevision;
 pub(crate) use store::OrphanedTurnInputScope;
 pub(crate) use store::work_claim::WorkCompletion;
 

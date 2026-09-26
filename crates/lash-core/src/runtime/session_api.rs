@@ -1461,7 +1461,12 @@ impl LashRuntime {
                     unreachable!("config-only command group was checked above")
                 };
                 patch.validate()?;
-                patch.apply_to_state(next_state);
+                if patch.apply_to_state(next_state).is_err() {
+                    // A stale base is a silent no-op that still settles
+                    // completed: the old queued-work tables cannot carry a
+                    // typed stale outcome; the ingress drain's planner can
+                    // (ADR 0101 §12, Q8).
+                }
             }
         } else {
             debug_assert_eq!(commands.len(), 1, "non-config commands remain exclusive");

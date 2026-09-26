@@ -424,6 +424,13 @@ pub struct PersistedSessionConfig {
     /// back to the checkpoint copy. `Some` is authoritative on cold load.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub protocol_turn_options: Option<crate::ProtocolTurnOptions>,
+    /// The config's own compare-and-set revision (ADR 0101 §12): `0` at
+    /// creation, `+1` per applied `ApplyConfigPatch`, and otherwise unchanged
+    /// — in particular it does not move with `head_revision` on every commit.
+    /// It is the value an `ApplyConfigPatch`'s `base_config_revision` is
+    /// checked against, and it is required on the wire: a head written before
+    /// the contract existed is refused at load, not defaulted.
+    pub config_revision: u64,
 }
 
 impl PersistedSessionConfig {
@@ -443,6 +450,7 @@ impl PersistedSessionConfig {
             tool_access: crate::SessionToolAccess::default(),
             subagent: None,
             protocol_turn_options: None,
+            config_revision: 0,
         }
     }
 }
@@ -458,6 +466,10 @@ impl From<&crate::SessionPolicy> for PersistedSessionConfig {
             tool_access: crate::SessionToolAccess::default(),
             subagent: None,
             protocol_turn_options: None,
+            // A `SessionPolicy` does not carry the revision; the caller that
+            // knows the durable value assigns it
+            // (`persisted_session_config_from_state`).
+            config_revision: 0,
         }
     }
 }

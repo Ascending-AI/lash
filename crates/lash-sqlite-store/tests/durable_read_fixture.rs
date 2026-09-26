@@ -173,6 +173,9 @@ const PG_ENGINE_CUT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const RETIRED_GENERATION_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-126-4f0359684/sqlite-expected.json",
 ];
+const CONFIG_REVISION_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-127-ebb1defac/sqlite-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/sqlite-expected.json",
 ];

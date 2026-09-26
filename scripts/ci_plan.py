@@ -280,14 +280,17 @@ GATED_JOBS = {
     "unicode-tests": "regress",
 }
 
-# `feature-lanes` runs on every trusted non-PR event and on a pull request
-# whose diff touches feature-gated code (the `feature_lanes` family;
-# `_is_feature_gate_path` holds the rule): #1979 merged a feature variant
-# that did not compile because the lane graph was dispatch-only, and the
-# fast PR board keeps it only where the diff can move a lane build. It needs
-# the pool's cache credentials, so an untrusted pull request skips it; the
-# merge group is always trusted and proves every variant before anything
-# lands. `lashlang-git-consumer` stays dispatch-only, where the cut to the
+# `feature-lanes` compiles and lints every lane variant on every trusted
+# event whose diff can move a Rust build, pull requests included: a lane
+# break is caused by an API change anywhere upstream, which the diff's own
+# path set can never see. #1979 merged a variant that did not compile while
+# the lane graph was dispatch-only, and #2285 broke the slack-clone live-E2E
+# variant from a public engine API change while `feature-lanes` was still
+# path-gated on the PR board. On a pull request the `feature_lanes` family
+# output gates only the lane TEST steps (`_is_feature_gate_path` holds that
+# rule); every other trusted event runs the whole lane board. The job needs
+# the pool's cache credentials, so an untrusted pull request skips it
+# entirely. `lashlang-git-consumer` stays dispatch-only, where the cut to the
 # minimum PR board left it.
 FEATURE_LANES_JOB = "feature-lanes"
 
@@ -1058,12 +1061,14 @@ def _is_tooling_class(path_class: PathClass) -> bool:
     return path_class.kind in {PathKind.SHARED, PathKind.TOOLING} or path_class.manifest
 
 
-# `feature_lanes` gates the `feature-lanes` job on a pull request. Merge
-# groups and dispatches run it on every Rust diff; the fast PR board pays for
-# it only when the diff touches feature-gated code, and the rule for that is
-# deliberately narrower than lane membership -- the generated lanes cover
-# nearly every package directory, so "the diff touched a lane package" would
-# run them on almost every diff. A path is feature-relevant when it is:
+# `feature_lanes` gates the lane TEST steps of the `feature-lanes` job on a
+# pull request: the job's compile and clippy run on every trusted Rust diff
+# because a lane break is caused by an API change anywhere upstream, while the
+# tests keep a path gate. Merge groups and dispatches run the whole lane
+# board. The rule is deliberately narrower than lane membership -- the
+# generated lanes cover nearly every package directory, so "the diff touched
+# a lane package" would run the tests on almost every diff. A path is
+# feature-relevant when it is:
 #
 # * the lane spec itself (`tools/bazel/feature_lanes.bzl`), the coverage
 #   registry (`scripts/feature-coverage.toml`), or Bazel machinery the lanes
@@ -1858,18 +1863,11 @@ def evaluate_conclusion(
             continue
         if job == FEATURE_LANES_JOB:
             rust_on = plan_outputs.get("rust") == "true"
-            # The fast PR board runs the lanes only for feature-gated code;
-            # every other trusted event keeps the full lane board.
-            wanted = (
-                "success"
-                if bazel_is_trusted
-                and rust_on
-                and (
-                    event_name != "pull_request"
-                    or plan_outputs.get("feature_lanes") == "true"
-                )
-                else "skipped"
-            )
+            # The lanes compile on every trusted event whose diff can move a
+            # Rust build, pull requests included. The `feature_lanes` output
+            # gates only the job's lane-test steps, which a job-level result
+            # cannot see.
+            wanted = "success" if bazel_is_trusted and rust_on else "skipped"
             if result != wanted:
                 problems.append(
                     f"{job} ended with {result!r} for a"

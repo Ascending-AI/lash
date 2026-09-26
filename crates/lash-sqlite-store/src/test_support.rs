@@ -55,7 +55,10 @@ impl StoreTestSupport for Store {
         schema_version: u32,
         tool_access: Option<serde_json::Value>,
     ) -> Result<(), StoreError> {
-        let session_id = self.selected_session_id()?;
+        let session_id = self
+            .resolve_session_id_for_read()
+            .await?
+            .ok_or(StoreError::SessionNotBound)?;
         self.conn
             .write(move |tx| {
                 let head_json: String = tx.query_row(

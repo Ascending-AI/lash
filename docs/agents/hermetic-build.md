@@ -378,10 +378,16 @@ recipes for these correctness contracts:
   requests keep the Cargo matrix exactly as it was, which is where a real
   third-party feature divergence would still surface.
 
-  CI's `Feature lanes` job builds `//:feature_lanes` on every trusted event,
-  pull requests and merge groups included (FIG-3572), so every lane unit is
-  a pull-request proof. Two units guard regressions that only one resolution
-  sees, and the generator fails if either stops being a lane unit: the
+  CI's `Feature lanes` job builds `//:feature_lanes` and
+  `//:feature_lane_clippy` on every trusted event whose diff can move a Rust
+  build, pull requests and merge groups included (FIG-3572): a lane break
+  rides an upstream API change rather than the gated files — #2285's public
+  engine API change broke the slack-clone live-E2E variant while the job was
+  still path-gated on pull requests. The lane tests
+  (`//:feature_lane_tests`) keep that path gate on pull requests and run
+  with the compile on every other trusted event. Two units guard regressions
+  that only one resolution sees, and the generator fails if either stops
+  being a lane unit: the
   runtime OFF witness, `cargo check -p lash-runtime --lib
   --no-default-features` (FIG-3427), and the Restate release witness, `cargo
   check -p lash-runtime --lib --no-default-features --features restate`,
@@ -493,8 +499,9 @@ approximation of it:
   reads `@crates//:workspace_cargo_lints` itself for a target that carries none.
 
 `slack-clone`'s `e2e` feature is outside the resolved default workspace graph.
-Trusted merge groups and dispatches lint it through `//:feature_lane_clippy`;
-untrusted events, which receive no cache credentials, keep
+Trusted events lint it through `//:feature_lane_clippy`, inside the
+`feature-lanes` job's compile invocation; untrusted events, which receive no
+cache credentials, keep
 `cargo clippy -p slack-clone --all-targets --features e2e --no-deps`.
 ## Service-backed jobs
 

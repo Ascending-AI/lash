@@ -493,6 +493,7 @@ fn delivered_wakes_complete_and_raise_the_floor_and_the_rest_defer() {
             IngressRowSettlement::Complete {
                 item_id: delivered_wake.item.item_id.clone(),
                 cause: IngressTerminalCause::Delivered,
+                state: IngressState::Completed,
             },
             IngressRowSettlement::Release {
                 item_id: undelivered.item.item_id.clone(),
@@ -535,6 +536,7 @@ fn completing_an_unclaimed_or_undelivered_item_is_refused() {
                 item_id: command.item.item_id.clone(),
                 result: crate::store::IngressCommandResult::Applied,
             }],
+            refused_windows: Vec::new(),
         },
     };
     assert!(matches!(
