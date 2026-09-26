@@ -318,10 +318,7 @@ fn wake_registration(label: &str, wake_session_id: &SessionId) -> ProcessRegistr
         },
         RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::pinned(
         ProcessIdentity::for_definition(

@@ -1784,6 +1784,7 @@ impl lash_core::ToolProvider for ProcessControlToolProvider {
                 lash_plugin_process_controls::execute_process_start_tool_call(
                     call.context,
                     call.args,
+                    &(Arc::new(lash_core::lifetime::detached) as lash_core::LifetimePolicy),
                 )
                 .await
             }
@@ -1928,8 +1929,16 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         session_id: &SessionId,
         mut registration: lash_core::ProcessRegistration,
         options: lash_core::ProcessStartOptions,
-        _scope: lash_core::ProcessOpScope<'_>,
+        scope: lash_core::ProcessOpScope<'_>,
     ) -> Result<lash_core::ProcessRecord, lash_core::PluginError> {
+        // A runtime start records the start context it was admitted under,
+        // as the runtime's own realization does (FIG-3607 R1, R2).
+        if let Some(cx) = scope
+            .start_cx()
+            .map_err(|error| lash_core::PluginError::Session(error.to_string()))?
+        {
+            registration = registration.with_start_cx(&cx);
+        }
         let (originator, wake_session_id) = self
             .originator_override
             .clone()
@@ -1948,8 +1957,9 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         if self.originator_override.is_some()
             && matches!(originator, lash_core::ProcessOriginator::Host { .. })
         {
-            // This fixture's override emulates a host-admin start, including its host parent.
-            registration.lifecycle.parent = lash_core::ParentScope::Host;
+            // This fixture's override emulates a host-admin start, which is a root.
+            registration.ancestry = lash_core::Ancestry::root();
+            registration.session_capability = None;
         }
         registration = registration
             .with_process_provenance(lash_core::ProcessProvenance::new(originator))
@@ -2232,15 +2242,14 @@ pub(super) async fn typescript_signal_round_trip_crosses_protocol_and_process_en
     let [record] = records.as_slice() else {
         panic!("expected exactly one started TypeScript process, got {records:?}");
     };
+    assert_eq!(record.lifetime, lash_core::LifetimeDecision::Detached);
     assert_eq!(
-        record.lifecycle,
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::turn(
-                SessionId::from("test-session"),
-                lash_core::TurnId::from("test-turn"),
-            ),
-            lash_core::OnParentEnd::Abandon,
-        )
+        record.ancestry.starter(),
+        Some(&lash_core::ScopeId::turn(
+            SessionId::from("test-session"),
+            lash_core::TurnId::from("test-turn"),
+        )),
+        "the start records the turn that started it"
     );
     let registry_dyn = Arc::clone(&registry);
     let terminal = match tokio::time::timeout(

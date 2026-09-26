@@ -123,10 +123,7 @@ mod tests {
             },
             crate::RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
-            crate::ProcessLifecyclePolicy::new(
-                crate::ParentScope::Host,
-                crate::OnParentEnd::Abandon,
-            ),
+            crate::Lifetime::Detached,
         );
         let invocation = RuntimeEffectInvocation::new(
             EffectAddress::new(

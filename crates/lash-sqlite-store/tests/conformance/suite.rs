@@ -801,10 +801,7 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
                 },
                 RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
-                lash_core_execution::ProcessLifecyclePolicy::new(
-                    lash_core_execution::ParentScope::Host,
-                    lash_core_execution::OnParentEnd::Abandon,
-                ),
+                lash_core_execution::Lifetime::Detached,
             )
             .with_admitted_identity(
                 lash_core_execution::AdmittedProcessIdentity::for_testing(ProcessIdentity::new(

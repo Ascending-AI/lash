@@ -85,10 +85,7 @@ mod tests {
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
-                crate::ProcessLifecyclePolicy::new(
-                    crate::ParentScope::Host,
-                    crate::OnParentEnd::Abandon,
-                ),
+                crate::Lifetime::Detached,
             ))
             .await
             .expect("register external process");
@@ -166,6 +163,7 @@ mod tests {
             attachment_source_policy: Arc::clone(&policy) as Arc<dyn crate::AttachmentSourcePolicy>,
             turn_context: crate::TurnContext::default(),
             clock: Arc::new(crate::SystemClock),
+            process_lineage: None,
         });
         let context = RuntimeExecutionContext::new(
             request.session_id,
@@ -338,6 +336,7 @@ mod tests {
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
+            process_lineage: None,
         });
         let env_store = backend.process_env_store();
         let parent = crate::ProcessRegistration::new(
@@ -347,10 +346,7 @@ mod tests {
             },
             crate::RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
-            crate::ProcessLifecyclePolicy::new(
-                crate::ParentScope::Host,
-                crate::OnParentEnd::Abandon,
-            ),
+            crate::Lifetime::Detached,
         )
         .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new(
             "process-env:inherited",
@@ -476,10 +472,7 @@ mod tests {
                     },
                     crate::RecoveryContract::ExternallyOwned,
                     crate::ProcessProvenance::host(),
-                    crate::ProcessLifecyclePolicy::new(
-                        crate::ParentScope::Host,
-                        crate::OnParentEnd::Abandon,
-                    ),
+                    crate::Lifetime::Detached,
                 )
                 .with_extra_event_types([crate::ProcessEventType {
                     name: "signal.ready".to_string(),
@@ -530,6 +523,7 @@ mod tests {
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
+            process_lineage: None,
         });
         let context = RuntimeExecutionContext::new(
             SessionId::from("session"),
@@ -636,6 +630,7 @@ mod tests {
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
+            process_lineage: None,
         });
         let context = RuntimeExecutionContext::new(
             SessionId::from("session"),
@@ -748,10 +743,7 @@ mod tests {
                     },
                     crate::RecoveryContract::ExternallyOwned,
                     crate::ProcessProvenance::host(),
-                    crate::ProcessLifecyclePolicy::new(
-                        crate::ParentScope::Host,
-                        crate::OnParentEnd::Abandon,
-                    ),
+                    crate::Lifetime::Detached,
                 )
                 .with_extra_event_types([crate::ProcessEventType {
                     name: "signal.ready".to_string(),
@@ -794,6 +786,7 @@ mod tests {
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
+            process_lineage: None,
         });
         let context = RuntimeExecutionContext::new(
             SessionId::from("session"),
@@ -875,10 +868,7 @@ mod tests {
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
-                crate::ProcessLifecyclePolicy::new(
-                    crate::ParentScope::Host,
-                    crate::OnParentEnd::Abandon,
-                ),
+                crate::Lifetime::Detached,
             );
             if label == "local-signal" {
                 registration = registration.with_extra_event_types([crate::ProcessEventType {
@@ -1108,10 +1098,7 @@ mod tests {
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
-                crate::ProcessLifecyclePolicy::new(
-                    crate::ParentScope::Host,
-                    crate::OnParentEnd::Abandon,
-                ),
+                crate::Lifetime::Detached,
             ))
             .await
             .expect("register the child a start declaration realizes");
@@ -1165,6 +1152,7 @@ mod tests {
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),
             clock: std::sync::Arc::new(crate::SystemClock),
+            process_lineage: None,
         });
         let context = RuntimeExecutionContext::new(
             SessionId::from("session"),

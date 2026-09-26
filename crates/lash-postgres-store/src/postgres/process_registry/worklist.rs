@@ -138,7 +138,7 @@ mod tests {
     /// artifact for this test alone: no rows, no `ANALYZE` history, no
     /// autovacuum statistics. On a shared database the planner costs these
     /// statements from whatever rows and statistics earlier tests left behind,
-    /// and PR CI once chose a bitmap scan of `idx_lash_processes_parent_scope`
+    /// and PR CI once chose a bitmap scan of `idx_lash_processes_lifetime_scope`
     /// plus a sort for the first page (FIG-3687). A fresh database fixes every
     /// planner input except the statement text and the schema, which are what
     /// this asserts on. `enable_seqscan = off` is still needed, because an

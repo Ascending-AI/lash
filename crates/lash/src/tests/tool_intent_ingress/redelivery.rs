@@ -356,10 +356,7 @@ async fn redelivered_cancel_requests_the_same_cancellation_once() -> Result<()> 
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             ),
             &[SessionId::from(SESSION)],
         )

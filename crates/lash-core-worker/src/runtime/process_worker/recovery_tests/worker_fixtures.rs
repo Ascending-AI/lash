@@ -257,7 +257,7 @@ pub(super) fn engine_registration(
         },
         RecoveryContract::Rerunnable,
         crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
+        crate::Lifetime::Detached,
     )
     .with_execution_env_ref(Some(env_ref))
 }

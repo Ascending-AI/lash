@@ -1,4 +1,4 @@
-//! SQLite proof that a `Cancel` child registering while its parent scope ends
+//! SQLite proof that an `Until` child registering while its parent scope ends
 //! is either refused or swept, never left live under an ended scope.
 //!
 //! SQLite serializes registration and the ledger write through one write
@@ -21,20 +21,20 @@ fn session_name(index: usize) -> String {
     format!("sqlite-parent-end-race-session-{index:02}")
 }
 
-fn turn_scope(index: usize) -> lash_core_execution::ParentScope {
-    lash_core_execution::ParentScope::turn(
+fn turn_scope(index: usize) -> lash_core_execution::ScopeId {
+    lash_core_execution::ScopeId::turn(
         lash_sansio::SessionId::from(session_name(index)),
         lash_core_execution::TurnId::from(format!("sqlite-parent-end-race-turn-{index:02}")),
     )
 }
 
-/// A `Cancel` child of one turn scope. Registration requires the child's
-/// originator session to be the turn's own session, so both come from `index`.
+/// A child one turn scope started, living `Until` it. The child's originator
+/// session is the turn's own, so both come from `index`.
 fn cancel_child(
     index: usize,
-    parent: lash_core_execution::ParentScope,
+    parent: lash_core_execution::ScopeId,
 ) -> lash_core_execution::ProcessRegistration {
-    lash_core_execution::ProcessRegistration::new(
+    let mut registration = lash_core_execution::ProcessRegistration::new(
         lash_core_execution::ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
@@ -42,16 +42,20 @@ fn cancel_child(
         lash_core_execution::ProcessProvenance::session(lash_core_execution::SessionScope::new(
             session_name(index),
         )),
-        lash_core_execution::ProcessLifecyclePolicy::new(
-            parent,
-            lash_core_execution::OnParentEnd::Cancel,
-        ),
-    )
+        lash_core_execution::Lifetime::Detached,
+    );
+    // Started by the turn and living until it.
+    registration.ancestry = lash_core_execution::Ancestry::from_scopes([parent.clone()]);
+    registration.lifetime = lash_core_execution::LifetimeDecision::Until {
+        scope: parent,
+        grant: lash_core_execution::ScopeGrant::Ancestor,
+    };
+    registration
 }
 
 /// The worker's settle, written out here so the race runs against the same
 /// registry calls the sweep makes.
-async fn settle(registry: &Arc<dyn ProcessRegistry>, parent: &lash_core_execution::ParentScope) {
+async fn settle(registry: &Arc<dyn ProcessRegistry>, parent: &lash_core_execution::ScopeId) {
     let page = std::num::NonZeroUsize::new(64).expect("page bound");
     let mut after: Option<lash_sansio::ProcessId> = None;
     loop {
@@ -136,7 +140,7 @@ async fn a_child_registering_as_its_parent_scope_ends_is_refused_or_swept() {
                 assert!(
                     observed.cancel_request.is_some(),
                     "child {index} committed before the ledger row, so the sweep must have \
-                     cancelled it; a live Cancel child under an ended scope is never revisited"
+                     cancelled it; a live Until child of an ended scope is never revisited"
                 );
                 assert_eq!(
                     observed.cancel_request.map(|request| request.origin),

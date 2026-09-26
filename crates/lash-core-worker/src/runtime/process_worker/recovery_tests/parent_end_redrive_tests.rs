@@ -37,8 +37,8 @@ impl crate::ProcessEngine for NeverDrivenEngine {
     }
 }
 
-fn turn_parent(turn_id: &str) -> crate::ParentScope {
-    crate::ParentScope::turn(SessionId::from(SESSION), crate::TurnId::from(turn_id))
+fn turn_parent(turn_id: &str) -> crate::ScopeId {
+    crate::ScopeId::turn(SessionId::from(SESSION), crate::TurnId::from(turn_id))
 }
 
 fn cancel_child(
@@ -50,13 +50,17 @@ fn cancel_child(
         engine_registration("immediate-success", env_ref, serde_json::Value::Null);
     registration.provenance.originator =
         crate::ProcessOriginator::session(crate::SessionScope::new(SESSION));
-    registration.lifecycle =
-        crate::ProcessLifecyclePolicy::new(turn_parent(turn_id), crate::OnParentEnd::Cancel);
+    // Started by the turn and living until it.
+    registration.ancestry = crate::Ancestry::from_scopes([turn_parent(turn_id)]);
+    registration.lifetime = crate::LifetimeDecision::Until {
+        scope: turn_parent(turn_id),
+        grant: crate::ScopeGrant::Ancestor,
+    };
     registration
 }
 
-/// Commit one turn to the session store the worker's backend hands out,
-/// leaving the parent-end ledger row unwritten: exactly the durable state a
+/// Commit one root's final turn to the session store the worker's backend
+/// hands out, leaving the parent-end ledger row unwritten: exactly the durable state a
 /// crash between the two writes produces.
 ///
 /// `head_revision` is the store's revision this commit expects: every turn here
@@ -90,6 +94,14 @@ async fn commit_turn(backend: &crate::Backend, turn_id: &str, head_revision: u64
     let mut commit = crate::RuntimeCommit::persisted_state_for_test(&state, &[]);
     commit.turn_commit =
         crate::RuntimeTurnCommitStamp::new(crate::OperationId::turn(SESSION, turn_id, "final"));
+    // The turn is its root's final one: its commit writes the root's terminal
+    // evidence, which is what recovery reads as "the root ended".
+    commit.root_terminal = Some(Box::new(crate::store::RootTerminalWrite {
+        root: crate::TurnId::from(turn_id),
+        commit: crate::store::TurnCommitId::new(crate::TurnId::from(turn_id), 0),
+        turn: crate::TurnId::from(turn_id),
+        stop: None,
+    }));
     store
         .commit_runtime_state(commit)
         .await

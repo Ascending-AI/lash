@@ -186,10 +186,7 @@ impl lash_core::facade_support::OrchestratingToolImplementation for OrchTool {
                         lash_core::ProcessStartRequest::external(
                             lash_core::ProcessOriginator::host(),
                             json!({ "lane": "drift" }),
-                            lash_core::ProcessLifecyclePolicy::new(
-                                lash_core::ParentScope::Host,
-                                lash_core::OnParentEnd::Abandon,
-                            ),
+                            lash_core::Lifetime::Detached,
                         )
                         .with_host_start_key(start_key),
                     )

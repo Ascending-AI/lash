@@ -18,6 +18,7 @@ mod registry;
 mod registry_concerns;
 pub(crate) mod registry_delegate;
 pub mod registry_transitions;
+mod scope_close;
 mod service;
 mod start_staging;
 #[cfg(any(test, feature = "testing"))]
@@ -67,26 +68,27 @@ pub use events::{
 };
 pub use materialization::materialize_process_event_semantics;
 pub use model::{
-    AbandonRequest, ArtifactOwner, DeclaredProcessIdentity, HandleId, InvalidStartKey, OnParentEnd,
-    PARENT_SCOPE_STORAGE_PAYLOAD_VERSION, PROCESS_LEASE_SCHEMA_VERSION, ParentScope,
-    ParentScopeStorageError, ProcessArtifactCleanup, ProcessArtifactCleanupAck,
-    ProcessCancelReceipt, ProcessChange, ProcessChangeCursor, ProcessCompletionOutcome,
-    ProcessExecutionContext, ProcessExecutionEnvLoadError, ProcessExecutionEnvRef,
-    ProcessExecutionEnvSpec, ProcessExecutionEnvStore, ProcessExecutionWriteAuthority,
-    ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdMint, ProcessIdentity, ProcessInput,
-    ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessLeaseSchemaVersionError,
-    ProcessLifecyclePolicy, ProcessListFilter, ProcessListMode, ProcessObserverBy,
-    ProcessOriginator, ProcessOriginatorFilter, ProcessOutcome, ProcessProvenance, ProcessRecord,
-    ProcessRegistration, ProcessRegistrationDisposition, ProcessRegistrationOutcome,
-    ProcessSessionDeleteReport, ProcessSpawnProvenance, ProcessStartDeclaration,
-    ProcessStartOptions, ProcessStartOutcome, ProcessStartRequest, ProcessStarted, ProcessStatus,
-    ProcessStatusFilter, ProcessTombstone, RecoveryContract, SessionId, SessionScope,
-    SessionScopeId, StartKey, StartKeyOwner, StoreRealization, WaitKind, WaitState,
-    artifact_destination_owner_retired_error, artifact_owner_is_permanently_retired,
-    artifact_owner_retired_error, artifact_staging_edge_missing_error,
-    artifact_staging_owner_edge_is_missing, artifact_store_plugin_error,
-    ensure_process_lease_schema_version, load_process_execution_env, mint_process_id,
-    process_child_session_id, process_runtime_session_ids, publish_process_execution_env,
+    AbandonRequest, Ancestry, ArtifactOwner, DeclaredProcessIdentity, HandleId, InvalidStartKey,
+    Lifetime, LifetimeDecision, LifetimePolicy, PROCESS_LEASE_SCHEMA_VERSION,
+    ProcessArtifactCleanup, ProcessArtifactCleanupAck, ProcessCancelReceipt, ProcessChange,
+    ProcessChangeCursor, ProcessCompletionOutcome, ProcessExecutionContext,
+    ProcessExecutionEnvLoadError, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessExternalRef,
+    ProcessHandleView, ProcessId, ProcessIdMint, ProcessIdentity, ProcessInput, ProcessLease,
+    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessLeaseSchemaVersionError,
+    ProcessLineage, ProcessListFilter, ProcessListMode, ProcessObserverBy, ProcessOriginator,
+    ProcessOriginatorFilter, ProcessOutcome, ProcessProvenance, ProcessRecord, ProcessRegistration,
+    ProcessRegistrationDisposition, ProcessRegistrationOutcome, ProcessSessionDeleteReport,
+    ProcessSpawnProvenance, ProcessStartDeclaration, ProcessStartOptions, ProcessStartOutcome,
+    ProcessStartRequest, ProcessStarted, ProcessStatus, ProcessStatusFilter, ProcessTombstone,
+    RecoveryContract, SCOPE_STORAGE_PAYLOAD_VERSION, ScopeGrant, ScopeId, ScopeRef,
+    ScopeStorageError, SessionId, SessionScope, SessionScopeId, StartCx, StartCxError, StartKey,
+    StartKeyOwner, StoreRealization, WaitKind, WaitState, artifact_destination_owner_retired_error,
+    artifact_owner_is_permanently_retired, artifact_owner_retired_error,
+    artifact_staging_edge_missing_error, artifact_staging_owner_edge_is_missing,
+    artifact_store_plugin_error, ensure_process_lease_schema_version, lifetime,
+    load_process_execution_env, mint_process_id, process_child_session_id,
+    process_runtime_session_ids, publish_process_execution_env,
     settle_started_process_execution_env,
 };
 pub use observation::{
@@ -116,6 +118,7 @@ pub use registry::{
     WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
     reconcile_pruned_trigger_deliveries,
 };
+pub use scope_close::RegistryScopeClose;
 pub use service::{ProcessService, ProcessToolVisibilityFilter, UnavailableProcessService};
 pub use start_staging::{ProcessStartStores, RegisteredProcessStart, register_process_start};
 #[cfg(any(test, feature = "testing"))]

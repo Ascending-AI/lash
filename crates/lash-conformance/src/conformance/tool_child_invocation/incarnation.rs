@@ -197,9 +197,7 @@ pub async fn another_process_is_not_the_recorded_opener(
     // `identity_encoding` of the recorded `ProcessId`, so the law still
     // proves the body's parent is the recorded process and not whatever
     // string a retired delimiter codec would have produced.
-    let expected_parent = crate::ParentScope::process(recorded_ref.clone())
-        .storage_id()
-        .expect("an owned process parent projects a storage id");
+    let expected_parent = crate::ScopeId::process(recorded_ref.clone()).storage_id();
 
     // The malformed probe: a process opener that records no enclosing
     // process. `ToolChildRequest::validate` makes the opener and its

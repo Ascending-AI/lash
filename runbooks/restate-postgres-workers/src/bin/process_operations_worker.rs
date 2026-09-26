@@ -61,10 +61,7 @@ fn registration() -> ProcessRegistration {
         },
         RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::pinned(
         ProcessIdentity::for_definition(
@@ -177,10 +174,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
                 },
                 RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_admitted_identity(lash_core::AdmittedProcessIdentity::pinned(
                 ProcessIdentity::new("runbook-retarget"),

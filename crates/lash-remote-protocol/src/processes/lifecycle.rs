@@ -1,12 +1,5 @@
 use super::*;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(rename_all = "snake_case")]
-pub enum RemoteOnParentEnd {
-    Abandon,
-    Cancel,
-}
-
 /// The wire form of the shared opener vocabulary inside an owned parent.
 ///
 /// Mirrors `lash_core::EffectOpener` arm for arm so a remote peer names the
@@ -28,66 +21,88 @@ pub enum RemoteEffectOpener {
     },
 }
 
+/// The wire form of a scope a process may live until: an opener or a session.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-#[serde(tag = "kind", content = "opener", rename_all = "snake_case")]
-pub enum RemoteParentScope {
-    Owned(RemoteEffectOpener),
-    Host,
+#[serde(tag = "kind", content = "scope", rename_all = "snake_case")]
+pub enum RemoteScopeId {
+    Opener(RemoteEffectOpener),
+    Session(SessionId),
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteProcessLifecyclePolicy {
-    pub parent: RemoteParentScope,
-    pub on_parent_end: RemoteOnParentEnd,
+/// How a recorded lifetime's scope was granted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteScopeGrant {
+    Ancestor,
+    HostSessionLookup,
 }
 
-impl RemoteProcessLifecyclePolicy {
+/// The lifetime a remote start asks for. A remote start is a root: it has no
+/// starter, so it is `detached` or lives until a session. This is data only:
+/// the server boundary looks the session up and grants it (FIG-3607 R3).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "lifetime", rename_all = "snake_case")]
+pub enum RemoteStartLifetime {
+    Detached,
+    UntilSession { session_id: SessionId },
+}
+
+/// A process's recorded lifetime decision.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(tag = "lifetime", rename_all = "snake_case")]
+pub enum RemoteLifetimeDecision {
+    Detached,
+    Until {
+        scope: RemoteScopeId,
+        grant: RemoteScopeGrant,
+    },
+}
+
+impl RemoteScopeId {
     pub fn validate(
         &self,
         type_name: &'static str,
-        originator: &RemoteProcessOriginator,
+        field: &'static str,
     ) -> Result<(), RemoteProtocolError> {
-        match &self.parent {
-            RemoteParentScope::Host if self.on_parent_end == RemoteOnParentEnd::Cancel => {
-                return Err(RemoteProtocolError::InvalidEnvelope {
-                    type_name,
-                    message: "Host parent cannot declare Cancel on parent end".to_string(),
-                });
-            }
-            RemoteParentScope::Owned(RemoteEffectOpener::Turn {
+        match self {
+            Self::Opener(RemoteEffectOpener::Turn {
                 session_id,
                 turn_id,
             }) => {
-                require_non_empty(type_name, "parent.opener.session_id", session_id)?;
-                require_non_empty(type_name, "parent.opener.turn_id", turn_id)?;
-                require_originating_session(type_name, session_id, originator)?;
+                require_non_empty(type_name, field, session_id)?;
+                require_non_empty(type_name, field, turn_id)
             }
-            RemoteParentScope::Owned(RemoteEffectOpener::QueueDrain {
+            Self::Opener(RemoteEffectOpener::QueueDrain {
                 session_id,
                 drain_id,
             }) => {
-                require_non_empty(type_name, "parent.opener.session_id", session_id)?;
-                require_non_empty(type_name, "parent.opener.drain_id", drain_id)?;
-                require_originating_session(type_name, session_id, originator)?;
+                require_non_empty(type_name, field, session_id)?;
+                require_non_empty(type_name, field, drain_id)
             }
-            RemoteParentScope::Owned(RemoteEffectOpener::Process { .. }) => {}
-            RemoteParentScope::Host => {}
+            Self::Opener(RemoteEffectOpener::Process { process_id }) => {
+                require_non_empty(type_name, field, process_id)
+            }
+            Self::Session(session_id) => require_non_empty(type_name, field, session_id),
         }
-        Ok(())
     }
 }
 
-fn require_originating_session(
-    type_name: &'static str,
-    session_id: &SessionId,
-    originator: &RemoteProcessOriginator,
-) -> Result<(), RemoteProtocolError> {
-    if !matches!(originator, RemoteProcessOriginator::Session { session_id: originating_session, .. } if originating_session == session_id)
-    {
-        return Err(RemoteProtocolError::InvalidEnvelope {
-            type_name,
-            message: "turn or drain parent must belong to the originating session".to_string(),
-        });
+impl RemoteStartLifetime {
+    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        match self {
+            Self::Detached => Ok(()),
+            Self::UntilSession { session_id } => {
+                require_non_empty(type_name, "lifetime.session_id", session_id)
+            }
+        }
     }
-    Ok(())
+}
+
+impl RemoteLifetimeDecision {
+    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
+        match self {
+            Self::Detached => Ok(()),
+            Self::Until { scope, .. } => scope.validate(type_name, "lifetime.scope"),
+        }
+    }
 }

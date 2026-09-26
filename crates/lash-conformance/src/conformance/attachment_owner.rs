@@ -426,10 +426,7 @@ async fn process_owner_leg(backend: &AttachmentOwnerColdReplayBackend) {
             },
             crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         )
     };
     let first_process = backend

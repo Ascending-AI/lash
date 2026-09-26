@@ -1,31 +1,22 @@
-//! The parent-end ledger: one row per ended parent scope.
+//! The scope-close ledger: one row per closed scope (FIG-3607 R9).
 //!
 //! The ledger is keyed by the scope itself — `(kind, id)` — not by a process
-//! row. A turn-scoped parent has no process row, and a process-scoped parent's
-//! row may be pruned before its children settle, so a foreign key onto
+//! row. A turn root or a session has no process row, and a process scope's row
+//! may be pruned before its children settle, so a foreign key onto
 //! `processes` cannot express the fact this table records.
 
 use std::num::NonZeroUsize;
 
-use lash_core_execution::{ParentEndPlan, ParentScope, PluginError, ProcessRecord};
+use lash_core_execution::{ParentEndPlan, PluginError, ProcessRecord, ScopeId};
 use lash_sansio::ProcessId;
 use rusqlite::{Connection, OptionalExtension, params};
 
 use super::sql::process_sql;
 use super::{SqliteProcessRegistry, process_decode_error, process_sqlite_error, tx_outcome};
 
-/// The storage key for a parent scope, refusing `Host`.
-///
-/// `Host` never ends within a process's lifetime, so there is no ledger row to
-/// write and no sweep to run; a caller asking for one is asking a question the
-/// ledger cannot answer.
-fn ledger_key(parent: &ParentScope) -> Result<(&'static str, String), PluginError> {
-    match parent.storage_id() {
-        Some(id) => Ok((parent.storage_kind(), id)),
-        None => Err(PluginError::Session(
-            "the host parent scope never ends and has no parent-end ledger row".to_string(),
-        )),
-    }
+/// The storage key for a scope.
+fn ledger_key(scope: &ScopeId) -> (&'static str, String) {
+    (scope.storage_kind(), scope.storage_id())
 }
 
 /// Reclaim settled ledger rows the retention horizon has passed and no live
@@ -51,7 +42,7 @@ pub(crate) fn reclaim_settled_plans_conn(
 
 /// The typed payload a ledger row persists beside the projection key.
 fn ledger_payload(
-    parent: &ParentScope,
+    parent: &ScopeId,
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<String, PluginError> {
     parent
@@ -61,11 +52,11 @@ fn ledger_payload(
 
 pub(super) fn record_conn(
     conn: &Connection,
-    parent: &ParentScope,
+    parent: &ScopeId,
     ended_at_ms: u64,
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(), PluginError> {
-    let (kind, id) = ledger_key(parent)?;
+    let (kind, id) = ledger_key(parent);
     conn.execute(
         process_sql().plan.insert_if_absent.sql(),
         params![
@@ -81,13 +72,10 @@ pub(super) fn record_conn(
 
 /// Whether a ledger row exists for this scope, settled or not.
 ///
-/// Registration reads this inside its own transaction to fence a late
-/// `Cancel` child.
-pub(super) fn plan_exists_conn(
-    conn: &Connection,
-    parent: &ParentScope,
-) -> Result<bool, PluginError> {
-    let (kind, id) = ledger_key(parent)?;
+/// Registration reads this inside its own transaction to fence a late start
+/// (FIG-3607 R11).
+pub(super) fn plan_exists_conn(conn: &Connection, parent: &ScopeId) -> Result<bool, PluginError> {
+    let (kind, id) = ledger_key(parent);
     conn.query_row(process_sql().plan.exists.sql(), params![kind, id], |_| {
         Ok(())
     })
@@ -98,7 +86,7 @@ pub(super) fn plan_exists_conn(
 
 pub(super) async fn record(
     registry: &SqliteProcessRegistry,
-    parent: &ParentScope,
+    parent: &ScopeId,
 ) -> Result<(), PluginError> {
     let parent = parent.clone();
     let ended_at_ms = registry.clock.timestamp_ms();
@@ -125,9 +113,8 @@ fn decode_plan(
     settled: Option<i64>,
     fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<ParentEndPlan, PluginError> {
-    let parent =
-        ParentScope::from_storage_columns(&kind, Some(id.as_str()), &payload, fleet_format)
-            .map_err(|error| PluginError::Session(error.to_string()))?;
+    let parent = ScopeId::from_storage_columns(&kind, &id, &payload, fleet_format)
+        .map_err(|error| PluginError::Session(error.to_string()))?;
     Ok(ParentEndPlan {
         parent,
         ended_at_ms: ended.max(0) as u64,
@@ -166,9 +153,9 @@ pub(super) async fn list_pending(
 
 pub(super) async fn get(
     registry: &SqliteProcessRegistry,
-    parent: &ParentScope,
+    parent: &ScopeId,
 ) -> Result<Option<ParentEndPlan>, PluginError> {
-    let (kind, id) = ledger_key(parent)?;
+    let (kind, id) = ledger_key(parent);
     let lookup = (kind.to_string(), id.clone());
     let row = registry
         .conn
@@ -201,7 +188,7 @@ pub(super) async fn get(
     .transpose()
 }
 
-/// Turn and queue-drain scopes with live `Cancel` children and no ledger row
+/// Turn and queue-drain scopes with live `Until` children and no ledger row
 /// yet.
 ///
 /// An opener's ledger row is written right after its end evidence rather than
@@ -218,7 +205,7 @@ pub(super) async fn list_unrecorded_opener_parents(
     registry: &SqliteProcessRegistry,
     after: Option<&str>,
     limit: NonZeroUsize,
-) -> Result<Vec<ParentScope>, PluginError> {
+) -> Result<Vec<ScopeId>, PluginError> {
     let after = after.map(str::to_string);
     let rows = registry
         .conn
@@ -244,33 +231,35 @@ pub(super) async fn list_unrecorded_opener_parents(
         .map(|(id, kind, record_json)| {
             let record: ProcessRecord =
                 serde_json::from_str(&record_json).map_err(process_decode_error)?;
-            let parent = record.lifecycle.parent;
-            (matches!(parent.storage_kind(), "turn" | "queue_drain")
-                && parent.storage_kind() == kind
-                && parent.storage_id().as_deref() == Some(id.as_str()))
-            .then_some(parent)
-            .ok_or_else(|| {
-                PluginError::Session(format!(
-                    "opener parent-scope candidate `{id}` names a different scope in its record"
-                ))
-            })
+            let parent = record.lifetime.scope().cloned();
+            parent
+                .filter(|parent| {
+                    matches!(parent.storage_kind(), "turn" | "queue_drain")
+                        && parent.storage_kind() == kind
+                        && parent.storage_id() == id
+                })
+                .ok_or_else(|| {
+                    PluginError::Session(format!(
+                        "opener parent-scope candidate `{id}` names a different scope in its record"
+                    ))
+                })
         })
         .collect()
 }
 
-/// Children of one ended parent scope that still owe a cancel.
+/// Processes living `Until` one closed scope that still owe a cancel.
 ///
-/// The predicate is exactly the pending-cancel partial index: Cancel policy,
+/// The predicate is exactly the pending-cancel partial index: `Until` lifetime,
 /// no cancel request yet, and a live status. `caller_departed` is excluded for
 /// the reason it is excluded from every other worklist — lash may never act on
 /// such a row nor assert an outcome for it, and a cancel request is both.
 pub(super) fn children_conn(
     conn: &Connection,
-    parent: &ParentScope,
+    parent: &ScopeId,
     after: Option<&ProcessId>,
     limit: NonZeroUsize,
 ) -> Result<Vec<ProcessRecord>, PluginError> {
-    let (kind, id) = ledger_key(parent)?;
+    let (kind, id) = ledger_key(parent);
     let after = after.map(|value| value.to_string());
     let mut statement = conn
         .prepare(process_sql().process_sqlite.list_parent_end_children.sql())
@@ -289,7 +278,7 @@ pub(super) fn children_conn(
 
 pub(super) async fn children(
     registry: &SqliteProcessRegistry,
-    parent: &ParentScope,
+    parent: &ScopeId,
     after: Option<&ProcessId>,
     limit: NonZeroUsize,
 ) -> Result<Vec<ProcessRecord>, PluginError> {
@@ -304,9 +293,9 @@ pub(super) async fn children(
 
 pub(super) async fn settle(
     registry: &SqliteProcessRegistry,
-    parent: &ParentScope,
+    parent: &ScopeId,
 ) -> Result<(), PluginError> {
-    let (kind, id) = ledger_key(parent)?;
+    let (kind, id) = ledger_key(parent);
     let kind = kind.to_string();
     let settled_at_ms = registry.clock.timestamp_ms();
     registry

@@ -42,7 +42,7 @@ fn restart_core(
         .lease_timings(short_lease())
         // ADR 0095: `processes` is catalogue presence, so the cell needs this.
         .plugin(Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
         ))
         .without_queued_work()
         .build(lash_core::LeaseOwnerIdentity::opaque(

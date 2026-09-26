@@ -22,10 +22,7 @@ fn batch_registration() -> ProcessRegistration {
         },
         RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
 }
 

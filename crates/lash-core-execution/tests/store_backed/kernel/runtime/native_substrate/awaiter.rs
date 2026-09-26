@@ -32,10 +32,7 @@ mod tests {
             },
             crate::RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
-            crate::ProcessLifecyclePolicy::new(
-                crate::ParentScope::Host,
-                crate::OnParentEnd::Abandon,
-            ),
+            crate::Lifetime::Detached,
         )
     }
 
@@ -480,10 +477,7 @@ mod tests {
             },
             crate::RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
-            crate::ProcessLifecyclePolicy::new(
-                crate::ParentScope::Host,
-                crate::OnParentEnd::Abandon,
-            ),
+            crate::Lifetime::Detached,
         );
         lifecycle_registration.env_ref =
             Some(crate::ProcessExecutionEnvRef::new("process-env:test"));

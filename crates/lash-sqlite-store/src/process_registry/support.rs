@@ -746,7 +746,7 @@ impl SqliteProcessRegistry {
                 if record.is_terminal() {
                     super::parent_end::record_conn(
                         conn,
-                        &lash_core_execution::ParentScope::process(process_id.clone()),
+                        &lash_core_execution::ScopeId::process(process_id.clone()),
                         occurred_at_ms,
                         fleet_format,
                     )?;

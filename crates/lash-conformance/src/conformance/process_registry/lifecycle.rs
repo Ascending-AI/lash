@@ -1,7 +1,9 @@
 use super::*;
-use lash_core::{OnParentEnd, ParentScope, ProcessLifecyclePolicy};
+use lash_core::{LifetimeDecision, ScopeGrant, ScopeId};
 use pretty_assertions::assert_eq;
 
+/// The recorded lifetime and ancestry of a registration, and admission
+/// against closure (FIG-3607 R3, R4b, R11).
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -11,19 +13,32 @@ pub(super) async fn registration_contract(registry: Arc<dyn crate::ConformancePr
         .register_process(registration("lifecycle-parent"))
         .await
         .expect("register parent");
-    let policy =
-        ProcessLifecyclePolicy::new(ParentScope::process(parent.id.clone()), OnParentEnd::Cancel);
+    let parent_scope = ScopeId::process(parent.id.clone());
     // The child starts under a key, so a replay of its start after the
     // parent ended returns the retained child instead of starting a new one.
-    let mut child = registration("lifecycle-child").with_start_key(Some(
-        crate::StartKey::for_host(crate::StartKeyOwner::HOST, "lifecycle-child"),
-    ));
-    child.lifecycle = policy.clone();
+    let child = crate::started_until_starter(
+        registration("lifecycle-child").with_start_key(Some(crate::StartKey::for_host(
+            crate::StartKeyOwner::HOST,
+            "lifecycle-child",
+        ))),
+        parent_scope.clone(),
+    );
     let admitted = registry
         .register_process(child.clone())
         .await
-        .expect("live parent admits child");
-    assert_eq!(admitted.lifecycle, policy);
+        .expect("a live starter admits its child");
+    assert_eq!(
+        admitted.lifetime,
+        LifetimeDecision::Until {
+            scope: parent_scope.clone(),
+            grant: ScopeGrant::Ancestor,
+        },
+        "the recorded lifetime is the decision the start carried"
+    );
+    assert_eq!(
+        admitted.ancestry.scopes(),
+        std::slice::from_ref(&parent_scope)
+    );
     registry
         .complete_process(
             &parent.id,
@@ -34,75 +49,77 @@ pub(super) async fn registration_contract(registry: Arc<dyn crate::ConformancePr
         .expect("complete action-free parent");
     assert!(
         registry
-            .get_process(&parent.id)
+            .get_parent_end_plan(&parent_scope)
             .await
-            .expect("read parent")
-            .expect("retained parent")
-            .is_terminal()
-    );
-    assert!(
-        registry
-            .get_parent_end_plan(&policy.parent)
-            .await
-            .expect("read parent-end ledger row")
+            .expect("read scope-close row")
             .is_some(),
-        "a terminal parent writes its ledger row with the terminal append"
+        "a terminal process closes its own scope with the terminal append"
     );
     assert_eq!(
         registry
             .register_process(child)
             .await
-            .expect("identical replay after parent end"),
+            .expect("a retained key's replay after the starter ended"),
         admitted
     );
-    let mut late = registration("lifecycle-late-child");
-    late.lifecycle = policy.clone();
+    // A new start under the ended process is refused whatever its lifetime:
+    // `Until` it, and `Detached` alike (R11).
+    let late =
+        crate::started_until_starter(registration("lifecycle-late-child"), parent_scope.clone());
     assert!(
-        matches!(registry.register_process(late).await, Err(PluginError::ParentEnded { parent: ref scope, .. }) if scope == &policy.parent)
+        matches!(registry.register_process(late).await, Err(PluginError::ParentEnded { parent: ref scope, .. }) if scope == &parent_scope)
     );
-    let mut detached = registration("lifecycle-detached-child");
-    detached.lifecycle = ProcessLifecyclePolicy::new(policy.parent, OnParentEnd::Abandon);
-    let detached_policy = detached.lifecycle.clone();
-    assert_eq!(
-        registry
-            .register_process(detached)
-            .await
-            .expect("Abandon child is host managed")
-            .lifecycle,
-        detached_policy
+    let late_detached = crate::started_detached(
+        registration("lifecycle-late-detached"),
+        parent_scope.clone(),
     );
-    let mut invalid = registration("lifecycle-invalid-host");
-    invalid.lifecycle.on_parent_end = OnParentEnd::Cancel;
     assert!(
-        registry.register_process(invalid).await.is_err(),
-        "Host never ends"
+        matches!(registry.register_process(late_detached).await, Err(PluginError::ParentEnded { parent: ref scope, .. }) if scope == &parent_scope),
+        "a detached start is refused once its starter has ended"
     );
-    let mut turn_child = registration("lifecycle-turn-child");
-    turn_child.lifecycle = ProcessLifecyclePolicy::new(
-        ParentScope::turn(
-            crate::SessionId::from("lifecycle-session"),
-            crate::TurnId::from("lifecycle-turn"),
-        ),
-        OnParentEnd::Cancel,
-    );
-    assert!(matches!(
-        turn_child.provenance.originator,
-        crate::ProcessOriginator::Host { .. }
-    ));
+    let root = registry
+        .register_process(registration("lifecycle-detached-root"))
+        .await
+        .expect("a detached root is admitted");
+    assert_eq!(root.lifetime, LifetimeDecision::Detached);
+    assert!(root.ancestry.is_root());
+    // A root cannot name a scope it was never admitted under (R3).
+    let mut unreachable = registration("lifecycle-unreachable");
+    unreachable.lifetime = LifetimeDecision::Until {
+        scope: ScopeId::turn("lifecycle-session", "lifecycle-turn"),
+        grant: ScopeGrant::Ancestor,
+    };
     assert!(
-        registry.register_process(turn_child.clone()).await.is_err(),
-        "turn parent must match session originator"
+        registry.register_process(unreachable).await.is_err(),
+        "a lifetime scope outside the ancestry is refused"
     );
-    turn_child.provenance.originator =
-        crate::ProcessOriginator::session(crate::SessionScope::new("lifecycle-session"));
-    let turn_policy = turn_child.lifecycle.clone();
+    // A host session grant is a root's alone.
+    let mut escaped = crate::started_detached(
+        registration("lifecycle-escaped-grant"),
+        ScopeId::turn("lifecycle-session", "lifecycle-turn"),
+    );
+    escaped.lifetime = LifetimeDecision::Until {
+        scope: ScopeId::session("lifecycle-session"),
+        grant: ScopeGrant::HostSessionLookup,
+    };
+    assert!(
+        registry.register_process(escaped).await.is_err(),
+        "a host session grant on a runtime start is refused"
+    );
+    let turn = ScopeId::turn("lifecycle-session", "lifecycle-turn");
+    let turn_child = crate::started_until(
+        registration("lifecycle-turn-child"),
+        turn.clone(),
+        ScopeId::session("lifecycle-session"),
+    );
     assert_eq!(
         registry
             .register_process(turn_child)
             .await
-            .expect("matching turn parent is admitted")
-            .lifecycle,
-        turn_policy
+            .expect("a turn's child may live until the turn's session")
+            .lifetime
+            .scope(),
+        Some(&ScopeId::session("lifecycle-session"))
     );
 }
 
@@ -159,7 +176,7 @@ pub(super) async fn empty_tool_call_identifiers_leave_no_row(
             },
             RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
-            ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
+            lash_core::Lifetime::Detached,
         )
         .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
             "process-env:{label}"

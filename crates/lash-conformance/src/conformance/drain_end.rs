@@ -15,7 +15,7 @@
 //! — and abandon one through `LashRuntime::abandon_queued_run`, the host API's
 //! body — and read the outcome only through the surfaces a backend already owes:
 //! `SessionCommitStore::drain_end_exists`, the parent-end ledger, and the
-//! `Cancel`/`Abandon` split the work driver's sweep performs.
+//! `Until`/`Detached` split the work driver's sweep performs.
 //!
 //! # Tier shape
 //!
@@ -52,11 +52,10 @@ use crate::facade_support::PluginFactory;
 use crate::store::RuntimePersistence;
 use crate::testing::store_fixtures::bind_conformance_session;
 use crate::{
-    EffectHost, LashRuntime, LeaseOwnerIdentity, OnParentEnd, ParentScope, PendingTurnInputDraft,
-    PluginError, ProcessId, ProcessInput, ProcessLifecyclePolicy, ProcessProvenance, ProcessRecord,
-    ProcessRegistration, ProcessRegistry, QueuedTurnDrain, RecoveryContract,
-    ScopedEffectController, SessionCommitStore, SessionStoreFactory, TurnInput, TurnInputIngress,
-    TurnOptions,
+    EffectHost, LashRuntime, LeaseOwnerIdentity, Lifetime, PendingTurnInputDraft, PluginError,
+    ProcessId, ProcessInput, ProcessProvenance, ProcessRecord, ProcessRegistration,
+    ProcessRegistry, QueuedTurnDrain, RecoveryContract, ScopeId, ScopedEffectController,
+    SessionCommitStore, SessionStoreFactory, TurnInput, TurnInputIngress, TurnOptions,
 };
 
 /// The session every drain-end law exercises.
@@ -118,16 +117,25 @@ pub type DrainEndWorldFactory = Arc<
         + Sync,
 >;
 
-fn drain_parent(drain_id: &str) -> ParentScope {
-    ParentScope::queue_drain(SESSION_ID, drain_id)
+fn drain_parent(drain_id: &str) -> ScopeId {
+    ScopeId::queue_drain(SESSION_ID, drain_id)
+}
+
+/// How a child the drain starts lives relative to it.
+#[derive(Clone, Copy)]
+enum Lives {
+    /// `Until` the drain: the drain's end cancels it.
+    Until,
+    /// `Detached`: started by the drain, owed nothing at its end.
+    Detached,
 }
 
 fn drain_scope(drain_id: &str) -> crate::ExecutionScope {
     crate::ExecutionScope::queue_drain(SESSION_ID, drain_id)
 }
 
-/// A `Cancel`/`Abandon` child of the drain owner, registered through the real
-/// write path the sweep later reads.
+/// A child the drain started, `Until` the drain or `Detached`, registered
+/// through the real write path the sweep later reads.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -135,17 +143,21 @@ fn drain_scope(drain_id: &str) -> crate::ExecutionScope {
 async fn register_drain_child(
     registry: &Arc<dyn ProcessRegistry>,
     drain_id: &str,
-    on_parent_end: OnParentEnd,
+    lives: Lives,
 ) -> ProcessRecord {
+    let registration = ProcessRegistration::new(
+        ProcessInput::External {
+            metadata: serde_json::Value::Null,
+        },
+        RecoveryContract::ExternallyOwned,
+        ProcessProvenance::session(crate::SessionScope::new(SESSION_ID)),
+        Lifetime::Detached,
+    );
     registry
-        .register_process(ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            RecoveryContract::ExternallyOwned,
-            ProcessProvenance::session(crate::SessionScope::new(SESSION_ID)),
-            ProcessLifecyclePolicy::new(drain_parent(drain_id), on_parent_end),
-        ))
+        .register_process(match lives {
+            Lives::Until => crate::started_until_starter(registration, drain_parent(drain_id)),
+            Lives::Detached => crate::started_detached(registration, drain_parent(drain_id)),
+        })
         .await
         .expect("register a drain-scoped child")
 }
@@ -411,7 +423,7 @@ async fn seed_turn_input(store: &Arc<dyn RuntimePersistence>, text: &str) {
         .expect("seed the drain's turn input");
 }
 
-/// **L1 — multi-physical-turn drain.** A `Cancel` child named by the drain
+/// **L1 — multi-physical-turn drain.** A `Until` child named by the drain
 /// owner is not swept by the drain's intermediate physical-turn commits — the
 /// owner has not ended — and is `ParentEnded`-cancelled only once the drain's
 /// own end lands and the sweep runs.
@@ -424,7 +436,7 @@ pub async fn a_multi_frame_drain_sweeps_children_only_at_its_own_end(
     world: DrainEndWorld,
 ) {
     let drain_id = format!("{prefix}-l1-drain");
-    let child_id = register_drain_child(&world.registry, &drain_id, OnParentEnd::Cancel)
+    let child_id = register_drain_child(&world.registry, &drain_id, Lives::Until)
         .await
         .id;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
@@ -546,26 +558,26 @@ pub async fn a_multi_frame_drain_sweeps_children_only_at_its_own_end(
     assert_eq!(
         cancel_origin(&child(&world.registry, &child_id).await),
         Some(crate::CancelOrigin::ParentEnded),
-        "the drain's end sweeps its Cancel child"
+        "the drain's end sweeps its Until child"
     );
 }
 
-/// **L2 — Cancel vs Abandon.** At the drain's end the sweep requests
-/// `ParentEnded` on its `Cancel` children; `Abandon` children stay
+/// **L2 — Until vs Detached.** At the drain's end the sweep requests
+/// `ParentEnded` on its `Until` children; `Abandon` children stay
 /// host-managed — live rows with no cancel request.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_drain_end_cancels_cancel_children_and_leaves_abandon_ones(
+pub async fn a_drain_end_cancels_until_children_and_leaves_detached_ones(
     prefix: &str,
     world: DrainEndWorld,
 ) {
     let drain_id = format!("{prefix}-l2-drain");
-    let cancel_id = register_drain_child(&world.registry, &drain_id, OnParentEnd::Cancel)
+    let cancel_id = register_drain_child(&world.registry, &drain_id, Lives::Until)
         .await
         .id;
-    let abandon_id = register_drain_child(&world.registry, &drain_id, OnParentEnd::Abandon)
+    let abandon_id = register_drain_child(&world.registry, &drain_id, Lives::Detached)
         .await
         .id;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
@@ -593,16 +605,16 @@ pub async fn a_drain_end_cancels_cancel_children_and_leaves_abandon_ones(
     assert_eq!(
         cancel_origin(&child(&world.registry, &cancel_id).await),
         Some(crate::CancelOrigin::ParentEnded),
-        "the sweep requests ParentEnded on the drain's Cancel child"
+        "the sweep requests ParentEnded on the drain's Until child"
     );
     let abandon = child(&world.registry, &abandon_id).await;
     assert!(
         abandon.cancel_request.is_none(),
-        "an Abandon child owes the ended drain nothing and stays host-managed"
+        "an Detached child owes the ended drain nothing and stays host-managed"
     );
     assert!(
         abandon.status.is_live(),
-        "the Abandon child is still a live process row"
+        "the Detached child is still a live process row"
     );
 }
 
@@ -619,7 +631,7 @@ pub async fn a_crash_after_the_drain_receipt_recovers_its_ledger_row(
     world: DrainEndWorld,
 ) {
     let drain_id = format!("{prefix}-l3-drain");
-    let child_id = register_drain_child(&world.registry, &drain_id, OnParentEnd::Cancel)
+    let child_id = register_drain_child(&world.registry, &drain_id, Lives::Until)
         .await
         .id;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
@@ -662,7 +674,7 @@ pub async fn a_crash_after_the_drain_receipt_recovers_its_ledger_row(
     assert_eq!(
         cancel_origin(&child(&world.registry, &child_id).await),
         Some(crate::CancelOrigin::ParentEnded),
-        "the re-derived row sweeps the drain's Cancel child"
+        "the re-derived row sweeps the drain's Until child"
     );
 }
 
@@ -705,7 +717,7 @@ pub async fn an_empty_drain_writes_nothing_and_a_retried_one_ends(
     );
 
     let retried = format!("{prefix}-l4-retried");
-    register_drain_child(&world.registry, &retried, OnParentEnd::Cancel).await;
+    register_drain_child(&world.registry, &retried, Lives::Until).await;
     let empty = drive_drain(&mut runtime, &world.effect_host, &retried)
         .await
         .expect("the resumed drain still finds an empty queue");
@@ -738,7 +750,7 @@ pub async fn a_failed_drain_writes_no_end_and_its_retry_ends_it(
     world: DrainEndWorld,
 ) {
     let drain_id = format!("{prefix}-l5-drain");
-    let child_id = register_drain_child(&world.registry, &drain_id, OnParentEnd::Cancel)
+    let child_id = register_drain_child(&world.registry, &drain_id, Lives::Until)
         .await
         .id;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
@@ -814,7 +826,7 @@ pub async fn a_failed_drain_writes_no_end_and_its_retry_ends_it(
 )]
 pub async fn an_interrupted_drain_is_ended_by_its_retry(prefix: &str, world: DrainEndWorld) {
     let drain_id = format!("{prefix}-l6-drain");
-    register_drain_child(&world.registry, &drain_id, OnParentEnd::Cancel).await;
+    register_drain_child(&world.registry, &drain_id, Lives::Until).await;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     seed_turn_input(&world.store, "commit, then die before the epilogue").await;
 
@@ -967,9 +979,8 @@ pub async fn a_closing_group_under_the_drain_scope_withholds_its_end(
     seed_turn_input(&world.store, "a drain gated on a closing group").await;
     // The drain owns a child, so the retry that ends it is a resumed drain,
     // not a fresh empty poll: the epilogue distinguishes the two by the
-    // registry, and an `Abandon` child is exactly the child a drain can own
-    // while a closing group withholds its end.
-    register_drain_child(&world.registry, &drain_id, OnParentEnd::Abandon).await;
+    // registry's children living `Until` the drain.
+    register_drain_child(&world.registry, &drain_id, Lives::Until).await;
 
     // Open and close a group under the drain's scope on the group host: one
     // child settles, the loser holds a release gate, so `closing` reports an
@@ -1102,7 +1113,7 @@ pub async fn a_closing_group_under_the_drain_scope_withholds_its_end(
 /// tool child is still live under a `closing` group of the drain's scope when
 /// the run fails; the epilogue waits out that protected obligation, then
 /// writes the receipt and the ledger row, and the sweep cancels the drain's
-/// `Cancel` child. No retry is involved — without the epilogue on the
+/// `Until` child. No retry is involved — without the epilogue on the
 /// `Failed` path the drain never reaches it.
 ///
 /// The group runs on the drain's own host, so on every tier its loser is this
@@ -1122,7 +1133,7 @@ pub async fn a_durably_failed_drain_settles_its_closing_group_and_ends(
         return;
     };
     let drain_id = format!("{prefix}-l8-drain");
-    let cancel_id = register_drain_child(&world.registry, &drain_id, OnParentEnd::Cancel)
+    let cancel_id = register_drain_child(&world.registry, &drain_id, Lives::Until)
         .await
         .id;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
@@ -1216,7 +1227,7 @@ pub async fn a_durably_failed_drain_settles_its_closing_group_and_ends(
     assert_eq!(
         cancel_origin(&child(&world.registry, &cancel_id).await),
         Some(crate::CancelOrigin::ParentEnded),
-        "the ended drain's Cancel child is swept"
+        "the ended drain's Until child is swept"
     );
 }
 
@@ -1227,7 +1238,7 @@ pub async fn a_durably_failed_drain_settles_its_closing_group_and_ends(
 /// fault while a tool child is still live under a `closing`
 /// group of its scope; the abandonment waits out that protected obligation,
 /// then writes the receipt and the ledger row, and the sweep cancels the
-/// drain's `Cancel` child. No drain under the abandoned `drain_id` ever runs
+/// drain's `Until` child. No drain under the abandoned `drain_id` ever runs
 /// again — without the end on the abandonment path nothing would reach it.
 ///
 /// As in L8 the group runs on the drain's own host, so on every tier its
@@ -1245,7 +1256,7 @@ pub async fn an_abandoned_drain_settles_its_closing_group_and_ends(
         return;
     };
     let drain_id = format!("{prefix}-l9-drain");
-    let cancel_id = register_drain_child(&world.registry, &drain_id, OnParentEnd::Cancel)
+    let cancel_id = register_drain_child(&world.registry, &drain_id, Lives::Until)
         .await
         .id;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
@@ -1373,7 +1384,7 @@ pub async fn an_abandoned_drain_settles_its_closing_group_and_ends(
     assert_eq!(
         cancel_origin(&child(&world.registry, &cancel_id).await),
         Some(crate::CancelOrigin::ParentEnded),
-        "the abandoned drain's Cancel child is swept"
+        "the abandoned drain's Until child is swept"
     );
 }
 
@@ -1383,7 +1394,7 @@ pub async fn an_abandoned_drain_settles_its_closing_group_and_ends(
 /// follows it withholds the receipt while that obligation stands — and a
 /// durably `Failed` run is never retried, so no drain under the same id asks
 /// again. Once the other host's work settles, the parent-end recovery pass
-/// finds the drain's `Cancel` child naming an owner with no end, reads the
+/// finds the drain's `Until` child naming an owner with no end, reads the
 /// drain's run settled, and runs the same epilogue: the receipt and the
 /// ledger row land and the child is swept. No input is enqueued and the
 /// drain id is never replayed.
@@ -1407,7 +1418,7 @@ pub async fn a_failed_drain_ends_once_its_foreign_closing_work_settles(
         return;
     };
     let drain_id = format!("{prefix}-l10-drain");
-    let cancel_id = register_drain_child(&world.registry, &drain_id, OnParentEnd::Cancel)
+    let cancel_id = register_drain_child(&world.registry, &drain_id, Lives::Until)
         .await
         .id;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
@@ -1553,7 +1564,7 @@ pub async fn a_failed_drain_ends_once_its_foreign_closing_work_settles(
     assert_eq!(
         cancel_origin(&child(&world.registry, &cancel_id).await),
         Some(crate::CancelOrigin::ParentEnded),
-        "the ended drain's Cancel child is swept"
+        "the ended drain's Until child is swept"
     );
 }
 
@@ -1635,8 +1646,8 @@ macro_rules! drain_end_tests {
                 "drain-end-multi-frame"
             ),
             (
-                a_drain_end_cancels_cancel_children_and_leaves_abandon_ones,
-                "drain-end-cancel-abandon"
+                a_drain_end_cancels_until_children_and_leaves_detached_ones,
+                "drain-end-until-detached"
             ),
             (
                 a_crash_after_the_drain_receipt_recovers_its_ledger_row,

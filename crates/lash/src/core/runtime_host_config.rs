@@ -13,8 +13,14 @@ impl LashCoreBuilder {
             .queued_work_batching
             .take()
             .ok_or(EmbedError::MissingQueuedWorkBatching)?;
-        let core =
+        let mut core =
             RuntimeHostConfig::new(self.backend.clone(), commit_budget, queued_work_batching);
+        // The backend's process registry owns the lifetime scopes the drive
+        // closes: a root's end and a session's close write its scope-close
+        // rows (FIG-3607 item 7).
+        core.control.scope_close = Arc::new(lash_core::RegistryScopeClose::new(
+            self.backend.process_registry(),
+        ));
         Ok(self.apply_core_overrides(core))
     }
 

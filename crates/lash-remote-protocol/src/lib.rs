@@ -300,6 +300,16 @@ pub use usage_activity::*;
 // input), and `RemoteTurnStatus` becomes a tagged
 // `answered`/`failed`/`cancelled`/`parked` status that names a parked root's
 // park.
+// The same window also changes in place under the pre-1.0 version freeze
+// (FIG-3846): FIG-3607 PR-2 replaces ADR 0094's lifecycle policy with a
+// recorded lifetime. A start request carries a required `lifetime`
+// (`detached`, or `until_session` a session the server looks up) instead of
+// `lifecycle`; a record carries its recorded `lifetime` decision (`until` a
+// `RemoteScopeId` with its grant, or `detached`), its `ancestry` and its
+// `session_capability`; an observed process carries `lifetime` and `ancestry`
+// instead of `policy`; and a list filter selects `until` a scope instead of a
+// `parent_scope`. A peer built before the change sends a `lifecycle` policy
+// this decoder refuses.
 pub const REMOTE_PROTOCOL_VERSION: u32 = 100;
 
 /// One versioned remote-protocol message.

@@ -66,15 +66,15 @@ impl<'run> OrchestrationContext<'run> {
         self.context.triggers()
     }
 
-    /// The enclosing durable parent for an orchestrated child start.
-    ///
-    /// The same one derivation the recorded attempt uses — the admitted scope,
-    /// never a registry lookup (FIG-3417).
-    pub fn child_process_parent_scope(&self) -> Result<crate::ParentScope, PluginError> {
+    /// The start context an orchestrated child start draws its lifetime
+    /// from: the same derivation the recorded attempt uses — the admitted
+    /// scope and the enclosing process's lineage, never a registry lookup
+    /// (FIG-3607 R2).
+    pub fn start_cx(&self) -> Result<crate::StartCx, PluginError> {
         let scoped = self.context.effect_controller.scoped();
-        let opener = crate::EffectOpener::for_scope(scoped.admitted_scope())
-            .map_err(|error| PluginError::Session(error.to_string()))?;
-        Ok(crate::ParentScope::from_owner(&opener))
+        let lineage = self.context.process_lineage();
+        crate::StartCx::materialize(scoped.admitted_scope(), lineage.as_ref())
+            .map_err(|error| PluginError::Session(error.to_string()))
     }
 
     /// The start key of this body's `ordinal`th process start: the call's

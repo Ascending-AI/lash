@@ -215,10 +215,7 @@ async fn publish_process(restate: &RestateTestBackend) -> lash_core::ProcessStar
         input,
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::default(),

@@ -1650,7 +1650,7 @@ impl crate::ProcessService for EffectBackedProcessService {
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
         let observers = request.observers.clone();
         let env_spec = request.env_spec.clone();
-        let registration = request.into_registration(None);
+        let registration = admitted_registration(request.into_registration(None), &scope)?;
         let command = crate::ProcessCommand::Start {
             registration,
             observers: observers.into_iter().collect(),
@@ -1681,6 +1681,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         options: crate::ProcessStartOptions,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
+        let registration = admitted_registration(registration, &scope)?;
         let command = crate::ProcessCommand::Start {
             registration,
             observers: options.initial_observers.into_iter().collect(),
@@ -1906,6 +1907,22 @@ impl crate::ProcessService for EffectBackedProcessService {
 
 /// Builds a process service whose starts cross the supplied operation scope's
 /// effect controller, matching the production durable process-start route.
+/// A runtime start records the start context it was admitted under, as the
+/// runtime's realization does (FIG-3607 R1, R2): these test services stand in
+/// for that realization.
+fn admitted_registration(
+    registration: crate::ProcessRegistration,
+    scope: &crate::ProcessOpScope<'_>,
+) -> Result<crate::ProcessRegistration, PluginError> {
+    match scope
+        .start_cx()
+        .map_err(|error| PluginError::Session(format!("process start refused: {error}")))?
+    {
+        Some(cx) => Ok(registration.with_start_cx(&cx)),
+        None => Ok(registration),
+    }
+}
+
 pub fn effect_backed_process_service(
     registry: Arc<dyn crate::ProcessRegistry>,
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
@@ -2224,8 +2241,9 @@ impl crate::ProcessService for MockSessionManager {
         _session_id: &SessionId,
         registration: crate::ProcessRegistration,
         options: crate::ProcessStartOptions,
-        _scope: crate::ProcessOpScope<'_>,
+        scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, PluginError> {
+        let registration = admitted_registration(registration, &scope)?;
         // The mock stands in as the journaled start effect: a spec-carrying
         // start is stamped with the content-addressed reference the executor's
         // publish would produce, since registration validation requires it.

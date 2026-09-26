@@ -309,21 +309,69 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
 
     let process_columns = "process_id, originator_id,
         identity_kind, created_at_ms, updated_at_ms, last_event_sequence, change_seq,
-        status, parent_scope_kind, on_parent_end, record_json";
+        status, lifetime_scope_kind, lifetime_scope_id, lifetime, record_json";
     assert_check_rejects(
         &mut connection,
         &format!(
             "INSERT INTO lash_processes ({process_columns}) VALUES
              ('bad-status', 'originator', 'standard', 0, 0, 0, 0,
-              'paused', 'host', 'abandon', '{{}}')"
+              'paused', NULL, NULL, 'detached', '{{}}')"
         ),
         "ck_processes_status",
+    )
+    .await;
+    for (process_id, scope_kind, scope_id, lifetime, constraint) in [
+        (
+            "bad-lifetime",
+            "NULL",
+            "NULL",
+            "'abandon'",
+            "ck_processes_lifetime",
+        ),
+        (
+            "bad-scope-kind",
+            "'host'",
+            "'scope'",
+            "'until'",
+            "ck_processes_lifetime_scope",
+        ),
+        (
+            "detached-with-scope",
+            "'turn'",
+            "'scope'",
+            "'detached'",
+            "ck_processes_lifetime_scope",
+        ),
+        (
+            "until-without-id",
+            "'session'",
+            "NULL",
+            "'until'",
+            "ck_processes_lifetime_scope",
+        ),
+    ] {
+        assert_check_rejects(
+            &mut connection,
+            &format!(
+                "INSERT INTO lash_processes ({process_columns}) VALUES
+                 ('{process_id}', 'originator', 'standard', 0, 0, 0, 0,
+                  'running', {scope_kind}, {scope_id}, {lifetime}, '{{}}')"
+            ),
+            constraint,
+        )
+        .await;
+    }
+    assert_check_rejects(
+        &mut connection,
+        "INSERT INTO lash_parent_end_plans (parent_kind, parent_id, parent_payload, ended_at_ms)
+         VALUES ('host', 'scope', '{}', 0)",
+        "ck_parent_end_plans_kind",
     )
     .await;
     sqlx::query(&format!(
         "INSERT INTO lash_processes ({process_columns}) VALUES
          ('wake-parent', 'originator', 'standard', 0, 0, 0, 0,
-          'running', 'host', 'abandon', '{{}}')"
+          'running', NULL, NULL, 'detached', '{{}}')"
     ))
     .execute(&mut connection)
     .await

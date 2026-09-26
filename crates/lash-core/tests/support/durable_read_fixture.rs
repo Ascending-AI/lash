@@ -1028,10 +1028,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
                 },
                 RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_extra_event_types([ProcessEventType {
                 name: "fixture.wake".to_string(),
@@ -1073,10 +1070,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             },
             RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         ))
         .await
         .expect("register fixture process to prune")
@@ -2333,10 +2327,7 @@ fn waiting_process_registration(env_ref: ProcessExecutionEnvRef) -> ProcessRegis
         },
         RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_start_key(Some(lash_core::StartKey::for_host(
         lash_core::StartKeyOwner::HOST,

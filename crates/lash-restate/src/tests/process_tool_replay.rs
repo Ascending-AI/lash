@@ -214,10 +214,7 @@ async fn signal_waiting_process_registration() -> ProcessRegistration {
         }),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
     .with_execution_env_ref(Some(env_ref))
@@ -286,7 +283,7 @@ async fn a_wait_signal_body_redriven_over_its_stored_terminal_replays_its_wait_s
         }
     };
 
-    let first = run(Arc::clone(&context))
+    let first = Box::pin(run(Arc::clone(&context)))
         .await
         .expect("run the signal-waiting process");
     let lash_core::ProcessRunOutcome::Terminal { output, .. } = &first else {
@@ -318,7 +315,7 @@ async fn a_wait_signal_body_redriven_over_its_stored_terminal_replays_its_wait_s
         .expect("store the terminal");
 
     context.start_replay();
-    let replayed = run(Arc::clone(&context))
+    let replayed = Box::pin(run(Arc::clone(&context)))
         .await
         .expect("a redrive over the stored terminal replays its wait");
     assert_eq!(
@@ -389,7 +386,9 @@ async fn a_redrive_after_the_records_mutable_state_moved_replays_the_run_unchang
         }
     };
 
-    let first = run(Arc::clone(&context)).await.expect("run the process");
+    let first = Box::pin(run(Arc::clone(&context)))
+        .await
+        .expect("run the process");
     let recorded_steps = context.runs();
     let before = registry
         .get_process(&process_id)
@@ -437,7 +436,7 @@ async fn a_redrive_after_the_records_mutable_state_moved_replays_the_run_unchang
         .expect("move the successor reference");
 
     context.start_replay();
-    let replayed = run(Arc::clone(&context))
+    let replayed = Box::pin(run(Arc::clone(&context)))
         .await
         .expect("redrive the process");
     assert_eq!(

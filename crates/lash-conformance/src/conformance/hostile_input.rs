@@ -234,10 +234,7 @@ pub async fn process_namespace(registry: Arc<dyn crate::ConformanceProcessRegist
             },
             crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         )
         .with_start_key(Some(crate::StartKey::for_host(
             crate::StartKeyOwner::HOST,

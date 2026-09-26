@@ -520,7 +520,7 @@ fn oracle_builder(
         // ADR 0095: `processes` is catalogue presence, so a cell that authors
         // `processes.start` or `processes.await` needs this factory installed.
         .plugin(Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
         ))
         .plugin(lash_core::testing::process_engine_plugin_fixture())
 }
@@ -541,10 +541,7 @@ async fn register_intent_target(
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_extra_event_types(vec![lash_core::ProcessEventType {
                 name: INTENT_EVENT.to_string(),

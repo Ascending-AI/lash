@@ -19,7 +19,7 @@ fn fixture_registration(_label: &str) -> ProcessRegistration {
         },
         RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
+        crate::Lifetime::Detached,
     )
 }
 
@@ -28,7 +28,7 @@ fn registration_for_input(input: ProcessInput) -> ProcessRegistration {
         input,
         RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
+        crate::Lifetime::Detached,
     )
 }
 

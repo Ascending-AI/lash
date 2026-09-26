@@ -17,8 +17,10 @@ mod artifact_cleanup;
 pub use artifact_cleanup::*;
 mod lease;
 pub use lease::*;
-mod lifecycle;
-pub use lifecycle::*;
+mod scope_lifetime;
+pub use scope_lifetime::*;
+mod start_request;
+pub use start_request::*;
 
 pub use lash_sansio::handle::HandleId;
 pub use lash_sansio::{ProcessId, SessionId};
@@ -763,7 +765,16 @@ pub struct ProcessRegistration {
     pub start_key: Option<StartKey>,
     pub input: Arc<ProcessInput>,
     pub disposition: RecoveryContract,
-    pub lifecycle: ProcessLifecyclePolicy,
+    /// What ends the process: the recorded decision (FIG-3607 R4b).
+    pub lifetime: LifetimeDecision,
+    /// Where the start came from, nearest first; empty for a root start. A
+    /// runtime start's is its admitted start context's, set by
+    /// [`Self::with_start_cx`], never by the start's author.
+    pub ancestry: Ancestry,
+    /// The session the process's descendants may bind to, inherited through
+    /// `Until` and `Detached` alike (FIG-3607 R10).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_capability: Option<SessionId>,
     /// Maximum execution attempts, or `None` for engine-paced indefinite
     /// retry. A deterministic failure with `None` can remain non-terminal
     /// indefinitely; producers with deterministic failure modes should set an
@@ -786,7 +797,9 @@ impl Clone for ProcessRegistration {
             start_key: self.start_key.clone(),
             input: Arc::clone(&self.input),
             disposition: self.disposition,
-            lifecycle: self.lifecycle.clone(),
+            lifetime: self.lifetime.clone(),
+            ancestry: self.ancestry.clone(),
+            session_capability: self.session_capability.clone(),
             max_attempts: self.max_attempts,
             identity: self.identity.clone(),
             event_types: self.event_types.clone(),
@@ -807,14 +820,25 @@ impl ProcessRegistration {
         input: ProcessInput,
         disposition: RecoveryContract,
         provenance: ProcessProvenance,
-        lifecycle: ProcessLifecyclePolicy,
+        lifetime: impl Into<LifetimeDecision>,
     ) -> Self {
         let identity = ProcessIdentity::from_process_input(&input);
+        let lifetime = lifetime.into();
+        // A root holds a session only through the host's lookup grant.
+        let session_capability = match &lifetime {
+            LifetimeDecision::Until {
+                scope: ScopeId::Session(session_id),
+                grant: ScopeGrant::HostSessionLookup,
+            } => Some(session_id.clone()),
+            LifetimeDecision::Until { .. } | LifetimeDecision::Detached => None,
+        };
         Self {
             start_key: None,
             input: Arc::new(input),
             disposition,
-            lifecycle,
+            lifetime,
+            ancestry: Ancestry::root(),
+            session_capability,
             max_attempts: None,
             identity,
             event_types: default_process_event_types(),
@@ -830,13 +854,36 @@ impl ProcessRegistration {
             input,
             disposition,
             ProcessProvenance::host(),
-            ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
+            Lifetime::Detached,
         )
     }
 
     /// Sets the start's idempotency key.
     pub fn with_start_key(mut self, start_key: Option<StartKey>) -> Self {
         self.start_key = start_key;
+        self
+    }
+
+    /// The lineage this process's body starts children under (FIG-3607 R1,
+    /// R10): the process, its own session when it runs one, then its recorded
+    /// ancestry and session capability.
+    pub fn lineage(&self, process_id: &ProcessId) -> ProcessLineage {
+        recorded_lineage(
+            process_id,
+            &self.input,
+            &self.ancestry,
+            self.session_capability.as_ref(),
+        )
+    }
+
+    /// Records the admitted start context a runtime start was made in: its
+    /// ancestry and the session capability its descendants inherit. Only the
+    /// runtime's realization calls this, with the context it materialized
+    /// from the admitted scope; registration then checks the recorded
+    /// lifetime against it (FIG-3607 R3).
+    pub fn with_start_cx(mut self, cx: &StartCx) -> Self {
+        self.ancestry = cx.ancestry();
+        self.session_capability = cx.session_capability();
         self
     }
 
@@ -1500,7 +1547,13 @@ pub struct ProcessRecord {
     /// durable rows cannot deserialize and are handled by each store's schema
     /// version bump (reject-and-recreate), never by an API/serde default.
     pub disposition: RecoveryContract,
-    pub lifecycle: ProcessLifecyclePolicy,
+    /// The recorded lifetime decision: never updated after registration.
+    pub lifetime: LifetimeDecision,
+    /// The recorded ancestry, nearest first; empty for a root.
+    pub ancestry: Ancestry,
+    /// The session capability descendants inherit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_capability: Option<SessionId>,
     /// Persisted attempt budget; `None` retains engine-paced indefinite retry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_attempts: Option<u32>,
@@ -1543,7 +1596,46 @@ pub struct ProcessRecord {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub outcome: Option<ProcessOutcome>,
 }
+/// The lineage a process's body starts children under, from the facts its
+/// row records: the process, the session it runs of its own (a `SessionTurn`
+/// child session), its ancestry and its session capability.
+fn recorded_lineage(
+    process_id: &ProcessId,
+    input: &ProcessInput,
+    ancestry: &Ancestry,
+    session_capability: Option<&SessionId>,
+) -> ProcessLineage {
+    let own_session = match input {
+        ProcessInput::SessionTurn { create_request, .. } => Some(
+            create_request
+                .session_id
+                .clone()
+                .unwrap_or_else(|| process_child_session_id(process_id)),
+        ),
+        ProcessInput::ToolCall { .. }
+        | ProcessInput::Engine { .. }
+        | ProcessInput::External { .. } => None,
+    };
+    ProcessLineage::of_process(
+        process_id,
+        ancestry,
+        session_capability,
+        own_session.as_ref(),
+    )
+}
+
 impl ProcessRecord {
+    /// The lineage this process's body starts children under, read back from
+    /// its row (FIG-3607 R1).
+    pub fn lineage(&self) -> ProcessLineage {
+        recorded_lineage(
+            &self.id,
+            &self.input,
+            &self.ancestry,
+            self.session_capability.as_ref(),
+        )
+    }
+
     /// Builds the record of a process the registrar just minted `id` for.
     pub fn from_registration(registration: ProcessRegistration, id: ProcessId) -> Self {
         Self::from_registration_with_clock(registration, id, &crate::SystemClock)
@@ -1578,7 +1670,9 @@ impl ProcessRecord {
             last_event_sequence: 0,
             input: registration.input,
             disposition: registration.disposition,
-            lifecycle: registration.lifecycle,
+            lifetime: registration.lifetime,
+            ancestry: registration.ancestry,
+            session_capability: registration.session_capability,
             max_attempts: registration.max_attempts,
             identity: registration.identity,
             event_types: registration.event_types,

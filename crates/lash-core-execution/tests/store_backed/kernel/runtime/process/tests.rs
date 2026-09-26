@@ -10,9 +10,7 @@ use crate::runtime::process::{
     ProjectionWatermark, RecoveryContract, artifact_owner_is_permanently_retired,
     artifact_staging_owner_edge_is_missing,
 };
-use crate::{
-    OnParentEnd, ParentScope, ProcessId, ProcessLifecyclePolicy, ProcessRegistry, SessionId,
-};
+use crate::{Lifetime, ProcessId, ProcessRegistry, SessionId};
 
 use crate::support::{memory_backend, memory_store_set};
 
@@ -27,7 +25,7 @@ fn registration(_id: &str) -> ProcessRegistration {
         },
         crate::RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
+        crate::Lifetime::Detached,
     )
 }
 
@@ -176,7 +174,7 @@ async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
         },
         RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
-        ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
+        Lifetime::Detached,
     )
     .with_execution_env_ref(Some(ProcessExecutionEnvRef::new("process-env:cleanup")));
     let registered = registry

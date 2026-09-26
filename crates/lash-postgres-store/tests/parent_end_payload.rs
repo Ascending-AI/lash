@@ -15,8 +15,8 @@ use sqlx::PgPool;
 
 use crate::support::{SharedDatabaseLock, database_url};
 
-fn turn_scope(session: &str, turn: &str) -> lash_core_execution::ParentScope {
-    lash_core_execution::ParentScope::turn(
+fn turn_scope(session: &str, turn: &str) -> lash_core_execution::ScopeId {
+    lash_core_execution::ScopeId::turn(
         lash_sansio::SessionId::from(session),
         lash_core_execution::TurnId::from(turn),
     )
@@ -82,14 +82,11 @@ async fn a_ledger_row_decodes_its_typed_payload() {
             lash_core_execution::ProcessProvenance::session(
                 lash_core_execution::SessionScope::new("pg-payload-session"),
             ),
-            lash_core_execution::ProcessLifecyclePolicy::new(
-                lash_core_execution::ParentScope::Host,
-                lash_core_execution::OnParentEnd::Abandon,
-            ),
+            lash_core_execution::Lifetime::Detached,
         ))
         .await
         .expect("register the process parent");
-    let scope = lash_core_execution::ParentScope::process(process_parent.id.clone());
+    let scope = lash_core_execution::ScopeId::process(process_parent.id.clone());
     registry
         .record_parent_end(&scope)
         .await
@@ -139,7 +136,41 @@ async fn a_pre_cutover_ledger_row_is_refused_not_migrated() {
         .expect_err("an old-format row must fail closed, not decode");
     clean_injected(&pool, kind, id).await;
     assert!(
-        error.to_string().contains("malformed parent-scope payload"),
+        error.to_string().contains("malformed scope payload"),
+        "the refusal names the payload shape: {error}"
+    );
+}
+
+/// ADR 0094's version-2 row keyed a parent scope (`Host` included) rather
+/// than a lifetime scope. FIG-3607 re-keys the ledger by `ScopeId` in place,
+/// under the same payload version; the old row's scope is not a `ScopeId`, so
+/// it is refused as malformed, never reinterpreted.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_parent_scope_row_is_refused_as_malformed() {
+    let Some((_database_lock, storage, pool)) = storage().await else {
+        eprintln!("skipping PostgreSQL parent-end payload test: database URL is not set");
+        return;
+    };
+    let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
+
+    let scope = turn_scope("pg-v2-session", "pg-v2-turn");
+    let payload = serde_json::json!({
+        "version": 2,
+        "scope": {"kind": "turn", "session_id": "pg-v2-session", "turn_id": "pg-v2-turn"},
+    })
+    .to_string();
+    let kind = scope.storage_kind();
+    let id = scope.storage_id();
+    clean_injected(&pool, kind, &id).await;
+    inject(&pool, kind, &id, &payload).await;
+
+    let error = registry
+        .list_pending_parent_end_plans(std::num::NonZeroUsize::MIN)
+        .await
+        .expect_err("a parent-scope row must refuse");
+    clean_injected(&pool, kind, &id).await;
+    assert!(
+        error.to_string().contains("malformed scope payload"),
         "the refusal names the payload shape: {error}"
     );
 }
@@ -154,12 +185,12 @@ async fn an_unsupported_payload_version_is_refused() {
 
     let scope = turn_scope("pg-version-session", "pg-version-turn");
     let payload = serde_json::json!({
-        "version": lash_core_execution::PARENT_SCOPE_STORAGE_PAYLOAD_VERSION + 1,
+        "version": lash_core_execution::SCOPE_STORAGE_PAYLOAD_VERSION + 1,
         "scope": serde_json::to_value(&scope).expect("scope json"),
     })
     .to_string();
     let kind = scope.storage_kind();
-    let id = scope.storage_id().expect("turn scopes carry an id");
+    let id = scope.storage_id();
     clean_injected(&pool, kind, &id).await;
     inject(&pool, kind, &id, &payload).await;
 
@@ -171,7 +202,7 @@ async fn an_unsupported_payload_version_is_refused() {
     assert!(
         error
             .to_string()
-            .contains("unsupported parent-scope payload version"),
+            .contains("unsupported scope payload version"),
         "the refusal names the version boundary: {error}"
     );
 }

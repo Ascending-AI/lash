@@ -178,6 +178,7 @@ pub struct AttemptContext<'run> {
     /// running inside a durable process. `None` where the attempt is not
     /// running inside one, and the child takes the declaring session's own.
     process_spawn_provenance: Option<crate::ProcessSpawnProvenance>,
+    process_lineage: Option<crate::ProcessLineage>,
     replay_key: Option<String>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
     completion_key: Option<crate::AwaitEventKey>,
@@ -194,17 +195,17 @@ impl<'run> AttemptContext<'run> {
         logical_root_of(self.parent_scope.scope())
     }
 
-    /// The runtime-owned parent scope for an explicit child lifecycle
-    /// declaration.
+    /// The start context a child start declared by this attempt draws its
+    /// lifetime from (FIG-3607 R2): materialized from the admitted scope the
+    /// enclosing execution runs under and the lineage of the process it runs
+    /// inside, with no live reads. A plugin resolves its [`LifetimePolicy`]
+    /// against it and declares the decision; realization records this same
+    /// context's ancestry beside it.
     ///
-    /// Derived through the one owner derivation — the admitted scope the
-    /// enclosing execution runs under — so a same-name successor in the
-    /// registry cannot rebind a child this attempt's opener still owns
-    /// (FIG-3417).
-    pub fn child_process_parent_scope(&self) -> Result<crate::ParentScope, PluginError> {
-        let opener = crate::EffectOpener::for_scope(&self.parent_scope)
-            .map_err(|error| PluginError::Session(error.to_string()))?;
-        Ok(crate::ParentScope::from_owner(&opener))
+    /// [`LifetimePolicy`]: crate::LifetimePolicy
+    pub fn start_cx(&self) -> Result<crate::StartCx, PluginError> {
+        crate::StartCx::materialize(&self.parent_scope, self.process_lineage.as_ref())
+            .map_err(|error| PluginError::Session(error.to_string()))
     }
 
     pub(crate) fn from_tool_context(
@@ -248,6 +249,7 @@ impl<'run> AttemptContext<'run> {
                 .runtime_execution_context
                 .as_ref()
                 .and_then(|runtime| runtime.process_spawn_provenance()),
+            process_lineage: context.process_lineage(),
             replay_key: context.replay_key.clone(),
             execution_env_spec: context.execution_env_spec.clone(),
             completion_key,
@@ -721,6 +723,19 @@ impl<'run> ToolContextBuilder<'run> {
 }
 
 impl<'run> ToolContext<'run> {
+    /// The lineage of the process this tool call runs inside (FIG-3607 R1):
+    /// the runtime context's when the call has one, else the dispatch's.
+    pub(crate) fn process_lineage(&self) -> Option<crate::ProcessLineage> {
+        self.runtime_execution_context
+            .as_ref()
+            .and_then(crate::RuntimeExecutionContext::process_lineage)
+            .or_else(|| {
+                self.runtime_dispatch
+                    .as_ref()
+                    .and_then(|dispatch| dispatch.process_lineage.clone())
+            })
+    }
+
     /// The logical root this call runs under, read from the admitted scope
     /// of its effect controller (FIG-3607 item 6): never a live read. `None`
     /// outside a session turn (a process body, a runtime operation).
@@ -891,6 +906,7 @@ impl<'run> ToolContext<'run> {
             tool_call_id: self.tool_call_id.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
             orchestrating_sinks: self.orchestrating_sinks.clone(),
+            process_lineage: self.process_lineage(),
         }
     }
 
@@ -1636,35 +1652,32 @@ mod tests {
         .build()
     }
 
-    /// A recorded leaf attempt under a process scope parents on its process —
-    /// the attempt carries no registry query, only the admitted scope.
+    /// A recorded leaf attempt under a process scope names its start context
+    /// from the admitted scope plus the process's recorded lineage. With no
+    /// lineage the context refuses rather than inventing roots: a process
+    /// body's ancestors are recorded facts, never a registry lookup.
     #[tokio::test]
-    async fn an_attempt_under_a_process_scope_parents_on_its_process() {
+    async fn an_attempt_under_a_process_scope_without_its_lineage_is_refused() {
         let context = tool_context_under_scope(crate::AdmittedScope::process(
             crate::process_id_for_test("worker"),
         ));
         let attempt = crate::AttemptContext::__for_testing(&context, "attempt-scope".to_string());
-        assert_eq!(
-            attempt
-                .child_process_parent_scope()
-                .expect("the process is the parent"),
-            crate::ParentScope::process(crate::process_id_for_test("worker")),
+        assert!(
+            attempt.start_cx().is_err(),
+            "a process opener without its lineage has no start context"
         );
     }
 
-    /// The orchestrating surface takes the same shared derivation: the
-    /// admitted process, not a registry lookup.
+    /// The orchestrating surface takes the same shared derivation.
     #[tokio::test]
-    async fn an_orchestrating_context_parents_on_its_process() {
+    async fn an_orchestrating_context_without_its_lineage_is_refused() {
         let context = tool_context_under_scope(crate::AdmittedScope::process(
             crate::process_id_for_test("worker"),
         ));
         let orchestration = crate::OrchestrationContext::new(context);
-        assert_eq!(
-            orchestration
-                .child_process_parent_scope()
-                .expect("the process is the parent"),
-            crate::ParentScope::process(crate::process_id_for_test("worker")),
+        assert!(
+            orchestration.start_cx().is_err(),
+            "a process opener without its lineage has no start context"
         );
     }
 }

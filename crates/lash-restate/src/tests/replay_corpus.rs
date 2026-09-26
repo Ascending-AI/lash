@@ -62,7 +62,7 @@ async fn replay_corpus_fixtures_match_current_controller() {
         let context = Arc::new(ReplayableRecordingContext::default());
         context.install_recorded_runtime_effects(fixture.records);
         context.start_replay();
-        drive_scenario(*scenario, context, true).await;
+        Box::pin(drive_scenario(*scenario, context, true)).await;
     }
 }
 
@@ -78,7 +78,7 @@ async fn regenerate_replay_corpus_fixtures() {
 
     for scenario in SCENARIOS {
         let context = Arc::new(ReplayableRecordingContext::default());
-        drive_scenario(*scenario, Arc::clone(&context), false).await;
+        Box::pin(drive_scenario(*scenario, Arc::clone(&context), false)).await;
         let fixture = ReplayCorpusFixture {
             scenario: scenario.name.to_string(),
             recorded_at_git_sha: git_sha.clone(),
@@ -100,9 +100,11 @@ async fn drive_scenario(
     match scenario.name {
         "sleep-envelope" => drive_sleep_envelope(context, replaying),
         "scalar-lashlang-tool-attempt" => {
-            drive_scalar_lashlang_tool_attempt(context, replaying).await;
+            Box::pin(drive_scalar_lashlang_tool_attempt(context, replaying)).await;
         }
-        "lashlang-effect-summary" => drive_lashlang_effect_summary(context, replaying).await,
+        "lashlang-effect-summary" => {
+            Box::pin(drive_lashlang_effect_summary(context, replaying)).await;
+        }
         other => panic!("unimplemented replay corpus scenario `{other}`"),
     }
 }

@@ -54,8 +54,9 @@ lash_conformance::turn_config_tests!({
 // after its evidence committed leaves no work for a later drive to admit, so
 // the close's at-least-once retry is an engine's, and
 // `root_scope_close_runs_after_terminal_evidence_at_least_once` runs on the
-// Restate double only. Reconciling an unacknowledged close in process needs
-// the scope owner's own closed-scope record (FIG-3607 PR-2).
+// Restate double only. In process, the process worker's recovery pass
+// reconciles an unacknowledged close: it re-derives the root's missing
+// scope-close row from the root's terminal evidence (FIG-3607).
 lash_conformance::drive_admission_tests!(@laws [] {
     let (backend, prefix, effect_host, stores, _process_work, turn_runner, _after_law) =
         sqlite_turn_runner_fixture().await;
@@ -75,4 +76,5 @@ lash_conformance::drive_admission_tests!(@laws [] {
     (a_host_id_naming_a_terminal_root_is_answered_not_rerun, "drive-root-adopted"),
     (a_root_whose_admission_a_successor_sealed_commits_nothing, "drive-root-superseded"),
     (a_queued_root_settled_without_a_commit_closes_after_its_evidence, "drive-root-settled-close"),
+    (a_root_end_closes_its_turn_scope_in_the_process_registry, "drive-root-registry-close"),
 ]);

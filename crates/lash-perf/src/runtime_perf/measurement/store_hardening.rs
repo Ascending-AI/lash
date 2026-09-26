@@ -499,10 +499,7 @@ async fn measure_process_prune(
                 lash_core::ProcessProvenance::new(lash_core::ProcessOriginator::host_scoped(
                     &prune_scope,
                 )),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             ))
             .await?
             .id;
@@ -605,10 +602,7 @@ mod store_hardening_tests {
                 lash_core::ProcessProvenance::new(lash_core::ProcessOriginator::host_scoped(
                     "unrelated",
                 )),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             ))
             .await
             .expect("register unrelated process")

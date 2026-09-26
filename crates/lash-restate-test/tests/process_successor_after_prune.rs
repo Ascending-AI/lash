@@ -196,10 +196,7 @@ fn start_request(start_key: &str, payload: serde_json::Value) -> lash_core::Proc
         },
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_start_key(Some(lash_core::StartKey::for_host(
         lash_core::StartKeyOwner::HOST,

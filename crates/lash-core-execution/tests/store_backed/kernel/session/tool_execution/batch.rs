@@ -113,6 +113,7 @@ mod tests {
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),
             clock: Arc::new(crate::SystemClock),
+            process_lineage: None,
         };
         let process_env_store: Arc<dyn crate::ProcessExecutionEnvStore> =
             backend.process_env_store();
@@ -616,6 +617,7 @@ mod tests {
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: crate::TurnContext::default(),
             clock: Arc::new(crate::SystemClock),
+            process_lineage: None,
         };
         crate::RuntimeExecutionContext::new(
             SessionId::from("session"),

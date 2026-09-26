@@ -116,10 +116,7 @@ fn engine_entry(
             },
             RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
-            crate::ProcessLifecyclePolicy::new(
-                crate::ParentScope::Host,
-                crate::OnParentEnd::Abandon,
-            ),
+            crate::Lifetime::Detached,
         )
         .with_admitted_identity(crate::AdmittedProcessIdentity::for_testing(
             ProcessIdentity::for_definition(

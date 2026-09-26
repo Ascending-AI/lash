@@ -32,24 +32,40 @@ pub use declarations::{
 /// Declares its provider through a [`PluginSpec`] driven by
 /// [`StaticPluginFactory`], so it does not hand-roll the `SessionPlugin` +
 /// `register` ceremony.
+///
+/// The [`LifetimePolicy`](lash_core::LifetimePolicy) is required and has no
+/// default: it chooses the lifetime of every process the model's
+/// `start_process` declares, against the start's admitted
+/// [`StartCx`](lash_core::StartCx). The model never picks one (FIG-3607).
 pub struct SessionProcessAdminPluginFactory {
     inner: StaticPluginFactory,
 }
 
 impl SessionProcessAdminPluginFactory {
-    pub fn new() -> Self {
-        Self::with_cancel_process(true)
+    /// Process controls whose starts take `lifetime`, for example
+    /// [`lash_core::lifetime::session_or_starter`].
+    pub fn new(
+        lifetime: impl Fn(&lash_core::StartCx) -> lash_core::Lifetime + Send + Sync + 'static,
+    ) -> Self {
+        Self::with_cancel_process(Arc::new(lifetime), true)
     }
 
-    pub fn without_cancel_process() -> Self {
-        Self::with_cancel_process(false)
+    /// The same controls without `cancel_process`.
+    pub fn without_cancel_process(
+        lifetime: impl Fn(&lash_core::StartCx) -> lash_core::Lifetime + Send + Sync + 'static,
+    ) -> Self {
+        Self::with_cancel_process(Arc::new(lifetime), false)
     }
 
-    fn with_cancel_process(include_cancel_process: bool) -> Self {
+    fn with_cancel_process(
+        lifetime: lash_core::LifetimePolicy,
+        include_cancel_process: bool,
+    ) -> Self {
         let provider = StaticToolProvider::new(
             processes_tool_definitions(include_cancel_process),
             SessionProcessAdminTools {
                 include_cancel_process,
+                lifetime,
             },
         );
         let spec =
@@ -57,12 +73,6 @@ impl SessionProcessAdminPluginFactory {
         Self {
             inner: StaticPluginFactory::new("processes", spec),
         }
-    }
-}
-
-impl Default for SessionProcessAdminPluginFactory {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -78,6 +88,7 @@ impl PluginFactory for SessionProcessAdminPluginFactory {
 
 struct SessionProcessAdminTools {
     include_cancel_process: bool,
+    lifetime: lash_core::LifetimePolicy,
 }
 
 #[async_trait::async_trait]
@@ -93,7 +104,7 @@ impl StaticToolExecute for SessionProcessAdminTools {
             return execute_process_await_tool_call(call.context, call.args);
         }
         if call.name() == "start_process" {
-            return execute_process_start_tool_call(call.context, call.args).await;
+            return execute_process_start_tool_call(call.context, call.args, &self.lifetime).await;
         }
         if call.name() == "signal_process" {
             return execute_process_signal_tool_call(call.context, call.args);
@@ -494,6 +505,7 @@ mod tests {
     async fn cancel_process_accepts_the_handle_shape_every_other_process_tool_takes() {
         let tools = SessionProcessAdminTools {
             include_cancel_process: true,
+            lifetime: std::sync::Arc::new(lash_core::lifetime::session_or_starter),
         };
         let tool_context = lash_core::testing::mock_tool_context();
         let context = lash_core::AttemptContext::__for_testing(
@@ -531,6 +543,7 @@ mod tests {
     async fn cancel_process_declares_literal_v1_cancel_intent() {
         let tools = SessionProcessAdminTools {
             include_cancel_process: true,
+            lifetime: std::sync::Arc::new(lash_core::lifetime::session_or_starter),
         };
         let tool_context = lash_core::testing::mock_tool_context();
         let context = lash_core::AttemptContext::__for_testing(
@@ -594,6 +607,7 @@ mod tests {
     async fn await_process_parks_naming_the_process_terminal_as_its_resolver() {
         let tools = SessionProcessAdminTools {
             include_cancel_process: true,
+            lifetime: std::sync::Arc::new(lash_core::lifetime::session_or_starter),
         };
         let tool_context = lash_core::testing::mock_tool_context();
         let context = parked_attempt_context(&tool_context);
@@ -625,6 +639,7 @@ mod tests {
     async fn await_process_refuses_a_value_that_is_not_a_process_handle() {
         let tools = SessionProcessAdminTools {
             include_cancel_process: true,
+            lifetime: std::sync::Arc::new(lash_core::lifetime::session_or_starter),
         };
         let tool_context = lash_core::testing::mock_tool_context();
         let context = parked_attempt_context(&tool_context);
@@ -658,6 +673,7 @@ mod tests {
         let definition = process_await_tool_definition();
         let tools = SessionProcessAdminTools {
             include_cancel_process: true,
+            lifetime: std::sync::Arc::new(lash_core::lifetime::session_or_starter),
         };
         assert!(
             StaticToolExecute::attempt_may_defer(&tools, definition.id()),
@@ -700,9 +716,9 @@ mod tests {
     #[test]
     fn plugin_registers_cancel_when_configured_and_omits_it_otherwise() {
         let standard_session = lash_core::facade_support::PluginHost::new(
-            std::iter::once(
-                Arc::new(SessionProcessAdminPluginFactory::new()) as Arc<dyn PluginFactory>
-            )
+            std::iter::once(Arc::new(SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::session_or_starter,
+            )) as Arc<dyn PluginFactory>)
             .chain(lash_core::testing::test_standard_protocol_factories())
             .collect(),
         )
@@ -717,8 +733,9 @@ mod tests {
 
         let rlm_session = lash_core::facade_support::PluginHost::new(
             std::iter::once(
-                Arc::new(SessionProcessAdminPluginFactory::without_cancel_process())
-                    as Arc<dyn PluginFactory>,
+                Arc::new(SessionProcessAdminPluginFactory::without_cancel_process(
+                    lash_core::lifetime::session_or_starter,
+                )) as Arc<dyn PluginFactory>,
             )
             .chain(lash_core::testing::test_code_protocol_factories())
             .collect(),

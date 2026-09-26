@@ -46,10 +46,7 @@ impl lash_core::facade_support::OrchestratingToolImplementation for FirstTurnPro
                 lash_core::ProcessStartRequest::external(
                     lash_core::ProcessOriginator::host(),
                     serde_json::json!({ "source": "first child turn" }),
-                    lash_core::ProcessLifecyclePolicy::new(
-                        lash_core::ParentScope::Host,
-                        lash_core::OnParentEnd::Abandon,
-                    ),
+                    lash_core::Lifetime::Detached,
                 )
                 .with_start_key(Some(start_key)),
             )

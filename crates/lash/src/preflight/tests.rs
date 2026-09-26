@@ -344,9 +344,9 @@ fn every_durable_format_has_one_explicit_surface_relation() {
             ),
         ),
         (
-            DurableFormat::ParentScopeStoragePayload,
+            DurableFormat::ScopeStoragePayload,
             SurfaceRelation::Unwalkable(
-                "no bounded surface: one payload per parent-owned ledger row, refused at decode \
+                "no bounded surface: one payload per scope-close row, refused at decode \
                  rather than at rest",
             ),
         ),
@@ -505,7 +505,7 @@ fn every_durable_format_has_one_explicit_surface_relation() {
         DurableFormat::SessionNodeBody,
         DurableFormat::SessionStateGeneration,
         DurableFormat::ProtocolTurnOptions,
-        DurableFormat::ParentScopeStoragePayload,
+        DurableFormat::ScopeStoragePayload,
         DurableFormat::ProcessLease,
         DurableFormat::ProcessEffectSummary,
         DurableFormat::AppendRequestIdentity,

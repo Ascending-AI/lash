@@ -602,6 +602,16 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // outcome, the recorded start of a deletion. No relation changes: `lash
 // migrate` restamps a component-140 catalog through the expand step of the
 // same name.
+//
+// Version 141 also records a process's lifetime rather than its parent
+// policy (FIG-3607), changed in place under the pre-1.0 version freeze
+// (FIG-3846): `lash_processes` replaces `parent_scope_kind`/`parent_scope_id`/
+// `on_parent_end` with `lifetime`/`lifetime_scope_kind`/`lifetime_scope_id`
+// under `ck_processes_lifetime` and `ck_processes_lifetime_scope`, its index
+// pair becomes `idx_lash_processes_lifetime_scope`/
+// `idx_lash_processes_lifetime_pending`, and `lash_parent_end_plans` admits
+// the `session` scope kind. A catalog provisioned before the change fails the
+// open-time shape check and is recreated.
 const SCHEMA_VERSION: i32 = 141;
 
 /// The oldest component schema version this build admits at open (FIG-3797).

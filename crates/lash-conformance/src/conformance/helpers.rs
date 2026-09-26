@@ -162,3 +162,43 @@ pub(crate) fn process_wake_work(
     .with_source_key(crate::process_wake_source_key(&process_id, sequence))
     .with_process_wake_source(process_id, sequence)
 }
+
+/// `registration` as a runtime start realized under `starter` records it: its
+/// ancestry is `[starter]`, and it lives `Until` its starter (FIG-3607 R1,
+/// R3).
+pub(crate) fn started_until_starter(
+    registration: crate::ProcessRegistration,
+    starter: crate::ScopeId,
+) -> crate::ProcessRegistration {
+    started_until(registration, starter.clone(), starter)
+}
+
+/// `registration` as a runtime start realized under `starter` records it,
+/// living `Until` `scope`, which must be `starter` or the session above it.
+pub(crate) fn started_until(
+    mut registration: crate::ProcessRegistration,
+    starter: crate::ScopeId,
+    scope: crate::ScopeId,
+) -> crate::ProcessRegistration {
+    registration.ancestry = if starter == scope {
+        crate::Ancestry::from_scopes([starter])
+    } else {
+        crate::Ancestry::from_scopes([starter, scope.clone()])
+    };
+    registration.lifetime = crate::LifetimeDecision::Until {
+        scope,
+        grant: crate::ScopeGrant::Ancestor,
+    };
+    registration
+}
+
+/// `registration` as a runtime start realized under `starter` records it,
+/// `Detached` from every scope.
+pub(crate) fn started_detached(
+    mut registration: crate::ProcessRegistration,
+    starter: crate::ScopeId,
+) -> crate::ProcessRegistration {
+    registration.ancestry = crate::Ancestry::from_scopes([starter]);
+    registration.lifetime = crate::LifetimeDecision::Detached;
+    registration
+}

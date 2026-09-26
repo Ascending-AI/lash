@@ -90,10 +90,7 @@ async fn admission_invariant_ends_the_process_failed(step: Step, seed: u64) {
         },
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     );
     let registry = restate.lash_backend().process_registry();
     let process_id = registry

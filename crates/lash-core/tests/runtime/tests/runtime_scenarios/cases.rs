@@ -523,10 +523,7 @@ impl lash_core::ToolProvider for RuntimeScenarioIntentProvider {
                     declaration: lash_core::ProcessStartDeclaration::external(
                         lash_core::ProcessOriginator::host_scoped("runtime-scenario"),
                         serde_json::json!({"kind": "start"}),
-                        lash_core::ProcessLifecyclePolicy::new(
-                            lash_core::ParentScope::Host,
-                            lash_core::OnParentEnd::Abandon,
-                        ),
+                        lash_core::Lifetime::Detached,
                     ),
                 })),
                 lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
@@ -609,10 +606,7 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_extra_event_types([
                 lash_core::ProcessEventType {

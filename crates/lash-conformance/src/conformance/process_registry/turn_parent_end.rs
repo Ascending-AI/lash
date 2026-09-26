@@ -15,25 +15,38 @@ use pretty_assertions::assert_eq;
 
 const PAGE: std::num::NonZeroUsize = std::num::NonZeroUsize::new(16).expect("page bound");
 
-fn turn_scope(session: &SessionId, turn: &str) -> lash_core::ParentScope {
-    lash_core::ParentScope::turn(session.clone(), crate::TurnId::from(turn))
+fn turn_scope(session: &SessionId, turn: &str) -> lash_core::ScopeId {
+    lash_core::ScopeId::turn(session.clone(), crate::TurnId::from(turn))
+}
+
+/// How a child started under a scope lives relative to it.
+#[derive(Clone, Copy)]
+enum Lives {
+    /// `Until` the scope that started it: its end cancels the child.
+    Until,
+    /// `Detached`: started there, owed nothing when it ends.
+    Detached,
 }
 
 async fn register_child(
     registry: &Arc<dyn ProcessRegistry>,
     originator: &SessionScope,
-    parent: &lash_core::ParentScope,
-    on_parent_end: lash_core::OnParentEnd,
+    starter: &lash_core::ScopeId,
+    lives: Lives,
 ) -> Result<ProcessRecord, crate::PluginError> {
+    let registration = ProcessRegistration::new(
+        ProcessInput::External {
+            metadata: serde_json::Value::Null,
+        },
+        RecoveryContract::Rerunnable,
+        ProcessProvenance::session(originator.clone()),
+        lash_core::Lifetime::Detached,
+    );
     registry
-        .register_process(ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            RecoveryContract::Rerunnable,
-            ProcessProvenance::session(originator.clone()),
-            lash_core::ProcessLifecyclePolicy::new(parent.clone(), on_parent_end),
-        ))
+        .register_process(match lives {
+            Lives::Until => crate::started_until_starter(registration, starter.clone()),
+            Lives::Detached => crate::started_detached(registration, starter.clone()),
+        })
         .await
 }
 
@@ -52,14 +65,14 @@ pub(super) async fn a_turn_scope_ends_through_its_recorded_ledger_row(
     let other_turn = turn_scope(&session, "turn-parent-end-other-turn");
 
     let mut children = Vec::new();
-    for (parent, on_parent_end) in [
-        (&turn, lash_core::OnParentEnd::Cancel),
-        (&turn, lash_core::OnParentEnd::Cancel),
-        (&turn, lash_core::OnParentEnd::Abandon),
-        (&other_turn, lash_core::OnParentEnd::Cancel),
+    for (parent, lives) in [
+        (&turn, Lives::Until),
+        (&turn, Lives::Until),
+        (&turn, Lives::Detached),
+        (&other_turn, Lives::Until),
     ] {
         children.push(
-            register_child(&registry, &originator, parent, on_parent_end)
+            register_child(&registry, &originator, parent, lives)
                 .await
                 .expect("register a child under a live turn scope")
                 .id,
@@ -75,13 +88,6 @@ pub(super) async fn a_turn_scope_ends_through_its_recorded_ledger_row(
             .expect("read the ledger row of a turn that has not ended")
             .is_none(),
         "a live turn owns no ledger row"
-    );
-    assert!(
-        registry
-            .record_parent_end(&lash_core::ParentScope::Host)
-            .await
-            .is_err(),
-        "a host scope never ends, so it can never be recorded as ended"
     );
 
     registry
@@ -136,7 +142,7 @@ pub(super) async fn a_turn_scope_ends_through_its_recorded_ledger_row(
             .map(|record| record.id)
             .collect::<Vec<_>>(),
         vec![cancel_a.clone(), cancel_b.clone()],
-        "the sweep sees this turn's Cancel children only: not its Abandon child, \
+        "the sweep sees this turn's Until children only: not its Detached child, \
          and not another turn's"
     );
     assert_eq!(
@@ -153,26 +159,20 @@ pub(super) async fn a_turn_scope_ends_through_its_recorded_ledger_row(
 
     assert!(
         matches!(
-            register_child(
-                &registry,
-                &originator,
-                &turn,
-                lash_core::OnParentEnd::Cancel,
-            )
-            .await,
+            register_child(&registry, &originator, &turn, Lives::Until,).await,
             Err(crate::PluginError::ParentEnded { .. })
         ),
-        "a Cancel child registering after the turn's row exists is refused, \
+        "a Until child registering after the turn's row exists is refused, \
          because the sweep that would have cancelled it has already run"
     );
-    register_child(
-        &registry,
-        &originator,
-        &turn,
-        lash_core::OnParentEnd::Abandon,
-    )
-    .await
-    .expect("an Abandon child owes the ended turn nothing and is admitted");
+    assert!(
+        matches!(
+            register_child(&registry, &originator, &turn, Lives::Detached).await,
+            Err(crate::PluginError::ParentEnded { .. })
+        ),
+        "a Detached child owes the ended turn nothing, but an ended scope \
+         starts nothing: its starter's close row refuses it too"
+    );
 
     registry
         .settle_parent_end_plan(&turn)
@@ -225,11 +225,11 @@ pub(super) async fn scopes_that_collide_in_rendering_share_no_ledger_key(
 ) {
     let first_originator = SessionScope::new("collision-session/a");
     let second_originator = SessionScope::new("collision-session");
-    let first = lash_core::ParentScope::turn(
+    let first = lash_core::ScopeId::turn(
         SessionId::from("collision-session/a"),
         crate::TurnId::from("c"),
     );
-    let second = lash_core::ParentScope::turn(
+    let second = lash_core::ScopeId::turn(
         SessionId::from("collision-session"),
         crate::TurnId::from("a/c"),
     );
@@ -239,22 +239,12 @@ pub(super) async fn scopes_that_collide_in_rendering_share_no_ledger_key(
         "the index projection is injective where the rendered id was not"
     );
 
-    let first_child = register_child(
-        &registry,
-        &first_originator,
-        &first,
-        lash_core::OnParentEnd::Cancel,
-    )
-    .await
-    .expect("register a Cancel child under the first colliding scope");
-    let second_child = register_child(
-        &registry,
-        &second_originator,
-        &second,
-        lash_core::OnParentEnd::Cancel,
-    )
-    .await
-    .expect("register a Cancel child under the second colliding scope");
+    let first_child = register_child(&registry, &first_originator, &first, Lives::Until)
+        .await
+        .expect("register a Until child under the first colliding scope");
+    let second_child = register_child(&registry, &second_originator, &second, Lives::Until)
+        .await
+        .expect("register a Until child under the second colliding scope");
 
     registry
         .record_parent_end(&first)
@@ -317,41 +307,21 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
     let second = turn_scope(&session, "unrecorded-turn-b");
     let abandon_only = turn_scope(&session, "unrecorded-turn-c");
 
-    let first_child = register_child(
-        &registry,
-        &originator,
-        &first,
-        lash_core::OnParentEnd::Cancel,
-    )
-    .await
-    .expect("register the first turn's Cancel child");
-    let second_child = register_child(
-        &registry,
-        &originator,
-        &second,
-        lash_core::OnParentEnd::Cancel,
-    )
-    .await
-    .expect("register the second turn's Cancel child");
-    let sibling = register_child(
-        &registry,
-        &originator,
-        &second,
-        lash_core::OnParentEnd::Cancel,
-    )
-    .await
-    .expect("register a second Cancel child under the same turn");
-    register_child(
-        &registry,
-        &originator,
-        &abandon_only,
-        lash_core::OnParentEnd::Abandon,
-    )
-    .await
-    .expect("register the third turn's Abandon child");
+    let first_child = register_child(&registry, &originator, &first, Lives::Until)
+        .await
+        .expect("register the first turn's Until child");
+    let second_child = register_child(&registry, &originator, &second, Lives::Until)
+        .await
+        .expect("register the second turn's Until child");
+    let sibling = register_child(&registry, &originator, &second, Lives::Until)
+        .await
+        .expect("register a second Until child under the same turn");
+    register_child(&registry, &originator, &abandon_only, Lives::Detached)
+        .await
+        .expect("register the third turn's Detached child");
 
-    // A Cancel child under a *process* scope is the same shape of row on every
-    // column but `parent_scope_kind`. Recovery re-derives turn rows only: a
+    // A Until child under a *process* scope is the same shape of row on every
+    // column but `lifetime_scope_kind`. Recovery re-derives turn rows only: a
     // process scope's row rides the terminal write that ends it, so reporting
     // one here would hand the sweep a candidate it must never write.
     let process_parent = registry
@@ -361,21 +331,18 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
             },
             RecoveryContract::Rerunnable,
             ProcessProvenance::session(originator.clone()),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         ))
         .await
         .expect("register the process parent");
     register_child(
         &registry,
         &originator,
-        &lash_core::ParentScope::process(process_parent.id.clone()),
-        lash_core::OnParentEnd::Cancel,
+        &lash_core::ScopeId::process(process_parent.id.clone()),
+        Lives::Until,
     )
     .await
-    .expect("register a Cancel child under a live process scope");
+    .expect("register a Until child under a live process scope");
 
     assert_eq!(
         registry
@@ -395,9 +362,7 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
         vec![first.clone()],
         "the page is bounded by the limit"
     );
-    let first_id = first
-        .storage_id()
-        .expect("a turn scope has a storage identity");
+    let first_id = first.storage_id();
     assert_eq!(
         registry
             .list_unrecorded_opener_parents(Some(first_id.as_str()), PAGE)

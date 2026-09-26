@@ -349,10 +349,7 @@ async fn durable_effect_outcome_event_crash_windows(
                 },
                 RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new(
                 "conformance-effect-env",

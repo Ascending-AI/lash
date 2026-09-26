@@ -57,7 +57,7 @@ fn session_turn_registration(child_session_id: &SessionId) -> ProcessRegistratio
         },
         RecoveryContract::Rerunnable,
         crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
+        crate::Lifetime::Detached,
     )
 }
 
@@ -409,7 +409,7 @@ fn registration_with_disposition(disposition: crate::RecoveryContract) -> Proces
         },
         disposition,
         crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
+        crate::Lifetime::Detached,
     )
 }
 
@@ -802,10 +802,7 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation
             },
             RecoveryContract::Rerunnable,
             crate::ProcessOriginator::host(),
-            crate::ProcessLifecyclePolicy::new(
-                crate::ParentScope::Host,
-                crate::OnParentEnd::Abandon,
-            ),
+            crate::Lifetime::Detached,
         )
         .with_start_key(Some(start_key));
         let process_id = match context.start_process(request).await {
@@ -895,12 +892,7 @@ impl crate::ProcessEngine for ProductionChainEngine {
                     },
                     RecoveryContract::Rerunnable,
                     runtime.trigger_actor(),
-                    crate::ProcessLifecyclePolicy::new(
-                        runtime
-                            .child_process_parent_scope()
-                            .expect("runtime parent"),
-                        crate::OnParentEnd::Abandon,
-                    ),
+                    crate::Lifetime::Detached,
                 )
                 .with_start_key(Some(crate::StartKey::for_host(
                     crate::StartKeyOwner::HOST,
@@ -971,12 +963,7 @@ impl crate::ProcessEngine for ProductionChainEngine {
                 },
                 RecoveryContract::Rerunnable,
                 runtime.trigger_actor(),
-                crate::ProcessLifecyclePolicy::new(
-                    runtime
-                        .child_process_parent_scope()
-                        .expect("runtime parent"),
-                    crate::OnParentEnd::Abandon,
-                ),
+                crate::Lifetime::Detached,
             )
             .with_start_key(Some(crate::StartKey::for_host(
                 crate::StartKeyOwner::HOST,
@@ -1105,12 +1092,12 @@ async fn run_production_chain(
         .iter()
         .filter(|record| record.id != p_00_chain_launcher_record.id)
     {
-        assert_eq!(record.lifecycle.on_parent_end, crate::OnParentEnd::Abandon);
-        let crate::ParentScope::Owned(crate::EffectOpener::Process { process_id }) =
-            &record.lifecycle.parent
+        assert_eq!(record.lifetime, crate::LifetimeDecision::Detached);
+        let Some(crate::ScopeId::Opener(crate::EffectOpener::Process { process_id })) =
+            record.ancestry.starter()
         else {
             panic!(
-                "a process-started child must retain its process parent: {}",
+                "a process-started child must record its starting process: {}",
                 record.id
             );
         };
@@ -1248,10 +1235,7 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
             },
             RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
-            crate::ProcessLifecyclePolicy::new(
-                crate::ParentScope::Host,
-                crate::OnParentEnd::Abandon,
-            ),
+            crate::Lifetime::Detached,
         ))
         .await
         .expect("register production session-turn process");
@@ -1326,10 +1310,7 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
                 },
                 RecoveryContract::Rerunnable,
                 crate::ProcessProvenance::host(),
-                crate::ProcessLifecyclePolicy::new(
-                    crate::ParentScope::Host,
-                    crate::OnParentEnd::Abandon,
-                ),
+                crate::Lifetime::Detached,
             )
             .with_execution_env_ref(Some(env_ref)),
         )
@@ -1709,10 +1690,7 @@ async fn sweep_does_not_reconcile_trigger_delivery_when_process_exists() {
                 },
                 RecoveryContract::Rerunnable,
                 crate::ProcessProvenance::host(),
-                crate::ProcessLifecyclePolicy::new(
-                    crate::ParentScope::Host,
-                    crate::OnParentEnd::Abandon,
-                ),
+                crate::Lifetime::Detached,
             )
             .with_start_key(Some(start_key)),
         )

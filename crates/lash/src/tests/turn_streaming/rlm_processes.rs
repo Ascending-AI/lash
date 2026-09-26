@@ -612,7 +612,7 @@ finish(value);"#,
     // ADR 0095: the `processes` module is catalogue presence, so a cell that
     // authors `processes.start` needs this factory installed.
     .plugin(Arc::new(
-        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
     ))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-process-control-tool").open().await?;
@@ -694,7 +694,7 @@ finish(value);"#,
     // ADR 0095: the `processes` module is catalogue presence, so a cell that
     // authors `processes.start` needs this factory installed.
     .plugin(Arc::new(
-        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
     ))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-lashlang-graph-store").open().await?;
@@ -1357,7 +1357,9 @@ async fn definition_filtered_process_list(cell: &str) -> Result<serde_json::Valu
         .model(mock_model_spec())
         .tools(Arc::new(BlockingAppTools::new(entered_tx, release_rx)))
         .plugin(Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::session_or_starter,
+            ),
         ))
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-process-definition-filter").open().await?;

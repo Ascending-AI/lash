@@ -553,11 +553,12 @@ async fn seed_process(
             "INSERT INTO lash_processes (
                  process_id, start_key, originator_id, wake_session_id,
                  identity_kind, identity_label, created_at_ms, updated_at_ms,
-                 last_event_sequence, change_seq, status, parent_scope_kind, on_parent_end,
+                 last_event_sequence, change_seq, status, lifetime_scope_kind, lifetime_scope_id,
+                 lifetime,
                  record_json
              ) VALUES (
                  '{process_id}', NULL, 'originator', {wake},
-                 'program', NULL, 0, 0, 0, 1, '{status}', 'host', 'abandon',
+                 'program', NULL, 0, 0, 0, 1, '{status}', NULL, NULL, 'detached',
                  '{{\"process\":\"{process_id}\"}}'
              )",
         ))

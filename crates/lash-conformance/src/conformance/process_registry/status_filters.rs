@@ -7,7 +7,7 @@ use pretty_assertions::assert_eq;
 )]
 pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn ProcessRegistry>) {
     let record = registry
-        .register_process(
+        .register_process(crate::started_until_starter(
             ProcessRegistration::new(
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
@@ -21,10 +21,7 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
                         subscription_revision: None,
                     }),
                 ),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
                 ProcessIdentity::for_definition(
@@ -35,7 +32,11 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
                     Some("filter-label"),
                 ),
             )),
-        )
+            lash_core::ScopeId::turn(
+                SessionId::from("filter-origin"),
+                crate::TurnId::from("filter-turn"),
+            ),
+        ))
         .await
         .expect("register filter target");
     let process_id = record.id.clone();
@@ -66,7 +67,7 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
             status: ProcessStatusFilter::any_of([ProcessStatus::Waiting]),
 
             originator: Some(ProcessOriginatorFilter::session("filter-origin")),
-            parent_scope: Some(record.lifecycle.parent.clone()),
+            until: record.lifetime.scope().cloned(),
             cancel_pending_before_ms: None,
             identity_kind: Some("indexed-filter-kind".to_string()),
             identity_label: Some("filter-label".to_string()),

@@ -171,6 +171,7 @@ fn echo_dispatch_context<'h>(
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: Arc::new(crate::SystemClock),
+        process_lineage: None,
     }
 }
 

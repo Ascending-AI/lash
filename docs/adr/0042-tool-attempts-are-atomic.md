@@ -24,7 +24,9 @@ the built-in tool suite; shell tools live in hosts. The in-crate declarers of
 `StartProcess`, `SignalProcess` and `CancelProcess` are the process-control
 leaf tools (`processes.start`, `processes.signal`, `processes.cancel`), and
 `processes.start` declares `OnParentEnd::Abandon`. Passages below that name
-the shell tools are historical.
+the shell tools are historical. Amended 2026-09-26 (FIG-3607): `processes.start`
+declares the Lifetime its host's policy chooses from the start's context
+([ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md)).
 
 Tool implementations are opaque host code. Lash cannot reliably discover,
 name, order, or replay every network call, database write, timer, or other side

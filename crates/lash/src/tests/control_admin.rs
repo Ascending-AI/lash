@@ -601,10 +601,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         },
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_start_key(Some(lash_core::StartKey::for_host(
         lash_core::StartKeyOwner::HOST,
@@ -631,11 +628,8 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         lash_core::ProcessQuery::get_process(registry.as_ref(), &started.process_id)
             .await?
             .expect("started record")
-            .lifecycle,
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon
-        )
+            .lifetime,
+        lash_core::LifetimeDecision::Detached
     );
     let replayed = session
         .admin()
@@ -700,10 +694,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         )
         .with_start_key(Some(reused_key.clone()))
     };
@@ -791,10 +782,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         )
     };
     let session_observer = SessionId::from("process-observation-events");
@@ -1059,10 +1047,7 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
             lash_core::ProcessStartRequest::external(
                 lash_core::ProcessOriginator::host(),
                 serde_json::Value::Null,
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_observers(["host-cancel".to_string()]),
             runtime_operation_scope(&core, "host-cancel-start"),
@@ -1123,10 +1108,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
                 lash_core::ProcessStartRequest::external(
                     lash_core::ProcessOriginator::host(),
                     serde_json::Value::Null,
-                    lash_core::ProcessLifecyclePolicy::new(
-                        lash_core::ParentScope::Host,
-                        lash_core::OnParentEnd::Abandon,
-                    ),
+                    lash_core::Lifetime::Detached,
                 )
                 .with_extra_event_types([lash_core::ProcessEventType {
                     name: "signal.ready".to_string(),
@@ -1232,10 +1214,7 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
                 lash_core::ProcessStartRequest::external(
                     lash_core::ProcessOriginator::host(),
                     serde_json::Value::Null,
-                    lash_core::ProcessLifecyclePolicy::new(
-                        lash_core::ParentScope::Host,
-                        lash_core::OnParentEnd::Abandon,
-                    ),
+                    lash_core::Lifetime::Detached,
                 )
                 .with_observers(["host-cancel-all".to_string()]),
                 runtime_operation_scope(&core, format!("{label}-start")),
@@ -1451,10 +1430,7 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             ))
             .await?
             .id;

@@ -109,10 +109,7 @@ pub async fn leased_completion_replay_repairs_projection<C, Fut>(
             },
             RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         ))
         .await
         .expect("register leased replay repair process");
@@ -413,10 +410,7 @@ pub(super) fn registration(id: &str) -> ProcessRegistration {
         },
         RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
         ProcessIdentity::for_definition(
@@ -722,6 +716,12 @@ pub async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_written(
     turn_parent_end::an_unrecorded_turn_parent_is_reported_until_its_row_is_written(registry).await;
 }
 
+/// Deleting a session closes its `Session` scope: its close row, owed
+/// cancels, and refusals of later starts naming it (FIG-3607 R10, R11).
+pub async fn a_session_delete_closes_its_session_scope(registry: Arc<dyn ProcessRegistry>) {
+    parent_end::a_session_delete_closes_its_session_scope(registry).await;
+}
+
 /// Retention reclaims a settled parent-end ledger row once no live child
 /// names its scope, so the ledger does not grow by one row per ended scope
 /// forever.
@@ -964,10 +964,7 @@ async fn refolded_process_record_matches_stored_projection(
                 },
                 RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
                 "process-env:{case}"
@@ -1132,10 +1129,7 @@ pub async fn redriven_child_reregisters_with_the_recorded_attempt_bound(
             },
             RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         )
         .with_max_attempts(Some(max_attempts))
         .with_start_key(Some(start_key.clone()))
@@ -1187,10 +1181,7 @@ pub async fn process_attempt_budget_is_typed(registry: Arc<dyn ProcessRegistry>)
                 },
                 RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_max_attempts(Some(1)),
         )
@@ -1397,10 +1388,7 @@ pub async fn waiting_processes_remain_in_the_recovery_worklist(registry: Arc<dyn
                 },
                 RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
                 ProcessIdentity::for_definition(

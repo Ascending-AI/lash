@@ -563,9 +563,9 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     last_event_sequence BIGINT NOT NULL,
     change_seq BIGINT NOT NULL,
     status TEXT NOT NULL,
-    parent_scope_kind TEXT NOT NULL,
-    parent_scope_id TEXT COLLATE "C",
-    on_parent_end TEXT NOT NULL,
+    lifetime TEXT NOT NULL,
+    lifetime_scope_kind TEXT,
+    lifetime_scope_id TEXT COLLATE "C",
     cancel_requested_at_ms BIGINT,
     parked_since_ms BIGINT,
     parked_reason_code TEXT,
@@ -573,9 +573,8 @@ CREATE TABLE IF NOT EXISTS lash_processes (
     record_json TEXT NOT NULL,
     CONSTRAINT ck_processes_parked CHECK ((parked_since_ms IS NULL) = (parked_reason_code IS NULL)),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),
-    CONSTRAINT ck_processes_parent_scope_kind CHECK (parent_scope_kind IN ('turn', 'queue_drain', 'process', 'host')),
-    CONSTRAINT ck_processes_parent_scope_id CHECK ((parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'queue_drain', 'process') AND parent_scope_id IS NOT NULL)),
-    CONSTRAINT ck_processes_on_parent_end CHECK (on_parent_end IN ('abandon', 'cancel'))
+    CONSTRAINT ck_processes_lifetime CHECK (lifetime IN ('until', 'detached')),
+    CONSTRAINT ck_processes_lifetime_scope CHECK ((lifetime = 'detached' AND lifetime_scope_kind IS NULL AND lifetime_scope_id IS NULL) OR (lifetime = 'until' AND lifetime_scope_kind IN ('turn', 'queue_drain', 'process', 'session') AND lifetime_scope_id IS NOT NULL))
 );
 -- A start key maps to the one retained process minted for it (ADR 0107).
 CREATE UNIQUE INDEX IF NOT EXISTS idx_lash_processes_start_key
@@ -607,16 +606,16 @@ CREATE INDEX IF NOT EXISTS idx_lash_processes_pending_cancel
     ON lash_processes(cancel_requested_at_ms, process_id)
     WHERE cancel_requested_at_ms IS NOT NULL
       AND status NOT IN ('completed', 'failed', 'cancelled', 'abandoned');
-CREATE INDEX IF NOT EXISTS idx_lash_processes_parent_scope
-    ON lash_processes(parent_scope_kind, parent_scope_id, process_id);
--- The parent-end sweep's only scan. The predicate names the live statuses
+CREATE INDEX IF NOT EXISTS idx_lash_processes_lifetime_scope
+    ON lash_processes(lifetime_scope_kind, lifetime_scope_id, process_id);
+-- The scope-close sweep's only scan. The predicate names the live statuses
 -- rather than a NOT IN so a status added later cannot silently widen the
 -- index; it is exactly LIVE_PROCESS_STATUS_LABELS, so `caller_departed` is out
 -- for the reason it is out of every other worklist: lash may never act on such
 -- a row nor assert an outcome for it, and a cancel request is both.
-CREATE INDEX IF NOT EXISTS idx_lash_processes_parent_end_pending
-    ON lash_processes(parent_scope_kind, parent_scope_id, process_id)
-    WHERE on_parent_end = 'cancel'
+CREATE INDEX IF NOT EXISTS idx_lash_processes_lifetime_pending
+    ON lash_processes(lifetime_scope_kind, lifetime_scope_id, process_id)
+    WHERE lifetime = 'until'
       AND cancel_requested_at_ms IS NULL
       AND status IN ('running', 'waiting');
 
@@ -746,7 +745,7 @@ CREATE TABLE IF NOT EXISTS lash_parent_end_plans (
     ended_at_ms BIGINT NOT NULL,
     settled_at_ms BIGINT,
     PRIMARY KEY (parent_kind, parent_id),
-    CONSTRAINT ck_parent_end_plans_kind CHECK (parent_kind IN ('turn', 'queue_drain', 'process'))
+    CONSTRAINT ck_parent_end_plans_kind CHECK (parent_kind IN ('turn', 'queue_drain', 'process', 'session'))
 );
 CREATE INDEX IF NOT EXISTS idx_lash_parent_end_plans_pending
     ON lash_parent_end_plans(ended_at_ms, parent_kind, parent_id)

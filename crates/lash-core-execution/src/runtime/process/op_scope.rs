@@ -4,6 +4,9 @@ pub struct ProcessOpScope<'scope> {
     pub effect_controller: crate::runtime::RuntimeEffectControllerHandle<'scope>,
     pub agent_frame_id: Option<crate::FrameNodeId>,
     pub turn_cancellation: Option<crate::ProcessTurnCancellation>,
+    /// The lineage of the process this operation runs inside, when it runs
+    /// inside one: what a start made here records above its starter.
+    pub process_lineage: Option<crate::ProcessLineage>,
 }
 
 impl<'scope> ProcessOpScope<'scope> {
@@ -17,7 +20,44 @@ impl<'scope> ProcessOpScope<'scope> {
             ),
             agent_frame_id: None,
             turn_cancellation: None,
+            process_lineage: None,
         }
+    }
+
+    /// Sets the lineage of the process this operation runs inside.
+    pub fn with_process_lineage(mut self, lineage: Option<crate::ProcessLineage>) -> Self {
+        self.process_lineage = lineage;
+        self
+    }
+
+    /// The start context a runtime start made under this operation records
+    /// (FIG-3607 R2): the admitted scope and the enclosing process's lineage.
+    /// `Ok(None)` under an administrative scope, which names no opener: the
+    /// start registers as a root and may only be `Detached`. A process scope
+    /// run without its lineage answers `MissingLineage` rather than a root, so
+    /// a start never silently loses the ancestry it ran under.
+    pub fn start_cx(&self) -> Result<Option<crate::StartCx>, crate::StartCxError> {
+        match crate::StartCx::materialize(
+            self.effect_controller.scoped().admitted_scope(),
+            self.process_lineage.as_ref(),
+        ) {
+            Ok(cx) => Ok(Some(cx)),
+            Err(crate::StartCxError::NotAnOpener(_)) => Ok(None),
+            Err(error) => Err(error),
+        }
+    }
+
+    /// The start context under this operation's admitted scope with the
+    /// enclosing process's `lineage` read back from its row, for a context
+    /// that runs inside the process without carrying its lineage.
+    pub fn start_cx_under(
+        &self,
+        lineage: &crate::ProcessLineage,
+    ) -> Result<crate::StartCx, crate::StartCxError> {
+        crate::StartCx::materialize(
+            self.effect_controller.scoped().admitted_scope(),
+            Some(lineage),
+        )
     }
 
     /// Sets the parent invocation carried by a `ProcessOpScope` for store and durable-substrate

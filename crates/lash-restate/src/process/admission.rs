@@ -65,7 +65,10 @@ use std::sync::Arc;
 /// id beside its registration, which no longer names one, the start step
 /// journals the id it started, and the requests a caller sends into a running
 /// workflow (complete, await, cancel, attach) are stamped with this generation
-/// and refused by it before their shape is decoded.
+/// and refused by it before their shape is decoded. Generation 4 changed in
+/// place under the pre-1.0 version freeze (FIG-3846): a registration records
+/// its lifetime, ancestry and session capability where it carried a parent
+/// policy (FIG-3607).
 pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 4;
 
 /// The manual epoch of the journal-bearing handlers' logic, hashed into the

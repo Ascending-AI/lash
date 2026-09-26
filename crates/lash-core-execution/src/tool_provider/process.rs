@@ -173,6 +173,8 @@ pub struct InternalProcessAdmin<'run> {
     /// orchestrating group child makes must reach its settlement, and this
     /// buffer is the only channel that crosses the no-attempt-frame boundary.
     pub(super) orchestrating_sinks: Option<crate::tool_dispatch::OrchestratingChildSinks>,
+    /// The lineage of the process this body runs inside, when it does.
+    pub(super) process_lineage: Option<crate::ProcessLineage>,
 }
 
 impl InternalProcessAdmin<'_> {
@@ -180,6 +182,7 @@ impl InternalProcessAdmin<'_> {
         crate::ProcessOpScope::new(self.effect_controller.scoped())
             .with_parent_invocation(self.parent_invocation.clone())
             .with_agent_frame_id(Some(self.agent_frame_id.clone()))
+            .with_process_lineage(self.process_lineage.clone())
     }
 
     /// Start a process owned by this session and registered to wake it,
@@ -458,6 +461,7 @@ impl<'run> InternalProcessAdmin<'run> {
             tool_call_id: None,
             execution_env_spec,
             orchestrating_sinks: None,
+            process_lineage: None,
         }
     }
 }

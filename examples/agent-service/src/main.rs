@@ -370,7 +370,7 @@ async fn async_main() -> anyhow_like::Result<()> {
     // (ADR 0095): the served cells author `processes.start`, so the surface
     // exists only where this factory is installed.
     .plugin(Arc::new(
-        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter),
     ));
     if let Some(marker) = shutdown_marker::factory_from_env("agent-service")? {
         core_builder = core_builder.plugin(marker);

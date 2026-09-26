@@ -21,17 +21,17 @@ use crate::runtime::process::registry_delegate::{
     delegate_process_tool_intents, delegate_process_wake_outbox,
 };
 use crate::{
-    AbandonRequest, CancelOrigin, ParentEndPlan, ParentScope, PluginError, ProcessAwaitOutput,
+    AbandonRequest, CancelOrigin, ParentEndPlan, PluginError, ProcessAwaitOutput,
     ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessExecutionWriteAuthority,
     ProcessId, ProcessLease, ProcessRecord, ProcessStartOutcome, ProcessStarted,
-    RuntimeReplayAttribution, SessionId, StoreRealization, WaitState,
+    RuntimeReplayAttribution, ScopeId, SessionId, StoreRealization, WaitState,
 };
 
 /// The decorated registry: one armed fault for `target`, everything else
 /// forwarded.
 struct ParentEndFault {
     inner: Arc<dyn ProcessRegistry>,
-    target: ParentScope,
+    target: ScopeId,
     armed: AtomicBool,
 }
 
@@ -39,7 +39,7 @@ struct ParentEndFault {
 /// other call — including a repeat of the same record — is forwarded.
 pub fn fail_parent_end_once(
     inner: Arc<dyn ProcessRegistry>,
-    target: ParentScope,
+    target: ScopeId,
 ) -> Arc<dyn ProcessRegistry> {
     Arc::new(ParentEndFault {
         inner,
@@ -128,7 +128,7 @@ impl ProcessLifecycle for ParentEndFault {
             .await
     }
 
-    async fn record_parent_end(&self, parent: &ParentScope) -> Result<(), PluginError> {
+    async fn record_parent_end(&self, parent: &ScopeId) -> Result<(), PluginError> {
         if *parent == self.target && self.armed.swap(false, Ordering::SeqCst) {
             return Err(PluginError::Session(
                 "injected crash between the drain-end receipt and the ledger row".to_string(),
@@ -146,14 +146,14 @@ impl ProcessLifecycle for ParentEndFault {
 
     async fn get_parent_end_plan(
         &self,
-        parent: &ParentScope,
+        parent: &ScopeId,
     ) -> Result<Option<ParentEndPlan>, PluginError> {
         self.inner.get_parent_end_plan(parent).await
     }
 
     async fn list_parent_end_children(
         &self,
-        parent: &ParentScope,
+        parent: &ScopeId,
         after: Option<&ProcessId>,
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<ProcessRecord>, PluginError> {
@@ -162,7 +162,7 @@ impl ProcessLifecycle for ParentEndFault {
             .await
     }
 
-    async fn settle_parent_end_plan(&self, parent: &ParentScope) -> Result<(), PluginError> {
+    async fn settle_parent_end_plan(&self, parent: &ScopeId) -> Result<(), PluginError> {
         self.inner.settle_parent_end_plan(parent).await
     }
 
@@ -170,7 +170,7 @@ impl ProcessLifecycle for ParentEndFault {
         &self,
         after: Option<&str>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<ParentScope>, PluginError> {
+    ) -> Result<Vec<ScopeId>, PluginError> {
         self.inner
             .list_unrecorded_opener_parents(after, limit)
             .await

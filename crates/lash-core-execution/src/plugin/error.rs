@@ -49,13 +49,13 @@ pub enum PluginError {
         existing: Box<crate::CancelRequest>,
         requested: Box<crate::CancelRequest>,
     },
-    /// A child requested cancellation on end of an already-ended parent. The
-    /// start is refused before an id is minted, so the refusal names the
-    /// start by its key.
-    #[error("cannot register process start {start_key:?}: parent scope {parent:?} has ended")]
+    /// A new start named a closed scope: its starter has ended, or the scope
+    /// its lifetime names has closed (FIG-3607 R11). The start is refused
+    /// before an id is minted, so the refusal names the start by its key.
+    #[error("cannot register process start {start_key:?}: scope `{parent}` has closed")]
     ParentEnded {
         start_key: Option<crate::StartKey>,
-        parent: crate::ParentScope,
+        parent: crate::ScopeId,
     },
     /// Discovery must itself be an inline member of the tool catalogue.
     #[error("discovery operation `{operation}` must be an inline catalogue member")]

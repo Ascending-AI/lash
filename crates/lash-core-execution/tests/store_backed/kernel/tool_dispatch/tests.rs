@@ -572,10 +572,7 @@ impl ToolProvider for AttemptIntentTools {
                     declaration: crate::ProcessStartDeclaration::external(
                         crate::ProcessOriginator::host_scoped("attempt-intents-test"),
                         json!({"source": "recorded-attempt"}),
-                        crate::ProcessLifecyclePolicy::new(
-                            crate::ParentScope::Host,
-                            crate::OnParentEnd::Abandon,
-                        ),
+                        crate::Lifetime::Detached,
                     ),
                 })),
                 crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
@@ -843,6 +840,7 @@ async fn strict_mcp_dispatch_context<'h>(
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
+        process_lineage: None,
     }
 }
 
@@ -941,6 +939,7 @@ async fn dispatch_context<'h>(ports: crate::support::DispatchPorts<'h>) -> ToolD
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
+        process_lineage: None,
     }
 }
 
@@ -1000,6 +999,7 @@ async fn projection_policy_dispatch_context<'h>(
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
+        process_lineage: None,
     }
 }
 
@@ -1170,6 +1170,7 @@ async fn pinned_contract_dispatch_context<'h>(
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
+        process_lineage: None,
     }
 }
 
@@ -1243,6 +1244,7 @@ async fn authority_hidden_dispatch_context<'h>(
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
+        process_lineage: None,
     }
 }
 
@@ -1292,6 +1294,7 @@ async fn exact_dispatch_context_with_plugins<'h>(
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
+        process_lineage: None,
     }
 }
 
@@ -1425,6 +1428,7 @@ async fn pending_dispatch_context<'h>(
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
+        process_lineage: None,
     }
 }
 
@@ -1482,6 +1486,7 @@ async fn parallel_dispatch_context<'h>(
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
+        process_lineage: None,
     }
 }
 
@@ -2143,10 +2148,7 @@ async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinat
                 },
                 crate::RecoveryContract::Rerunnable,
                 crate::ProcessProvenance::host(),
-                crate::ProcessLifecyclePolicy::new(
-                    crate::ParentScope::Host,
-                    crate::OnParentEnd::Abandon,
-                ),
+                crate::Lifetime::Detached,
             )
             .with_extra_event_types(event_types),
             &[SessionId::from("session")],

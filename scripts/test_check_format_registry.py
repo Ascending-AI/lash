@@ -299,8 +299,8 @@ class RealRepositoryTests(unittest.TestCase):
         # manifest before FIG-3521. Dropping their entries must fail the gate by
         # name; a sweep that stopped seeing them would pass silently instead.
         missing = {
-            "crates/lash-core-execution/src/runtime/process/model/lifecycle.rs:"
-            "PARENT_SCOPE_STORAGE_PAYLOAD_VERSION",
+            "crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs:"
+            "SCOPE_STORAGE_PAYLOAD_VERSION",
             "crates/lash-restate/src/controller/process_command.rs:"
             "PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION",
             "crates/lash-restate/src/durable_wait.rs:DURABLE_WAIT_REGISTRY_FORMAT_VERSION",

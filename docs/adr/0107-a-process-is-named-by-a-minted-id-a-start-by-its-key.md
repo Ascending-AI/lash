@@ -5,7 +5,8 @@
 Accepted 2026-09-25 (FIG-3607, PR-1: the identity cutover). The lifetime
 vocabulary of [ADR 0094](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md)
 is unchanged by this slice except that its process arm names a `ProcessId`;
-the lifetime rework (`Until`/`Detached`) and the retention guard are PR-2.
+the lifetime rework (`Until`/`Detached`) is
+[ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md).
 
 Amends [ADR 0094](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md)
 and [ADR 0099](0099-tool-children-of-effect-groups-are-live-closing-settled.md)

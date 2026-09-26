@@ -122,11 +122,12 @@ impl TurnCancelReceipt {
 /// caller as a side effect — so an API-driven `abort` orphaned the process and
 /// `stop` never reached it at all.
 ///
-/// The parent-end sweep does not cover this: a `processes.start` from code
-/// mode declares `OnParentEnd::Abandon`, so the turn's own parent-end ledger
-/// row deliberately leaves the child alone. The turn control is the operator
-/// saying "stop this work", which is a different act from the child-lifetime
-/// policy the program declared, so the request is issued here.
+/// The scope close does not cover this: a process the turn started may live
+/// past it (`Detached`, or `Until` its session), so the turn's own close
+/// deliberately leaves the child alone. The turn control is the operator
+/// saying "stop this work", which is a different act from the lifetime the
+/// start chose, so the request is issued here, to every live process whose
+/// recorded starter is this turn.
 ///
 /// Both modes issue the same request. A process cancellation is durable and
 /// lands at the subject's next wake, never mid-step, so `stop`'s step-boundary
@@ -136,11 +137,12 @@ pub(crate) async fn cancel_processes_parented_by_turn(
     state: &AppState,
     address: &lash::TurnAddress,
 ) -> Vec<String> {
+    let turn_scope =
+        lash::process::ScopeId::turn(address.session_id.clone(), address.turn_id.clone());
     let filter = lash::process::ProcessListFilter {
         status: lash::process::ProcessStatusFilter::Any,
-        parent_scope: Some(lash::process::ParentScope::turn(
+        originator: Some(lash::process::ProcessOriginatorFilter::session(
             address.session_id.clone(),
-            address.turn_id.clone(),
         )),
         ..lash::process::ProcessListFilter::default()
     };
@@ -161,6 +163,9 @@ pub(crate) async fn cancel_processes_parented_by_turn(
         // A terminal row is settled and a row already carrying a request is
         // converging on its own; re-asking for either is pure noise.
         if item.process.terminal() || item.process.cancel_request.is_some() {
+            continue;
+        }
+        if item.process.ancestry.starter() != Some(&turn_scope) {
             continue;
         }
         let process_id = item.process.process_id.clone();

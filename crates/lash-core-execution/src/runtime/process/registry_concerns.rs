@@ -550,15 +550,14 @@ pub trait ProcessLifecycle: Send + Sync {
         await_output: ProcessAwaitOutput,
     ) -> Result<ProcessCompletionOutcome, PluginError>;
 
-    /// This is the single durable parent-end fact, written for a turn, a
-    /// process and nothing else: a `Host` scope never ends, and implementations
-    /// refuse it. The row carries no action list. On the SQL tiers the write
+    /// This is the single durable scope-close fact, written for a turn root,
+    /// a queued drain, a process or a session. The row carries no action list. On the SQL tiers the write
     /// must ride the same transaction as the fact that ended the scope, so a
     /// child either commits before the row and is swept, or after it and is
     /// refused at registration. Repetition on an existing row is an idempotent
     /// no-op that preserves the first `ended_at_ms`, including on a row that
     /// is already settled.
-    async fn record_parent_end(&self, parent: &crate::ParentScope) -> Result<(), PluginError>;
+    async fn record_parent_end(&self, parent: &crate::ScopeId) -> Result<(), PluginError>;
 
     async fn list_pending_parent_end_plans(
         &self,
@@ -567,29 +566,28 @@ pub trait ProcessLifecycle: Send + Sync {
 
     /// Load the ledger row for one parent scope, settled or not.
     ///
-    /// Registration reads this to fence a late `Cancel` child: a child whose
-    /// parent has already ended is refused rather than left unvisited.
+    /// Registration reads this to fence a late start: a start whose starter
+    /// or lifetime scope has closed is refused rather than left unvisited.
     async fn get_parent_end_plan(
         &self,
-        parent: &crate::ParentScope,
+        parent: &crate::ScopeId,
     ) -> Result<Option<ParentEndPlan>, PluginError>;
 
     /// Page the children this parent-end sweep still has to cancel.
     ///
-    /// Returns nonterminal rows whose lifecycle names `parent` and whose
-    /// `on_parent_end` is `Cancel` and that do not already carry a cancel
-    /// request, ordered by process id and resumed after `after`. A terminal
+    /// Returns nonterminal rows whose recorded lifetime is `Until(parent)`
+    /// and that do not already carry a cancel request, ordered by process id and resumed after `after`. A terminal
     /// child and a child already carrying a request are settled by definition,
     /// so two concurrent sweeps converge instead of conflicting.
     async fn list_parent_end_children(
         &self,
-        parent: &crate::ParentScope,
+        parent: &crate::ScopeId,
         after: Option<&ProcessId>,
         limit: NonZeroUsize,
     ) -> Result<Vec<ProcessRecord>, PluginError>;
 
     /// Mark one ledger row settled. Repetition is idempotent.
-    async fn settle_parent_end_plan(&self, parent: &crate::ParentScope) -> Result<(), PluginError>;
+    async fn settle_parent_end_plan(&self, parent: &crate::ScopeId) -> Result<(), PluginError>;
 
     /// Page turn and queue-drain parent scopes that still owe a ledger row.
     ///
@@ -601,7 +599,7 @@ pub trait ProcessLifecycle: Send + Sync {
     /// candidates, and the caller decides which of them actually ended before
     /// writing anything.
     ///
-    /// Returns distinct owned `ParentScope`s named by at least one
+    /// Returns distinct turn and drain scopes named by at least one
     /// nonterminal child row and carrying no ledger row, ordered by scope id,
     /// resumed strictly after `after` and bounded by `limit`.
     ///
@@ -619,7 +617,7 @@ pub trait ProcessLifecycle: Send + Sync {
         &self,
         after: Option<&str>,
         limit: NonZeroUsize,
-    ) -> Result<Vec<crate::ParentScope>, PluginError> {
+    ) -> Result<Vec<crate::ScopeId>, PluginError> {
         let _ = (after, limit);
         Ok(Vec::new())
     }

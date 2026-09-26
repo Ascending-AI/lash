@@ -79,10 +79,7 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
                 },
                 RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
-                lash_core_execution::ProcessLifecyclePolicy::new(
-                    lash_core_execution::ParentScope::Host,
-                    lash_core_execution::OnParentEnd::Abandon,
-                ),
+                lash_core_execution::Lifetime::Detached,
             )
             .with_extra_event_types([lash_core_execution::ProcessEventType {
                 name: "snapshot.tail".to_string(),

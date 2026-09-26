@@ -1213,21 +1213,22 @@ async fn register_turn_child(
     session_id: &str,
     turn_id: &str,
 ) -> lash::ProcessId {
+    let mut registration = lash::process::ProcessRegistration::new(
+        lash::process::ProcessInput::External {
+            metadata: json!({ "awaited": true }),
+        },
+        lash::process::RecoveryContract::ExternallyOwned,
+        lash::process::ProcessProvenance::session(lash::process::SessionScope::new(session_id)),
+        lash::process::Lifetime::Detached,
+    );
+    // Started by the turn, `Detached` from it: the turn's close leaves it
+    // alone, so only the turn control's own cancel reaches it.
+    registration.ancestry = lash::process::Ancestry::from_scopes([lash::process::ScopeId::turn(
+        lash::SessionId::from(session_id),
+        TurnId::from(turn_id),
+    )]);
     registry
-        .register_process(lash::process::ProcessRegistration::new(
-            lash::process::ProcessInput::External {
-                metadata: json!({ "awaited": true }),
-            },
-            lash::process::RecoveryContract::ExternallyOwned,
-            lash::process::ProcessProvenance::session(lash::process::SessionScope::new(session_id)),
-            lash::process::ProcessLifecyclePolicy::new(
-                lash::process::ParentScope::turn(
-                    lash::SessionId::from(session_id),
-                    TurnId::from(turn_id),
-                ),
-                lash::process::OnParentEnd::Abandon,
-            ),
-        ))
+        .register_process(registration)
         .await
         .expect("register the awaited process")
         .id

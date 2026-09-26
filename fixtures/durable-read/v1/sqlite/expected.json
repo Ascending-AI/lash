@@ -653,12 +653,10 @@
       }
     },
     "disposition": "rerunnable",
-    "lifecycle": {
-      "parent": {
-        "kind": "host"
-      },
-      "on_parent_end": "abandon"
+    "lifetime": {
+      "lifetime": "detached"
     },
+    "ancestry": [],
     "identity": {
       "kind": "durable-read-engine",
       "label": "Durable read fixture",

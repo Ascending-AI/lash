@@ -83,6 +83,9 @@ use serde::{Deserialize, Serialize};
 /// 15: a session's deletion journals the start of its close as a recorded
 /// `{session}:begin-close` step (`BeginSessionClose`), whose outcome is the
 /// session's `CloseSession` control intent (FIG-3600 S7).
+/// Generation 15 also changed in place under the pre-1.0 version freeze
+/// (FIG-3846): a process start's journaled declaration records the lifetime
+/// its start chose (`lifetime`) where it recorded a parent policy (FIG-3607).
 pub const EFFECT_JOURNAL_VERSION: u32 = 15;
 
 /// The entry field the generation is stamped under.

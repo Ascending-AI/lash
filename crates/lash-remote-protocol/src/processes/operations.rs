@@ -216,7 +216,7 @@ pub struct RemoteProcessStartRequest {
     pub start_key: Option<String>,
     pub input: RemoteProcessInput,
     pub disposition: RemoteRecoveryContract,
-    pub lifecycle: Option<RemoteProcessLifecyclePolicy>,
+    pub lifetime: RemoteStartLifetime,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_attempts: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -243,13 +243,7 @@ impl RemoteProcessStartRequest {
                 message: "max_attempts must be greater than zero when provided".to_string(),
             });
         }
-        self.lifecycle
-            .as_ref()
-            .ok_or_else(|| RemoteProtocolError::InvalidEnvelope {
-                type_name: "RemoteProcessStartRequest",
-                message: "lifecycle policy is required".to_string(),
-            })?
-            .validate("RemoteProcessStartRequest", &self.originator)?;
+        self.lifetime.validate("RemoteProcessStartRequest")?;
         self.input.validate("RemoteProcessStartRequest")?;
         if let Some(env_spec) = &self.env_spec {
             env_spec.validate("RemoteProcessStartRequest")?;

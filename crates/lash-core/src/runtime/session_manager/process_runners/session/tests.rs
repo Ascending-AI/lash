@@ -182,7 +182,7 @@ fn failed_child_failure(stop: crate::TurnStop) -> crate::ToolFailure {
         },
         crate::RecoveryContract::ExternallyOwned,
         crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
+        crate::Lifetime::Detached,
     );
     let state = process_terminal_state_for_turn(&turn);
     assert_eq!(
@@ -320,13 +320,14 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
         },
         crate::RecoveryContract::Rerunnable,
         crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
+        crate::Lifetime::Detached,
     );
     let foreign_cancellation = tokio_util::sync::CancellationToken::new();
     foreign_cancellation.cancel();
     let foreign_output = services
         .run_process_session_turn(
             foreign_process_id.clone(),
+            test_lineage(&foreign_process_id, &foreign_create_request),
             foreign_create_request,
             crate::TurnInput::text("must not run"),
             native_execution_write_authority(foreign_process_id.clone()),
@@ -367,6 +368,7 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
     let cancellation = tokio_util::sync::CancellationToken::new();
     let mut run = Box::pin(services.run_process_session_turn(
         process_id.clone(),
+        test_lineage(&process_id, &create_request),
         create_request.clone(),
         crate::TurnInput::text("park the child turn"),
         native_execution_write_authority(process_id.clone()),
@@ -448,6 +450,7 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
     let replay = services
         .run_process_session_turn(
             process_id.clone(),
+            test_lineage(&process_id, &create_request),
             create_request,
             crate::TurnInput::text("replayed cancelled child turn"),
             native_execution_write_authority(process_id.clone()),
@@ -579,6 +582,7 @@ async fn failed_final_child_commit_cancellation_stays_recoverable() {
     let cancellation = tokio_util::sync::CancellationToken::new();
     let mut run = Box::pin(services.run_process_session_turn(
         process_id.clone(),
+        test_lineage(&process_id, &create_request),
         create_request.clone(),
         crate::TurnInput::text("park the child turn"),
         native_execution_write_authority(process_id.clone()),
@@ -615,6 +619,7 @@ async fn failed_final_child_commit_cancellation_stays_recoverable() {
     let replay = services
         .run_process_session_turn(
             process_id.clone(),
+            test_lineage(&process_id, &create_request),
             create_request,
             crate::TurnInput::text("park the child turn"),
             native_execution_write_authority(process_id.clone()),
@@ -668,6 +673,7 @@ async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
     let cancellation = tokio_util::sync::CancellationToken::new();
     let mut run = Box::pin(services.run_process_session_turn(
         process_id.clone(),
+        test_lineage(&process_id, &create_request),
         create_request.clone(),
         crate::TurnInput::text("park the child turn"),
         native_execution_write_authority(process_id.clone()),
@@ -694,6 +700,7 @@ async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
     let replay = services
         .run_process_session_turn(
             process_id.clone(),
+            test_lineage(&process_id, &create_request),
             create_request,
             crate::TurnInput::text("park the child turn"),
             native_execution_write_authority(process_id.clone()),
@@ -794,6 +801,7 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
     let outcome = services
         .run_process_session_turn(
             process_id.clone(),
+            test_lineage(&process_id, &create_request),
             create_request,
             crate::TurnInput::text("panic"),
             native_execution_write_authority(process_id.clone()),
@@ -875,6 +883,7 @@ async fn spawned_child_runtime_does_not_outlive_the_process_run() {
     let output = services
         .run_process_session_turn(
             process_id.clone(),
+            test_lineage(&process_id, &create_request),
             create_request,
             crate::TurnInput::text("run"),
             native_execution_write_authority(process_id.clone()),
@@ -973,6 +982,7 @@ async fn redelivery_after_create_commit_reopens_child_and_runs_turn() {
     let output = services
         .run_process_session_turn(
             process_id.clone(),
+            test_lineage(&process_id, &create_request),
             create_request,
             crate::TurnInput::text("run on redelivery"),
             native_execution_write_authority(process_id.clone()),
@@ -1068,6 +1078,7 @@ async fn redelivery_after_metadata_only_create_finishes_initialisation() {
     let output = services
         .run_process_session_turn(
             process_id.clone(),
+            test_lineage(&process_id, &create_request),
             create_request,
             crate::TurnInput::text("run on redelivery"),
             native_execution_write_authority(process_id.clone()),
@@ -1145,6 +1156,7 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
     let output = services
         .run_process_session_turn(
             process_id.clone(),
+            test_lineage(&process_id, &predecessor_request),
             predecessor_request,
             crate::TurnInput::text("run"),
             native_execution_write_authority(process_id.clone()),
@@ -1270,6 +1282,7 @@ async fn cancelled_session_turn_reacquires_budget_one_permit() {
                 let cancellation = tokio_util::sync::CancellationToken::new();
                 let mut run = Box::pin(services.run_process_session_turn(
                     crate::ProcessId::fixture("permit-process"),
+                    test_lineage(&crate::ProcessId::fixture("permit-process"), &request),
                     request,
                     crate::TurnInput::text("park"),
                     native_execution_write_authority(crate::ProcessId::fixture("permit-process")),
@@ -1317,7 +1330,7 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
         },
         crate::RecoveryContract::ExternallyOwned,
         crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
+        crate::Lifetime::Detached,
     );
     let evidence = crate::TurnCancellationEvidence {
         request_id: "child-request-17".to_string(),
@@ -1387,4 +1400,22 @@ fn assert_child_turn_cancellation(
             .map(crate::ToolValue::to_json_value),
         Some(serde_json::to_value(evidence).expect("encode turn cancellation evidence"))
     );
+}
+
+/// The lineage the runner derives for `process_id` from its registration: a
+/// root process whose own session is the child session it runs.
+fn test_lineage(
+    process_id: &crate::ProcessId,
+    create_request: &crate::SessionCreateRequest,
+) -> crate::ProcessLineage {
+    let own_session = create_request
+        .session_id
+        .clone()
+        .unwrap_or_else(|| crate::runtime::process_child_session_id(process_id));
+    crate::ProcessLineage::of_process(
+        process_id,
+        &crate::Ancestry::root(),
+        None,
+        Some(&own_session),
+    )
 }

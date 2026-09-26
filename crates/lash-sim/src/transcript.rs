@@ -514,10 +514,7 @@ mod tests {
                     },
                     RecoveryContract::ExternallyOwned,
                     lash_core::ProcessProvenance::host(),
-                    lash_core::ProcessLifecyclePolicy::new(
-                        lash_core::ParentScope::Host,
-                        lash_core::OnParentEnd::Abandon,
-                    ),
+                    lash_core::Lifetime::Detached,
                 )
                 .with_extra_event_types([ProcessEventType {
                     name: "producer.wake".to_string(),

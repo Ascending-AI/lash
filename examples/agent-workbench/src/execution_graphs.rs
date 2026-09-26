@@ -584,10 +584,7 @@ mod tests {
                 },
                 lash::process::RecoveryContract::Rerunnable,
                 lash::process::ProcessProvenance::session(lash::process::SessionScope::new("root")),
-                lash::process::ProcessLifecyclePolicy::new(
-                    lash::process::ParentScope::Host,
-                    lash::process::OnParentEnd::Abandon,
-                ),
+                lash::process::Lifetime::Detached,
             ))
             .await
             .expect("register subagent process")
@@ -720,10 +717,7 @@ mod tests {
                 lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
                     current_session_id,
                 )),
-                lash::process::ProcessLifecyclePolicy::new(
-                    lash::process::ParentScope::Host,
-                    lash::process::OnParentEnd::Abandon,
-                ),
+                lash::process::Lifetime::Detached,
             ))
             .await
             .expect("register subagent process")
@@ -743,10 +737,7 @@ mod tests {
                 },
                 lash::process::RecoveryContract::ExternallyOwned,
                 lash::process::ProcessProvenance::host(),
-                lash::process::ProcessLifecyclePolicy::new(
-                    lash::process::ParentScope::Host,
-                    lash::process::OnParentEnd::Abandon,
-                ),
+                lash::process::Lifetime::Detached,
             ))
             .await
             .expect("register old process")

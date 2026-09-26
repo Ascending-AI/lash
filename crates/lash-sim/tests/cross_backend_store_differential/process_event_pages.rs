@@ -70,10 +70,7 @@ pub(super) async fn compare_bounded_process_event_pages(
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         )
         .with_extra_event_types([lash_core::ProcessEventType {
             name: "page.event".to_string(),
@@ -191,10 +188,7 @@ pub(super) async fn compare_bounded_process_event_pages(
             },
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         )
         .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
             "effect-differential-env",

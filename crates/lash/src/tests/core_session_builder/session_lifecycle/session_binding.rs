@@ -303,10 +303,7 @@ async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> 
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::session(session.observe().process_scope()),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             ),
             &[lash_core::SessionId::from(session_id)],
         )

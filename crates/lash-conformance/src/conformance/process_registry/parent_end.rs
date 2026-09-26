@@ -19,25 +19,22 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
             },
             RecoveryContract::Rerunnable,
             ProcessProvenance::session(originator.clone()),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         ))
         .await
         .expect("register parent-end-plan process");
     let process_id = parent.id.clone();
-    let parent_scope = lash_core::ParentScope::process(parent.id.clone());
-    let child = ProcessRegistration::new(
-        ProcessInput::External {
-            metadata: serde_json::Value::Null,
-        },
-        RecoveryContract::Rerunnable,
-        ProcessProvenance::session(originator.clone()),
-        lash_core::ProcessLifecyclePolicy::new(
-            parent_scope.clone(),
-            lash_core::OnParentEnd::Cancel,
+    let parent_scope = lash_core::ScopeId::process(parent.id.clone());
+    let child = crate::started_until_starter(
+        ProcessRegistration::new(
+            ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            RecoveryContract::Rerunnable,
+            ProcessProvenance::session(originator.clone()),
+            lash_core::Lifetime::Detached,
         ),
+        parent_scope.clone(),
     );
     let child = registry
         .register_process(child)
@@ -141,16 +138,16 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
     );
 
     // A `Cancel` child registering after the ledger row exists is fenced.
-    let late = ProcessRegistration::new(
-        ProcessInput::External {
-            metadata: serde_json::Value::Null,
-        },
-        RecoveryContract::Rerunnable,
-        ProcessProvenance::session(originator.clone()),
-        lash_core::ProcessLifecyclePolicy::new(
-            parent_scope.clone(),
-            lash_core::OnParentEnd::Cancel,
+    let late = crate::started_until_starter(
+        ProcessRegistration::new(
+            ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            RecoveryContract::Rerunnable,
+            ProcessProvenance::session(originator.clone()),
+            lash_core::Lifetime::Detached,
         ),
+        parent_scope.clone(),
     );
     assert!(
         matches!(
@@ -246,25 +243,22 @@ pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
             },
             RecoveryContract::Rerunnable,
             ProcessProvenance::session(originator.clone()),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         ))
         .await
         .expect("register parent-end-reclaim process");
-    let parent_scope = lash_core::ParentScope::process(parent.id.clone());
+    let parent_scope = lash_core::ScopeId::process(parent.id.clone());
     let child = registry
-        .register_process(ProcessRegistration::new(
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            RecoveryContract::Rerunnable,
-            ProcessProvenance::session(originator.clone()),
-            lash_core::ProcessLifecyclePolicy::new(
-                parent_scope.clone(),
-                lash_core::OnParentEnd::Cancel,
+        .register_process(crate::started_until_starter(
+            ProcessRegistration::new(
+                ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                RecoveryContract::Rerunnable,
+                ProcessProvenance::session(originator.clone()),
+                lash_core::Lifetime::Detached,
             ),
+            parent_scope.clone(),
         ))
         .await
         .expect("register cancel child under the live parent");
@@ -342,4 +336,109 @@ async fn complete_process(
         .complete_process_with_lease(&lease, settled_success(serde_json::json!({"done": true})))
         .await
         .expect("complete process");
+}
+
+/// Deleting a session closes its `Session` scope (FIG-3607 R10): the delete
+/// writes the scope's close row in the same step, so a process living
+/// `Until` the session is owed its cancel, and a start that names the closed
+/// session — as its lifetime or its starter — is refused (R11). A process
+/// started by the session's turn but `Detached` owes nothing.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub(super) async fn a_session_delete_closes_its_session_scope(registry: Arc<dyn ProcessRegistry>) {
+    let session = SessionId::from("session-close-session");
+    let originator = SessionScope::new(session.as_str());
+    let turn = lash_core::ScopeId::turn(session.clone(), crate::TurnId::from("session-close-turn"));
+    let session_scope = lash_core::ScopeId::session(session.clone());
+    let registration = || {
+        ProcessRegistration::new(
+            ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            RecoveryContract::Rerunnable,
+            ProcessProvenance::session(originator.clone()),
+            lash_core::Lifetime::Detached,
+        )
+    };
+    let until_session = registry
+        .register_process(crate::started_until(
+            registration(),
+            turn.clone(),
+            session_scope.clone(),
+        ))
+        .await
+        .expect("register a child living until the session");
+    let detached = registry
+        .register_process(crate::started_detached(registration(), turn.clone()))
+        .await
+        .expect("register a detached child the session's turn started");
+    assert!(
+        registry
+            .get_parent_end_plan(&session_scope)
+            .await
+            .expect("read the live session's close row")
+            .is_none(),
+        "a live session has no close row"
+    );
+
+    registry
+        .delete_session_process_state(&session)
+        .await
+        .expect("delete the session's process state");
+
+    let closed = registry
+        .get_parent_end_plan(&session_scope)
+        .await
+        .expect("read the session's close row")
+        .expect("the delete writes the session scope's close row");
+    assert_eq!(closed.parent, session_scope);
+    assert_eq!(
+        registry
+            .list_parent_end_children(&session_scope, None, std::num::NonZeroUsize::MIN)
+            .await
+            .expect("page the closed session's children")
+            .into_iter()
+            .map(|record| record.id)
+            .collect::<Vec<_>>(),
+        vec![until_session.id.clone()],
+        "the sweep owes the child living until the session its cancel, and nothing \
+         to the detached one"
+    );
+    assert!(
+        registry
+            .get_process(&detached.id)
+            .await
+            .expect("read the detached child")
+            .expect("the detached child survives the delete")
+            .cancel_request
+            .is_none(),
+        "a detached child owes the closed session nothing"
+    );
+    assert!(
+        matches!(
+            registry
+                .register_process(crate::started_until(
+                    registration(),
+                    turn.clone(),
+                    session_scope.clone(),
+                ))
+                .await,
+            Err(crate::PluginError::ParentEnded { .. })
+        ),
+        "a start living until the closed session is refused"
+    );
+    let session_started = {
+        let mut registration = registration();
+        registration.ancestry = crate::Ancestry::from_scopes([session_scope.clone()]);
+        registration
+    };
+    assert!(
+        matches!(
+            registry.register_process(session_started).await,
+            Err(crate::PluginError::ParentEnded { .. })
+        ),
+        "a start whose starter is the closed session is refused"
+    );
 }

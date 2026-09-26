@@ -152,6 +152,10 @@ pub struct TestExecutionContextBuilder<'run> {
     /// already carries a builtin protocol factory and passes an empty vec so
     /// the two do not both claim the protocol-session capability.
     plugin_factories: Option<Vec<Arc<dyn crate::plugin::PluginFactory>>>,
+    /// The lineage of the process the context runs inside. `None` takes a
+    /// root process's lineage when the context admits a process scope, and
+    /// none otherwise.
+    process_lineage: Option<crate::ProcessLineage>,
 }
 
 pub struct BuiltTestExecutionContext<'run> {
@@ -227,6 +231,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             attachment_store: Arc::new(crate::SessionAttachmentStore::ephemeral(attachment_store)),
             clock,
             plugin_factories: None,
+            process_lineage: None,
         }
     }
 
@@ -432,6 +437,13 @@ impl<'run> TestExecutionContextBuilder<'run> {
         self
     }
 
+    /// The lineage of the process the context runs inside (FIG-3607 R1):
+    /// what a start made in it records above its starter.
+    pub fn process_lineage(mut self, lineage: crate::ProcessLineage) -> Self {
+        self.process_lineage = Some(lineage);
+        self
+    }
+
     pub fn build(self) -> BuiltTestExecutionContext<'run> {
         let plugins = crate::plugin::PluginHost::new(
             self.plugin_factories
@@ -518,6 +530,21 @@ impl<'run> TestExecutionContextBuilder<'run> {
                 crate::runtime::RuntimeEffectControllerHandle::borrowed(effect_controller)
             }
         };
+        // A process body runs inside its process: a fixture that names no
+        // lineage runs a root process's body.
+        let process_lineage =
+            self.process_lineage
+                .or_else(|| match effect_controller.scoped().execution_scope() {
+                    crate::ExecutionScope::Process { process_id } => {
+                        Some(crate::ProcessLineage::of_process(
+                            process_id,
+                            &crate::Ancestry::root(),
+                            None,
+                            None,
+                        ))
+                    }
+                    _ => None,
+                });
         let dispatch = Arc::new(crate::tool_dispatch::ToolDispatchContext {
             process_definitions: self.process_definitions,
             process_engines: self.process_engines,
@@ -549,6 +576,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
             turn_context: self.turn_context.clone(),
             clock: self.clock,
+            process_lineage,
         });
 
         let tool_child_host = if self.route_tool_children {

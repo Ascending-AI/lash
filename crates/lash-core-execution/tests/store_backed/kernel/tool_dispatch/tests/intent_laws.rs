@@ -60,10 +60,7 @@ async fn register_intent_law_target_observed_by(
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
-                crate::ProcessLifecyclePolicy::new(
-                    crate::ParentScope::Host,
-                    crate::OnParentEnd::Abandon,
-                ),
+                crate::Lifetime::Detached,
             )
             .with_extra_event_types(event_types.iter().map(|event_type| {
                 crate::ProcessEventType {
@@ -243,10 +240,7 @@ fn recorded_start_intents() -> crate::ToolIntents {
             declaration: crate::ProcessStartDeclaration::external(
                 crate::ProcessOriginator::host_scoped("intent-law"),
                 json!({"step": "start"}),
-                crate::ProcessLifecyclePolicy::new(
-                    crate::ParentScope::Host,
-                    crate::OnParentEnd::Abandon,
-                ),
+                crate::Lifetime::Detached,
             ),
         },
     ))])
@@ -538,10 +532,7 @@ async fn refusal_after_success_preserves_the_committed_prefix_and_replays_typed_
             },
             crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
-            crate::ProcessLifecyclePolicy::new(
-                crate::ParentScope::Host,
-                crate::OnParentEnd::Abandon,
-            ),
+            crate::Lifetime::Detached,
         ))
         .await
         .expect("mutate the formerly missing target after the recorded refusal");
@@ -717,10 +708,7 @@ async fn retry_drains_only_the_final_attempts_intents() {
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
-                crate::ProcessLifecyclePolicy::new(
-                    crate::ParentScope::Host,
-                    crate::OnParentEnd::Abandon,
-                ),
+                crate::Lifetime::Detached,
             )
             .with_extra_event_types([crate::ProcessEventType {
                 name: "attempt.retry.final".to_string(),

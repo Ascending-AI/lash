@@ -208,10 +208,7 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
                 // recover an input it does not own.
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             ),
             std::slice::from_ref(&session_id),
         )

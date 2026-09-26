@@ -1,4 +1,5 @@
 use super::*;
+use lash_core_execution::ScopeId;
 
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
@@ -34,21 +35,24 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                         ));
                     }
                     let registration = prepare_process_registration(registration)?;
-                    // Late-registration fencing: a `Cancel` child whose parent
-                    // scope already has a ledger row can never be swept, so it
-                    // is refused here rather than left to outlive its parent.
-                    if registration.lifecycle.on_parent_end
-                        == lash_core_execution::OnParentEnd::Cancel
-                        && !matches!(
-                            registration.lifecycle.parent,
-                            lash_core_execution::ParentScope::Host
-                        )
-                        && super::parent_end::plan_exists_conn(tx, &registration.lifecycle.parent)?
+                    // Admission against closure (FIG-3607 R11): a new start is
+                    // refused once its starter has ended, whatever its own
+                    // lifetime, and once the scope its lifetime names has
+                    // closed. Both are read in this transaction, so a start
+                    // racing a close either commits first and is swept, or
+                    // sees the row and is refused.
+                    for scope in registration
+                        .ancestry
+                        .starter()
+                        .into_iter()
+                        .chain(registration.lifetime.scope())
                     {
-                        return Err(lash_core_execution::PluginError::ParentEnded {
-                            start_key: registration.start_key.clone(),
-                            parent: registration.lifecycle.parent.clone(),
-                        });
+                        if super::parent_end::plan_exists_conn(tx, scope)? {
+                            return Err(lash_core_execution::PluginError::ParentEnded {
+                                start_key: registration.start_key.clone(),
+                                parent: scope.clone(),
+                            });
+                        }
                     }
                     // Minted only once the start is admitted, so no refusal
                     // names an id that was never registered.
@@ -74,9 +78,9 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                             record.last_event_sequence as i64,
                             change_seq as i64,
                             process_status_label(&record),
-                            record.lifecycle.parent.storage_kind(),
-                            record.lifecycle.parent.storage_id(),
-                            record.lifecycle.on_parent_end.storage_label(),
+                            record.lifetime.scope().map(ScopeId::storage_kind),
+                            record.lifetime.scope().map(ScopeId::storage_id),
+                            record.lifetime.storage_label(),
                             cancel_requested_at_ms(&record),
                             process_encode_json(&record)?,
                         ],

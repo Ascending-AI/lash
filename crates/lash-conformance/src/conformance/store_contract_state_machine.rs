@@ -567,10 +567,7 @@ fn registration(
         },
         disposition,
         ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_max_attempts(Some(max_attempts))
     .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(

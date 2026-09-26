@@ -729,7 +729,7 @@
       "observed": {
         "active_turn_id": "session-001:provider:001",
         "ingress_mode": "active_turn",
-        "input_id": "ti:7fb2c11656018951ff792dd5b20c0fe1b79503ff7fc8308064981a0d1d063ec9",
+        "input_id": "ti:0b33694cd575a219e1be7324a3b31735953174f159c1718dcfadc2a30592f314",
         "input_state": "pending_active",
         "queued_ingress": true,
         "session": "session-001",
@@ -1543,7 +1543,7 @@
       "observed": {
         "active_turn_id": null,
         "ingress_mode": "next_turn",
-        "input_id": "ti:21ab8701874e5fd6592414b3f6f702d11fafe287549d095cecfe2d073df39f26",
+        "input_id": "ti:a49a147a1d9e9a3e649059bb7f8bd92b3985513875453bc3061b91c0be94e0e1",
         "input_state": "deferred_next_turn",
         "queued_ingress": true,
         "session": "session-002",
@@ -1719,7 +1719,7 @@
       "observed": {
         "active_turn_id": "session-003:provider:001",
         "ingress_mode": "active_turn",
-        "input_id": "ti:40956450849f25c076eda887042509ae789ca126e930d4a70819a12054ab8206",
+        "input_id": "ti:225bbde220097c7a0cef07133b9bc15e719c7c49b4433582cc9f3d7a969c6f47",
         "input_state": "pending_active",
         "queued_ingress": true,
         "session": "session-003",
@@ -4399,11 +4399,8 @@
                         },
                         "type": "external"
                       },
-                      "lifecycle": {
-                        "on_parent_end": "abandon",
-                        "parent": {
-                          "kind": "host"
-                        }
+                      "lifetime": {
+                        "lifetime": "detached"
                       },
                       "originator": {
                         "scope": "lash-sim-durable-effect",
@@ -6986,11 +6983,8 @@
                         },
                         "type": "external"
                       },
-                      "lifecycle": {
-                        "on_parent_end": "abandon",
-                        "parent": {
-                          "kind": "host"
-                        }
+                      "lifetime": {
+                        "lifetime": "detached"
                       },
                       "originator": {
                         "scope": "lash-sim-durable-effect",
@@ -8547,11 +8541,8 @@
                         },
                         "type": "external"
                       },
-                      "lifecycle": {
-                        "on_parent_end": "abandon",
-                        "parent": {
-                          "kind": "host"
-                        }
+                      "lifetime": {
+                        "lifetime": "detached"
                       },
                       "originator": {
                         "scope": "lash-sim-durable-effect",
@@ -9814,11 +9805,8 @@
                         },
                         "type": "external"
                       },
-                      "lifecycle": {
-                        "on_parent_end": "abandon",
-                        "parent": {
-                          "kind": "host"
-                        }
+                      "lifetime": {
+                        "lifetime": "detached"
                       },
                       "originator": {
                         "scope": "lash-sim-durable-effect",
@@ -17586,7 +17574,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:22.674531744+00:00"
+              "timestamp": "2026-09-26T12:39:57.320494398+00:00"
             },
             {
               "event": {
@@ -17695,7 +17683,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:22.674531744+00:00"
+              "timestamp": "2026-09-26T12:39:57.320494398+00:00"
             },
             {
               "event": {
@@ -17912,7 +17900,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:28.956081185+00:00"
+              "timestamp": "2026-09-26T12:39:58.511974473+00:00"
             },
             {
               "event": {
@@ -18071,7 +18059,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:28.956081185+00:00"
+              "timestamp": "2026-09-26T12:39:58.511974473+00:00"
             },
             {
               "event": {
@@ -18326,7 +18314,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:29.413723015+00:00"
+              "timestamp": "2026-09-26T12:39:58.594399647+00:00"
             },
             {
               "event": {
@@ -18489,7 +18477,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:29.413723015+00:00"
+              "timestamp": "2026-09-26T12:39:58.594399647+00:00"
             },
             {
               "event": {
@@ -18748,7 +18736,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:30.651347335+00:00"
+              "timestamp": "2026-09-26T12:39:58.762140285+00:00"
             },
             {
               "event": {
@@ -18909,7 +18897,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:30.651347335+00:00"
+              "timestamp": "2026-09-26T12:39:58.762140285+00:00"
             },
             {
               "event": {
@@ -19501,7 +19489,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:32.405840440+00:00"
+              "timestamp": "2026-09-26T12:39:58.925940758+00:00"
             },
             {
               "event": {
@@ -19664,7 +19652,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:32.405840440+00:00"
+              "timestamp": "2026-09-26T12:39:58.925940758+00:00"
             },
             {
               "event": {
@@ -19919,7 +19907,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:35.012201450+00:00"
+              "timestamp": "2026-09-26T12:39:59.265040424+00:00"
             },
             {
               "event": {
@@ -20082,7 +20070,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:35.012201450+00:00"
+              "timestamp": "2026-09-26T12:39:59.265040424+00:00"
             },
             {
               "event": {
@@ -20337,7 +20325,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:36.154064858+00:00"
+              "timestamp": "2026-09-26T12:39:59.478644501+00:00"
             },
             {
               "event": {
@@ -20500,7 +20488,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:36.154064858+00:00"
+              "timestamp": "2026-09-26T12:39:59.478644501+00:00"
             },
             {
               "event": {
@@ -21058,7 +21046,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:36.951577152+00:00"
+              "timestamp": "2026-09-26T12:39:59.608622585+00:00"
             },
             {
               "event": {
@@ -21217,7 +21205,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:36.951577152+00:00"
+              "timestamp": "2026-09-26T12:39:59.608622585+00:00"
             },
             {
               "event": {
@@ -21466,7 +21454,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:39.007484178+00:00"
+              "timestamp": "2026-09-26T12:39:59.869089393+00:00"
             },
             {
               "event": {
@@ -21640,7 +21628,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:39.007484178+00:00"
+              "timestamp": "2026-09-26T12:39:59.869089393+00:00"
             },
             {
               "event": {
@@ -21902,7 +21890,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:40.002586668+00:00"
+              "timestamp": "2026-09-26T12:40:00.060119629+00:00"
             },
             {
               "event": {
@@ -22072,7 +22060,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:40.002586668+00:00"
+              "timestamp": "2026-09-26T12:40:00.060119629+00:00"
             },
             {
               "event": {
@@ -22386,7 +22374,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:22.674531744+00:00"
+              "timestamp": "2026-09-26T12:39:57.320494398+00:00"
             },
             {
               "event": {
@@ -23519,7 +23507,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:22.753705128+00:00"
+              "timestamp": "2026-09-26T12:39:57.345499235+00:00"
             },
             {
               "event": {
@@ -23638,7 +23626,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:22.753705128+00:00"
+              "timestamp": "2026-09-26T12:39:57.345499235+00:00"
             },
             {
               "event": {
@@ -23871,7 +23859,7 @@
               "kind": "event",
               "node_id": "n_7672595bed029bfb8068b11c4321b0365161729a3d20990a148173686bbf1b7e",
               "parent_node_id": "n_a85889bfd198034dff6a8fcee95009deff18955306e1334e7e0fc760da3ed5b7",
-              "timestamp": "2027-01-15T08:00:02.728+00:00"
+              "timestamp": "2027-01-15T08:00:00.638+00:00"
             }
           ]
         },
@@ -23937,7 +23925,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:22.753705128+00:00"
+              "timestamp": "2026-09-26T12:39:57.345499235+00:00"
             },
             {
               "event": {
@@ -24043,7 +24031,7 @@
               "kind": "event",
               "node_id": "n_7672595bed029bfb8068b11c4321b0365161729a3d20990a148173686bbf1b7e",
               "parent_node_id": "n_a85889bfd198034dff6a8fcee95009deff18955306e1334e7e0fc760da3ed5b7",
-              "timestamp": "2027-01-15T08:00:02.728+00:00"
+              "timestamp": "2027-01-15T08:00:00.638+00:00"
             }
           ],
           "token_ledger": [
@@ -24249,7 +24237,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:22.820036851+00:00"
+              "timestamp": "2026-09-26T12:39:57.376075896+00:00"
             },
             {
               "event": {
@@ -24358,7 +24346,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:22.820036851+00:00"
+              "timestamp": "2026-09-26T12:39:57.376075896+00:00"
             },
             {
               "event": {
@@ -24561,7 +24549,7 @@
               "kind": "event",
               "node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
               "parent_node_id": "n_92b4ec69cdcbb9ec8ab6efd733263589a1657879d4e9861876496640b014df7a",
-              "timestamp": "2027-01-15T08:00:02.728+00:00"
+              "timestamp": "2027-01-15T08:00:00.638+00:00"
             }
           ]
         },
@@ -24627,7 +24615,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:22.820036851+00:00"
+              "timestamp": "2026-09-26T12:39:57.376075896+00:00"
             },
             {
               "event": {
@@ -24713,7 +24701,7 @@
               "kind": "event",
               "node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
               "parent_node_id": "n_92b4ec69cdcbb9ec8ab6efd733263589a1657879d4e9861876496640b014df7a",
-              "timestamp": "2027-01-15T08:00:02.728+00:00"
+              "timestamp": "2027-01-15T08:00:00.638+00:00"
             }
           ],
           "token_ledger": [
@@ -24881,7 +24869,7 @@
               "kind": "event",
               "node_id": "n_5a4208b9b28ceade3741adee646095bbb5355bdd47d556a1d8018c9af66d2698",
               "parent_node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
-              "timestamp": "2027-01-15T08:00:02.728+00:00"
+              "timestamp": "2027-01-15T08:00:00.638+00:00"
             },
             {
               "event": {
@@ -24900,7 +24888,7 @@
               "kind": "event",
               "node_id": "n_c0c71a9bb847ab472abefba00a4caaf91232ad5aee6c9efdb5cc20b38f1dc25f",
               "parent_node_id": "n_5a4208b9b28ceade3741adee646095bbb5355bdd47d556a1d8018c9af66d2698",
-              "timestamp": "2027-01-15T08:00:03.889+00:00"
+              "timestamp": "2027-01-15T08:00:00.820+00:00"
             }
           ]
         },
@@ -24966,7 +24954,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:22.820036851+00:00"
+              "timestamp": "2026-09-26T12:39:57.376075896+00:00"
             },
             {
               "event": {
@@ -25052,7 +25040,7 @@
               "kind": "event",
               "node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
               "parent_node_id": "n_92b4ec69cdcbb9ec8ab6efd733263589a1657879d4e9861876496640b014df7a",
-              "timestamp": "2027-01-15T08:00:02.728+00:00"
+              "timestamp": "2027-01-15T08:00:00.638+00:00"
             },
             {
               "event": {
@@ -25076,7 +25064,7 @@
               "kind": "event",
               "node_id": "n_5a4208b9b28ceade3741adee646095bbb5355bdd47d556a1d8018c9af66d2698",
               "parent_node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
-              "timestamp": "2027-01-15T08:00:02.728+00:00"
+              "timestamp": "2027-01-15T08:00:00.638+00:00"
             },
             {
               "event": {
@@ -25095,7 +25083,7 @@
               "kind": "event",
               "node_id": "n_c0c71a9bb847ab472abefba00a4caaf91232ad5aee6c9efdb5cc20b38f1dc25f",
               "parent_node_id": "n_5a4208b9b28ceade3741adee646095bbb5355bdd47d556a1d8018c9af66d2698",
-              "timestamp": "2027-01-15T08:00:03.889+00:00"
+              "timestamp": "2027-01-15T08:00:00.820+00:00"
             }
           ],
           "token_ledger": [
@@ -25308,7 +25296,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:22.883994236+00:00"
+              "timestamp": "2026-09-26T12:39:57.402113877+00:00"
             },
             {
               "event": {
@@ -25417,7 +25405,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:22.883994236+00:00"
+              "timestamp": "2026-09-26T12:39:57.402113877+00:00"
             },
             {
               "event": {
@@ -25620,7 +25608,7 @@
               "kind": "event",
               "node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
               "parent_node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
-              "timestamp": "2027-01-15T08:00:02.728+00:00"
+              "timestamp": "2027-01-15T08:00:00.638+00:00"
             }
           ]
         },
@@ -25686,7 +25674,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:22.883994236+00:00"
+              "timestamp": "2026-09-26T12:39:57.402113877+00:00"
             },
             {
               "event": {
@@ -25772,7 +25760,7 @@
               "kind": "event",
               "node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
               "parent_node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
-              "timestamp": "2027-01-15T08:00:02.728+00:00"
+              "timestamp": "2027-01-15T08:00:00.638+00:00"
             }
           ],
           "token_ledger": [
@@ -25940,7 +25928,7 @@
               "kind": "event",
               "node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
               "parent_node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
-              "timestamp": "2027-01-15T08:00:02.728+00:00"
+              "timestamp": "2027-01-15T08:00:00.638+00:00"
             },
             {
               "event": {
@@ -25959,7 +25947,7 @@
               "kind": "event",
               "node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
               "parent_node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
-              "timestamp": "2027-01-15T08:00:03.889+00:00"
+              "timestamp": "2027-01-15T08:00:00.820+00:00"
             }
           ]
         },
@@ -26025,7 +26013,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:22.883994236+00:00"
+              "timestamp": "2026-09-26T12:39:57.402113877+00:00"
             },
             {
               "event": {
@@ -26111,7 +26099,7 @@
               "kind": "event",
               "node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
               "parent_node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
-              "timestamp": "2027-01-15T08:00:02.728+00:00"
+              "timestamp": "2027-01-15T08:00:00.638+00:00"
             },
             {
               "event": {
@@ -26135,7 +26123,7 @@
               "kind": "event",
               "node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
               "parent_node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
-              "timestamp": "2027-01-15T08:00:02.728+00:00"
+              "timestamp": "2027-01-15T08:00:00.638+00:00"
             },
             {
               "event": {
@@ -26154,7 +26142,7 @@
               "kind": "event",
               "node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
               "parent_node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
-              "timestamp": "2027-01-15T08:00:03.889+00:00"
+              "timestamp": "2027-01-15T08:00:00.820+00:00"
             }
           ],
           "token_ledger": [
@@ -26349,7 +26337,7 @@
               "kind": "event",
               "node_id": "n_4685b079ab678bbef20a3e35b0feb6e1ec8a446753c2dc2a3788a4d563f06bdb",
               "parent_node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
-              "timestamp": "2027-01-15T08:00:03.889+00:00"
+              "timestamp": "2027-01-15T08:00:00.820+00:00"
             },
             {
               "event": {
@@ -26368,7 +26356,7 @@
               "kind": "event",
               "node_id": "n_3c1b0d3e5a7a05994e5912786f2c6b052de8c8b785c04b0db48abfe169ebbc50",
               "parent_node_id": "n_4685b079ab678bbef20a3e35b0feb6e1ec8a446753c2dc2a3788a4d563f06bdb",
-              "timestamp": "2027-01-15T08:00:04.747+00:00"
+              "timestamp": "2027-01-15T08:00:00.938+00:00"
             }
           ]
         },
@@ -26434,7 +26422,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:22.883994236+00:00"
+              "timestamp": "2026-09-26T12:39:57.402113877+00:00"
             },
             {
               "event": {
@@ -26520,7 +26508,7 @@
               "kind": "event",
               "node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
               "parent_node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
-              "timestamp": "2027-01-15T08:00:02.728+00:00"
+              "timestamp": "2027-01-15T08:00:00.638+00:00"
             },
             {
               "event": {
@@ -26544,7 +26532,7 @@
               "kind": "event",
               "node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
               "parent_node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
-              "timestamp": "2027-01-15T08:00:02.728+00:00"
+              "timestamp": "2027-01-15T08:00:00.638+00:00"
             },
             {
               "event": {
@@ -26563,7 +26551,7 @@
               "kind": "event",
               "node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
               "parent_node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
-              "timestamp": "2027-01-15T08:00:03.889+00:00"
+              "timestamp": "2027-01-15T08:00:00.820+00:00"
             },
             {
               "event": {
@@ -26587,7 +26575,7 @@
               "kind": "event",
               "node_id": "n_4685b079ab678bbef20a3e35b0feb6e1ec8a446753c2dc2a3788a4d563f06bdb",
               "parent_node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
-              "timestamp": "2027-01-15T08:00:03.889+00:00"
+              "timestamp": "2027-01-15T08:00:00.820+00:00"
             },
             {
               "event": {
@@ -26606,7 +26594,7 @@
               "kind": "event",
               "node_id": "n_3c1b0d3e5a7a05994e5912786f2c6b052de8c8b785c04b0db48abfe169ebbc50",
               "parent_node_id": "n_4685b079ab678bbef20a3e35b0feb6e1ec8a446753c2dc2a3788a4d563f06bdb",
-              "timestamp": "2027-01-15T08:00:04.747+00:00"
+              "timestamp": "2027-01-15T08:00:00.938+00:00"
             }
           ],
           "token_ledger": [
@@ -26850,7 +26838,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:23.028282343+00:00"
+              "timestamp": "2026-09-26T12:39:57.440560779+00:00"
             },
             {
               "event": {
@@ -26895,7 +26883,7 @@
               "kind": "event",
               "node_id": "n_c8be6696dd3f59bb15c4c4bb9186403e03871e44ea17d639e69bf4f8a6ba7581",
               "parent_node_id": "n_270eccff0ba95d649c0ca05487d60c80587269c1fa55f7fd6669a941cc0d50db",
-              "timestamp": "2027-01-15T08:00:04.994+00:00"
+              "timestamp": "2027-01-15T08:00:00.988+00:00"
             },
             {
               "event": {
@@ -26921,7 +26909,7 @@
               "kind": "event",
               "node_id": "n_58cd8b1f4bd9a387252840a0dc7a90c9c4da825d3cacf869b2a200b3c3711a6c",
               "parent_node_id": "n_c8be6696dd3f59bb15c4c4bb9186403e03871e44ea17d639e69bf4f8a6ba7581",
-              "timestamp": "2027-01-15T08:00:04.994+00:00"
+              "timestamp": "2027-01-15T08:00:00.988+00:00"
             },
             {
               "event": {
@@ -26940,7 +26928,7 @@
               "kind": "event",
               "node_id": "n_3959d4d6e9b55560cdcb325721e1ba83be72da0a5840d9e3ea6875547c7d2a19",
               "parent_node_id": "n_58cd8b1f4bd9a387252840a0dc7a90c9c4da825d3cacf869b2a200b3c3711a6c",
-              "timestamp": "2027-01-15T08:00:04.994+00:00"
+              "timestamp": "2027-01-15T08:00:00.988+00:00"
             }
           ]
         },
@@ -26987,7 +26975,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:23.028282343+00:00"
+              "timestamp": "2026-09-26T12:39:57.440560779+00:00"
             },
             {
               "event": {
@@ -27032,7 +27020,7 @@
               "kind": "event",
               "node_id": "n_c8be6696dd3f59bb15c4c4bb9186403e03871e44ea17d639e69bf4f8a6ba7581",
               "parent_node_id": "n_270eccff0ba95d649c0ca05487d60c80587269c1fa55f7fd6669a941cc0d50db",
-              "timestamp": "2027-01-15T08:00:04.994+00:00"
+              "timestamp": "2027-01-15T08:00:00.988+00:00"
             },
             {
               "event": {
@@ -27058,7 +27046,7 @@
               "kind": "event",
               "node_id": "n_58cd8b1f4bd9a387252840a0dc7a90c9c4da825d3cacf869b2a200b3c3711a6c",
               "parent_node_id": "n_c8be6696dd3f59bb15c4c4bb9186403e03871e44ea17d639e69bf4f8a6ba7581",
-              "timestamp": "2027-01-15T08:00:04.994+00:00"
+              "timestamp": "2027-01-15T08:00:00.988+00:00"
             },
             {
               "event": {
@@ -27077,7 +27065,7 @@
               "kind": "event",
               "node_id": "n_3959d4d6e9b55560cdcb325721e1ba83be72da0a5840d9e3ea6875547c7d2a19",
               "parent_node_id": "n_58cd8b1f4bd9a387252840a0dc7a90c9c4da825d3cacf869b2a200b3c3711a6c",
-              "timestamp": "2027-01-15T08:00:04.994+00:00"
+              "timestamp": "2027-01-15T08:00:00.988+00:00"
             }
           ],
           "token_ledger": [],
@@ -27252,7 +27240,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:23.094137228+00:00"
+              "timestamp": "2026-09-26T12:39:57.483568455+00:00"
             },
             {
               "event": {
@@ -27297,7 +27285,7 @@
               "kind": "event",
               "node_id": "n_fb621545030c058fda0d4f6bc2749a8fcd4f5a8be261c4a6f5b169fd7a886c7b",
               "parent_node_id": "n_ccc2ad193b10f29f3e638a7a75cccf47bf4d8f0d9caf5c9b4451d2fc28dffc69",
-              "timestamp": "2027-01-15T08:00:04.994+00:00"
+              "timestamp": "2027-01-15T08:00:00.988+00:00"
             },
             {
               "event": {
@@ -27323,7 +27311,7 @@
               "kind": "event",
               "node_id": "n_e23c0f48c12a2d00e317af16e81606c4fe565484096772239f3e367590dc9ace",
               "parent_node_id": "n_fb621545030c058fda0d4f6bc2749a8fcd4f5a8be261c4a6f5b169fd7a886c7b",
-              "timestamp": "2027-01-15T08:00:04.994+00:00"
+              "timestamp": "2027-01-15T08:00:00.988+00:00"
             },
             {
               "event": {
@@ -27342,7 +27330,7 @@
               "kind": "event",
               "node_id": "n_31dea96e0b9842837e784ee3677941527d5909425d9440993836dc3062bb29e5",
               "parent_node_id": "n_e23c0f48c12a2d00e317af16e81606c4fe565484096772239f3e367590dc9ace",
-              "timestamp": "2027-01-15T08:00:04.994+00:00"
+              "timestamp": "2027-01-15T08:00:00.988+00:00"
             }
           ]
         },
@@ -27389,7 +27377,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:23.094137228+00:00"
+              "timestamp": "2026-09-26T12:39:57.483568455+00:00"
             },
             {
               "event": {
@@ -27434,7 +27422,7 @@
               "kind": "event",
               "node_id": "n_fb621545030c058fda0d4f6bc2749a8fcd4f5a8be261c4a6f5b169fd7a886c7b",
               "parent_node_id": "n_ccc2ad193b10f29f3e638a7a75cccf47bf4d8f0d9caf5c9b4451d2fc28dffc69",
-              "timestamp": "2027-01-15T08:00:04.994+00:00"
+              "timestamp": "2027-01-15T08:00:00.988+00:00"
             },
             {
               "event": {
@@ -27460,7 +27448,7 @@
               "kind": "event",
               "node_id": "n_e23c0f48c12a2d00e317af16e81606c4fe565484096772239f3e367590dc9ace",
               "parent_node_id": "n_fb621545030c058fda0d4f6bc2749a8fcd4f5a8be261c4a6f5b169fd7a886c7b",
-              "timestamp": "2027-01-15T08:00:04.994+00:00"
+              "timestamp": "2027-01-15T08:00:00.988+00:00"
             },
             {
               "event": {
@@ -27479,7 +27467,7 @@
               "kind": "event",
               "node_id": "n_31dea96e0b9842837e784ee3677941527d5909425d9440993836dc3062bb29e5",
               "parent_node_id": "n_e23c0f48c12a2d00e317af16e81606c4fe565484096772239f3e367590dc9ace",
-              "timestamp": "2027-01-15T08:00:04.994+00:00"
+              "timestamp": "2027-01-15T08:00:00.988+00:00"
             }
           ],
           "token_ledger": [],
@@ -27654,7 +27642,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:22.929513760+00:00"
+              "timestamp": "2026-09-26T12:39:57.429057792+00:00"
             },
             {
               "event": {
@@ -27699,7 +27687,7 @@
               "kind": "event",
               "node_id": "n_95f2e43ca2ffd8c9997355c3a985971f02f1be771128f12a44dcf26aaba10573",
               "parent_node_id": "n_808f443440c2b4e6259cf792f26133b585c444d27be079000d531c5857ab4f66",
-              "timestamp": "2027-01-15T08:00:04.994+00:00"
+              "timestamp": "2027-01-15T08:00:00.988+00:00"
             },
             {
               "event": {
@@ -27725,7 +27713,7 @@
               "kind": "event",
               "node_id": "n_6f4e33c379e9e6873025c0065fb4bbb63755c00b98a90fd6f2897197e144c4c5",
               "parent_node_id": "n_95f2e43ca2ffd8c9997355c3a985971f02f1be771128f12a44dcf26aaba10573",
-              "timestamp": "2027-01-15T08:00:04.994+00:00"
+              "timestamp": "2027-01-15T08:00:00.988+00:00"
             },
             {
               "event": {
@@ -27744,7 +27732,7 @@
               "kind": "event",
               "node_id": "n_4b710976f683da656774dc15a7f0c8e781f1d4eb5f066edf4b4e2adb110c24e4",
               "parent_node_id": "n_6f4e33c379e9e6873025c0065fb4bbb63755c00b98a90fd6f2897197e144c4c5",
-              "timestamp": "2027-01-15T08:00:04.994+00:00"
+              "timestamp": "2027-01-15T08:00:00.988+00:00"
             }
           ]
         },
@@ -27791,7 +27779,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T07:31:22.929513760+00:00"
+              "timestamp": "2026-09-26T12:39:57.429057792+00:00"
             },
             {
               "event": {
@@ -27836,7 +27824,7 @@
               "kind": "event",
               "node_id": "n_95f2e43ca2ffd8c9997355c3a985971f02f1be771128f12a44dcf26aaba10573",
               "parent_node_id": "n_808f443440c2b4e6259cf792f26133b585c444d27be079000d531c5857ab4f66",
-              "timestamp": "2027-01-15T08:00:04.994+00:00"
+              "timestamp": "2027-01-15T08:00:00.988+00:00"
             },
             {
               "event": {
@@ -27862,7 +27850,7 @@
               "kind": "event",
               "node_id": "n_6f4e33c379e9e6873025c0065fb4bbb63755c00b98a90fd6f2897197e144c4c5",
               "parent_node_id": "n_95f2e43ca2ffd8c9997355c3a985971f02f1be771128f12a44dcf26aaba10573",
-              "timestamp": "2027-01-15T08:00:04.994+00:00"
+              "timestamp": "2027-01-15T08:00:00.988+00:00"
             },
             {
               "event": {
@@ -27881,7 +27869,7 @@
               "kind": "event",
               "node_id": "n_4b710976f683da656774dc15a7f0c8e781f1d4eb5f066edf4b4e2adb110c24e4",
               "parent_node_id": "n_6f4e33c379e9e6873025c0065fb4bbb63755c00b98a90fd6f2897197e144c4c5",
-              "timestamp": "2027-01-15T08:00:04.994+00:00"
+              "timestamp": "2027-01-15T08:00:00.988+00:00"
             }
           ],
           "token_ledger": [],

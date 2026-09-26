@@ -57,6 +57,7 @@ fn live_context() -> LiveOpenerContext {
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: Arc::new(crate::SystemClock),
+        process_lineage: None,
     };
     let lent_controller = dispatch
         .effect_controller

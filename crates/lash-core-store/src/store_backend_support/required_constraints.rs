@@ -481,39 +481,26 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         &[SqliteConstraintDatabase::ProcessRegistry],
         rendered(
             "processes",
-            "ck_processes_parent_scope_kind",
-            "parent_scope_kind IN ('turn', 'queue_drain', 'process', 'host')",
+            "ck_processes_lifetime",
+            "lifetime IN ('until', 'detached')",
         ),
         rendered(
             "lash_processes",
-            "ck_processes_parent_scope_kind",
-            "parent_scope_kind IN ('turn', 'queue_drain', 'process', 'host')",
+            "ck_processes_lifetime",
+            "lifetime IN ('until', 'detached')",
         ),
     ),
     expected_constraint(
         &[SqliteConstraintDatabase::ProcessRegistry],
         rendered(
             "processes",
-            "ck_processes_parent_scope_id",
-            "(parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'queue_drain', 'process') AND parent_scope_id IS NOT NULL)",
+            "ck_processes_lifetime_scope",
+            "(lifetime = 'detached' AND lifetime_scope_kind IS NULL AND lifetime_scope_id IS NULL) OR (lifetime = 'until' AND lifetime_scope_kind IN ('turn', 'queue_drain', 'process', 'session') AND lifetime_scope_id IS NOT NULL)",
         ),
         rendered(
             "lash_processes",
-            "ck_processes_parent_scope_id",
-            "(parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'queue_drain', 'process') AND parent_scope_id IS NOT NULL)",
-        ),
-    ),
-    expected_constraint(
-        &[SqliteConstraintDatabase::ProcessRegistry],
-        rendered(
-            "processes",
-            "ck_processes_on_parent_end",
-            "on_parent_end IN ('abandon', 'cancel')",
-        ),
-        rendered(
-            "lash_processes",
-            "ck_processes_on_parent_end",
-            "on_parent_end IN ('abandon', 'cancel')",
+            "ck_processes_lifetime_scope",
+            "(lifetime = 'detached' AND lifetime_scope_kind IS NULL AND lifetime_scope_id IS NULL) OR (lifetime = 'until' AND lifetime_scope_kind IN ('turn', 'queue_drain', 'process', 'session') AND lifetime_scope_id IS NOT NULL)",
         ),
     ),
     expected_constraint(
@@ -521,12 +508,12 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         rendered(
             "parent_end_plans",
             "ck_parent_end_plans_kind",
-            "parent_kind IN ('turn', 'queue_drain', 'process')",
+            "parent_kind IN ('turn', 'queue_drain', 'process', 'session')",
         ),
         rendered(
             "lash_parent_end_plans",
             "ck_parent_end_plans_kind",
-            "parent_kind IN ('turn', 'queue_drain', 'process')",
+            "parent_kind IN ('turn', 'queue_drain', 'process', 'session')",
         ),
     ),
     expected_constraint(

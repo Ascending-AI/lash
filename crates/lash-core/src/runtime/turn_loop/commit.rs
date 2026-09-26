@@ -590,7 +590,6 @@ impl LashRuntime {
             self.resident_session
                 .record_committed_observation_turn(observation_revision.as_u64(), &trace_turn_id);
             self.emit_completed_turn_trace(&assembled.state, &assembled.outcome, &trace_turn_id);
-            self.record_turn_parent_end(&trace_turn_id).await?;
             observer.published().await;
             publish_terminal_after_commit(
                 turn_control,
@@ -850,7 +849,6 @@ impl LashRuntime {
             }
         };
         self.mark_phase_end(PreparedTurn::RUNTIME_PHASE);
-        self.record_turn_parent_end(&trace_turn_id).await?;
         self.mark_phase_begin(CommittedTurn::RUNTIME_PHASE);
         let mut delivery = committed
             .adopt(self, &trace_turn_id, session_execution_lease)
@@ -1050,34 +1048,6 @@ impl LashRuntime {
             observer,
         }))
         .await
-    }
-
-    /// The ledger row is the whole parent-end fact: the work it names — the
-    /// query for this turn's `Cancel` children and their cancels — is the
-    /// process worker's sweep. The row is written here, immediately after the
-    /// turn's own commit succeeds, as its own idempotent registry write rather
-    /// than inside the turn-commit transaction: the turn commits to the session
-    /// store and the ledger lives in the process registry, which is a separate
-    /// store on every tier (a separate attached database on SQLite, a separate
-    /// `ProcessRegistry` handle in the runtime host). Ordering it after the
-    /// commit is what makes the row mean "this turn ended": a turn that fails
-    /// to commit may be redriven, and a row written before the commit would
-    /// cancel the children of a turn that is about to run again. The gap that
-    /// leaves — committed, then a crash before the row — is closed by recovery,
-    /// which re-derives a missing row from a committed terminal turn, and it can
-    /// only delay settlement: a child that registered before the row is swept
-    /// when the row arrives, and a child that registers after it is refused. No
-    /// interleaving lets a `Cancel` child outlive its turn.
-    async fn record_turn_parent_end(&self, turn_id: &TurnId) -> Result<(), RuntimeError> {
-        let _phase =
-            super::RuntimeNamedPhase::begin(self.turn_phase_probe.clone(), "turn.parent_end");
-        let Some(registry) = self.host.process_registry() else {
-            return Ok(());
-        };
-        let parent = crate::ParentScope::turn(self.state.session_id.clone(), turn_id.clone());
-        registry.record_parent_end(&parent).await.map_err(|error| {
-            RuntimeError::new(RuntimeErrorCode::PluginSessionManager, error.to_string())
-        })
     }
 
     fn emit_completed_turn_trace(

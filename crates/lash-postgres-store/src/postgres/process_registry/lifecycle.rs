@@ -141,7 +141,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
 
     async fn record_parent_end(
         &self,
-        parent: &lash_core_execution::ParentScope,
+        parent: &lash_core_execution::ScopeId,
     ) -> Result<(), PluginError> {
         parent_end::record(
             &self.pool,
@@ -161,14 +161,14 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
 
     async fn get_parent_end_plan(
         &self,
-        parent: &lash_core_execution::ParentScope,
+        parent: &lash_core_execution::ScopeId,
     ) -> Result<Option<lash_core_execution::ParentEndPlan>, PluginError> {
         parent_end::get(&self.pool, parent, self.fleet_format).await
     }
 
     async fn list_parent_end_children(
         &self,
-        parent: &lash_core_execution::ParentScope,
+        parent: &lash_core_execution::ScopeId,
         after: Option<&ProcessId>,
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<ProcessRecord>, PluginError> {
@@ -177,7 +177,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
 
     async fn settle_parent_end_plan(
         &self,
-        parent: &lash_core_execution::ParentScope,
+        parent: &lash_core_execution::ScopeId,
     ) -> Result<(), PluginError> {
         parent_end::settle(&self.pool, parent, self.clock.timestamp_ms()).await
     }
@@ -186,7 +186,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         &self,
         after: Option<&str>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::ParentScope>, PluginError> {
+    ) -> Result<Vec<lash_core_execution::ScopeId>, PluginError> {
         parent_end::list_unrecorded_opener_parents(&self.pool, after, limit).await
     }
 

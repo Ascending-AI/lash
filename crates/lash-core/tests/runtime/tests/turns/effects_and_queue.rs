@@ -73,10 +73,7 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::session(target_scope.clone()),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_extra_event_types([process_wake_event_type()])
             .with_wake_session_id(Some(target_scope.session_id.clone())),
@@ -2103,10 +2100,7 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::session(target_scope.clone())
                     .with_caused_by(Some(process_caused_by.clone())),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_extra_event_types([process_wake_event_type()])
             .with_wake_session_id(Some(target_scope.session_id.clone())),

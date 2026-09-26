@@ -624,39 +624,47 @@ fn process_start_requests_round_trip_core_values() {
     let external = lash_core::ProcessStartRequest::external(
         lash_core::ProcessOriginator::host(),
         serde_json::json!({ "label": "External" }),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_wake_session_id(Some(SessionId::from("session-a".to_string())))
     .with_observers(["session-a".to_string()])
     .with_event_types([process_event_type()]);
     assert_process_start_roundtrip(external.clone());
-    for parent in [
-        lash_core::ParentScope::turn(
+    // A host start's session-lookup grant crosses as `until_session`.
+    let mut until_session = external.clone();
+    until_session.originator =
+        lash_core::ProcessOriginator::session(lash_core::SessionScope::new("session-a"));
+    until_session.lifetime = lash_core::LifetimeDecision::Until {
+        scope: lash_core::ScopeId::Session(SessionId::from("session-a")),
+        grant: lash_core::ScopeGrant::HostSessionLookup,
+    };
+    assert_process_start_roundtrip(until_session);
+    // A runtime start's ancestor grant never crosses the wire as a start.
+    for scope in [
+        lash_core::ScopeId::turn(
             SessionId::from("session-a"),
             lash_core::TurnId::from("turn-a"),
         ),
-        lash_core::ParentScope::queue_drain(SessionId::from("session-a"), "drain-a".to_string()),
-        lash_core::ParentScope::process(lash_sansio::ProcessId::fixture("parent")),
+        lash_core::ScopeId::queue_drain(SessionId::from("session-a"), "drain-a".to_string()),
+        lash_core::ScopeId::process(lash_sansio::ProcessId::fixture("parent")),
+        lash_core::ScopeId::Session(SessionId::from("session-a")),
     ] {
         let mut scoped = external.clone();
-        scoped.originator =
-            lash_core::ProcessOriginator::session(lash_core::SessionScope::new("session-a"));
-        scoped.lifecycle =
-            lash_core::ProcessLifecyclePolicy::new(parent, lash_core::OnParentEnd::Cancel);
-        assert_process_start_roundtrip(scoped);
+        scoped.lifetime = lash_core::LifetimeDecision::Until {
+            scope,
+            grant: lash_core::ScopeGrant::Ancestor,
+        };
+        assert!(
+            RemoteProcessStartRequest::try_from(scoped).is_err(),
+            "an ancestor grant is a runtime fact a remote start cannot request"
+        );
     }
 
     let lashlang = lash_core::ProcessStartRequest::new(
         engine_process_input("main", serde_json::json!({ "event": true })),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::session(lash_core::SessionScope::new("session-a")),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::typed(
@@ -705,10 +713,7 @@ fn process_start_requests_round_trip_core_values() {
         },
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     );
     assert_process_start_roundtrip(session_turn);
 }
@@ -904,7 +909,7 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
         )),
         status: lash_core::ProcessStatusFilter::any_of([lash_core::ProcessStatus::Waiting]),
         originator: Some(lash_core::ProcessOriginatorFilter::session("test")),
-        parent_scope: Some(lash_core::ParentScope::turn(
+        until: Some(lash_core::ScopeId::turn(
             lash_sansio::SessionId::from("test".to_string()),
             lash_core::TurnId::from("turn-1".to_string()),
         )),
@@ -922,7 +927,7 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     let core = lash_core::ProcessListFilter::try_from(remote).expect("core filter");
     assert_eq!(core.status, filter.status);
     assert_eq!(core.originator, filter.originator);
-    assert_eq!(core.parent_scope, filter.parent_scope);
+    assert_eq!(core.until, filter.until);
     assert_eq!(
         core.cancel_pending_before_ms,
         filter.cancel_pending_before_ms
@@ -2097,10 +2102,7 @@ fn a_remote_start_key_is_scoped_to_its_originator_and_never_rehashed() {
             RemoteProcessStartRequest::try_from(lash_core::ProcessStartRequest::external(
                 lash_core::ProcessOriginator::session(lash_core::SessionScope::new(session)),
                 serde_json::json!({ "label": "External" }),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             ))
             .expect("remote start");
         remote.start_key = Some(start_key.to_string());

@@ -531,7 +531,7 @@ pub fn build_e2e_core(config: E2eCoreConfig) -> Result<lash::LashCore> {
         // (ADR 0095): the scripted programs this harness serves author
         // `processes.start`, `processes.await` and `processes.emit`.
         .plugin(Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
         ))
         .plugin(Arc::new(E2ePluginFactory {
             pool: config.storage.pool().clone(),

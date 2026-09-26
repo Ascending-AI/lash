@@ -16,6 +16,14 @@ Where this ADR names a process parent scope as `process_id#incarnation` or a
 so there is no incarnation to carry. The lifetime vocabulary is otherwise
 unchanged until FIG-3607 PR-2.
 
+Superseded in part 2026-09-26 (FIG-3607, PR-2) by
+[ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md):
+`ParentScope`/`OnParentEnd`/`ProcessLifecyclePolicy` become a recorded
+`Lifetime` (`Until(scope)` or `Detached`) over an admitted ancestry; `Host` is
+no scope; a turn scope is its logical root and closes after the root's
+terminal evidence; a session delete closes `Session(s)`. The ledger below is
+the scope-close ledger, keyed by the closed scope.
+
 ## Context
 
 Process provenance and process lifecycle had been conflated in two incompatible

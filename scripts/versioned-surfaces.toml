@@ -2426,16 +2426,16 @@ paths = ["crates/lashlang/src/runtime/heap/object.rs"]
 symbols = ["OBJECT_HEADER_BYTES", "VALUE_SLOT_BYTES", "value_logical_bytes"]
 
 [[surface]]
-constant = "PARENT_SCOPE_STORAGE_PAYLOAD_VERSION"
-constant_path = "crates/lash-core-execution/src/runtime/process/model/lifecycle.rs"
+constant = "SCOPE_STORAGE_PAYLOAD_VERSION"
+constant_path = "crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs"
 upgrade = "migrate"
-description = "versioned typed parent scope persisted beside a ledger row's (kind, id) index projection"
-manifest = "ParentScopeStoragePayload"
+description = "versioned typed scope persisted beside a scope-close row's (kind, id) index projection"
+manifest = "ScopeStoragePayload"
 
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-core-execution/src/runtime/process/model/lifecycle.rs"]
-symbols = ["ParentScope", "ParentScopeStoragePayload"]
+paths = ["crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs"]
+symbols = ["ScopeId", "ScopeStoragePayload"]
 
 [[surface.guard]]
 kind = "rust_items"

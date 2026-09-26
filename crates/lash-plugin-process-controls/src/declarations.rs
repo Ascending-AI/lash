@@ -254,6 +254,7 @@ fn refuse(message: impl std::fmt::Display) -> ToolAttemptOutcome {
 pub async fn execute_process_start_tool_call(
     context: &AttemptContext<'_>,
     args: &Value,
+    lifetime: &lash_core::LifetimePolicy,
 ) -> ToolAttemptOutcome {
     let definition = match required_object_field(args, "definition") {
         Ok(value) => value,
@@ -271,10 +272,15 @@ pub async fn execute_process_start_tool_call(
             ));
         }
     };
-    let parent = match context.child_process_parent_scope() {
-        Ok(parent) => parent,
+    // The lifetime is the host's policy resolved against this attempt's
+    // admitted start context, never the model's choice, and the declaration
+    // journals the decision so realization never re-runs the policy
+    // (FIG-3607 R4b).
+    let cx = match context.start_cx() {
+        Ok(cx) => cx,
         Err(error) => return refuse(error),
     };
+    let lifetime = lifetime(&cx);
     let session_id = SessionId::from(context.session_id());
     // A child started from inside a running process belongs to the chain that
     // started that process, not to the ephemeral session the run executes in:
@@ -310,7 +316,7 @@ pub async fn execute_process_start_tool_call(
         },
         lash_core::RecoveryContract::Rerunnable,
         originator,
-        lash_core::ProcessLifecyclePolicy::new(parent, lash_core::OnParentEnd::Abandon),
+        lifetime,
     )
     .with_wake_session_id(wake_session_id)
     // The attempt bound this host stamps onto a child. It lives on the runtime

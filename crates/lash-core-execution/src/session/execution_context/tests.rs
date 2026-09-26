@@ -103,6 +103,7 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
+        process_lineage: None,
     });
     let ctx = RuntimeExecutionContext::new(
         SessionId::from("session"),
@@ -169,6 +170,7 @@ fn test_execution_context_with_env_store(
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
+        process_lineage: None,
     });
     RuntimeExecutionContext::new(
         SessionId::from("session"),
@@ -196,7 +198,7 @@ async fn a_start_inside_a_process_execution_inherits_the_recorded_env_ref() {
         },
         crate::RecoveryContract::Rerunnable,
         crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
+        crate::Lifetime::Detached,
     )
     .with_execution_env_ref(Some(inherited.clone()));
     let context = test_execution_context_with_env_store(env_store).with_process_execution(
@@ -212,7 +214,7 @@ async fn a_start_inside_a_process_execution_inherits_the_recorded_env_ref() {
         },
         crate::RecoveryContract::Rerunnable,
         crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
+        crate::Lifetime::Detached,
     );
     let (prepared, env_spec) = context.process_start_execution_env(child);
     assert_eq!(prepared.env_ref, Some(inherited));
@@ -336,19 +338,25 @@ fn scoped_context(
         .into_runtime()
 }
 
-/// A child a turn starts takes the turn as its lifecycle parent.
+/// A child a turn starts is started by the turn, under the turn's session:
+/// the start context names both, nearest first.
 #[tokio::test]
-async fn a_child_started_from_a_turn_parents_on_the_turn() {
+async fn a_child_started_from_a_turn_is_started_by_the_turn() {
     let context = scoped_context(
         "session-1",
         crate::AdmittedScope::turn("session-1", "turn-7"),
     );
+    let cx = context
+        .start_cx()
+        .expect("a turn scope materializes a start context");
+    let turn = crate::ScopeId::turn(SessionId::from("session-1"), crate::TurnId::from("turn-7"));
+    let session = crate::ScopeId::session(SessionId::from("session-1"));
+    assert_eq!(cx.starter().id(), &turn);
     assert_eq!(
-        context
-            .child_process_parent_scope()
-            .expect("a turn scope derives a turn parent"),
-        crate::ParentScope::turn(SessionId::from("session-1"), crate::TurnId::from("turn-7")),
+        cx.session().map(|scope| scope.id().clone()),
+        Some(session.clone())
     );
+    assert_eq!(cx.ancestry().scopes(), &[turn, session]);
 }
 
 #[test]
@@ -386,19 +394,21 @@ fn native_authority_retains_attempt_correlation_without_restate_identity() {
 }
 
 /// A queued-work drain is a durable owner with an end protocol (FIG-3419), so
-/// a child it starts parents on the drain itself — the derivation must not
+/// a child it starts is started by the drain itself — the derivation must not
 /// silently borrow the session's current turn.
 #[tokio::test]
-async fn a_child_started_from_a_queued_drain_parents_on_the_drain() {
+async fn a_child_started_from_a_queued_drain_is_started_by_the_drain() {
     let context = scoped_context(
         "session-1",
         crate::AdmittedScope::queue_drain("session-1", "drain-3"),
     );
     assert_eq!(
         context
-            .child_process_parent_scope()
-            .expect("a queued drain admits its own parent scope"),
-        crate::ParentScope::queue_drain("session-1", "drain-3"),
+            .start_cx()
+            .expect("a queued drain materializes a start context")
+            .starter()
+            .id(),
+        &crate::ScopeId::queue_drain("session-1", "drain-3"),
     );
 }
 

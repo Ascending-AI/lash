@@ -16,10 +16,7 @@ async fn registered_and_paged_ids(registry: &dyn ProcessRegistry) -> (Vec<String
                     },
                     RecoveryContract::ExternallyOwned,
                     ProcessProvenance::host(),
-                    lash_core_execution::ProcessLifecyclePolicy::new(
-                        lash_core_execution::ParentScope::Host,
-                        lash_core_execution::OnParentEnd::Abandon,
-                    ),
+                    lash_core_execution::Lifetime::Detached,
                 ))
                 .await
                 .expect("register worklist fixture")

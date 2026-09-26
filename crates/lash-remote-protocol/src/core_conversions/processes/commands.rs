@@ -3,17 +3,13 @@ use super::*;
 impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
     type Error = RemoteProtocolError;
 
-    #[expect(
-        clippy::expect_used,
-        reason = "validate() above refuses a missing lifecycle policy before this unwrap is reachable"
-    )]
     fn try_from(value: RemoteProcessStartRequest) -> Result<Self, Self::Error> {
         value.validate()?;
         let RemoteProcessStartRequest {
             start_key,
             input,
             disposition,
-            lifecycle,
+            lifetime,
             max_attempts,
             env_spec,
             originator,
@@ -26,9 +22,7 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
             input.try_into()?,
             disposition.into(),
             originator.try_into()?,
-            lifecycle
-                .expect("validated required lifecycle")
-                .try_into()?,
+            lash_core::LifetimeDecision::from(lifetime),
         );
         // A remote caller's key lands in the host namespace, scoped to the
         // start's originator, where no key lash derives for its own starts
@@ -69,7 +63,7 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
             start_key,
             input,
             disposition,
-            lifecycle,
+            lifetime,
             max_attempts,
             env_spec,
             originator,
@@ -92,7 +86,7 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
             start_key: None,
             input: input.try_into()?,
             disposition: disposition.into(),
-            lifecycle: Some(lifecycle.into()),
+            lifetime: lifetime.try_into()?,
             max_attempts,
             env_spec: env_spec.map(Into::into),
             originator: originator.into(),
@@ -155,7 +149,7 @@ impl TryFrom<RemoteProcessListFilter> for lash_core::ProcessListFilter {
             definition,
             status,
             originator,
-            parent_scope,
+            until,
             cancel_pending_before_ms,
             identity_kind,
             identity_label,
@@ -169,7 +163,7 @@ impl TryFrom<RemoteProcessListFilter> for lash_core::ProcessListFilter {
             definition: definition.map(Into::into),
             status: status.into(),
             originator: originator.map(TryInto::try_into).transpose()?,
-            parent_scope: parent_scope.map(Into::into),
+            until: until.map(Into::into),
             cancel_pending_before_ms,
             identity_kind,
             identity_label,
@@ -188,7 +182,7 @@ impl From<lash_core::ProcessListFilter> for RemoteProcessListFilter {
             definition,
             status,
             originator,
-            parent_scope,
+            until,
             cancel_pending_before_ms,
             identity_kind,
             identity_label,
@@ -202,7 +196,7 @@ impl From<lash_core::ProcessListFilter> for RemoteProcessListFilter {
             definition: definition.map(Into::into),
             status: status.into(),
             originator: originator.map(Into::into),
-            parent_scope: parent_scope.map(Into::into),
+            until: until.map(Into::into),
             cancel_pending_before_ms,
             identity_kind,
             identity_label,

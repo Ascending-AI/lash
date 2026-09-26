@@ -488,10 +488,7 @@ pub(super) async fn restate_positional_replay_records_tool_attempt_as_one_comman
                                                 "restate-positional-law",
                                             ),
                                             serde_json::json!({"captured": true}),
-                                            lash_core::ProcessLifecyclePolicy::new(
-                                                lash_core::ParentScope::Host,
-                                                lash_core::OnParentEnd::Abandon,
-                                            ),
+                                            lash_core::Lifetime::Detached,
                                         ),
                                     },
                                 )),

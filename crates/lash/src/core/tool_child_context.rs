@@ -150,7 +150,27 @@ impl ToolChildContextSource for CoreToolChildContextSource {
                 request.call.call_id
             ))
         })?;
-        let dispatch = runtime.tool_child_dispatch(lent_controller)?;
+        let mut dispatch = runtime.tool_child_dispatch(lent_controller)?;
+        // A child a process body opened runs inside that process: its starts
+        // record the process's lineage, read back from the process's own row
+        // since no live body lends it here (FIG-3607 R2).
+        if let Some(process_id) = request.enclosing_process.as_ref() {
+            let registry = env.process_registry().ok_or_else(|| {
+                PluginError::Session(format!(
+                    "tool child `{}` runs inside process `{process_id}` and this deployment has \
+                     no process registry to read its lineage from",
+                    request.call.call_id
+                ))
+            })?;
+            let enclosing = registry.get_process(process_id).await?.ok_or_else(|| {
+                PluginError::Session(format!(
+                    "tool child `{}` runs inside process `{process_id}`, which has no row to \
+                     read its lineage from",
+                    request.call.call_id
+                ))
+            })?;
+            dispatch.process_lineage = Some(enclosing.lineage());
+        }
         Ok(DeploymentToolChildContext::new(
             dispatch,
             Arc::new(std::sync::Mutex::new(runtime)),

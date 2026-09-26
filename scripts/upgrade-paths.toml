@@ -342,8 +342,8 @@ constant_path = "crates/lashlang/src/runtime/heap.rs"
 note = "read-only upcast of hash-addressed history; stored bytes are never rewritten"
 
 [[surface]]
-constant = "PARENT_SCOPE_STORAGE_PAYLOAD_VERSION"
-constant_path = "crates/lash-core-execution/src/runtime/process/model/lifecycle.rs"
+constant = "SCOPE_STORAGE_PAYLOAD_VERSION"
+constant_path = "crates/lash-core-execution/src/runtime/process/model/scope_lifetime.rs"
 note = "upcast on read, then write at the fleet format version"
 
 [[surface]]

@@ -747,7 +747,7 @@ pub(crate) use runtime::ToolAttemptEffectOutcome;
 pub use runtime::TurnCancelWait;
 pub use runtime::{
     AbandonEvidence, AbandonRequest, AbandonWriter, AcceptedTurnInputDrive,
-    AcceptedTurnInputRefusal, AdmittedProcessIdentity, AdmittedScope, ArtifactOwner,
+    AcceptedTurnInputRefusal, AdmittedProcessIdentity, AdmittedScope, Ancestry, ArtifactOwner,
     AssistantResponseHookEvents, AssistantStreamHookState, AwaitEventKey, AwaitEventResolver,
     AwaitEventWaitIdentity, BoundaryReason, CausalRef, ChargeSafetyRefusalEvidence,
     CheckpointClaimSet, ChildDrainOutcome, Clock, ClockWallTime, CommandJournalGuard,
@@ -758,21 +758,20 @@ pub use runtime::{
     ForkPoint, ForkSessionReceipt, ForkSessionRequest, GroupChildBinding, GroupDrainReport,
     GroupExecutors, GroupFinalizationReport, GroupOnlyFinalization, GroupReopen, GroupSettlement,
     GroupWakePolicy, HandleId, IndependentEffectWork, InlineSessionWork, InputItem,
-    InvalidStartKey, LedgerUsageDisposition, LlmRequestSpec, LlmStreamRecord, LocalTurnStop,
-    LoserPolicy, NativeProcessWork, NativeSubstrateConfig, NativeSubstrateConfigError,
-    NoSessionWork, OnParentEnd, OpenerFinalizationSteps, PARENT_SCOPE_STORAGE_PAYLOAD_VERSION,
-    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndPlan, ParentScope,
-    ParentScopeStorageError, PendingTurnInput, PendingTurnInputCancelOutcome,
-    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics,
-    PendingTurnInputDraft, PendingTurnInputRead, PendingTurnInputReadStatus,
-    PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, ProcessArtifactCleanup,
-    ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange,
-    ProcessChangeCursor, ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority,
-    ProcessCompletionOutcome, ProcessContinuationStore, ProcessDefinitionRef,
-    ProcessDefinitionRefusal, ProcessDefinitionResolution, ProcessDefinitionValue,
-    ProcessDriveStep, ProcessEffectOutcome, ProcessEngine, ProcessEngineAdmission,
-    ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry, ProcessEngineRunContext,
-    ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
+    InvalidStartKey, LedgerUsageDisposition, Lifetime, LifetimeDecision, LifetimePolicy,
+    LlmRequestSpec, LlmStreamRecord, LocalTurnStop, LoserPolicy, NativeProcessWork,
+    NativeSubstrateConfig, NativeSubstrateConfigError, NoSessionWork, OpenerFinalizationSteps,
+    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndPlan, PendingTurnInput,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
+    PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputRead,
+    PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover,
+    ProcessArtifactCleanup, ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt,
+    ProcessChange, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
+    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
+    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
+    ProcessDefinitionValue, ProcessDriveStep, ProcessEffectOutcome, ProcessEngine,
+    ProcessEngineAdmission, ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry,
+    ProcessEngineRunContext, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
     ProcessEventPageEvents, ProcessEventPageMore, ProcessEventQueryMode, ProcessEventReadOutcome,
     ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionContext, ProcessExecutionEnvRef,
@@ -780,7 +779,7 @@ pub use runtime::{
     ProcessExternalRef, ProcessHandleView, ProcessId, ProcessIdMint, ProcessIdentity,
     ProcessInfraError, ProcessInput, ProcessLease, ProcessLeaseClaimOutcome,
     ProcessLeaseCompletion, ProcessLeaseSchemaVersionError, ProcessLeases, ProcessLifecycle,
-    ProcessLifecyclePolicy, ProcessListFilter, ProcessListMode, ProcessLiveReferenceView,
+    ProcessLineage, ProcessListFilter, ProcessListMode, ProcessLiveReferenceView,
     ProcessObserverBy, ProcessObserverRegistry, ProcessOpScope, ProcessOriginator,
     ProcessOriginatorFilter, ProcessOutcome, ProcessOutcomeObserver, ProcessProvenance,
     ProcessPruneReport, ProcessQuery, ProcessRecord, ProcessRegistrar, ProcessRegistration,
@@ -798,15 +797,17 @@ pub use runtime::{
     QueuedLaneAcquisition, QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe,
     QueuedWorkAuthority, QueuedWorkBatchingConfig, QueuedWorkClaimPolicy, QueuedWorkKind,
     RecordedJournal, RecordedKeyFence, RecordedKeyRange, RecordedKeys, RecoveryContract,
-    RefusedWriteRange, Resolution, ResolveOutcome, RuntimeAttribution, RuntimeCheckpointComponents,
-    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectControllerError,
-    RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectKind,
-    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeEffectReplayMismatchReport,
-    RuntimeError, RuntimeErrorCause, RuntimeErrorCode, RuntimeInvocation, RuntimeReplay,
-    RuntimeReplayAttribution, RuntimeSessionState, ScopeBoundController, ScopedEffectController,
-    SegmentHandover, SegmentProgress, SegmentStartMarker, ServedOnly, ServedOnlyRange, SessionId,
-    SessionListFilter, SessionRelationKind, SessionScope, SessionStateVersionRefusal,
-    SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, SessionWorkEngine, SleepSpec,
+    RefusedWriteRange, RegistryScopeClose, Resolution, ResolveOutcome, RuntimeAttribution,
+    RuntimeCheckpointComponents, RuntimeEffectCommand, RuntimeEffectController,
+    RuntimeEffectControllerError, RuntimeEffectEnvelope, RuntimeEffectGroup,
+    RuntimeEffectInvocation, RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeEffectReplayMismatchReport, RuntimeError, RuntimeErrorCause, RuntimeErrorCode,
+    RuntimeInvocation, RuntimeReplay, RuntimeReplayAttribution, RuntimeSessionState,
+    SCOPE_STORAGE_PAYLOAD_VERSION, ScopeBoundController, ScopeGrant, ScopeId, ScopeRef,
+    ScopeStorageError, ScopedEffectController, SegmentHandover, SegmentProgress,
+    SegmentStartMarker, ServedOnly, ServedOnlyRange, SessionId, SessionListFilter,
+    SessionRelationKind, SessionScope, SessionStateVersionRefusal, SessionStoreCreateRequest,
+    SessionStoreFactory, SessionSummary, SessionWorkEngine, SleepSpec, StartCx, StartCxError,
     StartKey, StartKeyOwner, StoreEffectGroupClosing, StoreEffectGroupDrain, StoreRealization,
     TokenLedgerEntry, ToolAttemptLaunch, ToolIntentOutcomeSink, ToolIntentPreparation,
     ToolIntentSubmissionGuard, TurnActivity, TurnActivityId, TurnCancelAffectedInput,
@@ -824,7 +825,7 @@ pub use runtime::{
     WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState, WakeDiscardReason,
     WatchedRegistry, WeakProcessEngineRegistry, WorkCadencePolicy, WorkerSlotKind,
     WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy, admit_session_state_generation,
-    effect_groups_unsupported, ensure_process_lease_schema_version, mint_process_id,
+    effect_groups_unsupported, ensure_process_lease_schema_version, lifetime, mint_process_id,
     park_turn_of_refused_group_child, park_turn_refused_by_generation,
 };
 #[allow(unused_imports)]
@@ -916,5 +917,14 @@ pub mod core_internal {
 
     pub fn clear_process_invocation_correlation(turn_context: &mut crate::TurnContext) {
         crate::session::clear_process_invocation_correlation(turn_context);
+    }
+
+    /// Carries the lineage of the process a live child turn runs inside, so
+    /// every start made in that turn records it (FIG-3607 R1).
+    pub fn attach_process_lineage(
+        turn_context: &mut crate::TurnContext,
+        lineage: crate::ProcessLineage,
+    ) {
+        crate::session::attach_process_lineage(turn_context, lineage);
     }
 }

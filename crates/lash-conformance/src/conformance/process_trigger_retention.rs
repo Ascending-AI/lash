@@ -516,10 +516,7 @@ async fn start_and_bind_delivery(
                 },
                 RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
                 ProcessIdentity::new("test"),

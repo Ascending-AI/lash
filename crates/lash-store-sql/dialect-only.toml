@@ -1582,11 +1582,11 @@ Both are coarse pushdowns that the Rust predicate then fences exactly.
 """
 
 [[dialect_only]]
-statement = "process.list_by_parent_scope"
+statement = "process.list_by_lifetime_scope"
 backends = ["sqlite", "postgres"]
 kind = "JSON pushdown; array parameter"
 reason = """
-Same pushdown fork as process.list, plus the parent-scope conjunct: SQLite
+Same pushdown fork as process.list, plus the lifetime-scope conjunct: SQLite
 compares the nullable scope id with IS, PostgreSQL with IS NOT DISTINCT FROM
 over a cast. The conjunct is spelled rather than parameterised because an
 `(?n IS NULL OR ...)` form costs both planners the partial index.
@@ -1596,13 +1596,13 @@ over a cast. The conjunct is spelled rather than parameterised because an
 statement = "process.list_pending_cancel"
 backends = ["sqlite", "postgres"]
 kind = "JSON pushdown; array parameter"
-reason = "Same fork as process.list_by_parent_scope, with the pending-cancel conjunct instead."
+reason = "Same fork as process.list_by_lifetime_scope, with the pending-cancel conjunct instead."
 
 [[dialect_only]]
-statement = "process.list_by_parent_scope_pending_cancel"
+statement = "process.list_by_lifetime_scope_pending_cancel"
 backends = ["sqlite", "postgres"]
 kind = "JSON pushdown; array parameter"
-reason = "Same fork as process.list_by_parent_scope, with both conjuncts."
+reason = "Same fork as process.list_by_lifetime_scope, with both conjuncts."
 
 [[dialect_only]]
 statement = "process.list_recent_retired"
@@ -1615,10 +1615,10 @@ single disjunctive form well and keeps one statement (process.list).
 """
 
 [[dialect_only]]
-statement = "process.list_recent_retired_by_parent_scope"
+statement = "process.list_recent_retired_by_lifetime_scope"
 backends = ["sqlite"]
 kind = "operation exists on one backend only"
-reason = "Same union fork as process.list_recent_retired, with the parent-scope conjunct."
+reason = "Same union fork as process.list_recent_retired, with the lifetime-scope conjunct."
 
 [[dialect_only]]
 statement = "process.list_recent_retired_pending_cancel"
@@ -1627,7 +1627,7 @@ kind = "operation exists on one backend only"
 reason = "Same union fork as process.list_recent_retired, with the pending-cancel conjunct."
 
 [[dialect_only]]
-statement = "process.list_recent_retired_by_parent_scope_pending_cancel"
+statement = "process.list_recent_retired_by_lifetime_scope_pending_cancel"
 backends = ["sqlite"]
 kind = "operation exists on one backend only"
 reason = "Same union fork as process.list_recent_retired, with both conjuncts."

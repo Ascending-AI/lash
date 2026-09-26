@@ -6,10 +6,10 @@ use lash_core::facade_support::{
     watch_process_registry,
 };
 use lash_core::{
-    AdmittedProcessIdentity, ArtifactOwner, CommitBudget, NativeProcessWork, NoSessionWork,
-    OnParentEnd, ParentScope, PluginError, PluginOptions, ProcessExecutionEnvSpec,
-    ProcessExecutionEnvStore, ProcessLifecyclePolicy, ProcessProvenance, ProcessRegistration,
-    ProcessRegistry, QueuedWorkBatchingConfig, RecoveryContract, SessionPolicy, TurnBudget,
+    AdmittedProcessIdentity, ArtifactOwner, CommitBudget, Lifetime, NativeProcessWork,
+    NoSessionWork, PluginError, PluginOptions, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
+    ProcessProvenance, ProcessRegistration, ProcessRegistry, QueuedWorkBatchingConfig,
+    RecoveryContract, SessionPolicy, TurnBudget,
 };
 use lash_core_worker::{DurableProcessWorker, DurableProcessWorkerConfig, WorkerProcessWork};
 use lashlang::testing::ast_builders as b;
@@ -208,7 +208,7 @@ async fn run_session_surface_case(grant: bool) -> lash_core::ProcessAwaitOutput 
             .expect("process input encodes"),
         RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
-        ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
+        Lifetime::Detached,
     )
     .with_admitted_identity(AdmittedProcessIdentity::for_testing(process_identity))
     .with_execution_env_ref(Some(env_ref));
@@ -463,7 +463,7 @@ async fn fig3463_crashed_worker_retry_keeps_both_telemetry_attempts_but_executes
                 process_input.into_process_input().expect("process input"),
                 RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
-                ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
+                Lifetime::Detached,
             )
             .with_admitted_identity(AdmittedProcessIdentity::for_testing(process_identity))
             .with_execution_env_ref(Some(env_ref)),
@@ -694,7 +694,7 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
                 process_input.into_process_input().expect("process input"),
                 RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
-                ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
+                Lifetime::Detached,
             )
             .with_admitted_identity(AdmittedProcessIdentity::for_testing(process_identity))
             .with_execution_env_ref(Some(env_ref))
@@ -916,7 +916,7 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
                     input.into_process_input().expect("process input"),
                     RecoveryContract::Rerunnable,
                     ProcessProvenance::host(),
-                    ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
+                    Lifetime::Detached,
                 )
                 .with_admitted_identity(AdmittedProcessIdentity::for_testing(identity))
                 .with_execution_env_ref(Some(env_ref.clone())),

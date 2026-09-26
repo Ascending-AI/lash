@@ -146,36 +146,6 @@ pub struct RuntimeExecutionContext<'run> {
 }
 
 #[derive(Clone)]
-struct ProcessInvocationCorrelation {
-    process_id: ProcessId,
-    authority: crate::ProcessExecutionWriteAuthority,
-}
-
-/// Carries attempt-bound process invocation authority into one live child turn.
-///
-/// The private input type prevents an ordinary [`crate::TurnContext`] caller
-/// from fabricating the correlation with a string. The runtime revalidates the
-/// process and attempt when it reads the value.
-pub(crate) fn attach_process_invocation_correlation(
-    turn_context: &mut crate::TurnContext,
-    process_id: &ProcessId,
-    authority: &crate::ProcessExecutionWriteAuthority,
-) {
-    if authority.attempt_for(process_id).is_some() {
-        turn_context.set_runtime_correlation(ProcessInvocationCorrelation {
-            process_id: process_id.clone(),
-            authority: authority.clone(),
-        });
-    } else {
-        turn_context.clear_runtime_correlation::<ProcessInvocationCorrelation>();
-    }
-}
-
-pub(crate) fn clear_process_invocation_correlation(turn_context: &mut crate::TurnContext) {
-    turn_context.clear_runtime_correlation::<ProcessInvocationCorrelation>();
-}
-
-#[derive(Clone)]
 pub(crate) struct RuntimeProcessExecution {
     pub process_id: ProcessId,
     pub originator: crate::ProcessOriginator,
@@ -475,6 +445,7 @@ impl<'run> RuntimeExecutionContext<'run> {
         crate::ProcessOpScope::new(self.dispatch.effect_controller.scoped())
             .with_parent_invocation(parent_invocation)
             .with_agent_frame_id(Some(self.dispatch.agent_frame_id.clone()))
+            .with_process_lineage(self.dispatch.process_lineage.clone())
     }
 
     pub(crate) fn record_started_process(&self, process_id: &ProcessId) {
@@ -638,9 +609,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                 .execution_write_authority
                 .attempt_for(&execution.process_id);
         }
-        let correlation = self
-            .turn_context
-            .runtime_correlation::<ProcessInvocationCorrelation>()?;
+        let correlation = correlation::process_invocation_of(&self.turn_context)?;
         correlation.authority.attempt_for(&correlation.process_id)
     }
 
@@ -900,6 +869,13 @@ impl<'run> RuntimeExecutionContext<'run> {
         registration: &crate::ProcessRegistration,
         event_context: impl Into<Option<RuntimeExecutionProcessEventContext>>,
     ) -> Self {
+        // The lineage the process's body starts children under (FIG-3607 R1),
+        // on the dispatch every start made inside this run realizes through.
+        if self.dispatch.process_lineage.is_none() {
+            let mut dispatch = (*self.dispatch).clone();
+            dispatch.process_lineage = Some(registration.lineage(&process_id));
+            self.dispatch = Arc::new(dispatch);
+        }
         self.process_execution = Some(RuntimeProcessExecution {
             process_id,
             originator: registration.provenance.originator.clone(),
@@ -1239,9 +1215,7 @@ impl<'run> RuntimeExecutionContext<'run> {
                 .execution_write_authority
                 .engine_execution_id(&execution.process_id);
         }
-        let correlation = self
-            .turn_context
-            .runtime_correlation::<ProcessInvocationCorrelation>()?;
+        let correlation = correlation::process_invocation_of(&self.turn_context)?;
         correlation
             .authority
             .engine_execution_id(&correlation.process_id)
@@ -1249,6 +1223,12 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub(crate) fn is_run_local_process(&self, process_id: &ProcessId) -> bool {
         self.started_process_ids.lock_recover().contains(process_id)
+    }
+
+    /// The lineage of the process this context runs inside, when it runs
+    /// inside one: what a start made here records above its starter.
+    pub(crate) fn process_lineage(&self) -> Option<crate::ProcessLineage> {
+        self.dispatch.process_lineage.clone()
     }
 
     pub(crate) fn process_spawn_provenance(&self) -> Option<crate::ProcessSpawnProvenance> {
@@ -1346,15 +1326,14 @@ impl<'run> RuntimeExecutionContext<'run> {
         &self.dispatch
     }
 
-    /// The enclosing durable parent for a code-executor's child start.
-    ///
-    /// Derived through the one owner derivation — the admitted scope the
-    /// controller was built with. There is no registry access here by design.
-    pub fn child_process_parent_scope(&self) -> Result<crate::ParentScope, crate::PluginError> {
+    /// The start context a code-executor's child start draws its lifetime
+    /// from: the admitted scope the controller was built with, and the
+    /// lineage of the process this context runs inside. There is no registry
+    /// access here by design (FIG-3607 R2).
+    pub fn start_cx(&self) -> Result<crate::StartCx, crate::PluginError> {
         let scoped = self.dispatch.effect_controller.scoped();
-        let opener = crate::EffectOpener::for_scope(scoped.admitted_scope())
-            .map_err(|error| crate::PluginError::Session(error.to_string()))?;
-        Ok(crate::ParentScope::from_owner(&opener))
+        crate::StartCx::materialize(scoped.admitted_scope(), self.process_lineage().as_ref())
+            .map_err(|error| crate::PluginError::Session(error.to_string()))
     }
 
     pub async fn start_child_process(
@@ -1857,6 +1836,12 @@ impl<'run> RuntimeExecutionContext<'run> {
         &self.turn_context
     }
 }
+
+mod correlation;
+pub(crate) use correlation::{
+    attach_process_invocation_correlation, attach_process_lineage,
+    clear_process_invocation_correlation, process_lineage_of,
+};
 
 #[cfg(test)]
 mod tests;

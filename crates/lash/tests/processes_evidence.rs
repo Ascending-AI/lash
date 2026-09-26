@@ -1183,7 +1183,11 @@ fn processes_area_witnesses() {
         let _ = &value.event_types;
     });
     // W0290: lash::process::ProcessStartRequest::external [function]
-    let _ = lash::process::ProcessStartRequest::external(todo!(), todo!(), todo!());
+    let _ = lash::process::ProcessStartRequest::external(
+        todo!(),
+        todo!(),
+        lash::process::LifetimeDecision::Detached,
+    );
     // W0292: lash::process::ProcessStartRequest::identity [field]
     field_witness(|value: &lash::process::ProcessStartRequest| {
         let _ = &value.identity;
@@ -1199,7 +1203,12 @@ fn processes_area_witnesses() {
         let _ = &value.max_attempts;
     });
     // W0296: lash::process::ProcessStartRequest::new [function]
-    let _ = lash::process::ProcessStartRequest::new(todo!(), todo!(), todo!(), todo!());
+    let _ = lash::process::ProcessStartRequest::new(
+        todo!(),
+        todo!(),
+        todo!(),
+        lash::process::LifetimeDecision::Detached,
+    );
     // W0297: lash::process::ProcessStartRequest::observers [field]
     field_witness(|value: &lash::process::ProcessStartRequest| {
         let _ = &value.observers;

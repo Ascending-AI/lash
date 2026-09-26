@@ -95,10 +95,7 @@ async fn postgres_process_prune_cleanup_evidence_survives_reopen_when_configured
                 },
                 lash_core_execution::RecoveryContract::Rerunnable,
                 lash_core_execution::ProcessProvenance::host(),
-                lash_core_execution::ProcessLifecyclePolicy::new(
-                    lash_core_execution::ParentScope::Host,
-                    lash_core_execution::OnParentEnd::Abandon,
-                ),
+                lash_core_execution::Lifetime::Detached,
             )
             .with_execution_env_ref(Some(
                 lash_core_execution::ProcessExecutionEnvRef::new("process-env:postgres-cleanup"),
@@ -169,10 +166,7 @@ async fn postgres_process_prune_removes_queued_run_admission_and_members() {
             },
             lash_core_execution::RecoveryContract::ExternallyOwned,
             lash_core_execution::ProcessProvenance::host(),
-            lash_core_execution::ProcessLifecyclePolicy::new(
-                lash_core_execution::ParentScope::Host,
-                lash_core_execution::OnParentEnd::Abandon,
-            ),
+            lash_core_execution::Lifetime::Detached,
         ))
         .await
         .expect("register process");

@@ -22,6 +22,9 @@ explicit Lifecycle Relation defined by
 [ADR 0094](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md).
 Every process records a Lifecycle Policy and Parent Scope at registration;
 originator, observer, wake, and session relations still imply no cleanup.
+Amended 2026-09-26 (FIG-3607): the Lifecycle Policy and Parent Scope are now
+a recorded Lifetime over an admitted Ancestry
+([ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md)).
 
 Amended 2026-09-13 (FIG-2990): [ADR 0095](0095-processes-are-values-and-process-controls-are-tools.md) makes the definition a first-class
 value and pins a `ProcessDefinitionRef` on every durable record, so capture

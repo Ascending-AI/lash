@@ -71,7 +71,11 @@ fn standard_protocol_owns_batch_not_processes() {
 fn process_controls_and_a_model_provider_compose_with_standard_protocol() {
     let fixture: Arc<dyn lash_core::ToolProvider> = Arc::new(lash_core::testing::FixtureTools);
     let session = PluginHost::new(vec![
-        Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
+        Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::session_or_starter,
+            ),
+        ),
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
             "native-tools-fixture",
             lash_core::facade_support::PluginSpec::new().with_tool_provider(fixture),

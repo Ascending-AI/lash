@@ -468,7 +468,7 @@ fn segment_registration() -> ProcessRegistration {
         },
         crate::RecoveryContract::Rerunnable,
         crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
+        crate::Lifetime::Detached,
     )
 }
 
