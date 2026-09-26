@@ -800,6 +800,15 @@ impl lash_core::ProcessWorkSubstrate for CountingProcessWork {
     ) -> std::result::Result<lash_core::ProcessTerminalWait, lash_core::PluginError> {
         panic!("unexpected terminal wait for {process_id}")
     }
+
+    async fn deliver_cancel(
+        &self,
+        _process_id: &lash_core::ProcessId,
+        _request: &lash_core::CancelRequest,
+        _key: &str,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        Ok(())
+    }
 }
 
 /// Read the persisted checkpoint's `tool_state` component bytes.

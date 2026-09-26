@@ -459,8 +459,10 @@ pub async fn a_root_end_closes_its_turn_scope_in_the_process_registry(
 ) {
     let mut parts = DriveParts::new(prefix, "root-registry-close", &effect_host, &stores, 8).await;
     let registry = stores.process_registry();
-    parts.host.control.scope_close =
-        Arc::new(crate::RegistryScopeClose::new(Arc::clone(&registry)));
+    parts.host.control.scope_close = Arc::new(crate::RegistryScopeClose::new(
+        Arc::clone(&registry),
+        stores.clock(),
+    ));
     let root = TurnId::from("root-registry-close");
     let turn = lash_core::ScopeId::turn(parts.session_id.clone(), root.clone());
     let registration = || {

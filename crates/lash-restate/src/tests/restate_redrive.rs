@@ -1,5 +1,18 @@
 use super::*;
 
+/// A terminal process run's suspension tail: the terminal pair, then the
+/// `lash.process.parent-end` pair applied right after terminal completion
+/// (FIG-3822), then complete-promise, call, and suspension.
+const TERMINAL_PROCESS_SUSPENSION_MESSAGES: [u16; 7] = [
+    RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+    RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+    RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+    RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+    RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
+    RESTATE_CALL_COMMAND_MESSAGE_TYPE,
+    RESTATE_SUSPENSION_MESSAGE_TYPE,
+];
+
 #[derive(Debug, Serialize, serde::Deserialize)]
 struct Fig3460ReplayHeaderInput {
     index_key: String,
@@ -1023,13 +1036,7 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
     assert_eq!(
         restate_message_types(&terminal_delivery_suspension)
             .expect("decode ordinal-one terminal suspension"),
-        vec![
-            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
-            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
-            RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
-            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
-            RESTATE_SUSPENSION_MESSAGE_TYPE
-        ],
+        TERMINAL_PROCESS_SUSPENSION_MESSAGES,
         "endpoint error: {:?}",
         restate_error_message(&terminal_delivery_suspension)
     );
@@ -1141,13 +1148,7 @@ pub(super) async fn fig2083_a_terminal_segment_whose_handover_is_gone_replays_it
     .expect("terminal attempt should suspend during root delivery");
     assert_eq!(
         restate_message_types(&suspended).expect("decode terminal suspension"),
-        vec![
-            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
-            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
-            RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
-            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
-            RESTATE_SUSPENSION_MESSAGE_TYPE
-        ]
+        TERMINAL_PROCESS_SUSPENSION_MESSAGES
     );
     assert!(
         registry
@@ -1341,13 +1342,7 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
     assert_eq!(
         restate_message_types(&terminal_delivery_suspension)
             .expect("decode effectful terminal suspension"),
-        vec![
-            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
-            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
-            RESTATE_COMPLETE_PROMISE_COMMAND_MESSAGE_TYPE,
-            RESTATE_CALL_COMMAND_MESSAGE_TYPE,
-            RESTATE_SUSPENSION_MESSAGE_TYPE
-        ]
+        TERMINAL_PROCESS_SUSPENSION_MESSAGES
     );
 
     let complete_replay = encode_recorded_commands_replay(

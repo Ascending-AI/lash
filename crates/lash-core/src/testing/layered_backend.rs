@@ -158,6 +158,18 @@ impl LayeredBackend {
         self
     }
 
+    /// Replace the process-work port with `layer` over it, keeping its
+    /// watched registry. A backend without process work stays without.
+    pub fn map_process_work_port(
+        mut self,
+        layer: impl FnOnce(Arc<dyn crate::ProcessWorkSubstrate>) -> Arc<dyn crate::ProcessWorkSubstrate>,
+    ) -> Self {
+        self.process_work = self.process_work.map(|wiring| {
+            ProcessWorkWiring::new(wiring.watched().clone(), layer(Arc::clone(wiring.port())))
+        });
+        self
+    }
+
     /// Drive the backend's sessions on `session_work` (`None`: in process).
     pub fn with_session_work(
         mut self,

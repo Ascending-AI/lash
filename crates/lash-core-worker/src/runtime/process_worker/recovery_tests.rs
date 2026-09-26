@@ -334,6 +334,15 @@ impl crate::ProcessWorkSubstrate for LateBoundProcessWork {
         .await
         .map(crate::ProcessTerminalWait::Terminal)
     }
+
+    async fn deliver_cancel(
+        &self,
+        _process_id: &crate::ProcessId,
+        _request: &crate::CancelRequest,
+        _key: &str,
+    ) -> Result<(), PluginError> {
+        Ok(())
+    }
 }
 
 fn late_bound_process_work_wiring(

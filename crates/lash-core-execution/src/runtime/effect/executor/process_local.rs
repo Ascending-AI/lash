@@ -455,6 +455,15 @@ mod terminal_wait_tests {
                 Ok(crate::ProcessTerminalWait::Terminal(self.terminal.clone()))
             }
         }
+
+        async fn deliver_cancel(
+            &self,
+            _process_id: &crate::ProcessId,
+            _request: &crate::CancelRequest,
+            _key: &str,
+        ) -> Result<(), crate::PluginError> {
+            unreachable!("terminal-wait witness does not deliver cancels")
+        }
     }
 
     #[tokio::test]

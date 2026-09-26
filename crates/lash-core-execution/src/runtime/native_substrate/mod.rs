@@ -161,6 +161,21 @@ pub trait ProcessWorkSubstrate: Send + Sync {
         &self,
         process_id: &crate::ProcessId,
     ) -> Result<ProcessTerminalWait, PluginError>;
+
+    /// Deliver `request` to `process`'s live execution under `key`, so the
+    /// running segment observes the cancel. `key` is the caller's stable
+    /// dedupe identity for this delivery; a retry under the same key must be
+    /// a no-op. Native executions read cancel requests from the registry
+    /// directly, so the native port treats delivery as the registry write
+    /// the caller performs right after and returns `Ok(())`; an engine whose
+    /// executions do not see the registry (Restate) posts the cancel into
+    /// the engine and dedupes on `key`.
+    async fn deliver_cancel(
+        &self,
+        process_id: &crate::ProcessId,
+        request: &crate::CancelRequest,
+        key: &str,
+    ) -> Result<(), PluginError>;
 }
 
 /// Outcome of one bounded terminal wait.
