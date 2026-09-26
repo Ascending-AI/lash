@@ -538,6 +538,7 @@ impl RuntimeEffectLocalRunner for RootInputClaimRunner {
         // first, so a recorded fault would replay under `drive-claim:{root}`
         // on every later drive and wedge the session. Like admission and the
         // seal, the step runs again; only a claim or a refusal is recorded.
+        let root = self.root.clone();
         let drive = self.claim().await.map_err(|err| {
             let mut fault = crate::RuntimeEffectControllerError::from(
                 crate::runtime::runtime_error_from_store_commit(err),
@@ -545,6 +546,18 @@ impl RuntimeEffectLocalRunner for RootInputClaimRunner {
             fault.message = format!("root input claim failed: {}", fault.message);
             fault.retryable_uncommitted_derivation()
         })?;
+        if matches!(
+            drive,
+            crate::AcceptedTurnInputDrive::Refused {
+                refusal: crate::AcceptedTurnInputRefusal::HeldByLiveClaim
+            }
+        ) {
+            return Err(crate::RuntimeEffectControllerError::new(
+                RuntimeErrorCode::SessionExecutionLaneBusy,
+                format!("root `{root}` waits for a live input claim"),
+            )
+            .retryable_uncommitted_derivation());
+        }
         Ok(crate::RuntimeEffectOutcome::ClaimAcceptedTurnInput { drive })
     }
 }

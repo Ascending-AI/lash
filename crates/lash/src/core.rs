@@ -164,10 +164,24 @@ impl LashCore {
     /// the deployment is not drained until none remains. A store that cannot
     /// count its turns refuses rather than report zero.
     pub async fn drain_status(&self, accepting_new_work: bool) -> Result<DeploymentDrainStatus> {
+        let checked_at = self.env.core.clock.timestamp_ms();
+        // The reconcile sweep's standing caller besides boot (ADR 0104 O2):
+        // a drive ask lost with its process between the commit and the send
+        // is asked again for every session still holding open ingress. A
+        // host that never accepted work has no engine; the sweep is skipped
+        // rather than resolving ports it would not use.
+        if !matches!(self.substrate_slot.setup.queued, QueuedPortSetup::Disabled) {
+            let queued = self.substrate_slot.ports().await.queued;
+            lash_core::drive::reconcile_session_work(
+                self.store_factory.as_ref(),
+                queued.as_ref(),
+                &format!("drain-{checked_at}"),
+            )
+            .await?;
+        }
         let remaining_invocations = self.process_registry.count_non_terminal_processes().await?;
         let turns = self.store_factory.count_unsettled_turns().await?;
         let processes = self.process_registry.summarize_parked_processes().await?;
-        let checked_at = self.env.core.clock.timestamp_ms();
         let parked = crate::parked_work::ParkedWorkSummary {
             turns: lash_core::store::ParkSummary {
                 by_reason: turns.parked_by_reason.clone(),
@@ -1225,6 +1239,30 @@ impl LashCoreBuilder {
             },
             session_execution_owner.clone(),
         );
+        // The reconcile sweep's boot caller (ADR 0104 O2): a drive ask a
+        // process lost between the commit and the send is asked again at
+        // boot, at every drain_status, or by the session's next schedule,
+        // whichever is first. Outside a Tokio runtime there is no task to
+        // run it in; the other callers still heal the same sessions.
+        if !matches!(substrate_slot.setup.queued, QueuedPortSetup::Disabled)
+            && let Ok(runtime) = tokio::runtime::Handle::try_current()
+        {
+            let slot = Arc::clone(&substrate_slot);
+            let sessions = Arc::clone(&store_factory);
+            let sweep = format!("boot-{}", env.core.clock.timestamp_ms());
+            runtime.spawn(async move {
+                let queued = slot.ports().await.queued;
+                if let Err(error) = lash_core::drive::reconcile_session_work(
+                    sessions.as_ref(),
+                    queued.as_ref(),
+                    &sweep,
+                )
+                .await
+                {
+                    tracing::warn!(%error, "the boot reconcile sweep could not list sessions");
+                }
+            });
+        }
         Ok(LashCore {
             session_execution_owner,
             env,

@@ -252,6 +252,7 @@ impl LashRuntime {
             &sinks,
             None,
             crate::runtime::drive::FollowOnRecovery::Recover,
+            None,
             |_| true,
         ))
         .await;

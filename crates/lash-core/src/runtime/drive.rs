@@ -224,6 +224,7 @@ pub(crate) struct DriveRun {
     pub(crate) runs: Vec<RootRun>,
     /// The drive stopped at an admitted follow-on recovery it declined.
     pub(crate) declined_follow_on: bool,
+    pub(crate) budget_exhausted: bool,
 }
 
 /// Drive `request` on `runtime`'s session to a stop: admit, seal and run
@@ -250,16 +251,23 @@ pub async fn drive_session_with(
     request: &DriveRequest,
     sinks: DriveSinks<'_>,
 ) -> Result<DriveOutcome, DriveAbort> {
-    Box::pin(runtime.drive_until(
+    let run = Box::pin(runtime.drive_until(
         controller,
         request,
         &sinks,
         None,
         FollowOnRecovery::Recover,
+        Some(crate::engine::MAX_ROOTS_PER_DRIVE),
         |_| false,
     ))
-    .await
-    .map(|run| run.outcome)
+    .await?;
+    if run.budget_exhausted {
+        runtime.host.queued_work().schedule_drive(
+            &request.session,
+            crate::engine::drive_continuation_request(request),
+        );
+    }
+    Ok(run.outcome)
 }
 
 /// Admission `ordinal` of `request`: one recorded `AdmitDrive` step through
@@ -332,21 +340,26 @@ pub async fn drive_session_reporting(
     request: &DriveRequest,
     sinks: DriveSinks<'_>,
 ) -> Result<(DriveOutcome, Vec<RootReport>), DriveAbort> {
-    Box::pin(runtime.drive_until(
+    let run = Box::pin(runtime.drive_until(
         controller,
         request,
         &sinks,
         None,
         FollowOnRecovery::Recover,
+        Some(crate::engine::MAX_ROOTS_PER_DRIVE),
         |_| false,
     ))
-    .await
-    .map(|run| {
-        (
-            run.outcome,
-            run.runs.into_iter().map(RootReport::from).collect(),
-        )
-    })
+    .await?;
+    if run.budget_exhausted {
+        runtime.host.queued_work().schedule_drive(
+            &request.session,
+            crate::engine::drive_continuation_request(request),
+        );
+    }
+    Ok((
+        run.outcome,
+        run.runs.into_iter().map(RootReport::from).collect(),
+    ))
 }
 
 /// [`run_admitted_root_with`], answering the root's [`RootReport`].
@@ -433,12 +446,14 @@ impl LashRuntime {
         sinks: &DriveSinks<'_>,
         live: Option<(&crate::InputId, &crate::TurnInput)>,
         follow_on: FollowOnRecovery,
+        max_roots: Option<usize>,
         mut done: impl FnMut(&RootRun) -> bool,
     ) -> Result<DriveRun, DriveAbort> {
         let mut runs: Vec<RootRun> = Vec::new();
         let mut rules = DriveLoop::new();
         let mut ordinal = 0_u32;
         let mut declined_follow_on = false;
+        let mut budget_exhausted = false;
         let stop = loop {
             let admitted = match Box::pin(self.admit_drive_step(controller, request, ordinal))
                 .await?
@@ -482,6 +497,10 @@ impl LashRuntime {
             if finished {
                 break DriveStop::Yielded { root };
             }
+            if max_roots.is_some_and(|max| runs.len() >= max) {
+                budget_exhausted = true;
+                break DriveStop::Yielded { root };
+            }
         };
         let outcome = DriveOutcome {
             ran: runs.iter().map(|run| run.outcome.clone()).collect(),
@@ -491,6 +510,7 @@ impl LashRuntime {
             outcome,
             runs,
             declined_follow_on,
+            budget_exhausted,
         })
     }
 

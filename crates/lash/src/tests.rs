@@ -2411,6 +2411,7 @@ mod replay_park;
 #[cfg(feature = "rlm")]
 mod rlm_restore_idempotence;
 mod send_handle;
+mod session_drive;
 #[cfg(feature = "rlm")]
 mod stack_budget;
 mod standard_compaction_persistence;

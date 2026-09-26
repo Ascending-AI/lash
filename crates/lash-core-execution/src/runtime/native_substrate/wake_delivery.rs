@@ -27,6 +27,10 @@ fn retry_delay_ms(attempts: u64, work_cadence: &WorkCadencePolicy) -> u64 {
     initial_ms.saturating_mul(1_u64 << exponent).min(max_ms)
 }
 
+fn wake_drive_request(batch: &crate::BatchId, attempt: u64) -> crate::engine::DriveRequestId {
+    crate::engine::DriveRequestId::new(format!("wake-delivery:{batch}:attempt:{attempt}"))
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct WakeDeliveryDriveReport {
     pub inspected: usize,
@@ -348,7 +352,7 @@ impl WakeDeliveryDriver {
                     // and terminal-mark failures all re-arm the durable row.
                     queued_work.schedule_drive(
                         &target_session_id,
-                        crate::engine::DriveRequestId::new(enqueued.batch_id.to_string()),
+                        wake_drive_request(&enqueued.batch_id, delivery.attempts),
                     );
                     if enqueue_outcome.process_wake_was_absorbed() {
                         tracing::info!(
@@ -620,7 +624,17 @@ impl WakeDeliveryDriver {
 
 #[cfg(test)]
 mod tests {
-    use super::{WorkCadencePolicy, retry_delay_ms};
+    use super::{WorkCadencePolicy, retry_delay_ms, wake_drive_request};
+
+    #[test]
+    fn a_wake_redelivery_uses_a_new_drive_request() {
+        let batch = crate::BatchId::new("the-same-durable-batch");
+        let first = wake_drive_request(&batch, 1);
+        let repeated = wake_drive_request(&batch, 1);
+        let redelivered = wake_drive_request(&batch, 2);
+        assert_eq!(first, repeated, "one claim attempt is idempotent");
+        assert_ne!(first, redelivered, "a later claim must pass Restate dedupe");
+    }
 
     #[test]
     fn retry_delay_is_bounded_for_every_attempt_count() {

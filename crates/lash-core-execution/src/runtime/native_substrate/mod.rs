@@ -356,30 +356,127 @@ impl SessionWorkEngine for InlineSessionWork {
                 stop: crate::engine::DriveStop::Idle,
             });
         }
-        let outcome = driver
-            .drive(crate::engine::DriveRequest {
-                session: session.clone(),
-                request: request.clone(),
-                build_generation: self.build_generation.clone(),
-            })
-            .await
-            .map_err(|abort| match abort {
-                crate::engine::DriveAbort::Retry(error) => {
-                    crate::engine::DriveAbort::Refused(error)
-                }
-                abort => abort,
-            })?;
+        let mut drive_request = crate::engine::DriveRequest {
+            session: session.clone(),
+            request: request.clone(),
+            build_generation: self.build_generation.clone(),
+        };
+        let mut ran = Vec::new();
+        let stop = loop {
+            let outcome =
+                driver
+                    .drive(drive_request.clone())
+                    .await
+                    .map_err(|abort| match abort {
+                        crate::engine::DriveAbort::Retry(error) => {
+                            crate::engine::DriveAbort::Refused(error)
+                        }
+                        abort => abort,
+                    })?;
+            let at_limit = matches!(outcome.stop, crate::engine::DriveStop::Yielded { .. })
+                && outcome.ran.len() == crate::engine::MAX_ROOTS_PER_DRIVE;
+            ran.extend(outcome.ran);
+            if !at_limit {
+                break outcome.stop;
+            }
+            drive_request.request = crate::engine::drive_continuation_request(&drive_request);
+        };
         if drives.drove.len() >= INLINE_DROVE_CAPACITY {
             drives.drove.pop_front();
         }
         drives.drove.push_back(request.as_str().to_owned());
-        Ok(outcome)
+        Ok(crate::engine::DriveOutcome { ran, stop })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct PagedProbe {
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    #[async_trait::async_trait]
+    impl SessionDriver for PagedProbe {
+        async fn drive(
+            &self,
+            request: crate::engine::DriveRequest,
+        ) -> Result<crate::engine::DriveOutcome, crate::engine::DriveAbort> {
+            let call = self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            if call == 0 {
+                let ran = (0..crate::engine::MAX_ROOTS_PER_DRIVE)
+                    .map(|index| crate::engine::RootOutcome::Committed {
+                        root: crate::TurnId::from(format!("root-{index}")),
+                        outcome: crate::TurnOutcome::Finished(
+                            lash_sansio::TurnFinish::AssistantMessage {
+                                text: "answer".to_string(),
+                            },
+                        ),
+                    })
+                    .collect();
+                return Ok(crate::engine::DriveOutcome {
+                    ran,
+                    stop: crate::engine::DriveStop::Yielded {
+                        root: crate::TurnId::from("root-63"),
+                    },
+                });
+            }
+            assert_eq!(
+                request.request,
+                crate::engine::drive_continuation_request(&crate::engine::DriveRequest {
+                    request: crate::engine::DriveRequestId::new("first"),
+                    ..request.clone()
+                })
+            );
+            Ok(crate::engine::DriveOutcome {
+                ran: vec![crate::engine::RootOutcome::Committed {
+                    root: crate::TurnId::from("last"),
+                    outcome: crate::TurnOutcome::Finished(
+                        lash_sansio::TurnFinish::AssistantMessage {
+                            text: "last answer".to_string(),
+                        },
+                    ),
+                }],
+                stop: crate::engine::DriveStop::Idle,
+            })
+        }
+
+        async fn admit(
+            &self,
+            _controller: crate::ScopedEffectController<'_>,
+            _request: &crate::engine::DriveRequest,
+            _ordinal: u32,
+        ) -> Result<crate::engine::AdmitVerdict, crate::engine::DriveAbort> {
+            unreachable!("the probe drives its scripted requests directly")
+        }
+
+        async fn run_root(
+            &self,
+            _controller: crate::ScopedEffectController<'_>,
+            _admitted: crate::engine::Admitted,
+        ) -> Result<crate::engine::RootOutcome, crate::engine::DriveAbort> {
+            unreachable!("the probe drives its scripted requests directly")
+        }
+    }
+
+    #[tokio::test]
+    async fn an_inline_waiter_runs_a_bounded_drive_continuation() {
+        let work = InlineSessionWork::new(crate::engine::BuildGeneration::for_test("t0"));
+        let driver = Arc::new(PagedProbe {
+            calls: std::sync::atomic::AtomicUsize::new(0),
+        });
+        work.install_session_driver(driver.clone());
+        let outcome = work
+            .await_drive(
+                &SessionId::from("bounded-inline"),
+                &crate::engine::DriveRequestId::new("first"),
+            )
+            .await
+            .expect("the inline waiter drives its continuation");
+        assert_eq!(outcome.stop, crate::engine::DriveStop::Idle);
+        assert_eq!(driver.calls.load(std::sync::atomic::Ordering::SeqCst), 2);
+    }
 
     struct Probe;
 

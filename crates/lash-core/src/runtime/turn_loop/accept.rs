@@ -316,12 +316,14 @@ impl LashRuntime {
             outcome,
             runs,
             declined_follow_on,
+            ..
         } = Box::pin(self.drive_until(
             &scoped_effect_controller,
             &request,
             &sinks,
             Some((&accepted_id, &input)),
             crate::runtime::drive::FollowOnRecovery::Decline,
+            None,
             |run| run.driven_inputs.contains(&accepted_id),
         ))
         .await

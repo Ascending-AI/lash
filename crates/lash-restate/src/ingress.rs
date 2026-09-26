@@ -740,6 +740,34 @@ impl RestateIngressClient {
         Ok(RestateInvocationId::new(accepted.invocation_id))
     }
 
+    /// [`send_object_json_idempotent`](Self::send_object_json_idempotent)
+    /// with a bounded retry: a transient transport or throttling failure is
+    /// worth a short re-send under the same key before the caller's durable
+    /// recovery owns the ask.
+    pub(crate) async fn send_object_json_idempotent_bounded<T: Serialize + ?Sized>(
+        &self,
+        object: &str,
+        key: &str,
+        handler: &str,
+        body: &T,
+        idempotency_key: &str,
+    ) -> Result<RestateInvocationId, RestateHttpError> {
+        const ATTEMPTS: usize = 3;
+        let mut verdict = self
+            .send_object_json_idempotent(object, key, handler, body, idempotency_key)
+            .await;
+        for attempt in 1..ATTEMPTS {
+            if !matches!(&verdict, Err(error) if retryable_send_error(error)) {
+                return verdict;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25 << (attempt - 1))).await;
+            verdict = self
+                .send_object_json_idempotent(object, key, handler, body, idempotency_key)
+                .await;
+        }
+        verdict
+    }
+
     /// [`call_object_json`](Self::call_object_json) under an idempotency
     /// key: the call attaches to the invocation an earlier send or call with
     /// the key started, and returns its output.
@@ -1350,6 +1378,19 @@ async fn status_error(
             url,
             source,
         },
+    }
+}
+
+/// Whether a failed send is worth one more attempt under the same key:
+/// transport and decode failures plus throttling and server statuses; a
+/// malformed request or an unexpected send status is not.
+fn retryable_send_error(error: &RestateHttpError) -> bool {
+    match error {
+        RestateHttpError::Request { .. } | RestateHttpError::Decode { .. } => true,
+        RestateHttpError::Status { status, .. } => {
+            *status == 408 || *status == 429 || *status >= 500
+        }
+        RestateHttpError::Encode { .. } | RestateHttpError::UnexpectedSendStatus { .. } => false,
     }
 }
 
