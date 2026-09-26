@@ -423,6 +423,7 @@ impl ProcessCapability {
             )
             .with_execution_env_ref(env_ref)
             .with_wake_session_id(wake_session_id);
+        let registration = with_admitted_start_cx(current, registration, &scope).await?;
         let registration = self
             .admit_and_stamp_engine_start(current, registration, validation_env_spec.as_ref())
             .await?;
@@ -501,6 +502,7 @@ impl ProcessCapability {
         let registration = request.into_registration(None).with_process_provenance(
             crate::ProcessProvenance::new(originator).with_caused_by(caused_by),
         );
+        let registration = with_admitted_start_cx(current, registration, &scope).await?;
         // A redrive presents the same start key, and the registrar returns the
         // retained process untouched (ADR 0107): its recorded attempt bound
         // stands whatever this declaration carried.
@@ -1071,4 +1073,49 @@ fn process_visibility_miss(process_id: &ProcessId) -> crate::PluginError {
     crate::PluginError::ProcessNotVisible {
         process_id: process_id.clone(),
     }
+}
+
+/// A runtime start records the start context its operation was admitted
+/// under: its ancestry and inherited session capability (FIG-3607 R1, R2).
+/// Registration then checks the recorded lifetime against that ancestry (R3),
+/// so a declaration can name only a scope it was admitted under. An
+/// administrative operation has no start context and registers a root, which
+/// may only be `Detached`.
+///
+/// A process scope whose context does not carry the process's lineage — a
+/// recovered tool child whose context the deployment rebuilt, not lent from
+/// the live body — reads it back from the enclosing process's own row: the
+/// lineage is a recorded, immutable fact of that row, never re-derived. A
+/// process with no row is refused rather than recorded as a root.
+async fn with_admitted_start_cx(
+    current: &CurrentSessionCapability,
+    registration: crate::ProcessRegistration,
+    scope: &crate::ProcessOpScope<'_>,
+) -> Result<crate::ProcessRegistration, crate::PluginError> {
+    let process_id = match scope.start_cx() {
+        Ok(Some(cx)) => return Ok(registration.with_start_cx(&cx)),
+        Ok(None) => return Ok(registration),
+        Err(crate::StartCxError::MissingLineage { process_id }) => process_id,
+        Err(error) => {
+            return Err(crate::PluginError::Session(format!(
+                "process start refused: {error}"
+            )));
+        }
+    };
+    let registry = current.host.process_registry().ok_or_else(|| {
+        crate::PluginError::Session(format!(
+            "process start refused: no registry holds the lineage of enclosing process \
+             `{process_id}`"
+        ))
+    })?;
+    let enclosing = registry.get_process(&process_id).await?.ok_or_else(|| {
+        crate::PluginError::Session(format!(
+            "process start refused: enclosing process `{process_id}` has no row to read its \
+             lineage from"
+        ))
+    })?;
+    let cx = scope
+        .start_cx_under(&enclosing.lineage())
+        .map_err(|error| crate::PluginError::Session(format!("process start refused: {error}")))?;
+    Ok(registration.with_start_cx(&cx))
 }

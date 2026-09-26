@@ -1,5 +1,5 @@
 use super::*;
-use crate::{CancelOrigin, ParentEndPlan, ParentScope, ProcessId};
+use crate::{CancelOrigin, ParentEndPlan, ProcessId, ScopeId};
 
 /// The parent-end recovery pass's state, shared by every clone of one worker.
 #[derive(Default)]
@@ -83,29 +83,31 @@ impl DurableProcessWorker {
         // the next pass starts a new lap; a full page leaves the cursor on the
         // last scope read.
         *cursor = (candidates.len() == bound.get())
-            .then(|| candidates.last().and_then(|parent| parent.storage_id()))
+            .then(|| candidates.last().map(ScopeId::storage_id))
             .flatten();
         drop(cursor);
         let mut unopenable_sessions = 0usize;
         for parent in candidates {
-            let ParentScope::Owned(opener) = &parent else {
+            let ScopeId::Opener(opener) = &parent else {
                 continue;
             };
             let (session_id, owner_label, confirmed) = match opener {
+                // A root ended when it has terminal evidence (FIG-3607 R9):
+                // a frame switch that left a follow-on owed wrote none, so
+                // its `Until` children survive it (FIG-3554). The read needs
+                // no live session and answers for a deleted one.
                 crate::EffectOpener::Turn {
                     session_id,
                     turn_id,
-                } => {
-                    let Some(store) = self.open_session_store_for_read(session_id).await else {
-                        unopenable_sessions += 1;
-                        continue;
-                    };
-                    (
-                        session_id,
-                        format!("turn:{turn_id}"),
-                        store.committed_turn_exists(turn_id).await,
-                    )
-                }
+                } => (
+                    session_id,
+                    format!("turn:{turn_id}"),
+                    self.config
+                        .session_store_factory()
+                        .root_terminal(session_id, turn_id)
+                        .await
+                        .map(|terminal| terminal.is_some()),
+                ),
                 crate::EffectOpener::QueueDrain {
                     session_id,
                     drain_id,
@@ -184,7 +186,7 @@ impl DurableProcessWorker {
     /// not stall process intake behind it. One task per drain at a time.
     async fn write_owed_drain_end(
         &self,
-        parent: &ParentScope,
+        parent: &ScopeId,
         session_id: &crate::SessionId,
         drain_id: &str,
         store: &dyn crate::store::RuntimePersistence,
@@ -203,9 +205,7 @@ impl DurableProcessWorker {
                 return;
             }
         }
-        let Some(key) = parent.storage_id() else {
-            return;
-        };
+        let key = parent.storage_id();
         if !self
             .parent_end
             .owed_drain_ends
@@ -323,7 +323,7 @@ impl DurableProcessWorker {
     /// next pass retries it, so a single unreachable child cannot starve every
     /// other parent's children of their cancel.
     pub(super) async fn drive_pending_parent_end_plans(&self) -> Result<(), PluginError> {
-        let mut deferred: Vec<ParentScope> = Vec::new();
+        let mut deferred: Vec<ScopeId> = Vec::new();
         loop {
             let plans = self
                 .config
@@ -344,7 +344,7 @@ impl DurableProcessWorker {
                 if let Err(error) = self.settle_parent_end_plan(&plan).await {
                     tracing::warn!(
                         parent_kind = plan.parent.storage_kind(),
-                        parent_id = plan.parent.storage_id().unwrap_or_default(),
+                        parent_id = plan.parent.storage_id(),
                         error = %error,
                         "parent-end plan stays pending for the next sweep pass",
                     );
@@ -354,17 +354,14 @@ impl DurableProcessWorker {
         }
     }
 
-    /// Settle one parent scope: request `ParentEnded` cancel on every `Cancel`
-    /// child, then mark the ledger row settled.
+    /// Settle one closed scope: request `ParentEnded` cancel on every process
+    /// living `Until` it, then mark the ledger row settled.
     ///
     /// A terminal child and a child that already carries a cancel request are
     /// settled by definition and are never returned by the children query, so
     /// two sweeps racing on the same parent converge instead of conflicting.
     pub async fn settle_parent_end_plan(&self, plan: &ParentEndPlan) -> Result<(), PluginError> {
-        let requester = plan
-            .parent
-            .storage_id()
-            .unwrap_or_else(|| plan.parent.storage_kind().to_string());
+        let requester = plan.parent.storage_id();
         let mut after: Option<ProcessId> = None;
         loop {
             let children = self
@@ -440,7 +437,7 @@ impl DurableProcessWorker {
             .await
             .ok()
             .flatten()?;
-        let parent = ParentScope::process(record.id.clone());
+        let parent = ScopeId::process(record.id.clone());
         self.config
             .process_registry()
             .get_parent_end_plan(&parent)

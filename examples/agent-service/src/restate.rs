@@ -480,7 +480,7 @@ finish("done via Restate E2E");
             // The `processes` module is catalogue presence, not an ability bit
             // (ADR 0095): the scripted cell below authors `processes.start`.
             .plugin(Arc::new(
-                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter),
             ))
             .build(lash::persistence::LeaseOwnerIdentity::opaque(
                 "agent-service-test",

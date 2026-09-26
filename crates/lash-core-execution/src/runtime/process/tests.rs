@@ -10,7 +10,7 @@ fn registration(_id: &str) -> ProcessRegistration {
         },
         crate::RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
+        crate::Lifetime::Detached,
     )
 }
 

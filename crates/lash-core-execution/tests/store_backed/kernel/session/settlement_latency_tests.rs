@@ -285,6 +285,7 @@ fn probe_context_with<'run>(
         turn_context: crate::TurnContext::default(),
         clock: Arc::new(crate::SystemClock),
         tool_registry: None,
+        process_lineage: None,
     };
     let process_env_store: Arc<dyn crate::ProcessExecutionEnvStore> = backend.process_env_store();
     let dispatch = Arc::new(dispatch);

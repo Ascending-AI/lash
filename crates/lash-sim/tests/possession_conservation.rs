@@ -37,11 +37,12 @@ use std::sync::Arc;
 use lash_core::testing::{MockSessionManager, TestExecutionContextBuilder};
 use lash_core::tool_dispatch::ToolDispatchOutcome;
 use lash_core::{
-    EffectOpener, OnParentEnd, ParentScope, PluginOptions, ProcessExecutionEnvSpec, ProcessId,
-    ProcessInput, ProcessLifecyclePolicy, ProcessListFilter, ProcessOriginator, ProcessProvenance,
-    ProcessRegistration, ProcessStartRequest, RecoveryContract, RuntimeExecutionContext, SessionId,
-    SessionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolIntentExecutionOutcome,
-    ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason, ToolIntents, TurnBudget, TurnId,
+    Ancestry, EffectOpener, Lifetime, LifetimeDecision, PluginOptions, ProcessExecutionEnvSpec,
+    ProcessId, ProcessInput, ProcessListFilter, ProcessOriginator, ProcessProvenance,
+    ProcessRegistration, ProcessStartRequest, RecoveryContract, RuntimeExecutionContext,
+    ScopeGrant, ScopeId, SessionId, SessionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord,
+    ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason,
+    ToolIntents, TurnBudget, TurnId,
 };
 
 /// One live opener: a session's run-local execution context plus the counters
@@ -146,13 +147,9 @@ impl PossessionWorld {
                         session_id: opener.session.clone(),
                         agent_frame_id: None,
                     },
-                    ProcessLifecyclePolicy::new(
-                        ParentScope::Owned(EffectOpener::turn(
-                            opener.session.clone(),
-                            TurnId::from(format!("turn-{opener_name}")),
-                        )),
-                        OnParentEnd::Cancel,
-                    ),
+                    lash_core::lifetime::starter(&opener.context.start_cx().unwrap_or_else(
+                        |error| panic!("the opener's turn materializes a start context: {error}"),
+                    )),
                 )
                 .with_start_key(Some(lash_core::StartKey::for_host(
                     lash_core::StartKeyOwner::HOST,
@@ -320,7 +317,7 @@ impl PossessionWorld {
                 },
                 RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
-                ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
+                Lifetime::Detached,
             ))
             .await
             .unwrap_or_else(|err| panic!("register observed-only row {label}: {err}"))
@@ -367,7 +364,12 @@ impl PossessionWorld {
         )
         .stable_ref()
         .expect("env spec content-addresses");
-        ProcessRegistration::new(
+        // Started by the opener's turn and living until it.
+        let turn = ScopeId::Opener(EffectOpener::turn(
+            session.clone(),
+            TurnId::from(format!("turn-{opener_name}")),
+        ));
+        let mut registration = ProcessRegistration::new(
             ProcessInput::Engine {
                 kind: "sim-child".to_string(),
                 payload: serde_json::Value::Null,
@@ -377,15 +379,17 @@ impl PossessionWorld {
                 session_id: session.clone(),
                 agent_frame_id: None,
             }),
-            ProcessLifecyclePolicy::new(
-                ParentScope::Owned(EffectOpener::turn(
-                    session.clone(),
-                    TurnId::from(format!("turn-{opener_name}")),
-                )),
-                OnParentEnd::Cancel,
-            ),
+            Lifetime::Detached,
         )
-        .with_execution_env_ref(Some(env_ref))
+        .with_execution_env_ref(Some(env_ref));
+        registration.ancestry =
+            Ancestry::from_scopes([turn.clone(), ScopeId::Session(session.clone())]);
+        registration.lifetime = LifetimeDecision::Until {
+            scope: turn,
+            grant: ScopeGrant::Ancestor,
+        };
+        registration.session_capability = Some(session.clone());
+        registration
     }
 
     /// The conservation law, evaluated after every step:

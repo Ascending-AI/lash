@@ -111,10 +111,7 @@ fn registration(label: &str, leased: bool) -> lash_core::ProcessRegistration {
         input,
         contract,
         lash_core::ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_extra_event_types([tick_type()]);
     if leased {

@@ -30,6 +30,8 @@ pub(crate) struct RlmSubagentToolsProvider {
     pub(crate) session_spec: SessionSpec,
     pub(crate) tool_access: SessionToolAccess,
     pub(crate) final_answer_format: lash_rlm_types::RlmFinalAnswerFormat,
+    /// The host's policy for a spawned child's lifetime (FIG-3607).
+    pub(crate) lifetime: lash_core::LifetimePolicy,
     pub(crate) parent_subagent: Option<SubagentSessionContext>,
     pub(crate) include_submit_error: bool,
 }
@@ -68,12 +70,10 @@ impl RlmSubagentToolsProvider {
             // recovery may re-execute them (ADR 0019).
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                context
-                    .child_process_parent_scope()
-                    .map_err(|error| error.to_string())?,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            // The host's policy, resolved against the spawn's admitted start
+            // context. The decision rides the journaled start; a redrive
+            // presents the same key and gets the retained child back.
+            (self.lifetime)(&context.start_cx().map_err(|error| error.to_string())?),
         )
         // The spawn call's own key: every redrive of this body starts the same
         // child, and the child's session derives from the id its start mints

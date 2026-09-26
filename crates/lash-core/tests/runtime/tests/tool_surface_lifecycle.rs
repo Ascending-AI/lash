@@ -706,10 +706,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         );
         if label == "filtered-process" {
             registration = registration
@@ -973,10 +970,7 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_extra_event_types([lash_core::ProcessEventType {
                 name: "signal.ready".to_string(),
@@ -1116,10 +1110,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
                     },
                     lash_core::RecoveryContract::ExternallyOwned,
                     lash_core::ProcessProvenance::host(),
-                    lash_core::ProcessLifecyclePolicy::new(
-                        lash_core::ParentScope::Host,
-                        lash_core::OnParentEnd::Abandon,
-                    ),
+                    lash_core::Lifetime::Detached,
                 )
                 .with_start_key(Some(lash_core::StartKey::for_host(
                     lash_core::StartKeyOwner::HOST,
@@ -1166,10 +1157,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             ))
             .await
             .expect("register observer test process");
@@ -2119,10 +2107,7 @@ fn payload_gated_request(
         },
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::session(lash_core::SessionScope::new(session_id)),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::default(),

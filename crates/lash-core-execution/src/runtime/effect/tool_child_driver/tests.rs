@@ -155,6 +155,7 @@ fn lent_with_direct_completions(
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: Arc::new(crate::SystemClock),
+        process_lineage: None,
     }
 }
 

@@ -10,9 +10,15 @@ impl RuntimeSessionServices {
     /// session — and no pending or held turn input. Only the caller records
     /// the process terminal; the committed child turn is not itself a
     /// recorded process result.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the process identity and its recorded lineage are separate durable facts \
+                  the runner reads from the registration"
+    )]
     pub(in crate::runtime::session_manager::process_runners) async fn run_process_session_turn(
         &self,
         process_id: crate::ProcessId,
+        lineage: crate::ProcessLineage,
         mut create_request: crate::SessionCreateRequest,
         turn_input: crate::TurnInput,
         execution_write_authority: crate::ProcessExecutionWriteAuthority,
@@ -42,6 +48,7 @@ impl RuntimeSessionServices {
             self.initialize_session_and_run_turn(session_init::ProcessSessionTurnInit {
                 create_request,
                 process_id: &process_id,
+                lineage,
                 turn_id: child_turn_id,
                 turn_input,
                 execution_write_authority: &execution_write_authority,

@@ -1167,16 +1167,30 @@ fn remote_process_dtos_json_round_trip() {
         wake_session_id: Some(SessionId::from("session")),
         observers: vec![SessionId::from("session".to_string())],
         event_types: vec![remote_process_event_type()],
-        lifecycle: Some(crate::RemoteProcessLifecyclePolicy {
-            parent: crate::RemoteParentScope::Host,
-            on_parent_end: crate::RemoteOnParentEnd::Abandon,
-        }),
+        lifetime: crate::RemoteStartLifetime::UntilSession {
+            session_id: SessionId::from("session"),
+        },
     };
     start.validate().expect("valid process start request");
-    let mut missing_lifecycle = start.clone();
-    assert!(missing_lifecycle.lifecycle.take().is_some());
+    let mut missing_lifetime =
+        serde_json::to_value(&start).expect("serialize the process start request");
     assert!(
-        matches!(missing_lifecycle.validate(), Err(RemoteProtocolError::InvalidEnvelope { message, .. }) if message.contains("lifecycle"))
+        missing_lifetime
+            .as_object_mut()
+            .expect("a start request is an object")
+            .remove("lifetime")
+            .is_some()
+    );
+    assert!(
+        serde_json::from_value::<RemoteProcessStartRequest>(missing_lifetime).is_err(),
+        "a start request names its lifetime; there is no default"
+    );
+    let mut empty_session = start.clone();
+    empty_session.lifetime = crate::RemoteStartLifetime::UntilSession {
+        session_id: SessionId::from(""),
+    };
+    assert!(
+        matches!(empty_session.validate(), Err(RemoteProtocolError::MissingRequiredField { field, .. }) if field == "lifetime.session_id")
     );
 
     let mut invalid_max_attempts = start.clone();
@@ -1226,10 +1240,8 @@ fn remote_process_dtos_json_round_trip() {
                     definition: None,
                 },
                 lifecycle: RemoteProcessStatus::Running,
-                policy: RemoteProcessLifecyclePolicy {
-                    parent: RemoteParentScope::Host,
-                    on_parent_end: RemoteOnParentEnd::Abandon,
-                },
+                lifetime: RemoteLifetimeDecision::Detached,
+                ancestry: Vec::new(),
                 disposition: RemoteRecoveryContract::ExternallyOwned,
                 error: None,
                 error_code: None,
@@ -2171,7 +2183,9 @@ fn remote_process_record() -> RemoteProcessRecord {
         }),
         status: RemoteProcessStatus::Running,
         outcome: None,
-    lifecycle: crate::RemoteProcessLifecyclePolicy { parent: crate::RemoteParentScope::Host, on_parent_end: crate::RemoteOnParentEnd::Abandon },
+    lifetime: crate::RemoteLifetimeDecision::Detached,
+    ancestry: Vec::new(),
+    session_capability: None,
 }
 }
 

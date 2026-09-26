@@ -772,6 +772,20 @@ pub(crate) fn rebind_child_dispatch<'run>(
     // Ruling 1: a reopen may not consult the live Tool Catalog, and neither
     // may the calls the child issues (FIG-3712). See `admitted_catalog`.
     child.tool_catalog = Arc::new(admitted_catalog(request));
+    // The enclosing process's lineage is lent only by that process's own
+    // opener: a lent context of another process, or of no process, carries
+    // none the child may start under (FIG-3607 R2).
+    let enclosing = request
+        .enclosing_process
+        .clone()
+        .map(crate::ScopeId::process);
+    if child
+        .process_lineage
+        .as_ref()
+        .is_some_and(|lineage| lineage.ancestry().starter() != enclosing.as_ref())
+    {
+        child.process_lineage = None;
+    }
     // Lineage is recorded, not the opener's current one.
     child.parent_invocation = request.attempt_identity.parent_invocation().cloned();
     // Observation keying is likewise call-scoped: the child's own call sites

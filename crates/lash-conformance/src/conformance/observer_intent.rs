@@ -22,10 +22,7 @@ pub async fn fork_observer_intent_transient_failure(backend: crate::Backend) {
             },
             crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         ))
         .await
         .expect("register fork observer process")

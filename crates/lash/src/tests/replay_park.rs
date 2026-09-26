@@ -722,6 +722,7 @@ impl Backend {
             .model(mock_model_spec())
             .plugin(Arc::new(lash_subagents::SubagentsPluginFactory::new(
                 Arc::new(registry),
+                lash_core::lifetime::starter,
             )))
             .build(crate::testing::runtime_lease_owner())
             .expect("file-backed SQLite RLM backend with subagents")

@@ -428,8 +428,11 @@ pub(super) async fn restate_replay_does_not_reexecute_scalar_lashlang_tool_befor
     // without the process-controls plugin the cell's `processes.start` is
     // refused with "unknown module `processes`", the turn executes nothing, and
     // the replay law under test never gets a pending wait to park on.
-    let process_controls: Arc<dyn lash_core::facade_support::PluginFactory> =
-        Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new());
+    let process_controls: Arc<dyn lash_core::facade_support::PluginFactory> = Arc::new(
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+            lash_core::lifetime::session_or_starter,
+        ),
+    );
     let plugin_factories = vec![rlm_plugin, tool_plugin, process_controls];
     let llm_provider_calls = Arc::new(AtomicUsize::new(0));
     let provider = lash_core::testing::TestProvider::builder()
@@ -503,10 +506,7 @@ finish(await handle);
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_extra_event_types([lash_core::ProcessEventType {
                 name: "signal.resume".to_string(),
@@ -1240,10 +1240,7 @@ fn start_recovery_effect(
         },
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_start_key(Some(lash_core::StartKey::for_host(
         lash_core::StartKeyOwner::HOST,

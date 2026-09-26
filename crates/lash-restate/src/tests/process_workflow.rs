@@ -954,10 +954,7 @@ pub(super) async fn segmented_child_await_registration(
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new(
             "segmented-child-await-root",
         )),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
     .with_execution_env_ref(Some(env_ref))
@@ -973,7 +970,9 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
         Arc::clone(&registry),
         memory_session_store_factory().await,
         vec![Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::session_or_starter,
+            ),
         )],
         Some(graphs.clone()),
     )
@@ -1251,10 +1250,7 @@ pub(super) async fn snapshot_lashlang_registration(
         }),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types())
     .with_execution_env_ref(Some(env_ref))
@@ -1312,10 +1308,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
         },
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(creator_scope.clone()),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_extra_event_types([process_wake_event_type()])
     .with_execution_env_ref(Some(env_ref))
@@ -1357,10 +1350,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         ))
         .await
         .expect("register nonterminal cancellation target before reopen")

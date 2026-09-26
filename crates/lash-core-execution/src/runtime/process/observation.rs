@@ -9,9 +9,8 @@ use crate::plugin::PluginError;
 use super::events::{ProcessAwaitOutput, ProcessEvent};
 use super::model::{
     AbandonRequest, ProcessExecutionEnvRef, ProcessExternalRef, ProcessId, ProcessIdentity,
-    ProcessInput, ProcessLease, ProcessLifecyclePolicy, ProcessListFilter, ProcessOriginator,
-    ProcessOriginatorFilter, ProcessRecord, ProcessStarted, ProcessStatus, RecoveryContract,
-    SessionScope, WaitState,
+    ProcessInput, ProcessLease, ProcessListFilter, ProcessOriginator, ProcessOriginatorFilter,
+    ProcessRecord, ProcessStarted, ProcessStatus, RecoveryContract, SessionScope, WaitState,
 };
 use super::registry::ProcessRegistry;
 
@@ -53,9 +52,11 @@ pub struct ObservedProcess {
     /// Sequence of the newest event folded into this observed record.
     pub last_event_sequence: u64,
     pub lifecycle: ProcessStatus,
-    /// Declared parent scope and parent-end action. `lifecycle` above is the
-    /// status fold; this is the policy the host chose at registration.
-    pub policy: ProcessLifecyclePolicy,
+    /// The recorded lifetime decision: what ends the process. `lifecycle`
+    /// above is the status fold.
+    pub lifetime: crate::LifetimeDecision,
+    /// The recorded ancestry, nearest first; empty for a root start.
+    pub ancestry: crate::Ancestry,
     pub identity: ProcessIdentity,
     /// Declared recovery contract (ADR 0019). Raw fact; hosts classify.
     pub disposition: RecoveryContract,
@@ -434,7 +435,8 @@ impl ObservedProcess {
             process_id,
             last_event_sequence,
             lifecycle,
-            policy: record.lifecycle,
+            lifetime: record.lifetime,
+            ancestry: record.ancestry,
             identity,
             disposition: record.disposition,
             error: terminal_error(record.outcome.as_ref()),

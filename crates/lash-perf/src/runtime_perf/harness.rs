@@ -889,6 +889,7 @@ fn benchmark_plugin_factories(
                     lash_core::facade_support::SessionSpec::inherit(),
                 ),
             ))),
+            lash_core::lifetime::starter,
         )));
     }
     if wiring.oblique_tools_plugin {

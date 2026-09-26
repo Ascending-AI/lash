@@ -548,10 +548,7 @@ mod tests {
                     declaration: crate::ProcessStartDeclaration::external(
                         crate::ProcessOriginator::host(),
                         serde_json::Value::Null,
-                        crate::ProcessLifecyclePolicy::new(
-                            crate::ParentScope::Host,
-                            crate::OnParentEnd::Abandon,
-                        ),
+                        crate::Lifetime::Detached,
                     ),
                 }))
             }
@@ -722,28 +719,25 @@ mod tests {
     }
 
     #[test]
-    fn start_process_intent_without_a_lifecycle_policy_is_refused() {
+    fn start_process_intent_without_a_lifetime_is_refused() {
         let declaration = crate::ProcessStartDeclaration::external(
             crate::ProcessOriginator::host(),
             serde_json::Value::Null,
-            crate::ProcessLifecyclePolicy::new(
-                crate::ParentScope::Host,
-                crate::OnParentEnd::Abandon,
-            ),
+            crate::Lifetime::Detached,
         );
         let mut payload = serde_json::to_value(declaration).expect("serialize start declaration");
         assert!(
             payload
                 .as_object_mut()
                 .expect("declaration object")
-                .remove("lifecycle")
+                .remove("lifetime")
                 .is_some()
         );
         let error = serde_json::from_value::<StartProcessIntent>(serde_json::json!({
             "session_id": "session", "declaration": payload,
         }))
-        .expect_err("lifecycle absence must be refused");
-        assert!(error.to_string().contains("lifecycle"));
+        .expect_err("lifetime absence must be refused");
+        assert!(error.to_string().contains("lifetime"));
     }
 
     /// Every input the replay key is derived from, as a generated tuple.

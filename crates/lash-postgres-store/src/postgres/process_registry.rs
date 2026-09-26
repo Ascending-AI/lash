@@ -107,8 +107,8 @@ impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
             .bind(filter.created_at_start_ms.map(clamp_epoch_ms))
             .bind(filter.created_at_end_ms.map(clamp_epoch_ms))
             .bind(filter.retired_since_ms.map(clamp_epoch_ms));
-        if let Some(parent) = &filter.parent_scope {
-            query = query.bind(parent.storage_kind()).bind(parent.storage_id());
+        if let Some(scope) = &filter.until {
+            query = query.bind(scope.storage_kind()).bind(scope.storage_id());
         }
         if let Some(before_ms) = filter.cancel_pending_before_ms {
             query = query.bind(clamp_epoch_ms(before_ms));
@@ -258,36 +258,37 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
         let unprepared = registration.clone();
         let registration =
             lash_core_execution::runtime::prepare_process_registration(registration)?;
-        // Late-registration fencing: a `Cancel` child whose parent scope
-        // already has a ledger row can never be swept, so it is refused here
-        // rather than left to outlive its parent.
+        // Admission against closure (FIG-3607 R11): a new start is refused
+        // once its starter has ended, whatever its own lifetime, and once the
+        // scope its lifetime names has closed.
         //
-        // The read and this transaction's insert are one decision, so it is
-        // taken under the parent scope's advisory lock. Without it the pair is
-        // a check-then-act against a ledger write that runs in its own
-        // transaction on another connection: the child would read "no row",
-        // the row would commit, the sweep would page children without seeing
-        // this uncommitted one, and the child would land live under an ended
-        // scope. Holding the lock orders the two writes either way round.
-        if registration.lifecycle.on_parent_end == lash_core_execution::OnParentEnd::Cancel
-            && !matches!(
-                registration.lifecycle.parent,
-                lash_core_execution::ParentScope::Host
-            )
-        {
-            parent_end::lock_parent_scope_tx(&mut tx, &registration.lifecycle.parent).await?;
+        // The reads and this transaction's insert are one decision, so each
+        // is taken under its scope's advisory lock. Without it the pair is a
+        // check-then-act against a close written in its own transaction on
+        // another connection: the start would read "no row", the row would
+        // commit, the sweep would page children without seeing this
+        // uncommitted one, and the child would land live under a closed
+        // scope. Holding the lock orders the two writes either way round. The
+        // locks are taken in key order, so two starts never wait on each
+        // other's second lock.
+        let mut fenced: Vec<&lash_core_execution::ScopeId> = registration
+            .ancestry
+            .starter()
+            .into_iter()
+            .chain(registration.lifetime.scope())
+            .collect();
+        fenced.sort_by_key(|scope| (scope.storage_kind(), scope.storage_id()));
+        fenced.dedup();
+        for scope in &fenced {
+            parent_end::lock_parent_scope_tx(&mut tx, scope).await?;
         }
-        if registration.lifecycle.on_parent_end == lash_core_execution::OnParentEnd::Cancel
-            && !matches!(
-                registration.lifecycle.parent,
-                lash_core_execution::ParentScope::Host
-            )
-            && parent_end::plan_exists_tx(&mut tx, &registration.lifecycle.parent).await?
-        {
-            return Err(lash_core_execution::PluginError::ParentEnded {
-                start_key: registration.start_key.clone(),
-                parent: registration.lifecycle.parent.clone(),
-            });
+        for scope in fenced {
+            if parent_end::plan_exists_tx(&mut tx, scope).await? {
+                return Err(lash_core_execution::PluginError::ParentEnded {
+                    start_key: registration.start_key.clone(),
+                    parent: scope.clone(),
+                });
+            }
         }
         // Minted only once the start is admitted, so no refusal names an id
         // that was never registered.
@@ -313,9 +314,19 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
             .bind(record.last_event_sequence as i64)
             .bind(change_seq as i64)
             .bind(process_status_label(&record))
-            .bind(record.lifecycle.parent.storage_kind())
-            .bind(record.lifecycle.parent.storage_id())
-            .bind(record.lifecycle.on_parent_end.storage_label())
+            .bind(
+                record
+                    .lifetime
+                    .scope()
+                    .map(lash_core_execution::ScopeId::storage_kind),
+            )
+            .bind(
+                record
+                    .lifetime
+                    .scope()
+                    .map(lash_core_execution::ScopeId::storage_id),
+            )
+            .bind(record.lifetime.storage_label())
             .bind(cancel_requested_at_ms(&record))
             .bind(record_json)
             .execute(&mut *tx)
@@ -646,6 +657,16 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
         session_id: &SessionId,
     ) -> Result<lash_core_execution::ProcessSessionDeleteReport, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
+        // The session's scope closes with its process state (FIG-3607 R10):
+        // every process living `Until` it is swept, and a later start naming
+        // it is refused.
+        parent_end::record_tx(
+            &mut tx,
+            &lash_core_execution::ScopeId::session(session_id.clone()),
+            self.clock.timestamp_ms(),
+            self.fleet_format,
+        )
+        .await?;
         let discarded_wake_delivery_count =
             sqlx::query(process_sql().wake.discard_target_gone.sql())
                 .bind(session_id.as_str())

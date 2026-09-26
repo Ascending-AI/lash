@@ -28,10 +28,7 @@ async fn test_core() -> lash::Result<(lash::LashCore, ProcessId, ProcessId)> {
                     },
                     lash::process::RecoveryContract::ExternallyOwned,
                     lash::process::ProcessProvenance::host(),
-                    lash_core::ProcessLifecyclePolicy::new(
-                        lash_core::ParentScope::Host,
-                        lash_core::OnParentEnd::Abandon,
-                    ),
+                    lash_core::Lifetime::Detached,
                 ),
                 &[SessionId::from(SESSION.to_string())],
             )

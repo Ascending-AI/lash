@@ -338,6 +338,12 @@ async fn process_runner_deferred_await_uses_the_owning_process_execution_trio() 
     let output = services
         .run_process_tool_call(ProcessToolCallRun {
             process_id: crate::ProcessId::fixture("process-witness"),
+            lineage: crate::ProcessLineage::of_process(
+                &crate::ProcessId::fixture("process-witness"),
+                &crate::Ancestry::root(),
+                None,
+                None,
+            ),
             call,
             parent_invocation: None,
             execution_write_authority: crate::ProcessExecutionWriteAuthority::invocation(
@@ -401,6 +407,12 @@ async fn run_retrying_host_process_tool(
     let output = services
         .run_process_tool_call(ProcessToolCallRun {
             process_id: crate::ProcessId::fixture("process-attribution-witness"),
+            lineage: crate::ProcessLineage::of_process(
+                &crate::ProcessId::fixture("process-attribution-witness"),
+                &crate::Ancestry::root(),
+                None,
+                None,
+            ),
             call,
             parent_invocation,
             execution_write_authority: crate::ProcessExecutionWriteAuthority::invocation(

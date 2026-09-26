@@ -32,10 +32,7 @@ mod tests {
             },
             RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
-            crate::ProcessLifecyclePolicy::new(
-                crate::ParentScope::Host,
-                crate::OnParentEnd::Abandon,
-            ),
+            crate::Lifetime::Detached,
         )
     }
 
@@ -529,10 +526,7 @@ mod tests {
                 input,
                 disposition,
                 ProcessProvenance::host(),
-                crate::ProcessLifecyclePolicy::new(
-                    crate::ParentScope::Host,
-                    crate::OnParentEnd::Abandon,
-                ),
+                crate::Lifetime::Detached,
             )
             .with_admitted_identity(crate::AdmittedProcessIdentity::for_testing(
                 ProcessIdentity::labelled(kind, Some(label.to_string())),

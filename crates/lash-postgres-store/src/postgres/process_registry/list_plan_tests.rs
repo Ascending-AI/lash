@@ -39,8 +39,8 @@ async fn plan_for(filter: &lash_core_execution::ProcessListFilter) -> Option<Str
         .bind(filter.created_at_start_ms.map(crate::clamp_epoch_ms))
         .bind(filter.created_at_end_ms.map(crate::clamp_epoch_ms))
         .bind(filter.retired_since_ms.map(crate::clamp_epoch_ms));
-    if let Some(parent) = &filter.parent_scope {
-        query = query.bind(parent.storage_kind()).bind(parent.storage_id());
+    if let Some(scope) = &filter.until {
+        query = query.bind(scope.storage_kind()).bind(scope.storage_id());
     }
     if let Some(before_ms) = filter.cancel_pending_before_ms {
         query = query.bind(crate::clamp_epoch_ms(before_ms));
@@ -79,10 +79,10 @@ async fn pending_cancel_list_uses_the_partial_cancel_index() {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn parent_scope_list_uses_the_parent_scope_index() {
+async fn until_scope_list_uses_the_lifetime_scope_index() {
     let Some(plan) = plan_for(&lash_core_execution::ProcessListFilter {
         status: lash_core_execution::ProcessStatusFilter::Any,
-        parent_scope: Some(lash_core_execution::ParentScope::turn(
+        until: Some(lash_core_execution::ScopeId::turn(
             SessionId::from("plan-session"),
             lash_core_execution::TurnId::from("plan-turn"),
         )),
@@ -93,8 +93,8 @@ async fn parent_scope_list_uses_the_parent_scope_index() {
         return;
     };
     assert!(
-        plan.contains("idx_lash_processes_parent_scope"),
-        "a populated parent scope must seek the scope index:\n{plan}"
+        plan.contains("idx_lash_processes_lifetime_scope"),
+        "a populated until scope must seek the scope index:\n{plan}"
     );
 }
 
@@ -106,7 +106,7 @@ fn an_unpopulated_filter_leaves_no_predicate_behind() {
     });
     assert_eq!(sql, process_sql().process_postgres.list.sql());
     assert!(
-        !sql.contains("parent_scope_kind") && !sql.contains("cancel_requested_at_ms"),
+        !sql.contains("lifetime_scope_kind") && !sql.contains("cancel_requested_at_ms"),
         "an absent filter must not widen the statement:\n{sql}"
     );
 }

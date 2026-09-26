@@ -315,10 +315,7 @@ async fn a_declared_label_survives_the_admitted_stamp_byte_identical() {
             },
             crate::RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
-            crate::ProcessLifecyclePolicy::new(
-                crate::ParentScope::Host,
-                crate::OnParentEnd::Abandon,
-            ),
+            crate::Lifetime::Detached,
         )
     };
 

@@ -389,10 +389,7 @@ async fn register_process(registry: &dyn crate::ProcessRegistry) -> ProcessId {
             },
             crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         ))
         .await
         .expect("register the pruned process")

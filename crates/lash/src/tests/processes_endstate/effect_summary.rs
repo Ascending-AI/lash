@@ -119,7 +119,9 @@ impl SummaryBackend {
             .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
             .plugin(Arc::new(
-                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                    lash_core::lifetime::session_or_starter,
+                ),
             ))
             .process_event_sink(Arc::new(sink.clone()))
             .without_queued_work()

@@ -54,18 +54,17 @@ use lash_core::{
     AdmittedScope, ArtifactOwner, AttemptOutcome, AttemptRecord, AttemptUsageDisposition,
     AwaitEventKey, AwaitEventResolver, CancellationToken, ChildDrainOutcome, EffectAddress,
     EffectHost, EffectOpener, EmitProcessEventIntent, ExecutionScope, FrameNodeId,
-    GroupDrainReport, GroupExecutors, GroupWakePolicy, LlmCallId, LlmCallRecord, LoserPolicy,
-    OnParentEnd, ParentScope, PendingCompletion, PluginOptions, PreparedToolCall,
-    ProcessEngineRegistry, ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-    ProcessId, ProcessInput, ProcessLifecyclePolicy, ProcessOriginator, ProcessRegistration,
-    ProcessRegistry, ProcessService, ProcessStartDeclaration, ProtocolPosition, RecoveryContract,
-    Resolution, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectEnvelope,
-    RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
-    RuntimeInvocation, ScopedEffectController, SessionId, SessionPolicy, StartProcessIntent,
-    StoreEffectGroupDrain, ToolAttemptOutcome, ToolCatalog, ToolContract, ToolDefinition,
-    ToolExecutionGrant, ToolFailure, ToolFailureClass, ToolId, ToolIntent, ToolIntents,
-    ToolManifest, ToolOutcome, ToolOutcomeDone, ToolProvider, ToolRegistry, ToolRetryPolicy,
-    TurnBudget, TurnContext, TurnControlBindingId,
+    GroupDrainReport, GroupExecutors, GroupWakePolicy, Lifetime, LlmCallId, LlmCallRecord,
+    LoserPolicy, PendingCompletion, PluginOptions, PreparedToolCall, ProcessEngineRegistry,
+    ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessId, ProcessInput,
+    ProcessOriginator, ProcessRegistration, ProcessRegistry, ProcessService,
+    ProcessStartDeclaration, ProtocolPosition, RecoveryContract, Resolution, RuntimeAttribution,
+    RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimeInvocation, ScopedEffectController,
+    SessionId, SessionPolicy, StartProcessIntent, StoreEffectGroupDrain, ToolAttemptOutcome,
+    ToolCatalog, ToolContract, ToolDefinition, ToolExecutionGrant, ToolFailure, ToolFailureClass,
+    ToolId, ToolIntent, ToolIntents, ToolManifest, ToolOutcome, ToolOutcomeDone, ToolProvider,
+    ToolRegistry, ToolRetryPolicy, TurnBudget, TurnContext, TurnControlBindingId,
 };
 use lash_sansio::sync::MutexExt as _;
 use lash_sqlite_store::{SqliteEffectHost, SqliteEffectReplayOptions};
@@ -231,6 +230,9 @@ struct OpenerDeployment {
     turn_context: TurnContext,
     /// `RebindField::Clock` — A the system clock, B a test clock.
     clock: Arc<dyn lash_core::Clock>,
+    /// `RebindField::ProcessLineage` — A none (a turn opener runs inside no
+    /// process), B its process body's lineage.
+    process_lineage: Option<lash_core::ProcessLineage>,
     /// The request-side facts: the opener arm, the admitted scope pair, the
     /// recorded cancellation authority, the enclosing process, the completion
     /// routing.
@@ -296,6 +298,7 @@ impl OpenerDeployment {
             attachment_source_policy: Arc::clone(&self.attachment_source_policy),
             turn_context: self.turn_context.clone(),
             clock: Arc::clone(&self.clock),
+            process_lineage: self.process_lineage.clone(),
         })
     }
 
@@ -390,6 +393,13 @@ fn axis_value(
         }
         RebindField::TurnContext => format!("turn-context:{}", deployment.tag),
         RebindField::Clock => format!("{:p}", Arc::as_ptr(&deployment.clock)),
+        RebindField::ProcessLineage => format!(
+            "lineage:{:?}",
+            deployment
+                .process_lineage
+                .as_ref()
+                .map(|lineage| lineage.ancestry().scopes().to_vec())
+        ),
         // --- Rebound: the recorded request is the authority. ---
         RebindField::ToolCatalog => {
             serde_json::to_string(&request.admission).expect("the admission serializes")
@@ -543,10 +553,7 @@ impl ToolProvider for ProfileProvider {
                                 declaration: ProcessStartDeclaration::external(
                                     ProcessOriginator::host(),
                                     serde_json::json!({ "impl": "a", "leaf": "spend" }),
-                                    ProcessLifecyclePolicy::new(
-                                        ParentScope::Host,
-                                        OnParentEnd::Abandon,
-                                    ),
+                                    Lifetime::Detached,
                                 ),
                             })),
                             ToolIntent::EmitProcessEvent(EmitProcessEventIntent {
@@ -1135,7 +1142,7 @@ async fn fixture(
                 },
                 RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
-                ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
+                Lifetime::Detached,
             )
             .with_extra_event_types(vec![ProcessEventType {
                 name: INTENT_EVENT_TYPE.to_string(),
@@ -1203,6 +1210,7 @@ async fn fixture(
         attachment_source_policy: Arc::new(OpenAttachmentSourcePolicy),
         turn_context: TurnContext::default(),
         clock: Arc::new(SystemClock),
+        process_lineage: None,
         opener: EffectOpener::for_scope(&admitted_a).expect("a turn scope derives an opener"),
         admitted_scope: admitted_a,
         routing: ToolChildCompletionRouting::Durable,
@@ -1247,6 +1255,12 @@ async fn fixture(
         attachment_source_policy: Arc::new(OpenAttachmentSourcePolicy),
         turn_context: turn_context_b,
         clock: Arc::new(TestClock::new(1_700_000_000_000)),
+        process_lineage: Some(lash_core::ProcessLineage::of_process(
+            &process_b,
+            &lash_core::Ancestry::root(),
+            None,
+            None,
+        )),
         opener: EffectOpener::process(process_b.clone()),
         admitted_scope: admitted_b,
         // Differs from A's durable routing on the recorded axis.

@@ -44,11 +44,16 @@ pub(crate) fn configure_workbench_plugins(
             .with_approvals(approvals),
     ));
     plugins.push(Arc::new(
-        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+            lash::process::lifetime::session_or_starter,
+        ),
     ));
     plugins.push(Arc::new(
-        lash_subagents::SubagentsPluginFactory::new(subagent_registry)
-            .with_session_spec(SessionSpec::inherit()),
+        lash_subagents::SubagentsPluginFactory::new(
+            subagent_registry,
+            lash::process::lifetime::starter,
+        )
+        .with_session_spec(SessionSpec::inherit()),
     ));
     plugins.push(mcp);
 }

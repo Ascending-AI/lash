@@ -45,7 +45,7 @@ mod tests {
                 crate::StartKeyOwner::HOST,
                 "late-child",
             )),
-            parent: crate::ParentScope::process(crate::process_id_for_test("ended-parent")),
+            parent: crate::ScopeId::process(crate::process_id_for_test("ended-parent")),
         };
         assert!(error.is_terminal());
         assert!(!error.is_retryable());

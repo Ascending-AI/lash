@@ -958,6 +958,16 @@ impl ToolIntentIngress {
                 // one constructor, shared with core's recorded-intent seam
                 // (FIG-2876, FIG-2994).
                 let request = intent.into_request(identity);
+                // A host-submitted start is a root: its lifetime is
+                // `Detached` or `Until` a session the host holds, looked up
+                // now (FIG-3607 R3).
+                if let lash_core::LifetimeDecision::Until {
+                    scope: lash_core::ScopeId::Session(session_id),
+                    grant: lash_core::ScopeGrant::HostSessionLookup,
+                } = &request.lifetime
+                {
+                    self.core.processes().session_scope(session_id).await?;
+                }
                 let env_spec = request.env_spec.clone();
                 let observers = request.observers.clone();
                 let registration = self

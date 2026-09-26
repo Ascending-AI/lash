@@ -27,6 +27,7 @@ impl<'run> ProcessRunContext<'run> {
             causal_invocation: None,
             dispatch_parent_invocation: None,
             cancellation: tokio_util::sync::CancellationToken::new(),
+            process_lineage: None,
         }
     }
 
@@ -53,10 +54,12 @@ pub(in crate::runtime::session_manager::process_runners) struct ProcessRunContex
     causal_invocation: Option<crate::RuntimeInvocation>,
     dispatch_parent_invocation: Option<crate::RuntimeInvocation>,
     cancellation: tokio_util::sync::CancellationToken,
+    process_lineage: Option<crate::ProcessLineage>,
 }
 
 pub(in crate::runtime::session_manager::process_runners) struct ProcessToolCallRun<'run> {
     process_id: crate::ProcessId,
+    lineage: crate::ProcessLineage,
     call: crate::PreparedToolCall,
     parent_invocation: Option<crate::RuntimeInvocation>,
     execution_write_authority: crate::ProcessExecutionWriteAuthority,
@@ -94,6 +97,16 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
         invocation: Option<crate::RuntimeInvocation>,
     ) -> Self {
         self.dispatch_parent_invocation = invocation;
+        self
+    }
+
+    /// The lineage of the process this context runs, which every start made
+    /// inside it records above its starter (FIG-3607 R1).
+    pub(in crate::runtime::session_manager::process_runners) fn process_lineage(
+        mut self,
+        lineage: crate::ProcessLineage,
+    ) -> Self {
+        self.process_lineage = Some(lineage);
         self
     }
 
@@ -174,6 +187,7 @@ impl<'a, 'run> ProcessRunContextBuilder<'a, 'run> {
             ),
             turn_context: crate::TurnContext::default(),
             clock: Arc::clone(&self.services.current.host.core.clock),
+            process_lineage: self.process_lineage,
         });
         // Publish the process incarnation as a live opener, lending this
         // dispatch context to the group children it opens (ADR 0099 §3). The

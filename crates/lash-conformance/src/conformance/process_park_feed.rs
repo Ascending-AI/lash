@@ -43,10 +43,7 @@ fn parkable(max_attempts: Option<u32>) -> ProcessRegistration {
         },
         RecoveryContract::Rerunnable,
         ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_max_attempts(max_attempts)
 }

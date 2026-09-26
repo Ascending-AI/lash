@@ -1012,10 +1012,7 @@ pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         );
         let double =
             crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
@@ -1244,10 +1241,7 @@ pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         );
         let double =
             crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;

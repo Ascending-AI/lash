@@ -2323,10 +2323,7 @@ fn replay_conformance_tool_attempt_outcome(
                     declaration: crate::ProcessStartDeclaration::external(
                         crate::ProcessOriginator::host_scoped("effect-host-conformance"),
                         serde_json::json!({"tool": tool_name}),
-                        lash_core::ProcessLifecyclePolicy::new(
-                            lash_core::ParentScope::Host,
-                            lash_core::OnParentEnd::Abandon,
-                        ),
+                        lash_core::Lifetime::Detached,
                     ),
                 },
             ))]),

@@ -164,11 +164,11 @@ mod tests {
                          process_id, originator_id,
                          identity_kind, created_at_ms, updated_at_ms,
                          last_event_sequence, change_seq, status,
-                         parent_scope_kind, parent_scope_id, on_parent_end, record_json
+                         lifetime_scope_kind, lifetime_scope_id, lifetime, record_json
                      )
                      SELECT printf('plan-%05d', i), 'host', 'test', 0, 0, 0, i,
                             CASE WHEN i <= 100 THEN 'running' ELSE 'completed' END,
-                            'host', NULL, 'abandon',
+                            NULL, NULL, 'detached',
                             '{}'
                      FROM n;
                      ANALYZE;",

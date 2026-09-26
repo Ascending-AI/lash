@@ -24,10 +24,7 @@ pub async fn process_continuation_store(
             },
             RecoveryContract::Rerunnable,
             ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         ))
         .await
         .expect("register continuation owner");
@@ -210,10 +207,7 @@ pub async fn process_continuation_store(
             },
             RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         ))
         .await
         .expect("register prunable continuation owner");

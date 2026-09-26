@@ -1063,13 +1063,18 @@ async fn run_seed_probe_inner(
             // it explicitly: the worker below runs real processes.
             .with_process_lifecycle(true),
         ),
-        Arc::new(SubagentsPluginFactory::new(Arc::new(
-            CapabilityRegistry::new().with(capability),
-        ))),
+        Arc::new(SubagentsPluginFactory::new(
+            Arc::new(CapabilityRegistry::new().with(capability)),
+            lash_core::lifetime::starter,
+        )),
         // The `processes` module is catalogue presence, not an ability bit
         // (ADR 0095): the seeded programs author `processes.start`, so the
         // surface only exists if this factory is in the session's factories.
-        Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
+        Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::session_or_starter,
+            ),
+        ),
     ];
     let registry = backend.process_registry();
     let host_plugins = PluginHost::new(factories.clone());
@@ -1280,13 +1285,14 @@ impl SeedProbe {
             "the parent session observer must expose one {kind}/{label} process record; observed={observed_identities:?}"
         );
         let process = matching[0];
-        assert_eq!(
-            process.lifecycle.on_parent_end,
-            lash_core::OnParentEnd::Abandon
-        );
         assert!(
-            matches!(&process.lifecycle.parent, lash_core::ParentScope::Owned(lash_core::EffectOpener::Turn { session_id, .. }) if session_id.as_str() == "root"),
-            "spawn_agent retains its originating turn scope"
+            matches!(process.ancestry.starter(), Some(lash_core::ScopeId::Opener(lash_core::EffectOpener::Turn { session_id, .. })) if session_id.as_str() == "root"),
+            "spawn_agent records its originating turn as its starter"
+        );
+        assert_eq!(
+            process.lifetime.scope(),
+            process.ancestry.starter(),
+            "the `starter` policy keeps the subagent until the turn that spawned it"
         );
         let observers = lash_core::ProcessObserverRegistry::observers_for_process(
             self.process_registry.as_ref(),
@@ -1362,7 +1368,10 @@ fn request_text(request: &LlmRequest) -> String {
 
 #[tokio::test]
 async fn subagents_plugin_builds_without_mode_context() {
-    let factory = SubagentsPluginFactory::new(Arc::new(default_registry(&BTreeMap::new())));
+    let factory = SubagentsPluginFactory::new(
+        Arc::new(default_registry(&BTreeMap::new())),
+        lash_core::lifetime::starter,
+    );
     let ctx = PluginSessionContext {
         session_id: SessionId::from("parent"),
         tool_access: lash_core::SessionToolAccess::default(),
@@ -1379,7 +1388,10 @@ async fn subagents_plugin_builds_without_mode_context() {
 
 #[test]
 fn subagents_plugin_final_answer_format_defaults_raw_and_can_be_overridden() {
-    let factory = SubagentsPluginFactory::new(Arc::new(default_registry(&BTreeMap::new())));
+    let factory = SubagentsPluginFactory::new(
+        Arc::new(default_registry(&BTreeMap::new())),
+        lash_core::lifetime::starter,
+    );
     assert_eq!(
         factory.final_answer_format,
         lash_rlm_types::RlmFinalAnswerFormat::RawFinalValue

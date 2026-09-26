@@ -1044,7 +1044,9 @@ pub fn check_retained_start(
     let submitted = prepare_process_registration(registration.clone())?;
     let same = submitted.input == retained.input
         && submitted.disposition == retained.disposition
-        && submitted.lifecycle == retained.lifecycle
+        && submitted.lifetime == retained.lifetime
+        && submitted.ancestry == retained.ancestry
+        && submitted.session_capability == retained.session_capability
         && submitted.max_attempts == retained.max_attempts
         && submitted.identity == retained.identity
         && submitted.event_types == retained.event_types
@@ -1120,8 +1122,9 @@ pub(super) fn ensure_core_event_types(registration: &mut ProcessRegistration) {
 /// new shape is also fed through the remote decoder.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ProcessRegistrationRefusal {
-    HostParentCancels,
-    TurnParentSessionMismatch,
+    LifetimeScopeUnreachable,
+    HostGrantOutsideRoot,
+    SessionCapabilityUnreachable,
     ZeroMaxAttempts,
     ToolCallWithoutCallId,
     ToolCallWithoutToolName,
@@ -1138,8 +1141,9 @@ pub enum ProcessRegistrationRefusal {
 impl ProcessRegistrationRefusal {
     /// Every refusal rule, in declaration order.
     pub const ALL: &'static [Self] = &[
-        Self::HostParentCancels,
-        Self::TurnParentSessionMismatch,
+        Self::LifetimeScopeUnreachable,
+        Self::HostGrantOutsideRoot,
+        Self::SessionCapabilityUnreachable,
         Self::ZeroMaxAttempts,
         Self::ToolCallWithoutCallId,
         Self::ToolCallWithoutToolName,
@@ -1175,31 +1179,60 @@ fn registration_name(registration: &ProcessRegistration) -> String {
 pub(crate) fn classify_process_registration(
     registration: &ProcessRegistration,
 ) -> Result<(), ProcessRegistrationRefused> {
-    match &registration.lifecycle.parent {
-        super::model::ParentScope::Host
-            if registration.lifecycle.on_parent_end == super::model::OnParentEnd::Cancel =>
-        {
+    // Reachability (FIG-3607 R3), checked on every new start in every build:
+    // a runtime start's lifetime names a scope in its admitted ancestry, and
+    // a host's session-lookup grant is a root's only grant.
+    match &registration.lifetime {
+        super::model::LifetimeDecision::Detached => {}
+        super::model::LifetimeDecision::Until {
+            scope,
+            grant: super::model::ScopeGrant::Ancestor,
+        } => {
+            if !registration.ancestry.contains(scope) {
+                return Err(refuse(
+                    ProcessRegistrationRefusal::LifetimeScopeUnreachable,
+                    format!(
+                        "{} names lifetime scope `{scope}`, which is not in its admitted ancestry",
+                        registration_name(registration)
+                    ),
+                ));
+            }
+        }
+        super::model::LifetimeDecision::Until {
+            scope,
+            grant: super::model::ScopeGrant::HostSessionLookup,
+        } => {
+            if !registration.ancestry.is_root()
+                || !matches!(scope, super::model::ScopeId::Session(_))
+            {
+                return Err(refuse(
+                    ProcessRegistrationRefusal::HostGrantOutsideRoot,
+                    format!(
+                        "{} holds a host session-lookup grant for `{scope}`, which only a root start's session may carry",
+                        registration_name(registration)
+                    ),
+                ));
+            }
+        }
+    }
+    if let Some(session_id) = registration.session_capability.as_ref() {
+        let scope = super::model::ScopeId::Session(session_id.clone());
+        let held = registration.ancestry.contains(&scope)
+            || (registration.ancestry.is_root()
+                && registration.lifetime
+                    == (super::model::LifetimeDecision::Until {
+                        scope,
+                        grant: super::model::ScopeGrant::HostSessionLookup,
+                    }));
+        if !held {
             return Err(refuse(
-                ProcessRegistrationRefusal::HostParentCancels,
-                "Host parent scope cannot declare Cancel: a host scope never ends".to_string(),
+                ProcessRegistrationRefusal::SessionCapabilityUnreachable,
+                format!(
+                    "{} carries session capability `{session_id}`, which neither its ancestry nor a host lookup grants",
+                    registration_name(registration)
+                ),
             ));
         }
-        super::model::ParentScope::Owned(
-            crate::EffectOpener::Turn { session_id, .. }
-            | crate::EffectOpener::QueueDrain { session_id, .. },
-        ) if !matches!(
-            &registration.provenance.originator,
-            super::model::ProcessOriginator::Session { session_id: originator, .. }
-                if originator == session_id
-        ) =>
-        {
-            return Err(refuse(
-                ProcessRegistrationRefusal::TurnParentSessionMismatch,
-                "turn or drain parent session must match the process originator session"
-                    .to_string(),
-            ));
-        }
-        _ => {}
     }
     if registration.max_attempts == Some(0) {
         return Err(refuse(

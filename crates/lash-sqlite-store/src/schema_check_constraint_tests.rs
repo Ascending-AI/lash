@@ -162,13 +162,13 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         .expect("create process constraint fixture");
     let process_columns = "process_id, originator_id,
         identity_kind, created_at_ms, updated_at_ms, last_event_sequence, change_seq,
-        status, parent_scope_kind, parent_scope_id, on_parent_end, record_json";
+        status, lifetime_scope_kind, lifetime_scope_id, lifetime, record_json";
     assert_check_rejects(
         &process,
         &format!(
             "INSERT INTO processes ({process_columns}) VALUES
              ('bad-status', 'originator', 'standard', 0, 0, 0, 0,
-              'paused', 'host', NULL, 'abandon', '{{}}')"
+              'paused', NULL, NULL, 'detached', '{{}}')"
         ),
         "ck_processes_status",
     );
@@ -176,37 +176,37 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         &process,
         &format!(
             "INSERT INTO processes ({process_columns}) VALUES
-             ('bad-parent-kind', 'originator', 'standard', 0, 0, 0, 0,
-              'running', 'session', 'scope', 'abandon', '{{}}')"
+             ('bad-lifetime', 'originator', 'standard', 0, 0, 0, 0,
+              'running', NULL, NULL, 'abandon', '{{}}')"
         ),
-        "ck_processes_parent_scope_kind",
+        "ck_processes_lifetime",
     );
     assert_check_rejects(
         &process,
         &format!(
             "INSERT INTO processes ({process_columns}) VALUES
-             ('host-with-id', 'originator', 'standard', 0, 0, 0, 0,
-              'running', 'host', 'scope', 'abandon', '{{}}')"
+             ('bad-scope-kind', 'originator', 'standard', 0, 0, 0, 0,
+              'running', 'host', 'scope', 'until', '{{}}')"
         ),
-        "ck_processes_parent_scope_id",
+        "ck_processes_lifetime_scope",
     );
     assert_check_rejects(
         &process,
         &format!(
             "INSERT INTO processes ({process_columns}) VALUES
-             ('turn-without-id', 'originator', 'standard', 0, 0, 0, 0,
-              'running', 'turn', NULL, 'abandon', '{{}}')"
+             ('detached-with-scope', 'originator', 'standard', 0, 0, 0, 0,
+              'running', 'turn', 'scope', 'detached', '{{}}')"
         ),
-        "ck_processes_parent_scope_id",
+        "ck_processes_lifetime_scope",
     );
     assert_check_rejects(
         &process,
         &format!(
             "INSERT INTO processes ({process_columns}) VALUES
-             ('bad-on-parent-end', 'originator', 'standard', 0, 0, 0, 0,
-              'running', 'host', NULL, 'detach', '{{}}')"
+             ('until-without-id', 'originator', 'standard', 0, 0, 0, 0,
+              'running', 'session', NULL, 'until', '{{}}')"
         ),
-        "ck_processes_on_parent_end",
+        "ck_processes_lifetime_scope",
     );
     assert_check_rejects(
         &process,
@@ -218,7 +218,7 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         .execute_batch(&format!(
             "INSERT INTO processes ({process_columns}) VALUES
              ('wake-parent', 'originator', 'standard', 0, 0, 0, 0,
-              'running', 'host', NULL, 'abandon', '{{}}')"
+              'running', NULL, NULL, 'detached', '{{}}')"
         ))
         .expect("insert valid wake parent");
     assert_check_rejects(

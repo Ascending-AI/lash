@@ -229,8 +229,8 @@ fn format_surface(format: DurableFormat) -> SurfaceRelation {
         DurableFormat::ProtocolTurnOptions => SurfaceRelation::Unwalkable(
             "no bounded surface: carried on each session head, refused at open rather than at rest",
         ),
-        DurableFormat::ParentScopeStoragePayload => SurfaceRelation::Unwalkable(
-            "no bounded surface: one payload per parent-owned ledger row, refused at decode \
+        DurableFormat::ScopeStoragePayload => SurfaceRelation::Unwalkable(
+            "no bounded surface: one payload per scope-close row, refused at decode \
              rather than at rest",
         ),
         DurableFormat::ProcessLease => SurfaceRelation::Unwalkable(

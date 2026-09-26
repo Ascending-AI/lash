@@ -604,10 +604,7 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
             .await
     }
 
-    async fn record_parent_end(
-        &self,
-        parent: &crate::ParentScope,
-    ) -> Result<(), crate::PluginError> {
+    async fn record_parent_end(&self, parent: &crate::ScopeId) -> Result<(), crate::PluginError> {
         self.inner.record_parent_end(parent).await
     }
 
@@ -620,14 +617,14 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
 
     async fn get_parent_end_plan(
         &self,
-        parent: &crate::ParentScope,
+        parent: &crate::ScopeId,
     ) -> Result<Option<crate::ParentEndPlan>, crate::PluginError> {
         self.inner.get_parent_end_plan(parent).await
     }
 
     async fn list_parent_end_children(
         &self,
-        parent: &crate::ParentScope,
+        parent: &crate::ScopeId,
         after: Option<&ProcessId>,
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<crate::ProcessRecord>, crate::PluginError> {
@@ -638,7 +635,7 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
 
     async fn settle_parent_end_plan(
         &self,
-        parent: &crate::ParentScope,
+        parent: &crate::ScopeId,
     ) -> Result<(), crate::PluginError> {
         self.inner.settle_parent_end_plan(parent).await
     }
@@ -647,7 +644,7 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
         &self,
         after: Option<&str>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<crate::ParentScope>, crate::PluginError> {
+    ) -> Result<Vec<crate::ScopeId>, crate::PluginError> {
         self.inner
             .list_unrecorded_opener_parents(after, limit)
             .await

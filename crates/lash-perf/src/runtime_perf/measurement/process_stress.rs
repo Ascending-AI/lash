@@ -62,10 +62,7 @@ pub(super) async fn run_once_process_list_stress(
                         },
                         lash_core::RecoveryContract::ExternallyOwned,
                         lash_core::ProcessProvenance::host(),
-                        lash_core::ProcessLifecyclePolicy::new(
-                            lash_core::ParentScope::Host,
-                            lash_core::OnParentEnd::Abandon,
-                        ),
+                        lash_core::Lifetime::Detached,
                     )
                     .with_event_types(vec![lash_core::ProcessEventType {
                         name: signal_event_type.clone(),
@@ -347,10 +344,7 @@ fn process_list_stress_registration(
         },
         lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessProvenance::session(session_scope),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
 }
 

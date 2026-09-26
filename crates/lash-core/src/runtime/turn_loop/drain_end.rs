@@ -34,7 +34,7 @@
 //! ends it), and a fresh empty poll (nothing was ever owned). Ordering is the
 //! §7 one this ticket fixes: protected
 //! obligations drain first, then the outcome commit, then the receipt, then
-//! the ledger row — the ledger row is what sweeps `OnParentEnd::Cancel`
+//! the ledger row — the ledger row is what sweeps `Until(drain)`
 //! children, so it must land only after the drain cannot owe more work.
 
 use super::*;
@@ -86,9 +86,9 @@ impl LashRuntime {
             let Some(registry) = self.host.process_registry() else {
                 return;
             };
-            let parent = crate::ParentScope::queue_drain(session_id.clone(), drain_id.clone());
+            let parent = crate::ScopeId::queue_drain(session_id.clone(), drain_id.clone());
             let filter = crate::ProcessListFilter {
-                parent_scope: Some(parent),
+                until: Some(parent),
                 status: crate::ProcessStatusFilter::Any,
                 ..Default::default()
             };
@@ -295,7 +295,7 @@ impl LashRuntime {
         let Some(registry) = self.host.process_registry() else {
             return;
         };
-        let parent = crate::ParentScope::queue_drain(session_id.clone(), drain_id.clone());
+        let parent = crate::ScopeId::queue_drain(session_id.clone(), drain_id.clone());
         if let Err(error) = registry.record_parent_end(&parent).await {
             tracing::warn!(
                 session_id = %session_id,

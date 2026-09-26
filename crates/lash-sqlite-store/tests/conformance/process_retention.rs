@@ -11,10 +11,7 @@ async fn assert_waiting_process_is_live_not_prunable(registry: &dyn ProcessRegis
             },
             lash_core_execution::RecoveryContract::Rerunnable,
             lash_core_execution::ProcessProvenance::host(),
-            lash_core_execution::ProcessLifecyclePolicy::new(
-                lash_core_execution::ParentScope::Host,
-                lash_core_execution::OnParentEnd::Abandon,
-            ),
+            lash_core_execution::Lifetime::Detached,
         ))
         .await
         .expect("register waiting retention process")
@@ -118,10 +115,7 @@ async fn sqlite_prune_cleanup_evidence_survives_reopen_until_acknowledged() {
                 },
                 lash_core_execution::RecoveryContract::Rerunnable,
                 lash_core_execution::ProcessProvenance::host(),
-                lash_core_execution::ProcessLifecyclePolicy::new(
-                    lash_core_execution::ParentScope::Host,
-                    lash_core_execution::OnParentEnd::Abandon,
-                ),
+                lash_core_execution::Lifetime::Detached,
             )
             .with_execution_env_ref(Some(
                 lash_core_execution::ProcessExecutionEnvRef::new("process-env:sqlite-cleanup"),

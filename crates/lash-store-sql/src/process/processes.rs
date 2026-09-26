@@ -16,8 +16,8 @@ pub const TABLE: &str = "processes";
 /// are the two backends' registration inserts.
 pub const INSERT_COLUMNS: &str = "process_id, start_key, originator_id,
                 wake_session_id, identity_kind, identity_label, created_at_ms, updated_at_ms,
-                last_event_sequence, change_seq, status, parent_scope_kind, parent_scope_id,
-                on_parent_end, cancel_requested_at_ms, record_json";
+                last_event_sequence, change_seq, status, lifetime_scope_kind, lifetime_scope_id,
+                lifetime, cancel_requested_at_ms, record_json";
 
 /// The parked projection's columns, written by every fold that changes the
 /// park and `NULL` at registration (FIG-3659 NOW-B). A `retired_generation`
@@ -68,7 +68,7 @@ pub const CHANGE_FEED_UPSERT_COLUMNS: &str = "change_seq, 'upsert' AS kind, reco
 /// parent key, its kind, and one record carrying it.
 ///
 /// Narrow on purpose, and dialect-spelled twice because the two backends pick
-/// their representative row differently. `parent_scope_id` is the
+/// their representative row differently. `lifetime_scope_id` is the
 /// collision-free projection and is never parsed back; the kind disambiguates
 /// a turn from a queue drain for the caller's confirmation read;
 /// `record_json` is the authority. Every row sharing the key names the same
@@ -76,9 +76,8 @@ pub const CHANGE_FEED_UPSERT_COLUMNS: &str = "change_seq, 'upsert' AS kind, reco
 /// with `MIN`, Postgres with `DISTINCT ON` — and neither needs an indexed
 /// column the WHERE clause has already read.
 pub const UNRECORDED_OPENER_PARENT_COLUMNS_SQLITE: &str =
-    "child.parent_scope_id, child.parent_scope_kind, MIN(child.record_json)";
-pub const UNRECORDED_OPENER_PARENT_COLUMNS_POSTGRES: &str =
-    "ON (child.parent_scope_id) child.parent_scope_id, child.parent_scope_kind, child.record_json";
+    "child.lifetime_scope_id, child.lifetime_scope_kind, MIN(child.record_json)";
+pub const UNRECORDED_OPENER_PARENT_COLUMNS_POSTGRES: &str = "ON (child.lifetime_scope_id) child.lifetime_scope_id, child.lifetime_scope_kind, child.record_json";
 
 crate::statements! {
     /// `processes` statements both backends issue verbatim.

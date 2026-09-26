@@ -497,10 +497,7 @@ impl crate::ToolProvider for LawLeafProvider {
                             declaration: crate::ProcessStartDeclaration::external(
                                 crate::ProcessOriginator::host(),
                                 self.start_metadata.clone(),
-                                crate::ProcessLifecyclePolicy::new(
-                                    crate::ParentScope::Host,
-                                    crate::OnParentEnd::Abandon,
-                                ),
+                                crate::Lifetime::Detached,
                             ),
                         })),
                         crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
@@ -530,10 +527,7 @@ impl crate::ToolProvider for LawLeafProvider {
                             declaration: crate::ProcessStartDeclaration::external(
                                 crate::ProcessOriginator::host(),
                                 serde_json::json!({ "leaf": "commit", "call_id": call_id }),
-                                crate::ProcessLifecyclePolicy::new(
-                                    crate::ParentScope::Host,
-                                    crate::OnParentEnd::Abandon,
-                                ),
+                                crate::Lifetime::Detached,
                             ),
                         })),
                         crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
@@ -574,10 +568,7 @@ impl crate::ToolProvider for LawLeafProvider {
                             declaration: crate::ProcessStartDeclaration::external(
                                 crate::ProcessOriginator::host(),
                                 serde_json::json!({ "leaf": "spend-commit", "call_id": call_id }),
-                                crate::ProcessLifecyclePolicy::new(
-                                    crate::ParentScope::Host,
-                                    crate::OnParentEnd::Abandon,
-                                ),
+                                crate::Lifetime::Detached,
                             ),
                         },
                     ))]),
@@ -603,10 +594,7 @@ impl crate::ToolProvider for LawLeafProvider {
                             declaration: crate::ProcessStartDeclaration::external(
                                 crate::ProcessOriginator::host(),
                                 serde_json::json!({ "leaf": "fence", "call_id": call_id }),
-                                crate::ProcessLifecyclePolicy::new(
-                                    crate::ParentScope::Host,
-                                    crate::OnParentEnd::Abandon,
-                                ),
+                                crate::Lifetime::Detached,
                             ),
                         })),
                         crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
@@ -847,12 +835,12 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation for La
         // The start is keyed by the body's admitted scope, call id and start
         // ordinal, so a redrive re-requests the same start rather than
         // registering a second process (ADR 0107).
-        // The durable parent derives through the admitted scope's minted
+        // The start context's starter derives through the admitted scope's minted
         // `ProcessId` — the process the journal admitted, never a registry
         // lookup. A lost pin answers `None` for `admitted_process`
         // and this errors rather than running.
-        let parent_scope = match context.child_process_parent_scope() {
-            Ok(scope) => scope,
+        let parent_scope = match context.start_cx() {
+            Ok(cx) => cx.starter().id().clone(),
             Err(error) => {
                 return crate::ToolOutcome::err_fmt(format!(
                     "the orchestrating body could not name its durable parent: {error}"
@@ -872,10 +860,7 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation for La
                 crate::ProcessStartRequest::external(
                     crate::ProcessOriginator::host(),
                     serde_json::json!({ "lane": "orchestrating" }),
-                    crate::ProcessLifecyclePolicy::new(
-                        crate::ParentScope::Host,
-                        crate::OnParentEnd::Abandon,
-                    ),
+                    crate::Lifetime::Detached,
                 )
                 .with_start_key(Some(start_key)),
             )
@@ -1809,10 +1794,7 @@ async fn register_intent_target(
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 crate::ProcessProvenance::host(),
-                crate::ProcessLifecyclePolicy::new(
-                    crate::ParentScope::Host,
-                    crate::OnParentEnd::Abandon,
-                ),
+                crate::Lifetime::Detached,
             )
             .with_extra_event_types([crate::ProcessEventType {
                 name: "law.intent-event".to_string(),

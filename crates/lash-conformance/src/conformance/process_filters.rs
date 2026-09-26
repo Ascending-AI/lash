@@ -438,7 +438,7 @@ fn recent_labels(records: &[crate::ProcessRecord]) -> Vec<&str> {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn list_processes_filters_by_parent_scope_and_pending_cancel(
+pub async fn list_processes_filters_by_until_scope_and_pending_cancel(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     #[expect(
@@ -517,9 +517,9 @@ pub async fn list_processes_filters_by_parent_scope_and_pending_cancel(
         crate::session_graph::frame_node_id(&session, "scope-frame-b"),
     );
     let turn_scope =
-        lash_core::ParentScope::turn(session.clone(), crate::TurnId::from("scope-turn-one"));
+        lash_core::ScopeId::turn(session.clone(), crate::TurnId::from("scope-turn-one"));
     let other_turn_scope =
-        lash_core::ParentScope::turn(session.clone(), crate::TurnId::from("scope-turn-two"));
+        lash_core::ScopeId::turn(session.clone(), crate::TurnId::from("scope-turn-two"));
 
     let mut scope_ids = std::collections::BTreeMap::new();
     for (id, scope, parent) in [
@@ -530,8 +530,7 @@ pub async fn list_processes_filters_by_parent_scope_and_pending_cancel(
     ] {
         let mut request = registration(id);
         request.provenance = ProcessProvenance::session(scope.clone());
-        request.lifecycle =
-            lash_core::ProcessLifecyclePolicy::new(parent.clone(), lash_core::OnParentEnd::Cancel);
+        let request = crate::started_until_starter(request, parent.clone());
         let record = registry
             .register_process(request)
             .await
@@ -539,18 +538,22 @@ pub async fn list_processes_filters_by_parent_scope_and_pending_cancel(
         scope_ids.insert(id, record.id);
     }
     let child_one = scope_ids["scope-filter-a-child-one"].clone();
-    let mut host_parented = registration("scope-filter-a-host");
-    host_parented.provenance = ProcessProvenance::session(frame_a.clone());
+    let mut session_lived = registration("scope-filter-a-session");
+    session_lived.provenance = ProcessProvenance::session(frame_a.clone());
     registry
-        .register_process(host_parented)
+        .register_process(crate::started_until(
+            session_lived,
+            turn_scope.clone(),
+            lash_core::ScopeId::session(session.clone()),
+        ))
         .await
-        .expect("register host-parented sibling");
+        .expect("register a sibling living until the session");
 
     assert_ids(
         &registry,
         ProcessListFilter {
             status: ProcessStatusFilter::Any,
-            parent_scope: Some(turn_scope.clone()),
+            until: Some(turn_scope.clone()),
             ..ProcessListFilter::default()
         },
         &[
@@ -565,12 +568,14 @@ pub async fn list_processes_filters_by_parent_scope_and_pending_cancel(
         &registry,
         ProcessListFilter {
             status: ProcessStatusFilter::Any,
-            parent_scope: Some(lash_core::ParentScope::Host),
+            until: Some(lash_core::ScopeId::session(session.clone())),
             originator: Some(ProcessOriginatorFilter::Session(frame_a.clone())),
             ..ProcessListFilter::default()
         },
-        &["scope-filter-a-host"],
-        "the Host scope is a value the filter can name, not a wildcard",
+        &["scope-filter-a-session"],
+        "an `until` scope is a value the filter matches exactly, not a wildcard: \
+         the session scope names the one sibling living until it, not the \
+         children its starter turn also started",
     )
     .await;
 
@@ -600,8 +605,8 @@ pub async fn list_processes_filters_by_parent_scope_and_pending_cancel(
         [
             "scope-filter-a-child-one",
             "scope-filter-a-child-two",
-            "scope-filter-a-host",
             "scope-filter-a-other-turn",
+            "scope-filter-a-session",
             "scope-filter-b-child",
         ],
         "a filter that names no frame stays session-wide"

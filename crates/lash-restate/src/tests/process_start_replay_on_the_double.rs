@@ -180,10 +180,7 @@ pub(super) async fn a_keyless_host_start_replays_to_the_process_it_started(seed:
         lash_core::ProcessStartRequest::external(
             lash_core::ProcessOriginator::host(),
             serde_json::json!({ "work_item": "keyless" }),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         )
         .keyed_in(scoped)
         .into_registration(None)

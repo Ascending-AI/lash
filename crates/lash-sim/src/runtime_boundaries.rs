@@ -235,10 +235,7 @@ impl RuntimeBoundaryHarness {
                     declaration: lash_core::ProcessStartDeclaration::external(
                         lash_core::ProcessOriginator::host_scoped("lash-sim-durable-effect"),
                         json!({"durable_key": durable_key}),
-                        lash_core::ProcessLifecyclePolicy::new(
-                            lash_core::ParentScope::Host,
-                            lash_core::OnParentEnd::Abandon,
-                        ),
+                        lash_core::Lifetime::Detached,
                     ),
                 },
             ))]);

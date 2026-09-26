@@ -230,9 +230,10 @@ mod served_process_start_on_the_server_double {
                 )))
             },
         );
-        Arc::new(lash_subagents::SubagentsPluginFactory::new(Arc::new(
-            registry,
-        )))
+        Arc::new(lash_subagents::SubagentsPluginFactory::new(
+            Arc::new(registry),
+            lash_core::lifetime::starter,
+        ))
     }
 
     lash_conformance::served_process_start_tests!({
@@ -355,10 +356,7 @@ mod served_only_outside_a_run {
                     },
                     lash_core::RecoveryContract::ExternallyOwned,
                     lash_core::ProcessProvenance::host(),
-                    lash_core::ProcessLifecyclePolicy::new(
-                        lash_core::ParentScope::Host,
-                        lash_core::OnParentEnd::Abandon,
-                    ),
+                    lash_core::Lifetime::Detached,
                 )
                 .with_start_key(Some(start_key.clone()));
                 let started = guarded

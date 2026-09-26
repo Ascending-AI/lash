@@ -441,3 +441,91 @@ pub async fn a_queued_root_settled_without_a_commit_closes_after_its_evidence(
     assert_eq!(closes.closes(), vec![(root, true)]);
     assert_eq!(parts.calls(), 0, "nothing ran");
 }
+
+/// L-C1 with the process registry as the scope owner (FIG-3607 R9, R11): a
+/// root's end closes `Turn(root)` in the registry's scope-close ledger. A
+/// process living `Until` the root is owed its cancel from that row, and a
+/// start that names the ended root — as its lifetime or its starter — is
+/// refused afterwards. Before the root ran, the same starts were admitted.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_root_end_closes_its_turn_scope_in_the_process_registry(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let mut parts = DriveParts::new(prefix, "root-registry-close", &effect_host, &stores, 8).await;
+    let registry = stores.process_registry();
+    parts.host.control.scope_close =
+        Arc::new(crate::RegistryScopeClose::new(Arc::clone(&registry)));
+    let root = TurnId::from("root-registry-close");
+    let turn = lash_core::ScopeId::turn(parts.session_id.clone(), root.clone());
+    let registration = || {
+        crate::ProcessRegistration::new(
+            crate::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            crate::RecoveryContract::Rerunnable,
+            crate::ProcessProvenance::session(crate::SessionScope::new(parts.session_id.as_str())),
+            lash_core::Lifetime::Detached,
+        )
+    };
+    let until_root = registry
+        .register_process(crate::started_until_starter(registration(), turn.clone()))
+        .await
+        .expect("a start living until the running root is admitted");
+    registry
+        .register_process(crate::started_detached(registration(), turn.clone()))
+        .await
+        .expect("a detached start the running root made is admitted");
+
+    parts.enqueue("ask", Some(root.as_str())).await;
+    let outcome = drive(&runner, &parts, "root-registry-close-drive").await;
+    assert!(
+        outcome
+            .ran
+            .iter()
+            .any(|ran| matches!(ran, RootOutcome::Committed { root: ran, .. } if *ran == root)),
+        "{outcome:?}"
+    );
+    assert!(terminal(&parts, &root).await.is_some(), "the root ended");
+
+    let closed = registry
+        .get_parent_end_plan(&turn)
+        .await
+        .expect("read the root's close row")
+        .expect("the root's end closes its turn scope in the registry");
+    assert_eq!(closed.parent, turn);
+    assert_eq!(
+        registry
+            .list_parent_end_children(&turn, None, std::num::NonZeroUsize::MIN)
+            .await
+            .expect("page the ended root's children")
+            .into_iter()
+            .map(|record| record.id)
+            .collect::<Vec<_>>(),
+        vec![until_root.id],
+        "the process living until the root is owed its cancel"
+    );
+    for (what, refused) in [
+        (
+            "until",
+            crate::started_until_starter(registration(), turn.clone()),
+        ),
+        (
+            "detached",
+            crate::started_detached(registration(), turn.clone()),
+        ),
+    ] {
+        assert!(
+            matches!(
+                registry.register_process(refused).await,
+                Err(crate::PluginError::ParentEnded { .. })
+            ),
+            "a {what} start the ended root would make is refused"
+        );
+    }
+}

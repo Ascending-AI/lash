@@ -8,6 +8,7 @@ use crate::SessionProcessAdminTools;
 fn tools() -> SessionProcessAdminTools {
     SessionProcessAdminTools {
         include_cancel_process: true,
+        lifetime: std::sync::Arc::new(lash_core::lifetime::session_or_starter),
     }
 }
 
@@ -343,10 +344,7 @@ async fn a_started_definition_is_the_definition_processes_list_filters_by() {
         start.declaration.input.clone(),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_execution_env_ref(Some(lash_core::ProcessExecutionEnvRef::new(
         "process-env:fig-3000-declaration-test",

@@ -162,7 +162,7 @@ pub(super) fn explicit_durable_test_facets_on(backend: lash::Backend) -> lash::L
         // so the surface exists only where this factory is installed. Every
         // durable test core gets it here, as `bootstrap` gives the real app.
         .plugin(Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter),
         ))
 }
 
@@ -1112,7 +1112,7 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
         // surface only exists when this factory is installed, as bootstrap does.
-        .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()))
+        .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter)))
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .build(crate::test_core_owner())
         .expect("build core");
@@ -1792,7 +1792,7 @@ async fn live_workbench_restate_state_with_provider_and_database(
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
         // surface only exists when this factory is installed, as bootstrap does.
-        .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()))
+        .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter)))
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .plugin(Arc::new(lash_llm_tools::LlmToolsPluginFactory::default()))
         .lease_timings(lease_timings)
@@ -2027,7 +2027,7 @@ fn test_workbench_core(backend: Arc<lash_sqlite_store::SqliteBackend>) -> LashCo
         // The `processes` module is catalogue presence, not an ability bit (ADR
         // 0095): the workbench's scripted sources author `processes.*`, so the
         // surface only exists when this factory is installed, as bootstrap does.
-        .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()))
+        .plugin(Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash::process::lifetime::session_or_starter)))
         .plugin(Arc::new(WorkbenchPluginFactory::new()))
         .build(crate::test_core_owner())
         .expect("build core")

@@ -289,10 +289,7 @@ async fn register_terminal_processes(
                 lash::process::ProcessProvenance::session(lash::process::SessionScope::new(
                     session_id.to_string(),
                 )),
-                lash::process::ProcessLifecyclePolicy::new(
-                    lash::process::ParentScope::Host,
-                    lash::process::OnParentEnd::Abandon,
-                ),
+                lash::process::Lifetime::Detached,
             ))
             .await
             .expect("register process")

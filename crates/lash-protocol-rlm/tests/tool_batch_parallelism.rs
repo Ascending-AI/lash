@@ -67,7 +67,11 @@ fn process_bridge_factories(
 ) -> Vec<Arc<dyn lash_core::facade_support::PluginFactory>> {
     vec![
         rlm_factory(backend, true),
-        Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
+        Arc::new(
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::session_or_starter,
+            ),
+        ),
     ]
 }
 

@@ -202,10 +202,7 @@ fn external_registration(start_key: Option<&str>) -> lash_core::ProcessRegistrat
         },
         lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_start_key(
         start_key.map(|key| lash_core::StartKey::for_host(lash_core::StartKeyOwner::HOST, key)),
@@ -361,10 +358,7 @@ fn start_request() -> lash_core::ProcessStartRequest {
         },
         lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessOriginator::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_start_key(Some(lash_core::StartKey::for_host(
         lash_core::StartKeyOwner::HOST,

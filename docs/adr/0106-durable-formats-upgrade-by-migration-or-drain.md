@@ -185,7 +185,7 @@ and `scripts/check_upgrade_paths.py` keeps it exhaustive against
 | PG `SCHEMA_VERSION` | `lash_*` tables; every worker at open | **M** by the pre-deploy job (§5). |
 | SQLite four `*SCHEMA_VERSION` | `user_version` per file | **M** on open, in one transaction, after a backup. |
 | `CURRENT_SESSION_STATE_VERSION` | session marker; lease admission | **M** at rest: the session is upcast at admission. **D** in flight: a claimed or parked turn keeps its generation until it settles. The window is `[OLDEST_SUPPORTED, CURRENT]`. |
-| `SESSION_HEAD_META`, `PROTOCOL_TURN_OPTIONS`, `PARENT_SCOPE_STORAGE_PAYLOAD`, `PROCESS_WAKE_DELIVERY_FORMAT`, `NATIVE_DRIVER_STATE` | mutable rows; any worker | **M**. Upcast on read, write at `F`. |
+| `SESSION_HEAD_META`, `PROTOCOL_TURN_OPTIONS`, `SCOPE_STORAGE_PAYLOAD`, `PROCESS_WAKE_DELIVERY_FORMAT`, `NATIVE_DRIVER_STATE` | mutable rows; any worker | **M**. Upcast on read, write at `F`. |
 | `SESSION_NODE_BODY`, `RUNTIME_COMMIT_RECEIPT`, `SESSION_CHECKPOINT`, `CHECKPOINT_COMPONENT_ENCODING`, `RLM_SNAPSHOT`, `LASHLANG_SNAPSHOT`, `HEAP_SIZE_SCHEDULE`, `NATIVE_TRANSPORT`, `PROCESS_EVENT_VOCABULARY` | immutable, hash-addressed history; replay and reopen | **M, read-only**. Upcast on read and never rewrite the stored bytes. These upcasters are permanent. |
 | `WORKFLOW_GRAPH_SCHEMA`, `WORKFLOW_TYPE_FACET` | derived projection | **M**. Regenerate from the module. |
 | `LASHLANG_SEMANTIC_HASH`, `BYTECODE_FORMAT`, four request-identity encodings, `*_FAMILY_VERSION`, `FRAME_KEY`, `JOURNAL_IDENTITY` | content addresses, idempotency keys | **C**. New identities are minted under the new family after finalize. A stored identity is never re-derived, and a retry is verified under the family it names. |

@@ -507,7 +507,7 @@ async fn stage_process_event_append_tx(
             if record.is_terminal() {
                 crate::process_registry::parent_end::record_tx(
                     tx,
-                    &lash_core_execution::ParentScope::process(process_id.clone()),
+                    &lash_core_execution::ScopeId::process(process_id.clone()),
                     occurred_at_ms,
                     fleet_format,
                 )

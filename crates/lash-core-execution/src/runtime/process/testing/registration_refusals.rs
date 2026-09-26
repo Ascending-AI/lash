@@ -15,8 +15,8 @@
 
 use super::super::events::{ProcessEventSemanticsSpec, ProcessEventType, ProcessTerminalSpec};
 use super::super::model::{
-    OnParentEnd, ParentScope, ProcessExecutionEnvRef, ProcessInput, ProcessLifecyclePolicy,
-    ProcessProvenance, ProcessRegistration, ProcessStatus, RecoveryContract,
+    Ancestry, Lifetime, LifetimeDecision, ProcessExecutionEnvRef, ProcessInput, ProcessProvenance,
+    ProcessRegistration, ProcessStatus, RecoveryContract, ScopeGrant, ScopeId,
 };
 use super::super::validation::ProcessRegistrationRefusal;
 
@@ -34,7 +34,7 @@ fn host_registration(input: ProcessInput) -> ProcessRegistration {
         input,
         RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
-        ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
+        Lifetime::Detached,
     )
     .with_start_key(Some(crate::StartKey::for_host(
         crate::StartKeyOwner::HOST,
@@ -101,21 +101,31 @@ fn session_turn_input(definition_key: &str) -> ProcessInput {
 /// is spelled here, and both validators then see it.
 pub fn refused_process_registrations(rule: ProcessRegistrationRefusal) -> Vec<ProcessRegistration> {
     match rule {
-        ProcessRegistrationRefusal::HostParentCancels => {
+        ProcessRegistrationRefusal::LifetimeScopeUnreachable => {
+            // A root start names a turn it was never admitted under.
             let mut registration = accepted_process_registration();
-            registration.lifecycle =
-                ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Cancel);
+            registration.lifetime = LifetimeDecision::Until {
+                scope: ScopeId::turn("fixture-session", "fixture-turn"),
+                grant: ScopeGrant::Ancestor,
+            };
             vec![registration]
         }
-        ProcessRegistrationRefusal::TurnParentSessionMismatch => {
+        ProcessRegistrationRefusal::HostGrantOutsideRoot => {
+            // A host session-lookup grant on a runtime start, and on a scope
+            // that is not a session.
+            let mut runtime_start = accepted_process_registration();
+            runtime_start.ancestry = Ancestry::root();
+            runtime_start.lifetime = LifetimeDecision::Until {
+                scope: ScopeId::turn("fixture-session", "fixture-turn"),
+                grant: ScopeGrant::HostSessionLookup,
+            };
+            vec![runtime_start]
+        }
+        ProcessRegistrationRefusal::SessionCapabilityUnreachable => {
+            // A root that claims a session its lifetime never looked up.
             let mut registration = accepted_process_registration();
-            registration.lifecycle = ProcessLifecyclePolicy::new(
-                ParentScope::turn("parent-session", "turn-1"),
-                OnParentEnd::Abandon,
-            );
-            registration.provenance = ProcessProvenance::session(crate::SessionScope::new(
-                "a-different-session".to_string(),
-            ));
+            registration.lifetime = LifetimeDecision::Detached;
+            registration.session_capability = Some(crate::SessionId::from("a-different-session"));
             vec![registration]
         }
         ProcessRegistrationRefusal::ZeroMaxAttempts => {

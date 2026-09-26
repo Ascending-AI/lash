@@ -66,6 +66,8 @@ pub(in crate::runtime::session_manager) struct InitializedSessionTurn {
 pub(in crate::runtime::session_manager) struct ProcessSessionTurnInit<'a> {
     pub create_request: crate::SessionCreateRequest,
     pub process_id: &'a crate::ProcessId,
+    /// The lineage the process's child turn starts children under.
+    pub lineage: crate::ProcessLineage,
     pub turn_id: TurnId,
     pub turn_input: crate::TurnInput,
     pub execution_write_authority: &'a crate::ProcessExecutionWriteAuthority,
@@ -732,6 +734,7 @@ impl RuntimeSessionServices {
         let ProcessSessionTurnInit {
             create_request,
             process_id,
+            lineage,
             turn_id,
             turn_input,
             execution_write_authority,
@@ -844,6 +847,7 @@ impl RuntimeSessionServices {
             &turn_id,
             turn_input,
             process_id,
+            lineage,
             execution_write_authority,
             scoped_effect_controller,
         )
@@ -1166,6 +1170,7 @@ fn validated_process_turn_input<'run>(
     turn_id: &TurnId,
     mut input: crate::TurnInput,
     process_id: &crate::ProcessId,
+    lineage: crate::ProcessLineage,
     execution_write_authority: &crate::ProcessExecutionWriteAuthority,
     scoped_effect_controller: crate::ScopedEffectController<'run>,
 ) -> Result<(crate::TurnInput, crate::ScopedEffectController<'run>), crate::PluginError> {
@@ -1192,6 +1197,7 @@ fn validated_process_turn_input<'run>(
         process_id,
         execution_write_authority,
     );
+    lash_core_execution::core_internal::attach_process_lineage(&mut input.turn_context, lineage);
     input.trace_turn_id = Some(turn_id.clone());
     Ok((input, scoped_effect_controller))
 }
@@ -1340,6 +1346,7 @@ mod tests {
             &crate::TurnId::from(process_id.as_str()),
             crate::TurnInput::text("run child"),
             &process_id,
+            crate::ProcessLineage::of_process(&process_id, &crate::Ancestry::root(), None, None),
             &authority,
             scoped_effect_controller,
         )

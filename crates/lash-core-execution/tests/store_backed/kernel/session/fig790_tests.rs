@@ -179,10 +179,7 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
                         },
                         crate::RecoveryContract::ExternallyOwned,
                         crate::ProcessProvenance::host(),
-                        crate::ProcessLifecyclePolicy::new(
-                            crate::ParentScope::Host,
-                            crate::OnParentEnd::Abandon,
-                        ),
+                        crate::Lifetime::Detached,
                     ),
                     crate::ProcessId::fixture("fig790-process"),
                 );
@@ -504,6 +501,7 @@ async fn fig790_process_await_context(
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: Arc::new(crate::SystemClock),
+        process_lineage: None,
     });
     RuntimeExecutionContext::new(
         SessionId::from("fig790-session"),

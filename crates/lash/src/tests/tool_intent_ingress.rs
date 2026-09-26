@@ -40,10 +40,7 @@ async fn ingress_core_over(
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_extra_event_types(vec![
                 lash_core::ProcessEventType {
@@ -826,10 +823,7 @@ fn start_intent(session_id: &SessionId) -> lash_core::ToolIntent {
         declaration: lash_core::ProcessStartDeclaration::external(
             lash_core::ProcessOriginator::host(),
             serde_json::Value::Null,
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         ),
     }))
 }
@@ -850,10 +844,7 @@ fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
             },
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         )
         .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),
@@ -1522,27 +1513,27 @@ async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()>
 }
 
 #[test]
-fn ingress_start_without_lifecycle_is_refused_before_submission() {
+fn ingress_start_without_lifetime_is_refused_before_submission() {
     let mut payload =
         serde_json::to_value(start_intent(&SessionId::from(SESSION))).expect("encode intent");
-    fn remove_lifecycle(value: &mut serde_json::Value) -> bool {
+    fn remove_lifetime(value: &mut serde_json::Value) -> bool {
         match value {
             serde_json::Value::Object(object) => {
-                if object.remove("lifecycle").is_some() {
+                if object.remove("lifetime").is_some() {
                     return true;
                 }
-                object.values_mut().any(remove_lifecycle)
+                object.values_mut().any(remove_lifetime)
             }
             _ => false,
         }
     }
     assert!(
-        remove_lifecycle(&mut payload),
-        "valid start had a required policy"
+        remove_lifetime(&mut payload),
+        "valid start had a required lifetime"
     );
     let error = serde_json::from_value::<lash_core::ToolIntent>(payload)
-        .expect_err("missing lifecycle must not decode");
-    assert!(error.to_string().contains("lifecycle"));
+        .expect_err("missing lifetime must not decode");
+    assert!(error.to_string().contains("lifetime"));
 }
 
 const INGRESS_ENGINE_KIND: &str = "ingress-admission-engine";
@@ -1662,10 +1653,7 @@ fn engine_start_intent(kind: &str, payload: serde_json::Value) -> lash_core::Too
             },
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         )
         .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
             lash_core::PluginOptions::default(),

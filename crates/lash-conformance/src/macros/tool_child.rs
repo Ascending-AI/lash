@@ -145,6 +145,7 @@ macro_rules! drive_admission_tests {
             (a_root_whose_admission_a_successor_sealed_commits_nothing, "drive-root-superseded"),
             (root_scope_close_runs_after_terminal_evidence_at_least_once, "drive-root-close"),
             (a_queued_root_settled_without_a_commit_closes_after_its_evidence, "drive-root-settled-close"),
+            (a_root_end_closes_its_turn_scope_in_the_process_registry, "drive-root-registry-close"),
         ]);
     };
     (@laws $attrs:tt $fixture:block; [$($(#[$law_attr:meta])* ( $law:ident, $label:literal )),* $(,)?]) => {

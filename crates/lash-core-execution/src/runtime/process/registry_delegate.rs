@@ -334,7 +334,7 @@ macro_rules! delegate_process_lifecycle {
 
             async fn record_parent_end(
                 &self,
-                parent: &$crate::ParentScope,
+                parent: &$crate::ScopeId,
             ) -> Result<(), $crate::PluginError> {
                 self.$inner.record_parent_end(parent).await
             }
@@ -348,14 +348,14 @@ macro_rules! delegate_process_lifecycle {
 
             async fn get_parent_end_plan(
                 &self,
-                parent: &$crate::ParentScope,
+                parent: &$crate::ScopeId,
             ) -> Result<Option<$crate::ParentEndPlan>, $crate::PluginError> {
                 self.$inner.get_parent_end_plan(parent).await
             }
 
             async fn list_parent_end_children(
                 &self,
-                parent: &$crate::ParentScope,
+                parent: &$crate::ScopeId,
                 after: Option<&$crate::ProcessId>,
                 limit: std::num::NonZeroUsize,
             ) -> Result<Vec<$crate::ProcessRecord>, $crate::PluginError> {
@@ -366,7 +366,7 @@ macro_rules! delegate_process_lifecycle {
 
             async fn settle_parent_end_plan(
                 &self,
-                parent: &$crate::ParentScope,
+                parent: &$crate::ScopeId,
             ) -> Result<(), $crate::PluginError> {
                 self.$inner.settle_parent_end_plan(parent).await
             }
@@ -375,7 +375,7 @@ macro_rules! delegate_process_lifecycle {
                 &self,
                 after: Option<&str>,
                 limit: std::num::NonZeroUsize,
-            ) -> Result<Vec<$crate::ParentScope>, $crate::PluginError> {
+            ) -> Result<Vec<$crate::ScopeId>, $crate::PluginError> {
                 self.$inner
                     .list_unrecorded_opener_parents(after, limit)
                     .await

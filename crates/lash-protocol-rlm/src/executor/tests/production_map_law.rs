@@ -452,7 +452,9 @@ async fn production_process_map_is_the_compiled_inventory_after_a_store_round_tr
             Arc::new(lash_core::facade_support::PluginHost::new({
                 let mut factories = lash_core::testing::test_code_protocol_factories();
                 factories.push(Arc::new(
-                    lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+                    lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                        lash_core::lifetime::session_or_starter,
+                    ),
                 ));
                 factories
             })),

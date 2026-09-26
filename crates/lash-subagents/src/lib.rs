@@ -35,7 +35,7 @@ pub use rlm::spawn_agent_tool_definition;
 ///         &self,
 ///         ctx: &PluginSessionContext,
 ///     ) -> Result<Arc<dyn SessionPlugin>, PluginError> {
-///         SubagentsPluginFactory::new(Arc::clone(&self.registry))
+///         SubagentsPluginFactory::new(Arc::clone(&self.registry), lash_core::lifetime::starter)
 ///             .with_tool_access(ctx.tool_access.clone())
 ///             .build(ctx)
 ///     }
@@ -56,15 +56,24 @@ pub struct SubagentsPluginFactory {
     tool_access: SessionToolAccess,
     registry: Arc<CapabilityRegistry>,
     final_answer_format: RlmFinalAnswerFormat,
+    lifetime: lash_core::LifetimePolicy,
 }
 
 impl SubagentsPluginFactory {
-    pub fn new(registry: Arc<CapabilityRegistry>) -> Self {
+    /// Subagents whose `spawn_agent` children take `lifetime`, for example
+    /// [`lash_core::lifetime::starter`]: resolved against the spawn's
+    /// admitted start context, never chosen by the model (FIG-3607). The
+    /// policy is required and has no default.
+    pub fn new(
+        registry: Arc<CapabilityRegistry>,
+        lifetime: impl Fn(&lash_core::StartCx) -> lash_core::Lifetime + Send + Sync + 'static,
+    ) -> Self {
         Self {
             session_spec: SessionSpec::inherit(),
             tool_access: SessionToolAccess::default(),
             registry,
             final_answer_format: RlmFinalAnswerFormat::RawFinalValue,
+            lifetime: Arc::new(lifetime),
         }
     }
 
@@ -124,6 +133,7 @@ impl PluginFactory for SubagentsPluginFactory {
             session_spec: session_spec.clone(),
             tool_access,
             final_answer_format,
+            lifetime: Arc::clone(&self.lifetime),
             parent_subagent,
             include_submit_error: ctx.subagent.is_some(),
         });
@@ -136,6 +146,7 @@ impl PluginFactory for SubagentsPluginFactory {
                         session_spec: implementation.session_spec.clone(),
                         tool_access: implementation.tool_access.clone(),
                         final_answer_format: implementation.final_answer_format.clone(),
+                        lifetime: Arc::clone(&implementation.lifetime),
                         parent_subagent: implementation.parent_subagent.clone(),
                         include_submit_error: true,
                     }

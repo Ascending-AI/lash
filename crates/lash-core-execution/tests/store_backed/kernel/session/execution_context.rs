@@ -3,17 +3,14 @@ mod tests {
 
     use crate::{ProcessId, RuntimeExecutionContext};
 
-    fn registration_for_parent_scope(_process_id: &str) -> crate::ProcessRegistration {
+    fn registration_for_starter(_process_id: &str) -> crate::ProcessRegistration {
         crate::ProcessRegistration::new(
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
             crate::RecoveryContract::ExternallyOwned,
             crate::ProcessProvenance::host(),
-            crate::ProcessLifecyclePolicy::new(
-                crate::ParentScope::Host,
-                crate::OnParentEnd::Abandon,
-            ),
+            crate::Lifetime::Detached,
         )
     }
 
@@ -75,10 +72,7 @@ mod tests {
             },
             crate::RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
-            crate::ProcessLifecyclePolicy::new(
-                crate::ParentScope::Host,
-                crate::OnParentEnd::Abandon,
-            ),
+            crate::Lifetime::Detached,
         );
 
         let (prepared, env_spec) = crate::process_start_execution_env(&context, registration);
@@ -134,7 +128,7 @@ mod tests {
         );
     }
 
-    /// A child started by a process parents on that process's minted id, even
+    /// A child started by a process is started by that process's minted id, even
     /// when the process was pruned and another process now runs the same
     /// definition: nothing on the derivation reads the registry.
     #[tokio::test]
@@ -142,7 +136,7 @@ mod tests {
         let backend = crate::support::memory_store_backend().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let retired = registry
-            .register_process(registration_for_parent_scope("worker"))
+            .register_process(registration_for_starter("worker"))
             .await
             .expect("first registration");
         registry
@@ -160,7 +154,7 @@ mod tests {
             .await
             .expect("prune the first process");
         let successor = registry
-            .register_process(registration_for_parent_scope("worker"))
+            .register_process(registration_for_starter("worker"))
             .await
             .expect("a later process of the same definition");
         assert_ne!(successor.id, retired.id, "a minted id is never reused");
@@ -176,14 +170,16 @@ mod tests {
         )
         .with_process_execution(
             retired.id.clone(),
-            &registration_for_parent_scope("worker"),
+            &registration_for_starter("worker"),
             Some(process_event_context(&retired.id, Arc::clone(&registry))),
         );
         assert_eq!(
             context
-                .child_process_parent_scope()
-                .expect("the starting process is the parent"),
-            crate::ParentScope::process(retired.id.clone()),
+                .start_cx()
+                .expect("the starting process materializes a start context")
+                .starter()
+                .id(),
+            &crate::ScopeId::process(retired.id.clone()),
         );
     }
 }

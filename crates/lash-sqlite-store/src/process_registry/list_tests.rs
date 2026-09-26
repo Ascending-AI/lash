@@ -120,14 +120,14 @@ fn pending_cancel_query_seeks_the_partial_cancel_index() {
 }
 
 #[test]
-fn parent_scope_query_seeks_the_parent_scope_index() {
+fn until_scope_query_seeks_the_lifetime_scope_index() {
     let conn = rusqlite::Connection::open_in_memory().expect("open query-plan database");
     conn.execute_batch(crate::schema::PROCESS_SCHEMA)
         .expect("install process schema");
     let (sql, values) = list_processes_query(
         &lash_core_execution::ProcessListFilter {
             status: lash_core_execution::ProcessStatusFilter::Any,
-            parent_scope: Some(lash_core_execution::ParentScope::turn(
+            until: Some(lash_core_execution::ScopeId::turn(
                 lash_sansio::SessionId::from("plan-session"),
                 lash_core_execution::TurnId::from("plan-turn"),
             )),
@@ -138,18 +138,18 @@ fn parent_scope_query_seeks_the_parent_scope_index() {
     );
     let mut stmt = conn
         .prepare(&format!("EXPLAIN QUERY PLAN {sql}"))
-        .expect("prepare parent-scope query plan");
+        .expect("prepare until-scope query plan");
     let plan = stmt
         .query_map(rusqlite::params_from_iter(values.iter()), |row| {
             row.get::<_, String>(3)
         })
-        .expect("explain parent-scope query")
+        .expect("explain until-scope query")
         .collect::<Result<Vec<_>, _>>()
-        .expect("collect parent-scope query plan");
+        .expect("collect until-scope query plan");
     assert!(
         plan.iter()
-            .any(|step| step.contains("idx_processes_parent_scope")),
-        "a populated parent scope must seek the scope index, plan: {plan:?}"
+            .any(|step| step.contains("idx_processes_lifetime_scope")),
+        "a populated until scope must seek the scope index, plan: {plan:?}"
     );
     assert!(
         plan.iter().all(|step| !step.contains("SCAN processes")),
@@ -169,7 +169,7 @@ fn an_absent_scope_filter_emits_no_scope_predicate() {
     );
     assert_eq!(sql, process_sql().process_sqlite.list.sql());
     assert!(
-        !sql.contains("parent_scope_kind") && !sql.contains("cancel_requested_at_ms"),
+        !sql.contains("lifetime_scope_kind") && !sql.contains("cancel_requested_at_ms"),
         "an unpopulated filter must not widen the statement: {sql}"
     );
     assert_eq!(

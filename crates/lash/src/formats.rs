@@ -66,8 +66,8 @@ pub use lash_core::store::{
     USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION,
 };
 pub use lash_core::{
-    PARENT_SCOPE_STORAGE_PAYLOAD_VERSION, PROCESS_EVENT_VOCABULARY_VERSION,
-    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION,
+    PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+    PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION, SCOPE_STORAGE_PAYLOAD_VERSION,
     SESSION_NODE_BODY_SCHEMA_VERSION, TOOL_ATTEMPT_CAPTURE_VERSION, TOOL_CHILD_REQUEST_VERSION,
     TOOL_PRESENTATION_VERSION, TOOL_SETTLEMENT_VERSION,
 };
@@ -119,7 +119,7 @@ pub enum DurableFormat {
     ProtocolTurnOptions,
     /// The versioned typed parent scope persisted beside a ledger row's index
     /// projection.
-    ParentScopeStoragePayload,
+    ScopeStoragePayload,
     /// The persisted process lease record.
     ProcessLease,
     /// The runtime-owned durable effect-summary events a process's log
@@ -213,7 +213,7 @@ impl DurableFormat {
             DurableFormat::SessionNodeBody => "session node body",
             DurableFormat::SessionStateGeneration => "session state generation",
             DurableFormat::ProtocolTurnOptions => "protocol turn options",
-            DurableFormat::ParentScopeStoragePayload => "parent scope storage payload",
+            DurableFormat::ScopeStoragePayload => "scope storage payload",
             DurableFormat::ProcessLease => "process lease",
             DurableFormat::ProcessEffectSummary => "process effect summary",
             DurableFormat::AppendRequestIdentity => "append request identity",
@@ -258,7 +258,7 @@ impl DurableFormat {
             DurableFormat::SessionNodeBody => UpgradePolicy::Migrate,
             DurableFormat::SessionStateGeneration => UpgradePolicy::Migrate,
             DurableFormat::ProtocolTurnOptions => UpgradePolicy::Migrate,
-            DurableFormat::ParentScopeStoragePayload => UpgradePolicy::Migrate,
+            DurableFormat::ScopeStoragePayload => UpgradePolicy::Migrate,
             DurableFormat::ProcessLease => UpgradePolicy::Migrate,
             DurableFormat::ProcessEffectSummary => UpgradePolicy::Migrate,
             DurableFormat::AppendRequestIdentity => UpgradePolicy::Coexist,
@@ -406,10 +406,10 @@ pub fn durable_formats() -> impl Iterator<Item = DurableFormatEntry> {
             probe: FormatProbe::Comparable,
         },
         DurableFormatEntry {
-            format: DurableFormat::ParentScopeStoragePayload,
-            version: FormatVersion::Counter(PARENT_SCOPE_STORAGE_PAYLOAD_VERSION as u32),
+            format: DurableFormat::ScopeStoragePayload,
+            version: FormatVersion::Counter(SCOPE_STORAGE_PAYLOAD_VERSION as u32),
             owning_crate: "lash-core",
-            constant: "PARENT_SCOPE_STORAGE_PAYLOAD_VERSION",
+            constant: "SCOPE_STORAGE_PAYLOAD_VERSION",
             probe: FormatProbe::Comparable,
         },
         DurableFormatEntry {

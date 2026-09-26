@@ -349,10 +349,7 @@ pub(super) async fn selected_observer_intents(
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         );
         let first = registry
             .register_process(registration.clone())

@@ -152,6 +152,10 @@ pub struct ToolDispatchContext<'run> {
     pub attachment_source_policy: Arc<dyn crate::AttachmentSourcePolicy>,
     pub turn_context: crate::TurnContext,
     pub clock: Arc<dyn crate::Clock>,
+    /// The lineage of the process this dispatch runs inside, when it runs
+    /// inside one (FIG-3607 R1): a start an intent realizes records it above
+    /// its starter.
+    pub process_lineage: Option<crate::ProcessLineage>,
 }
 
 impl ToolDispatchContext<'_> {
@@ -317,6 +321,7 @@ pub enum RebindField {
     AttachmentSourcePolicy,
     TurnContext,
     Clock,
+    ProcessLineage,
 }
 
 impl RebindField {
@@ -349,6 +354,7 @@ impl RebindField {
             Self::AttachmentSourcePolicy => "attachment_source_policy",
             Self::TurnContext => "turn_context",
             Self::Clock => "clock",
+            Self::ProcessLineage => "process_lineage",
         }
     }
 
@@ -394,6 +400,13 @@ impl RebindField {
             | Self::AttachmentSourcePolicy
             | Self::TurnContext
             | Self::Clock => RebindDisposition::Lent,
+            // The lineage of the process the opener's body runs inside is
+            // lent with the opener: request validation makes the opener and
+            // the enclosing process one fact, so a live opener's lineage is
+            // the child's. A context the deployment built carries none, and a
+            // start the child makes reads the enclosing process's recorded
+            // lineage back from its row (FIG-3607 R2).
+            Self::ProcessLineage => RebindDisposition::Lent,
         }
     }
 }
@@ -430,6 +443,7 @@ pub const REBIND_FIELDS: &[RebindField] = &[
     RebindField::AttachmentSourcePolicy,
     RebindField::TurnContext,
     RebindField::Clock,
+    RebindField::ProcessLineage,
 ];
 
 impl<'run> ToolDispatchContext<'run> {
@@ -437,6 +451,7 @@ impl<'run> ToolDispatchContext<'run> {
         crate::ProcessOpScope::new(self.effect_controller.scoped())
             .with_parent_invocation(self.parent_invocation.clone())
             .with_agent_frame_id(Some(self.agent_frame_id.clone()))
+            .with_process_lineage(self.process_lineage.clone())
     }
 
     pub(crate) fn to_static(&self) -> Option<ToolDispatchContext<'static>> {
@@ -466,6 +481,7 @@ impl<'run> ToolDispatchContext<'run> {
             attachment_source_policy: Arc::clone(&self.attachment_source_policy),
             turn_context: self.turn_context.clone(),
             clock: Arc::clone(&self.clock),
+            process_lineage: self.process_lineage.clone(),
         })
     }
 
@@ -518,6 +534,7 @@ impl<'run> ToolDispatchContext<'run> {
             attachment_source_policy: Arc::clone(&self.attachment_source_policy),
             turn_context: self.turn_context.clone(),
             clock: Arc::clone(&self.clock),
+            process_lineage: self.process_lineage.clone(),
         }
     }
 }

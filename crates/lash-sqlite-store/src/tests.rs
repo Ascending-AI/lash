@@ -758,10 +758,7 @@ fn registration() -> ProcessRegistration {
         lash_core_execution::ProcessProvenance::session(lash_core_execution::SessionScope::new(
             "session",
         )),
-        lash_core_execution::ProcessLifecyclePolicy::new(
-            lash_core_execution::ParentScope::Host,
-            lash_core_execution::OnParentEnd::Abandon,
-        ),
+        lash_core_execution::Lifetime::Detached,
     )
 }
 

@@ -158,7 +158,9 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             last_event_sequence,
             input,
             disposition,
-            lifecycle,
+            lifetime,
+            ancestry,
+            session_capability,
             max_attempts,
             identity,
             event_types,
@@ -181,7 +183,9 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
             last_event_sequence,
             input: input.as_ref().clone().try_into()?,
             disposition: disposition.into(),
-            lifecycle: lifecycle.into(),
+            lifetime: lifetime.into(),
+            ancestry: ancestry.scopes().iter().cloned().map(Into::into).collect(),
+            session_capability,
             max_attempts,
             identity: identity.into(),
             event_types: event_types.into_iter().map(Into::into).collect(),
@@ -216,7 +220,9 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             last_event_sequence,
             input,
             disposition,
-            lifecycle,
+            lifetime,
+            ancestry,
+            session_capability,
             max_attempts,
             identity,
             event_types,
@@ -243,12 +249,12 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
                 })
             })
             .transpose()?;
-        let registration =
+        let mut registration =
             lash_core::ProcessRegistration::new(
                 input.try_into()?,
                 disposition.into(),
                 provenance.try_into()?,
-                lifecycle.try_into()?,
+                lash_core::LifetimeDecision::from(lifetime),
             )
             .with_start_key(start_key)
             .with_max_attempts(max_attempts)
@@ -257,6 +263,9 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             .with_execution_env_ref(env_ref.map(|env_ref| {
                 lash_core::ProcessExecutionEnvRef::new(env_ref.as_str().to_string())
             }));
+        registration.ancestry =
+            lash_core::Ancestry::from_scopes(ancestry.into_iter().map(Into::into));
+        registration.session_capability = session_capability;
         // `ProcessRecord::from_registration` `.expect()`s on any core validation
         // error, so peer input must clear core's validator here or a malformed
         // record aborts the host (FIG-2985). Running the core validator itself,
@@ -298,7 +307,8 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
             last_event_sequence,
             identity,
             lifecycle,
-            policy,
+            lifetime,
+            ancestry,
             disposition,
             error,
             error_code,
@@ -323,7 +333,8 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
             last_event_sequence,
             identity: identity.into(),
             lifecycle: lifecycle.into(),
-            policy: policy.into(),
+            lifetime: lifetime.into(),
+            ancestry: ancestry.scopes().iter().cloned().map(Into::into).collect(),
             disposition: disposition.into(),
             error,
             error_code: error_code.map(Into::into),
@@ -358,7 +369,8 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
             last_event_sequence,
             identity,
             lifecycle,
-            policy,
+            lifetime,
+            ancestry,
             disposition,
             error,
             error_code,
@@ -383,7 +395,8 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
             last_event_sequence,
             identity: identity.into(),
             lifecycle: lifecycle.into(),
-            policy: policy.try_into()?,
+            lifetime: lifetime.into(),
+            ancestry: lash_core::Ancestry::from_scopes(ancestry.into_iter().map(Into::into)),
             disposition: disposition.into(),
             error,
             error_code: error_code.map(Into::into),

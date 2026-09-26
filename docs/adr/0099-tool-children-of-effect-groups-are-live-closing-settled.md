@@ -185,7 +185,8 @@ process_id }` with no incarnation, while
 `crates/lash-core-store/src/process_identity.rs` defines `ProcessRef {
 process_id, incarnation }` precisely to "Pin a reusable process name to one
 store-minted incarnation", and ADR 0094 renders a process Parent Scope as
-`process_id#incarnation`. A group key — for a lashlang aggregate
+`process_id#incarnation` (both retired: ADR 0107 names a process by its minted
+id, and ADR 0108 replaces the Parent Scope with a recorded Lifetime). A group key — for a lashlang aggregate
 `{scope_id}:group:` then the issuing command's positional key
 `{namespace}:lk2:{k:010}` (FIG-3586), for any other caller
 `{scope_id}:group:{parent_effect_id}:{batch_id}` — is a string shape,

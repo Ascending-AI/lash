@@ -231,10 +231,7 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
             input.to_process_input().expect("valid process input"),
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::LifetimeDecision::Detached,
         )
         .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
             input.process_identity(),
@@ -442,10 +439,7 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
         input.to_process_input().expect("valid process input"),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::LifetimeDecision::Detached,
     )
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
         input.process_identity(),
@@ -1458,10 +1452,7 @@ async fn prepared_start_replays_same_start_key_without_duplicate_child_identity(
         )),
         test_process_start(&output, site.clone(), "."),
         lash_core::ProcessOriginator::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::LifetimeDecision::Detached,
         lash_core::RecoveryContract::Rerunnable,
         test_child_max_attempts(),
     )
@@ -1475,10 +1466,7 @@ async fn prepared_start_replays_same_start_key_without_duplicate_child_identity(
         )),
         test_process_start(&output, site.clone(), "."),
         lash_core::ProcessOriginator::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::LifetimeDecision::Detached,
         lash_core::RecoveryContract::Rerunnable,
         test_child_max_attempts(),
     )
@@ -1492,10 +1480,7 @@ async fn prepared_start_replays_same_start_key_without_duplicate_child_identity(
         )),
         test_process_start(&output, test_start_site("child_process:scan", 2), "."),
         lash_core::ProcessOriginator::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::LifetimeDecision::Detached,
         lash_core::RecoveryContract::Rerunnable,
         test_child_max_attempts(),
     )
@@ -1566,10 +1551,7 @@ process scan(root: str) -> str {
             )),
             bad_start,
             lash_core::ProcessOriginator::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::LifetimeDecision::Detached,
             lash_core::RecoveryContract::Rerunnable,
             test_child_max_attempts(),
         )
@@ -1625,10 +1607,7 @@ process scan(root: str) -> str {
         )),
         start,
         lash_core::ProcessOriginator::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::LifetimeDecision::Detached,
         lash_core::RecoveryContract::Rerunnable,
         test_child_max_attempts(),
     )
@@ -1672,10 +1651,7 @@ process scan(root: str) -> str {
             input.to_process_input().expect("valid engine input"),
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::LifetimeDecision::Detached,
         )
         .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
             input.process_identity(),
@@ -1822,10 +1798,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
             .unwrap(),
         ),
         lash_core::ProcessOriginator::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::LifetimeDecision::Detached,
         lash_core::RecoveryContract::Rerunnable,
         test_child_max_attempts(),
     )
@@ -1846,10 +1819,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
             .unwrap(),
         ),
         lash_core::ProcessOriginator::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::LifetimeDecision::Detached,
         lash_core::RecoveryContract::Rerunnable,
         test_child_max_attempts(),
     )
@@ -1888,10 +1858,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
             )),
             start_with(definition),
             lash_core::ProcessOriginator::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::LifetimeDecision::Detached,
             lash_core::RecoveryContract::Rerunnable,
             test_child_max_attempts(),
         )
@@ -1921,10 +1888,7 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
         )),
         start_with(wrong_ref),
         lash_core::ProcessOriginator::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::LifetimeDecision::Detached,
         lash_core::RecoveryContract::Rerunnable,
         test_child_max_attempts(),
     )
@@ -1994,10 +1958,7 @@ async fn process_signature_union_accepts_a_later_matching_nonprocess_arm() {
         )),
         start,
         lash_core::ProcessOriginator::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::LifetimeDecision::Detached,
         lash_core::RecoveryContract::Rerunnable,
         test_child_max_attempts(),
     )
@@ -2172,10 +2133,7 @@ async fn a_prepared_start_records_the_resolved_attempt_bound_and_the_fingerprint
                 )),
                 start,
                 lash_core::ProcessOriginator::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::LifetimeDecision::Detached,
                 lash_core::RecoveryContract::Rerunnable,
                 std::num::NonZeroU32::new(bound).expect("non-zero test bound"),
             )

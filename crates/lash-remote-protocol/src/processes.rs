@@ -18,7 +18,8 @@ use crate::turn_result::RemoteCausalRef;
 
 mod lifecycle;
 pub use lifecycle::{
-    RemoteEffectOpener, RemoteOnParentEnd, RemoteParentScope, RemoteProcessLifecyclePolicy,
+    RemoteEffectOpener, RemoteLifetimeDecision, RemoteScopeGrant, RemoteScopeId,
+    RemoteStartLifetime,
 };
 
 mod outcomes;
@@ -573,7 +574,14 @@ pub struct RemoteProcessRecord {
     pub last_event_sequence: u64,
     pub input: RemoteProcessInput,
     pub disposition: RemoteRecoveryContract,
-    pub lifecycle: RemoteProcessLifecyclePolicy,
+    /// The recorded lifetime decision: what ends the process.
+    pub lifetime: RemoteLifetimeDecision,
+    /// The recorded ancestry, nearest first; empty for a root start.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ancestry: Vec<RemoteScopeId>,
+    /// The session capability the process's descendants inherit.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub session_capability: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_attempts: Option<u32>,
     pub identity: RemoteProcessIdentity,
@@ -632,8 +640,10 @@ fn validate_status_and_outcome(
 impl RemoteProcessRecord {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         require_non_empty(type_name, "process_id", &self.process_id)?;
-        self.lifecycle
-            .validate(type_name, &self.provenance.originator)?;
+        self.lifetime.validate(type_name)?;
+        for scope in &self.ancestry {
+            scope.validate(type_name, "ancestry")?;
+        }
         self.input.validate(type_name)?;
         self.identity.validate(type_name)?;
         let mut event_type_names = std::collections::BTreeSet::new();
@@ -768,9 +778,12 @@ pub struct RemoteObservedProcess {
     pub last_event_sequence: u64,
     pub identity: RemoteProcessIdentity,
     pub lifecycle: RemoteProcessStatus,
-    /// Declared parent scope and parent-end action, distinct from the
-    /// `lifecycle` status fold above.
-    pub policy: RemoteProcessLifecyclePolicy,
+    /// The recorded lifetime decision, distinct from the `lifecycle` status
+    /// fold above.
+    pub lifetime: RemoteLifetimeDecision,
+    /// The recorded ancestry, nearest first; empty for a root start.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ancestry: Vec<RemoteScopeId>,
     pub disposition: RemoteRecoveryContract,
     /// Human-readable summary of the terminal failure, for display only.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -812,7 +825,10 @@ impl RemoteObservedProcess {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         require_non_empty(type_name, "process_id", &self.process_id)?;
         self.identity.validate(type_name)?;
-        self.policy.validate(type_name, &self.originator)?;
+        self.lifetime.validate(type_name)?;
+        for scope in &self.ancestry {
+            scope.validate(type_name, "ancestry")?;
+        }
         self.input.validate(type_name)?;
         self.originator.validate(type_name)?;
         if let Some(lease_holder) = &self.lease_holder {
@@ -1493,9 +1509,9 @@ pub struct RemoteProcessListFilter {
     pub status: RemoteProcessStatusFilter,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub originator: Option<RemoteProcessOriginatorFilter>,
-    /// Selects the children of one durable parent scope.
+    /// Selects the processes that live until one scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub parent_scope: Option<RemoteParentScope>,
+    pub until: Option<RemoteScopeId>,
     /// Selects nonterminal rows whose cancellation request predates this
     /// timestamp.
     #[serde(default, skip_serializing_if = "Option::is_none")]

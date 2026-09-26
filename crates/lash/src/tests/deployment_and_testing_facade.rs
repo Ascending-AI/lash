@@ -16,10 +16,7 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
             },
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         ))
         .await
         .expect("register waiting process")
@@ -176,10 +173,7 @@ async fn parked_work_merges_parked_turns_and_processes() {
             },
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         ))
         .await
         .expect("register the process")

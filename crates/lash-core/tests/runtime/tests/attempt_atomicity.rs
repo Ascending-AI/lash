@@ -258,10 +258,7 @@ async fn fixtures() -> Fixtures {
                     },
                     disposition,
                     lash_core::ProcessProvenance::host(),
-                    lash_core::ProcessLifecyclePolicy::new(
-                        lash_core::ParentScope::Host,
-                        lash_core::OnParentEnd::Abandon,
-                    ),
+                    lash_core::Lifetime::Detached,
                 )
                 .with_extra_event_types(event_types.clone()),
                 &[SessionId::from(SESSION.to_string())],
@@ -423,6 +420,7 @@ fn tool_context_with_provider<'run>(
         attachment_source_policy: Arc::new(lash_core::attachments::OpenAttachmentSourcePolicy),
         turn_context: lash_core::TurnContext::default(),
         clock: Arc::new(lash_core::facade_support::SystemClock),
+        process_lineage: None,
     });
     lash_core::ToolContext::from_dispatch(dispatch)
         .tool_call_id(Some(CALL_ID.to_string()))
@@ -817,10 +815,7 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
             declaration: lash_core::ProcessStartDeclaration::external(
                 lash_core::ProcessOriginator::host_scoped("intent-test"),
                 serde_json::json!({"step": "start"}),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             ),
         })),
         lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
@@ -968,10 +963,7 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_extra_event_types([lash_core::ProcessEventType {
                 name: "structural.note".to_string(),

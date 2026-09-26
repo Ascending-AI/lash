@@ -302,7 +302,8 @@ async fn execute_one(
     ));
     let scope = crate::ProcessOpScope::new(context.effect_controller.scoped())
         .with_parent_invocation(Some(parent))
-        .with_agent_frame_id(Some(context.agent_frame_id.clone()));
+        .with_agent_frame_id(Some(context.agent_frame_id.clone()))
+        .with_process_lineage(context.process_lineage.clone());
 
     match intent {
         crate::ToolIntent::StartProcess(intent) => {

@@ -33,10 +33,7 @@ pub(super) fn process_record(process_id: &ProcessId) -> lash_core::ProcessRecord
                 subscription_revision: None,
             },
         )),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_event_types([process_event_type()])
     .with_wake_session_id(Some(SessionId::from("session-a".to_string())));
@@ -98,10 +95,8 @@ pub(super) fn observed_process() -> lash_core::facade_support::ObservedProcess {
         last_event_sequence: 0,
         identity: lash_core::ProcessIdentity::labelled("external", Some("External".to_string())),
         lifecycle: lash_core::ProcessStatus::Running,
-        policy: lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lifetime: lash_core::LifetimeDecision::Detached,
+        ancestry: lash_core::Ancestry::root(),
         disposition: lash_core::RecoveryContract::ExternallyOwned,
         error: None,
         error_code: None,

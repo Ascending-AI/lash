@@ -211,10 +211,7 @@ impl LinkedTestProcess {
             self.process_input(),
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         )
         .with_start_key(Some(lash_core::StartKey::for_host(
             lash_core::StartKeyOwner::HOST,
@@ -422,7 +419,7 @@ fn process_test_builder(backend: lash_core::Backend) -> crate::core::LashCoreBui
     .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
     // ADR 0095: `processes` is catalogue presence, so the fixtures need this.
     .plugin(Arc::new(
-        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+        lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
     ))
 }
 
@@ -490,10 +487,7 @@ async fn process_prune_recovery_case(failing_store: &str) -> Result<()> {
                 },
                 lash_core::RecoveryContract::Rerunnable,
                 lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_execution_env_ref(Some(env_ref.clone())),
         )
@@ -611,10 +605,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
                 lash_core::ProcessIdentity::new("test"),
@@ -903,10 +894,7 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
                 lash_core::ProcessIdentity::new("test"),
@@ -1002,10 +990,7 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
                 lash_core::ProcessIdentity::new("test"),
@@ -1579,13 +1564,11 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
         .process_id;
     let child = registry.get_process(child_id).await?.expect("child record");
     assert_eq!(child.disposition, lash_core::RecoveryContract::Rerunnable);
-    assert_eq!(
-        child.lifecycle,
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::process(parent.id),
-            lash_core::OnParentEnd::Abandon,
-        )
-    );
+    // Started by the parent's body; with no session above it, the host's
+    // `session_or_starter` policy keeps it only until its starter.
+    let parent_scope = lash_core::ScopeId::process(parent.id);
+    assert_eq!(child.ancestry.starter(), Some(&parent_scope));
+    assert_eq!(child.lifetime.scope(), Some(&parent_scope));
     Ok(())
 }
 
@@ -1944,7 +1927,9 @@ async fn durable_admission_core(
         .commit_budget(crate::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(crate::QueuedWorkBatchingConfig::new(1))
         .plugin(Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::session_or_starter,
+            ),
         ))
         .process_event_sink(Arc::new(sink))
         .without_queued_work()
@@ -2029,10 +2014,7 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
         process_input,
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_env_spec(process_env_spec())
     .with_extra_event_types(lash_lashlang_runtime::lashlang_process_event_types());

@@ -95,10 +95,7 @@ pub async fn live_reference_summary_tracks_non_terminal_reference_counts(
                     },
                     RecoveryContract::Rerunnable,
                     ProcessProvenance::host(),
-                    lash_core::ProcessLifecyclePolicy::new(
-                        lash_core::ParentScope::Host,
-                        lash_core::OnParentEnd::Abandon,
-                    ),
+                    lash_core::Lifetime::Detached,
                 )
                 .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
                     ProcessIdentity::for_definition(

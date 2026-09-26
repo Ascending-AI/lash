@@ -24,10 +24,7 @@ async fn registry_result(
             },
             lash_core::RecoveryContract::ExternallyOwned,
             lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         ))
         .await
         .unwrap()
@@ -238,6 +235,7 @@ async fn submit_error_emits_failure_control_with_reason() {
         final_answer_format: lash_rlm_types::RlmFinalAnswerFormat::RawFinalValue,
         parent_subagent: None,
         include_submit_error: true,
+        lifetime: Arc::new(lash_core::lifetime::starter),
     }
     .into_leaf_provider();
     let args = json!({"reason": "child cannot finish"});

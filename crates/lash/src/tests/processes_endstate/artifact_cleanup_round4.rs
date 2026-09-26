@@ -31,10 +31,7 @@ async fn a_pruned_process_cleanup_cannot_release_its_successor_owner() -> Result
                 },
                 lash_core::RecoveryContract::Rerunnable,
                 lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_execution_env_ref(Some(env_ref.clone())),
         )
@@ -76,10 +73,7 @@ async fn a_pruned_process_cleanup_cannot_release_its_successor_owner() -> Result
                 },
                 lash_core::RecoveryContract::Rerunnable,
                 lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_execution_env_ref(Some(env_ref.clone())),
         )

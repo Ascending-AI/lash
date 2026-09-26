@@ -78,9 +78,9 @@ pub struct ProcessListFilter {
     pub definition: Option<super::ProcessDefinitionValue>,
     pub status: ProcessStatusFilter,
     pub originator: Option<ProcessOriginatorFilter>,
-    /// Selects the children of one durable scope, compared by the same
+    /// Selects the processes that live until one scope, compared by the same
     /// `(kind, id)` pair the stores index.
-    pub parent_scope: Option<ParentScope>,
+    pub until: Option<super::ScopeId>,
     /// Selects nonterminal rows whose cancellation request was recorded
     /// strictly before this timestamp. `caller_departed` is nonterminal and
     /// is selected: nothing may terminalize such a row, so a cancel request
@@ -114,7 +114,7 @@ impl ProcessListFilter {
                 "definition"
                 | "status"
                 | "originator"
-                | "parent_scope"
+                | "until"
                 | "cancel_pending_before_ms"
                 | "identity_kind"
                 | "identity_label"
@@ -141,11 +141,11 @@ impl ProcessListFilter {
                     .map_err(|error| format!("processes.list invalid originator filter: {error}"))
             })
             .transpose()?;
-        let parent_scope = args
-            .get("parent_scope")
+        let until = args
+            .get("until")
             .map(|value| {
-                serde_json::from_value::<ParentScope>(value.clone())
-                    .map_err(|error| format!("processes.list invalid parent scope filter: {error}"))
+                serde_json::from_value::<super::ScopeId>(value.clone())
+                    .map_err(|error| format!("processes.list invalid until filter: {error}"))
             })
             .transpose()?;
         let cancel_pending_before_ms = optional_u64_filter(args, "cancel_pending_before_ms")?;
@@ -160,7 +160,7 @@ impl ProcessListFilter {
             definition,
             status,
             originator,
-            parent_scope,
+            until,
             cancel_pending_before_ms,
             identity_kind,
             identity_label,
@@ -192,9 +192,9 @@ impl ProcessListFilter {
                 .as_ref()
                 .is_none_or(|originator| originator.matches(&record.provenance.originator))
             && self
-                .parent_scope
+                .until
                 .as_ref()
-                .is_none_or(|parent| record.lifecycle.parent == *parent)
+                .is_none_or(|scope| record.lifetime.scope() == Some(scope))
             && self.cancel_pending_before_ms.is_none_or(|before_ms| {
                 !record.status.is_terminal()
                     && record

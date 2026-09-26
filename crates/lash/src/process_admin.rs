@@ -359,11 +359,65 @@ impl Processes {
     /// registry directly does. The gate exists to stop a *model or leaf* payload
     /// from becoming a committed start; it is not a guard against the operator's
     /// own request. `ProcessEngine::run` still refuses an unrunnable row.
+    /// The scope a host start may live until: `session_id`, looked up now.
+    ///
+    /// A host start is a root: it has no starter, so its lifetime is
+    /// [`Lifetime::Detached`](lash_core::Lifetime::Detached) or `Until` a
+    /// session this lookup grants (FIG-3607 R3). A process started `Until` it
+    /// is cancelled when the session is deleted, and its descendants inherit
+    /// the session as their session capability.
+    ///
+    /// # Errors
+    ///
+    /// [`EmbedError::UnknownSession`] when the session does not exist or was
+    /// deleted.
+    pub async fn session_scope(&self, session_id: &SessionId) -> Result<lash_core::ScopeRef> {
+        self.require_live_session(session_id).await?;
+        Ok(lash_core::ScopeRef::host_session_lookup(session_id.clone()))
+    }
+
+    async fn require_live_session(&self, session_id: &SessionId) -> Result<()> {
+        let store = self
+            .core
+            .store_factory
+            .open_existing_store_by_id(session_id)
+            .await
+            .map_err(|error| EmbedError::StoreFactory {
+                session_id: session_id.clone(),
+                message: error.to_string(),
+            })?;
+        let live = match store {
+            Some(store) => match store.load_session_meta().await {
+                Ok(meta) => meta.is_some(),
+                Err(lash_core::StoreError::SessionDeleted { .. }) => false,
+                Err(error) => return Err(EmbedError::Store(error)),
+            },
+            None => false,
+        };
+        if live {
+            Ok(())
+        } else {
+            Err(EmbedError::UnknownSession {
+                session_id: session_id.clone(),
+            })
+        }
+    }
+
     pub async fn start(
         &self,
         request: lash_core::ProcessStartRequest,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessRecord> {
+        // A root start's session grant is the host's lookup: the session must
+        // exist now, whether the grant came from `session_scope` or from a
+        // remote start's `until_session` data (FIG-3607 R3).
+        if let lash_core::LifetimeDecision::Until {
+            scope: lash_core::ScopeId::Session(session_id),
+            grant: lash_core::ScopeGrant::HostSessionLookup,
+        } = &request.lifetime
+        {
+            self.require_live_session(session_id).await?;
+        }
         // Publication belongs inside the replayable process effect. Publishing here
         // would revisit the permanently retired staging owner before the executor can
         // discover the already-transferred process edge on an exact replay.

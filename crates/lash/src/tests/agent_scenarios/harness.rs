@@ -332,7 +332,9 @@ impl AgentScenarioSetup {
         }
         if self.install_process_controls || self.install_process_composition {
             builder = builder.plugin(Arc::new(
-                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                    lash_core::lifetime::session_or_starter,
+                ),
             ));
         }
         if self.install_process_composition {
@@ -461,10 +463,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
                     lash_core::ProcessProvenance::session(lash_core::SessionScope::new(
                         &case.session_id,
                     )),
-                    lash_core::ProcessLifecyclePolicy::new(
-                        lash_core::ParentScope::Host,
-                        lash_core::OnParentEnd::Abandon,
-                    ),
+                    lash_core::Lifetime::Detached,
                 )
                 .with_admitted_identity(
                     lash_core::AdmittedProcessIdentity::for_testing(
@@ -898,10 +897,7 @@ impl AgentSessionTurnProcessScenario {
             },
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
+            lash_core::Lifetime::Detached,
         )
     }
 
@@ -1328,9 +1324,10 @@ fn scripted_provider(
 }
 
 fn subagents_plugin() -> Arc<dyn PluginFactory> {
-    Arc::new(lash_subagents::SubagentsPluginFactory::new(Arc::new(
-        lash_subagents::CapabilityRegistry::new().with(Arc::new(
+    Arc::new(lash_subagents::SubagentsPluginFactory::new(
+        Arc::new(lash_subagents::CapabilityRegistry::new().with(Arc::new(
             lash_subagents::StaticCapability::new("default", SessionSpec::inherit()),
-        )),
-    )))
+        ))),
+        lash_core::lifetime::starter,
+    ))
 }

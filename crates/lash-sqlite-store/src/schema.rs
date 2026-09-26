@@ -995,9 +995,9 @@ CREATE TABLE IF NOT EXISTS processes (
     last_event_sequence   INTEGER NOT NULL,
     change_seq            INTEGER NOT NULL,
     status                TEXT NOT NULL,
-    parent_scope_kind     TEXT NOT NULL,
-    parent_scope_id       TEXT,
-    on_parent_end         TEXT NOT NULL,
+    lifetime              TEXT NOT NULL,
+    lifetime_scope_kind   TEXT,
+    lifetime_scope_id     TEXT,
     cancel_requested_at_ms INTEGER,
     parked_since_ms       INTEGER,
     parked_reason_code    TEXT,
@@ -1005,9 +1005,8 @@ CREATE TABLE IF NOT EXISTS processes (
     record_json           TEXT NOT NULL,
     CONSTRAINT ck_processes_parked CHECK ((parked_since_ms IS NULL) = (parked_reason_code IS NULL)),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),
-    CONSTRAINT ck_processes_parent_scope_kind CHECK (parent_scope_kind IN ('turn', 'queue_drain', 'process', 'host')),
-    CONSTRAINT ck_processes_parent_scope_id CHECK ((parent_scope_kind = 'host' AND parent_scope_id IS NULL) OR (parent_scope_kind IN ('turn', 'queue_drain', 'process') AND parent_scope_id IS NOT NULL)),
-    CONSTRAINT ck_processes_on_parent_end CHECK (on_parent_end IN ('abandon', 'cancel'))
+    CONSTRAINT ck_processes_lifetime CHECK (lifetime IN ('until', 'detached')),
+    CONSTRAINT ck_processes_lifetime_scope CHECK ((lifetime = 'detached' AND lifetime_scope_kind IS NULL AND lifetime_scope_id IS NULL) OR (lifetime = 'until' AND lifetime_scope_kind IN ('turn', 'queue_drain', 'process', 'session') AND lifetime_scope_id IS NOT NULL))
 );
 
 CREATE INDEX IF NOT EXISTS idx_processes_status
@@ -1045,17 +1044,17 @@ CREATE INDEX IF NOT EXISTS idx_processes_pending_cancel
     ON processes(cancel_requested_at_ms, process_id)
     WHERE cancel_requested_at_ms IS NOT NULL
       AND status NOT IN ('completed', 'failed', 'cancelled', 'abandoned');
--- The parent-end sweep's only scan: children of one ended parent scope that
--- still owe a cancel. The predicate names the live statuses rather than a NOT
+-- The scope-close sweep's only scan: processes living `Until` one closed
+-- scope that still owe a cancel. The predicate names the live statuses rather than a NOT
 -- IN so a status added later cannot silently widen the index; it is exactly
 -- `LIVE_PROCESS_STATUS_LABELS`, so `caller_departed` is out for the reason it
 -- is out of every other worklist - lash may never act on such a row nor
 -- assert an outcome for it, and a cancel request is both.
-CREATE INDEX IF NOT EXISTS idx_processes_parent_scope
-    ON processes(parent_scope_kind, parent_scope_id, process_id);
-CREATE INDEX IF NOT EXISTS idx_processes_parent_end_pending
-    ON processes(parent_scope_kind, parent_scope_id, process_id)
-    WHERE on_parent_end = 'cancel'
+CREATE INDEX IF NOT EXISTS idx_processes_lifetime_scope
+    ON processes(lifetime_scope_kind, lifetime_scope_id, process_id);
+CREATE INDEX IF NOT EXISTS idx_processes_lifetime_pending
+    ON processes(lifetime_scope_kind, lifetime_scope_id, process_id)
+    WHERE lifetime = 'until'
       AND cancel_requested_at_ms IS NULL
       AND status IN ('running', 'waiting');
 
@@ -1201,7 +1200,7 @@ CREATE TABLE IF NOT EXISTS parent_end_plans (
     ended_at_ms      INTEGER NOT NULL,
     settled_at_ms    INTEGER,
     PRIMARY KEY (parent_kind, parent_id),
-    CONSTRAINT ck_parent_end_plans_kind CHECK (parent_kind IN ('turn', 'queue_drain', 'process'))
+    CONSTRAINT ck_parent_end_plans_kind CHECK (parent_kind IN ('turn', 'queue_drain', 'process', 'session'))
 );
 CREATE INDEX IF NOT EXISTS idx_parent_end_plans_pending
     ON parent_end_plans(ended_at_ms, parent_kind, parent_id)
@@ -1320,6 +1319,13 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// the nullable `start_key`, unique while retained, and every table keyed by
 /// `(process_id, incarnation)` is keyed by `process_id` alone. A pre-44
 /// registry holds reusable names, so it is rejected at open and recreated.
+/// Version 44 also records what ends a process (FIG-3607 PR-2, changed in
+/// place under the pre-1.0 version freeze, FIG-3846): `processes` replaces
+/// `parent_scope_kind`/`parent_scope_id`/`on_parent_end` with the recorded
+/// `lifetime` (`until` or `detached`) and the scope it names, which may be a
+/// session, and `parent_end_plans` admits a session scope. A registry written
+/// before the change holds ADR 0094 lifecycle policies this build does not
+/// read; recreate it.
 pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 44;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "

@@ -20,10 +20,7 @@ mod attach_terminal_tests {
             },
             crate::RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
-            crate::ProcessLifecyclePolicy::new(
-                crate::ParentScope::Host,
-                crate::OnParentEnd::Abandon,
-            ),
+            crate::Lifetime::Detached,
         )
         .with_execution_env_ref(Some(crate::ProcessExecutionEnvRef::new(format!(
             "process-env:{process_id}"
@@ -333,10 +330,7 @@ mod tests {
             },
             crate::RecoveryContract::Rerunnable,
             crate::ProcessProvenance::host(),
-            crate::ProcessLifecyclePolicy::new(
-                crate::ParentScope::Host,
-                crate::OnParentEnd::Abandon,
-            ),
+            crate::Lifetime::Detached,
         )
         .with_start_key(Some(crate::StartKey::for_host(
             crate::StartKeyOwner::HOST,
@@ -1001,10 +995,7 @@ mod tests {
                     },
                     crate::RecoveryContract::ExternallyOwned,
                     crate::ProcessProvenance::host(),
-                    crate::ProcessLifecyclePolicy::new(
-                        crate::ParentScope::Host,
-                        crate::OnParentEnd::Abandon,
-                    ),
+                    crate::Lifetime::Detached,
                 )
                 .with_extra_event_types([crate::ProcessEventType {
                     name: event_type.clone(),

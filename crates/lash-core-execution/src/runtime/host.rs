@@ -154,8 +154,9 @@ pub struct RuntimeControlConfig {
     pub open_sources: crate::runtime::effect::UnrecordedSessionSources,
     /// Where the drive reports a logical root's closed scope, after the
     /// root's terminal evidence is durable (FIG-3607 item 7). Defaults to
-    /// [`NoScopeClose`](crate::engine::NoScopeClose); the owner of lifetime
-    /// scopes (the process registry's adapter) installs its own.
+    /// [`NoScopeClose`](crate::engine::NoScopeClose); a host composition that
+    /// owns lifetime scopes installs the process registry's
+    /// [`RegistryScopeClose`](crate::runtime::process::RegistryScopeClose).
     pub scope_close: Arc<dyn crate::engine::ScopeCloseSink>,
 }
 

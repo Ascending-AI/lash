@@ -311,15 +311,20 @@ lash_conformance::migrated_tools_redrive_tests!(
         let prefix: &'static str =
             Box::leak(format!("restate-migrated-tools-{}", harness.run_nonce()).into_boxed_str());
         let orchestration: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
-            Arc::new(lash_plugin_process_controls::SessionProcessAdminPluginFactory::new()),
-            Arc::new(lash_subagents::SubagentsPluginFactory::new(Arc::new(
-                lash_subagents::CapabilityRegistry::new().with(Arc::new(
+            Arc::new(
+                lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                    lash_core::lifetime::session_or_starter,
+                ),
+            ),
+            Arc::new(lash_subagents::SubagentsPluginFactory::new(
+                Arc::new(lash_subagents::CapabilityRegistry::new().with(Arc::new(
                     lash_subagents::StaticCapability::new(
                         "default",
                         lash_core::facade_support::SessionSpec::inherit(),
                     ),
-                )),
-            ))),
+                ))),
+                lash_core::lifetime::starter,
+            )),
         ];
         (
             harness,
@@ -1773,10 +1778,7 @@ pub(super) fn external_registration() -> ProcessRegistration {
         },
         lash_core::RecoveryContract::ExternallyOwned,
         lash_core::ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
 }
 
@@ -1787,10 +1789,7 @@ pub(super) fn rerunnable_registration() -> ProcessRegistration {
         },
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
 }
 
@@ -1808,10 +1807,7 @@ pub(super) fn rerunnable_session_turn_registration() -> ProcessRegistration {
         },
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
 }
 
@@ -1822,10 +1818,7 @@ pub(super) fn owner_bound_registration() -> ProcessRegistration {
         },
         lash_core::RecoveryContract::OwnerBound,
         lash_core::ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
 }
 

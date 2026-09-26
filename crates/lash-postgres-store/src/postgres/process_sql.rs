@@ -153,7 +153,7 @@ lash_store_sql::statements! {
                 identity_kind, identity_label,
                 created_at_ms, updated_at_ms, last_event_sequence,
                 change_seq, status,
-                parent_scope_kind, parent_scope_id, on_parent_end, cancel_requested_at_ms,
+                lifetime_scope_kind, lifetime_scope_id, lifetime, cancel_requested_at_ms,
                 record_json
              )
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
@@ -184,42 +184,42 @@ lash_store_sql::statements! {
        AND process_id <= ?1 AND process_id > ?2
      ORDER BY process_id ASC LIMIT ?3";
 
-        /// Children of ended parent scope `?1` / `?2` that still owe a cancel:
+        /// Processes living `Until` closed scope `?1` / `?2` that still owe a cancel:
         /// after `?3`, at most `?4`.
         ///
         /// The cursor parameter carries its type cast, which is the fork: a
         /// bare `NULL` parameter has no type PostgreSQL can compare.
         list_parent_end_children = "SELECT record_json FROM processes
-         WHERE parent_scope_kind = ?1
-           AND parent_scope_id = ?2
-           AND on_parent_end = 'cancel'
+         WHERE lifetime_scope_kind = ?1
+           AND lifetime_scope_id = ?2
+           AND lifetime = 'until'
            AND cancel_requested_at_ms IS NULL
            AND {{live_process_status(status)}}
            AND (?3::text IS NULL OR process_id > ?3::text)
          ORDER BY process_id ASC
          LIMIT ?4";
 
-        /// Turn scopes with live `Cancel` children and no ledger row yet:
+        /// Turn scopes with live `Until` children and no ledger row yet:
         /// after `?1`, at most `?2`. Same cursor-cast fork.
         ///
-        /// The projection id is never parsed back: `parent_scope_id` is a
+        /// The projection id is never parsed back: `lifetime_scope_id` is a
         /// collision-free canonical key, so `DISTINCT ON` keeps one row per
         /// scope — any child's, since every row sharing the key names the
         /// same typed parent — and `record_json` carries the authority.
-        list_unrecorded_opener_parents = "SELECT DISTINCT ON (child.parent_scope_id)
-               child.parent_scope_id, child.parent_scope_kind, child.record_json
+        list_unrecorded_opener_parents = "SELECT DISTINCT ON (child.lifetime_scope_id)
+               child.lifetime_scope_id, child.lifetime_scope_kind, child.record_json
          FROM processes AS child
-         WHERE child.parent_scope_kind IN ('turn', 'queue_drain')
-           AND child.on_parent_end = 'cancel'
+         WHERE child.lifetime_scope_kind IN ('turn', 'queue_drain')
+           AND child.lifetime = 'until'
            AND child.cancel_requested_at_ms IS NULL
            AND {{live_process_status(child.status)}}
            AND NOT EXISTS (
                SELECT 1 FROM parent_end_plans AS plan
-               WHERE plan.parent_kind = child.parent_scope_kind
-                 AND plan.parent_id = child.parent_scope_id
+               WHERE plan.parent_kind = child.lifetime_scope_kind
+                 AND plan.parent_id = child.lifetime_scope_id
            )
-           AND (?1::text IS NULL OR child.parent_scope_id > ?1::text)
-         ORDER BY child.parent_scope_id, child.process_id
+           AND (?1::text IS NULL OR child.lifetime_scope_id > ?1::text)
+         ORDER BY child.lifetime_scope_id, child.process_id
          LIMIT ?2";
 
         /// Prune candidates: retired rows older than `?1`, at or below change
@@ -323,8 +323,8 @@ lash_store_sql::statements! {
                AND (?10::BIGINT IS NULL OR {{live_process_status(status)}}
                     OR updated_at_ms >= ?10)
              ORDER BY process_id ASC";
-        /// The same, narrowed to parent scope `?11` / `?12`.
-        list_by_parent_scope = "SELECT record_json FROM processes
+        /// The same, narrowed to lifetime scope `?11` / `?12`.
+        list_by_lifetime_scope = "SELECT record_json FROM processes
              WHERE (?1::TEXT[] IS NULL OR status = ANY(?1))
                AND (?2::TEXT IS NULL OR originator_id = ?2)
                AND (?3::TEXT IS NULL OR identity_kind = ?3)
@@ -339,8 +339,8 @@ lash_store_sql::statements! {
                AND (?9::BIGINT IS NULL OR created_at_ms < ?9)
                AND (?10::BIGINT IS NULL OR {{live_process_status(status)}}
                     OR updated_at_ms >= ?10)
-               AND parent_scope_kind = ?11
-               AND parent_scope_id IS NOT DISTINCT FROM ?12::TEXT
+               AND lifetime_scope_kind = ?11
+               AND lifetime_scope_id IS NOT DISTINCT FROM ?12::TEXT
              ORDER BY process_id ASC";
         /// The same, narrowed to rows whose cancel request is older than `?11`
         /// and whose outcome is still open.
@@ -364,7 +364,7 @@ lash_store_sql::statements! {
                AND {{nonterminal_process_status(status)}}
              ORDER BY process_id ASC";
         /// Both narrowings at once.
-        list_by_parent_scope_pending_cancel = "SELECT record_json FROM processes
+        list_by_lifetime_scope_pending_cancel = "SELECT record_json FROM processes
              WHERE (?1::TEXT[] IS NULL OR status = ANY(?1))
                AND (?2::TEXT IS NULL OR originator_id = ?2)
                AND (?3::TEXT IS NULL OR identity_kind = ?3)
@@ -379,8 +379,8 @@ lash_store_sql::statements! {
                AND (?9::BIGINT IS NULL OR created_at_ms < ?9)
                AND (?10::BIGINT IS NULL OR {{live_process_status(status)}}
                     OR updated_at_ms >= ?10)
-               AND parent_scope_kind = ?11
-               AND parent_scope_id IS NOT DISTINCT FROM ?12::TEXT
+               AND lifetime_scope_kind = ?11
+               AND lifetime_scope_id IS NOT DISTINCT FROM ?12::TEXT
                AND cancel_requested_at_ms IS NOT NULL
                AND cancel_requested_at_ms < ?13
                AND {{nonterminal_process_status(status)}}
@@ -754,8 +754,8 @@ lash_store_sql::statements! {
            AND plan.settled_at_ms < ?1
            AND NOT EXISTS (
                SELECT 1 FROM processes AS child
-               WHERE child.parent_scope_kind = plan.parent_kind
-                 AND child.parent_scope_id = plan.parent_id
+               WHERE child.lifetime_scope_kind = plan.parent_kind
+                 AND child.lifetime_scope_id = plan.parent_id
                  AND {{live_process_status(child.status)}}
            )";
     }
@@ -935,12 +935,12 @@ pub(crate) fn process_sql() -> &'static ProcessSql {
 pub(crate) fn list_processes_sql(filter: &lash_core_execution::ProcessListFilter) -> &'static str {
     let statements = &process_sql().process_postgres;
     match (
-        filter.parent_scope.is_some(),
+        filter.until.is_some(),
         filter.cancel_pending_before_ms.is_some(),
     ) {
         (false, false) => statements.list.sql(),
-        (true, false) => statements.list_by_parent_scope.sql(),
+        (true, false) => statements.list_by_lifetime_scope.sql(),
         (false, true) => statements.list_pending_cancel.sql(),
-        (true, true) => statements.list_by_parent_scope_pending_cancel.sql(),
+        (true, true) => statements.list_by_lifetime_scope_pending_cancel.sql(),
     }
 }

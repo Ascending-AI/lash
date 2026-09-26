@@ -629,7 +629,9 @@ async fn facade_final_value_execution_inner(
     }
     if process_surface == ProcessSurface::Installed {
         builder = builder.plugin(Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(
+                lash_core::lifetime::session_or_starter,
+            ),
         ));
     }
     let core = builder
@@ -974,7 +976,7 @@ async fn agent_process_contract_core_with_options_and_effect_layer(
         // "unknown module `processes`" -- the mirrored facade agent scenarios
         // install `SessionProcessAdminPluginFactory` for exactly this reason.
         .plugin(Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
         ))
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -1003,14 +1005,15 @@ async fn agent_process_contract_core_with_options_and_effect_layer(
 }
 
 fn agent_contract_subagents_plugin() -> Arc<dyn lash_core::facade_support::PluginFactory> {
-    Arc::new(lash_subagents::SubagentsPluginFactory::new(Arc::new(
-        lash_subagents::CapabilityRegistry::new().with(Arc::new(
+    Arc::new(lash_subagents::SubagentsPluginFactory::new(
+        Arc::new(lash_subagents::CapabilityRegistry::new().with(Arc::new(
             lash_subagents::StaticCapability::new(
                 "default",
                 lash_core::facade_support::SessionSpec::inherit(),
             ),
-        )),
-    )))
+        ))),
+        lash_core::lifetime::starter,
+    ))
 }
 
 async fn wait_for_contract_durable_input_key(

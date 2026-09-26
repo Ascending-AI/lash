@@ -319,10 +319,10 @@ table lash_processes
   column identity_kind text not-null
   column identity_label text nullable
   column last_event_sequence bigint not-null
-  column on_parent_end text not-null
+  column lifetime text not-null
+  column lifetime_scope_id text nullable
+  column lifetime_scope_kind text nullable
   column originator_id text not-null
-  column parent_scope_id text nullable
-  column parent_scope_kind text not-null
   column park_executable_generation text nullable
   column parked_reason_code text nullable
   column parked_since_ms bigint nullable

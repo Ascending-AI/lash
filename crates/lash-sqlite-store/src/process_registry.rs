@@ -417,11 +417,18 @@ impl lash_core_execution::ProcessObserverRegistry for SqliteProcessRegistry {
     ) -> Result<lash_core_execution::ProcessSessionDeleteReport, lash_core_execution::PluginError>
     {
         let session_id_owned = session_id.to_string();
+        let session_scope = lash_core_execution::ScopeId::session(session_id.clone());
+        let closed_at_ms = self.clock.timestamp_ms();
+        let fleet_format = self.fleet_format;
         let (removed_observer_count, discarded_wake_delivery_count, cleared_subscription_count) =
             self.conn
                 .write_flow(move |tx| {
                     Ok(tx_outcome((|| {
                         let session_id = session_id_owned;
+                        // The session's scope closes with its process state
+                        // (FIG-3607 R10): every process living `Until` it is
+                        // swept, and a later start naming it is refused.
+                        parent_end::record_conn(tx, &session_scope, closed_at_ms, fleet_format)?;
                         let discarded_wake_delivery_count = tx
                             .execute(
                                 process_sql().wake.discard_target_gone.sql(),
@@ -720,7 +727,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
 
     async fn record_parent_end(
         &self,
-        parent: &lash_core_execution::ParentScope,
+        parent: &lash_core_execution::ScopeId,
     ) -> Result<(), lash_core_execution::PluginError> {
         parent_end::record(self, parent).await
     }
@@ -734,14 +741,14 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
 
     async fn get_parent_end_plan(
         &self,
-        parent: &lash_core_execution::ParentScope,
+        parent: &lash_core_execution::ScopeId,
     ) -> Result<Option<lash_core_execution::ParentEndPlan>, lash_core_execution::PluginError> {
         parent_end::get(self, parent).await
     }
 
     async fn list_parent_end_children(
         &self,
-        parent: &lash_core_execution::ParentScope,
+        parent: &lash_core_execution::ScopeId,
         after: Option<&ProcessId>,
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<lash_core_execution::ProcessRecord>, lash_core_execution::PluginError> {
@@ -750,7 +757,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
 
     async fn settle_parent_end_plan(
         &self,
-        parent: &lash_core_execution::ParentScope,
+        parent: &lash_core_execution::ScopeId,
     ) -> Result<(), lash_core_execution::PluginError> {
         parent_end::settle(self, parent).await
     }
@@ -759,7 +766,7 @@ impl lash_core_execution::ProcessLifecycle for SqliteProcessRegistry {
         &self,
         after: Option<&str>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<lash_core_execution::ParentScope>, lash_core_execution::PluginError> {
+    ) -> Result<Vec<lash_core_execution::ScopeId>, lash_core_execution::PluginError> {
         parent_end::list_unrecorded_opener_parents(self, after, limit).await
     }
 

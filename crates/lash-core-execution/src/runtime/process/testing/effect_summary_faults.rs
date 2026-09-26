@@ -20,10 +20,10 @@ use crate::runtime::process::registry_delegate::{
     delegate_process_wake_outbox,
 };
 use crate::{
-    AbandonRequest, CancelOrigin, ParentEndPlan, ParentScope, PluginError, ProcessAwaitOutput,
+    AbandonRequest, CancelOrigin, ParentEndPlan, PluginError, ProcessAwaitOutput,
     ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessEventAppendRequest,
     ProcessExecutionWriteAuthority, ProcessId, ProcessLease, ProcessRecord, ProcessStartOutcome,
-    ProcessStarted, RuntimeReplayAttribution, SessionId, StoreRealization, WaitState,
+    ProcessStarted, RuntimeReplayAttribution, ScopeId, SessionId, StoreRealization, WaitState,
 };
 
 /// Refuses the next `failures` registry writes that carry a runtime append of
@@ -250,7 +250,7 @@ impl ProcessLifecycle for EffectSummaryAppendFaults {
             .await
     }
 
-    async fn record_parent_end(&self, parent: &ParentScope) -> Result<(), PluginError> {
+    async fn record_parent_end(&self, parent: &ScopeId) -> Result<(), PluginError> {
         self.inner.record_parent_end(parent).await
     }
 
@@ -263,14 +263,14 @@ impl ProcessLifecycle for EffectSummaryAppendFaults {
 
     async fn get_parent_end_plan(
         &self,
-        parent: &ParentScope,
+        parent: &ScopeId,
     ) -> Result<Option<ParentEndPlan>, PluginError> {
         self.inner.get_parent_end_plan(parent).await
     }
 
     async fn list_parent_end_children(
         &self,
-        parent: &ParentScope,
+        parent: &ScopeId,
         after: Option<&ProcessId>,
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<ProcessRecord>, PluginError> {
@@ -279,7 +279,7 @@ impl ProcessLifecycle for EffectSummaryAppendFaults {
             .await
     }
 
-    async fn settle_parent_end_plan(&self, parent: &ParentScope) -> Result<(), PluginError> {
+    async fn settle_parent_end_plan(&self, parent: &ScopeId) -> Result<(), PluginError> {
         self.inner.settle_parent_end_plan(parent).await
     }
 
@@ -287,7 +287,7 @@ impl ProcessLifecycle for EffectSummaryAppendFaults {
         &self,
         after: Option<&str>,
         limit: std::num::NonZeroUsize,
-    ) -> Result<Vec<ParentScope>, PluginError> {
+    ) -> Result<Vec<ScopeId>, PluginError> {
         self.inner
             .list_unrecorded_opener_parents(after, limit)
             .await

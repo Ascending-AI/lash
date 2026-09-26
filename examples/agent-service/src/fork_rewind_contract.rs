@@ -113,10 +113,7 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
             },
             RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
-            lash::process::ProcessLifecyclePolicy::new(
-                lash::process::ParentScope::Host,
-                lash::process::OnParentEnd::Abandon,
-            ),
+            lash::process::Lifetime::Detached,
         ))
         .await
         .expect("register process observed by the source")
@@ -211,10 +208,7 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
             },
             RecoveryContract::ExternallyOwned,
             ProcessProvenance::host(),
-            lash::process::ProcessLifecyclePolicy::new(
-                lash::process::ParentScope::Host,
-                lash::process::OnParentEnd::Abandon,
-            ),
+            lash::process::Lifetime::Detached,
         ))
         .await
         .expect("register second branch's work");

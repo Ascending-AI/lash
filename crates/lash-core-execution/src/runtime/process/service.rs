@@ -451,10 +451,7 @@ mod tests {
                             },
                             crate::RecoveryContract::ExternallyOwned,
                             ProcessProvenance::host(),
-                            crate::ProcessLifecyclePolicy::new(
-                                crate::ParentScope::Host,
-                                crate::OnParentEnd::Abandon,
-                            ),
+                            crate::Lifetime::Detached,
                         ),
                         process_id.clone(),
                     )
@@ -631,10 +628,7 @@ mod tests {
                 },
                 crate::RecoveryContract::ExternallyOwned,
                 ProcessProvenance::host(),
-                crate::ProcessLifecyclePolicy::new(
-                    crate::ParentScope::Host,
-                    crate::OnParentEnd::Abandon,
-                ),
+                crate::Lifetime::Detached,
             ),
             process_id.clone(),
         );

@@ -19,9 +19,11 @@ pub(crate) fn runtime_perf_plugin_stack(
         stack.push(Arc::new(StandardCompactionPluginFactory::default()));
     }
     let processes = if include_cancel_process {
-        SessionProcessAdminPluginFactory::new()
+        SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter)
     } else {
-        SessionProcessAdminPluginFactory::without_cancel_process()
+        SessionProcessAdminPluginFactory::without_cancel_process(
+            lash_core::lifetime::session_or_starter,
+        )
     };
     stack.push(Arc::new(processes));
     stack

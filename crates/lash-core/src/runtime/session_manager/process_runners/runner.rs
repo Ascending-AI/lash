@@ -40,6 +40,7 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
             crate::ProcessInput::ToolCall { call } => {
                 let output = Box::pin(
                     self.run_process_tool_call(ProcessToolCallRun {
+                        lineage: registration.lineage(&process_id),
                         process_id,
                         call: call.clone(),
                         parent_invocation: execution_context.causal_invocation,
@@ -62,7 +63,8 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                     .execution_write_authority
                     .expect("process worker installs execution write authority");
                 let output = Box::pin(self.run_process_session_turn(
-                    process_id,
+                    process_id.clone(),
+                    registration.lineage(&process_id),
                     *create_request.clone(),
                     *turn_input.clone(),
                     execution_write_authority,
@@ -148,6 +150,7 @@ impl RuntimeSessionServices {
             }
             let run_context = ProcessRunContext::builder(&services)
                 .tool_surface(tool_surface)
+                .process_lineage(registration_for_runtime.lineage(&process_id_for_runtime))
                 .scoped_effect_controller(scoped_effect_controller)
                 .causal_invocation(execution_context_for_runtime.causal_invocation.clone())
                 .cancellation(cancellation_for_runtime.clone())

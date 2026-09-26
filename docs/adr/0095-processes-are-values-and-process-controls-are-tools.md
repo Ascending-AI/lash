@@ -249,8 +249,9 @@ while the opener remains live**, and a live opener that crashes must recover it.
 Opener close then cancels and releases that wait **without requesting
 cancellation of `job`**. The process's eventual lifetime is still this ADR's and
 [ADR 0094](0094-child-lifecycle-is-a-registration-fact-settled-by-scope-end.md)'s,
-through its own Parent Scope and Lifecycle Policy: surviving wait cancellation
-does not guarantee surviving parent end. This is the ruled answer to "I want work
+through its own Parent Scope and Lifecycle Policy (since FIG-3607 its recorded
+Lifetime, [ADR 0108](0108-a-process-lives-until-a-scope-its-start-could-reach.md)):
+surviving wait cancellation does not guarantee surviving parent end. This is the ruled answer to "I want work
 that outlives the turn": name a process, and race the wait rather than the work.
 
 **A process terminal and a cancellation of the wait are different facts.** A

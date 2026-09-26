@@ -58,6 +58,7 @@ impl RuntimeSessionServices {
     ) -> Result<crate::ToolCallOutput, crate::PluginError> {
         let ProcessToolCallRun {
             process_id,
+            lineage,
             call,
             parent_invocation,
             execution_write_authority,
@@ -84,6 +85,7 @@ impl RuntimeSessionServices {
                     .pin_resolved_tool_surface(&self.current.session_id)?,
             )
             .scoped_effect_controller(scoped_effect_controller)
+            .process_lineage(lineage)
             .causal_invocation(parent_invocation.clone())
             .dispatch_parent_invocation(parent_invocation)
             .cancellation(cancellation.clone())

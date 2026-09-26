@@ -293,7 +293,7 @@ fn base_builder(backend: &lash_core::Backend) -> LashCoreBuilder {
         // bit (ADR 0095): the rebuild sources author `processes.emit`,
         // so the surface only exists if this factory is installed.
         .plugin(Arc::new(
-            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(),
+            lash_plugin_process_controls::SessionProcessAdminPluginFactory::new(lash_core::lifetime::session_or_starter),
         ))
         .tools(Arc::new(EchoToolProvider))
 }
@@ -314,10 +314,7 @@ fn worker_registration(input: lash_core::ProcessInput) -> lash_core::ProcessRegi
         // Worker-rebuild recovery tests need the row to be re-executable.
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::session(lash_core::SessionScope::new(SESSION_ID)),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
 }
 

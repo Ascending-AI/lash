@@ -821,10 +821,7 @@ impl lash_core::ToolProvider for StandardIntentProvider {
                     declaration: lash_core::ProcessStartDeclaration::external(
                         lash_core::ProcessOriginator::host_scoped("standard-scenario"),
                         serde_json::json!({"kind": "start"}),
-                        lash_core::ProcessLifecyclePolicy::new(
-                            lash_core::ParentScope::Host,
-                            lash_core::OnParentEnd::Abandon,
-                        ),
+                        lash_core::Lifetime::Detached,
                     ),
                 })),
                 lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
@@ -862,10 +859,7 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_extra_event_types([
                 lash_core::ProcessEventType {

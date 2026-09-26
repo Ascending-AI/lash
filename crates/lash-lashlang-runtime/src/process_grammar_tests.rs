@@ -48,10 +48,7 @@ pub(crate) async fn run_sleep_process()
         input.to_process_input().expect("valid process input"),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
-        lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::Host,
-            lash_core::OnParentEnd::Abandon,
-        ),
+        lash_core::Lifetime::Detached,
     )
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
         input.process_identity(),

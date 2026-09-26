@@ -61,6 +61,7 @@ impl RuntimeSessionServices {
             attachment_source_policy: Arc::clone(&self.current.host.core.attachment_source_policy),
             turn_context: crate::TurnContext::default(),
             clock: Arc::clone(&self.current.host.core.clock),
+            process_lineage: None,
         })
     }
 }

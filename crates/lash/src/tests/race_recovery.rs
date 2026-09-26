@@ -178,10 +178,7 @@ async fn register_intent_target(registry: &dyn ProcessRegistry) -> lash_sansio::
                 },
                 lash_core::RecoveryContract::ExternallyOwned,
                 lash_core::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
+                lash_core::Lifetime::Detached,
             )
             .with_start_key(Some(lash_core::StartKey::for_host(
                 lash_core::StartKeyOwner::HOST,
