@@ -1118,7 +1118,8 @@ struct AgentContractProcessObservation {
 async fn agent_contract_process_observations(
     core: &lash::LashCore,
 ) -> Result<Vec<AgentContractProcessObservation>, FixedScriptRunnerError> {
-    let mut observed = core
+    let artifacts = lash::persistence::LashlangArtifacts::of_backend(core.backend());
+    let processes = core
         .processes()
         .list(&lash_core::ProcessListFilter {
             definition: None,
@@ -1126,27 +1127,78 @@ async fn agent_contract_process_observations(
             ..lash_core::ProcessListFilter::default()
         })
         .await
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
-        .into_iter()
-        .map(|process| {
-            let process_ref = agent_contract_process_ref(&process);
-            AgentContractProcessObservation {
-                raw_process_id: process.process_id.clone(),
-                process_ref: process_ref.clone(),
-                observed: json!({
-                    "process_ref": process_ref,
-                    "kind": process.kind(),
-                    "label": process.label(),
-                    "status": process.lifecycle.label(),
-                    "terminal": process.terminal(),
-                    "definition_present": process.identity.definition.is_some(),
-                    "child_session_present": process.child_session_id.is_some(),
-                }),
-            }
-        })
-        .collect::<Vec<_>>();
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+    let mut observed = Vec::with_capacity(processes.len());
+    for process in processes {
+        let process_ref = agent_contract_process_ref(&process);
+        let process_origin = agent_contract_process_origin(&artifacts, &process).await?;
+        observed.push(AgentContractProcessObservation {
+            raw_process_id: process.process_id.clone(),
+            process_ref: process_ref.clone(),
+            observed: json!({
+                "process_ref": process_ref,
+                "kind": process.kind(),
+                "label": process.label(),
+                "status": process.lifecycle.label(),
+                "terminal": process.terminal(),
+                "definition_present": process.identity.definition.is_some(),
+                "process_origin": process_origin.map(Value::from).unwrap_or(Value::Null),
+                "child_session_present": process.child_session_id.is_some(),
+            }),
+        });
+    }
     observed.sort_by(|left, right| left.process_ref.cmp(&right.process_ref));
     Ok(observed)
+}
+
+/// The structural origin an observed process's pinned definition resolves to
+/// in its module IR (`ProcessOrigin` on the Lashlang declaration), never the
+/// display label the process row carries. `None` for a process that pins no
+/// Lashlang definition at all; an unresolvable pinned definition is a defect
+/// the contract run reports rather than quietly uncounting.
+async fn agent_contract_process_origin(
+    artifacts: &lash::persistence::LashlangArtifacts,
+    process: &lash_core::facade_support::ObservedProcess,
+) -> Result<Option<&'static str>, FixedScriptRunnerError> {
+    if process.kind() != lash_lashlang_runtime::LASHLANG_ENGINE_KIND {
+        return Ok(None);
+    }
+    let Some(reference) = process.identity.definition.as_ref() else {
+        return Ok(None);
+    };
+    let identity = lash::rlm::lang::ProcessDefinitionIdentity::from_process_value(
+        reference.definition.as_json(),
+    )
+    .map_err(|err| {
+        FixedScriptRunnerError::Runtime(format!(
+            "lashlang process {} pins a definition that is not a process identity: {err}",
+            process.process_id
+        ))
+    })?;
+    let artifact = artifacts
+        .get_module_artifact(&identity.module_ref)
+        .await
+        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
+        .ok_or_else(|| {
+            FixedScriptRunnerError::Runtime(format!(
+                "lashlang process {} pins module artifact `{}`, which the store no longer retains",
+                process.process_id, identity.module_ref
+            ))
+        })?;
+    let declaration = artifact
+        .ir()
+        .process(&identity.process_name)
+        .ok_or_else(|| {
+            FixedScriptRunnerError::Runtime(format!(
+                "module artifact `{}` exports no process `{}`",
+                identity.module_ref, identity.process_name
+            ))
+        })?;
+    Ok(Some(if declaration.origin.is_lifted() {
+        "lifted"
+    } else {
+        "declared"
+    }))
 }
 
 fn agent_contract_process_ref(process: &lash_core::facade_support::ObservedProcess) -> String {
@@ -1183,6 +1235,7 @@ fn hex_prefix(bytes: &[u8], len: usize) -> String {
 fn agent_contract_process_facts(processes: &[AgentContractProcessObservation]) -> Value {
     let mut completed_entries = BTreeSet::new();
     let mut completed_lashlang_process_refs = BTreeSet::new();
+    let mut completed_lifted_process_refs = BTreeSet::new();
     let mut statuses = BTreeMap::<String, usize>::new();
     let mut kinds = BTreeMap::<String, usize>::new();
     for process in processes {
@@ -1209,6 +1262,14 @@ fn agent_contract_process_facts(processes: &[AgentContractProcessObservation]) -
                 .is_some_and(|kind| kind == lash_lashlang_runtime::LASHLANG_ENGINE_KIND)
             {
                 completed_lashlang_process_refs.insert(process.process_ref.clone());
+                if process
+                    .observed
+                    .get("process_origin")
+                    .and_then(Value::as_str)
+                    == Some("lifted")
+                {
+                    completed_lifted_process_refs.insert(process.process_ref.clone());
+                }
             }
         }
     }
@@ -1220,6 +1281,7 @@ fn agent_contract_process_facts(processes: &[AgentContractProcessObservation]) -
             .count(),
         "completed_entries": completed_entries.into_iter().collect::<Vec<_>>(),
         "completed_lashlang_process_count": completed_lashlang_process_refs.len(),
+        "completed_lifted_process_count": completed_lifted_process_refs.len(),
         "completed_lashlang_process_refs": completed_lashlang_process_refs.into_iter().collect::<Vec<_>>(),
         "status_counts": statuses,
         "kind_counts": kinds,

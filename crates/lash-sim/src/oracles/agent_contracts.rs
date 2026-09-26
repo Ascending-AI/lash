@@ -447,31 +447,29 @@ pub(super) fn require_agent_completed_process_entry(
     )
 }
 
-/// A process lifted out of a cell carries no author-chosen name: the runtime
-/// labels it `__process_<digest>` from the definition it lifted (the mirrored
-/// facade scenarios snapshot exactly that label). The identifying evidence for
-/// such a process is its `@label` node/resource title plus how many completed,
-/// so that is what a contract asserts rather than a binding name the executed
-/// graph never carries.
-pub(super) fn require_agent_lifted_process_entries(
+/// A process lifted out of a cell carries no author-chosen name, and a host
+/// may replace even the runtime's derived label with its own display label:
+/// neither spelling is evidence. The lifted count a contract asserts comes
+/// from the structural `ProcessOrigin::Lifted` on the module IR's process
+/// declaration, resolved per observed process and aggregated as
+/// `completed_lifted_process_count`. The identifying evidence alongside it
+/// stays the `@label` node/resource titles the executed graph carries.
+pub(crate) fn require_agent_lifted_process_entries(
     result: &Value,
     expected: usize,
     contract: &str,
 ) -> Result<(), String> {
-    let entries = result
-        .pointer("/process_facts/completed_entries")
-        .and_then(Value::as_array)
-        .ok_or_else(|| format!("{contract} missing /process_facts/completed_entries"))?;
-    let lifted = entries
-        .iter()
-        .filter_map(Value::as_str)
-        .filter(|entry| entry.starts_with("__process_"))
-        .count();
-    if lifted == expected {
+    let lifted = result
+        .pointer("/process_facts/completed_lifted_process_count")
+        .and_then(Value::as_u64)
+        .ok_or_else(|| {
+            format!("{contract} missing /process_facts/completed_lifted_process_count")
+        })?;
+    if lifted == expected as u64 {
         Ok(())
     } else {
         Err(format!(
-            "{contract} expected {expected} completed lifted process entries, observed {lifted} in {entries:?}"
+            "{contract} expected {expected} completed lifted process entries, observed {lifted}"
         ))
     }
 }
