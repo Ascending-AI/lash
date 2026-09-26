@@ -171,9 +171,9 @@ impl Backend {
         let core = self.core("probe");
         let session = core.session(probe).open().await.expect("open the probe");
         session
-            .turn(TurnInput::text("probe"))
-            .turn_id(TURN)
-            .run()
+            .send(TurnInput::text("probe"))
+            .id(TURN)
+            .output()
             .await
             .expect("the probe turn completes");
         self.keys_of(probe)
@@ -202,9 +202,9 @@ impl Backend {
             .await
             .expect("open the session");
         let error = session
-            .turn(TurnInput::text("call the probe"))
-            .turn_id(TURN)
-            .run()
+            .send(TurnInput::text("call the probe"))
+            .id(TURN)
+            .output()
             .await
             .expect_err("the journal fault aborts the turn");
         assert!(faults.fired(), "the armed finalize fault fired: {error:?}");
@@ -225,30 +225,30 @@ impl Backend {
     }
 }
 
-/// Redrives `TURN` of `session_id` on `core` and returns the refusal code.
-async fn redrive(core: &LashCore, session_id: &str) -> lash_core::RuntimeErrorCode {
+/// Reobserves `TURN` on `core` and returns its durable park.
+async fn redrive(core: &LashCore, session_id: &str) -> crate::ParkedTurn {
     let session = core
         .session(session_id)
         .open()
         .await
         .expect("open the session");
-    let error = session
-        .turn(TurnInput::text("call the probe"))
-        .turn_id(TURN)
-        .run()
+    let outcome = session
+        .root(TURN)
+        .outcome()
         .await
-        .expect_err("a redrive that cannot replay its journal aborts");
-    let EmbedError::Runtime(runtime_error) = &error else {
-        panic!("the abort is the typed runtime error: {error:?}");
+        .expect("the root answers its durable park");
+    assert!(outcome.output.is_none(), "a park has no terminal report");
+    let crate::TurnStatus::Parked(parked) = outcome.status else {
+        panic!("the root must park: {outcome:?}");
     };
-    runtime_error.code.clone()
+    parked
 }
 
 async fn assert_parked(
     backend: &Backend,
     core: &LashCore,
     session_id: &str,
-    code: lash_core::RuntimeErrorCode,
+    parked: &crate::ParkedTurn,
 ) {
     let park = backend
         .park_of(session_id)
@@ -256,20 +256,8 @@ async fn assert_parked(
         .expect("the refused turn is parked");
     assert_eq!(park.turn_id.as_str(), TURN);
     assert_eq!(
-        lash_core::RuntimeErrorCode::LashlangCellReplayDivergence == code,
-        matches!(
-            park.reason,
-            lash_core::store::ParkReason::ReplayDivergence { .. }
-        ),
-        "the park names the refusal: {park:?}"
-    );
-    assert_eq!(
-        lash_core::RuntimeErrorCode::LashlangCellBindingDrift == code,
-        matches!(
-            park.reason,
-            lash_core::store::ParkReason::BindingDrift { .. }
-        ),
-        "the park names the refusal: {park:?}"
+        park.reason, parked.reason,
+        "the handle names the stored park"
     );
     let session = core
         .session(session_id)
@@ -312,7 +300,6 @@ async fn assert_parked(
 /// oldest age. The test-metrics recorder is thread-local, so this law runs on
 /// a single-threaded runtime where every spawned task shares its slot.
 #[tokio::test]
-#[ignore = "FIG-3600 S5c C6: a parked root answers SendOutcome Parked, not a runtime error (D1 §1.7)"]
 async fn a_parked_turn_records_the_parked_work_metrics() -> Result<()> {
     #[cfg(feature = "otel-trace")]
     let metrics = lash_core::operational_metrics::TestMetrics::install();
@@ -322,8 +309,11 @@ async fn a_parked_turn_records_the_parked_work_metrics() -> Result<()> {
     backend.abort_after_dispatch(SESSION, &attempt_key).await;
 
     let drifted = backend.core_for(Probe::Removed);
-    let code = redrive(&drifted, SESSION).await;
-    assert_eq!(code, lash_core::RuntimeErrorCode::LashlangCellBindingDrift);
+    let parked = redrive(&drifted, SESSION).await;
+    assert!(matches!(
+        parked.reason,
+        lash_core::store::ParkReason::BindingDrift { .. }
+    ));
     #[cfg(feature = "otel-trace")]
     assert_eq!(
         metrics.counter_value("lash.parked_work.parks"),
@@ -354,7 +344,6 @@ async fn a_parked_turn_records_the_parked_work_metrics() -> Result<()> {
 /// (FIG-3587): the call would reach the drifted tool live, so every redrive
 /// parks with the binding-drift refusal naming it and dispatches nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-3600 S5c C6: a parked root answers SendOutcome Parked, not a runtime error (D1 §1.7)"]
 async fn a_cell_whose_tool_drifted_before_its_result_parks_on_every_redrive() -> Result<()> {
     for (session_id, probe_id, drift, word) in [
         ("drift-mov1", "drift-prb1", Probe::Id("probe_v2"), "missing"),
@@ -369,13 +358,15 @@ async fn a_cell_whose_tool_drifted_before_its_result_parks_on_every_redrive() ->
 
         let drifted = backend.core_for(drift);
         for _ in 0..2 {
-            let code = redrive(&drifted, session_id).await;
-            assert_eq!(
-                code,
-                lash_core::RuntimeErrorCode::LashlangCellBindingDrift,
+            let parked = redrive(&drifted, session_id).await;
+            assert!(
+                matches!(
+                    parked.reason,
+                    lash_core::store::ParkReason::BindingDrift { .. }
+                ),
                 "{drift:?}"
             );
-            assert_parked(&backend, &drifted, session_id, code).await;
+            assert_parked(&backend, &drifted, session_id, &parked).await;
             let park = backend.park_of(session_id).await.expect("parked");
             let message = park.reason.message();
             assert!(
@@ -487,7 +478,6 @@ async fn a_redescribed_tool_never_parks() -> Result<()> {
 /// effect, and parks carrying both generations so drain status can count it
 /// per generation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-3600 S5c C6: a parked root answers SendOutcome Parked, not a runtime error (D1 §1.7)"]
 async fn a_turn_admitted_under_another_generation_parks_before_any_effect() -> Result<()> {
     let current = lash_lashlang_runtime::lashlang_cell_generation();
     let retired = lash_core::ExecutableGeneration::new("blake3:retired");
@@ -526,9 +516,12 @@ async fn a_turn_admitted_under_another_generation_parks_before_any_effect() -> R
 
         let core = backend.core("probe");
         for _ in 0..2 {
-            let code = redrive(&core, session_id).await;
-            assert_eq!(code, lash_core::RuntimeErrorCode::RetiredGeneration);
-            assert_parked(&backend, &core, session_id, code).await;
+            let parked = redrive(&core, session_id).await;
+            assert!(matches!(
+                parked.reason,
+                lash_core::store::ParkReason::RetiredGeneration { .. }
+            ));
+            assert_parked(&backend, &core, session_id, &parked).await;
             let park = backend.park_of(session_id).await.expect("parked");
             assert_eq!(
                 park.reason,
@@ -856,9 +849,9 @@ impl Backend {
             .open()
             .await
             .expect("open the probe")
-            .turn(TurnInput::text("call the probe"))
-            .turn_id(TURN)
-            .run()
+            .send(TurnInput::text("call the probe"))
+            .id(TURN)
+            .output()
             .await
             .expect("the probe turn completes");
         assert!(output.is_success(), "{:?}", output.result.errors);
@@ -880,12 +873,33 @@ impl Backend {
             .open()
             .await
             .expect("open the session")
-            .turn(TurnInput::text("call the probe"))
-            .turn_id(TURN)
-            .run()
+            .send(TurnInput::text("call the probe"))
+            .id(TURN)
+            .output()
             .await
             .expect_err("the journal fault aborts the turn");
         assert!(faults.fired(), "the armed fault fired: {error:?}");
+    }
+
+    async fn native_parked(&self, probe: Probe, session_id: &str) -> crate::ParkedTurn {
+        let session = self
+            .native_core_for(probe)
+            .session(session_id)
+            .open()
+            .await
+            .expect("open the session");
+        let outcome = tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            session.root(TURN).outcome(),
+        )
+        .await
+        .expect("the native redrive answers")
+        .expect("the native root answers its park");
+        assert!(outcome.output.is_none());
+        let crate::TurnStatus::Parked(parked) = outcome.status else {
+            panic!("the native root must park: {outcome:?}");
+        };
+        parked
     }
 
     /// Redrives `session_id`'s native turn under the build registering
@@ -950,7 +964,6 @@ async fn a_native_call_on_a_reworded_tool_never_parks() -> Result<()> {
 /// drifted tool live: every redrive parks with the binding-drift refusal
 /// naming the call and dispatches nothing (FIG-3672 P7b).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-3600 S5c C6: a parked root answers SendOutcome Parked, not a runtime error (D1 §1.7)"]
 async fn a_native_call_on_a_drifted_tool_needed_live_parks() -> Result<()> {
     for (session_id, probe_id, drift, word) in [
         ("native-ret1", "native-prb2", Probe::Retried, "changed in"),
@@ -966,17 +979,13 @@ async fn a_native_call_on_a_drifted_tool_needed_live_parks() -> Result<()> {
         let dispatched = backend.executions.load(Ordering::SeqCst);
 
         for _ in 0..2 {
-            let error = backend
-                .native_redrive(drift, session_id)
-                .await
-                .expect_err("a call on a drifted tool needed live parks");
-            let EmbedError::Runtime(runtime_error) = &error else {
-                panic!("the abort is the typed runtime error: {error:?}");
-            };
-            assert_eq!(
-                runtime_error.code,
-                lash_core::RuntimeErrorCode::LashlangCellBindingDrift,
-                "{drift:?}: {error:?}"
+            let parked = backend.native_parked(drift, session_id).await;
+            assert!(
+                matches!(
+                    parked.reason,
+                    lash_core::store::ParkReason::BindingDrift { .. }
+                ),
+                "{drift:?}"
             );
             let park = backend.park_of(session_id).await.expect("parked");
             assert!(

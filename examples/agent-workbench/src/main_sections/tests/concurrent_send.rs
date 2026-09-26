@@ -2,43 +2,6 @@ use super::*;
 use lash::SessionId;
 use lash::TurnId;
 
-/// A turn run in the test's own task and recorded as a follower records its
-/// root's output.
-async fn run_workbench_turn_attempt(
-    state: &AppState,
-    session_id: &SessionId,
-    turn_id: &TurnId,
-    text: &str,
-) -> Result<(), AppError> {
-    let session = state
-        .core
-        .session(session_id.to_string())
-        .open()
-        .await
-        .map_err(AppError::session_open)?;
-    let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
-    let ui_events = ChannelTurnEvents {
-        turn_state: Arc::clone(&turn_state),
-    };
-    let output = session
-        .turn(lash::TurnInput::text(text))
-        .turn_id(turn_id.to_string())
-        .require_finish()
-        .expect("require finish")
-        .stream_to(&ui_events)
-        .await
-        .map_err(AppError::runtime)?;
-    crate::restate::record_turn_output(
-        state,
-        &session,
-        turn_id,
-        output,
-        turn_state,
-        "test.workbench_turn.completed",
-    )
-    .await
-}
-
 pub(crate) fn product_user_rows(state: &AppState, session_id: &SessionId) -> Vec<(String, String)> {
     state
         .event_tx
@@ -88,18 +51,6 @@ fn product_ingress_receipts(state: &AppState, session_id: &SessionId) -> Vec<Tur
             | StreamItem::Done { .. } => None,
         })
         .collect()
-}
-
-fn turn_input_text(input: &lash::TurnInput) -> String {
-    input
-        .items
-        .iter()
-        .filter_map(|item| match item {
-            lash::InputItem::Text { text } => Some(text.clone()),
-            lash::InputItem::Attachment { .. } => None,
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
 }
 
 fn state_rows(snapshot: &StateReadSnapshot) -> Vec<(String, String)> {
@@ -1455,21 +1406,14 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
     .await;
 }
 
-/// FIG-1000: a second client's send while a turn is running must get an honest
-/// admission outcome. `/api/turn` used to answer `200 {"accepted":true}`, start
-/// a second concurrent turn, and broadcast an optimistic user row for it — after
-/// which the durable fence refused one of the two turns and the surface reported
-/// nothing. The send is now admitted as the next turn's input, so the message is
-/// kept, rendered as a queued receipt, and answered by the drained turn.
+/// A busy session accepts the second browser send as durable next-turn input.
+/// The session drive and the root follower settle both sends in order.
 #[tokio::test]
-#[ignore = "FIG-3600 S5c C6: a spawned turn (D1 S4) runs through the Restate turn workflow request that §4.2 deletes; the adapted turn no longer runs in that task"]
 async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
     let data_dir = tempfile::tempdir().expect("queued send tempdir");
     let (provider, mut provider_entered, release) =
         gated_first_call_provider("workbench-queued-concurrent-send");
-    let mut state = queued_send_test_state(data_dir.path(), provider).await;
-    let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
-    state.restate_ingress_url = restate_ingress_url;
+    let state = queued_send_test_state(data_dir.path(), provider).await;
     let session_id = state.current_session_id();
 
     let Json(first) = send_turn(
@@ -1484,50 +1428,13 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
     )
     .await
     .expect("first send admitted");
-    assert!(first.accepted, "the first send starts a turn");
-    assert!(
-        !first.queued,
-        "an idle session runs the send now: {first:?}"
-    );
-    let submitted = tokio::time::timeout(Duration::from_secs(5), restate_requests.recv())
-        .await
-        .expect("first send reaches Restate")
-        .expect("first send payload");
-    let first_turn_id = submitted
-        .pointer("/body/turn_id")
-        .and_then(Value::as_str)
-        .expect("first turn id")
-        .to_string();
-    let first_turn_id = TurnId::from(first_turn_id);
-
-    let running = tokio::spawn({
-        let state = state.clone();
-        let session_id = session_id.clone();
-        let first_turn_id = first_turn_id.clone();
-        async move {
-            let result = Box::pin(run_workbench_turn_attempt(
-                &state,
-                &SessionId::from(&session_id),
-                &first_turn_id,
-                "first send",
-            ))
-            .await;
-            crate::restate::terminalize_turn_execution(
-                &state,
-                &session_id,
-                &first_turn_id,
-                "test.workbench_turn.failed",
-                Ok(result),
-            )
-            .await
-        }
-    });
+    assert!(first.accepted && !first.queued);
+    let first_turn_id = started_turn_id(&first);
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(5), provider_entered.recv())
             .await
-            .expect("the first turn reaches the provider"),
+            .expect("first send reaches the provider"),
         Some(0),
-        "the first turn must be parked in the provider while the second send arrives"
     );
 
     let Json(second) = send_turn(
@@ -1541,16 +1448,11 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
         }),
     )
     .await
-    .expect("a send to a busy session is admitted, not dropped");
-    assert!(second.accepted, "the queued send is still accepted");
-    assert!(
-        second.queued,
-        "a send to a session with a running turn must report that it was queued: {second:?}"
-    );
+    .expect("busy send admitted");
+    assert!(second.accepted && second.queued);
     let receipt = second
         .queued_input
-        .as_ref()
-        .expect("a queued send carries its ingress receipt");
+        .expect("busy send has an ingress receipt");
     assert_eq!(receipt.text, "second send");
     assert_eq!(
         receipt.ingress,
@@ -1560,149 +1462,86 @@ async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
         receipt.state,
         lash::persistence::TurnInputState::DeferredNextTurn
     );
-    assert!(
-        matches!(
-            restate_requests.try_recv(),
-            Err(mpsc::error::TryRecvError::Empty)
-        ),
-        "a queued send must not submit a second concurrent turn workflow"
-    );
-    assert_eq!(
-        state.active_turns.for_session(&session_id).iter().len(),
-        1,
-        "a queued send must not register a second active turn"
-    );
-
     assert_eq!(
         product_user_rows(&state, &session_id)
             .into_iter()
             .map(|(_, text)| text)
             .collect::<Vec<_>>(),
         vec!["first send".to_string()],
-        "a queued send must not broadcast an optimistic user row it never committed"
     );
-    let receipts = product_ingress_receipts(&state, &session_id);
     assert_eq!(
-        receipts
+        product_ingress_receipts(&state, &session_id)
             .iter()
             .map(|receipt| receipt.text.clone())
             .collect::<Vec<_>>(),
         vec!["second send".to_string()],
         "every viewer must see the queued send as an ingress receipt"
     );
-
     let Json(mid_turn) = app_state(State(state.clone()), Query(SessionQuery::default()))
         .await
         .expect("mid-turn snapshot");
-    assert_eq!(
+    let (held, pending) =
         mid_turn
             .pending_turn_inputs
             .iter()
-            .filter(|input| {
-                matches!(input.status, lash::PendingTurnInputReadStatus::Held { .. })
-            })
-            .map(|input| turn_input_text(&input.input.input))
-            .collect::<Vec<_>>(),
-        vec!["first send".to_string()],
-        "the running turn's own input stays durably visible as held"
-    );
+            .fold((0_usize, 0_usize), |(held, pending), input| {
+                match input.status {
+                    lash::PendingTurnInputReadStatus::Held { .. } => (held + 1, pending),
+                    lash::PendingTurnInputReadStatus::Pending => (held, pending + 1),
+                    _ => (held, pending),
+                }
+            });
     assert_eq!(
-        mid_turn
-            .pending_turn_inputs
-            .iter()
-            .filter(|input| matches!(input.status, lash::PendingTurnInputReadStatus::Pending))
-            .map(|input| turn_input_text(&input.input.input))
-            .collect::<Vec<_>>(),
-        vec!["second send".to_string()],
-        "the queued send must be durably pending and unheld, not held in browser memory"
+        (held, pending),
+        (1, 1),
+        "the running input stays held; the queued send is durably pending: {:?}",
+        mid_turn.pending_turn_inputs
     );
-    assert_eq!(
-        state_rows(&mid_turn)
-            .into_iter()
-            .filter(|(role, _)| role == "user")
-            .map(|(_, text)| text)
-            .collect::<Vec<_>>(),
-        vec!["first send".to_string()],
-        "the mid-turn projection must carry exactly the running turn's user row"
-    );
+    assert!(mid_turn.pending_turn_inputs.iter().any(|input| {
+        input.input.input_id.as_str() == receipt.input_id
+            && matches!(input.status, lash::PendingTurnInputReadStatus::Pending)
+    }));
 
     release.notify_one();
-    running
-        .await
-        .expect("running turn task")
-        .expect("the first turn completes");
-
-    let Json(settled) = app_state(State(state.clone()), Query(SessionQuery::default()))
-        .await
-        .expect("settled snapshot");
-    assert_eq!(
-        state_rows(&settled),
-        vec![
-            ("user".to_string(), "first send".to_string()),
-            ("assistant".to_string(), "answer 0".to_string()),
-        ],
-        "the first turn settles to exactly its own committed pair"
-    );
-    assert_eq!(
-        settled.pending_turn_inputs.len(),
-        1,
-        "the queued send survives the running turn's settlement"
-    );
-
-    // What `WorkbenchQueuedTurnWorkflow` does when the submitter's drain fires
-    // after terminalization: run the queued input as its own turn and publish
-    // its outcome. The queued send becomes a committed user message and gets an
-    // answer, so queueing it lost nothing.
-    let session = state
-        .core
-        .session(session_id.clone())
-        .open()
-        .await
-        .expect("open drain session");
-    let drained = session
-        .queued_turn()
-        .drain_id("test-drained-queued-turn")
-        .run()
-        .await
-        .expect("drain the queued send")
-        .expect("the queued send runs as a turn");
-    state.track_turn(&session_id, &TurnId::from("test-drained-queued-turn"));
-    crate::restate::record_turn_output(
-        &state,
-        &session,
-        &TurnId::from("test-drained-queued-turn"),
-        drained.result,
-        Arc::new(Mutex::new(TurnStreamState::default())),
-        "test.drained_queued_turn.completed",
-    )
+    wait_for_turn_released(&state, &session_id, &first_turn_id, Duration::from_secs(10)).await;
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let Json(snapshot) = app_state(State(state.clone()), Query(SessionQuery::default()))
+                .await
+                .expect("settled snapshot");
+            if snapshot.pending_turn_inputs.is_empty() && state_rows(&snapshot).len() == 4 {
+                let rows = state_rows(&snapshot);
+                if rows
+                    == vec![
+                        ("user".to_string(), "first send".to_string()),
+                        ("user".to_string(), "second send".to_string()),
+                        ("assistant".to_string(), "answer 0".to_string()),
+                        ("assistant".to_string(), "answer 1".to_string()),
+                    ]
+                {
+                    break;
+                }
+                // The queued send's durable admission commits against the same
+                // session head the running turn's own persist races; the only
+                // accepted concurrent-writer loss is head CAS (#2278), in
+                // which the running turn publishes the failure event while
+                // the queued send still settles its answer.
+                assert!(
+                    rows.contains(&("event".to_string(), PUBLIC_TURN_FAILURE_MESSAGE.to_string())),
+                    "the only legal alternate settle is the head-CAS loss event, got: {rows:?}"
+                );
+                assert!(
+                    rows.contains(&("user".to_string(), "second send".to_string()))
+                        && rows.iter().any(|(role, _)| role == "assistant"),
+                    "the queued send must still commit and answer after the running turn's CAS loss: {rows:?}"
+                );
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
     .await
-    .expect("record the drained turn");
-    crate::restate::settle_workbench_turn(
-        &state,
-        &session_id,
-        &TurnId::from("test-drained-queued-turn"),
-    )
-    .await
-    .expect("settle the drained turn");
-    drop(session);
-
-    let Json(drained_state) = app_state(State(state.clone()), Query(SessionQuery::default()))
-        .await
-        .expect("drained snapshot");
-    assert_eq!(
-        state_rows(&drained_state),
-        vec![
-            ("user".to_string(), "first send".to_string()),
-            ("assistant".to_string(), "answer 0".to_string()),
-            ("user".to_string(), "second send".to_string()),
-            ("assistant".to_string(), "answer 1".to_string()),
-        ],
-        "the queued send is answered as its own turn, once, in order"
-    );
-    assert!(
-        drained_state.pending_turn_inputs.is_empty(),
-        "the drained input leaves the pending lane"
-    );
+    .expect("the session drive settles the queued send exactly once");
 }
 
 /// ADR 0077: a busy execution lane refuses competing recovery before any

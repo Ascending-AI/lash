@@ -262,12 +262,9 @@ impl lash_core::plugin::ProtocolSessionPlugin for DivergingBeforeLlmCall {
     }
 }
 
-/// FIG-3586, FIG-3600: a replay refusal parks a direct turn. The turn aborts
-/// with `Err` and is never recorded failed; it keeps its input bound, records
-/// a typed park that `drain_status` counts, and every redrive refuses again
-/// with nothing sent to the model. Withdrawing its input settles the park.
+/// FIG-3586, FIG-3600: a replay refusal parks the sent root without a failed
+/// turn report. Reattaching observes the same park and withdrawal clears it.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-3600 S5c C6: a parked root answers SendOutcome Parked, not a runtime error (D1 §1.7)"]
 async fn a_replay_refusal_parks_the_direct_turn_until_its_input_is_withdrawn() -> Result<()> {
     const SESSION: &str = "direct-replay-refusal";
     let backend = SqliteBackend::open().await;
@@ -279,29 +276,38 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_input_is_withdrawn() -
     );
     let session = core.session(SESSION).open().await?;
 
-    for attempt in 1..=2 {
-        let error = session
-            .turn(TurnInput::text(STRANDED_WORDS))
-            .turn_id("parked-turn")
-            .run()
-            .await
-            .expect_err("a replay refusal aborts the turn instead of recording it");
-        let EmbedError::Runtime(runtime_error) = &error else {
-            panic!("the abort is the typed runtime error: {error:?}");
-        };
-        assert_eq!(
-            runtime_error.code,
-            lash_core::RuntimeErrorCode::LashlangCellReplayDivergence
-        );
-        assert_eq!(protocol.calls.load(Ordering::SeqCst), attempt);
+    let handle = session
+        .send(TurnInput::text(STRANDED_WORDS))
+        .id("parked-turn")
+        .await?;
+    let input_id = handle.input_id().clone();
+    let first = tokio::time::timeout(std::time::Duration::from_secs(10), handle.outcome())
+        .await
+        .expect("the first send answers its park")?;
+    let reobserved = tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        session.root("parked-turn").outcome(),
+    )
+    .await
+    .expect("the root handle observes the same park")?;
+    for outcome in [first, reobserved] {
+        assert!(matches!(
+            outcome.status,
+            crate::TurnStatus::Parked(crate::ParkedTurn {
+                reason: lash_core::store::ParkReason::ReplayDivergence { .. },
+                ..
+            })
+        ));
+        assert!(outcome.output.is_none(), "a park has no terminal report");
         let status = core.drain_status(false).await?;
         assert_eq!(
             (status.parked_turns, status.in_flight_turns),
             (1, 1),
-            "attempt {attempt}: the parked turn is counted"
+            "the parked turn is counted"
         );
         assert!(!status.drained());
     }
+    assert_eq!(protocol.calls.load(Ordering::SeqCst), 1);
     assert_eq!(
         provider_calls.load(Ordering::SeqCst),
         0,
@@ -319,11 +325,11 @@ async fn a_replay_refusal_parks_the_direct_turn_until_its_input_is_withdrawn() -
         "the parked turn's input stays pending: {:?}",
         pending[0].status
     );
-    let cancelled = session
-        .durable()
-        .cancel_pending_turn_input(&pending[0].input.input_id)
-        .await?;
-    assert!(cancelled.is_cancelled(), "{cancelled:?}");
+    let cancelled = session.cancel(crate::CancelTarget::Input(input_id)).await?;
+    assert!(
+        matches!(cancelled, crate::CancelReceipt::Withdrawn(_)),
+        "{cancelled:?}"
+    );
     let status = core.drain_status(false).await?;
     assert_eq!((status.parked_turns, status.in_flight_turns), (0, 0));
     assert!(status.drained(), "withdrawing the input settles the park");
@@ -406,42 +412,51 @@ async fn abort_direct_turn_with_live_fault(
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-3600 S5c C6: a direct turn's live fault is retried by the session drive, not returned with its receipt (D1 §1.7)"]
-async fn live_fault_on_a_direct_turn_returns_its_receipt_to_withdraw_the_input() -> Result<()> {
+async fn a_send_receipt_withdraws_input_before_drive() -> Result<()> {
     const SESSION: &str = "direct-live-fault";
     let backend = SqliteBackend::open().await;
     let provider_calls = Arc::new(AtomicUsize::new(0));
     let requests = Arc::new(StdMutex::new(Vec::new()));
-    let core = backend.core(
-        counting_text_provider(Arc::clone(&provider_calls), Arc::clone(&requests)),
-        None,
-    );
+    // `without_queued_work` drives a send inside the task that waits on it:
+    // nothing claims the input until a waiter runs, so the withdraw below is
+    // never a claim race.
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        backend.backend.clone().into(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(counting_text_provider(
+        Arc::clone(&provider_calls),
+        Arc::clone(&requests),
+    ))
+    .model(mock_model_spec())
+    .without_queued_work()
+    .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(SESSION).open().await?;
 
-    let (error, input_id) =
-        abort_direct_turn_with_live_fault(&backend, &session, SESSION, "faulted-turn").await;
+    let handle = session
+        .send(TurnInput::text(STRANDED_WORDS))
+        .id("withdrawn-turn")
+        .await?;
+    let receipt = handle.receipt().clone();
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
-    let receipt = error
-        .turn_input_acceptance()
-        .expect("an aborted direct turn returns its acceptance receipt");
-    assert_eq!(
-        receipt.input_id, input_id,
-        "the receipt names the accepted input"
-    );
     assert_eq!(receipt.session_id.as_str(), SESSION);
 
-    // The host withdraws the input by the name the receipt gives it.
     let cancelled = session
-        .durable()
-        .cancel_pending_turn_input(&receipt.input_id)
+        .cancel(crate::CancelTarget::Input(receipt.input_id.clone()))
         .await?;
     assert!(
-        cancelled.is_cancelled(),
-        "the aborted turn's input is withdrawable by its receipt: {cancelled:?}"
+        matches!(cancelled, crate::CancelReceipt::Withdrawn(_)),
+        "the input is withdrawable by its receipt: {cancelled:?}"
     );
+    let outcome = handle.outcome().await?;
+    assert_eq!(outcome.status, crate::TurnStatus::Cancelled);
+    assert!(outcome.output.is_none());
     assert!(session.durable().pending_turn_inputs().await?.is_empty());
 
-    let next = session.turn(TurnInput::text("the next turn")).run().await?;
+    let next = session
+        .send(TurnInput::text("the next turn"))
+        .output()
+        .await?;
     assert!(next.is_success(), "{:?}", next.result.outcome);
     let seen = requests.lock_recover().clone();
     assert_eq!(seen.len(), 1);
@@ -453,11 +468,9 @@ async fn live_fault_on_a_direct_turn_returns_its_receipt_to_withdraw_the_input()
     Ok(())
 }
 
-/// The aborted turn's journal is the recovery path: redriving the same turn
-/// id replays the recorded acceptance and drive and commits once, with the
-/// receipt's acceptance.
+/// The session drive retries a live journal fault under the send's stable
+/// root id. A retry of that id observes the same acceptance and turn.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "FIG-3600 S5c C6: a direct turn's live fault is retried by the session drive, not returned with its receipt (D1 §1.7)"]
 async fn live_fault_on_a_direct_turn_is_redriven_by_its_turn_id() -> Result<()> {
     const SESSION: &str = "direct-live-fault-redrive";
     let backend = SqliteBackend::open().await;
@@ -469,28 +482,51 @@ async fn live_fault_on_a_direct_turn_is_redriven_by_its_turn_id() -> Result<()> 
     );
     let session = core.session(SESSION).open().await?;
 
-    let (error, _) =
-        abort_direct_turn_with_live_fault(&backend, &session, SESSION, "redriven-turn").await;
-    let receipt = error
-        .turn_input_acceptance()
-        .cloned()
-        .expect("an aborted direct turn returns its acceptance receipt");
+    let faults = backend.backend.effect_host().effect_journal_faults();
+    faults.fail_next(
+        EffectJournalFaultPoint::Claim,
+        &first_llm_call_key(SESSION, "redriven-turn"),
+    );
+    let handle = session
+        .send(TurnInput::text(STRANDED_WORDS))
+        .id("redriven-turn")
+        .await?;
+    let receipt = handle.receipt().clone();
+    let error = handle
+        .output()
+        .await
+        .expect_err("the live journal fault stops this drive attempt");
+    assert!(faults.fired(), "the first model-call claim failed once");
+    assert!(matches!(
+        error,
+        EmbedError::Runtime(ref runtime)
+            if runtime.code == lash_core::RuntimeErrorCode::SqliteEffectReplayStore
+    ));
     assert_eq!(
         session.durable().pending_turn_inputs().await?[0].status,
         lash_core::PendingTurnInputReadStatus::Pending,
-        "until its redrive, the input stays accepted and pending"
     );
-
-    let redriven = session
-        .turn(TurnInput::text(STRANDED_WORDS))
-        .turn_id("redriven-turn")
-        .run()
+    let retry = session
+        .send(TurnInput::text(STRANDED_WORDS))
+        .id("redriven-turn")
         .await?;
+    assert_eq!(retry.input_id(), &receipt.input_id);
+    let redriven = retry.output().await?;
     assert!(redriven.is_success(), "{:?}", redriven.result.outcome);
     assert_eq!(
         redriven.result.acceptance.as_ref(),
         Some(&receipt),
         "the redrive re-derives the aborted turn's own acceptance"
+    );
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
+    let settled_retry = session
+        .send(TurnInput::text(STRANDED_WORDS))
+        .id("redriven-turn")
+        .await?;
+    assert_eq!(settled_retry.input_id(), &receipt.input_id);
+    assert_eq!(
+        settled_retry.outcome().await?.status,
+        crate::TurnStatus::Answered
     );
     assert_eq!(provider_calls.load(Ordering::SeqCst), 1);
     assert_eq!(

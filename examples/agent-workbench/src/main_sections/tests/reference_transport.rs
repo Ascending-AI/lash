@@ -411,9 +411,7 @@ async fn apply_until_settled(
     panic!("turn {turn_id} never settled");
 }
 
-/// Drive one turn through the same code path the workbench's own routes use:
-/// `stream_to` for activity, `record_turn_output` for the durable and product
-/// records, `settle_workbench_turn` for the terminal bookkeeping.
+/// Drive one turn through the workbench's send and settlement path.
 async fn drive_reference_turn(
     state: &AppState,
     session: &lash::LashSession,
@@ -422,9 +420,9 @@ async fn drive_reference_turn(
 ) {
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let output = session
-        .turn(lash::TurnInput::text(prompt))
-        .turn_id(turn_id.clone())
-        .stream_to(&ChannelTurnEvents {
+        .send(lash::TurnInput::text(prompt))
+        .id(turn_id.clone())
+        .output_into(&ChannelTurnEvents {
             turn_state: Arc::clone(&turn_state),
         })
         .await
@@ -1003,25 +1001,18 @@ async fn a_retried_attempt_replaces_partial_prose_on_the_same_row() {
     drop(client);
 }
 
-/// A recovery re-drive reuses the request's turn identity: the first drive
-/// dies mid-turn with its journaled provider call intact — the crashed
-/// workflow invocation — and the recovery drive under the same `turn_id`
-/// replays the journal and commits once. Fresh delivery identities arrive
-/// under the same turn id and the transport keeps one output row whose
-/// canonical text the settled refetch writes.
+/// A faulted drive retries under the accepted root id. The transport keeps
+/// one output row, and a same-id send observes the settled root without
+/// producing another row.
 #[tokio::test]
-#[ignore = "FIG-3600 S5c C6: the session drive retries the crashed attempt itself, so the first send settles instead of returning the abort (D1 S5)"]
 async fn a_redriven_turn_keeps_its_output_identity() {
     const CRASHED_PARTIAL: &str = "partial prose from the crashed drive";
     const REDRIVEN_ANSWER: &str = "answer from the recovery re-drive";
-    const DRAINED_ANSWER: &str = "answer from the queued drain";
+    const NEXT_ANSWER: &str = "answer from the queued drain";
     let data_dir = tempfile::tempdir().expect("reference transport tempdir");
-    // The fixture is a file backend under `data_dir`: the crash layer sits
-    // over its journaling host, so the re-drive replays the journal the first
-    // drive wrote.
     let layer = Arc::new(RedriveCrashLayer::failing_on_llm_call(2));
     let (provider, provider_calls) =
-        redrive_provider(CRASHED_PARTIAL, &[REDRIVEN_ANSWER, DRAINED_ANSWER]);
+        redrive_provider(CRASHED_PARTIAL, &[REDRIVEN_ANSWER, NEXT_ANSWER]);
     let state = recoverable_chat_test_state_with_replay_store(
         data_dir.path(),
         16,
@@ -1043,56 +1034,9 @@ async fn a_redriven_turn_keeps_its_output_identity() {
         .open()
         .await
         .expect("open session");
-
     let mut transport = ReferenceTransport::default();
     let mut client = connect_observations(&state, &session_id, transport.resume_cursor()).await;
 
-    // The first drive journals one provider call — its streamed partial is
-    // live on the row — then dies on the call the journal does not yet hold,
-    // the way a crashed runner leaves a turn mid-flight.
-    let crashed = session
-        .turn(lash::TurnInput::text("the question"))
-        .turn_id(TurnId::from("turn-one"))
-        .stream_to(&ChannelTurnEvents {
-            turn_state: Arc::new(Mutex::new(TurnStreamState::default())),
-        })
-        .await;
-    assert!(
-        crashed.is_err(),
-        "the first drive aborts mid-invocation: {crashed:?}"
-    );
-    for _ in 0..256 {
-        let item = client.next_item().await;
-        transport.apply(&item);
-        if transport
-            .outputs()
-            .get(&TurnId::from("turn-one"))
-            .is_some_and(|row| row.provisional_text() == CRASHED_PARTIAL)
-        {
-            break;
-        }
-    }
-    let row = transport
-        .outputs()
-        .get(&TurnId::from("turn-one"))
-        .expect("the crashed drive still has one output row");
-    assert_eq!(
-        row.provisional_text(),
-        CRASHED_PARTIAL,
-        "the crashed drive's streamed partial is provisional state on the one row"
-    );
-    assert!(!row.is_settled(), "nothing committed, so nothing settled");
-    drop(session);
-
-    // Recovery re-drives the request's own turn id on a reopened session —
-    // the journaled call replays instead of re-buying the provider, the call
-    // past the journal executes, and the turn commits once.
-    let session = state
-        .core
-        .session(session_id.clone())
-        .open()
-        .await
-        .expect("reopen session for the recovery drive");
     drive_reference_turn(&state, &session, &TurnId::from("turn-one"), "the question").await;
     apply_until_settled(
         &state,
@@ -1102,53 +1046,43 @@ async fn a_redriven_turn_keeps_its_output_identity() {
         &TurnId::from("turn-one"),
     )
     .await;
-    assert_eq!(
-        provider_calls.load(Ordering::SeqCst),
-        2,
-        "the re-drive replays the journaled call instead of re-buying it"
-    );
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 2);
     assert_eq!(
         layer.answered_llm_effects() - provider_calls.load(Ordering::SeqCst),
         1,
-        "the journaled call must replay on the recovery drive"
+        "the first model call replays from the journal",
     );
     assert_eq!(
         transport.output_keys(),
-        vec!["workbench-assistant:turn-one".to_string()],
-        "a re-drive must not mint a second output identity"
+        vec!["workbench-assistant:turn-one".to_string()]
     );
     let row = transport
         .outputs()
         .get(&TurnId::from("turn-one"))
         .expect("turn-one output row");
+    assert_eq!(row.settled_text(), Some(REDRIVEN_ANSWER));
+    assert_eq!(row.provisional_text(), "", "stale partial text is cleared");
+
+    let retried = session
+        .send(lash::TurnInput::text("the question"))
+        .id("turn-one")
+        .output()
+        .await
+        .expect("same-id retry observes the settled root");
+    assert_eq!(retried.assistant_message(), Some(REDRIVEN_ANSWER));
+    assert_eq!(provider_calls.load(Ordering::SeqCst), 2);
     assert_eq!(
-        row.settled_text(),
-        Some(REDRIVEN_ANSWER),
-        "the re-drive's committed output replaces the first copy in place"
-    );
-    assert_eq!(
-        row.provisional_text(),
-        "",
-        "the re-drive superseded the crashed drive's stale partial"
+        transport.output_keys(),
+        vec!["workbench-assistant:turn-one".to_string()]
     );
 
-    // The durable drain a workflow journal re-drives carries its own
-    // idempotency key: a repeated drain answers empty instead of running the
-    // turn a second time — the durable half of the same one-identity story.
-    session
-        .durable()
-        .enqueue(lash::TurnInput::text("queued question"))
-        .id("turn-two-input")
-        .send()
-        .await
-        .expect("enqueue queued input");
-    session
-        .queued_turn()
-        .drain_id("turn-two")
-        .run()
-        .await
-        .expect("drain queued work")
-        .expect("the queued input should run");
+    drive_reference_turn(
+        &state,
+        &session,
+        &TurnId::from("turn-two"),
+        "queued question",
+    )
+    .await;
     apply_until_settled(
         &state,
         &session_id,
@@ -1157,23 +1091,19 @@ async fn a_redriven_turn_keeps_its_output_identity() {
         &TurnId::from("turn-two"),
     )
     .await;
-    let redriven = session
-        .queued_turn()
-        .drain_id("turn-two")
-        .run()
-        .await
-        .expect("re-drive the satisfied drain");
-    assert!(
-        redriven.ran().is_none(),
-        "re-driving a satisfied drain id must be a durable no-op"
-    );
     assert_eq!(
         transport.output_keys(),
         vec![
             "workbench-assistant:turn-one".to_string(),
             "workbench-assistant:turn-two".to_string()
         ],
-        "a satisfied drain's re-drive emits nothing and mints nothing"
+    );
+    assert_eq!(
+        transport
+            .outputs()
+            .get(&TurnId::from("turn-two"))
+            .and_then(|row| row.settled_text()),
+        Some(NEXT_ANSWER)
     );
     drop(client);
 }

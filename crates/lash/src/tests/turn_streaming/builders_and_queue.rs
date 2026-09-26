@@ -79,7 +79,6 @@ pub(super) async fn turn_run_uses_configured_effect_host_without_explicit_effect
 }
 
 #[tokio::test]
-#[ignore = "FIG-3600 S5c C6: an adapted turn runs under its input's session drive, so the scopes its host records changed (D1 §2.1)"]
 pub(super) async fn durable_configured_effect_host_scopes_plain_turn_entry_points() -> Result<()> {
     let recorder = EffectRecorder::default();
     let core = LashCore::standard_builder(
@@ -96,64 +95,56 @@ pub(super) async fn durable_configured_effect_host_scopes_plain_turn_entry_point
     let events = RecordingEvents::default();
 
     session
-        .turn(TurnInput::text("stream to"))
-        .turn_id("durable-stream-to")
-        .stream_to(&events)
+        .send(TurnInput::text("stream to"))
+        .id("durable-stream-to")
+        .output_into(&events)
         .await?;
     let run = session
-        .turn(TurnInput::text("run"))
-        .turn_id("durable-run")
-        .run()
+        .send(TurnInput::text("run"))
+        .id("durable-run")
+        .output()
         .await?;
-    let mut stream = session
-        .turn(TurnInput::text("stream"))
-        .turn_id("durable-stream")
-        .stream()?;
-    while let Some(activity) = stream.next().await {
+    let stream = session
+        .send(TurnInput::text("stream"))
+        .id("durable-stream")
+        .await?;
+    let mut activities = stream.events();
+    while let Some(activity) = activities.next().await {
         activity?;
     }
-    stream.finish().await?;
+    stream.output().await?;
 
     session
-        .durable()
-        .enqueue(TurnInput::text("queued"))
-        .id("durable-queued-input")
-        .send()
+        .send(TurnInput::text("queued"))
+        .id("durable-queue-drain")
+        .output()
         .await?;
-    session
-        .queued_turn()
-        .drain_id("durable-queue-drain")
-        .run()
-        .await?
-        .expect("queued turn should run");
 
     assert_eq!(run.assistant_message(), Some("echo: run"));
-    assert_eq!(
-        recorder.scopes(),
-        // Each direct turn runs its admission under the drive request's own
-        // scope, then its root under the turn's (FIG-3600).
-        vec![
-            lash_core::ExecutionScope::turn("durable-default-effect-host", "durable-stream-to"),
-            lash_core::ExecutionScope::queue_drain(
-                "durable-default-effect-host",
-                "drive:turn:durable-stream-to"
-            ),
-            lash_core::ExecutionScope::turn("durable-default-effect-host", "durable-run"),
-            lash_core::ExecutionScope::queue_drain(
-                "durable-default-effect-host",
-                "drive:turn:durable-run"
-            ),
-            lash_core::ExecutionScope::turn("durable-default-effect-host", "durable-stream"),
-            lash_core::ExecutionScope::queue_drain(
-                "durable-default-effect-host",
-                "drive:turn:durable-stream"
-            ),
-            lash_core::ExecutionScope::queue_drain(
-                "durable-default-effect-host",
-                "durable-queue-drain"
-            ),
-        ]
-    );
+    let scopes = recorder.scopes();
+    assert_eq!(scopes.len(), 8, "one drive and turn scope per send");
+    let mut drive_ids = BTreeSet::new();
+    for (pair, turn_id) in scopes.as_chunks::<2>().0.iter().zip([
+        "durable-stream-to",
+        "durable-run",
+        "durable-stream",
+        "durable-queue-drain",
+    ]) {
+        let lash_core::ExecutionScope::QueueDrain {
+            session_id,
+            drain_id,
+        } = &pair[0]
+        else {
+            panic!("admission must use the session drive scope: {:?}", pair[0]);
+        };
+        assert_eq!(session_id.as_str(), "durable-default-effect-host");
+        assert!(drain_id.starts_with("drive:ti:"), "{drain_id}");
+        assert!(drive_ids.insert(drain_id), "each send has its own drive");
+        assert_eq!(
+            pair[1],
+            lash_core::ExecutionScope::turn("durable-default-effect-host", turn_id),
+        );
+    }
     let effect_turn_ids = recorder
         .invocations()
         .into_iter()

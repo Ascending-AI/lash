@@ -180,34 +180,58 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     );
     let first_factory = rlm_factory(&backend.clone().into())
         .with_deferred_tool_resolver(Arc::new(FrameStateDeferredResolver));
+    let (follow_on_started_tx, follow_on_started_rx) = oneshot::channel::<()>();
+    let follow_on_started_tx = Arc::new(StdMutex::new(Some(follow_on_started_tx)));
+    let provider_calls = Arc::new(AtomicUsize::new(0));
+    let first_provider = crate::testing::TestProvider::builder()
+        .kind("embed-test")
+        .complete(move |_| {
+            let source = switch_source.clone();
+            let started = Arc::clone(&follow_on_started_tx);
+            let calls = Arc::clone(&provider_calls);
+            async move {
+                if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    return Ok(text_response(&typescript_block(&source)));
+                }
+                if let Some(tx) = started.lock_recover().take() {
+                    let _ = tx.send(());
+                }
+                std::future::pending::<()>().await;
+                unreachable!("the held follow-on call is dropped before cold reopen")
+            }
+        })
+        .build()
+        .into_handle();
     let first_core = explicit_ephemeral_facets(LashCore::rlm_builder(
         backend.clone().into(),
         crate::TurnBudget::Unbounded,
         first_factory,
     ))
-    .provider(queued_text_provider(vec![typescript_block(&switch_source)]))
+    .provider(first_provider)
     .model(mock_model_spec())
     .tools(Arc::new(FrameStateDeferredTools))
-    .plugin(Arc::new(StopAfterFrameSwitchCommitFactory))
     .without_queued_work()
     .build(crate::testing::runtime_lease_owner())?;
     let first_session = first_core.session(session_id).open().await?;
 
+    let root_id = format!("{session_id}:switch-root");
     let switched = first_session
-        .turn(TurnInput::text("switch away from the abandoned frame"))
-        .run()
+        .send(TurnInput::text("switch away from the abandoned frame"))
+        .id(root_id.clone())
         .await?;
-    assert!(matches!(
-        switched.result.outcome,
-        TurnOutcome::AgentFrameSwitch { .. }
-    ));
+    let drive = tokio::spawn(async move { switched.outcome().await });
+    tokio::time::timeout(std::time::Duration::from_secs(5), follow_on_started_rx)
+        .await
+        .expect("the drive reaches the follow-on provider call")
+        .expect("follow-on provider signal");
+    drive.abort();
     assert!(
-        switched.result.errors.iter().any(|issue| issue
-            .message
-            .contains("stop after the accepted frame-switch commit")),
-        "the test hook must stop automatic follow-through only after the switch commit: {switched:?}"
+        drive
+            .await
+            .expect_err("the drive task was dropped")
+            .is_cancelled()
     );
-    let switch_turn_index = switched.result.state.turn_index;
+    let switch_turn_index = 1;
 
     let resident_execution_state = first_session
         .admin()
@@ -216,7 +240,6 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         .await?
         .expect("resident switched RLM has an execution snapshot");
 
-    drop(switched);
     drop(first_session);
     drop(first_core);
 
@@ -311,21 +334,15 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
         .await?
         .expect("reopened RLM has an execution snapshot");
 
-    let follow_on = reopened_session
-        .queued_turn()
-        .run()
-        .await?
-        .expect("the durable frame handoff must remain claimable after cold reopen");
+    let follow_on = reopened_session.root(root_id.clone()).output().await?;
     assert_eq!(
         follow_on.final_value(),
         Some(&serde_json::json!(
             "completed after real SQLite cold reopen"
         ))
     );
-    assert!(
-        reopened_session.queued_turn().run().await?.ran().is_none(),
-        "the durable frame handoff must be delivered exactly once"
-    );
+    let settled_again = reopened_session.root(root_id).outcome().await?;
+    assert_eq!(settled_again.status, crate::TurnStatus::Answered);
     let follow_on_requests = follow_on_requests.lock_recover();
     assert_eq!(follow_on_requests.len(), 1);
     let follow_on_json = serde_json::to_string(&follow_on_requests[0])?;
@@ -352,19 +369,26 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
 
 #[cfg(feature = "rlm")]
 #[test]
-#[ignore = "FIG-3600 S5c C6: the test hook aborts the root's frame follow-through, which the session drive now retries (D1 S5)"]
 pub(super) fn agent_frame_switch_clears_execution_state_across_cold_reopen() -> Result<()> {
     run_async_test_on_stack_budget("agent-frame-switch-cold-reopen-test", || async {
-        let small = Box::pin(frame_switch_state_after_cold_reopen(
-            &SessionId::from("frame-clear-small"),
-            16,
-        ))
-        .await?;
-        let large = Box::pin(frame_switch_state_after_cold_reopen(
-            &SessionId::from("frame-clear-large"),
-            128 * 1024,
-        ))
-        .await?;
+        let small = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            Box::pin(frame_switch_state_after_cold_reopen(
+                &SessionId::from("frame-clear-small"),
+                16,
+            )),
+        )
+        .await
+        .expect("small frame switch settles")?;
+        let large = tokio::time::timeout(
+            std::time::Duration::from_secs(30),
+            Box::pin(frame_switch_state_after_cold_reopen(
+                &SessionId::from("frame-clear-large"),
+                128 * 1024,
+            )),
+        )
+        .await
+        .expect("large frame switch settles")?;
 
         for (geometry, state) in [
             ("resident", &large.resident_execution_state),

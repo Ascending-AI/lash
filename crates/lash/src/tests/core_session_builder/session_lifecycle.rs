@@ -634,8 +634,7 @@ async fn generic_lash_core_builder_requires_protocol_plugin() {
 }
 
 #[tokio::test]
-#[ignore = "FIG-3600 S5c C6: a per-turn prompt cannot cross durable acceptance; send refuses it (D1 S3)"]
-async fn prompt_layers_apply_across_core_session_turn_and_mutation_scopes() -> Result<()> {
+async fn prompt_layers_apply_across_core_session_and_mutation_scopes() -> Result<()> {
     let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         memory_backend().await.into(),
@@ -655,11 +654,7 @@ async fn prompt_layers_apply_across_core_session_turn_and_mutation_scopes() -> R
         .open()
         .await?;
 
-    session
-        .turn(TurnInput::text("first"))
-        .prompt_contribution(PromptContribution::guidance("Turn", "turn guidance"))
-        .run()
-        .await?;
+    session.send(TurnInput::text("first")).output().await?;
     Box::pin(session.admin().config().replace_prompt_slot(
         PromptSlot::Guidance,
         [PromptContribution::guidance(
@@ -668,13 +663,13 @@ async fn prompt_layers_apply_across_core_session_turn_and_mutation_scopes() -> R
         )],
     ))
     .await?;
-    session.turn(TurnInput::text("second")).run().await?;
+    session.send(TurnInput::text("second")).output().await?;
     session
         .admin()
         .config()
         .clear_prompt_slot(PromptSlot::Guidance)
         .await?;
-    session.turn(TurnInput::text("third")).run().await?;
+    session.send(TurnInput::text("third")).output().await?;
 
     let prompts = seen.lock_recover();
     assert_eq!(prompts.len(), 3);
@@ -689,12 +684,36 @@ async fn prompt_layers_apply_across_core_session_turn_and_mutation_scopes() -> R
     }
     assert!(prompts[0].contains("core guidance"));
     assert!(prompts[0].contains("session guidance"));
-    assert!(prompts[0].contains("turn guidance"));
     assert!(prompts[1].contains("replacement guidance"));
     assert!(!prompts[1].contains("core guidance"));
     assert!(!prompts[1].contains("session guidance"));
     assert!(!prompts[2].contains("core guidance"));
     assert!(!prompts[2].contains("replacement guidance"));
+    Ok(())
+}
+
+#[tokio::test]
+#[ignore = "FIG-3838: per-turn prompt layers require RunSpec on send()"]
+async fn per_turn_prompt_layer_applies_only_to_its_root() -> Result<()> {
+    let seen = Arc::new(std::sync::Mutex::new(Vec::new()));
+    let core = explicit_ephemeral_facets(LashCore::standard_builder(
+        memory_backend().await.into(),
+        crate::TurnBudget::Unbounded,
+    ))
+    .provider(recording_prompt_provider(Arc::clone(&seen)))
+    .model(mock_model_spec())
+    .build(crate::testing::runtime_lease_owner())?;
+    let session = core.session("per-turn-prompt").open().await?;
+    session
+        .turn(TurnInput::text("first"))
+        .prompt_contribution(PromptContribution::guidance("Turn", "turn guidance"))
+        .run()
+        .await?;
+    session.send(TurnInput::text("second")).output().await?;
+    let prompts = seen.lock_recover();
+    assert_eq!(prompts.len(), 2);
+    assert!(prompts[0].contains("turn guidance"));
+    assert!(!prompts[1].contains("turn guidance"));
     Ok(())
 }
 
