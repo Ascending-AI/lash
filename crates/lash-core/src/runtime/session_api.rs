@@ -1046,6 +1046,11 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
     Ok(enqueued)
 }
 
+/// The first re-ask of a settlement wait whose session another drive holds;
+/// each later one doubles, up to [`SETTLEMENT_REASK_MAX_SHIFT`] doublings.
+const SETTLEMENT_REASK_BASE_MS: u64 = 10;
+const SETTLEMENT_REASK_MAX_SHIFT: u32 = 7;
+
 enum AcceptedSessionCommand {
     Inline(crate::SessionCommandReceipt),
     Queued(crate::runtime::SessionCommandSettlementHandle),
@@ -1065,6 +1070,7 @@ impl LashRuntime {
                 "session command idempotency key cannot be empty",
             ));
         }
+        self.refuse_unservable_route(&command)?;
         let source_key = command.source_key(&idempotency_key);
         let session_id = self.state.session_id.clone();
         let Some(store) = self
@@ -1166,6 +1172,8 @@ impl LashRuntime {
         // timings through `with_lease_timings` tighten this wait as well.
         let settlement_timeout = self.host.core.control.lease_timings.ttl();
         let settlement_started = self.host.core.clock.now();
+        let mut asks = 0_u32;
+        let mut next_ask = std::time::Duration::ZERO;
         loop {
             let still_pending = store
                 .list_queued_work(&handle.receipt.session_id)
@@ -1243,11 +1251,36 @@ impl LashRuntime {
                     .release_if_live()
                     .await
                     .map_err(super::runtime_error_from_store_commit)?;
-            } else {
+            } else if self
+                .host
+                .core
+                .clock
+                .now()
+                .saturating_duration_since(settlement_started)
+                >= next_ask
+            {
+                // Another drive holds the session. Ask for a drive again,
+                // under an id no earlier ask used: an engine dedupes a
+                // repeated id, and a drive already past its last admission
+                // would swallow it. The asks back off, so a long drive is
+                // not flooded (review-2290 MEDIUM-9).
+                asks = asks.saturating_add(1);
                 self.host.queued_work().schedule_drive(
                     &handle.receipt.session_id,
-                    crate::engine::DriveRequestId::new(handle.receipt.batch_id.to_string()),
+                    crate::engine::DriveRequestId::new(format!(
+                        "{}#settle-{asks}",
+                        handle.receipt.batch_id
+                    )),
                 );
+                next_ask = self
+                    .host
+                    .core
+                    .clock
+                    .now()
+                    .saturating_duration_since(settlement_started)
+                    .saturating_add(std::time::Duration::from_millis(
+                        SETTLEMENT_REASK_BASE_MS << asks.min(SETTLEMENT_REASK_MAX_SHIFT),
+                    ));
             }
             let remaining = settlement_timeout.saturating_sub(
                 self.host
@@ -1264,6 +1297,14 @@ impl LashRuntime {
         }
     }
 
+    /// Submit `command` to the session's command lane and return as soon as
+    /// it is durable: **before** it is applied (FIG-3600). The session's
+    /// drive applies it at its next turn boundary, in order; its outcome is
+    /// observed with [`Self::settle_session_command`].
+    ///
+    /// The resident session state is marked stale: the drive commits the
+    /// command over the durable head, so the next use of this runtime reloads
+    /// the head instead of committing over a pre-command copy.
     pub async fn submit_session_command(
         &mut self,
         command: crate::SessionCommand,
@@ -1276,13 +1317,25 @@ impl LashRuntime {
             AcceptedSessionCommand::Inline(receipt) => return Ok(receipt),
             AcceptedSessionCommand::Queued(handle) => handle.receipt,
         };
-        // The command is durable; the session's drive applies it in order
-        // (FIG-3600). Its settlement is observed through the receipt.
         self.host.queued_work().schedule_drive(
             &receipt.session_id,
             crate::engine::DriveRequestId::new(receipt.batch_id.to_string()),
         );
+        self.invalidate_resident_session_state();
         Ok(receipt)
+    }
+
+    /// Wait for the command `receipt` names to settle, and adopt the durable
+    /// head it settled on. `Pending` when it has not settled within the
+    /// host's lease TTL; the command stays durable and settles later.
+    pub async fn settle_session_command(
+        &mut self,
+        receipt: crate::SessionCommandReceipt,
+    ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
+        self.await_session_command_settlement(crate::runtime::SessionCommandSettlementHandle {
+            receipt,
+        })
+        .await
     }
 
     pub async fn drain_next_session_command(
@@ -1458,6 +1511,9 @@ impl LashRuntime {
                     unreachable!("config-only command group was checked above")
                 };
                 patch.validate()?;
+                if self.refuses_route_at_apply(patch, next_state.effective_policy()) {
+                    continue;
+                }
                 if patch.apply_to_state(next_state).is_err() {
                     // A stale base is a silent no-op that still settles
                     // completed: the old queued-work tables cannot carry a

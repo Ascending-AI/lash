@@ -529,6 +529,8 @@ impl LashRuntime {
         } else {
             supplied_trace_turn_id
         };
+        self.resolve_turn_config(&scoped_effect_controller, &turn_trace_turn_id)
+            .await?;
         let mut turns: Vec<AssembledTurn> = Vec::new();
         // FIG-3157: work claimed at a terminal checkpoint, withheld from the
         // delivery so the committed finish stayed the turn's answer, waiting

@@ -101,13 +101,21 @@ impl lash_core::testing::EffectLayer for RejectingEffectController {
         &self,
         _inner: &dyn RuntimeEffectController,
         envelope: RuntimeEffectEnvelope,
-        _local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
+        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         if matches!(
             &envelope.command,
             RuntimeEffectCommand::PeekAwaitEvent { .. }
         ) {
             return Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution: None });
+        }
+        // The root's recorded session config is the funnel's, not the turn's:
+        // this double judges the turn's own effects.
+        if matches!(
+            &envelope.command,
+            RuntimeEffectCommand::ResolveTurnConfig { .. }
+        ) {
+            return local_executor.execute(envelope).await;
         }
         if let Some(summary) = self.mismatch_summary.clone() {
             return Err(RuntimeEffectControllerError::new(
@@ -143,13 +151,21 @@ impl lash_core::testing::EffectLayer for WrongOutcomeEffectController {
         &self,
         _inner: &dyn RuntimeEffectController,
         envelope: RuntimeEffectEnvelope,
-        _local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
+        local_executor: lash_core::RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         if matches!(
             &envelope.command,
             RuntimeEffectCommand::PeekAwaitEvent { .. }
         ) {
             return Ok(RuntimeEffectOutcome::PeekAwaitEvent { resolution: None });
+        }
+        // The root's recorded session config is the funnel's, not the turn's:
+        // this double judges the turn's own effects.
+        if matches!(
+            &envelope.command,
+            RuntimeEffectCommand::ResolveTurnConfig { .. }
+        ) {
+            return local_executor.execute(envelope).await;
         }
         Ok(RuntimeEffectOutcome::Sleep)
     }
@@ -632,7 +648,8 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             | RuntimeEffectCommand::AcceptTurnInput { .. }
             | RuntimeEffectCommand::ClaimAcceptedTurnInput { .. }
             | RuntimeEffectCommand::AdmitDrive { .. }
-            | RuntimeEffectCommand::SealDriveAdmission { .. }) => {
+            | RuntimeEffectCommand::SealDriveAdmission { .. }
+            | RuntimeEffectCommand::ResolveTurnConfig { .. }) => {
                 local_executor
                     .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
                     .await

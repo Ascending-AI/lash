@@ -263,6 +263,7 @@ pub mod facade_support {
     pub use crate::provider::ProviderOptions;
     pub use crate::provider::ReconciledUsage;
     pub use crate::provider::SingleProviderResolver;
+    pub use crate::provider::{ConfigRefusalCode, ProviderRegistry};
     pub use crate::runtime::AgentFrameRun;
     pub use crate::runtime::AssembledTurn;
     pub use crate::runtime::AssistantOutput;

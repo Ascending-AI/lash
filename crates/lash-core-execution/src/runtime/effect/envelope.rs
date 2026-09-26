@@ -448,6 +448,11 @@ pub enum RuntimeEffectCommand {
     SealDriveAdmission {
         admitted: Box<crate::engine::Admitted>,
     },
+    /// Resolve the session config `root` runs under (FIG-3600 S6): once per
+    /// root, keyed by it, so every redrive replays the recorded config.
+    ResolveTurnConfig {
+        root: crate::TurnId,
+    },
     Checkpoint {
         checkpoint: CheckpointKind,
     },
@@ -545,6 +550,7 @@ impl RuntimeEffectCommand {
             Self::ClaimAcceptedTurnInput { .. } => RuntimeEffectKind::ClaimAcceptedTurnInput,
             Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
+            Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
             Self::LoadExecutionEnv { .. } => RuntimeEffectKind::LoadExecutionEnv,
@@ -1193,6 +1199,10 @@ pub enum RuntimeEffectOutcome {
     SealDriveAdmission {
         verdict: Box<crate::engine::SealVerdict>,
     },
+    /// The whole config the root runs under, read from the durable head.
+    ResolveTurnConfig {
+        config: Box<crate::PersistedSessionConfig>,
+    },
     Checkpoint {
         result: CheckpointOutcome,
         #[serde(default)]
@@ -1660,6 +1670,7 @@ impl RuntimeEffectOutcome {
             Self::ClaimAcceptedTurnInput { .. } => RuntimeEffectKind::ClaimAcceptedTurnInput,
             Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
+            Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
             Self::LoadExecutionEnv { .. } => RuntimeEffectKind::LoadExecutionEnv,
@@ -1842,3 +1853,7 @@ mod rejection_tests {
         }
     }
 }
+
+#[cfg(test)]
+#[path = "envelope_tests.rs"]
+mod cell_replay_grammar_tests;

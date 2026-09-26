@@ -63,6 +63,10 @@ pub enum RuntimeEffectKind {
     /// The recorded seal of a drive admission: the drive-epoch
     /// compare-and-set whose fence the admitted root's commits present.
     SealDriveAdmission,
+    /// The session config a logical turn runs under, recorded once per root
+    /// after the boundary's command drain (FIG-3600 S6, D3 §2): every replay
+    /// of the root runs under the recorded config, never the live head's.
+    ResolveTurnConfig,
     Checkpoint,
     SyncExecutionEnvironment,
     /// The recorded read of a tool child's execution environment (FIG-3683):
@@ -93,6 +97,7 @@ impl RuntimeEffectKind {
             Self::ClaimAcceptedTurnInput => "claim_accepted_turn_input",
             Self::AdmitDrive => "admit_drive",
             Self::SealDriveAdmission => "seal_drive_admission",
+            Self::ResolveTurnConfig => "resolve_turn_config",
             Self::Checkpoint => "checkpoint",
             Self::SyncExecutionEnvironment => "sync_execution_environment",
             Self::LoadExecutionEnv => "load_execution_env",

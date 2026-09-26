@@ -6,10 +6,10 @@ use std::task::{Context, Poll};
 use crate::support::{
     Arc, AssembledTurn, BTreeMap, CancellationToken, EffectHost, EmbedError, EventSink, JoinHandle,
     LlmCallRecord, LocalTurnStop, Message, MessageRole, PromptContribution, PromptLayer,
-    PromptSlot, PromptTemplate, ProtocolTurnOptions, ProviderHandle, Result,
-    RuntimeEffectController, RuntimeErrorCode, RuntimeHandle, ScopedEffectController,
-    SessionSnapshot, StdMutex, TokenUsage, ToolCallRecord, TurnActivity, TurnActivitySink,
-    TurnExecutionMetrics, TurnInput, TurnOutcome, async_trait, mpsc,
+    PromptSlot, PromptTemplate, ProtocolTurnOptions, Result, RuntimeEffectController,
+    RuntimeErrorCode, RuntimeHandle, ScopedEffectController, SessionSnapshot, StdMutex, TokenUsage,
+    ToolCallRecord, TurnActivity, TurnActivitySink, TurnExecutionMetrics, TurnInput, TurnOutcome,
+    async_trait, mpsc,
 };
 use futures_util::Stream;
 use lash_core::facade_support::{
@@ -158,7 +158,6 @@ pub struct TurnBuilder {
     pub(crate) stop: LocalTurnStop,
     pub(crate) cancels: TurnCancelRegistry,
     pub(crate) protocol_turn_options: Option<ProtocolTurnOptions>,
-    pub(crate) provider: Option<ProviderHandle>,
     pub(crate) turn_id: Option<TurnId>,
 }
 
@@ -184,12 +183,6 @@ impl TurnBuilder {
 
     pub fn protocol_turn_options(mut self, options: ProtocolTurnOptions) -> Self {
         self.protocol_turn_options = Some(options);
-        self
-    }
-
-    /// Configures the provider and returns the updated builder.
-    pub fn provider(mut self, provider: ProviderHandle) -> Self {
-        self.provider = Some(provider);
         self
     }
 
@@ -316,9 +309,6 @@ impl TurnBuilder {
     ) -> Result<(RuntimeHandle, TurnInput, LocalTurnStop, TurnCancelGuard)> {
         if let Some(options) = self.protocol_turn_options {
             self.input.protocol_turn_options = Some(options);
-        }
-        if let Some(provider) = self.provider {
-            self.input.turn_context.set_provider(provider);
         }
         if let Some(turn_id) = turn_id {
             self.input.trace_turn_id = Some(turn_id);

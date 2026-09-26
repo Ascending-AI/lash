@@ -17,7 +17,6 @@ pub(super) async fn exercise_attempt_capabilities(attempt: &lash_core::AttemptCo
     let _ = attempt.cancellation_token();
     let _ = attempt.enclosing_process();
     let _ = attempt.attachments();
-    let _ = attempt.provider();
     let _ = attempt.prepared_payload();
     let _ = attempt.tool_execution_binding();
     let _ = attempt.tool_call_id();

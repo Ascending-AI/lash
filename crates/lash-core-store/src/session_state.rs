@@ -1262,6 +1262,24 @@ pub mod facade_ops {
 #[cfg(test)]
 mod tests;
 
+/// Adopt a durable session config onto resident state: the one config→state
+/// mapping, shared by head adoption and by a root's recorded turn config
+/// (FIG-3600 S6, D3 §2.1). The durable config wins for every fact it
+/// carries; the turn budget stays live-owned (FIG-1875), and a `None` prompt
+/// or protocol-turn-options value (a head written before the field existed)
+/// keeps the resident one.
+pub fn adopt_session_config(
+    state: &mut RuntimeSessionState,
+    config: &crate::PersistedSessionConfig,
+) {
+    state.authority.tool_access = config.tool_access.clone();
+    state.authority.subagent = config.subagent.clone();
+    apply_persisted_session_config(state, config);
+    if let Some(options) = config.protocol_turn_options.as_ref() {
+        state.protocol_turn_options = options.clone();
+    }
+}
+
 /// Adopt the durable head config's carried fields onto resident state: the
 /// policy-homed values plus the config compare-and-set revision, which moves
 /// only with the config itself (ADR 0101 §12).
@@ -1395,18 +1413,14 @@ pub fn adopt_durable_head(
         .iter()
         .map(|node| node.node_id.clone())
         .collect();
-    state.authority.tool_access = head.config.tool_access.clone();
-    state.authority.subagent = head.config.subagent.clone();
-    apply_persisted_session_config(state, &head.config);
+    adopt_session_config(state, &head.config);
     state.policy.session_id = live_owned.session_id;
     state.policy.turn_budget = live_owned.turn_budget;
-    // Adopt the commanded head value before the checkpoint restore (so a
-    // checkpointless graph's initial frame captures it) and again after (the
-    // head row is authoritative over the checkpoint's turn-state copy; `None`
-    // is a pre-v6-content head, which keeps the checkpoint fallback). FIG-2479.
-    if let Some(options) = head.config.protocol_turn_options.as_ref() {
-        state.protocol_turn_options = options.clone();
-    }
+    // The config adopted the commanded head value before the checkpoint
+    // restore (so a checkpointless graph's initial frame captures it); adopt
+    // it again after (the head row is authoritative over the checkpoint's
+    // turn-state copy; `None` is a pre-v6-content head, which keeps the
+    // checkpoint fallback). FIG-2479.
     apply_session_checkpoint(state, checkpoint)?;
     if let Some(options) = head.config.protocol_turn_options.as_ref() {
         state.protocol_turn_options = options.clone();

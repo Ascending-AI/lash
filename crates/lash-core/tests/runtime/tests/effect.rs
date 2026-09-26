@@ -91,6 +91,7 @@ async fn standard_turn_llm_and_checkpoint_effects_cross_controller_once() {
     assert!(recorder.records().iter().all(|record| {
         record.turn_id.is_some()
             && (record.kind == RuntimeEffectKind::PeekAwaitEvent
+                || record.kind == RuntimeEffectKind::ResolveTurnConfig
                 || record.replay_key.starts_with("root:"))
     }));
 }
@@ -521,6 +522,7 @@ impl lash_core::testing::EffectLayer for CapturingRuntimeReplayController {
             command @ (RuntimeEffectCommand::IncorporateGroupSettlements { .. }
             | RuntimeEffectCommand::LoadExecutionEnv { .. }
             | RuntimeEffectCommand::PresentToolResult { .. }
+            | RuntimeEffectCommand::ResolveTurnConfig { .. }
             | RuntimeEffectCommand::SyncExecutionEnvironment) => {
                 local_executor
                     .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))

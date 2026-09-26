@@ -188,18 +188,6 @@ fn turn_input_rejects_non_remote_safe_fields() {
         Err(RemoteProtocolError::NonRemoteSafeTurnInput(message))
             if message.contains("live plugin")
     ));
-
-    let mut input = lash_core::TurnInput::text("provider");
-    input.turn_context.set_provider(
-        lash_core::testing::TestProvider::builder()
-            .build()
-            .into_handle(),
-    );
-    assert!(matches!(
-        RemoteTurnInput::try_from(input),
-        Err(RemoteProtocolError::NonRemoteSafeTurnInput(message))
-            if message.contains("provider")
-    ));
 }
 
 #[test]

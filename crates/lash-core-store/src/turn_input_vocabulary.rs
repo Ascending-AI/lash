@@ -1203,7 +1203,6 @@ enum QueuedWorkDrainMode {
 #[derive(Clone)]
 pub struct TurnContext {
     plugin_inputs: LiveTurnInputs,
-    provider: Option<crate::ProviderHandle>,
     prompt: crate::PromptLayer,
     runtime_correlation: Option<Arc<dyn Any + Send + Sync>>,
     queued_work_drain: QueuedWorkDrainMode,
@@ -1212,7 +1211,6 @@ impl Default for TurnContext {
     fn default() -> Self {
         Self {
             plugin_inputs: LiveTurnInputs::default(),
-            provider: None,
             prompt: crate::PromptLayer::default(),
             runtime_correlation: None,
             queued_work_drain: QueuedWorkDrainMode::Automatic,
@@ -1229,14 +1227,6 @@ impl TurnContext {
         T: Send + Sync + 'static,
     {
         self.plugin_inputs.insert(plugin_id, input);
-    }
-
-    pub fn set_provider(&mut self, provider: crate::ProviderHandle) {
-        self.provider = Some(provider);
-    }
-
-    pub fn provider(&self) -> Option<&crate::ProviderHandle> {
-        self.provider.as_ref()
     }
 
     pub fn mark_selected_queued_work_drain(&mut self) {
@@ -1344,7 +1334,6 @@ impl fmt::Debug for TurnContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("TurnContext")
             .field("plugin_inputs", &self.plugin_inputs.plugin_ids())
-            .field("has_provider", &self.provider.is_some())
             .field("has_prompt_layer", &(!self.prompt.is_empty()))
             .finish()
     }

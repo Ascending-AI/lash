@@ -68,7 +68,11 @@ use serde::{Deserialize, Serialize};
 /// barrier instead of awaiting the group's remaining ranks as its caller, so
 /// the end journals the index's `drain_blockers` call where it journaled rank
 /// reads and rank waits (FIG-3826).
-pub const EFFECT_JOURNAL_VERSION: u32 = 11;
+/// 12: a logical turn journals its session-config resolution as a recorded
+/// `turn-config:{root}` step at its start, ahead of every effect the root
+/// records, so a replay adopts the config the first execution ran under
+/// (FIG-3600 S6).
+pub const EFFECT_JOURNAL_VERSION: u32 = 12;
 
 /// The entry field the generation is stamped under.
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";

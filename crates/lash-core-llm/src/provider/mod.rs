@@ -41,8 +41,8 @@ pub use options::{
 };
 pub use rate_limit::{ProviderRateLimitPermit, ProviderRateLimiter};
 pub use resolver::{
-    EmptyProviderResolver, ProviderBinding, ProviderResolutionError, RuntimeProviderResolver,
-    SingleProviderResolver,
+    ConfigRefusalCode, DuplicateProviderId, EmptyProviderResolver, ProviderBinding,
+    ProviderRegistry, ProviderResolutionError, RuntimeProviderResolver, SingleProviderResolver,
 };
 pub use traits::{
     DefaultProviderFailureClassifier, GenerationRetryGuarantee, Provider,

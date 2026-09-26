@@ -84,6 +84,38 @@ macro_rules! admitted_head_redrive_tests {
     };
 }
 
+/// Register the turn-config laws (FIG-3600 S6, D3 §5.2): a root resolves its
+/// session config once, as a recorded step, and every replay of the root
+/// runs under that record. The fixture is the admitted-head one: a guard, a
+/// prefix, the tier's effect host, the store set under test and its
+/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner).
+#[macro_export]
+macro_rules! turn_config_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (a_committed_root_redriven_after_a_model_change_replays_its_recorded_config, "turn-config-recorded-replay"));
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (an_input_sent_after_a_config_command_runs_on_the_new_model, "turn-config-after-command"));
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (one_config_resolution_per_root, "turn-config-one-resolution"));
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (an_unbindable_route_retries_and_never_fails_the_turn, "turn-config-unbindable-retries"));
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (a_bad_route_is_refused_at_send_with_nothing_enqueued, "turn-config-bad-route-send"));
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (a_route_refused_at_apply_leaves_the_route_unchanged, "turn-config-refused-at-apply"));
+    };
+    (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
+        $($attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, prefix, host, stores, runner) = $fixture;
+            $crate::registration_macro_support::$law(prefix, host, stores, runner).await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
+    };
+}
+
 /// Register the session drive's admission laws (FIG-3600, ADR 0105 §2): a
 /// drive admits and seals every root before its first effect, one admission
 /// at a time holds the session, and a replay mints no ownership. The fixture

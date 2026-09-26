@@ -4,7 +4,6 @@
 //! Extracted from `runtime/mod.rs`. This file re-opens `impl LashRuntime`.
 
 use crate::SessionError;
-use crate::provider::ProviderHandle;
 pub use lash_core_store::session_policy::*;
 use std::sync::Arc;
 
@@ -12,6 +11,10 @@ use super::LashRuntime;
 
 /// A mid-run configuration change: what to make true of the session from here
 /// on, leaving everything else alone.
+///
+/// The route is a provider id, never a live handle (FIG-3600 ruling 7): the
+/// host's provider resolver must already serve it, or the change is refused
+/// typed when it is sent.
 ///
 /// Every field is an overlay — `None` leaves the current value in place. The
 /// vocabulary matches [`crate::SessionSpec`] field for field, deliberately:
@@ -22,7 +25,7 @@ use super::LashRuntime;
 /// spec's overlay exists to prevent, one surface over.
 #[derive(Clone, Debug, Default)]
 pub struct SessionConfigPatch {
-    pub provider: Option<ProviderHandle>,
+    pub provider_id: Option<String>,
     pub model: Option<crate::ModelSpec>,
     pub prompt: Option<crate::PromptLayer>,
     pub generation: Option<crate::GenerationOverlay>,
@@ -91,10 +94,9 @@ impl LashRuntime {
         self.reload_invalidated_resident_session_state_for_session()
             .await?;
         let previous = self.session_policy();
-        let provider = patch.provider;
         let mut candidate = previous.clone();
-        if let Some(provider) = provider.as_ref() {
-            candidate.provider_id = provider.kind().to_string();
+        if let Some(provider_id) = patch.provider_id {
+            candidate.provider_id = provider_id;
         }
         if let Some(model) = patch.model {
             candidate.replace_model_retaining_attachment_acceptance(model);
@@ -120,10 +122,6 @@ impl LashRuntime {
         // smuggle a resident-first durable assignment back into this path.
         self.state.policy.autonomous = candidate.autonomous;
         self.state.policy.no_progress_budget = candidate.no_progress_budget;
-        if let Some(provider) = provider {
-            self.host.core.providers.provider_resolver =
-                std::sync::Arc::new(crate::SingleProviderResolver::new(provider));
-        }
         self.notify_session_config_changed(previous)
             .await
             .map_err(|error| SessionError::Protocol(error.to_string()))

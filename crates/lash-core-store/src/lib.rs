@@ -153,7 +153,6 @@ pub(crate) use turn_input_vocabulary::{
 pub(crate) use await_event_identity::{AwaitEventKey, AwaitEventWaitIdentity};
 pub(crate) use chronological::ChronologicalProjection;
 pub(crate) use effect_identity::{RuntimeEffectKind, RuntimeInvocation};
-pub(crate) use lash_core_llm::provider::ProviderHandle;
 pub(crate) use lash_sansio::ToolIntentIdentity;
 pub(crate) use message_projection::plugin_message_to_message;
 pub(crate) use process_identity::{ProcessWakeDelivery, WakeDeliveryState};

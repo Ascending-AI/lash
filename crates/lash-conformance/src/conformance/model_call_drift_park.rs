@@ -7,12 +7,13 @@
 //! removed a tool the prompt rendered replays the recorded model call from
 //! the journaled prompt with no provider request. Then, the first attempt
 //! asks the model once and crashes after its effect loop, before the turn
-//! commits. The redrive runs under a changed host setting the
-//! model request is built from (the session's generation temperature): the
-//! recorded model call's envelope hash conflicts, and the conflict parks the
+//! commits. The redrive runs under changed host code the model request is
+//! built from (a plugin that adds a note to every turn, as a redeploy
+//! would; the session's config cannot drift a recorded root, FIG-3600 S6):
+//! the recorded model call's envelope hash conflicts, and the conflict parks the
 //! turn — it aborts with the typed replay refusal, a `TurnPark` names the
 //! diverged effect kind, the model is not asked again and nothing terminal is
-//! written. A second redrive under the original setting replays the recorded
+//! written. A second redrive under the original code replays the recorded
 //! model call, finishes the turn and clears the park.
 
 use crate::admit;
@@ -20,6 +21,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use lash_sansio::{SessionId, TurnId};
+
+/// The note the drifted host code adds to every turn.
+const DRIFT_NOTE: &str = "a note only the redeployed build adds";
 
 /// The model's one answer: a cell that finishes the turn.
 const ANSWER_CELL: &str = "<typescript>\nfinish(\"answered once\");\n</typescript>";
@@ -58,11 +62,9 @@ struct DriftParts {
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn build_runtime(parts: DriftParts, temperature: Option<f64>) -> crate::LashRuntime {
+async fn build_runtime(parts: DriftParts, note: Option<&'static str>) -> crate::LashRuntime {
     let mut policy = crate::testing::mock_session_policy();
     policy.session_id = Some(parts.session_id.clone());
-    policy.generation.temperature = temperature
-        .map(|value| crate::NonNegativeFiniteF64::new(value).expect("a valid temperature"));
     let state = crate::RuntimeSessionState {
         session_id: parts.session_id.clone(),
         policy: policy.clone(),
@@ -82,6 +84,9 @@ async fn build_runtime(parts: DriftParts, temperature: Option<f64>) -> crate::La
                         parts.probe,
                         Arc::clone(&parts.executions),
                     )])
+                    .chain(note.map(|note| {
+                        Arc::new(DriftNote(note)) as Arc<dyn crate::facade_support::PluginFactory>
+                    }))
                     .collect(),
             )
             .with_store(parts.store)
@@ -92,18 +97,65 @@ async fn build_runtime(parts: DriftParts, temperature: Option<f64>) -> crate::La
     .expect("build the model-call drift conformance runtime")
 }
 
+/// Host code that adds a system note to every turn it prepares: a redrive
+/// built with it rebuilds another model request than the one its first
+/// execution recorded, as a redeployed build would.
+#[derive(Clone)]
+struct DriftNote(&'static str);
+
+impl crate::plugin::PluginFactory for DriftNote {
+    fn id(&self) -> &'static str {
+        "conformance-model-drift-note"
+    }
+
+    fn build(
+        &self,
+        _: &crate::plugin::PluginSessionContext,
+    ) -> Result<Arc<dyn crate::plugin::SessionPlugin>, lash_core::PluginError> {
+        Ok(Arc::new(self.clone()))
+    }
+}
+
+impl crate::plugin::SessionPlugin for DriftNote {
+    fn id(&self) -> &'static str {
+        "conformance-model-drift-note"
+    }
+
+    fn register(
+        &self,
+        registrar: &mut crate::plugin::PluginRegistrar,
+    ) -> Result<(), lash_core::PluginError> {
+        let note = self.0;
+        registrar.turn().before(Arc::new(move |_| {
+            Box::pin(async move {
+                Ok(vec![
+                    lash_core::facade_support::TurnPluginDirective::EnqueueMessages(
+                        lash_core::facade_support::EnqueueMessagesDirective {
+                            messages: vec![lash_core::PluginMessage::text(
+                                lash_core::MessageRole::System,
+                                note,
+                            )],
+                        },
+                    ),
+                ])
+            })
+        }));
+        Ok(())
+    }
+}
+
 fn drift_input(turn_id: &TurnId) -> crate::TurnInput {
     let mut input = crate::TurnInput::text("answer once");
     input.trace_turn_id = Some(turn_id.clone());
     input
 }
 
-/// Runs one attempt of the law's turn under `temperature` and sends back
+/// Runs one attempt of the law's turn, with the drifting `note` when set, and sends back
 /// what it returned.
 fn attempt(
     parts: &DriftParts,
     turn_id: &TurnId,
-    temperature: Option<f64>,
+    note: Option<&'static str>,
     crash: bool,
     result_tx: Option<
         tokio::sync::mpsc::UnboundedSender<Result<crate::AssembledTurn, crate::RuntimeError>>,
@@ -116,7 +168,7 @@ fn attempt(
         let turn_id = turn_id.clone();
         let result_tx = result_tx.clone();
         Box::pin(async move {
-            let mut runtime = build_runtime(parts, temperature).await;
+            let mut runtime = build_runtime(parts, note).await;
             if crash {
                 runtime.set_turn_phase_probe(Arc::new(PanicBeforeTurnCommit));
             }
@@ -234,12 +286,18 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
         protocol,
     };
 
-    // The crash, then a redrive under a changed generation setting.
+    // The crash, then a redrive under changed host code.
     runner
         .run_crashed_then_redriven_turn(
             admit(crate::ExecutionScope::turn(&session_id, &turn_id)),
             attempt(&parts, &turn_id, None, true, None),
-            attempt(&parts, &turn_id, Some(0.5), false, Some(result_tx.clone())),
+            attempt(
+                &parts,
+                &turn_id,
+                Some(DRIFT_NOTE),
+                false,
+                Some(result_tx.clone()),
+            ),
         )
         .await;
     let asked = calls.load(Ordering::SeqCst);
@@ -276,7 +334,13 @@ pub async fn model_call_drift_parks_then_completes_once_restored(
     runner
         .run_turn(
             admit(crate::ExecutionScope::turn(&session_id, &turn_id)),
-            attempt(&parts, &turn_id, Some(0.5), false, Some(result_tx.clone())),
+            attempt(
+                &parts,
+                &turn_id,
+                Some(DRIFT_NOTE),
+                false,
+                Some(result_tx.clone()),
+            ),
         )
         .await;
     let error = result_rx
