@@ -159,6 +159,7 @@ mod effect_group_shape;
 mod endpoint_protocol;
 mod journal_cut_runner;
 mod live_turn_probe;
+mod parent_end_on_the_double;
 mod process_effect_summary;
 mod process_tool_replay;
 mod replay_corpus;

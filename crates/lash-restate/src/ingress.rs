@@ -714,6 +714,23 @@ impl RestateIngressClient {
         Ok(RestateInvocationId::new(accepted.invocation_id))
     }
 
+    /// [`send_workflow_json`](Self::send_workflow_json) under an idempotency
+    /// key: a repeated send with the key names the first invocation instead
+    /// of starting another. For a workflow's shared handlers only; Restate
+    /// keys a workflow's `run` by the workflow key itself.
+    pub(crate) async fn send_workflow_json_idempotent<T: Serialize + ?Sized>(
+        &self,
+        workflow: &str,
+        workflow_key: &str,
+        handler: &str,
+        body: &T,
+        idempotency_key: &str,
+    ) -> Result<RestateInvocationId, RestateHttpError> {
+        // The ingress path of a workflow's handler has an object's shape.
+        self.send_object_json_idempotent(workflow, workflow_key, handler, body, idempotency_key)
+            .await
+    }
+
     /// [`call_object_json`](Self::call_object_json) under an idempotency
     /// key: the call attaches to the invocation an earlier send or call with
     /// the key started, and returns its output.

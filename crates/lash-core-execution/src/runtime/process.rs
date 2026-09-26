@@ -13,6 +13,7 @@ mod model_filter_tests;
 mod observation;
 mod observer_intent;
 mod op_scope;
+mod parent_end;
 mod references;
 mod registry;
 mod registry_concerns;
@@ -95,6 +96,10 @@ pub use observer_intent::{
     SessionObserverIntentSource, reconcile_session_process_observer_intents,
 };
 pub use op_scope::ProcessOpScope;
+pub use parent_end::{
+    ParentEndApplication, ParentEndReconcileReport, apply_parent_end_plan, end_parent_scope,
+    end_session_roots, parent_end_delivery_key, parent_end_requester, reconcile_parent_end_plans,
+};
 pub use references::ProcessLiveReferenceView;
 #[cfg(any(test, feature = "testing"))]
 pub use registry::reconcile_pruned_trigger_deliveries_interleaved;

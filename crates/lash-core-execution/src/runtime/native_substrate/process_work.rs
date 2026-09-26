@@ -83,6 +83,17 @@ impl NativeProcessWork {
 
 #[async_trait::async_trait]
 impl ProcessWorkSubstrate for NativeProcessWork {
+    /// A native execution reads its cancel request from the registry, which
+    /// the caller writes after this returns: there is nothing to deliver.
+    async fn deliver_cancel(
+        &self,
+        _process: &crate::ProcessRef,
+        _request: &crate::CancelRequest,
+        _delivery_key: &str,
+    ) -> Result<(), crate::PluginError> {
+        Ok(())
+    }
+
     async fn admit_pending_processes(
         &self,
         reason: &str,

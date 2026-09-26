@@ -192,7 +192,7 @@ pub async fn reconcile_once(
 
     // 4–5. The slots other slices fill.
     if let Some(processes) = parts.processes {
-        match reconcile_parent_end_plans_slot(&processes, parts.sessions, page).await {
+        match reconcile_parent_end_plans_slot(&processes, parts.sessions, page, parts.clock).await {
             Ok(pass) => report.parent_end_plans = pass,
             Err(error) => report.failures.push(ReconcileFailure {
                 arm: ReconcileArm::ParentEndPlans,
@@ -211,26 +211,37 @@ pub async fn reconcile_once(
 }
 
 /// **FIG-3822 slot.** Apply every recorded but unapplied parent-end plan,
-/// at most `page` of them, and re-derive a plan whose parent's end is
-/// durable but whose record is missing.
+/// at most `page` of them.
 ///
-/// A plan is left unapplied when the invocation that recorded it was killed
-/// or paused, or when a process ended off-workflow. This slot is that
-/// plan's only recovery owner: there is no second background actor. It runs
-/// once per tick, only on a host with processes, and must be idempotent and
-/// bounded by `page`; one failed plan never aborts the page.
+/// A plan is left unapplied when the execution that recorded it was killed
+/// or paused between the record and the apply, or when a process ended off
+/// any workflow (a never-started child folded cancelled, an externally
+/// owned abandon). This slot is that plan's only recovery owner: there is no
+/// second background actor. It is idempotent (each child's cancel is
+/// delivered under its per-scope key, and the first request stands) and one
+/// failed plan never aborts the page.
 ///
-/// FIG-3822 fills the body with
-/// `lash_core_execution::reconcile_parent_end_plans(processes.registry,
-/// processes.port, sessions, page)`, mapping its report onto [`SlotPass`].
-/// Until then it applies nothing.
+/// A root whose close step never recorded its plan has nothing to find
+/// here: a released root's scope is closed by the intent arm, and a root the
+/// engine gave up on before its close recorded anything is not re-derived.
 pub async fn reconcile_parent_end_plans_slot(
     processes: &ReconcileProcesses<'_>,
     sessions: &dyn SessionStoreFactory,
     page: NonZeroUsize,
+    clock: &dyn Clock,
 ) -> Result<SlotPass, crate::PluginError> {
-    let _ = (processes, sessions, page);
-    Ok(SlotPass::default())
+    let _ = sessions;
+    let report = crate::reconcile_parent_end_plans(
+        processes.registry,
+        processes.port,
+        page,
+        clock.timestamp_ms(),
+    )
+    .await?;
+    Ok(SlotPass {
+        handled: report.applied.len(),
+        deferred: report.deferred.len(),
+    })
 }
 
 /// **FIG-3799 slot.** Wake and hand over the waiting processes of a draining

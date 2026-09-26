@@ -107,6 +107,21 @@ pub trait ProcessWorkSubstrate: Send + Sync {
         &self,
         process_ref: &crate::ProcessRef,
     ) -> Result<ProcessTerminalWait, PluginError>;
+
+    /// Make `process`'s running execution observe `request`, however this
+    /// engine delivers a cancel to it (FIG-3822). The caller records the
+    /// request in the registry *after* this returns: delivery comes first, so
+    /// a crash between the two leaves the child listed for the next pass.
+    ///
+    /// Idempotent per `delivery_key`: a repeat names the first delivery. An
+    /// engine whose executions read cancellation from the registry itself has
+    /// nothing to deliver and returns `Ok(())`.
+    async fn deliver_cancel(
+        &self,
+        process: &crate::ProcessRef,
+        request: &crate::CancelRequest,
+        delivery_key: &str,
+    ) -> Result<(), PluginError>;
 }
 
 /// Outcome of one bounded terminal wait.

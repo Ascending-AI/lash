@@ -988,6 +988,10 @@ impl LashRuntime {
         .await
     }
 
+    /// The parent-end row of a turn the session drive does not run (a
+    /// store-less runtime, a host-prepared turn); a drive-run root records
+    /// its end in the drive's recorded close instead (FIG-3822).
+    ///
     /// The ledger row is the whole parent-end fact: the work it names — the
     /// query for this turn's `Cancel` children and their cancels — is the
     /// process worker's sweep. The row is written here, immediately after the
@@ -1010,6 +1014,12 @@ impl LashRuntime {
         let Some(registry) = self.host.process_registry() else {
             return Ok(());
         };
+        // A root the session drive runs ends once, at the drive's recorded
+        // close after its terminal commit (FIG-3822): a physical commit of it
+        // (the frame a switch left, whose id is the root's own) is not its end.
+        if self.drive_owned_root.is_some() {
+            return Ok(());
+        }
         let parent = crate::ParentScope::turn(self.state.session_id.clone(), turn_id.clone());
         registry.record_parent_end(&parent).await.map_err(|error| {
             RuntimeError::new(RuntimeErrorCode::PluginSessionManager, error.to_string())

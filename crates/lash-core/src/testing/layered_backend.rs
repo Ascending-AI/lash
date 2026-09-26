@@ -24,6 +24,7 @@ pub struct LayeredBackend {
     process_registry: Arc<dyn ProcessRegistry>,
     trigger_store: Arc<dyn TriggerStore>,
     process_definitions: Arc<dyn ProcessDefinitionRegistry>,
+    process_work: Option<ProcessWorkWiring>,
 }
 
 impl LayeredBackend {
@@ -35,6 +36,7 @@ impl LayeredBackend {
             process_registry: inner.process_registry(),
             trigger_store: inner.trigger_store(),
             process_definitions: inner.process_definition_registry(),
+            process_work: inner.process_work(),
             inner,
         }
     }
@@ -81,6 +83,18 @@ impl LayeredBackend {
         layer: impl FnOnce(Arc<dyn ProcessDefinitionRegistry>) -> Arc<dyn ProcessDefinitionRegistry>,
     ) -> Self {
         self.process_definitions = layer(self.process_definitions);
+        self
+    }
+
+    /// Replace the process-work port with `layer` over it, keeping its
+    /// watched registry. A backend without process work stays without.
+    pub fn map_process_work_port(
+        mut self,
+        layer: impl FnOnce(Arc<dyn crate::ProcessWorkSubstrate>) -> Arc<dyn crate::ProcessWorkSubstrate>,
+    ) -> Self {
+        self.process_work = self.process_work.map(|wiring| {
+            ProcessWorkWiring::new(wiring.watched().clone(), layer(Arc::clone(wiring.port())))
+        });
         self
     }
 
@@ -132,7 +146,7 @@ impl Backend for LayeredBackend {
     }
 
     fn process_work(&self) -> Option<ProcessWorkWiring> {
-        self.inner.process_work()
+        self.process_work.clone()
     }
 
     fn session_work(&self) -> Option<Arc<dyn crate::SessionWorkEngine>> {
