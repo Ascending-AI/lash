@@ -136,56 +136,66 @@ pub fn plugin_host(
     crate::PluginHost::new(factories)
 }
 
-/// The ports a hand-built dispatch context runs over, from one memory
-/// backend: its controller for the runtime-operation scope
-/// `RuntimeEffectControllerHandle::shared` admits, and an ephemeral facade
-/// over its attachment port.
-pub struct DispatchPorts {
-    pub controller: std::sync::Arc<dyn crate::RuntimeEffectController>,
+/// The ports a hand-built dispatch context runs over: the controller its
+/// tool attempts run through and an ephemeral attachment facade. The context
+/// takes `effect_controller: ports.controller`, so it cannot outlive a
+/// handler that lent the controller.
+pub struct DispatchPorts<'h> {
+    pub controller: crate::runtime::RuntimeEffectControllerHandle<'h>,
     pub attachment_store: std::sync::Arc<crate::SessionAttachmentStore>,
 }
 
-pub async fn dispatch_ports() -> DispatchPorts {
-    let backend = memory_backend().await;
-    DispatchPorts {
-        controller: scoped_controller(
-            &backend,
-            crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
-        ),
-        attachment_store: std::sync::Arc::new(crate::SessionAttachmentStore::ephemeral(
-            crate::Backend::from(backend.clone()).attachment_store(),
-        )),
-    }
-}
-
-/// The runtime-operation scope [`dispatch_ports`] admits its controller for,
-/// which a hand-built dispatch context's attempts run under. Open the
+/// The runtime-operation scope a hand-built dispatch context's attempts run
+/// under, the one `RuntimeEffectControllerHandle::shared` admits. Open the
 /// handler [`double_dispatch_ports`] lends for it.
 pub fn dispatch_scope() -> crate::AdmittedScope {
     crate::AdmittedScope::runtime_operation("test-runtime-effect-controller")
 }
 
-/// The ports a hand-built dispatch context runs over on the server double:
-/// the controller one handler execution lent, and an ephemeral facade over
-/// the double's attachment port. The context serves its effects through
-/// `RuntimeEffectControllerHandle::borrowed(ports.controller)`, and it
-/// cannot outlive the handler.
-pub struct DoubleDispatchPorts<'h> {
-    pub controller: crate::ScopedEffectController<'h>,
-    pub attachment_store: std::sync::Arc<crate::SessionAttachmentStore>,
+/// A fresh server double under `seed` and a handler open on it for
+/// [`dispatch_scope`]. Build the context over
+/// [`double_dispatch_ports`]`(&double, &handler)`, drop it, then close the
+/// handler.
+pub async fn open_dispatch_handler(
+    seed: u64,
+) -> (
+    lash_restate_test::RestateTestBackend,
+    lash_restate_test::OpenHandler,
+) {
+    let double = kernel_double(seed, lash_restate_test::ServerConfig::default()).await;
+    let handler = double
+        .open_handler(dispatch_scope())
+        .await
+        .expect("open the dispatch handler");
+    (double, handler)
 }
 
-/// The twin of [`dispatch_ports`] on the server double: `handler`, opened on
-/// `double` for [`dispatch_scope`], lends the controller. Drop the context,
-/// then close the handler.
+/// Dispatch ports on the server double: `handler`, opened on `double` for
+/// [`dispatch_scope`], lends the controller, and the attachment facade is
+/// over the double's attachment port.
 pub fn double_dispatch_ports<'h>(
     double: &lash_restate_test::RestateTestBackend,
     handler: &'h lash_restate_test::OpenHandler,
-) -> DoubleDispatchPorts<'h> {
-    DoubleDispatchPorts {
-        controller: handler.scoped(),
+) -> DispatchPorts<'h> {
+    DispatchPorts {
+        controller: crate::runtime::RuntimeEffectControllerHandle::borrowed(handler.scoped()),
         attachment_store: std::sync::Arc::new(crate::SessionAttachmentStore::ephemeral(
             double.lash_backend().attachment_store(),
+        )),
+    }
+}
+
+/// Dispatch ports for a fixture that brings its own controller (a replaying
+/// or recording one): `controller` serves the attempts under
+/// [`dispatch_scope`], and the attachment facade is over a storage-only
+/// backend. No engine runs.
+pub async fn controller_dispatch_ports(
+    controller: std::sync::Arc<dyn crate::RuntimeEffectController>,
+) -> DispatchPorts<'static> {
+    DispatchPorts {
+        controller: crate::runtime::RuntimeEffectControllerHandle::shared(controller),
+        attachment_store: std::sync::Arc::new(crate::SessionAttachmentStore::ephemeral(
+            memory_store_backend().await.attachment_store(),
         )),
     }
 }

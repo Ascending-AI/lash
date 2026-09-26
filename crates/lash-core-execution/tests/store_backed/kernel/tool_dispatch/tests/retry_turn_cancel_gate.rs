@@ -90,14 +90,17 @@ async fn retry_sleep_shape(
     let attempts = Arc::new(AtomicUsize::new(0));
     let observed_attempts = Arc::new(std::sync::Mutex::new(Vec::new()));
     let recorder = Arc::new(RetrySleepShapeRecorder::default());
-    let mut context = exact_dispatch_context(Arc::new(RetryProbeTools {
-        definition: retry_tool("retry_probe", ToolRetryPolicy::safe(2, 25, 25)),
-        attempts: Arc::clone(&attempts),
-        successes_after: 2,
-        cancel_on_first: false,
-        observed_attempts,
-        retry_after_ms: Some(25),
-    }))
+    let mut context = exact_dispatch_context(
+        crate::support::controller_dispatch_ports(recorder.clone()).await,
+        Arc::new(RetryProbeTools {
+            definition: retry_tool("retry_probe", ToolRetryPolicy::safe(2, 25, 25)),
+            attempts: Arc::clone(&attempts),
+            successes_after: 2,
+            cancel_on_first: false,
+            observed_attempts,
+            retry_after_ms: Some(25),
+        }),
+    )
     .await;
     context.session_id = crate::SessionId::from(ambient_session_id);
     context.effect_controller = RuntimeEffectControllerHandle::borrowed(

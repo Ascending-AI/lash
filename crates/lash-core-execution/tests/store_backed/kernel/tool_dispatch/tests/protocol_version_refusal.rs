@@ -1,8 +1,11 @@
 use super::*;
 
+const SEED: u64 = 0x5_2d26;
+
 #[tokio::test]
 async fn empty_batch_dispatches_predecessor_and_unknown_versions_to_a_typed_protocol_refusal() {
-    let context = dispatch_context().await;
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
+    let context = dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await;
     for recorded in [0, 1, 2, 4] {
         let outcomes = execute_final_tool_intents(
             &context,
@@ -22,4 +25,6 @@ async fn empty_batch_dispatches_predecessor_and_unknown_versions_to_a_typed_prot
             }]
         );
     }
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }

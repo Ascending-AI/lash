@@ -1,13 +1,17 @@
 use super::*;
 
+const SEED: u64 = 0x5_2d29;
+
 /// A declared park announcement is the runtime's to append, so a failed append
 /// has to fail the call. Parking anyway would leave a durable wait whose
 /// announcement never happened — exactly the split the declaration exists to
 /// prevent.
 #[tokio::test]
 async fn failed_park_announcement_fails_the_call_instead_of_parking() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let attempts = Arc::new(AtomicUsize::new(0));
     let context = pending_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
         PendingProbeMode::AnnouncingWithoutProcess,
         Arc::clone(&attempts),
         None,
@@ -38,6 +42,8 @@ async fn failed_park_announcement_fails_the_call_instead_of_parking() {
         "the failure must say the declared announcement could not be appended: {}",
         failure.message
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 pub(super) fn pending_prepared_call() -> crate::PreparedToolCall {

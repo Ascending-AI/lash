@@ -1,8 +1,12 @@
 use super::*;
 
+const SEED: u64 = 0x5_2d25;
+
 #[tokio::test]
 async fn resumed_orchestrating_dispatch_hidden_from_catalog_returns_tool_unavailable() {
-    let mut context = dispatch_context().await;
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
+    let mut context =
+        dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await;
     context.tool_registry = Some(context.plugins.tool_registry());
     let manifest = crate::tool_dispatch::resolve_callable_manifest(&context, "batch")
         .expect("batch starts admitted before the resumed dispatch");
@@ -48,10 +52,13 @@ async fn resumed_orchestrating_dispatch_hidden_from_catalog_returns_tool_unavail
     assert_eq!(failure.code, "tool_unavailable");
     assert_eq!(failure.message, "Tool is unavailable in this session");
     assert_eq!(failure.source, crate::ToolFailureSource::Runtime);
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn batch_overflow_rows_come_from_the_parsed_specs_in_input_order() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     // Over the 25-call cap the orchestrating lane still renders a failure row
     // per call, named from the parsed spec rather than a raw-argument re-read.
     let mut tool_calls = vec![
@@ -63,7 +70,7 @@ async fn batch_overflow_rows_come_from_the_parsed_specs_in_input_order() {
     tool_calls.push(json!({"tool": "ghost", "parameters": {}}));
 
     let outcome = dispatch_orchestrating_tool_call(
-        &dispatch_context().await,
+        &dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await,
         "batch",
         json!({ "tool_calls": tool_calls }),
     )
@@ -116,4 +123,5 @@ async fn batch_overflow_rows_come_from_the_parsed_specs_in_input_order() {
             })
         );
     }
+    handler.close().await.expect("close the dispatch handler");
 }

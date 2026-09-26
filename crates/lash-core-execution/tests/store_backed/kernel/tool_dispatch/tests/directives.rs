@@ -1,6 +1,8 @@
 use super::*;
 use crate::plugin::PluginFactory;
 
+const SEED: u64 = 0x5_2d22;
+
 #[derive(Default)]
 struct RecordingSessionGraph {
     events: std::sync::Mutex<Vec<lash_trace::TraceEvent>>,
@@ -139,20 +141,28 @@ async fn dispatch_with_terminal_plugins(
         .into_iter()
         .map(|(id, directive)| fixed_before_tool_factory(id, directive))
         .collect();
-    dispatch_tool_call(
-        &exact_dispatch_context_with_plugins(before_tool_plugin_stack(factories)).await,
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
+    let output = dispatch_tool_call(
+        &exact_dispatch_context_with_plugins(
+            crate::support::double_dispatch_ports(&double, &handler),
+            before_tool_plugin_stack(factories),
+        )
+        .await,
         "beta".to_string(),
         json!({ "value": "original" }),
     )
     .await
     .record
-    .output
+    .output;
+    handler.close().await.expect("close the dispatch handler");
+    output
 }
 
 #[tokio::test]
 async fn deny_cannot_be_overridden_by_later_success_on_the_raw_fold() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let outcome = crate::tool_dispatch::apply_before_tool_directives(
-        &dispatch_context().await,
+        &dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await,
         json!({ "value": "original" }),
         vec![
             crate::plugin::PluginOwned {
@@ -176,6 +186,7 @@ async fn deny_cannot_be_overridden_by_later_success_on_the_raw_fold() {
         result.value_for_projection()["code"],
         json!("policy_denied")
     );
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
@@ -263,13 +274,18 @@ async fn equal_terminal_strength_uses_plugin_id_not_registration_order() {
 
 #[tokio::test]
 async fn terminal_conflict_is_an_observable_composition_event() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let plugins = before_tool_plugin_stack(vec![
         fixed_before_tool_factory("deny", policy_denial()),
         fixed_before_tool_factory("allow", successful_short_circuit()),
     ]);
     let (event_tx, mut events) = mpsc::unbounded_channel();
     let session_graph = Arc::new(RecordingSessionGraph::default());
-    let mut context = exact_dispatch_context_with_plugins(plugins).await;
+    let mut context = exact_dispatch_context_with_plugins(
+        crate::support::double_dispatch_ports(&double, &handler),
+        plugins,
+    )
+    .await;
     context.observer = crate::testing::ChannelObservationSink::new(Some(event_tx), None);
     context.session_graph = session_graph.clone();
 
@@ -291,22 +307,27 @@ async fn terminal_conflict_is_an_observable_composition_event() {
     assert_eq!(payload["winner_directive"], json!("denied_short_circuit"));
     assert_eq!(payload["ignored_plugin_id"], json!("allow"));
 
-    let trace_events = session_graph.events.lock_recover();
-    let [lash_trace::TraceEvent::Custom { name, payload }] = trace_events.as_slice() else {
-        panic!("expected one durable composition trace event: {trace_events:?}");
-    };
-    assert_eq!(name, "plugin.allow.before_tool_call.directive_conflict");
-    assert_eq!(payload["winner_plugin_id"], json!("deny"));
-    assert_eq!(payload["winner_directive"], json!("denied_short_circuit"));
-    assert_eq!(payload["ignored_plugin_id"], json!("allow"));
-    assert_eq!(
-        payload["ignored_directive"],
-        json!("successful_short_circuit")
-    );
+    {
+        let trace_events = session_graph.events.lock_recover();
+        let [lash_trace::TraceEvent::Custom { name, payload }] = trace_events.as_slice() else {
+            panic!("expected one durable composition trace event: {trace_events:?}");
+        };
+        assert_eq!(name, "plugin.allow.before_tool_call.directive_conflict");
+        assert_eq!(payload["winner_plugin_id"], json!("deny"));
+        assert_eq!(payload["winner_directive"], json!("denied_short_circuit"));
+        assert_eq!(payload["ignored_plugin_id"], json!("allow"));
+        assert_eq!(
+            payload["ignored_directive"],
+            json!("successful_short_circuit")
+        );
+    }
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn reinspection_does_not_emit_a_self_conflict() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let plugins = before_tool_plugin_stack(vec![
         fixed_before_tool_factory("policy", policy_denial()),
         fixed_before_tool_factory(
@@ -319,7 +340,11 @@ async fn reinspection_does_not_emit_a_self_conflict() {
     ]);
     let (event_tx, mut events) = mpsc::unbounded_channel();
     let session_graph = Arc::new(RecordingSessionGraph::default());
-    let mut context = exact_dispatch_context_with_plugins(plugins).await;
+    let mut context = exact_dispatch_context_with_plugins(
+        crate::support::double_dispatch_ports(&double, &handler),
+        plugins,
+    )
+    .await;
     context.observer = crate::testing::ChannelObservationSink::new(Some(event_tx), None);
     context.session_graph = session_graph.clone();
 
@@ -338,10 +363,13 @@ async fn reinspection_does_not_emit_a_self_conflict() {
         session_graph.events.lock_recover().is_empty(),
         "self-conflict trace event"
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn replacement_is_seen_by_remaining_plugin_hooks() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let inspected = Arc::new(std::sync::Mutex::new(Vec::new()));
     let inspector_observations = Arc::clone(&inspected);
     let replacer = fixed_before_tool_factory(
@@ -361,9 +389,11 @@ async fn replacement_is_seen_by_remaining_plugin_hooks() {
             })
         }),
     );
-    let context =
-        exact_dispatch_context_with_plugins(before_tool_plugin_stack(vec![replacer, inspector]))
-            .await;
+    let context = exact_dispatch_context_with_plugins(
+        crate::support::double_dispatch_ports(&double, &handler),
+        before_tool_plugin_stack(vec![replacer, inspector]),
+    )
+    .await;
 
     let output = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
         .await
@@ -375,10 +405,13 @@ async fn replacement_is_seen_by_remaining_plugin_hooks() {
         &[json!({ "value": "replaced" })]
     );
     assert_eq!(output.value_for_projection(), json!("replaced"));
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn replacement_is_reinspected_by_earlier_policy_in_either_registration_order() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     for policy_first in [true, false] {
         let policy = before_tool_factory(
             "policy",
@@ -408,8 +441,11 @@ async fn replacement_is_reinspected_by_earlier_policy_in_either_registration_ord
             "allow",
             successful_short_circuit(),
         ));
-        let context =
-            exact_dispatch_context_with_plugins(before_tool_plugin_stack(factories)).await;
+        let context = exact_dispatch_context_with_plugins(
+            crate::support::double_dispatch_ports(&double, &handler),
+            before_tool_plugin_stack(factories),
+        )
+        .await;
 
         let output =
             dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
@@ -424,6 +460,7 @@ async fn replacement_is_reinspected_by_earlier_policy_in_either_registration_ord
             "policy_first={policy_first}"
         );
     }
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
@@ -478,6 +515,7 @@ async fn replacement_during_bounded_reinspection_is_a_typed_composition_error() 
 
 #[tokio::test]
 async fn clean_bounded_reinspection_runs_on_replaced_arguments() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
     let earlier_observed = Arc::clone(&observed);
     let earlier = before_tool_factory(
@@ -497,8 +535,11 @@ async fn clean_bounded_reinspection_runs_on_replaced_arguments() {
         }
         .into(),
     );
-    let context =
-        exact_dispatch_context_with_plugins(before_tool_plugin_stack(vec![earlier, later])).await;
+    let context = exact_dispatch_context_with_plugins(
+        crate::support::double_dispatch_ports(&double, &handler),
+        before_tool_plugin_stack(vec![earlier, later]),
+    )
+    .await;
 
     let output = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
         .await
@@ -513,10 +554,13 @@ async fn clean_bounded_reinspection_runs_on_replaced_arguments() {
         ]
     );
     assert_eq!(output.value_for_projection(), json!("replaced"));
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn reinspection_rehonors_terminals_without_reapplying_side_effects() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let invocations = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let auditor_invocations = Arc::clone(&invocations);
     let auditor = before_tool_factory(
@@ -549,7 +593,11 @@ async fn reinspection_rehonors_terminals_without_reapplying_side_effects() {
     );
     let plugins = before_tool_plugin_stack(vec![auditor, replacer]);
     let (event_tx, mut events) = mpsc::unbounded_channel();
-    let mut context = exact_dispatch_context_with_plugins(plugins).await;
+    let mut context = exact_dispatch_context_with_plugins(
+        crate::support::double_dispatch_ports(&double, &handler),
+        plugins,
+    )
+    .await;
     context.observer = crate::testing::ChannelObservationSink::new(Some(event_tx), None);
 
     let output = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
@@ -577,6 +625,8 @@ async fn reinspection_rehonors_terminals_without_reapplying_side_effects() {
         events.try_recv().is_err(),
         "reinspection duplicated audit event"
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
@@ -628,14 +678,21 @@ async fn dispatch_with_after_terminal_plugins(
         .into_iter()
         .map(|(id, directive)| fixed_after_tool_factory(id, vec![directive]))
         .collect();
-    dispatch_tool_call(
-        &exact_dispatch_context_with_plugins(after_tool_plugin_stack(factories)).await,
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
+    let output = dispatch_tool_call(
+        &exact_dispatch_context_with_plugins(
+            crate::support::double_dispatch_ports(&double, &handler),
+            after_tool_plugin_stack(factories),
+        )
+        .await,
         "beta".to_string(),
         json!({ "value": "original" }),
     )
     .await
     .record
-    .output
+    .output;
+    handler.close().await.expect("close the dispatch handler");
+    output
 }
 
 fn successful_replacement(value: &str) -> crate::AfterToolCallPluginDirective {
@@ -725,6 +782,7 @@ async fn after_tool_three_plugins_keep_the_most_restrictive_terminal() {
 
 #[tokio::test]
 async fn after_tool_equal_strength_result_replacement_is_first_wins() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let first = after_tool_factory(
         "first",
         Arc::new(|ctx| {
@@ -739,7 +797,11 @@ async fn after_tool_equal_strength_result_replacement_is_first_wins() {
     );
     let second = fixed_after_tool_factory("second", vec![successful_replacement("second")]);
     let plugins = after_tool_plugin_stack(vec![first, second]);
-    let context = exact_dispatch_context_with_plugins(plugins).await;
+    let context = exact_dispatch_context_with_plugins(
+        crate::support::double_dispatch_ports(&double, &handler),
+        plugins,
+    )
+    .await;
 
     let output = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
         .await
@@ -747,10 +809,13 @@ async fn after_tool_equal_strength_result_replacement_is_first_wins() {
         .output;
 
     assert_eq!(output.value_for_projection(), json!("first"));
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn after_tool_replacement_is_reinspected_by_policy_in_either_registration_order() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     for policy_first in [true, false] {
         let policy = after_tool_factory(
             "policy",
@@ -776,7 +841,11 @@ async fn after_tool_replacement_is_reinspected_by_policy_in_either_registration_
         } else {
             vec![injector, policy]
         };
-        let context = exact_dispatch_context_with_plugins(after_tool_plugin_stack(factories)).await;
+        let context = exact_dispatch_context_with_plugins(
+            crate::support::double_dispatch_ports(&double, &handler),
+            after_tool_plugin_stack(factories),
+        )
+        .await;
 
         let output =
             dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
@@ -791,10 +860,12 @@ async fn after_tool_replacement_is_reinspected_by_policy_in_either_registration_
             "policy_first={policy_first}"
         );
     }
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn after_tool_clean_bounded_reinspection_keeps_the_replaced_result() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
     let earlier_observed = Arc::clone(&observed);
     let earlier = after_tool_factory(
@@ -810,8 +881,11 @@ async fn after_tool_clean_bounded_reinspection_keeps_the_replaced_result() {
         }),
     );
     let later = fixed_after_tool_factory("later", vec![successful_replacement("replaced")]);
-    let context =
-        exact_dispatch_context_with_plugins(after_tool_plugin_stack(vec![earlier, later])).await;
+    let context = exact_dispatch_context_with_plugins(
+        crate::support::double_dispatch_ports(&double, &handler),
+        after_tool_plugin_stack(vec![earlier, later]),
+    )
+    .await;
 
     let output = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
         .await
@@ -823,6 +897,8 @@ async fn after_tool_clean_bounded_reinspection_keeps_the_replaced_result() {
         &[json!("original"), json!("replaced")]
     );
     assert_eq!(output.value_for_projection(), json!("replaced"));
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
@@ -869,6 +945,7 @@ async fn after_tool_replacement_during_reinspection_is_a_typed_composition_error
 
 #[tokio::test]
 async fn after_tool_reinspection_does_not_reapply_side_effects() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let invocations = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let auditor_invocations = Arc::clone(&invocations);
     let auditor = after_tool_factory(
@@ -891,7 +968,11 @@ async fn after_tool_reinspection_does_not_reapply_side_effects() {
     let replacer = fixed_after_tool_factory("replacer", vec![successful_replacement("replaced")]);
     let plugins = after_tool_plugin_stack(vec![auditor, replacer]);
     let (event_tx, mut events) = mpsc::unbounded_channel();
-    let mut context = exact_dispatch_context_with_plugins(plugins).await;
+    let mut context = exact_dispatch_context_with_plugins(
+        crate::support::double_dispatch_ports(&double, &handler),
+        plugins,
+    )
+    .await;
     context.observer = crate::testing::ChannelObservationSink::new(Some(event_tx), None);
 
     let output = dispatch_tool_call(&context, "beta".to_string(), json!({ "value": "original" }))
@@ -915,17 +996,24 @@ async fn after_tool_reinspection_does_not_reapply_side_effects() {
         events.try_recv().is_err(),
         "reinspection duplicated audit event"
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn after_tool_reinspection_does_not_emit_a_self_conflict() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let plugins = after_tool_plugin_stack(vec![
         fixed_after_tool_factory("policy", vec![policy_denial()]),
         fixed_after_tool_factory("replacer", vec![successful_replacement("replaced")]),
     ]);
     let (event_tx, mut events) = mpsc::unbounded_channel();
     let session_graph = Arc::new(RecordingSessionGraph::default());
-    let mut context = exact_dispatch_context_with_plugins(plugins).await;
+    let mut context = exact_dispatch_context_with_plugins(
+        crate::support::double_dispatch_ports(&double, &handler),
+        plugins,
+    )
+    .await;
     context.observer = crate::testing::ChannelObservationSink::new(Some(event_tx), None);
     context.session_graph = session_graph.clone();
 
@@ -946,6 +1034,8 @@ async fn after_tool_reinspection_does_not_emit_a_self_conflict() {
         1,
         "self-conflict trace event"
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
@@ -982,6 +1072,7 @@ async fn after_tool_two_unconditional_replacers_fail_closed() {
 
 #[tokio::test]
 async fn after_tool_same_plugin_terminals_tighten_without_self_conflict() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let plugins = after_tool_plugin_stack(vec![fixed_after_tool_factory(
         "policy",
         vec![
@@ -992,7 +1083,11 @@ async fn after_tool_same_plugin_terminals_tighten_without_self_conflict() {
     )]);
     let (event_tx, mut events) = mpsc::unbounded_channel();
     let session_graph = Arc::new(RecordingSessionGraph::default());
-    let mut context = exact_dispatch_context_with_plugins(plugins).await;
+    let mut context = exact_dispatch_context_with_plugins(
+        crate::support::double_dispatch_ports(&double, &handler),
+        plugins,
+    )
+    .await;
     context.observer = crate::testing::ChannelObservationSink::new(Some(event_tx), None);
     context.session_graph = session_graph.clone();
 
@@ -1011,17 +1106,24 @@ async fn after_tool_same_plugin_terminals_tighten_without_self_conflict() {
         session_graph.events.lock_recover().is_empty(),
         "self-conflict trace event"
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn after_tool_terminal_conflict_has_bounded_identity_evidence() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let plugins = after_tool_plugin_stack(vec![
         fixed_after_tool_factory("deny", vec![policy_denial()]),
         fixed_after_tool_factory("allow", vec![successful_replacement("allowed")]),
     ]);
     let (event_tx, mut events) = mpsc::unbounded_channel();
     let session_graph = Arc::new(RecordingSessionGraph::default());
-    let mut context = exact_dispatch_context_with_plugins(plugins).await;
+    let mut context = exact_dispatch_context_with_plugins(
+        crate::support::double_dispatch_ports(&double, &handler),
+        plugins,
+    )
+    .await;
     context.observer = crate::testing::ChannelObservationSink::new(Some(event_tx), None);
     context.session_graph = session_graph.clone();
 
@@ -1047,16 +1149,20 @@ async fn after_tool_terminal_conflict_has_bounded_identity_evidence() {
         json!("successful_short_circuit")
     );
 
-    let trace_events = session_graph.events.lock_recover();
-    let [lash_trace::TraceEvent::Custom { name, payload }] = trace_events.as_slice() else {
-        panic!("expected one durable composition trace event: {trace_events:?}");
-    };
-    assert_eq!(name, "plugin.allow.after_tool_call.directive_conflict");
-    assert_eq!(payload["winner_plugin_id"], json!("deny"));
-    assert_eq!(payload["winner_directive"], json!("denied_short_circuit"));
-    assert_eq!(payload["ignored_plugin_id"], json!("allow"));
-    assert_eq!(
-        payload["ignored_directive"],
-        json!("successful_short_circuit")
-    );
+    {
+        let trace_events = session_graph.events.lock_recover();
+        let [lash_trace::TraceEvent::Custom { name, payload }] = trace_events.as_slice() else {
+            panic!("expected one durable composition trace event: {trace_events:?}");
+        };
+        assert_eq!(name, "plugin.allow.after_tool_call.directive_conflict");
+        assert_eq!(payload["winner_plugin_id"], json!("deny"));
+        assert_eq!(payload["winner_directive"], json!("denied_short_circuit"));
+        assert_eq!(payload["ignored_plugin_id"], json!("allow"));
+        assert_eq!(
+            payload["ignored_directive"],
+            json!("successful_short_circuit")
+        );
+    }
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }

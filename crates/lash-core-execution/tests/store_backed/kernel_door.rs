@@ -126,7 +126,7 @@ impl crate::ToolProvider for EchoTool {
 
 /// A dispatch context over `ports`, the shape the dispatch fixtures build.
 fn echo_dispatch_context<'h>(
-    ports: crate::support::DoubleDispatchPorts<'h>,
+    ports: crate::support::DispatchPorts<'h>,
     executed: Arc<std::sync::atomic::AtomicUsize>,
 ) -> crate::tool_dispatch::ToolDispatchContext<'h> {
     let provider: Arc<dyn crate::ToolProvider> = Arc::new(EchoTool { executed });
@@ -152,9 +152,7 @@ fn echo_dispatch_context<'h>(
         trigger_router: None,
         process_definitions: None,
         process_engines: Default::default(),
-        effect_controller: crate::runtime::RuntimeEffectControllerHandle::borrowed(
-            ports.controller,
-        ),
+        effect_controller: ports.controller,
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
         ),
@@ -182,12 +180,7 @@ fn echo_dispatch_context<'h>(
 /// current-thread runtime, as the dispatch laws do.
 #[tokio::test]
 async fn a_tool_call_on_the_doubles_lent_dispatch_ports_runs_in_the_handler() {
-    let double =
-        crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
-    let handler = double
-        .open_handler(crate::support::dispatch_scope())
-        .await
-        .expect("open the dispatch handler");
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let executed = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let context = echo_dispatch_context(
         crate::support::double_dispatch_ports(&double, &handler),

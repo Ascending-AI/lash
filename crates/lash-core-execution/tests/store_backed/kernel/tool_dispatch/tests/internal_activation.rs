@@ -1,9 +1,16 @@
 use super::*;
 
+const SEED: u64 = 0x5_2d24;
+
 #[tokio::test]
 async fn resumed_internal_process_dispatch_hidden_from_catalog_returns_tool_unavailable() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let executed = Arc::new(AtomicUsize::new(0));
-    let mut context = internal_probe_dispatch_context(Arc::clone(&executed)).await;
+    let mut context = internal_probe_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
+        Arc::clone(&executed),
+    )
+    .await;
     let controller = Arc::new(IntentReplayController::new(None).await);
     context.effect_controller = RuntimeEffectControllerHandle::shared(controller.clone());
     let manifest = crate::tool_dispatch::resolve_internal_manifest_by_id(
@@ -58,12 +65,19 @@ async fn resumed_internal_process_dispatch_hidden_from_catalog_returns_tool_unav
         controller.frame_sightings().is_empty(),
         "no attempt frame is emitted"
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn normal_dispatch_refuses_internal_activation_by_name_and_id() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let executed = Arc::new(AtomicUsize::new(0));
-    let context = internal_probe_dispatch_context(Arc::clone(&executed)).await;
+    let context = internal_probe_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
+        Arc::clone(&executed),
+    )
+    .await;
 
     let outcome = dispatch_tool_call(
         &context,
@@ -83,12 +97,19 @@ async fn normal_dispatch_refuses_internal_activation_by_name_and_id() {
             .is_none(),
         "normal by-id admission must not resolve Internal entries"
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn frameless_internal_record_uses_manifest_name_when_prepared_call_is_renamed() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let executed = Arc::new(AtomicUsize::new(0));
-    let context = internal_probe_dispatch_context(Arc::clone(&executed)).await;
+    let context = internal_probe_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
+        Arc::clone(&executed),
+    )
+    .await;
     let prepared = crate::PreparedToolCall::from_parts(
         "internal-call",
         "tool:internal_probe",
@@ -111,4 +132,6 @@ async fn frameless_internal_record_uses_manifest_name_when_prepared_call_is_rena
     assert!(outcome.record.output.is_success());
     assert_eq!(outcome.record.tool, "internal_probe");
     assert_eq!(executed.load(Ordering::SeqCst), 1);
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
