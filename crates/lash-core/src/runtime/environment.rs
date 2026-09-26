@@ -258,7 +258,7 @@ mod tests {
 
     #[tokio::test]
     async fn builder_methods_configure_runtime_host() {
-        let backend = crate::testing::memory_backend().await;
+        let backend = crate::testing::memory_store_backend().await;
         let trace_context = TraceContext::default().for_session("session-1");
         let termination = TerminationPolicy {
             treat_missing_done_as_failure: false,
@@ -289,7 +289,7 @@ mod tests {
     /// nothing falls back to an in-memory store.
     #[tokio::test]
     async fn every_store_port_is_the_config_backends() {
-        let backend = crate::testing::memory_backend().await;
+        let backend = crate::testing::memory_store_backend().await;
         let env = RuntimeEnvironment::builder(core_over(&backend)).build();
 
         assert!(Arc::ptr_eq(
@@ -332,7 +332,7 @@ mod tests {
     /// work wiring, not a field that `with_work_ports` is free to clear.
     #[tokio::test]
     async fn rebinding_work_ports_without_a_wiring_keeps_a_registry_only_registry() {
-        let backend = crate::testing::memory_backend().await;
+        let backend = crate::testing::memory_store_backend().await;
         let registry = backend.process_registry();
         let env = registry_only_environment(&backend, &registry);
         assert!(
@@ -361,7 +361,7 @@ mod tests {
     /// does not live in `work` never reaches the runtime.
     #[tokio::test]
     async fn a_host_built_from_a_registry_only_environment_reports_that_registry() {
-        let backend = crate::testing::memory_backend().await;
+        let backend = crate::testing::memory_store_backend().await;
         let registry = backend.process_registry();
         let env = registry_only_environment(&backend, &registry);
 
@@ -383,13 +383,16 @@ mod tests {
     #[tokio::test]
     async fn the_trigger_store_stamps_from_the_backend_clock() {
         const NOW_MS: u64 = 4_200_000;
-        let clock: Arc<dyn crate::Clock> = Arc::new(crate::testing::TestClock::new(NOW_MS));
-        let backend: crate::Backend = Arc::new(
-            lash_sqlite_store::SqliteBackend::memory_with_clock(Arc::clone(&clock))
-                .await
-                .expect("open a SQLite memory backend"),
+        let double = crate::testing::kernel_double(
+            0xf6_0003,
+            lash_restate_test::ServerConfig {
+                start_time_ms: NOW_MS,
+                time: lash_restate_test::TimeMode::Manual,
+                ..Default::default()
+            },
         )
-        .into();
+        .await;
+        let backend = double.lash_backend();
 
         let env = RuntimeEnvironment::builder(core_over(&backend)).build();
         let receipt = env

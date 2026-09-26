@@ -232,7 +232,7 @@ async fn committed_factory_attachment() -> (
     Arc<dyn AttachmentStore>,
     AttachmentId,
 ) {
-    let substrate = crate::testing::memory_backend().await;
+    let substrate = crate::testing::memory_store_set().await;
     let factory = substrate.session_store_factory();
     let request = crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
@@ -388,7 +388,7 @@ struct DeleteFailingAttachmentStore {
 impl DeleteFailingAttachmentStore {
     async fn new() -> Self {
         Self {
-            inner: crate::testing::memory_backend().await.attachment_store(),
+            inner: crate::testing::memory_store_set().await.attachment_store(),
         }
     }
 }
@@ -463,7 +463,7 @@ async fn gc_all_deletes_failed_is_incomplete() {
 
 #[tokio::test]
 async fn gc_empty_backend_reports_incomplete_with_degraded_proof_and_root_diagnostic() {
-    let backend = crate::testing::memory_backend().await.attachment_store();
+    let backend = crate::testing::memory_store_set().await.attachment_store();
 
     let report = reclaim_unreferenced_attachments(
         &UnavailableRootSet,
@@ -494,7 +494,7 @@ async fn gc_empty_backend_reports_incomplete_with_degraded_proof_and_root_diagno
 
 #[tokio::test]
 async fn gc_refuses_an_empty_root_set_with_a_deletion_eligible_blob() {
-    let backend = crate::testing::memory_backend().await.attachment_store();
+    let backend = crate::testing::memory_store_set().await.attachment_store();
     let attachment = backend
         .put(vec![4, 2, 4, 6], meta())
         .await
@@ -528,7 +528,7 @@ async fn gc_refuses_an_empty_root_set_with_a_deletion_eligible_blob() {
 
 #[tokio::test]
 async fn gc_explicit_authorization_permits_an_empty_root_set_sweep() {
-    let backend = crate::testing::memory_backend().await.attachment_store();
+    let backend = crate::testing::memory_store_set().await.attachment_store();
     let attachment = backend
         .put(vec![4, 2, 4, 7], meta())
         .await
@@ -555,7 +555,7 @@ async fn gc_explicit_authorization_permits_an_empty_root_set_sweep() {
 
 #[tokio::test]
 async fn gc_empty_root_set_does_not_refuse_when_every_blob_is_fresh() {
-    let backend = crate::testing::memory_backend().await.attachment_store();
+    let backend = crate::testing::memory_store_set().await.attachment_store();
     let attachment = backend
         .put(vec![4, 2, 4, 8], meta())
         .await
@@ -582,7 +582,7 @@ async fn gc_empty_root_set_does_not_refuse_when_every_blob_is_fresh() {
 
 #[tokio::test]
 async fn gc_refuses_when_roots_are_unenumerable_and_blobs_are_only_grace_protected() {
-    let backend = crate::testing::memory_backend().await.attachment_store();
+    let backend = crate::testing::memory_store_set().await.attachment_store();
     let attachment = backend
         .put(vec![4, 2, 4, 9], meta())
         .await
@@ -623,7 +623,7 @@ async fn gc_refuses_when_roots_are_unenumerable_and_blobs_are_only_grace_protect
 #[tokio::test]
 async fn gc_non_empty_root_set_still_reclaims_an_unreferenced_blob() {
     let backend: Arc<dyn AttachmentStore> =
-        crate::testing::memory_backend().await.attachment_store();
+        crate::testing::memory_store_set().await.attachment_store();
     let manifest = Arc::new(RecordingManifest::default());
     let session = SessionAttachmentStore::new(
         Arc::clone(&backend),
@@ -671,7 +671,7 @@ async fn gc_non_empty_root_set_still_reclaims_an_unreferenced_blob() {
 #[tokio::test]
 async fn facade_get_resolves_content_addresses_across_sessions() {
     let backend: Arc<dyn AttachmentStore> =
-        crate::testing::memory_backend().await.attachment_store();
+        crate::testing::memory_store_set().await.attachment_store();
     let manifest: Arc<dyn AttachmentManifest> = Arc::new(RecordingManifest::default());
     let session_a = SessionAttachmentStore::new(backend.clone(), manifest.clone(), "session-a");
     let session_b = SessionAttachmentStore::new(backend.clone(), manifest.clone(), "session-b");
@@ -701,7 +701,7 @@ async fn facade_get_resolves_content_addresses_across_sessions() {
 #[tokio::test]
 async fn facade_delete_drops_ref_but_keeps_backend_bytes() {
     let backend: Arc<dyn AttachmentStore> =
-        crate::testing::memory_backend().await.attachment_store();
+        crate::testing::memory_store_set().await.attachment_store();
     let manifest: Arc<dyn AttachmentManifest> = Arc::new(RecordingManifest::default());
     let session = SessionAttachmentStore::new(backend.clone(), manifest, "session-1");
 
@@ -730,7 +730,7 @@ async fn facade_delete_drops_ref_but_keeps_backend_bytes() {
 #[tokio::test]
 async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
     let backend: Arc<dyn AttachmentStore> =
-        crate::testing::memory_backend().await.attachment_store();
+        crate::testing::memory_store_set().await.attachment_store();
     let manifest_a = Arc::new(RecordingManifest::default());
     let manifest_b = Arc::new(RecordingManifest::default());
     let session_a = SessionAttachmentStore::new(
@@ -810,7 +810,7 @@ async fn shared_bytes_survive_until_all_refs_released_then_gc_collects() {
 #[tokio::test]
 async fn gc_spares_fresh_in_flight_intents_as_refs() {
     let backend: Arc<dyn AttachmentStore> =
-        crate::testing::memory_backend().await.attachment_store();
+        crate::testing::memory_store_set().await.attachment_store();
     let manifest = Arc::new(RecordingManifest::default());
     let session = SessionAttachmentStore::new(
         backend.clone(),
@@ -847,7 +847,7 @@ async fn gc_spares_fresh_in_flight_intents_as_refs() {
 #[tokio::test]
 async fn gc_collects_aged_uncommitted_intent_orphan() {
     let backend: Arc<dyn AttachmentStore> =
-        crate::testing::memory_backend().await.attachment_store();
+        crate::testing::memory_store_set().await.attachment_store();
     let manifest = Arc::new(RecordingManifest::default());
     let session = SessionAttachmentStore::new(
         backend.clone(),
@@ -1198,7 +1198,7 @@ struct FencedFixture {
 }
 
 async fn fenced_fixture(session_id: &SessionId) -> FencedFixture {
-    let substrate = crate::testing::memory_backend().await;
+    let substrate = crate::testing::memory_store_set().await;
     let factory = substrate.session_store_factory();
     let request = crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
@@ -1566,7 +1566,7 @@ async fn a_stuck_intent_retains_the_blob() {
 async fn session_facade_records_bound_owner_on_put() {
     let manifest = Arc::new(RecordingManifest::default());
     let store = Arc::new(SessionAttachmentStore::new(
-        crate::testing::memory_backend().await.attachment_store(),
+        crate::testing::memory_store_set().await.attachment_store(),
         manifest.clone(),
         "session-1",
     ));
@@ -1599,7 +1599,7 @@ async fn session_facade_records_bound_owner_on_put() {
 async fn nested_owner_binding_restores_the_previous_owner() {
     let manifest = Arc::new(RecordingManifest::default());
     let store = Arc::new(SessionAttachmentStore::new(
-        crate::testing::memory_backend().await.attachment_store(),
+        crate::testing::memory_store_set().await.attachment_store(),
         manifest.clone(),
         "session-1",
     ));
@@ -1643,11 +1643,9 @@ async fn nested_owner_binding_restores_the_previous_owner() {
 
 #[tokio::test]
 async fn ephemeral_facade_passes_reads_through_without_a_guard() {
-    let backend = lash_sqlite_store::SqliteBackend::memory()
-        .await
-        .expect("memory backend");
-    let store =
-        SessionAttachmentStore::ephemeral(crate::Backend::from(backend.clone()).attachment_store());
+    let store = SessionAttachmentStore::ephemeral(
+        crate::testing::memory_store_set().await.attachment_store(),
+    );
     let reference = store.put(vec![1, 2, 3], meta()).await.expect("put");
     assert_eq!(
         store.get(&reference.id).await.expect("get").bytes,
@@ -2086,7 +2084,7 @@ fn a_manifest_write_leaves_the_caller_runtime_running() {
         // would leave the worker free and prove nothing.
         let worker = crate::task::spawn(async move {
             let session = SessionAttachmentStore::new(
-                crate::testing::memory_backend().await.attachment_store(),
+                crate::testing::memory_store_set().await.attachment_store(),
                 Arc::new(SlowManifest {
                     inner: NoopAttachmentManifest,
                     delay: std::time::Duration::from_millis(300),

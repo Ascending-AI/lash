@@ -881,7 +881,7 @@ mod tests {
         let runtime = Box::pin(
             LashRuntime::builder(
                 crate::RuntimeHostConfig::new(
-                    crate::testing::memory_backend().await,
+                    crate::testing::memory_store_backend().await,
                     crate::CommitBudget::bounded(1024 * 1024, 512),
                     crate::QueuedWorkBatchingConfig::new(1),
                 ),
@@ -940,7 +940,7 @@ mod tests {
         let runtime = Box::pin(
             LashRuntime::builder(
                 crate::RuntimeHostConfig::new(
-                    crate::testing::memory_backend().await,
+                    crate::testing::memory_store_backend().await,
                     crate::CommitBudget::bounded(1024 * 1024, 512),
                     crate::QueuedWorkBatchingConfig::new(1),
                 ),
@@ -1000,7 +1000,7 @@ mod tests {
         let runtime = Box::pin(
             LashRuntime::builder(
                 crate::RuntimeHostConfig::new(
-                    crate::testing::memory_backend().await,
+                    crate::testing::memory_store_backend().await,
                     crate::CommitBudget::bounded(1024 * 1024, 512),
                     crate::QueuedWorkBatchingConfig::new(1),
                 ),
@@ -1039,7 +1039,7 @@ mod tests {
         let runtime = Box::pin(
             LashRuntime::builder(
                 crate::RuntimeHostConfig::new(
-                    crate::testing::memory_backend().await,
+                    crate::testing::memory_store_backend().await,
                     crate::CommitBudget::bounded(1024 * 1024, 512),
                     crate::QueuedWorkBatchingConfig::new(1),
                 ),
@@ -1089,7 +1089,7 @@ mod tests {
         let runtime = Box::pin(
             LashRuntime::builder(
                 crate::RuntimeHostConfig::new(
-                    crate::testing::memory_backend().await,
+                    crate::testing::memory_store_backend().await,
                     crate::CommitBudget::bounded(1024 * 1024, 512),
                     crate::QueuedWorkBatchingConfig::new(1),
                 ),
@@ -1144,7 +1144,7 @@ mod tests {
         let runtime = Box::pin(
             LashRuntime::builder(
                 crate::RuntimeHostConfig::new(
-                    crate::testing::memory_backend().await,
+                    crate::testing::memory_store_backend().await,
                     crate::CommitBudget::bounded(1024 * 1024, 512),
                     crate::QueuedWorkBatchingConfig::new(1),
                 ),

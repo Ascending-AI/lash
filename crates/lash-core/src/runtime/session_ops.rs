@@ -948,7 +948,7 @@ mod plugin_state_boundary_tests {
     #[tokio::test]
     async fn plugin_event_boundary_itself_contains_the_accepted_state_write() {
         let collector = CheckpointWriteCollector::default();
-        let backend = crate::testing::memory_backend().await;
+        let backend = crate::testing::memory_store_backend().await;
         let factory =
             ObservedSessionStoreFactory::new(backend.session_store_factory(), collector.clone());
         let policy = crate::SessionPolicy {

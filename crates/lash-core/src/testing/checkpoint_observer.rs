@@ -704,7 +704,7 @@ mod tests {
 
         let collector = CheckpointWriteCollector::default();
         let factory = ObservedSessionStoreFactory::new(
-            crate::testing::memory_backend()
+            crate::testing::memory_store_set()
                 .await
                 .session_store_factory(),
             collector.clone(),

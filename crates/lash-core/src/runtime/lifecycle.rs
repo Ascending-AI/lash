@@ -815,6 +815,7 @@ mod tests {
     use super::{bind_state_to_store, initial_park_operation, initial_park_preview};
     use crate::SessionError;
     use crate::SessionId;
+    use crate::SessionStoreFactory;
 
     fn user_message(id: &str, content: &str) -> crate::Message {
         crate::Message {
@@ -917,7 +918,7 @@ mod tests {
             relation: crate::SessionRelation::Root,
             policy: policy.clone(),
         };
-        let backend = crate::testing::memory_backend().await;
+        let backend = crate::testing::memory_store_set().await;
         let factory = backend.session_store_factory();
         let store = factory
             .create_store(&request)
@@ -964,7 +965,7 @@ mod tests {
             relation: crate::SessionRelation::Root,
             policy: policy.clone(),
         };
-        let backend = crate::testing::memory_backend().await;
+        let backend = crate::testing::memory_store_backend().await;
         let factory = backend.session_store_factory();
         let store = factory
             .create_store(&request)
@@ -1030,7 +1031,7 @@ mod tests {
 
         let session_id = "transient-park-commit-failure";
         let policy = standard_test_policy();
-        let backend = crate::testing::memory_backend().await;
+        let backend = crate::testing::memory_store_backend().await;
         let store = Arc::new(crate::testing::runtime_helpers::RecordingStore::over(
             backend
                 .session_store_factory()
