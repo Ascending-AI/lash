@@ -1,5 +1,7 @@
 use super::*;
 
+const SEED: u64 = 0x5_2d2b;
+
 const FIRST_BYTES: &[u8] = b"authorized attachment";
 const DENIED_BYTES: &[u8] = b"denied attachment";
 
@@ -133,10 +135,11 @@ impl crate::AttachmentSourcePolicy for DenySecondInlinePolicy {
     }
 }
 
-async fn durable_attachment_context(
+async fn durable_attachment_context<'h>(
+    ports: crate::support::DispatchPorts<'h>,
     plugins: Arc<PluginSession>,
 ) -> (
-    ToolDispatchContext<'static>,
+    ToolDispatchContext<'h>,
     Arc<dyn crate::RuntimePersistence>,
     Arc<dyn crate::AttachmentStore>,
 ) {
@@ -160,7 +163,7 @@ async fn durable_attachment_context(
         ))),
         request.session_id,
     ));
-    let mut context = exact_dispatch_context_with_plugins(plugins).await;
+    let mut context = exact_dispatch_context_with_plugins(ports, plugins).await;
     context.attachment_store = attachment_store;
     (context, persistence, backend)
 }
@@ -229,6 +232,7 @@ fn assert_single_stored_attachment(output: &crate::ToolCallOutput) {
 
 #[tokio::test]
 async fn denied_second_source_records_no_manifest_intent_for_the_first() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let definition = named_beta_tool("atomic_attachment_probe");
     let provider: Arc<dyn ToolProvider> = Arc::new(AttachmentProbeTools {
         definition: definition.clone(),
@@ -237,8 +241,11 @@ async fn denied_second_source_records_no_manifest_intent_for_the_first() {
             inline_attachment(DENIED_BYTES),
         ],
     });
-    let (mut context, persistence, backend) =
-        durable_attachment_context(test_plugins(provider)).await;
+    let (mut context, persistence, backend) = durable_attachment_context(
+        crate::support::double_dispatch_ports(&double, &handler),
+        test_plugins(provider),
+    )
+    .await;
     let authorized = Arc::new(std::sync::Mutex::new(Vec::new()));
     context.attachment_source_policy = Arc::new(DenySecondInlinePolicy {
         authorized: Arc::clone(&authorized),
@@ -283,10 +290,13 @@ async fn denied_second_source_records_no_manifest_intent_for_the_first() {
         backend.list().await.unwrap().is_empty(),
         "authorization rejection must leave no physical blob"
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn before_tool_attachment_replacement_is_normalized_before_leaf_recording() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let definition = named_beta_tool("before_hook_attachment_probe");
     let provider: Arc<dyn ToolProvider> = Arc::new(AttachmentProbeTools {
         definition: definition.clone(),
@@ -300,7 +310,11 @@ async fn before_tool_attachment_replacement_is_normalized_before_leaf_recording(
     ))])
     .build_session("root")
     .expect("plugin session");
-    let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
+    let (mut context, persistence, backend) = durable_attachment_context(
+        crate::support::double_dispatch_ports(&double, &handler),
+        plugins,
+    )
+    .await;
     let authorized = deny_probe_attachment(&mut context);
     assert!(
         persistence
@@ -320,10 +334,13 @@ async fn before_tool_attachment_replacement_is_normalized_before_leaf_recording(
 
     assert_policy_denial_left_no_attachment_state(&outcome, &persistence, &backend, &authorized)
         .await;
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn after_tool_attachment_replacement_is_normalized_before_leaf_recording() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let definition = named_beta_tool("after_hook_leaf_attachment_probe");
     let provider: Arc<dyn ToolProvider> = Arc::new(AttachmentProbeTools {
         definition: definition.clone(),
@@ -337,7 +354,11 @@ async fn after_tool_attachment_replacement_is_normalized_before_leaf_recording()
     ))])
     .build_session("root")
     .expect("plugin session");
-    let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
+    let (mut context, persistence, backend) = durable_attachment_context(
+        crate::support::double_dispatch_ports(&double, &handler),
+        plugins,
+    )
+    .await;
     let authorized = deny_probe_attachment(&mut context);
     assert!(
         persistence
@@ -357,10 +378,13 @@ async fn after_tool_attachment_replacement_is_normalized_before_leaf_recording()
 
     assert_policy_denial_left_no_attachment_state(&outcome, &persistence, &backend, &authorized)
         .await;
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn after_tool_attachment_replacement_is_normalized_before_orchestrating_recording() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let definition = named_beta_tool("after_hook_orchestrating_attachment_probe");
     let orchestrator =
         crate::facade_support::OrchestratingToolDef::new(Arc::new(AttachmentProbeOrchestrator {
@@ -375,7 +399,11 @@ async fn after_tool_attachment_replacement_is_normalized_before_orchestrating_re
     ))])
     .build_session("root")
     .expect("plugin session");
-    let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
+    let (mut context, persistence, backend) = durable_attachment_context(
+        crate::support::double_dispatch_ports(&double, &handler),
+        plugins,
+    )
+    .await;
     context.tool_registry = Some(context.plugins.tool_registry());
     let authorized = deny_probe_attachment(&mut context);
     assert!(
@@ -393,10 +421,13 @@ async fn after_tool_attachment_replacement_is_normalized_before_orchestrating_re
 
     assert_policy_denial_left_no_attachment_state(&outcome, &persistence, &backend, &authorized)
         .await;
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn after_tool_attachment_replacement_is_normalized_before_internal_recording() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let definition = named_beta_tool("after_hook_internal_attachment_probe")
         .with_activation(crate::ToolActivation::Internal);
     let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
@@ -412,7 +443,11 @@ async fn after_tool_attachment_replacement_is_normalized_before_internal_recordi
     ))])
     .build_session("root")
     .expect("plugin session");
-    let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
+    let (mut context, persistence, backend) = durable_attachment_context(
+        crate::support::double_dispatch_ports(&double, &handler),
+        plugins,
+    )
+    .await;
     context.tool_registry = Some(context.plugins.tool_registry());
     let authorized = deny_probe_attachment(&mut context);
     assert!(
@@ -432,17 +467,24 @@ async fn after_tool_attachment_replacement_is_normalized_before_internal_recordi
 
     assert_policy_denial_left_no_attachment_state(&outcome, &persistence, &backend, &authorized)
         .await;
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn deferred_completion_after_hook_attachment_is_normalized_before_recording() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
         "deferred_completion_attachment_probe",
         crate::PluginSpec::new().with_after_tool_call(after_attachment_hook(DENIED_BYTES)),
     ))])
     .build_session("root")
     .expect("plugin session");
-    let (mut context, persistence, backend) = durable_attachment_context(plugins).await;
+    let (mut context, persistence, backend) = durable_attachment_context(
+        crate::support::double_dispatch_ports(&double, &handler),
+        plugins,
+    )
+    .await;
     let authorized = deny_probe_attachment(&mut context);
     assert!(
         persistence
@@ -493,10 +535,13 @@ async fn deferred_completion_after_hook_attachment_is_normalized_before_recordin
     );
     assert_policy_denial_left_no_attachment_state(&outcome, &persistence, &backend, &authorized)
         .await;
+    drop(execution);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn orchestrating_tool_output_is_normalized_under_process_ownership() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let definition = named_beta_tool("orchestrating_attachment_probe");
     let orchestrator =
         crate::facade_support::OrchestratingToolDef::new(Arc::new(AttachmentProbeOrchestrator {
@@ -509,7 +554,11 @@ async fn orchestrating_tool_output_is_normalized_under_process_ownership() {
     ))])
     .build_session("root")
     .expect("plugin session");
-    let (mut context, persistence, _) = durable_attachment_context(plugins).await;
+    let (mut context, persistence, _) = durable_attachment_context(
+        crate::support::double_dispatch_ports(&double, &handler),
+        plugins,
+    )
+    .await;
     context.tool_registry = Some(context.plugins.tool_registry());
     let _owner = context
         .attachment_store
@@ -541,10 +590,13 @@ async fn orchestrating_tool_output_is_normalized_under_process_ownership() {
         &entries[0].owner,
         Some(crate::AttachmentOwner::Process { id, .. }) if id == "orchestrating-process"
     ));
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn internal_process_tool_output_is_normalized_under_process_ownership() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let definition = named_beta_tool("internal_attachment_probe")
         .with_activation(crate::ToolActivation::Internal);
     let plugins = crate::support::plugin_host(vec![Arc::new(StaticPluginFactory::new(
@@ -558,7 +610,11 @@ async fn internal_process_tool_output_is_normalized_under_process_ownership() {
     ))])
     .build_session("root")
     .expect("plugin session");
-    let (mut context, persistence, _) = durable_attachment_context(plugins).await;
+    let (mut context, persistence, _) = durable_attachment_context(
+        crate::support::double_dispatch_ports(&double, &handler),
+        plugins,
+    )
+    .await;
     context.tool_registry = Some(context.plugins.tool_registry());
     let _owner = context
         .attachment_store
@@ -592,4 +648,6 @@ async fn internal_process_tool_output_is_normalized_under_process_ownership() {
         &entries[0].owner,
         Some(crate::AttachmentOwner::Process { id, .. }) if id == "internal-process"
     ));
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }

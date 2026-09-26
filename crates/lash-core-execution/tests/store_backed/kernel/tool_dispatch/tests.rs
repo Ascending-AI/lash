@@ -28,6 +28,7 @@ mod internal_activation;
 mod orchestrating;
 mod protocol_version_refusal;
 mod retry_effect_controllers;
+mod retry_laws;
 mod retry_turn_cancel_gate;
 
 use retry_effect_controllers::{FailingSleepEffectController, SleepRecordingEffectController};
@@ -124,10 +125,12 @@ fn internal_probe_plugins(executed: Arc<AtomicUsize>) -> Arc<PluginSession> {
 
 /// Internal-lane dispatch resolves its registration through the tool registry,
 /// which the plain leaf-dispatch fixture leaves unset.
-async fn internal_probe_dispatch_context(
+async fn internal_probe_dispatch_context<'h>(
+    ports: crate::support::DispatchPorts<'h>,
     executed: Arc<AtomicUsize>,
-) -> ToolDispatchContext<'static> {
-    let mut context = exact_dispatch_context_with_plugins(internal_probe_plugins(executed)).await;
+) -> ToolDispatchContext<'h> {
+    let mut context =
+        exact_dispatch_context_with_plugins(ports, internal_probe_plugins(executed)).await;
     context.tool_registry = Some(context.plugins.tool_registry());
     context
 }
@@ -798,8 +801,10 @@ fn projection_policy_tool_definition() -> crate::ToolDefinition {
     )
 }
 
-async fn strict_mcp_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatchContext<'static> {
-    let ports = crate::support::dispatch_ports().await;
+async fn strict_mcp_dispatch_context<'h>(
+    ports: crate::support::DispatchPorts<'h>,
+    executed: Arc<AtomicUsize>,
+) -> ToolDispatchContext<'h> {
     let plugins = test_plugins(Arc::new(StrictMcpTools { executed }));
     let tools = plugins.tools();
     let tool_catalog = plugins
@@ -817,7 +822,7 @@ async fn strict_mcp_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatch
         trigger_router: None,
         process_definitions: None,
         process_engines: Default::default(),
-        effect_controller: RuntimeEffectControllerHandle::shared(Arc::clone(&ports.controller)),
+        effect_controller: ports.controller,
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
         ),
@@ -832,7 +837,7 @@ async fn strict_mcp_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatch
         observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        attachment_store: Arc::clone(&ports.attachment_store),
+        attachment_store: ports.attachment_store,
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
@@ -897,8 +902,7 @@ async fn dispatch_orchestrating_tool_call_with_prepared_name(
 
 use crate::testing::MockSessionManager;
 
-async fn dispatch_context() -> ToolDispatchContext<'static> {
-    let ports = crate::support::dispatch_ports().await;
+async fn dispatch_context<'h>(ports: crate::support::DispatchPorts<'h>) -> ToolDispatchContext<'h> {
     let plugins = test_plugins(Arc::new(MockTools));
     let tools = plugins.tools();
     let tool_catalog = plugins
@@ -916,7 +920,7 @@ async fn dispatch_context() -> ToolDispatchContext<'static> {
         trigger_router: None,
         process_definitions: None,
         process_engines: Default::default(),
-        effect_controller: RuntimeEffectControllerHandle::shared(Arc::clone(&ports.controller)),
+        effect_controller: ports.controller,
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
         ),
@@ -931,17 +935,17 @@ async fn dispatch_context() -> ToolDispatchContext<'static> {
         observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        attachment_store: Arc::clone(&ports.attachment_store),
+        attachment_store: ports.attachment_store,
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
     }
 }
 
-async fn projection_policy_dispatch_context(
+async fn projection_policy_dispatch_context<'h>(
+    ports: crate::support::DispatchPorts<'h>,
     captured: Arc<std::sync::Mutex<Option<crate::ToolArgumentProjectionPolicy>>>,
-) -> ToolDispatchContext<'static> {
-    let ports = crate::support::dispatch_ports().await;
+) -> ToolDispatchContext<'h> {
     let provider: Arc<dyn ToolProvider> = Arc::new(ProjectionPolicyTools);
     let hook_captured = Arc::clone(&captured);
     let hook: crate::plugin::BeforeToolCallHook = Arc::new(move |ctx| {
@@ -975,7 +979,7 @@ async fn projection_policy_dispatch_context(
         trigger_router: None,
         process_definitions: None,
         process_engines: Default::default(),
-        effect_controller: RuntimeEffectControllerHandle::shared(Arc::clone(&ports.controller)),
+        effect_controller: ports.controller,
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
         ),
@@ -990,7 +994,7 @@ async fn projection_policy_dispatch_context(
         observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        attachment_store: Arc::clone(&ports.attachment_store),
+        attachment_store: ports.attachment_store,
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
@@ -1122,11 +1126,11 @@ impl ToolProvider for RetryProbeTools {
     }
 }
 
-async fn pinned_contract_dispatch_context(
+async fn pinned_contract_dispatch_context<'h>(
+    ports: crate::support::DispatchPorts<'h>,
     contracts_resolved: Arc<AtomicUsize>,
     executed: Arc<AtomicUsize>,
-) -> ToolDispatchContext<'static> {
-    let ports = crate::support::dispatch_ports().await;
+) -> ToolDispatchContext<'h> {
     let provider: Arc<dyn ToolProvider> = Arc::new(CountingContractTools {
         contracts_resolved,
         executed,
@@ -1145,7 +1149,7 @@ async fn pinned_contract_dispatch_context(
         trigger_router: None,
         process_definitions: None,
         process_engines: Default::default(),
-        effect_controller: RuntimeEffectControllerHandle::shared(Arc::clone(&ports.controller)),
+        effect_controller: ports.controller,
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
         ),
@@ -1160,7 +1164,7 @@ async fn pinned_contract_dispatch_context(
         observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        attachment_store: Arc::clone(&ports.attachment_store),
+        attachment_store: ports.attachment_store,
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
@@ -1170,10 +1174,10 @@ async fn pinned_contract_dispatch_context(
 /// Build a dispatch context where the provider's tool is authority-hidden,
 /// so it is removed from the Tool Catalog (non-membership) and rejected before
 /// contract resolution.
-async fn authority_hidden_dispatch_context(
+async fn authority_hidden_dispatch_context<'h>(
+    ports: crate::support::DispatchPorts<'h>,
     provider: Arc<dyn ToolProvider>,
-) -> ToolDispatchContext<'static> {
-    let ports = crate::support::dispatch_ports().await;
+) -> ToolDispatchContext<'h> {
     let tool_access = crate::SessionToolAccess::ambient()
         .with_hidden_tools(["hidden"])
         .expect("valid hidden name");
@@ -1218,7 +1222,7 @@ async fn authority_hidden_dispatch_context(
         trigger_router: None,
         process_definitions: None,
         process_engines: Default::default(),
-        effect_controller: RuntimeEffectControllerHandle::shared(Arc::clone(&ports.controller)),
+        effect_controller: ports.controller,
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
         ),
@@ -1233,21 +1237,24 @@ async fn authority_hidden_dispatch_context(
         observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        attachment_store: Arc::clone(&ports.attachment_store),
+        attachment_store: ports.attachment_store,
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
     }
 }
 
-async fn exact_dispatch_context(provider: Arc<dyn ToolProvider>) -> ToolDispatchContext<'static> {
-    exact_dispatch_context_with_plugins(test_plugins(provider)).await
+async fn exact_dispatch_context<'h>(
+    ports: crate::support::DispatchPorts<'h>,
+    provider: Arc<dyn ToolProvider>,
+) -> ToolDispatchContext<'h> {
+    exact_dispatch_context_with_plugins(ports, test_plugins(provider)).await
 }
 
-async fn exact_dispatch_context_with_plugins(
+async fn exact_dispatch_context_with_plugins<'h>(
+    ports: crate::support::DispatchPorts<'h>,
     plugins: Arc<PluginSession>,
-) -> ToolDispatchContext<'static> {
-    let ports = crate::support::dispatch_ports().await;
+) -> ToolDispatchContext<'h> {
     let tools = plugins.tools();
     let tool_catalog = plugins
         .resolved_tool_catalog(&SessionId::from("session"))
@@ -1264,7 +1271,7 @@ async fn exact_dispatch_context_with_plugins(
         trigger_router: None,
         process_definitions: None,
         process_engines: Default::default(),
-        effect_controller: RuntimeEffectControllerHandle::shared(Arc::clone(&ports.controller)),
+        effect_controller: ports.controller,
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
         ),
@@ -1279,7 +1286,7 @@ async fn exact_dispatch_context_with_plugins(
         observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        attachment_store: Arc::clone(&ports.attachment_store),
+        attachment_store: ports.attachment_store,
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
@@ -1290,29 +1297,34 @@ fn retry_tool(name: &str, retry_policy: ToolRetryPolicy) -> crate::ToolDefinitio
     named_beta_tool(name).with_retry_policy(retry_policy)
 }
 
-async fn retry_dispatch_context(
+async fn retry_dispatch_context<'h>(
+    ports: crate::support::DispatchPorts<'h>,
     retry_policy: ToolRetryPolicy,
     attempts: Arc<AtomicUsize>,
     successes_after: usize,
     cancel_on_first: bool,
     observed_attempts: SharedAttemptObservations,
-) -> ToolDispatchContext<'static> {
-    exact_dispatch_context(Arc::new(RetryProbeTools {
-        definition: retry_tool("retry_probe", retry_policy),
-        attempts,
-        successes_after,
-        cancel_on_first,
-        observed_attempts,
-        retry_after_ms: Some(0),
-    }))
+) -> ToolDispatchContext<'h> {
+    exact_dispatch_context(
+        ports,
+        Arc::new(RetryProbeTools {
+            definition: retry_tool("retry_probe", retry_policy),
+            attempts,
+            successes_after,
+            cancel_on_first,
+            observed_attempts,
+            retry_after_ms: Some(0),
+        }),
+    )
     .await
 }
 
-async fn retry_dispatch_context_with_after_observations(
+async fn retry_dispatch_context_with_after_observations<'h>(
+    ports: crate::support::DispatchPorts<'h>,
     attempts: Arc<AtomicUsize>,
     observed_attempts: SharedAttemptObservations,
     observed_retries: Arc<std::sync::Mutex<Vec<ToolRetryStatus>>>,
-) -> ToolDispatchContext<'static> {
+) -> ToolDispatchContext<'h> {
     let provider: Arc<dyn ToolProvider> = Arc::new(RetryProbeTools {
         definition: retry_tool("retry_probe", ToolRetryPolicy::safe(2, 0, 0)),
         attempts,
@@ -1340,20 +1352,20 @@ async fn retry_dispatch_context_with_after_observations(
     ))])
     .build_session("root")
     .expect("plugin session");
-    exact_dispatch_context_with_plugins(plugins).await
+    exact_dispatch_context_with_plugins(ports, plugins).await
 }
 
 fn pending_probe_tool(retry_policy: ToolRetryPolicy) -> crate::ToolDefinition {
     named_beta_tool("pending_probe").with_retry_policy(retry_policy)
 }
 
-async fn pending_dispatch_context(
+async fn pending_dispatch_context<'h>(
+    ports: crate::support::DispatchPorts<'h>,
     mode: PendingProbeMode,
     attempts: Arc<AtomicUsize>,
     after_calls: Option<Arc<AtomicUsize>>,
     retry_policy: ToolRetryPolicy,
-) -> ToolDispatchContext<'static> {
-    let ports = crate::support::dispatch_ports().await;
+) -> ToolDispatchContext<'h> {
     let provider: Arc<dyn ToolProvider> = Arc::new(PendingProbeTools {
         definition: pending_probe_tool(retry_policy),
         attempts,
@@ -1392,7 +1404,7 @@ async fn pending_dispatch_context(
         trigger_router: None,
         process_definitions: None,
         process_engines: Default::default(),
-        effect_controller: RuntimeEffectControllerHandle::shared(Arc::clone(&ports.controller)),
+        effect_controller: ports.controller,
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
         ),
@@ -1407,7 +1419,7 @@ async fn pending_dispatch_context(
         observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        attachment_store: Arc::clone(&ports.attachment_store),
+        attachment_store: ports.attachment_store,
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
@@ -1415,6 +1427,8 @@ async fn pending_dispatch_context(
 }
 
 use pending_park_laws::pending_prepared_call;
+
+const SEED: u64 = 0x5_2d21;
 
 fn tool_context_for_prepared<'run>(
     context: &ToolDispatchContext<'run>,
@@ -1425,11 +1439,11 @@ fn tool_context_for_prepared<'run>(
         .build()
 }
 
-async fn parallel_dispatch_context(
+async fn parallel_dispatch_context<'h>(
+    ports: crate::support::DispatchPorts<'h>,
     barrier: Arc<Barrier>,
     started: Arc<AtomicUsize>,
-) -> ToolDispatchContext<'static> {
-    let ports = crate::support::dispatch_ports().await;
+) -> ToolDispatchContext<'h> {
     let plugins = test_plugins(Arc::new(ParallelProbeTools { barrier, started }));
     let tools = plugins.tools();
     let tool_catalog = plugins
@@ -1447,7 +1461,7 @@ async fn parallel_dispatch_context(
         trigger_router: None,
         process_definitions: None,
         process_engines: Default::default(),
-        effect_controller: RuntimeEffectControllerHandle::shared(Arc::clone(&ports.controller)),
+        effect_controller: ports.controller,
         direct_completions: crate::DirectCompletionClient::unavailable(
             "direct completions are unavailable in this test context",
         ),
@@ -1462,7 +1476,7 @@ async fn parallel_dispatch_context(
         observer: crate::engine::NullObservationSink::arc(),
         checkpoint_messages: crate::tool_dispatch::CheckpointMessageBuffer::default(),
         trigger_outcomes: crate::tool_dispatch::ToolTriggerOutcomeBuffer::default(),
-        attachment_store: Arc::clone(&ports.attachment_store),
+        attachment_store: ports.attachment_store,
         attachment_source_policy: Arc::new(crate::OpenAttachmentSourcePolicy),
         turn_context: crate::TurnContext::default(),
         clock: std::sync::Arc::new(crate::SystemClock),
@@ -1471,23 +1485,34 @@ async fn parallel_dispatch_context(
 
 #[tokio::test]
 async fn dispatch_rejects_invalid_args_before_provider_execution() {
-    let outcome =
-        dispatch_tool_call(&dispatch_context().await, "beta".to_string(), json!({})).await;
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
+    let outcome = dispatch_tool_call(
+        &dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await,
+        "beta".to_string(),
+        json!({}),
+    )
+    .await;
 
     assert!(!outcome.record.output.is_success());
     assert_eq!(
         outcome.record.output.value_for_projection()["message"],
         json!("\"value\" is a required property")
     );
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn dispatch_uses_catalog_pinned_contract_without_reresolution() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let contracts_resolved = Arc::new(AtomicUsize::new(0));
     let executed = Arc::new(AtomicUsize::new(0));
     let outcome = dispatch_tool_call(
-        &pinned_contract_dispatch_context(Arc::clone(&contracts_resolved), Arc::clone(&executed))
-            .await,
+        &pinned_contract_dispatch_context(
+            crate::support::double_dispatch_ports(&double, &handler),
+            Arc::clone(&contracts_resolved),
+            Arc::clone(&executed),
+        )
+        .await,
         "beta".to_string(),
         json!({ "value": "ok" }),
     )
@@ -1500,12 +1525,15 @@ async fn dispatch_uses_catalog_pinned_contract_without_reresolution() {
     );
     assert_eq!(contracts_resolved.load(Ordering::SeqCst), 0);
     assert_eq!(executed.load(Ordering::SeqCst), 1);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn pending_tool_without_completion_key_is_runtime_failure() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let attempts = Arc::new(AtomicUsize::new(0));
     let context = pending_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
         PendingProbeMode::MissingKey,
         Arc::clone(&attempts),
         None,
@@ -1531,12 +1559,16 @@ async fn pending_tool_without_completion_key_is_runtime_failure() {
         panic!("expected failure output");
     };
     assert_eq!(failure.code, "pending_tool_missing_completion_key");
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn retry_policy_stops_after_pending_launch() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let attempts = Arc::new(AtomicUsize::new(0));
     let context = pending_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
         PendingProbeMode::PendingWithKey,
         Arc::clone(&attempts),
         None,
@@ -1563,12 +1595,16 @@ async fn retry_policy_stops_after_pending_launch() {
         pending.key.wait,
         crate::AwaitEventWaitIdentity::tool_completion("pending-call")
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn retry_ladder_survives_a_later_pending_completion() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let attempts = Arc::new(AtomicUsize::new(0));
     let context = pending_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
         PendingProbeMode::FailureThenPending,
         Arc::clone(&attempts),
         None,
@@ -1626,13 +1662,17 @@ async fn retry_ladder_survives_a_later_pending_completion() {
         completed.attempts[1].outcome,
         lash_trace::TraceRetryAttemptOutcome::Completed
     );
+    drop(execution);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn after_tool_hook_runs_only_for_completed_tool_results() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let after_calls = Arc::new(AtomicUsize::new(0));
     let pending_attempts = Arc::new(AtomicUsize::new(0));
     let pending_context = pending_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
         PendingProbeMode::PendingWithKey,
         pending_attempts,
         Some(Arc::clone(&after_calls)),
@@ -1659,6 +1699,7 @@ async fn after_tool_hook_runs_only_for_completed_tool_results() {
 
     let done_attempts = Arc::new(AtomicUsize::new(0));
     let done_context = pending_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
         PendingProbeMode::Done,
         done_attempts,
         Some(Arc::clone(&after_calls)),
@@ -1678,13 +1719,20 @@ async fn after_tool_hook_runs_only_for_completed_tool_results() {
 
     assert!(matches!(launch, ToolCallLaunch::Done(_)));
     assert_eq!(after_calls.load(Ordering::SeqCst), 1);
+    drop((done_context, pending_context));
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn before_tool_hook_receives_resolved_argument_projection_policy() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let captured = Arc::new(std::sync::Mutex::new(None));
     let outcome = dispatch_tool_call(
-        &projection_policy_dispatch_context(Arc::clone(&captured)).await,
+        &projection_policy_dispatch_context(
+            crate::support::double_dispatch_ports(&double, &handler),
+            Arc::clone(&captured),
+        )
+        .await,
         "seedy".to_string(),
         json!({}),
     )
@@ -1695,10 +1743,12 @@ async fn before_tool_hook_receives_resolved_argument_projection_policy() {
         captured.lock_recover().clone(),
         Some(crate::ToolArgumentProjectionPolicy::preserve_projected_refs_in_field("seed"))
     );
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn dispatch_rejects_non_catalog_tool_before_provider_resolution() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let contracts_resolved = Arc::new(AtomicUsize::new(0));
     let executed = Arc::new(AtomicUsize::new(0));
     let provider: Arc<dyn ToolProvider> = Arc::new(ExactDispatchTools {
@@ -1708,7 +1758,11 @@ async fn dispatch_rejects_non_catalog_tool_before_provider_resolution() {
         observed_execution_bindings: None,
     });
     let outcome = dispatch_tool_call(
-        &exact_dispatch_context(provider).await,
+        &exact_dispatch_context(
+            crate::support::double_dispatch_ports(&double, &handler),
+            provider,
+        )
+        .await,
         "host_only".to_string(),
         json!({ "value": "ok" }),
     )
@@ -1721,10 +1775,12 @@ async fn dispatch_rejects_non_catalog_tool_before_provider_resolution() {
     );
     assert_eq!(contracts_resolved.load(Ordering::SeqCst), 0);
     assert_eq!(executed.load(Ordering::SeqCst), 0);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn non_catalog_tool_is_rejected_before_contract_resolution() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let contracts_resolved = Arc::new(AtomicUsize::new(0));
     let executed = Arc::new(AtomicUsize::new(0));
     let provider: Arc<dyn ToolProvider> = Arc::new(ExactDispatchTools {
@@ -1734,7 +1790,11 @@ async fn non_catalog_tool_is_rejected_before_contract_resolution() {
         observed_execution_bindings: None,
     });
     let outcome = dispatch_tool_call(
-        &exact_dispatch_context(provider).await,
+        &exact_dispatch_context(
+            crate::support::double_dispatch_ports(&double, &handler),
+            provider,
+        )
+        .await,
         "host_only".to_string(),
         json!({ "value": "ok" }),
     )
@@ -1747,10 +1807,12 @@ async fn non_catalog_tool_is_rejected_before_contract_resolution() {
     );
     assert_eq!(contracts_resolved.load(Ordering::SeqCst), 0);
     assert_eq!(executed.load(Ordering::SeqCst), 0);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let contracts_resolved = Arc::new(AtomicUsize::new(0));
     let executed = Arc::new(AtomicUsize::new(0));
     let observed_execution_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1760,7 +1822,11 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
         contract_available: false,
         observed_execution_bindings: Some(Arc::clone(&observed_execution_bindings)),
     });
-    let context = exact_dispatch_context(provider).await;
+    let context = exact_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
+        provider,
+    )
+    .await;
     let grant = crate::ToolExecutionGrant::from_definition(named_beta_tool("host_only"))
         .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID)
         .with_execution_binding(json!({ "kind": "test", "route": "deferred" }));
@@ -1806,12 +1872,15 @@ async fn explicit_execution_grant_runs_non_catalog_tool_with_binding() {
         *observed_execution_bindings.lock_recover(),
         vec![json!({ "kind": "test", "route": "deferred" })]
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 mod single_gate;
 
 #[tokio::test]
 async fn dispatch_rejects_hidden_tool_before_contract_resolution() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let contracts_resolved = Arc::new(AtomicUsize::new(0));
     let executed = Arc::new(AtomicUsize::new(0));
     let provider: Arc<dyn ToolProvider> = Arc::new(HiddenDispatchTools {
@@ -1819,7 +1888,11 @@ async fn dispatch_rejects_hidden_tool_before_contract_resolution() {
         executed: Arc::clone(&executed),
     });
     let outcome = dispatch_tool_call(
-        &authority_hidden_dispatch_context(provider).await,
+        &authority_hidden_dispatch_context(
+            crate::support::double_dispatch_ports(&double, &handler),
+            provider,
+        )
+        .await,
         "hidden".to_string(),
         json!({ "value": "ok" }),
     )
@@ -1832,13 +1905,19 @@ async fn dispatch_rejects_hidden_tool_before_contract_resolution() {
     );
     assert_eq!(contracts_resolved.load(Ordering::SeqCst), 0);
     assert_eq!(executed.load(Ordering::SeqCst), 0);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let executed = Arc::new(AtomicUsize::new(0));
     let outcome = dispatch_tool_call(
-        &strict_mcp_dispatch_context(Arc::clone(&executed)).await,
+        &strict_mcp_dispatch_context(
+            crate::support::double_dispatch_ports(&double, &handler),
+            Arc::clone(&executed),
+        )
+        .await,
         "mcp__appworld__venmo_show_transactions".to_string(),
         json!({
             "min_datetime": "2024-01-01T00:00:00Z",
@@ -1849,344 +1928,14 @@ async fn dispatch_allows_unknown_mcp_args_when_schema_does_not_forbid_them() {
 
     assert!(outcome.record.output.is_success());
     assert_eq!(executed.load(Ordering::SeqCst), 1);
-}
-
-#[tokio::test]
-async fn default_retry_policy_never_retries_safe_failures() {
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let outcome = dispatch_tool_call(
-        &retry_dispatch_context(
-            ToolRetryPolicy::Never,
-            Arc::clone(&attempts),
-            usize::MAX,
-            false,
-            Arc::clone(&observed),
-        )
-        .await,
-        "retry_probe".to_string(),
-        json!({ "value": "ok" }),
-    )
-    .await;
-
-    assert!(!outcome.record.output.is_success());
-    assert_eq!(attempts.load(Ordering::SeqCst), 1);
-    assert_eq!(observed.lock_recover()[0].0, 1);
-}
-
-#[tokio::test]
-async fn safe_retry_policy_retries_safe_failure_and_stops_on_success() {
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let outcome = dispatch_tool_call(
-        &retry_dispatch_context(
-            ToolRetryPolicy::safe(3, 0, 0),
-            Arc::clone(&attempts),
-            2,
-            false,
-            Arc::clone(&observed),
-        )
-        .await,
-        "retry_probe".to_string(),
-        json!({ "value": "ok" }),
-    )
-    .await;
-
-    assert!(outcome.record.output.is_success());
-    assert_eq!(attempts.load(Ordering::SeqCst), 2);
-    assert_eq!(outcome.attempts.len(), 2);
-    assert_eq!(outcome.attempts[0].ordinal, 1);
-    assert_eq!(
-        outcome.attempts[0].outcome,
-        lash_trace::TraceRetryAttemptOutcome::Failed
-    );
-    assert!(
-        outcome.attempts[0]
-            .reason
-            .as_deref()
-            .is_some_and(|reason| reason.contains("transient"))
-    );
-    assert_eq!(outcome.attempts[0].delay_ms, Some(0));
-    assert_eq!(outcome.attempts[1].ordinal, 2);
-    assert_eq!(
-        outcome.attempts[1].outcome,
-        lash_trace::TraceRetryAttemptOutcome::Completed
-    );
-    assert_eq!(outcome.attempts[1].delay_ms, None);
-    let directory = tempfile::tempdir().expect("trace tempdir");
-    let path = directory.path().join("tool-retry.trace.jsonl");
-    let sink: Arc<dyn lash_trace::TraceSink> = Arc::new(lash_trace::JsonlTraceSink::new(&path));
-    let tracing = crate::RuntimeExecutionTracing::new(
-        sink,
-        lash_trace::TraceContext::default(),
-        lash_trace::TraceContext::default().for_session("tool-retry-session"),
-    );
-    crate::emit_tool_call_completed(
-        &tracing,
-        &outcome.record,
-        &outcome.attempts,
-        None,
-        7,
-        &crate::facade_support::SystemClock,
-    );
-    let emitted: lash_trace::TraceRecord =
-        lash_trace::parse_jsonl_records(&std::fs::read_to_string(path).expect("read tool trace"))
-            .expect("parse emitted tool trace")
-            .into_iter()
-            .next()
-            .expect("one emitted tool trace record");
-    let lash_trace::TraceEvent::ToolCallCompleted { attempts, .. } = emitted.event else {
-        panic!("expected emitted tool completion");
-    };
-    assert_eq!(attempts.expect("emitted attempt ladder").len(), 2);
-    assert_eq!(
-        observed
-            .lock_recover()
-            .iter()
-            .map(|(attempt, max, _)| (*attempt, *max))
-            .collect::<Vec<_>>(),
-        vec![(1, 3), (2, 3)]
-    );
-}
-
-#[tokio::test]
-async fn scalar_after_tool_hook_runs_once_per_retry_attempt_before_exhaustion() {
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let observed_attempts = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let observed_retries = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let outcome = dispatch_tool_call(
-        &retry_dispatch_context_with_after_observations(
-            Arc::clone(&attempts),
-            observed_attempts,
-            Arc::clone(&observed_retries),
-        )
-        .await,
-        "retry_probe".to_string(),
-        json!({ "value": "ok" }),
-    )
-    .await;
-
-    assert_eq!(attempts.load(Ordering::SeqCst), 2);
-    assert_eq!(
-        *observed_retries.lock_recover(),
-        vec![
-            ToolRetryStatus::Safe { after_ms: Some(0) },
-            ToolRetryStatus::Safe { after_ms: Some(0) },
-        ],
-        "the after hook runs for each finalized attempt, before exhaustion is marked"
-    );
-    let ToolCallOutcome::Failure(failure) = outcome.record.output.outcome else {
-        panic!("expected exhausted failure");
-    };
-    assert_eq!(failure.retry, ToolRetryStatus::Exhausted { attempts: 2 });
-}
-
-#[tokio::test]
-async fn retry_delay_crosses_effect_controller_as_sleep_effect() {
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let recorder = Arc::new(SleepRecordingEffectController::default());
-    let mut context = exact_dispatch_context(Arc::new(RetryProbeTools {
-        definition: retry_tool("retry_probe", ToolRetryPolicy::safe(3, 25, 25)),
-        attempts: Arc::clone(&attempts),
-        successes_after: 2,
-        cancel_on_first: false,
-        observed_attempts: Arc::clone(&observed),
-        retry_after_ms: Some(25),
-    }))
-    .await;
-    context.effect_controller = RuntimeEffectControllerHandle::shared(recorder.clone());
-    let tool_context = ToolContext::from_dispatch(Arc::new(context.clone()))
-        .tool_call_id("call-1".to_string())
-        .build();
-
-    let outcome = dispatch_tool_call_with_execution_context(
-        &context,
-        "retry_probe".to_string(),
-        json!({ "value": "ok" }),
-        tool_context,
-    )
-    .await;
-
-    assert!(outcome.record.output.is_success());
-    let sleeps = recorder.sleeps.lock_recover();
-    assert_eq!(sleeps.len(), 1);
-    assert!(
-        sleeps[0]
-            .effect_id()
-            .is_some_and(|effect_id| effect_id.ends_with(":retry_probe:attempt:1:sleep"))
-    );
-    assert_eq!(
-        sleeps[0].replay_key(),
-        Some("lash-tool:session:call-1:retry_probe:attempt:1:sleep")
-    );
-}
-
-#[tokio::test]
-async fn retry_sleep_controller_rejection_aborts_as_controller_error() {
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let mut context = exact_dispatch_context(Arc::new(RetryProbeTools {
-        definition: retry_tool("retry_probe", ToolRetryPolicy::safe(3, 25, 25)),
-        attempts: Arc::clone(&attempts),
-        successes_after: 2,
-        cancel_on_first: false,
-        observed_attempts: Arc::clone(&observed),
-        retry_after_ms: Some(25),
-    }))
-    .await;
-    context.effect_controller =
-        RuntimeEffectControllerHandle::shared(Arc::new(FailingSleepEffectController));
-    let tool_context = ToolContext::from_dispatch(Arc::new(context.clone()))
-        .tool_call_id("call-1".to_string())
-        .build();
-
-    let outcome = dispatch_tool_call_with_execution_context(
-        &context,
-        "retry_probe".to_string(),
-        json!({ "value": "ok" }),
-        tool_context,
-    )
-    .await;
-
-    assert_eq!(attempts.load(Ordering::SeqCst), 1);
-    let ToolCallOutcome::Failure(failure) = outcome.record.output.outcome else {
-        panic!("expected failure");
-    };
-    // A live controller rejection of the retry-sleep effect is a crash-class
-    // fault, not a tool-produced outcome: it carries the controller's code
-    // rather than `tool_retry_sleep_failed` (FIG-3528).
-    assert_eq!(failure.code, "test_sleep_rejected");
-}
-
-#[tokio::test]
-async fn safe_retry_policy_marks_exhausted_after_final_attempt() {
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let outcome = dispatch_tool_call(
-        &retry_dispatch_context(
-            ToolRetryPolicy::safe(2, 0, 0),
-            Arc::clone(&attempts),
-            usize::MAX,
-            false,
-            Arc::clone(&observed),
-        )
-        .await,
-        "retry_probe".to_string(),
-        json!({ "value": "ok" }),
-    )
-    .await;
-
-    assert!(!outcome.record.output.is_success());
-    assert_eq!(attempts.load(Ordering::SeqCst), 2);
-    let ToolCallOutcome::Failure(failure) = outcome.record.output.outcome else {
-        panic!("expected failure");
-    };
-    assert_eq!(failure.retry, ToolRetryStatus::Exhausted { attempts: 2 });
-}
-
-#[tokio::test]
-async fn cancellation_stops_retry_immediately() {
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let outcome = dispatch_tool_call(
-        &retry_dispatch_context(
-            ToolRetryPolicy::safe(3, 0, 0),
-            Arc::clone(&attempts),
-            usize::MAX,
-            true,
-            Arc::clone(&observed),
-        )
-        .await,
-        "retry_probe".to_string(),
-        json!({ "value": "ok" }),
-    )
-    .await;
-
-    assert!(!outcome.record.output.is_success());
-    assert_eq!(attempts.load(Ordering::SeqCst), 1);
-    assert!(matches!(
-        outcome.record.output.outcome,
-        ToolCallOutcome::Cancelled(_)
-    ));
-}
-
-#[tokio::test]
-async fn retry_context_has_stable_replay_key_across_attempts() {
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let context = retry_dispatch_context(
-        ToolRetryPolicy::safe(3, 0, 0),
-        Arc::clone(&attempts),
-        3,
-        false,
-        Arc::clone(&observed),
-    )
-    .await;
-    let tool_context = ToolContext::from_dispatch(Arc::new(context.clone()))
-        .tool_call_id("call-1".to_string())
-        .build();
-    let outcome = dispatch_tool_call_with_execution_context(
-        &context,
-        "retry_probe".to_string(),
-        json!({ "value": "ok" }),
-        tool_context,
-    )
-    .await;
-
-    assert!(outcome.record.output.is_success());
-    let observed = observed.lock_recover();
-    assert_eq!(observed.len(), 3);
-    assert_eq!(
-        observed
-            .iter()
-            .map(|(attempt, max, _)| (*attempt, *max))
-            .collect::<Vec<_>>(),
-        vec![(1, 3), (2, 3), (3, 3)]
-    );
-    let keys = observed
-        .iter()
-        .map(|(_, _, key)| key.clone())
-        .collect::<Vec<_>>();
-    assert!(keys.iter().all(|key| key == &keys[0]));
-    assert_eq!(
-        keys[0].as_deref(),
-        Some("lash-tool:session:call-1:retry_probe")
-    );
-}
-
-#[tokio::test]
-async fn idempotent_retry_policy_uses_journaled_attempts_without_provider_replay_key() {
-    let attempts = Arc::new(AtomicUsize::new(0));
-    let observed = Arc::new(std::sync::Mutex::new(Vec::new()));
-    let outcome = dispatch_tool_call(
-        &retry_dispatch_context(
-            ToolRetryPolicy::idempotent(3, 0, 0),
-            Arc::clone(&attempts),
-            usize::MAX,
-            false,
-            Arc::clone(&observed),
-        )
-        .await,
-        "retry_probe".to_string(),
-        json!({ "value": "ok" }),
-    )
-    .await;
-
-    assert!(!outcome.record.output.is_success());
-    assert_eq!(attempts.load(Ordering::SeqCst), 3);
-    let observed = observed.lock_recover();
-    assert!(
-        observed
-            .iter()
-            .all(|(_, max_attempts, replay_key)| *max_attempts == 3 && replay_key.is_none())
-    );
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn batch_returns_explicit_errors_without_runtime_execution_context() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let outcome = dispatch_orchestrating_tool_call(
-        &dispatch_context().await,
+        &dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await,
         "batch",
         json!({
             "tool_calls": [
@@ -2221,12 +1970,14 @@ async fn batch_returns_explicit_errors_without_runtime_execution_context() {
             .and_then(|value| value.as_str()),
         Some("tool batch orchestration is unavailable outside process replay")
     );
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn frameless_orchestrating_record_uses_manifest_name_when_prepared_call_is_renamed() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let outcome = dispatch_orchestrating_tool_call_with_prepared_name(
-        &dispatch_context().await,
+        &dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await,
         "batch",
         "provider_controlled_name",
         json!({
@@ -2239,12 +1990,14 @@ async fn frameless_orchestrating_record_uses_manifest_name_when_prepared_call_is
 
     assert!(outcome.record.output.is_success());
     assert_eq!(outcome.record.tool, "batch");
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn batch_rejects_nested_batch_as_partial_failure() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let outcome = dispatch_orchestrating_tool_call(
-        &dispatch_context().await,
+        &dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await,
         "batch",
         json!({
             "tool_calls": [
@@ -2265,16 +2018,18 @@ async fn batch_rejects_nested_batch_as_partial_failure() {
         first.get("error"),
         Some(&json!("Tool 'batch' is not allowed inside batch"))
     );
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn batch_marks_overflow_calls_as_failures() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let tool_calls = (0..26)
         .map(|_| json!({"tool": "alpha", "parameters": {}}))
         .collect::<Vec<_>>();
 
     let outcome = dispatch_tool_call(
-        &dispatch_context().await,
+        &dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await,
         "batch".to_string(),
         json!({ "tool_calls": tool_calls }),
     )
@@ -2290,14 +2045,21 @@ async fn batch_marks_overflow_calls_as_failures() {
         error.contains("tool_calls") && error.contains("has more than 25 items"),
         "{error}",
     );
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn batch_does_not_run_child_tools_without_runtime_execution_context() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let barrier = Arc::new(Barrier::new(2));
     let started = Arc::new(AtomicUsize::new(0));
     let outcome = dispatch_orchestrating_tool_call(
-        &parallel_dispatch_context(Arc::clone(&barrier), Arc::clone(&started)).await,
+        &parallel_dispatch_context(
+            crate::support::double_dispatch_ports(&double, &handler),
+            Arc::clone(&barrier),
+            Arc::clone(&started),
+        )
+        .await,
         "batch",
         json!({
             "tool_calls": [
@@ -2321,6 +2083,7 @@ async fn batch_does_not_run_child_tools_without_runtime_execution_context() {
             .iter()
             .all(|item| item.get("success").and_then(|value| value.as_bool()) == Some(false))
     );
+    handler.close().await.expect("close the dispatch handler");
 }
 
 /// The v2 provider seam law: an opted-in leaf is called through the public
@@ -2328,13 +2091,24 @@ async fn batch_does_not_run_child_tools_without_runtime_execution_context() {
 /// attempt is committed, in declaration order.
 #[tokio::test]
 async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinator() {
+    // This law stays on the SQLite engine's runtime-operation controller: its
+    // process intents realize there through the process service's local
+    // executor, while on the server double they need the engine's process
+    // worker, which this target does not install.
     let definition = named_beta_tool("attempt_intents");
     let calls = Arc::new(AtomicUsize::new(0));
     let provider: Arc<dyn ToolProvider> = Arc::new(AttemptIntentTools {
         definition: definition.clone(),
         calls: Arc::clone(&calls),
     });
-    let mut context = exact_dispatch_context(provider).await;
+    let mut context = exact_dispatch_context(
+        crate::support::controller_dispatch_ports(
+            crate::support::runtime_operation_controller().await,
+        )
+        .await,
+        provider,
+    )
+    .await;
     context.direct_completions = crate::DirectCompletionClient::from_fn(|_, _| {
         Ok(crate::plugin::DirectCompletion {
             text: "attempt direct ok".to_string(),

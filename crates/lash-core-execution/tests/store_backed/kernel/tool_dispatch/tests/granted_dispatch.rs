@@ -1,5 +1,7 @@
 use super::*;
 
+const SEED: u64 = 0x5_2d27;
+
 /// What a granted probe's body does when the dispatch path reaches it.
 #[derive(Clone, Copy)]
 enum GrantProbeMode {
@@ -118,12 +120,13 @@ fn grant_probe_tool(retry_policy: ToolRetryPolicy) -> crate::ToolDefinition {
 
 /// Builds a dispatch context whose only provider is a granted probe, plus the
 /// grant that authorizes it.
-async fn grant_probe_dispatch(
+async fn grant_probe_dispatch<'h>(
+    ports: crate::support::DispatchPorts<'h>,
     mode: GrantProbeMode,
     attempts: Arc<AtomicUsize>,
     retry_policy: ToolRetryPolicy,
     observed_execution_bindings: Arc<std::sync::Mutex<Vec<serde_json::Value>>>,
-) -> (ToolDispatchContext<'static>, crate::ToolExecutionGrant) {
+) -> (ToolDispatchContext<'h>, crate::ToolExecutionGrant) {
     let definition = grant_probe_tool(retry_policy);
     let provider: Arc<dyn ToolProvider> = Arc::new(GrantProbeTools {
         definition: definition.clone(),
@@ -134,7 +137,7 @@ async fn grant_probe_dispatch(
     let grant = crate::ToolExecutionGrant::from_definition(definition)
         .with_source_id(crate::PLUGIN_TOOL_SOURCE_ID)
         .with_execution_binding(json!({ "kind": "grant-probe" }));
-    (exact_dispatch_context(provider).await, grant)
+    (exact_dispatch_context(ports, provider).await, grant)
 }
 
 /// `tool_name` is the name the provider stamped on the prepared call, which may differ from
@@ -160,9 +163,11 @@ fn grant_prepared_call_with_id(tool_id: &str, tool_name: &str) -> crate::Prepare
 /// runs bound even on the path that parks.
 #[tokio::test]
 async fn granted_pending_park_returns_a_pending_launch_under_the_grant_binding() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let attempts = Arc::new(AtomicUsize::new(0));
     let observed_execution_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (context, grant) = grant_probe_dispatch(
+        crate::support::double_dispatch_ports(&double, &handler),
         GrantProbeMode::PendingWithKey,
         Arc::clone(&attempts),
         ToolRetryPolicy::safe(5, 0, 0),
@@ -194,13 +199,17 @@ async fn granted_pending_park_returns_a_pending_launch_under_the_grant_binding()
         vec![json!({ "kind": "grant-probe" })],
         "the grant binding must reach the parking body"
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn unresolvable_grant_source_cannot_borrow_same_id_catalog_deferral() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let attempts = Arc::new(AtomicUsize::new(0));
     let observed_execution_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (mut context, mut grant) = grant_probe_dispatch(
+        crate::support::double_dispatch_ports(&double, &handler),
         GrantProbeMode::PendingWithKey,
         attempts,
         ToolRetryPolicy::Never,
@@ -228,6 +237,8 @@ async fn unresolvable_grant_source_cannot_borrow_same_id_catalog_deferral() {
         !crate::dispatch_attempt_may_defer(&context, &tool_id, Some(&grant)),
         "an unresolvable out-of-catalog grant must not borrow catalog deferral"
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 /// A granted attempt runs the same retry ladder as a catalog attempt, and the
@@ -236,9 +247,11 @@ async fn unresolvable_grant_source_cannot_borrow_same_id_catalog_deferral() {
 /// non-catalog tool has.
 #[tokio::test]
 async fn granted_retry_ladder_marks_exhausted_after_the_final_attempt() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let attempts = Arc::new(AtomicUsize::new(0));
     let observed_execution_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (context, grant) = grant_probe_dispatch(
+        crate::support::double_dispatch_ports(&double, &handler),
         GrantProbeMode::AlwaysRetryable,
         Arc::clone(&attempts),
         ToolRetryPolicy::safe(2, 0, 0),
@@ -265,6 +278,8 @@ async fn granted_retry_ladder_marks_exhausted_after_the_final_attempt() {
         panic!("expected an exhausted failure");
     };
     assert_eq!(failure.retry, ToolRetryStatus::Exhausted { attempts: 2 });
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 /// The attachment producer of a granted attempt is the grant's tool name, not
@@ -274,10 +289,12 @@ async fn granted_retry_ladder_marks_exhausted_after_the_final_attempt() {
 /// able to move itself to a different producer identity.
 #[tokio::test]
 async fn granted_attachment_producer_is_the_grant_name_when_the_prepared_call_is_renamed() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let attempts = Arc::new(AtomicUsize::new(0));
     let observed_execution_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
     let producers = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (mut context, grant) = grant_probe_dispatch(
+        crate::support::double_dispatch_ports(&double, &handler),
         GrantProbeMode::InlineAttachment,
         Arc::clone(&attempts),
         ToolRetryPolicy::Never,
@@ -309,6 +326,8 @@ async fn granted_attachment_producer_is_the_grant_name_when_the_prepared_call_is
             tool_name: "grant_probe".to_string(),
         }],
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 /// A catalog-authorized attempt must use the catalog manifest as its
@@ -317,10 +336,12 @@ async fn granted_attachment_producer_is_the_grant_name_when_the_prepared_call_is
 /// deliberately drifted name.
 #[tokio::test]
 async fn catalog_attachment_producer_is_the_manifest_name_when_prepared_call_is_renamed() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let attempts = Arc::new(AtomicUsize::new(0));
     let observed_execution_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
     let producers = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (mut context, _grant) = grant_probe_dispatch(
+        crate::support::double_dispatch_ports(&double, &handler),
         GrantProbeMode::InlineAttachment,
         Arc::clone(&attempts),
         ToolRetryPolicy::Never,
@@ -352,18 +373,24 @@ async fn catalog_attachment_producer_is_the_manifest_name_when_prepared_call_is_
             tool_name: "grant_probe".to_string(),
         }],
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 /// Preparation must reject a provider-controlled name that does not match the
 /// admitted manifest before the provider's execution body runs.
 #[tokio::test]
 async fn preparation_rejects_provider_prepared_tool_name_drift() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let executed = Arc::new(AtomicUsize::new(0));
     let definition = named_beta_tool("prepared_name_probe");
-    let context = exact_dispatch_context(Arc::new(RenamedPreparationTools {
-        definition,
-        executed: Arc::clone(&executed),
-    }))
+    let context = exact_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
+        Arc::new(RenamedPreparationTools {
+            definition,
+            executed: Arc::clone(&executed),
+        }),
+    )
     .await;
 
     let outcome = dispatch_tool_call(
@@ -385,6 +412,8 @@ async fn preparation_rejects_provider_prepared_tool_name_drift() {
         0,
         "name drift must be rejected before provider execution"
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 /// A prepared call whose tool id disagrees with the grant's manifest id is
@@ -395,9 +424,11 @@ async fn preparation_rejects_provider_prepared_tool_name_drift() {
 /// grant's authority.
 #[tokio::test]
 async fn granted_identifier_mismatch_is_refused_before_the_tool_body_runs() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let attempts = Arc::new(AtomicUsize::new(0));
     let observed_execution_bindings = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (context, grant) = grant_probe_dispatch(
+        crate::support::double_dispatch_ports(&double, &handler),
         GrantProbeMode::InlineAttachment,
         Arc::clone(&attempts),
         ToolRetryPolicy::Never,
@@ -429,4 +460,6 @@ async fn granted_identifier_mismatch_is_refused_before_the_tool_body_runs() {
     };
     assert_eq!(failure.code, "granted_tool_id_mismatch");
     assert_eq!(failure.class, crate::ToolFailureClass::Internal);
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }

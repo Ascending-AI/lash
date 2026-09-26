@@ -16,6 +16,8 @@
 
 use super::*;
 
+const SEED: u64 = 0x5_2d23;
+
 /// The external system the instrumented tools write to: a stand-in for a
 /// ticket tracker, a payments API, anything whose writes the runtime cannot
 /// journal.
@@ -318,10 +320,11 @@ fn ledger_hook(
     })
 }
 
-async fn ledger_dispatch_context(
+async fn ledger_dispatch_context<'h>(
+    ports: crate::support::DispatchPorts<'h>,
     provider: Arc<dyn ToolProvider>,
     hook: crate::plugin::AfterToolCallHook,
-) -> ToolDispatchContext<'static> {
+) -> ToolDispatchContext<'h> {
     let spec = crate::PluginSpec::new()
         .with_tool_provider(provider)
         .with_after_tool_call(hook);
@@ -331,7 +334,7 @@ async fn ledger_dispatch_context(
     ))])
     .build_session("root")
     .expect("plugin session");
-    exact_dispatch_context_with_plugins(plugins).await
+    exact_dispatch_context_with_plugins(ports, plugins).await
 }
 
 async fn dispatch_ledger_call(
@@ -353,6 +356,7 @@ async fn dispatch_ledger_call(
 
 #[tokio::test]
 async fn host_effect_ledger_hook_call_id_matches_the_executed_call_record() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let ledger = Arc::new(HostEffectLedger::default());
     let world = Arc::new(ExternalWorld::default());
     let observations = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -364,6 +368,7 @@ async fn host_effect_ledger_hook_call_id_matches_the_executed_call_record() {
         transient_failures: 0,
     });
     let context = ledger_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
         provider,
         ledger_hook(Arc::clone(&ledger), Arc::clone(&observations)),
     )
@@ -385,10 +390,13 @@ async fn host_effect_ledger_hook_call_id_matches_the_executed_call_record() {
         "the attempt claimed and marked its row under the same call id"
     );
     assert_eq!(world.applied(), vec!["issue.open".to_string()]);
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn host_effect_ledger_deduplicates_retried_attempts_on_the_call_id() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let ledger = Arc::new(HostEffectLedger::default());
     let world = Arc::new(ExternalWorld::default());
     let observations = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -401,6 +409,7 @@ async fn host_effect_ledger_deduplicates_retried_attempts_on_the_call_id() {
         transient_failures: 1,
     });
     let context = ledger_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
         provider,
         ledger_hook(Arc::clone(&ledger), Arc::clone(&observations)),
     )
@@ -425,10 +434,13 @@ async fn host_effect_ledger_deduplicates_retried_attempts_on_the_call_id() {
         observations.lock_recover().as_slice(),
         &[("call-r".to_string(), false), ("call-r".to_string(), true),]
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn host_effect_ledger_replay_reexecutes_neither_effect_nor_hook() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let ledger = Arc::new(HostEffectLedger::default());
     let world = Arc::new(ExternalWorld::default());
     let observations = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -441,6 +453,7 @@ async fn host_effect_ledger_replay_reexecutes_neither_effect_nor_hook() {
         transient_failures: 0,
     });
     let mut context = ledger_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
         provider,
         ledger_hook(Arc::clone(&ledger), Arc::clone(&observations)),
     )
@@ -469,10 +482,13 @@ async fn host_effect_ledger_replay_reexecutes_neither_effect_nor_hook() {
         "replay skips the hook — the ledger sees one observation per call"
     );
     assert_eq!(world.applied(), vec!["deploy".to_string()]);
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn host_effect_ledger_reconciles_a_pending_row_against_the_world() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let ledger = Arc::new(HostEffectLedger::default());
     let world = Arc::new(ExternalWorld::default());
     let observations = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -484,6 +500,7 @@ async fn host_effect_ledger_reconciles_a_pending_row_against_the_world() {
         transient_failures: 0,
     });
     let context = ledger_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
         provider,
         ledger_hook(Arc::clone(&ledger), Arc::clone(&observations)),
     )
@@ -514,10 +531,13 @@ async fn host_effect_ledger_reconciles_a_pending_row_against_the_world() {
         Some((1, Stage::Applied, Some(false))),
         "the effect is on record as landed once the world confirms it"
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn host_effect_ledger_compensates_only_what_reconciliation_proves() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let ledger = Arc::new(HostEffectLedger::default());
     let world = Arc::new(ExternalWorld::default());
     let observations = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -529,6 +549,7 @@ async fn host_effect_ledger_compensates_only_what_reconciliation_proves() {
         transient_failures: 0,
     });
     let context = ledger_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
         provider,
         ledger_hook(Arc::clone(&ledger), Arc::clone(&observations)),
     )
@@ -562,10 +583,13 @@ async fn host_effect_ledger_compensates_only_what_reconciliation_proves() {
         ledger.row("call-ok").map(|(_, stage, _)| stage),
         Some(Stage::Compensated)
     );
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn host_effect_ledger_reverse_compensation_resumes_at_a_retained_point() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let ledger = Arc::new(HostEffectLedger::default());
     let world = Arc::new(ExternalWorld::default());
     let observations = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -577,6 +601,7 @@ async fn host_effect_ledger_reverse_compensation_resumes_at_a_retained_point() {
         transient_failures: 0,
     });
     let context = ledger_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
         provider,
         ledger_hook(Arc::clone(&ledger), Arc::clone(&observations)),
     )
@@ -619,10 +644,13 @@ async fn host_effect_ledger_reverse_compensation_resumes_at_a_retained_point() {
 
     // A further pass is a no-op: reverse compensation is idempotent.
     assert_eq!(ledger.compensate_from(retained, &world, usize::MAX), 0);
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 
 #[tokio::test]
 async fn host_effect_ledger_observes_a_settled_pending_call_under_its_call_id() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let ledger = Arc::new(HostEffectLedger::default());
     let observations = Arc::new(std::sync::Mutex::new(Vec::new()));
     let provider: Arc<dyn ToolProvider> = Arc::new(PendingProbeTools {
@@ -631,6 +659,7 @@ async fn host_effect_ledger_observes_a_settled_pending_call_under_its_call_id() 
         mode: PendingProbeMode::PendingWithKey,
     });
     let context = ledger_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
         provider,
         ledger_hook(Arc::clone(&ledger), Arc::clone(&observations)),
     )
@@ -684,4 +713,6 @@ async fn host_effect_ledger_observes_a_settled_pending_call_under_its_call_id() 
         &[("pending-call".to_string(), true)],
         "the settlement observation names the parked call's durable id"
     );
+    drop(execution);
+    handler.close().await.expect("close the dispatch handler");
 }

@@ -2,6 +2,8 @@ use super::*;
 use crate::ProcessId;
 use crate::SessionId;
 
+const SEED: u64 = 0x5_2d28;
+
 /// One memory backend's registry, env store and trigger store: every port
 /// an intent law's dispatch, process service, runtime execution and trigger
 /// router share.
@@ -80,8 +82,11 @@ async fn fixed_intent_dispatch_context(
         intents,
         calls,
     });
-    let mut context = exact_dispatch_context(provider).await;
-    context.effect_controller = RuntimeEffectControllerHandle::shared(controller);
+    let mut context = exact_dispatch_context(
+        crate::support::controller_dispatch_ports(controller).await,
+        provider,
+    )
+    .await;
     context.processes = crate::testing::effect_backed_process_service(
         Arc::clone(&world.registry),
         Arc::clone(&world.env_store),
@@ -677,6 +682,7 @@ async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
 
 #[tokio::test]
 async fn retry_drains_only_the_final_attempts_intents() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let definition =
         named_beta_tool("retry_intents").with_retry_policy(crate::ToolRetryPolicy::safe(2, 0, 0));
     let calls = Arc::new(AtomicUsize::new(0));
@@ -684,7 +690,11 @@ async fn retry_drains_only_the_final_attempts_intents() {
         definition: definition.clone(),
         calls: Arc::clone(&calls),
     });
-    let mut context = exact_dispatch_context(provider).await;
+    let mut context = exact_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
+        provider,
+    )
+    .await;
     let world = intent_law_world().await;
     let registry = Arc::clone(&world.registry);
     registry
@@ -741,11 +751,14 @@ async fn retry_drains_only_the_final_attempts_intents() {
         .expect("read retry intent target events");
     assert_eq!(events.len(), 1, "the retried declaration never drains");
     assert_eq!(events[0].payload, json!({"attempt": 2}));
+    drop(context);
+    handler.close().await.expect("close the dispatch handler");
 }
 #[tokio::test]
 async fn empty_v2_batch_without_a_recorded_call_id_is_a_noop() {
+    let (double, handler) = crate::support::open_dispatch_handler(SEED).await;
     let outcomes = execute_final_tool_intents(
-        &dispatch_context().await,
+        &dispatch_context(crate::support::double_dispatch_ports(&double, &handler)).await,
         None,
         &crate::ToolIntents::default(),
         None,
@@ -753,6 +766,7 @@ async fn empty_v2_batch_without_a_recorded_call_id_is_a_noop() {
     .await
     .expect("empty v2 batch is a no-op");
     assert!(outcomes.is_empty());
+    handler.close().await.expect("close the dispatch handler");
 }
 
 async fn register_trigger_intent_subscription(
