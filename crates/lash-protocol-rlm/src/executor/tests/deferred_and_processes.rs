@@ -1,6 +1,8 @@
 use super::*;
 use lash_core::testing::store_fixtures::durable_admission;
 
+const SEED: u64 = 0x5_2c0a;
+
 /// A fresh SQLite memory backend's effect host: the one journal a
 /// fixture's worker, cell context and process service share.
 pub(super) async fn memory_backend() -> lash_core::Backend {
@@ -12,9 +14,9 @@ pub(super) async fn memory_backend() -> lash_core::Backend {
     .into()
 }
 
-/// Runs a deferred tool resolution and then fails its journal commit, over a
-/// SQLite memory backend that journals every other effect.
-struct FailingDeferredJournalLayer;
+/// Runs a deferred tool resolution and then fails its journal commit, in
+/// front of a controller that journals every other effect.
+pub(super) struct FailingDeferredJournalLayer;
 
 #[async_trait::async_trait]
 impl lash_core::testing::EffectLayer for FailingDeferredJournalLayer {
@@ -38,18 +40,6 @@ impl lash_core::testing::EffectLayer for FailingDeferredJournalLayer {
             inner.execute_effect(envelope, local_executor).await
         }
     }
-}
-
-/// A fresh memory backend's effect host behind a
-/// [`FailingDeferredJournalLayer`].
-pub(super) async fn failing_deferred_journal_host() -> Arc<dyn lash_core::EffectHost> {
-    let backend = lash_sqlite_store::SqliteBackend::memory()
-        .await
-        .expect("open a memory backend");
-    Arc::new(lash_core::testing::LayeredEffectHost::new(
-        backend.effect_host(),
-        Arc::new(FailingDeferredJournalLayer),
-    ))
 }
 
 #[derive(Clone, Copy)]
@@ -278,11 +268,21 @@ pub(super) struct BindingRecordingDeferredProvider {
     pub(super) enumerations: Arc<AtomicUsize>,
 }
 
-async fn restricted_empty_deferred_context(
+/// The scope [`restricted_empty_deferred_context`] claims for `session_id`.
+fn restricted_empty_deferred_scope(session_id: &str) -> lash_core::AdmittedScope {
+    lash_core::AdmittedScope::turn(
+        lash_core::SessionId::from(session_id),
+        lash_core::TurnId::from("test-turn"),
+    )
+}
+
+async fn restricted_empty_deferred_context<'h>(
+    double: &lash_restate_test::RestateTestBackend,
+    handler: &'h lash_restate_test::OpenHandler,
     provider: Arc<dyn lash_core::ToolProvider>,
     session_id: &str,
 ) -> (
-    lash_core::RuntimeExecutionContext<'static>,
+    lash_core::RuntimeExecutionContext<'h>,
     Arc<lash_core::ToolRegistry>,
 ) {
     let mut factories = lash_core::testing::test_standard_protocol_factories();
@@ -319,7 +319,7 @@ async fn restricted_empty_deferred_context(
     );
     (
         lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
-            crate::testing::memory_backend_ports().await,
+            crate::testing::double_ports(double, handler),
             session.tools(),
             catalog.as_ref().clone(),
             lash_core::testing::exec_code_invocation(
@@ -413,6 +413,24 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
                 installed: Arc::clone(&installed),
             });
 
+        // Both links of turn 1 run in that turn's handler, and turn 2 runs
+        // in its own.
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let turn_1 = double
+            .open_handler(lash_core::AdmittedScope::turn(
+                lash_core::SessionId::from("test-session"),
+                lash_core::TurnId::from("turn-1"),
+            ))
+            .await
+            .expect("open turn 1's handler");
+        let turn_2 = double
+            .open_handler(lash_core::AdmittedScope::turn(
+                lash_core::SessionId::from("test-session"),
+                lash_core::TurnId::from("turn-2"),
+            ))
+            .await
+            .expect("open turn 2's handler");
         let first_invocation = lash_core::testing::exec_code_invocation(
             "test-session",
             "turn-1",
@@ -422,7 +440,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
             "replay:effect-1",
         );
         let first_ctx = lash_core::testing::code_execution_context_with_invocation(
-            crate::testing::memory_backend_ports().await,
+            crate::testing::double_ports(&double, &turn_1),
             first_invocation,
         );
         assert!(first_ctx.tool_catalog().tools.is_empty());
@@ -483,7 +501,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
         // A second code effect in the same logical turn is a different link
         // and must resolve the same paths against current authority.
         let second_ctx = lash_core::testing::code_execution_context_with_invocation(
-            crate::testing::memory_backend_ports().await,
+            crate::testing::double_ports(&double, &turn_1),
             lash_core::testing::exec_code_invocation(
                 "test-session",
                 "turn-1",
@@ -513,7 +531,7 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
         // A new logical turn also selects a fresh record, even when the
         // program references exactly the same paths.
         let next_turn_ctx = lash_core::testing::code_execution_context_with_invocation(
-            crate::testing::memory_backend_ports().await,
+            crate::testing::double_ports(&double, &turn_2),
             lash_core::testing::exec_code_invocation(
                 "test-session",
                 "turn-2",
@@ -548,6 +566,9 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
                 vec!["mystery.x".to_string(), "web.fetch".to_string()],
             ]
         );
+        drop((first_ctx, second_ctx, next_turn_ctx));
+        turn_1.close().await.expect("close turn 1's handler");
+        turn_2.close().await.expect("close turn 2's handler");
     });
 }
 
@@ -568,8 +589,21 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
                 observed_bindings: Arc::clone(&observed_bindings),
                 enumerations: Arc::clone(&enumerations),
             });
-        let (ctx, registry) =
-            restricted_empty_deferred_context(provider, "restricted-empty-lashlang-deferred").await;
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(restricted_empty_deferred_scope(
+                "restricted-empty-lashlang-deferred",
+            ))
+            .await
+            .expect("open the cell's handler");
+        let (ctx, registry) = restricted_empty_deferred_context(
+            &double,
+            &handler,
+            provider,
+            "restricted-empty-lashlang-deferred",
+        )
+        .await;
         let enumerations_after_catalog = enumerations.load(Ordering::SeqCst);
         assert!(ctx.tool_catalog().tools.is_empty());
 
@@ -632,6 +666,8 @@ pub(super) fn deferred_call_executes_through_grant_without_mutating_catalog() {
             .is_none(),
             "grant execution must not promote the deferred tool into resident membership"
         );
+        drop(ctx);
+        handler.close().await.expect("close the cell's handler");
     });
 }
 
@@ -646,9 +682,22 @@ pub(super) fn deferred_journal_failure_prevents_dependent_tool_execution() {
                 observed_bindings: Default::default(),
                 enumerations: Default::default(),
             });
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(lash_core::AdmittedScope::turn(
+                lash_core::SessionId::from("deferred-journal-failure"),
+                lash_core::TurnId::from("turn-1"),
+            ))
+            .await
+            .expect("open the cell's handler");
         let ctx =
             lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
-                crate::testing::ports_over_host(failing_deferred_journal_host().await).await,
+                crate::testing::double_ports_over_layer(
+                    &double,
+                    &handler,
+                    Arc::new(FailingDeferredJournalLayer),
+                ),
                 Arc::clone(&provider),
                 lash_core::ToolCatalog::default(),
                 lash_core::testing::exec_code_invocation(
@@ -680,6 +729,7 @@ pub(super) fn deferred_journal_failure_prevents_dependent_tool_execution() {
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
 
         let error = response.error.expect("journal failure must abort linking");
         assert!(
@@ -1239,9 +1289,21 @@ pub(super) fn typescript_deferred_call_executes_through_the_same_grant_path() {
                 observed_bindings: Arc::clone(&observed_bindings),
                 enumerations: Arc::clone(&enumerations),
             });
-        let (ctx, registry) =
-            restricted_empty_deferred_context(provider, "restricted-empty-typescript-deferred")
-                .await;
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(restricted_empty_deferred_scope(
+                "restricted-empty-typescript-deferred",
+            ))
+            .await
+            .expect("open the cell's handler");
+        let (ctx, registry) = restricted_empty_deferred_context(
+            &double,
+            &handler,
+            provider,
+            "restricted-empty-typescript-deferred",
+        )
+        .await;
         let enumerations_after_catalog = enumerations.load(Ordering::SeqCst);
 
         let mut state = RlmExecutionState::for_engine("typescript");
@@ -1288,6 +1350,8 @@ pub(super) fn typescript_deferred_call_executes_through_the_same_grant_path() {
             .is_none(),
             "grant execution must not promote the deferred tool into resident membership"
         );
+        drop(ctx);
+        handler.close().await.expect("close the cell's handler");
     });
 }
 
@@ -1308,9 +1372,18 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
                 observed_bindings: Arc::clone(&observed_bindings),
                 enumerations,
             });
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(lash_core::AdmittedScope::turn(
+                lash_core::SessionId::from("runtime-output-retention"),
+                lash_core::TurnId::from("turn-1"),
+            ))
+            .await
+            .expect("open the cell's handler");
         let ctx =
             lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
-                crate::testing::memory_backend_ports().await,
+                crate::testing::double_ports(&double, &handler),
                 provider,
                 lash_core::ToolCatalog::from_tool_definitions(Vec::new()),
                 lash_core::testing::exec_code_invocation(
@@ -1343,6 +1416,7 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
 
         assert!(
             response.error.is_some(),
@@ -1421,9 +1495,6 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
                 .to_string(),
         };
         let resolver = || Arc::new(ProjectionRegistry::new());
-        let context = || async {
-            lash_core::testing::code_execution_context(crate::testing::memory_backend_ports().await)
-        };
         let surface = || {
             LashlangSurface::new(
                 lashlang::LashlangAbilities::default(),
@@ -1432,9 +1503,17 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
             )
         };
 
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
         let first = execute_code_unbounded_for_tests(
             &mut state,
-            context().await,
+            lash_core::testing::code_execution_context(crate::testing::double_ports(
+                &double, &handler,
+            )),
             request(),
             crate::testing::memory_artifact_store().await,
             surface(),
@@ -1444,12 +1523,21 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
         assert!(first.error.is_none(), "{:?}", first.error);
         assert_eq!(state.stored_lashlang_modules.len(), 1);
 
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
         let second = execute_code_unbounded_for_tests(
             &mut state,
-            context().await,
+            lash_core::testing::code_execution_context(crate::testing::double_ports(
+                &double, &handler,
+            )),
             request(),
             crate::testing::memory_artifact_store().await,
             surface(),
@@ -1459,6 +1547,7 @@ pub(super) fn execute_code_stores_process_module_artifact_once() {
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
         assert!(second.error.is_none(), "{:?}", second.error);
         assert_eq!(state.stored_lashlang_modules.len(), 1);
         let stats = state.linked_programs.stats();
@@ -1472,11 +1561,17 @@ pub(super) fn typescript_executor_stores_a_typescript_process_artifact() {
     block_on(async {
         let artifact_store = crate::testing::fresh_memory_artifact_store().await;
         let mut state = RlmExecutionState::for_engine("typescript");
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
         let response = execute_code_with_channel_and_bounds(
             &mut state,
-            lash_core::testing::code_execution_context(
-                crate::testing::memory_backend_ports().await,
-            ),
+            lash_core::testing::code_execution_context(crate::testing::double_ports(
+                &double, &handler,
+            )),
             ExecRequest {
                 language: "typescript".to_string(),
                 code: r#"
@@ -1499,6 +1594,7 @@ pub(super) fn typescript_executor_stores_a_typescript_process_artifact() {
             crate::plugin::RlmChannel::Cell,
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
         assert!(response.error.is_none(), "{:?}", response.error);
         let module_ref = state
             .stored_lashlang_modules

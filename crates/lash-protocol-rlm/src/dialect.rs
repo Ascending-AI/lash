@@ -345,6 +345,8 @@ pub(crate) fn dialect_identity_markers(dialect: &TypescriptDialect) -> Vec<Strin
 mod tests {
     use super::*;
 
+    const SEED: u64 = 0x5_2c03;
+
     /// The channel reaches the parse diagnostic through the production session
     /// seam, not just through the formatter's own argument: the session reads
     /// it off the services the plugin factory fills from the session-pinned
@@ -356,11 +358,18 @@ mod tests {
             services.channel = channel;
             let mut session =
                 DialectSession::new(lash_lashlang_runtime::LashlangSurface::default(), services);
+            let double =
+                crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default())
+                    .await;
+            let handler = double
+                .open_handler(crate::testing::default_cell_scope())
+                .await
+                .expect("open the cell's handler");
             let response = session
                 .execute(
-                    lash_core::testing::code_execution_context(
-                        crate::testing::memory_backend_ports().await,
-                    ),
+                    lash_core::testing::code_execution_context(crate::testing::double_ports(
+                        &double, &handler,
+                    )),
                     ExecRequest {
                         language: "typescript".to_string(),
                         code: "const payload = `".to_string(),
@@ -369,6 +378,7 @@ mod tests {
                 )
                 .await
                 .expect("the cell runs and reports its own failure");
+            handler.close().await.expect("close the cell's handler");
             response
                 .error
                 .expect("an unterminated template literal fails to parse")

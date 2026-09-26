@@ -5,6 +5,8 @@
 
 use super::*;
 
+const SEED: u64 = 0x5_2c0b;
+
 #[derive(Clone)]
 struct TestDeferredTriggerResolver {
     outcome: lash_lashlang_runtime::TriggerResolution,
@@ -94,10 +96,19 @@ async fn execute_with_deferred_trigger(
     resolver: lash_lashlang_runtime::SharedDeferredTriggerResolver,
 ) -> (RlmExecutionState, ExecResponse) {
     let mut state = RlmExecutionState::for_engine(language);
+    let double =
+        crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::turn(
+            lash_core::SessionId::from("session"),
+            lash_core::TurnId::from("turn"),
+        ))
+        .await
+        .expect("open the cell's handler");
     let response = execute_code_with_channel_and_bounds_with_trigger_resolver(
         &mut state,
         lash_core::testing::code_execution_context_with_trigger_store_and_invocation(
-            crate::testing::memory_backend_ports().await,
+            crate::testing::double_ports(&double, &handler),
             crate::testing::memory_trigger_store().await,
             crate::testing::memory_process_registry().await,
             lash_core::testing::exec_code_invocation(
@@ -128,6 +139,7 @@ async fn execute_with_deferred_trigger(
         crate::plugin::RlmChannel::Cell,
     )
     .await;
+    handler.close().await.expect("close the cell's handler");
     (state, response)
 }
 
@@ -291,10 +303,19 @@ fn deferred_trigger_zero_and_ambiguous_results_fail_before_target_mapping() {
 fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
     block_on(async {
         let mut state = RlmExecutionState::for_engine("typescript");
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(lash_core::AdmittedScope::turn(
+                lash_core::SessionId::from("session"),
+                lash_core::TurnId::from("turn"),
+            ))
+            .await
+            .expect("open the cell's handler");
         let response = execute_code_with_channel_and_bounds_with_trigger_resolver(
             &mut state,
             lash_core::testing::code_execution_context_with_trigger_store_and_invocation(
-                crate::testing::memory_backend_ports().await,
+                crate::testing::double_ports(&double, &handler),
                 crate::testing::memory_trigger_store().await,
                 crate::testing::memory_process_registry().await,
                 lash_core::testing::exec_code_invocation(
@@ -335,6 +356,7 @@ fn mixed_deferred_trigger_and_tool_links_keep_provider_records_separate() {
             crate::plugin::RlmChannel::Cell,
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
 
         assert!(response.error.is_none(), "{:?}", response.error);
         assert!(matches!(
@@ -426,11 +448,6 @@ impl TriggerEffectCapture {
         .into_backend()
     }
 
-    /// [`Self::backend`]'s effect host.
-    async fn effect_host(&self) -> Arc<dyn lash_core::EffectHost> {
-        self.backend().await.effect_host()
-    }
-
     /// The registration drafts the runtime sent, in order.
     fn register_drafts(&self) -> Vec<lash_core::TriggerSubscriptionDraft> {
         self.envelopes
@@ -477,8 +494,14 @@ pub(super) async fn execute_with_capturing_trigger_effects(
     capture: TriggerEffectCapture,
 ) -> ExecResponse {
     let mut state = RlmExecutionState::new();
+    let double =
+        crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let handler = double
+        .open_handler(crate::testing::default_cell_scope())
+        .await
+        .expect("open the cell's handler");
     let ctx = lash_core::testing::code_execution_context_with_trigger_store(
-        crate::testing::ports_over_host(capture.effect_host().await).await,
+        crate::testing::double_ports_over_layer(&double, &handler, Arc::new(capture.clone())),
         crate::testing::memory_trigger_store().await,
         crate::testing::memory_process_registry().await,
     );
@@ -487,7 +510,7 @@ pub(super) async fn execute_with_capturing_trigger_effects(
         lashlang::LashlangLanguageFeatures::default(),
         timer_trigger_resources(),
     );
-    execute_code_unbounded_for_tests(
+    let response = execute_code_unbounded_for_tests(
         &mut state,
         ctx,
         ExecRequest {
@@ -501,7 +524,9 @@ pub(super) async fn execute_with_capturing_trigger_effects(
         Arc::new(ProjectionRegistry::new()),
         RlmLashlangExecutionTraceConfig::default(),
     )
-    .await
+    .await;
+    handler.close().await.expect("close the cell's handler");
+    response
 }
 
 pub(super) async fn execute_with_trigger_environment(code: &str) -> ExecResponse {
@@ -656,8 +681,14 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
     block_on(async {
         let store = crate::testing::memory_trigger_store().await;
         let capture = TriggerEffectCapture::default();
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
         let ctx = lash_core::testing::code_execution_context_with_trigger_store(
-            crate::testing::ports_over_host(capture.effect_host().await).await,
+            crate::testing::double_ports_over_layer(&double, &handler, Arc::new(capture.clone())),
             store.clone(),
             crate::testing::memory_process_registry().await,
         );
@@ -691,6 +722,7 @@ pub(super) fn keyless_trigger_registration_reaches_effect_and_owner_scoped_store
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
         assert!(response.error.is_none(), "{:?}", response.error);
 
         // Re-pinned by FIG-2999: a keyless key is derived from the source and
@@ -852,10 +884,16 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
         );
         let mut state = RlmExecutionState::new();
 
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
         let first = execute_code_unbounded_for_tests(
             &mut state,
             lash_core::testing::code_execution_context_with_trigger_store(
-                crate::testing::memory_backend_ports().await,
+                crate::testing::double_ports(&double, &handler),
                 trigger_store.clone(),
                 crate::testing::memory_process_registry().await,
             ),
@@ -882,6 +920,7 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
         assert!(first.error.is_none(), "{:?}", first.error);
         let listed = first.terminal_finish.expect("registration list");
         let listed = listed.as_array().expect("list result");
@@ -897,10 +936,16 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
         .await
         .expect("list registration before unrelated execution");
 
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
         let unrelated = execute_code_unbounded_for_tests(
             &mut state,
             lash_core::testing::code_execution_context_with_trigger_store(
-                crate::testing::memory_backend_ports().await,
+                crate::testing::double_ports(&double, &handler),
                 trigger_store.clone(),
                 crate::testing::memory_process_registry().await,
             ),
@@ -920,6 +965,7 @@ pub(super) fn removing_a_declaration_and_running_unrelated_code_does_not_unregis
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
 
         assert!(unrelated.error.is_none(), "{:?}", unrelated.error);
         assert_eq!(unrelated.terminal_finish, Some(serde_json::json!(42)));
@@ -972,8 +1018,14 @@ pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
                 lash_core::OnParentEnd::Abandon,
             ),
         );
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
         let context = lash_core::testing::code_execution_context_for_process(
-            crate::testing::memory_backend_ports().await,
+            crate::testing::double_ports(&double, &handler),
             &registration,
         );
         let owner_error = context
@@ -1002,6 +1054,7 @@ pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
 
         assert!(response.error.is_none(), "{:?}", response.error);
         assert_eq!(response.terminal_finish, Some(serde_json::json!(42)));
@@ -1197,8 +1250,14 @@ pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
                 lash_core::OnParentEnd::Abandon,
             ),
         );
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
         let context = lash_core::testing::code_execution_context_for_process(
-            crate::testing::memory_backend_ports().await,
+            crate::testing::double_ports(&double, &handler),
             &registration,
         );
         let owner_error = context
@@ -1208,6 +1267,8 @@ pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
             owner_error.to_string().contains("bare host authority"),
             "{owner_error}"
         );
+        drop(context);
+        handler.close().await.expect("close the cell's handler");
 
         let result = execute_trigger_process_with_originator(
             "typescript",
@@ -1879,10 +1940,16 @@ async fn execute_typescript_with_capturing_trigger_effects(
     store: lashlang::LashlangArtifacts,
 ) -> ExecResponse {
     let mut state = RlmExecutionState::for_engine("typescript");
-    execute_code_with_channel_and_bounds(
+    let double =
+        crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let handler = double
+        .open_handler(crate::testing::default_cell_scope())
+        .await
+        .expect("open the cell's handler");
+    let response = execute_code_with_channel_and_bounds(
         &mut state,
         lash_core::testing::code_execution_context_with_trigger_store(
-            crate::testing::ports_over_host(capture.effect_host().await).await,
+            crate::testing::double_ports_over_layer(&double, &handler, Arc::new(capture.clone())),
             crate::testing::memory_trigger_store().await,
             crate::testing::memory_process_registry().await,
         ),
@@ -1903,5 +1970,7 @@ async fn execute_typescript_with_capturing_trigger_effects(
         lashlang::ExecutionBounds::unbounded(),
         crate::plugin::RlmChannel::Cell,
     )
-    .await
+    .await;
+    handler.close().await.expect("close the cell's handler");
+    response
 }

@@ -425,6 +425,39 @@ mod tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
     use std::task::{Context, Poll, Waker};
 
+    const SEED: u64 = 0x5_2c08;
+
+    /// Runs `request` on `state` as one cell, in a handler of its own on a
+    /// fresh server double.
+    async fn execute_cell(
+        state: &RlmRuntimeState,
+        request: lash_core::ExecRequest,
+    ) -> Result<lash_core::ExecResponse, SessionError> {
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
+        let result = Box::pin(state.execute_code(
+            lash_core::testing::code_execution_context(crate::testing::double_ports(
+                &double, &handler,
+            )),
+            request,
+        ))
+        .await;
+        handler.close().await.expect("close the cell's handler");
+        result
+    }
+
+    /// The scope [`admitted_context`] claims.
+    fn admitted_scope() -> lash_core::AdmittedScope {
+        lash_core::AdmittedScope::turn(
+            lash_core::SessionId::from("runtime-state-session"),
+            lash_core::TurnId::from("runtime-state-turn"),
+        )
+    }
+
     /// A cell that references an unresolved module call-path, so the deferred
     /// resolver is consulted before anything is linked or run.
     const PARKING_CELL: &str = "await web.fetch({});";
@@ -499,10 +532,16 @@ mod tests {
         }
     }
 
-    async fn admitted_context(cell_id: &str) -> lash_core::RuntimeExecutionContext<'static> {
+    /// A cell context under `cell_id`'s invocation, over the controller
+    /// `handler`, open on `double` for [`admitted_scope`], lends.
+    fn admitted_context<'h>(
+        double: &lash_restate_test::RestateTestBackend,
+        handler: &'h lash_restate_test::OpenHandler,
+        cell_id: &str,
+    ) -> lash_core::RuntimeExecutionContext<'h> {
         let replay_key = format!("exec-code:{cell_id}");
         lash_core::testing::code_execution_context_with_invocation(
-            crate::testing::memory_backend_ports().await,
+            crate::testing::double_ports(double, handler),
             lash_core::testing::exec_code_invocation(
                 "runtime-state-session",
                 "runtime-state-turn",
@@ -518,10 +557,9 @@ mod tests {
     /// the middle of a cell with the execution state in hand.
     ///
     /// Each poll runs on the task's own waker and the loop yields between
-    /// polls: the cell journals through a SQLite memory backend (ADR 0102),
-    /// whose writes complete on the connection's thread, so reaching the
-    /// resolver takes real turns of the runtime rather than a fixed number of
-    /// polls.
+    /// polls: the cell journals through a handler on the server double,
+    /// whose invocation runs on its own task, so reaching the resolver takes
+    /// real turns of the runtime rather than a fixed number of polls.
     async fn poll_until_parked<F: Future>(future: &mut Pin<Box<F>>, resolver: &ParkingResolver) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
         while resolver.entered() == 0 {
@@ -556,25 +594,42 @@ mod tests {
             .expect("runtime")
             .block_on(async {
                 let (resolver, state) = parked_session();
+                let double =
+                    crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default())
+                        .await;
 
                 // Drive a cell until it is suspended mid-flight, then drop it:
                 // a cancellation with the execution state in the cell's hands.
+                let cancelled_handler = double
+                    .open_handler(admitted_scope())
+                    .await
+                    .expect("open the cell's handler");
                 {
-                    let mut cancelled = Box::pin(
-                        state.execute_code(admitted_context("cancelled").await, cell(PARKING_CELL)),
-                    );
+                    let mut cancelled = Box::pin(state.execute_code(
+                        admitted_context(&double, &cancelled_handler, "cancelled"),
+                        cell(PARKING_CELL),
+                    ));
                     poll_until_parked(&mut cancelled, &resolver).await;
                 }
+                cancelled_handler
+                    .close()
+                    .await
+                    .expect("close the cell's handler");
 
                 // The state was borrowed, never moved out, so the session is
                 // still whole and the next cell runs normally.
+                let handler = double
+                    .open_handler(admitted_scope())
+                    .await
+                    .expect("open the cell's handler");
                 let next = state
                     .execute_code(
-                        admitted_context("survivor").await,
+                        admitted_context(&double, &handler, "survivor"),
                         cell("let survivor = 1;\nfinish(survivor);"),
                     )
                     .await
                     .expect("the session survives a cell cancelled mid-flight");
+                handler.close().await.expect("close the cell's handler");
                 assert_eq!(next.error, None);
                 assert_eq!(next.terminal_finish, Some(serde_json::json!(1)));
             });
@@ -589,19 +644,31 @@ mod tests {
             .block_on(async {
                 let (resolver, state) = parked_session();
                 let mut cx = Context::from_waker(Waker::noop());
+                let double =
+                    crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default())
+                        .await;
 
                 // One cell is running: parked mid-flight, holding the state.
-                let mut running = Box::pin(
-                    state.execute_code(admitted_context("running").await, cell(PARKING_CELL)),
-                );
+                let running_handler = double
+                    .open_handler(admitted_scope())
+                    .await
+                    .expect("open the cell's handler");
+                let mut running = Box::pin(state.execute_code(
+                    admitted_context(&double, &running_handler, "running"),
+                    cell(PARKING_CELL),
+                ));
                 poll_until_parked(&mut running, &resolver).await;
 
                 // A second cell arrives while the first is still running. It
                 // makes no progress whatsoever: it is queued behind the running
                 // cell rather than answered — with a result or with an error.
+                let waiting_handler = double
+                    .open_handler(admitted_scope())
+                    .await
+                    .expect("open the cell's handler");
                 {
                     let mut waiting = Box::pin(state.execute_code(
-                        admitted_context("waiting").await,
+                        admitted_context(&double, &waiting_handler, "waiting"),
                         cell("let second_cell = 2;"),
                     ));
                     for _ in 0..16 {
@@ -616,10 +683,18 @@ mod tests {
                         "the waiting cell never began executing beside the running one"
                     );
                 }
+                waiting_handler
+                    .close()
+                    .await
+                    .expect("close the cell's handler");
 
                 // The running cell finishes and hands the state back, live.
                 resolver.release();
                 let first = running.await.expect("the parked cell completes");
+                running_handler
+                    .close()
+                    .await
+                    .expect("close the cell's handler");
                 assert!(
                     first.error.is_some(),
                     "`web.fetch` resolves to nothing, so the parked cell ends in a link error"
@@ -630,26 +705,36 @@ mod tests {
                     .expect("settle the first returned cell");
 
                 // The waiting cell, re-driven, now runs — on that same state.
+                let handler = double
+                    .open_handler(admitted_scope())
+                    .await
+                    .expect("open the cell's handler");
                 let second = state
                     .execute_code(
-                        admitted_context("waiting").await,
+                        admitted_context(&double, &handler, "waiting"),
                         cell("let second_cell = 2;"),
                     )
                     .await
                     .expect("the cell that waited now runs");
+                handler.close().await.expect("close the cell's handler");
                 assert_eq!(second.error, None);
                 state
                     .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Accepted)
                     .await
                     .expect("settle the second returned cell");
 
+                let handler = double
+                    .open_handler(admitted_scope())
+                    .await
+                    .expect("open the cell's handler");
                 let total = state
                     .execute_code(
-                        admitted_context("total").await,
+                        admitted_context(&double, &handler, "total"),
                         cell("finish(second_cell);"),
                     )
                     .await
                     .expect("execute code");
+                handler.close().await.expect("close the cell's handler");
                 assert_eq!(total.error, None);
                 assert_eq!(total.terminal_finish, Some(serde_json::json!(2)));
             });
@@ -663,23 +748,11 @@ mod tests {
             .expect("runtime")
             .block_on(async {
                 let state = RlmRuntimeState::new_for_tests().expect("runtime state");
-                state
-                    .execute_code(
-                        lash_core::testing::code_execution_context(
-                            crate::testing::memory_backend_ports().await,
-                        ),
-                        cell("let first = 1;"),
-                    )
+                execute_cell(&state, cell("let first = 1;"))
                     .await
                     .expect("first cell");
 
-                let overlapping = state
-                    .execute_code(
-                        lash_core::testing::code_execution_context(
-                            crate::testing::memory_backend_ports().await,
-                        ),
-                        cell("let second = 2;"),
-                    )
+                let overlapping = execute_cell(&state, cell("let second = 2;"))
                     .await
                     .expect_err("an unsettled response fences the next cell");
                 assert!(matches!(
@@ -692,13 +765,7 @@ mod tests {
                     .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Accepted)
                     .await
                     .expect("settle first response");
-                state
-                    .execute_code(
-                        lash_core::testing::code_execution_context(
-                            crate::testing::memory_backend_ports().await,
-                        ),
-                        cell("let second = 2;"),
-                    )
+                execute_cell(&state, cell("let second = 2;"))
                     .await
                     .expect("settlement releases the next cell");
             });
@@ -718,18 +785,15 @@ mod tests {
                     .expect("bound variables prompt");
                 assert!(!prompt.contains("scratch_note"));
 
-                state
-                    .execute_code(
-                        lash_core::testing::code_execution_context(
-                            crate::testing::memory_backend_ports().await,
-                        ),
-                        lash_core::ExecRequest {
-                            language: "typescript".to_string(),
-                            code: "let scratch_note = \"after execution\";".to_string(),
-                        },
-                    )
-                    .await
-                    .expect("execute code");
+                execute_cell(
+                    &state,
+                    lash_core::ExecRequest {
+                        language: "typescript".to_string(),
+                        code: "let scratch_note = \"after execution\";".to_string(),
+                    },
+                )
+                .await
+                .expect("execute code");
 
                 let prompt = state
                     .bound_variables_prompt()
@@ -748,26 +812,14 @@ mod tests {
             .block_on(async {
                 let state = RlmRuntimeState::new_for_tests().expect("runtime state");
 
-                state
-                    .execute_code(
-                        lash_core::testing::code_execution_context(
-                            crate::testing::memory_backend_ports().await,
-                        ),
-                        cell("let survives = 7;"),
-                    )
+                execute_cell(&state, cell("let survives = 7;"))
                     .await
                     .expect("execute accepted cell");
                 state
                     .settle_code_execution(lash_core::plugin::CodeExecutionDisposition::Accepted)
                     .await
                     .expect("accept first cell");
-                state
-                    .execute_code(
-                        lash_core::testing::code_execution_context(
-                            crate::testing::memory_backend_ports().await,
-                        ),
-                        cell("let cancelled_tail = 1;"),
-                    )
+                execute_cell(&state, cell("let cancelled_tail = 1;"))
                     .await
                     .expect("execute cell before late cancellation");
                 let rendered = state
@@ -797,33 +849,27 @@ mod tests {
             .expect("runtime")
             .block_on(async {
                 let state = RlmRuntimeState::new_for_tests().expect("runtime state");
-                let response = state
-                    .execute_code(
-                        lash_core::testing::code_execution_context(
-                            crate::testing::memory_backend_ports().await,
-                        ),
-                        lash_core::ExecRequest {
-                            language: "typescript".to_string(),
-                            code: "const answer: number = 40 + 2; finish(answer);".to_string(),
-                        },
-                    )
-                    .await
-                    .expect("selected TypeScript dialect must execute");
+                let response = execute_cell(
+                    &state,
+                    lash_core::ExecRequest {
+                        language: "typescript".to_string(),
+                        code: "const answer: number = 40 + 2; finish(answer);".to_string(),
+                    },
+                )
+                .await
+                .expect("selected TypeScript dialect must execute");
                 assert_eq!(response.error, None);
                 assert_eq!(response.terminal_finish, Some(serde_json::json!(42)));
 
-                let error = state
-                    .execute_code(
-                        lash_core::testing::code_execution_context(
-                            crate::testing::memory_backend_ports().await,
-                        ),
-                        lash_core::ExecRequest {
-                            language: "python".to_string(),
-                            code: "finish(42)".to_string(),
-                        },
-                    )
-                    .await
-                    .expect_err("unregistered language must be rejected");
+                let error = execute_cell(
+                    &state,
+                    lash_core::ExecRequest {
+                        language: "python".to_string(),
+                        code: "finish(42)".to_string(),
+                    },
+                )
+                .await
+                .expect_err("unregistered language must be rejected");
 
                 assert!(matches!(
                     error,
@@ -838,18 +884,15 @@ mod tests {
                 // same unregistered-language path as `python` — the cell is
                 // still refused, which is what `runbooks/RULES.md` treats as
                 // mandatory.
-                let inactive = state
-                    .execute_code(
-                        lash_core::testing::code_execution_context(
-                            crate::testing::memory_backend_ports().await,
-                        ),
-                        lash_core::ExecRequest {
-                            language: "lashlang".to_string(),
-                            code: "finish(42)".to_string(),
-                        },
-                    )
-                    .await
-                    .expect_err("the retired surface must be rejected");
+                let inactive = execute_cell(
+                    &state,
+                    lash_core::ExecRequest {
+                        language: "lashlang".to_string(),
+                        code: "finish(42)".to_string(),
+                    },
+                )
+                .await
+                .expect_err("the retired surface must be rejected");
 
                 assert!(
                     matches!(
@@ -919,13 +962,7 @@ mod tests {
 
     /// The value `finish baton` yields on the state's live execution.
     async fn live_baton(state: &RlmRuntimeState) -> serde_json::Value {
-        let response = state
-            .execute_code(
-                lash_core::testing::code_execution_context(
-                    crate::testing::memory_backend_ports().await,
-                ),
-                cell("finish(baton);"),
-            )
+        let response = execute_cell(state, cell("finish(baton);"))
             .await
             .expect("the baton cell runs");
         state
@@ -1062,15 +1099,10 @@ mod tests {
                     serde_json::json!("committed")
                 );
 
-                let mutated = state
-                    .execute_code(
-                        lash_core::testing::code_execution_context(
-                            crate::testing::memory_backend_ports().await,
-                        ),
-                        cell("let baton = \"uncommitted\";\nfinish(baton);"),
-                    )
-                    .await
-                    .expect("the mutating cell runs");
+                let mutated =
+                    execute_cell(&state, cell("let baton = \"uncommitted\";\nfinish(baton);"))
+                        .await
+                        .expect("the mutating cell runs");
                 assert_eq!(
                     mutated.terminal_finish,
                     Some(serde_json::json!("uncommitted"))
@@ -1123,15 +1155,10 @@ mod tests {
                     .expect("capture")
                     .expect("the RLM executor always holds a snapshotable state");
 
-                let mutated = state
-                    .execute_code(
-                        lash_core::testing::code_execution_context(
-                            crate::testing::memory_backend_ports().await,
-                        ),
-                        cell("let baton = \"uncommitted\";\nfinish(baton);"),
-                    )
-                    .await
-                    .expect("the mutating cell runs");
+                let mutated =
+                    execute_cell(&state, cell("let baton = \"uncommitted\";\nfinish(baton);"))
+                        .await
+                        .expect("the mutating cell runs");
                 assert_eq!(
                     mutated.terminal_finish,
                     Some(serde_json::json!("uncommitted"))

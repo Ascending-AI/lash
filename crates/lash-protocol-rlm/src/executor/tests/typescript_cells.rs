@@ -1,6 +1,8 @@
 use super::*;
 use lash_lashlang_runtime::TraceLanguageExecutionFailure;
 
+const SEED: u64 = 0x5_2c01;
+
 fn approval_request_definition() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
         "tool:approval_request",
@@ -54,8 +56,14 @@ impl lash_core::ToolProvider for PolicyDeniedToolProvider {
 fn typescript_cell_can_branch_on_policy_tool_failure_fields() {
     block_on(async {
         let definition = approval_request_definition();
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
         let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
-            crate::testing::memory_backend_ports().await,
+            crate::testing::double_ports(&double, &handler),
             Arc::new(PolicyDeniedToolProvider),
             lash_core::ToolCatalog::from_tool_definitions(vec![definition]),
         );
@@ -101,6 +109,7 @@ fn typescript_cell_can_branch_on_policy_tool_failure_fields() {
             crate::plugin::RlmChannel::Cell,
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
 
         assert_eq!(response.error, None);
         assert_eq!(
@@ -143,9 +152,19 @@ fn scalar_and_batch_tool_failures_keep_recorded_provenance_on_node_failed() {
             "await Promise.all([approval.request({ reason: 'batch' })]);",
         ] {
             let sink = Arc::new(FailureTraceSink::default());
+            let double =
+                crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default())
+                    .await;
+            let handler = double
+                .open_handler(lash_core::AdmittedScope::turn(
+                    lash_core::SessionId::from("failure-session"),
+                    lash_core::TurnId::from("failure-turn"),
+                ))
+                .await
+                .expect("open the cell's handler");
             let response = execute_code_with_channel_and_bounds(
                 &mut RlmExecutionState::for_engine("typescript"),
-                lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(crate::testing::memory_backend_ports().await, Arc::new(PolicyDeniedToolProvider), lash_core::ToolCatalog::from_tool_definitions(vec![approval_request_definition()]), lash_core::testing::exec_code_invocation(
+                lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(crate::testing::double_ports(&double, &handler), Arc::new(PolicyDeniedToolProvider), lash_core::ToolCatalog::from_tool_definitions(vec![approval_request_definition()]), lash_core::testing::exec_code_invocation(
                         "failure-session", "failure-turn", 0, 0, "failure-exec", "exec:failure",
                     )),
                 ExecRequest { language: "typescript".into(), code: code.into() },
@@ -161,6 +180,7 @@ fn scalar_and_batch_tool_failures_keep_recorded_provenance_on_node_failed() {
                 lashlang::ExecutionBounds::unbounded(),
                 crate::plugin::RlmChannel::Cell,
             ).await;
+            handler.close().await.expect("close the cell's handler");
             assert!(response.error.is_some(), "the effect must fail: {code}");
             let records = sink.0.lock().expect("trace sink lock");
             let failed = records
@@ -247,9 +267,15 @@ async fn execute_typescript_test_cell(
     mut state: RlmExecutionState,
     code: &str,
 ) -> (RlmExecutionState, ExecResponse) {
+    let double =
+        crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let handler = double
+        .open_handler(crate::testing::default_cell_scope())
+        .await
+        .expect("open the cell's handler");
     let response = execute_code_with_channel_and_bounds(
         &mut state,
-        lash_core::testing::code_execution_context(crate::testing::memory_backend_ports().await),
+        lash_core::testing::code_execution_context(crate::testing::double_ports(&double, &handler)),
         ExecRequest {
             language: "typescript".to_string(),
             code: code.to_string(),
@@ -264,6 +290,7 @@ async fn execute_typescript_test_cell(
         crate::plugin::RlmChannel::Cell,
     )
     .await;
+    handler.close().await.expect("close the cell's handler");
     (state, response)
 }
 
@@ -477,8 +504,14 @@ impl lash_core::ToolProvider for EchoToolProvider {
 #[test]
 fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
     block_on(async {
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
         let context = lash_core::testing::code_execution_context_with_tool_provider_and_catalog(
-            crate::testing::memory_backend_ports().await,
+            crate::testing::double_ports(&double, &handler),
             Arc::new(EchoToolProvider),
             lash_core::ToolCatalog::from_tool_definitions(vec![echo_definition()]),
         );
@@ -511,6 +544,7 @@ fn identical_aggregates_in_one_cell_mint_distinct_leaf_identities() {
             crate::plugin::RlmChannel::Cell,
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
 
         assert_eq!(response.error, None);
         assert_eq!(

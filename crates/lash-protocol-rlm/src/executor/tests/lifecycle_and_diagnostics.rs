@@ -1,5 +1,7 @@
 use super::*;
 
+const SEED: u64 = 0x5_2c09;
+
 #[derive(Clone, Copy, Debug)]
 enum HostSetupFailureSite {
     DeferredResolution,
@@ -108,8 +110,22 @@ fn colliding_host_catalog() -> lash_core::ToolCatalog {
 
 async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
     let mut state = RlmExecutionState::new();
-    let mut context =
-        lash_core::testing::code_execution_context(crate::testing::memory_backend_ports().await);
+    // The deferred-resolution site installs its own invocation, so its
+    // handler is opened for that invocation's turn.
+    let scope = match site {
+        HostSetupFailureSite::DeferredResolution => lash_core::AdmittedScope::turn(
+            lash_core::SessionId::from("host-setup-failure"),
+            lash_core::TurnId::from("turn-1"),
+        ),
+        _ => crate::testing::default_cell_scope(),
+    };
+    let double =
+        crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let handler = double
+        .open_handler(scope)
+        .await
+        .expect("open the cell's handler");
+    let mut context = None;
     let mut request = ExecRequest {
         language: "typescript".to_string(),
         code: "finish(1);".to_string(),
@@ -129,14 +145,14 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
                     observed_bindings: Default::default(),
                     enumerations: Default::default(),
                 });
-            context = lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(crate::testing::ports_over_host(failing_deferred_journal_host().await).await, provider, lash_core::ToolCatalog::default(), lash_core::testing::exec_code_invocation(
+            context = Some(lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(crate::testing::double_ports_over_layer(&double, &handler, Arc::new(FailingDeferredJournalLayer)), provider, lash_core::ToolCatalog::default(), lash_core::testing::exec_code_invocation(
                     "host-setup-failure",
                     "turn-1",
                     0,
                     0,
                     "exec-code",
                     "exec-code:host-setup-failure",
-                ));
+                )));
             request.code =
                 r#"finish(await web.fetch({ url: "https://example.test" }));"#.to_string();
             deferred_resolver = Some(Arc::new(BindingDeferredResolver {
@@ -145,9 +161,11 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
                 as lash_lashlang_runtime::SharedDeferredToolResolver);
         }
         HostSetupFailureSite::HostEnvironment => {
-            context = lash_core::testing::code_execution_context_with_tool_catalog(
-                crate::testing::memory_backend_ports().await,
-                colliding_host_catalog(),
+            context = Some(
+                lash_core::testing::code_execution_context_with_tool_catalog(
+                    crate::testing::double_ports(&double, &handler),
+                    colliding_host_catalog(),
+                ),
             );
         }
         HostSetupFailureSite::ArtifactStore => {
@@ -171,14 +189,17 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
             projection_resolver = Arc::new(FailingProjectionResolver);
         }
         HostSetupFailureSite::CancelledSetup => {
-            context = lash_core::testing::cancelled_code_execution_context(
-                crate::testing::memory_backend_ports().await,
-            );
+            context = Some(lash_core::testing::cancelled_code_execution_context(
+                crate::testing::double_ports(&double, &handler),
+            ));
             request.code = "missing =".to_string();
         }
     }
 
-    execute_code_unbounded_for_tests(
+    let context = context.unwrap_or_else(|| {
+        lash_core::testing::code_execution_context(crate::testing::double_ports(&double, &handler))
+    });
+    let response = execute_code_unbounded_for_tests(
         &mut state,
         context,
         request,
@@ -189,7 +210,9 @@ async fn inject_host_setup_failure(site: HostSetupFailureSite) -> ExecResponse {
         projection_resolver,
         RlmLashlangExecutionTraceConfig::default(),
     )
-    .await
+    .await;
+    handler.close().await.expect("close the cell's handler");
+    response
 }
 
 #[test]
@@ -332,9 +355,18 @@ pub(super) async fn execute_and_collect_inventory(
     language: &str,
 ) -> InventoryEvidence {
     let sink = Arc::new(RecordingTraceSink::default());
+    let double =
+        crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::turn(
+            lash_core::SessionId::from(format!("fig2365-{language}")),
+            lash_core::TurnId::from("turn-1"),
+        ))
+        .await
+        .expect("open the cell's handler");
     let context =
         lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
-            crate::testing::memory_backend_ports().await,
+            crate::testing::double_ports(&double, &handler),
             Arc::new(BindingRecordingDeferredProvider {
                 executions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 observed_bindings: Arc::new(std::sync::Mutex::new(Vec::new())),
@@ -373,6 +405,7 @@ pub(super) async fn execute_and_collect_inventory(
         crate::plugin::RlmChannel::Cell,
     )
     .await;
+    handler.close().await.expect("close the cell's handler");
     assert_eq!(
         response.error, None,
         "{language}: regression program executes"
@@ -456,11 +489,18 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                 "cancelledTail",
             );
             let mut state = RlmExecutionState::for_engine(language);
+            let double =
+                crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default())
+                    .await;
+            let handler = double
+                .open_handler(crate::testing::default_cell_scope())
+                .await
+                .expect("open the cell's handler");
             let successful = execute_code_with_channel_and_bounds(
                 &mut state,
-                lash_core::testing::code_execution_context(
-                    crate::testing::memory_backend_ports().await,
-                ),
+                lash_core::testing::code_execution_context(crate::testing::double_ports(
+                    &double, &handler,
+                )),
                 ExecRequest {
                     language: language.to_string(),
                     code: successful_code.to_string(),
@@ -475,14 +515,22 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
                 crate::plugin::RlmChannel::Cell,
             )
             .await;
+            handler.close().await.expect("close the cell's handler");
             assert_eq!(successful.error, None, "{language}: first cell");
 
+            let double =
+                crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default())
+                    .await;
+            let handler = double
+                .open_handler(crate::testing::default_cell_scope())
+                .await
+                .expect("open the cell's handler");
             let response = tokio::time::timeout(
                 std::time::Duration::from_secs(5),
                 execute_code_with_channel_and_bounds(
                     &mut state,
                     lash_core::testing::code_execution_context_cancelling_after_yield(
-                        crate::testing::memory_backend_ports().await,
+                        crate::testing::double_ports(&double, &handler),
                     )
                     .await,
                     ExecRequest {
@@ -501,6 +549,7 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
             )
             .await
             .unwrap_or_else(|_| panic!("{language}: running code did not observe cancellation"));
+            handler.close().await.expect("close the cell's handler");
 
             let error = response.error.expect("host cancellation is classified");
             assert_eq!(
@@ -538,19 +587,24 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
     });
 }
 
-/// On the SQL engine a turn-observing cell timer races the turn's
-/// cancellation gate inside its recorded execution (FIG-3672 P9): an
-/// `Immediate` stop ends a cell parked in a long `sleep` promptly, instead of
-/// after the timer.
+/// A turn-observing cell timer races the turn's cancellation gate inside
+/// its recorded execution (FIG-3672 P9): an `Immediate` stop ends a cell
+/// parked in a long `sleep` promptly, instead of after the timer.
 #[test]
-pub(super) fn an_immediate_stop_ends_a_cell_sleeping_on_the_sql_engine() {
+pub(super) fn an_immediate_stop_ends_a_sleeping_cell_promptly() {
     block_on(async {
         let stop = lash_core::CancellationToken::new();
         let mut state = RlmExecutionState::for_engine("typescript");
-        let execution = execute_code_with_channel_and_bounds(
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
+        let mut execution = Box::pin(execute_code_with_channel_and_bounds(
             &mut state,
             lash_core::testing::code_execution_context_stopped_on(
-                crate::testing::memory_backend_ports().await,
+                crate::testing::double_ports(&double, &handler),
                 stop.clone(),
             )
             .await,
@@ -566,8 +620,7 @@ pub(super) fn an_immediate_stop_ends_a_cell_sleeping_on_the_sql_engine() {
             RlmLashlangExecutionTraceConfig::default(),
             lashlang::ExecutionBounds::unbounded(),
             crate::plugin::RlmChannel::Cell,
-        );
-        tokio::pin!(execution);
+        ));
         assert!(
             tokio::time::timeout(std::time::Duration::from_millis(100), &mut execution)
                 .await
@@ -578,6 +631,7 @@ pub(super) fn an_immediate_stop_ends_a_cell_sleeping_on_the_sql_engine() {
         let response = tokio::time::timeout(std::time::Duration::from_secs(5), execution)
             .await
             .expect("an Immediate stop ends the sleeping cell promptly");
+        handler.close().await.expect("close the cell's handler");
         let error = response.error.expect("the stopped cell reports its stop");
         assert_eq!(error.kind, lash_core::CellFailureKind::Host);
     });
@@ -589,11 +643,18 @@ pub(super) fn cancellation_wins_over_pre_execution_compile_failures() {
         {
             let (language, code) = ("typescript", "let missing: number = ;");
             let mut state = RlmExecutionState::for_engine(language);
+            let double =
+                crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default())
+                    .await;
+            let handler = double
+                .open_handler(crate::testing::default_cell_scope())
+                .await
+                .expect("open the cell's handler");
             let response = execute_code_with_channel_and_bounds(
                 &mut state,
-                lash_core::testing::cancelled_code_execution_context(
-                    crate::testing::memory_backend_ports().await,
-                ),
+                lash_core::testing::cancelled_code_execution_context(crate::testing::double_ports(
+                    &double, &handler,
+                )),
                 ExecRequest {
                     language: language.to_string(),
                     code: code.to_string(),
@@ -608,6 +669,7 @@ pub(super) fn cancellation_wins_over_pre_execution_compile_failures() {
                 crate::plugin::RlmChannel::Cell,
             )
             .await;
+            handler.close().await.expect("close the cell's handler");
 
             let error = response.error.expect("cancelled setup is classified");
             assert_eq!(
@@ -631,11 +693,18 @@ pub(super) fn late_cancellation_settlement_rolls_back_only_the_uncommitted_cell(
             );
             let mut state = RlmExecutionState::for_engine(language);
             for code in [first_code, tail_code] {
+                let double =
+                    crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default())
+                        .await;
+                let handler = double
+                    .open_handler(crate::testing::default_cell_scope())
+                    .await
+                    .expect("open the cell's handler");
                 let response = execute_code_with_channel_and_bounds(
                     &mut state,
-                    lash_core::testing::code_execution_context(
-                        crate::testing::memory_backend_ports().await,
-                    ),
+                    lash_core::testing::code_execution_context(crate::testing::double_ports(
+                        &double, &handler,
+                    )),
                     ExecRequest {
                         language: language.to_string(),
                         code: code.to_string(),
@@ -650,6 +719,7 @@ pub(super) fn late_cancellation_settlement_rolls_back_only_the_uncommitted_cell(
                     crate::plugin::RlmChannel::Cell,
                 )
                 .await;
+                handler.close().await.expect("close the cell's handler");
                 assert_eq!(response.error, None, "{language}: `{code}`");
             }
 
@@ -685,11 +755,18 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
             );
             for acknowledge_first_capture in [false, true] {
                 let mut state = RlmExecutionState::for_engine(language);
+                let double =
+                    crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default())
+                        .await;
+                let handler = double
+                    .open_handler(crate::testing::default_cell_scope())
+                    .await
+                    .expect("open the cell's handler");
                 let first = execute_code_with_channel_and_bounds(
                     &mut state,
-                    lash_core::testing::code_execution_context(
-                        crate::testing::memory_backend_ports().await,
-                    ),
+                    lash_core::testing::code_execution_context(crate::testing::double_ports(
+                        &double, &handler,
+                    )),
                     ExecRequest {
                         language: language.to_string(),
                         code: first_code.clone(),
@@ -704,6 +781,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                     crate::plugin::RlmChannel::Cell,
                 )
                 .await;
+                handler.close().await.expect("close the cell's handler");
                 assert_eq!(first.error, None, "{language}: large first cell");
                 let first_snapshot = state
                     .snapshot_execution_state()
@@ -713,11 +791,18 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                     state.acknowledge_execution_state_capture();
                 }
 
+                let double =
+                    crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default())
+                        .await;
+                let handler = double
+                    .open_handler(crate::testing::default_cell_scope())
+                    .await
+                    .expect("open the cell's handler");
                 let tail = execute_code_with_channel_and_bounds(
                     &mut state,
-                    lash_core::testing::code_execution_context(
-                        crate::testing::memory_backend_ports().await,
-                    ),
+                    lash_core::testing::code_execution_context(crate::testing::double_ports(
+                        &double, &handler,
+                    )),
                     ExecRequest {
                         language: language.to_string(),
                         code: tail_code.to_string(),
@@ -732,6 +817,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                     crate::plugin::RlmChannel::Cell,
                 )
                 .await;
+                handler.close().await.expect("close the cell's handler");
                 assert_eq!(tail.error, None, "{language}: tail cell");
                 state.cancel_code_execution();
 
@@ -1095,9 +1181,18 @@ pub(super) async fn execute_continue_as_with_trace_sink(
         "exec-code-3",
         "exec-code:3",
     );
+    let double =
+        crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::turn(
+            lash_core::SessionId::from("test-session"),
+            lash_core::TurnId::from("turn-7"),
+        ))
+        .await
+        .expect("open the cell's handler");
     let context =
         lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
-            crate::testing::memory_backend_ports().await,
+            crate::testing::double_ports(&double, &handler),
             Arc::new(crate::control_tools::RlmControlToolsProvider {
                 vocabulary: crate::dialect::DialectPromptVocabulary::default(),
             }),
@@ -1123,6 +1218,7 @@ pub(super) async fn execute_continue_as_with_trace_sink(
         },
     )
     .await;
+    handler.close().await.expect("close the cell's handler");
     assert_eq!(response.error, None);
     assert_eq!(response.calls.len(), 1);
     response
@@ -1213,9 +1309,15 @@ pub(super) async fn execute_test_code(
     mut state: RlmExecutionState,
     code: String,
 ) -> RlmExecutionState {
+    let double =
+        crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let handler = double
+        .open_handler(crate::testing::default_cell_scope())
+        .await
+        .expect("open the cell's handler");
     let response = Box::pin(execute_code_unbounded_for_tests(
         &mut state,
-        lash_core::testing::code_execution_context(crate::testing::memory_backend_ports().await),
+        lash_core::testing::code_execution_context(crate::testing::double_ports(&double, &handler)),
         ExecRequest {
             language: "typescript".to_string(),
             code,
@@ -1228,6 +1330,7 @@ pub(super) async fn execute_test_code(
         RlmLashlangExecutionTraceConfig::default(),
     ))
     .await;
+    handler.close().await.expect("close the cell's handler");
     assert_eq!(response.error, None, "test TypeScript execution failed");
     state
 }
@@ -1345,8 +1448,14 @@ pub(super) async fn execute_with_host_environment(
     // Triggers are catalogue presence rather than an ability now (FIG-2999), so
     // the harness always supplies the store: a program that never registers one
     // never reaches it.
+    let double =
+        crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let handler = double
+        .open_handler(crate::testing::default_cell_scope())
+        .await
+        .expect("open the cell's handler");
     let ctx = lash_core::testing::code_execution_context_with_trigger_store(
-        crate::testing::memory_backend_ports().await,
+        crate::testing::double_ports(&double, &handler),
         crate::testing::memory_trigger_store().await,
         crate::testing::memory_process_registry().await,
     );
@@ -1355,7 +1464,7 @@ pub(super) async fn execute_with_host_environment(
         lashlang::LashlangLanguageFeatures::default(),
         resources,
     );
-    execute_code_with_bounds(
+    let response = execute_code_with_bounds(
         &mut state,
         ctx,
         ExecRequest {
@@ -1373,7 +1482,9 @@ pub(super) async fn execute_with_host_environment(
             lashlang::ExecutionBound::Unbounded,
         ),
     )
-    .await
+    .await;
+    handler.close().await.expect("close the cell's handler");
+    response
 }
 
 #[test]
@@ -1381,11 +1492,17 @@ pub(super) async fn execute_with_host_environment(
 pub(super) fn confidence_execution_fails_loudly_on_bound_exhaustion() {
     let _mode = EXECUTION_BOUND_EXHAUSTION_MODE.lock_recover();
     block_on(async {
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
         let _ = execute_code_with_bounds(
             &mut RlmExecutionState::new(),
-            lash_core::testing::code_execution_context(
-                crate::testing::memory_backend_ports().await,
-            ),
+            lash_core::testing::code_execution_context(crate::testing::double_ports(
+                &double, &handler,
+            )),
             ExecRequest {
                 language: "typescript".to_string(),
                 code: "let i = 0;\nwhile (i < 5000) { i = i + 1; }\nfinish(i);".to_string(),
@@ -1402,6 +1519,7 @@ pub(super) fn confidence_execution_fails_loudly_on_bound_exhaustion() {
             ),
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
     });
 }
 
@@ -1410,11 +1528,17 @@ pub(super) fn exhaustion_response_remains_testable_when_loudness_is_temporarily_
     let _mode = EXECUTION_BOUND_EXHAUSTION_MODE.lock_recover();
     block_on(async {
         let previous = set_execution_bound_exhaustion_loud(false);
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
         let result = execute_code_with_bounds(
             &mut RlmExecutionState::new(),
-            lash_core::testing::code_execution_context(
-                crate::testing::memory_backend_ports().await,
-            ),
+            lash_core::testing::code_execution_context(crate::testing::double_ports(
+                &double, &handler,
+            )),
             ExecRequest {
                 language: "typescript".to_string(),
                 code: "const value = 1;".to_string(),
@@ -1431,6 +1555,7 @@ pub(super) fn exhaustion_response_remains_testable_when_loudness_is_temporarily_
             ),
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
         set_execution_bound_exhaustion_loud(previous);
         assert!(
             result
@@ -1458,11 +1583,17 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
             )
         };
 
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
         let first = execute_code_unbounded_for_tests(
             &mut state,
-            lash_core::testing::code_execution_context(
-                crate::testing::memory_backend_ports().await,
-            ),
+            lash_core::testing::code_execution_context(crate::testing::double_ports(
+                &double, &handler,
+            )),
             request(),
             crate::testing::memory_artifact_store().await,
             surface(),
@@ -1472,17 +1603,24 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
         assert!(first.error.is_none(), "{:?}", first.error);
         assert_eq!(first.terminal_finish, Some(serde_json::json!(1)));
         let first_stats = state.linked_programs.stats();
         assert_eq!(first_stats.hits, 0);
         assert_eq!(first_stats.misses, 1);
 
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
         let second = execute_code_unbounded_for_tests(
             &mut state,
-            lash_core::testing::code_execution_context(
-                crate::testing::memory_backend_ports().await,
-            ),
+            lash_core::testing::code_execution_context(crate::testing::double_ports(
+                &double, &handler,
+            )),
             request(),
             crate::testing::memory_artifact_store().await,
             surface(),
@@ -1492,6 +1630,7 @@ pub(super) fn execute_code_reuses_linked_program_cache_for_repeat_source() {
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
         assert!(second.error.is_none(), "{:?}", second.error);
         assert_eq!(second.terminal_finish, Some(serde_json::json!(1)));
         let second_stats = state.linked_programs.stats();

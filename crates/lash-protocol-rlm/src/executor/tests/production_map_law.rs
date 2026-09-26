@@ -11,6 +11,8 @@
 
 use super::*;
 
+const SEED: u64 = 0x5_2c06;
+
 #[derive(Default)]
 struct RecordingSink(Mutex<Vec<lash_core::facade_support::TraceRecord>>);
 
@@ -93,9 +95,18 @@ finish(doubled);
 
 async fn run_cell(source: &str) -> Vec<lash_core::facade_support::TraceRecord> {
     let sink = Arc::new(RecordingSink::default());
+    let double =
+        crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::turn(
+            lash_core::SessionId::from("fig3571-l1"),
+            lash_core::TurnId::from("turn-1"),
+        ))
+        .await
+        .expect("open the cell's handler");
     let context =
         lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
-            crate::testing::memory_backend_ports().await,
+            crate::testing::double_ports(&double, &handler),
             Arc::new(BindingRecordingDeferredProvider {
                 executions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
                 observed_bindings: Arc::new(std::sync::Mutex::new(Vec::new())),
@@ -138,6 +149,7 @@ async fn run_cell(source: &str) -> Vec<lash_core::facade_support::TraceRecord> {
         crate::plugin::RlmChannel::Cell,
     )
     .await;
+    handler.close().await.expect("close the cell's handler");
     assert_eq!(response.error, None, "the L1 corpus cell executes");
     sink.0.lock().expect("trace sink lock").clone()
 }
