@@ -296,10 +296,11 @@ impl LashCore {
     /// prompt, tracing, and other live turn policy are deliberately excluded.
     pub async fn session_administration(&self) -> lash_core::SessionAdministration {
         let ports = self.substrate_slot.ports().await;
+        let queued = ports.queued_port();
         let resolved_env = self
             .env
             .clone()
-            .with_work_ports(Some(ports.process.clone()), ports.queued_port());
+            .with_work_ports(Some(ports.process.clone()), Arc::clone(&queued));
         lash_core::SessionAdministration::new(
             Arc::clone(&self.store_factory),
             Arc::clone(&resolved_env.core.control.effect_host),
@@ -307,6 +308,11 @@ impl LashCore {
             Some(resolved_env.core.trigger_store()),
             Arc::clone(&resolved_env.core.durability.process_env_store),
             self.host_process_engines.clone(),
+            lash_core::session_close::SessionCloseServices {
+                work: queued,
+                scopes: Arc::clone(&resolved_env.core.control.scope_close),
+                clock: Arc::clone(&resolved_env.core.clock),
+            },
         )
     }
 
@@ -507,56 +513,22 @@ impl LashCore {
     ) -> Result<SessionDeleteReport> {
         let session_id = context.session_id().clone();
         let administration = context.administration();
-        match lash_core::facade_support::ScopedEffectControllerFacadeOps::execution_scope(
-            context.controller(),
-        ) {
-            lash_core::ExecutionScope::SessionDelete {
-                session_id: scoped_session_id,
-            } if scoped_session_id == session_id => {}
-            _ => {
-                return Err(lash_core::RuntimeError::new(
-                    lash_core::RuntimeErrorCode::SessionDeleteScopeMismatch,
-                    "session deletion requires a matching SessionDelete scope",
-                )
-                .into());
-            }
-        }
-        let pins = administration
-            .store_factory()
-            .pending_turn_cancel_closure_pins(&session_id)
+        // Every refusal of a deletion is asked inside the close, before its
+        // recorded step, the point of no return (FIG-3600 S7, FIG-3607 item
+        // 7): the close ends the session's roots and stops it accepting and
+        // admitting, and its engine half releases the roots and closes the
+        // session's scopes, or is retained for reconciliation. From here the
+        // deletion only retries: nothing below refuses.
+        lash_core::session_close::close_session(&context)
             .await
-            .map_err(EmbedError::from)?;
-        if !pins.is_empty() {
-            return Err(lash_core::StoreError::TurnCancelClosureLifecyclePinned {
-                session_id: session_id.clone(),
-                pending_count: pins.len(),
-            }
-            .into());
-        }
-        // ADR 0099 §7 / W16: an accepted or closing effect group keeps its
-        // session until it settles. Asked before anything is deleted — the
-        // journal retirement below refuses the same pins, but only after the
-        // session's processes, subscriptions, waits and store rows are gone.
-        if let Some(closing) = administration.effect_host().effect_group_closing() {
-            let group_pins = closing
-                .read_session_pins(&session_id)
-                .await
-                .map_err(|err| EmbedError::SessionDeleteProcess {
-                    session_id: session_id.clone(),
-                    message: err.to_string(),
-                })?;
-            if let Some(first) = group_pins.first() {
-                return Err(lash_core::RuntimeError::new(
-                    lash_core::RuntimeErrorCode::EffectGroupLifecyclePinned,
-                    format!(
-                        "session `{session_id}` still owns {} effect group(s) that are live or \
-                         closing (first: `{first}`); session deletion is refused until they settle",
-                        group_pins.len()
-                    ),
-                )
-                .into());
-            }
-        }
+            .map_err(|error| match error {
+                lash_core::session_close::SessionCloseError::Store(error) => {
+                    EmbedError::from(error)
+                }
+                lash_core::session_close::SessionCloseError::Runtime(error) => {
+                    EmbedError::from(error)
+                }
+            })?;
         let process = if let Some(process) = administration.process() {
             #[expect(
                 clippy::expect_used,

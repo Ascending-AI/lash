@@ -5,6 +5,17 @@
 
 use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
 
+lash_conformance::session_close_tests!({
+    let harness =
+        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let host = harness.endpoint_host();
+    let stores = harness.law_stores();
+    let runner = harness.turn_runner();
+    let prefix: &'static str =
+        Box::leak(format!("restate-session-close-{}", harness.run_nonce()).into_boxed_str());
+    (harness, prefix, host, stores, Some(runner))
+});
+
 // The drive's admission laws (FIG-3600, ADR 0105 §2): admission and seal
 // are recorded steps on the engine's journal, so a redelivered handler
 // replays them instead of re-deciding from the store.

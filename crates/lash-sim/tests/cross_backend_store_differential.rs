@@ -262,9 +262,9 @@ enum StoreOperation {
     /// Enter deletion through `LashCore::delete_session` to exercise the store
     /// tombstone and subsequent admission refusal. The lifecycle backend's
     /// store set supplies its real process registry and trigger store, and the
-    /// recording effect host runs the process-deletion effect through the
-    /// local executor it is handed rather than synthesizing an outcome, so
-    /// this leg covers the full delete path an embedder sees.
+    /// recording effect host runs session-close and process-deletion effects
+    /// through their local executors, so this leg covers the full delete path
+    /// an embedder sees.
     DeleteSession,
     AttemptAdmission,
     CreateHandle {

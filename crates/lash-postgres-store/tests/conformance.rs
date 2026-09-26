@@ -82,6 +82,8 @@ use lash_postgres_store::{PostgresStorage, PostgresStoreConfig};
 
 mod support;
 
+#[path = "conformance/session_close.rs"]
+mod session_close;
 #[path = "conformance/session_delete_blob_reclaim.rs"]
 mod session_delete_blob_reclaim;
 #[path = "conformance/session_ingress.rs"]

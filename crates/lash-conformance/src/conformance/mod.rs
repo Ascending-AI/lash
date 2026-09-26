@@ -91,6 +91,7 @@ mod runtime_persistence;
 mod runtime_persistence_state_machine;
 mod segment_redrive;
 mod served_process_start;
+mod session_close;
 mod session_delete_blob_reclaim;
 mod session_execution_lease_renewal;
 mod session_graph_append;
