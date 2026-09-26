@@ -12,8 +12,8 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "session_ingress";
 
-/// The session-owned allocation counter, shared by every ingress producer.
-pub const SEQUENCE_TABLE: &str = "session_ingress_sequence";
+/// Column ownership for the session allocation counter.
+pub mod sequence;
 
 /// Every column a row decoder reads, in the order both backends index.
 ///

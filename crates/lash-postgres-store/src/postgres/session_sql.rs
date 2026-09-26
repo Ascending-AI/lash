@@ -923,6 +923,11 @@ lash_store_sql::statements! {
              FROM deleted_turn_parks AS park
              CROSS JOIN deleted_turn_park_clock AS clock
          ),
+         deleted_session_ingress_sequence AS (
+             DELETE FROM session_ingress_sequence
+             WHERE session_id = ANY(?1)
+             RETURNING session_id
+         ),
          deleted_session_ingress AS (
              DELETE FROM session_ingress
              WHERE session_id = ANY(?1)
@@ -984,6 +989,7 @@ lash_store_sql::statements! {
               + (SELECT count(*) FROM deleted_pending_turn_inputs)
               + (SELECT count(*) FROM deleted_turn_parks)
               + (SELECT count(*) FROM deleted_session_ingress)
+              + (SELECT count(*) FROM deleted_session_ingress_sequence)
               + (SELECT count(*) FROM deleted_turn_cancel_closures)
               + (SELECT count(*) FROM deleted_turn_cancellation_bindings)
               + (SELECT count(*) FROM deleted_session_execution_leases)
