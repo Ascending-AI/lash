@@ -55,6 +55,51 @@ const FLEET_FORMAT_TABLE_DDL: &str = "CREATE TABLE IF NOT EXISTS lash_fleet_form
     CONSTRAINT ck_fleet_format_singleton CHECK (singleton)
 );";
 
+/// The 139→140 expand step (FIG-3600 S7): the logical-root family. The
+/// session head gains its closing intent, a park its engine reference and
+/// resume intent, a park event the `redrive_requested` kind, and the store
+/// gains `lash_session_roots`, `lash_session_root_inputs` and
+/// `lash_control_intents` with their indexes, each stated as `schema.sql`
+/// states it. Every statement is guarded, so a replay after a crash is a
+/// no-op.
+const LOGICAL_ROOT_FAMILY_DDL: &str = "ALTER TABLE lash_session_meta ADD COLUMN IF NOT EXISTS closing_intent BIGINT;
+ALTER TABLE lash_turn_parks ADD COLUMN IF NOT EXISTS engine_ref TEXT;
+ALTER TABLE lash_turn_parks ADD COLUMN IF NOT EXISTS resume_intent BIGINT;
+ALTER TABLE lash_turn_park_events DROP CONSTRAINT IF EXISTS ck_turn_park_events_kind;
+ALTER TABLE lash_turn_park_events ADD CONSTRAINT ck_turn_park_events_kind CHECK (kind IN ('parked', 'unparked', 'cancelled', 'redrive_requested'));
+CREATE TABLE IF NOT EXISTS lash_session_roots (
+    session_id TEXT NOT NULL,
+    root TEXT NOT NULL,
+    terminal_kind TEXT,
+    terminal_cause_json TEXT,
+    terminal_head_revision BIGINT,
+    terminal_at_ms BIGINT,
+    PRIMARY KEY (session_id, root),
+    CONSTRAINT ck_session_roots_terminal CHECK ((terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL))
+);
+CREATE TABLE IF NOT EXISTS lash_session_root_inputs (
+    session_id TEXT NOT NULL,
+    input_id TEXT NOT NULL,
+    root TEXT NOT NULL,
+    PRIMARY KEY (session_id, input_id)
+);
+CREATE TABLE IF NOT EXISTS lash_control_intents (
+    intent_id BIGSERIAL PRIMARY KEY,
+    session_id TEXT NOT NULL,
+    format BIGINT NOT NULL,
+    kind TEXT NOT NULL CONSTRAINT ck_control_intents_kind CHECK (kind IN ('redrive', 'cancel', 'fork', 'close_session')),
+    kind_json TEXT NOT NULL,
+    state TEXT NOT NULL CONSTRAINT ck_control_intents_state CHECK (state IN ('pending', 'acknowledged', 'superseded', 'failed_retryable', 'failed')),
+    state_json TEXT NOT NULL,
+    attempts BIGINT NOT NULL,
+    created_at_ms BIGINT NOT NULL,
+    engine_ref TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_lash_control_intents_open
+    ON lash_control_intents(intent_id) WHERE state IN ('pending', 'failed_retryable');
+CREATE INDEX IF NOT EXISTS idx_lash_control_intents_session
+    ON lash_control_intents(session_id, kind);";
+
 /// One expand-phase step this build's migrate runner can apply.
 ///
 /// `from_version`/`to_version` chain steps together so planning can walk the
@@ -84,7 +129,8 @@ struct ExpandMigration {
 /// removed or edited — the ledger names them permanently.
 /// Component 139 (FIG-3607) re-keys the process relations, which is no
 /// expand step, so nothing chains from 138: a 133–138 catalog plans to the
-/// typed recreate refusal.
+/// typed recreate refusal. The sixth step adds the logical-root family and
+/// carries 139 to 140 (FIG-3600).
 static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
     ExpandMigration {
         id: "0134-migrations-ledger",
@@ -115,6 +161,12 @@ static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
         from_version: 137,
         to_version: 138,
         statements: "ALTER TABLE lash_session_meta ADD COLUMN IF NOT EXISTS drive_root_start TEXT",
+    },
+    ExpandMigration {
+        id: "0140-logical-root-family",
+        from_version: 139,
+        to_version: 140,
+        statements: LOGICAL_ROOT_FAMILY_DDL,
     },
 ];
 
@@ -717,6 +769,25 @@ mod tests {
                     migration.id
                 );
             }
+        }
+    }
+
+    /// A step that alters tables before it creates any still creates each
+    /// object exactly as `schema.sql` states it: every `CREATE` statement of
+    /// the logical-root step appears verbatim in the artifact.
+    #[test]
+    fn the_logical_root_step_creates_what_the_schema_artifact_states() {
+        let created: Vec<&str> = LOGICAL_ROOT_FAMILY_DDL
+            .split(";\n")
+            .map(|statement| statement.trim_end_matches(';'))
+            .filter(|statement| statement.starts_with("CREATE"))
+            .collect();
+        assert_eq!(created.len(), 5, "three tables and two indexes");
+        for statement in created {
+            assert!(
+                SCHEMA_DDL.contains(statement),
+                "schema.sql does not contain the logical-root step's DDL verbatim: {statement}"
+            );
         }
     }
 

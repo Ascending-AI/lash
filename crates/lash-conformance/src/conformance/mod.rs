@@ -84,6 +84,7 @@ mod release_stamp;
 mod restored_claim_cede;
 mod retention;
 mod root_start_marker;
+mod root_terminal;
 mod run_shape;
 mod runtime_persistence;
 mod runtime_persistence_state_machine;

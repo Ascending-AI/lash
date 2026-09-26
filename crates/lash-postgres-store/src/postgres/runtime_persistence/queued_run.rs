@@ -285,6 +285,15 @@ impl PostgresSessionStore {
             return Ok(next);
         }
         settle_run_members_tx(&mut tx, fence, &settlement.scope).await?;
+        // A failed or empty settlement ends the run's root without a head
+        // commit: its evidence is written here (FIG-3600 S7).
+        if let Some(terminal) = lash_core_execution::store::settled_queued_root_terminal(
+            &fence.session_id,
+            &settlement,
+            self.clock.timestamp_ms(),
+        ) {
+            crate::session_roots::write_root_terminal_conn(&mut tx, &terminal).await?;
+        }
         // Settling the run settles the turn it had parked (FIG-3586).
         let released = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()

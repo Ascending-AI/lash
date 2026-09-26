@@ -50,8 +50,29 @@ lash_conformance::turn_config_tests!({
     (backend, prefix, effect_host, stores, turn_runner)
 });
 
-lash_conformance::drive_admission_tests!({
+// The in-process tier redelivers no drive: a root whose scope close failed
+// after its evidence committed leaves no work for a later drive to admit, so
+// the close's at-least-once retry is an engine's, and
+// `root_scope_close_runs_after_terminal_evidence_at_least_once` runs on the
+// Restate double only. Reconciling an unacknowledged close in process needs
+// the scope owner's own closed-scope record (FIG-3607 PR-2).
+lash_conformance::drive_admission_tests!(@laws [] {
     let (backend, prefix, effect_host, stores, _process_work, turn_runner, _after_law) =
         sqlite_turn_runner_fixture().await;
     (backend, prefix, effect_host, stores, turn_runner)
-});
+}; [
+    (one_authorized_drive_per_session, "drive-one-authorized"),
+    (one_drive_claims_many_items, "drive-many-items"),
+    (claim_identity_is_idempotent_within_ownership, "drive-claim-idempotent"),
+    (replay_cannot_mint_ownership, "drive-replay-ownership"),
+    (admission_precedes_first_effect, "drive-admission-first"),
+    (reset_before_admission_admits_fresh, "drive-reset-admission"),
+    (parked_root_blocks_admission, "drive-parked-root"),
+    (fence_is_not_in_the_envelope_hash, "drive-fence-envelope"),
+    (every_driver_turn_is_owned_by_its_root, "drive-owned-root"),
+    (a_store_fault_at_the_root_claim_is_retried_not_recorded, "drive-claim-fault-retried"),
+    (a_committed_root_answers_its_terminal_by_root, "drive-root-answered"),
+    (a_host_id_naming_a_terminal_root_is_answered_not_rerun, "drive-root-adopted"),
+    (a_root_whose_admission_a_successor_sealed_commits_nothing, "drive-root-superseded"),
+    (a_queued_root_settled_without_a_commit_closes_after_its_evidence, "drive-root-settled-close"),
+]);

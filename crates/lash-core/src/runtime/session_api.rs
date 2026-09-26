@@ -795,7 +795,7 @@ impl LashRuntime {
         // a successful frame switch: a compaction that produced no summary or
         // failed outright can still have staged billed usage into the shared
         // ledger, and this boundary is the only place it persists.
-        let settlement = self.settle_pending_compaction_usage().await;
+        let settlement = Box::pin(self.settle_pending_compaction_usage()).await;
         match (outcome, settlement) {
             (Ok(opened), Ok(())) => Ok(opened),
             (Ok(_), Err(err)) | (Err(err), Ok(())) => Err(err),
@@ -1114,10 +1114,10 @@ impl LashRuntime {
         &mut self,
         patch: super::ApplyConfigPatch,
     ) -> Result<crate::runtime::SessionCommandSettlement, RuntimeError> {
-        self.submit_apply_config_patch_with_idempotency_key(
+        Box::pin(self.submit_apply_config_patch_with_idempotency_key(
             patch,
             format!("config-patch:{}", uuid::Uuid::new_v4()),
-        )
+        ))
         .await
     }
 

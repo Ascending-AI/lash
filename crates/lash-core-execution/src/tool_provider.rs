@@ -122,6 +122,21 @@ pub(crate) enum ToolExecutionRoute {
     },
 }
 
+/// The logical root an admitted scope runs under: a turn scope is its root's
+/// own; a queue drain names its queued root by its drain id until queued roots
+/// run under turn scopes (FIG-3600 S8).
+fn logical_root_of(scope: &crate::ExecutionScope) -> Option<crate::TurnId> {
+    match scope {
+        crate::ExecutionScope::Turn { turn_id, .. } => Some(turn_id.clone()),
+        crate::ExecutionScope::QueueDrain { drain_id, .. } => {
+            Some(crate::TurnId::from(drain_id.as_str()))
+        }
+        crate::ExecutionScope::Process { .. }
+        | crate::ExecutionScope::SessionDelete { .. }
+        | crate::ExecutionScope::RuntimeOperation { .. } => None,
+    }
+}
+
 /// Integrator class 3 sealed, controller-free environment for a recorded leaf attempt.
 #[derive(Clone)]
 pub struct AttemptContext<'run> {
@@ -172,6 +187,13 @@ pub struct AttemptContext<'run> {
 }
 
 impl<'run> AttemptContext<'run> {
+    /// The logical root this attempt runs under, read from the admitted
+    /// scope it was recorded in (FIG-3607 item 6): never a live read. `None`
+    /// outside a session turn (a process body, a runtime operation).
+    pub fn logical_root(&self) -> Option<crate::TurnId> {
+        logical_root_of(self.parent_scope.scope())
+    }
+
     /// The runtime-owned parent scope for an explicit child lifecycle
     /// declaration.
     ///
@@ -699,6 +721,13 @@ impl<'run> ToolContextBuilder<'run> {
 }
 
 impl<'run> ToolContext<'run> {
+    /// The logical root this call runs under, read from the admitted scope
+    /// of its effect controller (FIG-3607 item 6): never a live read. `None`
+    /// outside a session turn (a process body, a runtime operation).
+    pub fn logical_root(&self) -> Option<crate::TurnId> {
+        logical_root_of(self.effect_controller.scoped().admitted_scope().scope())
+    }
+
     pub(crate) fn install_prederived_completion_key(&self, key: Option<crate::AwaitEventKey>) {
         if let Some(key) = key {
             let _ = self.completion.store(key);

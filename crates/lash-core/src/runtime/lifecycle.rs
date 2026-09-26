@@ -330,6 +330,7 @@ impl LashRuntime {
             unreported_usage_attempts: outstanding_unreported_attempts,
             journaled_drive_claims: std::collections::BTreeSet::new(),
             admitted_turn_index: None,
+            drive_root: None,
             process_sync_needed: Arc::new(AtomicBool::new(false)),
             turn_phase_probe: None,
             resident_session: ResidentSessionContinuity::fresh(),

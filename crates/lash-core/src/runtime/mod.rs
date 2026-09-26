@@ -558,4 +558,8 @@ pub struct LashRuntime {
     /// physical turn is addressed under the recorded index and never re-reads
     /// the head a replay's live store may have moved past.
     pub(crate) admitted_turn_index: Option<usize>,
+    /// The admitted root this runtime is running, with the fence its seal
+    /// raised (FIG-3600 S7): its commits present the fence, and the commit of
+    /// its final physical turn writes its terminal evidence.
+    pub(crate) drive_root: Option<Box<crate::runtime::drive::DriveRootRun>>,
 }

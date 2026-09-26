@@ -126,5 +126,17 @@
   "lash_sessions.pending_follow_on_json": {
     "verdict": "deliberately-excluded",
     "reason": "PendingFollowOn is fenced by the store component version (reject and recreate) and decoded through its shared store type with deny_unknown_fields; it is the same head fact on both backends (ADR 0101 §3)."
+  },
+  "lash_session_roots.terminal_cause_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "RootTerminalCause is decoded through its shared store type beside the terminal_kind column it must agree with; a disagreement is refused as corrupt. It is fenced by the store component version with the rest of the logical-root family (FIG-3600 S7)."
+  },
+  "lash_control_intents.kind_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "ControlIntentKind rides a row stamped with CONTROL_INTENT_FORMAT, a registered durable surface that refuses any other format before the payload is decoded."
+  },
+  "lash_control_intents.state_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "ControlIntentState rides a row stamped with CONTROL_INTENT_FORMAT, a registered durable surface that refuses any other format before the payload is decoded; the indexed state column carries its code."
   }
 }

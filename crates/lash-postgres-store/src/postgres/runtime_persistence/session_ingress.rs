@@ -197,7 +197,7 @@ async fn drive_epoch_tx(
 
 /// Refuse `fence` unless it is the session's current drive fence, read in the
 /// caller's transaction.
-async fn require_fence_tx(
+pub(super) async fn require_fence_tx(
     tx: &mut PgTx<'_>,
     session_id: &SessionId,
     fence: &DriveFence,

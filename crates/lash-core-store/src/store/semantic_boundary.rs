@@ -104,6 +104,8 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         session_id,
         expected_head_revision: _, // CAS is excluded from replay identity
         session_execution_lease_fence: _, // transaction predicate, not content
+        drive_fence: _,            // transaction predicate, not content
+        root_terminal: _,          // a turn root's end; no boundary carries one
         release_session_execution_lease: _, // transport authority
         config,
         current_frame_node_id: _, // derived from the graph leaf

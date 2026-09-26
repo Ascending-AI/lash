@@ -92,6 +92,22 @@ pub(super) enum SurfaceMethod {
     /// follow-on as committed, read on an unowed head, beside a live fact,
     /// and after the fact's clearing commit.
     LoadPendingFollowOn,
+    /// [`RootStore::root_terminal`](lash_core::store::RootStore::root_terminal)
+    /// of the sweep's drain root: none before its settlement, and the failed
+    /// settlement's evidence after it (FIG-3600 S7).
+    RootTerminal,
+    /// [`RootStore::root_binding`](lash_core::store::RootStore::root_binding)
+    /// of the sweep's next-turn input.
+    RootBinding,
+    /// [`RootStore::root_of_input`](lash_core::store::RootStore::root_of_input)
+    /// of the sweep's next-turn input.
+    RootOfInput,
+    /// [`RootStore::bind_root_inputs`](lash_core::store::RootStore::bind_root_inputs)
+    /// of the sweep's next-turn input: to the sweep root, and then to another
+    /// root (`conflicting`), which every backend refuses without residue.
+    BindRootInputs {
+        conflicting: bool,
+    },
     AbortUnknownAttachmentWrite,
     CommitUnknownAttachmentRefs,
     ForgetUnknownAttachment,
@@ -150,6 +166,11 @@ impl SurfaceMethod {
                 "surface:raise_pending_follow_on_attempts_unowed"
             }
             Self::LoadPendingFollowOn => "surface:load_pending_follow_on",
+            Self::RootTerminal => "surface:root_terminal",
+            Self::RootBinding => "surface:root_binding",
+            Self::RootOfInput => "surface:root_of_input",
+            Self::BindRootInputs { conflicting: false } => "surface:bind_root_inputs",
+            Self::BindRootInputs { conflicting: true } => "surface:bind_root_inputs_conflicting",
             Self::AbortUnknownAttachmentWrite => "surface:abort_attachment_write_unknown",
             Self::CommitUnknownAttachmentRefs => "surface:commit_refs_unknown",
             Self::ForgetUnknownAttachment => "surface:forget_attachment_unknown",
@@ -219,6 +240,10 @@ const SURFACE_COMMITTED_TURN_ID: &str = "fig-2841-surface-committed-turn";
 /// and whatever a backend answers, the no-residue law still applies.
 const UNKNOWN_ATTACHMENT_ID: &str = "fig-2841-unknown-attachment";
 const UNKNOWN_INPUT_ID: &str = "fig-2841-unknown-input";
+/// The root the sweep binds its next-turn input to, and the other root a
+/// second binding names.
+const SURFACE_ROOT_ID: &str = "fig-3600-root";
+const SURFACE_OTHER_ROOT_ID: &str = "fig-3600-other-root";
 /// The aborted direct turn the sweep binds its drive claim to (FIG-3589).
 const SURFACE_ABORTED_TURN_ID: &str = "fig-3589-surface-aborted-turn";
 /// The queue drain the sweep admits, selects, settles and ends. Its scope is
@@ -341,12 +366,24 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
             surface(SurfaceMethod::PendingQueuedRun),
             surface(SurfaceMethod::BeginOrResumeQueuedRun),
             surface(SurfaceMethod::SelectQueuedRun),
+            surface(SurfaceMethod::RootTerminal),
             surface(SurfaceMethod::SettleQueuedRun),
+            // The failed settlement wrote its root's evidence (FIG-3600 S7).
+            surface(SurfaceMethod::RootTerminal),
             surface(SurfaceMethod::QueuedRun),
             surface(SurfaceMethod::PendingQueuedRun),
             surface(SurfaceMethod::DrainEndExists),
             surface(SurfaceMethod::CommitDrainEnd),
             surface(SurfaceMethod::DrainEndExists),
+            // An input's root binding: unbound, bound once, read back, and a
+            // second binding to another root refused.
+            surface(SurfaceMethod::RootBinding),
+            surface(SurfaceMethod::BindRootInputs { conflicting: false }),
+            surface(SurfaceMethod::RootBinding),
+            surface(SurfaceMethod::RootOfInput),
+            surface(SurfaceMethod::BindRootInputs { conflicting: false }),
+            surface(SurfaceMethod::BindRootInputs { conflicting: true }),
+            surface(SurfaceMethod::RootBinding),
             surface(SurfaceMethod::CancelUnknownPendingTurnInput),
             surface(SurfaceMethod::CancelPendingTurnInputSuffix),
             surface(SurfaceMethod::CancelPendingTurnInputs),
@@ -1021,6 +1058,41 @@ impl BackendRunner {
                     ),
                     None => "owed=none".to_string(),
                 }
+            }
+            SurfaceMethod::RootTerminal => {
+                // The kind and cause are caller-supplied facts; the instant
+                // is the backend clock's and is not compared.
+                let root = lash_core::TurnId::from(surface_drain_scope(&session_id).id());
+                match store.root_terminal(&session_id, &root).await? {
+                    Some(terminal) => {
+                        format!("kind={:?} cause={:?}", terminal.kind, terminal.cause)
+                    }
+                    None => "terminal=none".to_string(),
+                }
+            }
+            SurfaceMethod::RootBinding => {
+                let input = lash_core::InputId::from(format!("{session_id}:input"));
+                match store.root_binding(&session_id, &input).await? {
+                    Some(root) => format!("bound={root}"),
+                    None => "bound=none".to_string(),
+                }
+            }
+            SurfaceMethod::RootOfInput => {
+                let input = lash_core::InputId::from(format!("{session_id}:input"));
+                match store.root_of_input(&session_id, &input).await? {
+                    Some(root) => format!("root={root}"),
+                    None => "root=none".to_string(),
+                }
+            }
+            SurfaceMethod::BindRootInputs { conflicting } => {
+                let root = lash_core::TurnId::from(if conflicting {
+                    SURFACE_OTHER_ROOT_ID
+                } else {
+                    SURFACE_ROOT_ID
+                });
+                let input = lash_core::InputId::from(format!("{session_id}:input"));
+                store.bind_root_inputs(&session_id, &root, &[input]).await?;
+                "bound".to_string()
             }
             SurfaceMethod::AbortUnknownAttachmentWrite => {
                 let intent = unknown_attachment_intent(&session_id);

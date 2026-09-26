@@ -737,6 +737,38 @@ impl LashRuntime {
             .map(Box::new);
         let release_session_execution_lease =
             release_session_execution_lease && queued_run.is_none();
+        // Under an admitted root, the commit presents the root's drive fence
+        // and, when this turn ends the root, writes its terminal evidence
+        // (FIG-3600 S7).
+        let drive_commit = self.drive_root.as_ref().and_then(|root| {
+            let ends = match queued_run.as_deref() {
+                Some(run) => {
+                    if matches!(
+                        run.progress,
+                        crate::store::QueuedRunProgress::Settle {
+                            terminal: crate::store::QueuedRunTerminal::Completed { .. }
+                        }
+                    ) {
+                        crate::runtime::drive::RootEnd::Settles
+                    } else {
+                        crate::runtime::drive::RootEnd::Continues
+                    }
+                }
+                None => crate::runtime::drive::RootEnd::Unless {
+                    owes_follow_on: commit_effects.pending_follow_on.is_some()
+                        || claims.carries_follow_on_work(matches!(
+                            prepared.outcome(),
+                            TurnOutcome::Stopped(TurnStop::Cancelled { .. })
+                        )),
+                },
+            };
+            root.commit_facts(&trace_turn_id, prepared.outcome(), ends)
+        });
+        let writes_root_terminal = drive_commit
+            .as_ref()
+            .is_some_and(|(_, terminal)| terminal.is_some());
+        let mut prepared = prepared;
+        prepared.turn_pipeline.set_drive_commit(drive_commit);
         let queued_work_completion_trace =
             commit_effects.claim_settlement.queued.completions.clone();
         let turn_input_completion_trace = commit_effects
@@ -783,7 +815,12 @@ impl LashRuntime {
         )
         .await
         {
-            Ok(committed) => committed,
+            Ok(committed) => {
+                if writes_root_terminal && let Some(root) = self.drive_root.as_mut() {
+                    root.mark_terminal_written();
+                }
+                committed
+            }
             Err(err) => {
                 crate::trace::emit_store_error(
                     &self.host.core.tracing.trace_sink,

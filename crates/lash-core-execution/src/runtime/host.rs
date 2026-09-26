@@ -152,6 +152,11 @@ pub struct RuntimeControlConfig {
     /// deployment builds for it cannot reproduce them, so such a child waits
     /// for its live opener. Set by the embedder that opened the session.
     pub open_sources: crate::runtime::effect::UnrecordedSessionSources,
+    /// Where the drive reports a logical root's closed scope, after the
+    /// root's terminal evidence is durable (FIG-3607 item 7). Defaults to
+    /// [`NoScopeClose`](crate::engine::NoScopeClose); the owner of lifetime
+    /// scopes (the process registry's adapter) installs its own.
+    pub scope_close: Arc<dyn crate::engine::ScopeCloseSink>,
 }
 
 #[derive(Clone)]
@@ -223,6 +228,7 @@ impl RuntimeHostConfig {
                 opener_work_bound: crate::session::OpenerWorkBound::default(),
                 tool_children,
                 open_sources: crate::runtime::effect::UnrecordedSessionSources::default(),
+                scope_close: Arc::new(crate::engine::NoScopeClose),
             },
             tracing: RuntimeTracingConfig {
                 trace_sink: None,

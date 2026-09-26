@@ -62,6 +62,14 @@ pub fn drive_seal_replay_key(admitted: &Admitted) -> String {
     format!("drive-seal:{}", admitted.admission().as_str())
 }
 
+/// The replay key of a root's scope close, inside the root's scope: one
+/// close per root, whichever admission ran it, so a redrive of a root that
+/// already closed replays the recorded close.
+#[must_use]
+pub fn drive_close_root_replay_key(root: &TurnId) -> String {
+    format!("drive-close:{}", root.as_str())
+}
+
 /// How one admitted root ended.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "root_outcome", rename_all = "snake_case")]
@@ -107,7 +115,11 @@ pub enum DriveStop {
     /// execution cannot read. It is parked or abandoned, never re-run.
     SubstrateLost { root: TurnId },
     /// The root admission named already has its terminal (ADR 0105 L-S6).
-    RootTerminal { root: TurnId, by: TurnCommitId },
+    RootTerminal {
+        root: TurnId,
+        kind: crate::store::RootTerminalKind,
+        commit: Option<TurnCommitId>,
+    },
     /// A pending follow-on of `root` holds the session and admission could
     /// not resume it (ADR 0101 §3, FIG-3542).
     Blocked { root: TurnId },

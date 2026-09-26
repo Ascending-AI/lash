@@ -67,7 +67,17 @@ pub(super) struct TurnBoundary {
     /// driver when the turn finishes so the final commit recognizes it by
     /// identity.
     protocol_terminal_output: materialize::ProtocolTerminalOutput,
+    /// What the final commit presents when the turn runs under an admitted
+    /// root (FIG-3600 S7): the root's drive fence, and the root's terminal
+    /// evidence when this turn ends it.
+    drive_commit: Option<DriveCommit>,
 }
+
+/// A final commit's drive fence, and the terminal evidence it writes.
+pub(super) type DriveCommit = (
+    crate::store::DriveFence,
+    Option<crate::store::RootTerminalWrite>,
+);
 
 /// Explicit two-phase lifecycle for a turn commit.
 /// Drafting accumulates progress; finalization irreversibly assembles and
@@ -137,7 +147,13 @@ impl TurnBoundary {
             commit_budget,
             graph_appends,
             protocol_terminal_output: materialize::ProtocolTerminalOutput::default(),
+            drive_commit: None,
         }
+    }
+
+    /// Present `drive_commit` on the final commit.
+    pub(super) fn set_drive_commit(&mut self, drive_commit: Option<DriveCommit>) {
+        self.drive_commit = drive_commit;
     }
 
     pub(super) fn record_protocol_terminal_output(
@@ -597,6 +613,7 @@ impl TurnBoundary {
         // read from `self` are hoisted before the state borrow begins.
         let operation = self.final_operation();
         let commit_budget = self.commit_budget;
+        let drive_commit = self.drive_commit.clone();
         let state = self.final_state_mut();
 
         if let Some(store) = store {
@@ -634,6 +651,7 @@ impl TurnBoundary {
                 committed_attachment_ids,
                 adopted_intent_rows,
                 session_execution_lease_completion,
+                drive_commit,
             )
             .await
         } else {
@@ -674,6 +692,7 @@ impl TurnBoundary {
         committed_attachment_ids: Vec<crate::AttachmentId>,
         adopted_intent_rows: u64,
         session_execution_lease_completion: Option<crate::SessionExecutionLeaseAuthority>,
+        drive_commit: Option<DriveCommit>,
     ) -> FinalCommitResult {
         let session_id = state.session_id.clone();
         let node_id_mapping = graph.derive_node_ids(&session_id, &operation)?;
@@ -728,6 +747,10 @@ impl TurnBoundary {
         commit.interrupted_turn_input_cancellation = interrupted_turn_input_cancellation;
         commit.interrupted_turn_cancel_intent = interrupted_turn_cancel_intent;
         commit.turn_cancel_closure_settlement = turn_cancel_closure_settlement;
+        if let Some((fence, root_terminal)) = drive_commit {
+            commit.drive_fence = Some(Box::new(fence));
+            commit.root_terminal = root_terminal.map(Box::new);
+        }
         // Cancellation-intent retries are progress-fenced: every refusal
         // proves a newer durable intent revision. Refresh only that snapshot:
         // the settlement and materialized cancellation evidence are already

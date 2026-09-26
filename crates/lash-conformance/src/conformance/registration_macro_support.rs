@@ -45,6 +45,7 @@ pub use super::queued_after_commit_redrive::*;
 pub use super::restored_claim_cede::*;
 pub use super::retention::*;
 pub use super::root_start_marker::*;
+pub use super::root_terminal::*;
 pub use super::runtime_persistence::*;
 pub use super::runtime_persistence_state_machine::*;
 pub use super::segment_redrive::*;

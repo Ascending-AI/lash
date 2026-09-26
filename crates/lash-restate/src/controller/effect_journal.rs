@@ -77,7 +77,10 @@ use serde::{Deserialize, Serialize};
 /// incarnation-qualified reference, a start is addressed by its start key and
 /// journals its registration, a process start's frontier marker records its
 /// start key, and a recorded process event carries no incarnation.
-pub const EFFECT_JOURNAL_VERSION: u32 = 13;
+/// 14: a logical root whose final commit wrote its terminal evidence journals
+/// its scope close as a recorded `drive-close:{root}` step
+/// (`CloseRootScope`), whose outcome is the evidence it closed (FIG-3600 S7).
+pub const EFFECT_JOURNAL_VERSION: u32 = 14;
 
 /// The entry field the generation is stamped under.
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";

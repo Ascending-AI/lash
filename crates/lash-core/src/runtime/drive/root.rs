@@ -668,6 +668,16 @@ impl RootInputClaimRunner {
             ..self.base.clone()
         };
         self.store.retain_admission_base(&self.fence, &base).await?;
+        // The claimed inputs name the root that took them (FIG-3600 S7): a
+        // host resolves an input's outcome through its root.
+        let inputs = claim
+            .inputs
+            .iter()
+            .map(|input| input.input_id.clone())
+            .collect::<Vec<_>>();
+        self.store
+            .bind_root_inputs(&self.session_id, &self.root, &inputs)
+            .await?;
         Ok(crate::AcceptedTurnInputDrive::Claimed {
             claim: Box::new(claim),
             base,

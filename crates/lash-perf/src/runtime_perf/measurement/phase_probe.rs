@@ -418,9 +418,7 @@ async fn run_once_inner(
         .await?;
 
     if matches!(scenario, RuntimePerfScenario::RlmToolCatalogWarm) {
-        runtime
-            .refresh_tool_catalog("runtime-perf-catalog-warm")
-            .await?;
+        Box::pin(runtime.refresh_tool_catalog("runtime-perf-catalog-warm")).await?;
         runtime.await_background_work().await?;
     }
 
@@ -516,7 +514,7 @@ async fn run_once_inner(
         if matches!(scenario, RuntimePerfScenario::RlmToolCatalogCold) {
             let refresh_key = format!("runtime-perf-catalog-cold-{turn_index}");
             runtime.suppress_tool_catalog_composition_counting();
-            runtime.refresh_tool_catalog(&refresh_key).await?;
+            Box::pin(runtime.refresh_tool_catalog(&refresh_key)).await?;
             runtime.resume_tool_catalog_composition_counting();
         }
 

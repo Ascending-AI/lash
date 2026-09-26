@@ -2191,15 +2191,14 @@ pub(super) async fn no_queued_work_submit_defers_without_refreshing_resident_sta
     let full_loads_before = store.load_session_count();
     let head_reads_before = store.load_session_head_meta_count();
 
-    let receipt = runtime
-        .submit_session_command(
-            lash_core::facade_support::SessionCommand::RefreshToolCatalog {
-                reason: "deferred queued lane".to_string(),
-            },
-            "deferred-queued-command",
-        )
-        .await
-        .expect("NoSessionWork leaves the durable command pending");
+    let receipt = Box::pin(runtime.submit_session_command(
+        lash_core::facade_support::SessionCommand::RefreshToolCatalog {
+            reason: "deferred queued lane".to_string(),
+        },
+        "deferred-queued-command",
+    ))
+    .await
+    .expect("NoSessionWork leaves the durable command pending");
 
     assert_eq!(store.load_session_count(), full_loads_before);
     assert_eq!(store.load_session_head_meta_count(), head_reads_before);

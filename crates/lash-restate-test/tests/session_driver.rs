@@ -406,7 +406,10 @@ async fn a_scheduled_drive_runs_every_open_item_in_arrival_order() {
         .collect();
     assert_eq!(
         turns,
-        ["LashTurn/drive-order:a/run", "LashTurn/drive-order:b/run"],
+        [
+            "LashTurn/11:drive-ordera/run",
+            "LashTurn/11:drive-orderb/run"
+        ],
         "one LashTurn workflow per admitted root"
     );
 }
@@ -534,7 +537,7 @@ async fn a_request_of_another_generation_is_refused_before_any_journal_command()
         let turn = ingress
             .call_workflow_json::<_, RootOutcome>(
                 TURN_DRIVER_SERVICE,
-                &format!("{}:a", session.as_str()),
+                &format!("{}:{}a", session.as_str().len(), session.as_str()),
                 "run",
                 &RestateTurnDriveRequest {
                     drive_version: version,
