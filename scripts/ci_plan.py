@@ -37,6 +37,8 @@ POSTGRES_STORE_MANIFEST_DIR = "crates/lash-postgres-store"
 FAMILIES = (
     "rust",
     "stores",
+    "pr_pg_store",
+    "pr_host_restate",
     "functional_e2e",
     "workers_e2e",
     "restate_suites",
@@ -272,6 +274,7 @@ GATED_JOBS = {
     "heavy-tests": "rust",
     "stack-budget": "rust",
     "postgres-store": "stores",
+    "pr-host-workers": "pr_host_restate",
     "s3-store": "stores",
     "functional-e2e": "functional_e2e",
     "functional-e2e-process-operations": "functional_e2e",
@@ -300,16 +303,12 @@ FEATURE_LANES_JOB = "feature-lanes"
 # There is no automatic trunk run to carry them any more — an automatic push to
 # main triggers no CI at all — so a dispatch is their sole home, and it is the
 # profile release.yml certifies against.
-# postgres-store is intentionally absent: it is not dispatch-only but it is no
-# longer pull-request work either. The merge group and the dispatch run every
-# selected `lash-postgres-store` test binary while its simulator, pool-wait
-# and cross-backend steps remain dispatch-only; a pull request runs the
-# suite's input changes through the affected Bazel targets only.
+# postgres-store is not dispatch-only. Selected store PRs run PG16 and the
+# cross-backend differential; merge groups and dispatches retain their suites.
 DISPATCH_ONLY_JOBS = {
     "heavy-tests",
     "stack-budget",
     "s3-store",
-    "functional-e2e",
     "functional-e2e-process-operations",
     "unicode-tests",
     "lashlang-git-consumer",
@@ -353,15 +352,49 @@ UNGATED_JOBS = {
     "restate-postgres-workers-summary",
 }
 
+
+STORE_PR_PACKAGES = frozenset(
+    {
+        "crates/lash-postgres-store",
+        "crates/lash-sqlite-store",
+        "crates/lash-core-store",
+        "crates/lash-s3-store",
+        "crates/lash-store-sql",
+        "crates/lash-sim",
+    }
+)
+
+
+def _is_pr_pg_store_path(path: str, path_class: PathClass) -> bool:
+    return (
+        path_class.package in STORE_PR_PACKAGES
+        or "migrations" in PurePosixPath(path).parts
+    )
+
+
+def _is_pr_host_restate_path(path: str) -> bool:
+    if path.startswith("examples/"):
+        return True
+    if path.startswith("crates/lash-core/src/runtime/"):
+        return any(
+            path.startswith(f"crates/lash-core/src/runtime/{part}")
+            for part in ("drive/", "drive.rs", "turn_loop/", "turn_loop.rs")
+        )
+    if path.startswith("crates/lash-restate/src/"):
+        return any(
+            path.startswith(f"crates/lash-restate/src/{part}")
+            for part in ("handlers/", "handlers.rs", "turn_handler.rs", "session_driver/", "session_driver.rs")
+        )
+    return False
+
 WORKERS_E2E_JOBS = {
     "worker-artifacts",
     "restate-postgres-workers",
     "restate-postgres-workers-summary",
 }
 
-# The functional-e2e legs that host the live Restate suites. They run on the
-# full-profile dispatch only: a pull request no longer runs any E2E leg, so
-# the set is a name for the matrix flags, not a conclusion exception.
+# The functional-e2e legs that host live Restate suites. Host PRs run the
+# agent-service and agent-workbench legs; dispatches run the full matrix.
 RESTATE_SUITE_JOBS = frozenset(
     {"functional-e2e", "functional-e2e-process-operations"}
 )
@@ -1750,6 +1783,10 @@ def classify(
     outputs["pr_build_targets"] = " ".join(pr_builds)
     selected = {
         "rust": bool(build),
+        "pr_pg_store": any(
+            _is_pr_pg_store_path(path, classes[path]) for path in build
+        ),
+        "pr_host_restate": any(_is_pr_host_restate_path(path) for path in build),
         "functional_e2e": breadth,
         "workers_e2e": breadth,
         "workbench": workbench_hit,
@@ -1764,11 +1801,9 @@ def classify(
         "schema": any(_is_schema_path(path) for path in build),
         "facade": any(_is_facade_path(path) for path in build),
         "tooling": any(_is_tooling_class(classes[path]) for path in build),
-        # `stores` follows the Postgres store closure (see _is_stores_path);
-        # `functional_e2e` and `workers_e2e` keep the breadth flag because
-        # their jobs are dispatch/label-only anyway. `restate_suites` stays a
-        # real path rule even though a pull request no longer acts on it:
-        # merge groups and the full profile still consume the selection.
+        # `stores` follows the Postgres store closure for merge groups and
+        # dispatches. The narrower PR selectors are independent of that
+        # closure. `restate_suites` still selects full-profile work.
         "stores": any(
             _is_stores_path(path, classes[path], store_dirs) for path in build
         ),
@@ -1809,6 +1844,11 @@ def evaluate_conclusion(
         problems.append(f"plan output docs_only is {docs_only!r}, expected 'true' or 'false'")
     if fail_open_output not in {"true", "false"}:
         problems.append(f"plan output fail_open is {fail_open_output!r}, expected 'true' or 'false'")
+    for selector in ("pr_pg_store", "pr_host_restate"):
+        if plan_outputs.get(selector) not in {"true", "false"}:
+            problems.append(
+                f"plan output {selector} is {plan_outputs.get(selector)!r}, expected 'true' or 'false'"
+            )
     if fail_open_output == "true":
         for family in FAMILIES:
             if plan_outputs.get(family) not in {"true", None}:
@@ -1827,11 +1867,30 @@ def evaluate_conclusion(
         # `tooling`: a non-docs plan that selects nothing is a classifier fault.
         problems.append("plan selects no family for a non-docs diff")
 
-    # A pull request runs no E2E leg and no live-suite board: the whole set
-    # is dispatch- or merge-group-only on the fast board, and a skipped
-    # result is the expected one whatever the diff selected.
     for job in sorted(expected_jobs & set(needs)):
         result = needs[job].get("result")
+        if job == "functional-e2e" and event_name in DEFERRED_EVENTS:
+            wanted = (
+                "success"
+                if event_name == "pull_request"
+                and plan_outputs.get("pr_host_restate") == "true"
+                and bazel_is_trusted
+                else "skipped"
+            )
+            if result != wanted:
+                problems.append(f"{job} ended with {result!r} on a {event_name} event, expected {wanted}")
+            continue
+        if job == "pr-host-workers":
+            wanted = (
+                "success"
+                if event_name == "pull_request"
+                and plan_outputs.get("pr_host_restate") == "true"
+                and bazel_is_trusted
+                else "skipped"
+            )
+            if result != wanted:
+                problems.append(f"{job} ended with {result!r} on a {event_name} event, expected {wanted}")
+            continue
         if job in BAZEL_TEST_JOBS:
             rust_on = plan_outputs.get("rust") == "true"
             wanted = (
@@ -1891,12 +1950,14 @@ def evaluate_conclusion(
                 )
             continue
         if job == "postgres-store" and event_name in DEFERRED_EVENTS:
-            # The merge group keeps the store suite; a pull request covers a
-            # store diff through its affected Bazel labels alone.
             wanted = (
                 "success"
-                if event_name == "merge_group"
-                and plan_outputs.get("stores") == "true"
+                if (
+                    event_name == "merge_group" and plan_outputs.get("stores") == "true"
+                ) or (
+                    event_name == "pull_request"
+                    and plan_outputs.get("pr_pg_store") == "true"
+                )
                 else "skipped"
             )
             if result != wanted:

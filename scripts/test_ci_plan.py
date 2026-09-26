@@ -93,6 +93,31 @@ class ConfidenceConclusionTests(unittest.TestCase):
 
 
 class ClassifyTests(unittest.TestCase):
+    def test_pr_service_path_map(self) -> None:
+        cases = (
+            ("crates/lash-postgres-store/src/lib.rs", "true", "false"),
+            ("crates/lash-sqlite-store/migrations/0001_init/up.sql", "true", "false"),
+            ("crates/lash-store-sql/src/lib.rs", "true", "false"),
+            ("crates/lash-sim/src/lib.rs", "true", "false"),
+            ("crates/lash-core/src/runtime/drive/admission.rs", "false", "true"),
+            ("crates/lash-core/src/runtime/turn_loop.rs", "false", "true"),
+            ("crates/lash-restate/src/turn_handler.rs", "false", "true"),
+            ("crates/lash-restate/src/session_driver.rs", "false", "true"),
+            ("examples/agent-service/src/main.rs", "false", "true"),
+            ("crates/lash-core/src/session/mod.rs", "false", "false"),
+            ("crates/lash-restate/src/lib.rs", "false", "false"),
+        )
+        for path, postgres, host in cases:
+            with self.subTest(path=path):
+                plan = ci_plan.classify([("M", path)], "pull_request")
+                self.assertEqual(postgres, plan["pr_pg_store"])
+                self.assertEqual(host, plan["pr_host_restate"])
+
+    def test_pr_service_map_fails_open_on_an_unknown_path(self) -> None:
+        plan = ci_plan.classify([("M", "mystery.data")], "pull_request")
+        self.assertEqual("true", plan["pr_pg_store"])
+        self.assertEqual("true", plan["pr_host_restate"])
+
     def test_docs_only_skips_every_expensive_family(self) -> None:
         plan = ci_plan.classify(
             [("M", "README.md"), ("A", "docs/runbooks/ci.md"), ("M", "runbooks/operator/README.md")]
@@ -1187,7 +1212,6 @@ class RestateSuiteSelectionTests(unittest.TestCase):
     def test_the_e2e_and_workers_jobs_are_dispatch_only(self) -> None:
         jobs = yaml.safe_load(CI_WORKFLOW.read_text(encoding="utf-8"))["jobs"]
         for job in (
-            "functional-e2e",
             "functional-e2e-process-operations",
             "worker-artifacts",
             "restate-postgres-workers",
@@ -1298,7 +1322,10 @@ class RestateSuiteSelectionTests(unittest.TestCase):
 
 def successful_needs() -> dict[str, dict[str, object]]:
     plan_outputs = {family: "true" for family in ci_plan.FAMILIES}
-    plan_outputs.update({"docs_only": "false", "fail_open": "false"})
+    plan_outputs.update({
+        "docs_only": "false", "fail_open": "false",
+        "pr_pg_store": "false", "pr_host_restate": "false",
+    })
     needs = {
         job: {"result": "success", "outputs": {}}
         for job in ci_plan.UNGATED_JOBS
@@ -1310,6 +1337,7 @@ def successful_needs() -> dict[str, dict[str, object]]:
     # API seal; the Cargo workspace and seal jobs are the untrusted path.
     needs["workspace-tests"]["result"] = "skipped"
     needs["check"]["result"] = "skipped"
+    needs["pr-host-workers"]["result"] = "skipped"
     return needs
 
 
@@ -1320,11 +1348,19 @@ def apply_event_deferrals(needs: dict, event: str, trusted: bool = True) -> dict
         needs[job]["result"] = "skipped" if event in ci_plan.DEFERRED_EVENTS else "success"
     if event == "pull_request":
         needs["bazel-tests-tail"]["result"] = "skipped"
-        # The fast board runs no live suite: the workers jobs are
-        # dispatch-only and the store suite is merge-group work.
         for job in ci_plan.WORKERS_E2E_JOBS:
             needs[job]["result"] = "skipped"
-        needs["postgres-store"]["result"] = "skipped"
+        needs["postgres-store"]["result"] = (
+            "success" if needs["plan"]["outputs"]["pr_pg_store"] == "true" else "skipped"
+        )
+        needs["functional-e2e"]["result"] = (
+            "success"
+            if trusted and needs["plan"]["outputs"]["pr_host_restate"] == "true"
+            else "skipped"
+        )
+        needs["pr-host-workers"]["result"] = needs["functional-e2e"]["result"]
+    elif event == "merge_group":
+        needs["functional-e2e"]["result"] = "skipped"
     return needs
 
 
@@ -1575,6 +1611,7 @@ def selected_postgres_test_steps(event: str, compatibility: bool) -> set[str]:
     selectors = {
         None: True,
         "needs.plan.outputs.postgres_compatibility != ''": compatibility,
+        "github.event_name != 'merge_group'": event != "merge_group",
         (
             "github.event_name != 'pull_request'"
             " && github.event_name != 'merge_group'"
@@ -1599,7 +1636,11 @@ class PostgresMatrixTests(unittest.TestCase):
     COMPATIBILITY = {"Test PostgreSQL catalog compatibility"}
     # Every event runs the whole store package (FIG-3572): FIG-3595 and
     # FIG-3550 broke it while it was dispatch-only.
-    PRIMARY_PR = {"Test Postgres store (conformance and attempt atomicity)"}
+    PRIMARY_PR = {
+        "Test Postgres store (conformance and attempt atomicity)",
+        "Test cross-backend store differential",
+    }
+    PRIMARY_MERGE = {"Test Postgres store (conformance and attempt atomicity)"}
     PRIMARY_TRUNK = {
         "Test Postgres store (conformance and attempt atomicity)",
         "Test runtime pool-wait binding",
@@ -1696,11 +1737,12 @@ class PostgresMatrixTests(unittest.TestCase):
                         compatibility,
                         event == "workflow_dispatch" or (event == "merge_group" and schema),
                     )
-                    expected = (
-                        self.PRIMARY_PR
-                        if event in ci_plan.DEFERRED_EVENTS
-                        else self.PRIMARY_TRUNK
-                    ) | (self.COMPATIBILITY if compatibility else set())
+                    primary = {
+                        "pull_request": self.PRIMARY_PR,
+                        "merge_group": self.PRIMARY_MERGE,
+                        "workflow_dispatch": self.PRIMARY_TRUNK,
+                    }[event]
+                    expected = primary | (self.COMPATIBILITY if compatibility else set())
                     self.assertEqual(
                         expected, selected_postgres_test_steps(event, compatibility)
                     )
@@ -2093,13 +2135,56 @@ class WorkflowRegistrationTests(unittest.TestCase):
     def test_every_ci_job_is_registered_or_allowlisted(self) -> None:
         self.assertEqual(set(), unregistered_ci_jobs(CI_WORKFLOW.read_text(encoding="utf-8")))
 
+    def test_pr_service_jobs_follow_the_path_map(self) -> None:
+        jobs = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
+        plan = jobs["plan"]["outputs"]
+        for selector in ("pr_pg_store", "pr_host_restate"):
+            self.assertEqual(
+                f"${{{{ steps.classify.outputs.{selector} }}}}", plan[selector]
+            )
+        self.assertIn("pr_pg_store", jobs["postgres-store"]["if"])
+        self.assertIn("pr_host_restate", jobs["functional-e2e"]["if"])
+        self.assertIn("pr_host_restate", jobs["pr-host-workers"]["if"])
+        self.assertEqual("ubuntu-24.04", jobs["pr-host-workers"]["runs-on"])
+        self.assertIn("LASH_E2E_TURN_CONTROL_ONLY", str(jobs["pr-host-workers"]["steps"]))
+        self.assertIn("ci-conclusion", jobs)
+        self.assertIn("pr-host-workers", jobs["ci-conclusion"]["needs"])
+
+    def test_pr_service_checks_are_required_only_when_selected(self) -> None:
+        for selector, jobs in (
+            ("pr_pg_store", ("postgres-store",)),
+            ("pr_host_restate", ("functional-e2e", "pr-host-workers")),
+        ):
+            for selected in ("true", "false"):
+                with self.subTest(selector=selector, selected=selected):
+                    needs = successful_needs()
+                    needs["plan"]["outputs"][selector] = selected
+                    apply_event_deferrals(needs, "pull_request")
+                    self.assertEqual([], ci_plan.evaluate_conclusion(needs, "pull_request"))
+                    for job in jobs:
+                        needs[job]["result"] = "skipped" if selected == "true" else "success"
+                        self.assertTrue(
+                            any(job in issue for issue in ci_plan.evaluate_conclusion(needs, "pull_request"))
+                        )
+                        needs[job]["result"] = "success" if selected == "true" else "skipped"
+
+    def test_pr_service_plan_outputs_are_required(self) -> None:
+        for selector in ("pr_pg_store", "pr_host_restate"):
+            needs = successful_needs()
+            apply_event_deferrals(needs, "pull_request")
+            del needs["plan"]["outputs"][selector]
+            self.assertTrue(
+                any(selector in issue for issue in ci_plan.evaluate_conclusion(needs, "pull_request"))
+            )
+
     def test_only_process_operations_waits_for_worker_artifacts(self):
         jobs = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]
         other = jobs["functional-e2e"]
         consumer = jobs["functional-e2e-process-operations"]
         self.assertEqual("plan", other["needs"])
         self.assertEqual(["plan", "worker-artifacts"], consumer["needs"])
-        self.assertEqual(other["if"], consumer["if"])
+        self.assertIn("github.event_name == 'workflow_dispatch'", consumer["if"])
+        self.assertNotIn("pull_request", consumer["if"])
         self.assertEqual(["process-operations"],
                          [leg["name"] for leg in consumer["strategy"]["matrix"]["include"]])
         self.assertEqual({"agent-service", "agent-workbench", "effect-group-conformance",
@@ -2268,7 +2353,6 @@ class DispatchOnlyJobTests(unittest.TestCase):
             "heavy-tests",
             "stack-budget",
             "s3-store",
-            "functional-e2e",
             "functional-e2e-process-operations",
             "fuzz-smoke",
         )

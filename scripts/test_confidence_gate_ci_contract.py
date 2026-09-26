@@ -592,7 +592,6 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
             "heavy-tests",
             "stack-budget",
             "s3-store",
-            "functional-e2e",
             "functional-e2e-process-operations",
             "fuzz-smoke",
             # Deferred Unicode and the lashlang consumer left the
@@ -625,6 +624,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         needs["plan"]["outputs"] = dict.fromkeys(plan["FAMILIES"], "true") | {
             "docs_only": "false",
             "fail_open": "false",
+            "pr_pg_store": "false",
+            "pr_host_restate": "false",
         }
         # This scenario exercises deferral. The fast pull-request board runs
         # no live suite at all — the workers jobs are dispatch-only and the
@@ -642,6 +643,8 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         )
         for job in workers:
             needs[job] = {"result": "skipped", "outputs": {}}
+        needs["functional-e2e"] = {"result": "skipped", "outputs": {}}
+        needs["pr-host-workers"] = {"result": "skipped", "outputs": {}}
         needs["postgres-store"] = {"result": "skipped", "outputs": {}}
         needs["bazel-tests-tail"] = {"result": "skipped", "outputs": {}}
         self.assertEqual(evaluate(needs, "pull_request"), [])
@@ -666,8 +669,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         self.assertEqual(
             evaluate(restate_needs, "pull_request"),
             [
-                "dispatch-only job functional-e2e ended with 'success' on a"
-                " pull_request event, expected skipped"
+                "functional-e2e ended with 'success' on a pull_request event, expected skipped"
             ],
         )
         dispatch_needs = {
@@ -677,6 +679,7 @@ class ConfidenceGateCiContractTest(unittest.TestCase):
         dispatch_needs["plan"]["outputs"] = dict(needs["plan"]["outputs"])
         dispatch_needs["workspace-tests"]["result"] = "skipped"
         dispatch_needs["check"]["result"] = "skipped"
+        dispatch_needs["pr-host-workers"]["result"] = "skipped"
         self.assertEqual(evaluate(dispatch_needs, "workflow_dispatch"), [])
         for job in workers:
             needs[job] = {"result": "skipped", "outputs": {}}
@@ -2297,7 +2300,8 @@ derive_mutation_jobs() {{
             "//crates/lash-postgres-store:integration__test",
             (ROOT / "tools/bazel/postgres_test_labels.txt").read_text(encoding="utf-8"),
         )
-        self.assertIn("if: needs.plan.outputs.stores == 'true'", postgres_store_job)
+        self.assertIn("needs.plan.outputs.stores == 'true'", postgres_store_job)
+        self.assertIn("needs.plan.outputs.pr_pg_store == 'true'", postgres_store_job)
 
         # The differential's skip reason and its `compared_backends` inventory
         # go to stderr, which libtest swallows for a passing test: uncaptured

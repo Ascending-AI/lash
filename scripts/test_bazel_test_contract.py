@@ -1155,16 +1155,16 @@ class BazelTestContractTests(unittest.TestCase):
             "docs_only": "false",
             "fail_open": "false",
             **{family: "true" for family in ci_plan.FAMILIES},
+            "pr_pg_store": "false",
+            "pr_host_restate": "false",
         }
         for job in ci_plan.DISPATCH_ONLY_JOBS:
             needs[job]["result"] = "skipped"
-        # The fast board runs no live suite on any pull request — trusted or
-        # not — and the feature lanes need the pool as much as the Bazel
-        # partition does, so an untrusted event skips them too.
+        # This unrelated path selects neither PR service job.
         for job in (
             ci_plan.BAZEL_TEST_JOBS
             | ci_plan.WORKERS_E2E_JOBS
-            | {ci_plan.FEATURE_LANES_JOB, "postgres-store"}
+            | {ci_plan.FEATURE_LANES_JOB, "postgres-store", "functional-e2e", "pr-host-workers"}
         ):
             needs[job]["result"] = "skipped"
         self.assertEqual(
