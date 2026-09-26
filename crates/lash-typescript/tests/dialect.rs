@@ -366,7 +366,23 @@ fn normalized_continuation_bytes(
             VmRunOutcome::EffectCompleted
         );
         let continuation = vm.suspend().expect("capture continuation");
-        serde_json::to_vec(&continuation).expect("encode deterministic continuation")
+        assert_eq!(
+            &continuation.executable,
+            program.executable_identity(),
+            "a continuation names the executable it was parked by"
+        );
+        let mut value =
+            serde_json::to_value(&continuation).expect("encode deterministic continuation");
+        // The executable identity names the module artifact, and a lowered
+        // TypeScript module is a different artifact from its stated IR, so the
+        // two differ there by construction (FIG-3571). Everything else the VM
+        // parked must be byte-identical.
+        value
+            .as_object_mut()
+            .expect("a continuation encodes as an object")
+            .remove("executable")
+            .expect("a continuation carries its executable");
+        serde_json::to_vec(&value).expect("encode deterministic continuation")
     })
 }
 
