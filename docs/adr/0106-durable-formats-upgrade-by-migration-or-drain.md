@@ -169,8 +169,10 @@ arbitration and wake scheduling that ADR 0104 §1 deletes.
 - **Deleted:** `DURABLE_WAIT_INDEX_IDENTITY_EPOCH`, its refusal gate, the
   drain-and-recreate doctrine, and the exact-version refusal on effect groups.
   Identity-family validation stays.
-- **Renamed:** `LashDurableWaitIndex` becomes `LashDurableWaitRegistry`, and
-  `EffectGroupIndex` becomes `EffectGroupState` (FIG-3814).
+- **Renamed:** the Rust items — the `LashDurableWaitIndex` trait becomes
+  `LashDurableWaitRegistry`, and `EffectGroupIndex` becomes `EffectGroupState`
+  — while the registered Restate names stay `LashDurableWaitIndex` and
+  `EffectGroupIndex` (FIG-3814).
 
 ### 4. Per-surface policy
 
@@ -330,7 +332,7 @@ Sam's rulings of 2026-09-25 (FIG-3660, logged on FIG-3622):
 | Q2 Finalize | Explicit, automated as the last step of the drain, checked against drained and retired deployments, fencing stale writers, with an operator hold flag (§2). |
 | Q3 Upgrade window | Only compatibility releases count. N supports N-1. A deployment further behind steps through the retained releases, one at a time; a skipped release is refused (§7). |
 | Q4 Work that never drains | Superseded by Q1: there is no fork. The drain wakes and hands over waiting work; what remains parks (§1, §7). |
-| Q5 Restate object state | Stays in Restate: split version kinds, versioned JSON with N-1 upcasters, read-both/write-old until finalize, introspection preflight and `upgrade`-handler sweep, no namespacing; the identity epoch and exact-version refusals are deleted; renamed to `LashDurableWaitRegistry` and `EffectGroupState` (§3). |
+| Q5 Restate object state | Stays in Restate: split version kinds, versioned JSON with N-1 upcasters, read-both/write-old until finalize, introspection preflight and `upgrade`-handler sweep, no namespacing; the identity epoch and exact-version refusals are deleted; the Rust items rename to `LashDurableWaitRegistry` and `EffectGroupState` under the unchanged registered names (§3). |
 | Q6 Recorded `version()` op | Deleted, with `ChangeId`, `VersionRange` and `RecordedVersion`; ADR 0105 §7 is amended separately. `DriveRequest.build_generation` stays. |
 | Q7 PostgreSQL | A pre-deploy `lash migrate` job; expand, then backfill at finalize, then contract in the next release, gated on `F` and the ledger; the row-change table; a two-sided worker range; rollback before finalize guaranteed and tested; SQLite migrates on open after a backup (§5). |
 

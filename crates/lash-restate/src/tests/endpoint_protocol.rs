@@ -448,7 +448,7 @@ pub(super) fn encode_recorded_commands_with_invocations_replay<T: serde::Seriali
     Ok(body.freeze())
 }
 
-/// The answer a scope's `LashDurableWaitIndex` gives the handler-side effect
+/// The answer a scope's `LashDurableWaitRegistry` gives the handler-side effect
 /// recording (FIG-2499): admitted, or cleared. `None` for any other call.
 pub(super) fn durable_wait_index_call_response(
     service: &str,

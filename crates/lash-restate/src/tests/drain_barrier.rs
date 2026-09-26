@@ -4,8 +4,8 @@
 
 use super::*;
 use crate::effect_group::{
-    EFFECT_GROUP_INDEX_PROTOCOL_VERSION, EffectGroupDrainBlockersResponse,
-    EffectGroupWaitResolution, drained_wait_request,
+    EFFECT_GROUP_STATE_FORMAT_VERSION, EFFECT_GROUP_STATE_FORMATS,
+    EffectGroupDrainBlockersResponse, EffectGroupWaitResolution, drained_wait_request,
 };
 use lash_core::RuntimeErrorCode;
 
@@ -79,13 +79,16 @@ pub(super) async fn a_drained_wake_resolved_as_anything_else_is_a_shape_error() 
     assert_eq!(error.code, RuntimeErrorCode::RuntimeEffectGroupShape);
 }
 
-/// An index whose state another protocol version wrote refuses with the typed
-/// terminal error, and the controller hands that refusal back as itself.
+/// An index whose state carries a stored-format stamp this build does not
+/// read refuses with the typed terminal error, and the controller hands that
+/// refusal back as itself.
 #[tokio::test]
-pub(super) async fn an_index_of_another_protocol_version_is_refused_typed() {
-    let refusal = crate::effect_group::protocol_retired_error(
+pub(super) async fn an_index_of_another_stored_format_is_refused_typed() {
+    let refusal = crate::object_state::stored_format_error(
+        "effect group",
         "group",
-        Some(u64::from(EFFECT_GROUP_INDEX_PROTOCOL_VERSION) - 1),
+        Some(u64::from(EFFECT_GROUP_STATE_FORMAT_VERSION) + 1),
+        &EFFECT_GROUP_STATE_FORMATS,
     );
     let context = Arc::new(RecordingContext::default());
     *context.drain_blockers.lock_recover() = Some(Err(TerminalError::new(
@@ -95,10 +98,10 @@ pub(super) async fn an_index_of_another_protocol_version_is_refused_typed() {
     let error = controller
         .await_group_child_drain_admission("group", 2)
         .await
-        .expect_err("the retired protocol is refused");
+        .expect_err("the foreign format is refused");
     assert_eq!(
         error.code,
-        RuntimeErrorCode::EngineEffectGroupProtocolRetired
+        RuntimeErrorCode::EngineObjectStateFormatUnsupported
     );
     assert!(error.code.is_terminal());
     assert!(context.group_waits.lock_recover().is_empty());

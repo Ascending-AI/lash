@@ -298,7 +298,7 @@ impl EffectHost for RestateEffectHost {
             .controller
             .await_event_ingress
             .ingress
-            .call_object_empty_json(LashService::DurableWaitIndex, session_id, "outstanding")
+            .call_object_empty_json(LashService::DurableWaitRegistry, session_id, "outstanding")
             .await
             .map_err(|err| {
                 RuntimeError::new(
@@ -374,7 +374,7 @@ impl EffectHost for RestateEffectHost {
     /// replay ledger is deleted here and the count is always 0. The promise
     /// half is real: a scope-exact retirement revokes every durable wait the
     /// scope owns and fences later mints, resolves, peeks, awaits, effects,
-    /// and groups under it through the scope's `LashDurableWaitIndex` object,
+    /// and groups under it through the scope's `LashDurableWaitRegistry` object,
     /// which survives restarts and redeploys. Session retirements stay a
     /// no-op: session promises are revoked through the session lever the
     /// host already calls. A [`lash_core::EffectRetirementGate::WhenQuiescent`] request
@@ -489,7 +489,7 @@ fn ingress_group_error(
     operation: &str,
     error: crate::RestateHttpError,
 ) -> RuntimeEffectControllerError {
-    if let Some(refusal) = ingress_protocol_refusal(&error) {
+    if let Some(refusal) = ingress_stored_format_refusal(&error) {
         return refusal;
     }
     let service_unregistered = error.is_service_unregistered();
@@ -501,10 +501,9 @@ fn ingress_group_error(
     }
 }
 
-/// The typed effect-group protocol refusal an index handler answered an
-/// ingress call with, recovered from the terminal error's message in the
-/// response body.
-pub(crate) fn ingress_protocol_refusal(
+/// The typed stored-format refusal an index handler answered an ingress call
+/// with, recovered from the terminal error's message in the response body.
+pub(crate) fn ingress_stored_format_refusal(
     error: &crate::RestateHttpError,
 ) -> Option<RuntimeEffectControllerError> {
     let crate::RestateHttpError::Status { body, .. } = error else {
@@ -515,7 +514,7 @@ pub(crate) fn ingress_protocol_refusal(
         .get("message")?
         .as_str()?
         .to_owned();
-    crate::effect_group::protocol_refusal_in(&message)
+    crate::object_state::stored_format_error_in(&message)
 }
 
 #[async_trait::async_trait]
@@ -614,7 +613,7 @@ impl AwaitEventResolver for RestateEffectHostController {
     }
 
     /// Revoke every durable wait of a non-session `scope` and fence the
-    /// scope's `LashDurableWaitIndex` object, durably: the promise half of
+    /// scope's `LashDurableWaitRegistry` object, durably: the promise half of
     /// scope retirement on Restate. A session scope is refused as everywhere.
     async fn retire_await_events_for_scope(
         &self,
@@ -641,7 +640,7 @@ impl AwaitEventResolver for RestateEffectHostController {
         self.await_event_ingress
             .ingress
             .call_object_json::<_, bool>(
-                LashService::DurableWaitIndex.name(),
+                LashService::DurableWaitRegistry.name(),
                 &index_key,
                 "revoke_all_if_quiescent",
                 &(),
@@ -707,7 +706,7 @@ impl RestateEffectHostController {
             .await_event_ingress
             .ingress
             .call_object_json::<_, bool>(
-                LashService::DurableWaitIndex.name(),
+                LashService::DurableWaitRegistry.name(),
                 &index_key,
                 "register_closure_participant",
                 &RestateTurnCancelClosureParticipantRequest {
@@ -747,7 +746,7 @@ impl RestateEffectHostController {
         self.await_event_ingress
             .ingress
             .call_object_json::<_, ()>(
-                LashService::DurableWaitIndex.name(),
+                LashService::DurableWaitRegistry.name(),
                 &index_key,
                 "release_closure_participant",
                 &RestateTurnCancelClosureParticipantRequest {
@@ -822,7 +821,7 @@ impl RestateEffectHostController {
         self.await_event_ingress
             .ingress
             .call_object_json::<_, bool>(
-                LashService::DurableWaitIndex.name(),
+                LashService::DurableWaitRegistry.name(),
                 &index_key,
                 "record_group",
                 &crate::durable_wait::RestateDurableWaitGroupRequest {
@@ -855,7 +854,7 @@ impl RestateEffectHostController {
         let shape = EffectGroupShape::from_group(&group, opener)?;
         let probe = ingress
             .call_object_empty_json::<EffectGroupProbeResponse>(
-                LashService::EffectGroupIndex,
+                LashService::EffectGroupState,
                 &group_key,
                 "probe",
             )
@@ -892,7 +891,7 @@ impl RestateEffectHostController {
         let content_checked = group.reopen() == lash_core::GroupReopen::RetainedContent;
         let opened = ingress
             .call_object_json::<_, EffectGroupOpenResponse>(
-                LashService::EffectGroupIndex.name(),
+                LashService::EffectGroupState.name(),
                 &group_key,
                 "open",
                 &EffectGroupOpenRequest {
@@ -1053,7 +1052,7 @@ impl RuntimeEffectController for RestateEffectHostController {
         })?;
         let mut read = ingress
             .call_object_json::<_, EffectGroupReadRankResponse>(
-                LashService::EffectGroupIndex.name(),
+                LashService::EffectGroupState.name(),
                 handle.group_key(),
                 "read_rank",
                 &EffectGroupReadRankRequest {
@@ -1111,7 +1110,7 @@ impl RuntimeEffectController for RestateEffectHostController {
             }
             read = ingress
                 .call_object_json::<_, EffectGroupReadRankResponse>(
-                    LashService::EffectGroupIndex.name(),
+                    LashService::EffectGroupState.name(),
                     handle.group_key(),
                     "read_rank",
                     &EffectGroupReadRankRequest {
@@ -1195,7 +1194,7 @@ impl RuntimeEffectController for RestateEffectHostController {
         let ingress = &self.await_event_ingress.ingress;
         let read = ingress
             .call_object_json::<_, EffectGroupReadRankResponse>(
-                LashService::EffectGroupIndex.name(),
+                LashService::EffectGroupState.name(),
                 group_key,
                 "read_rank",
                 &EffectGroupReadRankRequest {
@@ -1270,7 +1269,7 @@ impl RuntimeEffectController for RestateEffectHostController {
             .await_event_ingress
             .ingress
             .call_object_json::<_, EffectGroupCloseResponse>(
-                LashService::EffectGroupIndex.name(),
+                LashService::EffectGroupState.name(),
                 &group_key,
                 "close",
                 &EffectGroupCloseRequest { disposition },
@@ -1318,7 +1317,7 @@ impl RuntimeEffectController for RestateEffectHostController {
         let index_key = durable_wait_index_key_for_scope(&scope);
         let membership: Option<String> = ingress
             .call_object_json::<_, Option<String>>(
-                LashService::DurableWaitIndex.name(),
+                LashService::DurableWaitRegistry.name(),
                 &index_key,
                 "group_child_membership",
                 &crate::durable_wait::RestateDurableWaitGroupChildMembershipRequest {
@@ -1334,7 +1333,7 @@ impl RuntimeEffectController for RestateEffectHostController {
         };
         let response = ingress
             .call_object_json::<_, crate::effect_group::EffectGroupCommitChildResponse>(
-                LashService::EffectGroupIndex.name(),
+                LashService::EffectGroupState.name(),
                 &group_key,
                 "commit_child",
                 &crate::effect_group::EffectGroupCommitChildRequest {
@@ -1393,7 +1392,7 @@ impl RuntimeEffectController for RestateEffectHostController {
         let ingress = &self.await_event_ingress.ingress;
         let (wait_scope, positions) = match ingress
             .call_object_json::<_, crate::effect_group::EffectGroupDrainBlockersResponse>(
-                LashService::EffectGroupIndex.name(),
+                LashService::EffectGroupState.name(),
                 group_key,
                 "drain_blockers",
                 &crate::effect_group::EffectGroupDrainBlockersRequest { commit_seq },

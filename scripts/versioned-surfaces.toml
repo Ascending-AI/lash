@@ -2370,15 +2370,17 @@ paths = ["crates/lash-restate/src/controller/process_command.rs"]
 symbols = ["JournaledCancelCommandIdentity", "JournaledCancelAdmission"]
 
 [[surface]]
-constant = "DURABLE_WAIT_INDEX_IDENTITY_EPOCH"
+constant = "DURABLE_WAIT_REGISTRY_FORMAT_VERSION"
 constant_path = "crates/lash-restate/src/durable_wait.rs"
-upgrade = "coexist"
-description = "identity epoch of the Restate durable-wait index object state"
-manifest = "engine:restate.durable_wait_index_epoch"
+upgrade = "migrate"
+description = "stored-format stamp every durable-wait registry object-state value carries"
+manifest = "engine:restate.durable_wait_registry_format"
 
-# Object state survives a deployment and is refused at open under a foreign
-# epoch. The guard projects the state the index persists and the keys it
-# persists it under.
+# Object state survives a deployment; every stored value carries a format
+# stamp and decodes through the stamped envelope's version dispatch — the
+# current format directly, one behind through the family's N-1 upcaster slot.
+# The guard projects the state the registry persists, the keys it persists it
+# under, and the shared stamped envelope.
 [[surface.guard]]
 kind = "rust_items"
 paths = ["crates/lash-restate/src/durable_wait.rs"]
@@ -2386,7 +2388,7 @@ symbols = [
   "RestateDurableWaitIndexMetadata",
   "RestateDurableWaitAwakeableRequest",
   "RestateDurableWaitClassification",
-  "DURABLE_WAIT_INDEX_EPOCH_KEY",
+  "DURABLE_WAIT_REGISTRY_FORMATS",
   "DURABLE_WAIT_INDEX_METADATA_KEY",
   "DURABLE_WAIT_INDEX_WAIT_PREFIX",
   "DURABLE_WAIT_INDEX_RESOLUTION_PREFIX",
@@ -2396,41 +2398,104 @@ symbols = [
   "DURABLE_WAIT_INDEX_CLOSURE_PARTICIPANT_PREFIX",
 ]
 
-[[surface]]
-constant = "EFFECT_GROUP_INDEX_PROTOCOL_VERSION"
-constant_path = "crates/lash-restate/src/effect_group/protocol.rs"
-upgrade = "coexist"
-description = "Restate effect-group protocol: the EffectGroupIndex handlers' request and response wire, the dispatch workflow's wire, and the index record Restate retains"
-manifest = "engine:restate.effect_group_index_protocol"
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-restate/src/object_state.rs"]
+must_cover = ["StampedValue"]
 
-# Index state survives a deployment, and an in-flight invocation replays the
-# journal of the handlers it called. Every index record carries the version
-# that wrote it, and each index handler refuses any other with a terminal
-# typed error before it acts. The guard projects every serde shape the group
-# services exchange or retain, and the key the index record lives under.
+[[surface]]
+constant = "EFFECT_GROUP_STATE_FORMAT_VERSION"
+constant_path = "crates/lash-restate/src/effect_group/protocol.rs"
+upgrade = "migrate"
+description = "stored format of the record the effect-group state object retains"
+manifest = "engine:restate.effect_group_state_format"
+
+# Group state survives a deployment: the retained record decodes through the
+# stamped envelope's version dispatch before a handler acts on it. The guard
+# projects the retained record's serde shapes, the key it lives under, and
+# the shared stamped envelope.
 [[surface.guard]]
 kind = "rust_serde_shapes"
 paths = [
   "crates/lash-restate/src/effect_group.rs",
-  "crates/lash-restate/src/effect_group/index_record.rs",
+  "crates/lash-restate/src/effect_group/state_record.rs",
   "crates/lash-restate/src/effect_group/shape.rs",
-  "crates/lash-restate/src/effect_group/wire.rs",
-  "crates/lash-restate/src/effect_group/dispatch.rs",
 ]
 must_cover = [
-  "EffectGroupIndexRecord",
-  "EffectGroupIndexLiveRecord",
+  "EffectGroupStateRecord",
+  "EffectGroupStateLiveRecord",
   "EffectGroupShape",
+]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-restate/src/effect_group.rs"]
+symbols = ["INDEX_STATE_KEY", "EFFECT_GROUP_STATE_FORMATS"]
+
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-restate/src/object_state.rs"]
+must_cover = ["StampedValue"]
+
+[[surface]]
+constant = "EFFECT_GROUP_WIRE_VERSION"
+constant_path = "crates/lash-restate/src/effect_group/protocol.rs"
+upgrade = "coexist"
+description = "Restate effect-group wire: the group handlers' request and response shapes callers exchange with them"
+manifest = "engine:restate.effect_group_wire"
+
+# The guard projects the serde shapes callers and the group's handlers
+# exchange.
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = [
+  "crates/lash-restate/src/effect_group.rs",
+  "crates/lash-restate/src/effect_group/wire.rs",
+]
+must_cover = [
   "EffectGroupOpenRequest",
   "EffectGroupCommitChildResponse",
   "EffectGroupDrainBlockersResponse",
   "EffectGroupChildRequest",
 ]
 
+[[surface]]
+constant = "EFFECT_GROUP_DISPATCH_JOURNAL_VERSION"
+constant_path = "crates/lash-restate/src/effect_group/protocol.rs"
+upgrade = "drain"
+description = "Restate effect-group dispatch journal: the dispatch workflow's journaled input and the run outputs a replay trusts"
+manifest = "engine:restate.effect_group_dispatch_journal"
+
+# A replayed journal belongs to the generation that wrote it. The guard
+# projects the dispatch workflow's journaled input shape.
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-restate/src/effect_group/dispatch.rs"]
+must_cover = ["EffectGroupDispatchRequest"]
+
+[[surface]]
+constant = "EFFECT_GROUP_PAYLOAD_FORMAT_VERSION"
+constant_path = "crates/lash-restate/src/effect_group/payload.rs"
+upgrade = "migrate"
+description = "stored-format stamp every effect-group payload object-state value carries"
+manifest = "engine:restate.effect_group_payload_format"
+
+# The payload object's bytes and retired marker carry the same stamped
+# envelope; first-writer byte-equality fencing compares the decoded body. The
+# guard projects the keys the object persists under and the shared envelope.
 [[surface.guard]]
 kind = "rust_items"
-paths = ["crates/lash-restate/src/effect_group.rs"]
-symbols = ["INDEX_STATE_KEY"]
+paths = ["crates/lash-restate/src/effect_group/payload.rs"]
+symbols = [
+  "PAYLOAD_STATE_KEY",
+  "PAYLOAD_RETIRED_KEY",
+  "EFFECT_GROUP_PAYLOAD_FORMATS",
+]
+
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-restate/src/object_state.rs"]
+must_cover = ["StampedValue"]
 
 [[surface]]
 constant = "EFFECT_JOURNAL_VERSION"

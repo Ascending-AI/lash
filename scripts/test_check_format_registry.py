@@ -303,7 +303,7 @@ class RealRepositoryTests(unittest.TestCase):
             "PARENT_SCOPE_STORAGE_PAYLOAD_VERSION",
             "crates/lash-restate/src/controller/process_command.rs:"
             "PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION",
-            "crates/lash-restate/src/durable_wait.rs:DURABLE_WAIT_INDEX_IDENTITY_EPOCH",
+            "crates/lash-restate/src/durable_wait.rs:DURABLE_WAIT_REGISTRY_FORMAT_VERSION",
             "crates/lash-core-store/src/store/queued_work.rs:"
             "QUEUED_WORK_CLAIM_LEASE_ENCODING_VERSION",
         }

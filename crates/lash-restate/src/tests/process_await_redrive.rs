@@ -1,4 +1,5 @@
 use super::*;
+use crate::object_state::StampedValue;
 use bytes::BytesMut;
 
 /// FIG-779 control: the identical input against the bare SDK timer is handled
@@ -1654,7 +1655,7 @@ pub(super) async fn durable_wait_workflow_rejects_an_inconsistent_key_preimage_b
 #[tokio::test]
 pub(super) async fn durable_wait_index_rejects_an_inconsistent_key_preimage_before_state_write() {
     let endpoint = Endpoint::builder()
-        .bind(LashDurableWaitIndexImpl.serve())
+        .bind(LashDurableWaitRegistryImpl.serve())
         .build();
     let scope = durable_turn_scope("fig2005-forged-session", "fig2005-forged-turn");
     let mut key = restate_await_event_key(&scope, AwaitEventWaitIdentity::TurnCancelGate)
@@ -1699,6 +1700,144 @@ pub(super) async fn durable_wait_index_rejects_an_inconsistent_key_preimage_befo
     assert!(state.is_empty(), "terminal rejection must not write state");
 }
 
+/// FIG-3814: a wait-registry object a pre-stamp deployment left refuses typed
+/// at the stamped-state gate, before any write. Each seed is exactly what
+/// that deployment wrote: the `wait-index/v2/identity-epoch` marker (refused
+/// by name whatever its bytes), an unstamped metadata row, and a wait row of
+/// raw non-JSON bytes.
+#[tokio::test]
+pub(super) async fn pre_stamp_wait_registry_state_refuses_typed_before_any_write() {
+    let endpoint = Endpoint::builder()
+        .bind(LashDurableWaitRegistryImpl.serve())
+        .build();
+    let object_key = "fig3814-session";
+    let key = restate_await_event_key(
+        &durable_turn_scope(object_key, "fig3814-turn"), // gitleaks:allow -- synthetic workflow/turn identity fixture
+        AwaitEventWaitIdentity::tool_completion("fig3814-tool-wait"),
+    )
+    .expect("derive FIG-3814 wait key");
+
+    for (name, seeded) in [
+        (
+            "identity-epoch",
+            BTreeMap::from([("wait-index/v2/identity-epoch".to_string(), b"6".to_vec())]),
+        ),
+        (
+            "unstamped-metadata",
+            BTreeMap::from([(
+                crate::durable_wait::DURABLE_WAIT_INDEX_METADATA_KEY.to_string(),
+                serde_json::to_vec(&serde_json::json!({
+                    "revoked": false,
+                    "awakeables": []
+                }))
+                .expect("encode unstamped metadata"),
+            )]),
+        ),
+        (
+            "raw-bytes",
+            BTreeMap::from([(
+                "wait-index/v2/wait/raw".to_string(),
+                vec![0xff, 0x00, 0x13, 0x37],
+            )]),
+        ),
+    ] {
+        let mut state = seeded;
+        let before = state.clone();
+        let output = invoke_endpoint_body(
+            &endpoint,
+            "LashDurableWaitIndex",
+            "register",
+            fig1943_invocation_with_state(
+                object_key,
+                &RestateDurableWaitIndexRequest { key: key.clone() },
+                &state,
+            ),
+        )
+        .await
+        .expect("invoke register against pre-stamp state");
+        let message = restate_output_failure_message(&output)
+            .or_else(|| restate_error_message(&output))
+            .unwrap_or_else(|| panic!("{name}: pre-stamp state must fail the invocation"));
+        let typed = crate::object_state::stored_format_error_in(&message)
+            .unwrap_or_else(|| panic!("{name}: the refusal is typed: {message}"));
+        assert_eq!(
+            typed.code,
+            lash_core::RuntimeErrorCode::EngineObjectStateFormatUnsupported
+        );
+        fig1943_apply_state_commands(&mut state, &output);
+        assert_eq!(state, before, "{name}: the refusal writes no state");
+    }
+}
+
+/// FIG-3814: the payload object's pre-stamp rows — the raw payload bytes and
+/// the bare `retired` bool — refuse typed before a write lands beside them,
+/// on the exclusive handlers through the object gate and on the shared read
+/// through the stamped decode.
+#[tokio::test]
+pub(super) async fn pre_stamp_effect_group_payload_state_refuses_typed_before_any_write() {
+    let endpoint = Endpoint::builder()
+        .bind(crate::effect_group::EffectGroupPayload)
+        .build();
+    let object_key = "fig3814-group-payload";
+    let raw_payload = vec![0xff_u8, 0x00, 0x13, 0x37];
+    let put = EffectGroupPayloadPutRequest {
+        bytes: b"fig3814-payload".to_vec(),
+    };
+
+    for (name, handler, input, seeded) in [
+        // `put` meets raw pre-stamp payload bytes at the stamped read.
+        (
+            "put-raw-payload",
+            "put",
+            serde_json::to_value(&put).expect("encode put request"),
+            BTreeMap::from([("effect-group/v1/payload".to_string(), raw_payload.clone())]),
+        ),
+        // `retire` writes nothing beside raw pre-stamp bytes.
+        (
+            "retire-raw-payload",
+            "retire",
+            serde_json::Value::Null,
+            BTreeMap::from([("effect-group/v1/payload".to_string(), raw_payload.clone())]),
+        ),
+        // The shared read meets the pre-stamp bare `retired` bool.
+        (
+            "get-bare-retired",
+            "get",
+            serde_json::Value::Null,
+            BTreeMap::from([("effect-group/v1/retired".to_string(), b"true".to_vec())]),
+        ),
+        // `delete_bytes` clears nothing beside an unstamped marker.
+        (
+            "delete-unstamped-retired",
+            "delete_bytes",
+            serde_json::Value::Null,
+            BTreeMap::from([("effect-group/v1/retired".to_string(), b"true".to_vec())]),
+        ),
+    ] {
+        let mut state = seeded;
+        let before = state.clone();
+        let output = invoke_endpoint_body(
+            &endpoint,
+            "EffectGroupPayload",
+            handler,
+            fig1943_invocation_with_state(object_key, &input, &state),
+        )
+        .await
+        .expect("invoke the payload handler against pre-stamp state");
+        let message = restate_output_failure_message(&output)
+            .or_else(|| restate_error_message(&output))
+            .unwrap_or_else(|| panic!("{name}: pre-stamp state must fail the invocation"));
+        let typed = crate::object_state::stored_format_error_in(&message)
+            .unwrap_or_else(|| panic!("{name}: the refusal is typed: {message}"));
+        assert_eq!(
+            typed.code,
+            lash_core::RuntimeErrorCode::EngineObjectStateFormatUnsupported
+        );
+        fig1943_apply_state_commands(&mut state, &output);
+        assert_eq!(state, before, "{name}: the refusal writes no state");
+    }
+}
+
 #[test]
 pub(super) fn durable_wait_register_and_sweep_derive_the_same_address_for_every_scope() {
     let scopes = [
@@ -1728,7 +1867,7 @@ pub(super) fn durable_wait_register_and_sweep_derive_the_same_address_for_every_
 #[tokio::test]
 pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
     let endpoint = Endpoint::builder()
-        .bind(LashDurableWaitIndexImpl.serve())
+        .bind(LashDurableWaitRegistryImpl.serve())
         .build();
     let object_key = "fig1943-session";
     let key = restate_await_event_key(
@@ -1756,12 +1895,13 @@ pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
     );
     fig1943_apply_state_commands(&mut state, &registered);
     let state_key = durable_wait_index_state_key(&RestateDurableWaitAddress::for_key(&key));
-    let indexed_key: AwaitEventKey = serde_json::from_slice(
+    let indexed_key: AwaitEventKey = serde_json::from_slice::<StampedValue<AwaitEventKey>>(
         state
             .get(&state_key)
             .expect("FIG-2005 index state stores the key preimage"),
     )
-    .expect("decode FIG-2005 indexed key preimage");
+    .expect("decode FIG-2005 indexed key preimage")
+    .body;
     assert_eq!(indexed_key, key);
 
     let terminal = Resolution::Ok(serde_json::json!({ "tool_result": "complete" }));
@@ -1820,7 +1960,7 @@ pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
 #[tokio::test]
 pub(super) async fn outstanding_wait_read_is_pure_and_filters_retained_control_terminals() {
     let endpoint = Endpoint::builder()
-        .bind(LashDurableWaitIndexImpl.serve())
+        .bind(LashDurableWaitRegistryImpl.serve())
         .build();
     let object_key = "fig2946-session";
     let mut state = BTreeMap::new();
@@ -1928,41 +2068,6 @@ pub(super) async fn outstanding_wait_read_is_pure_and_filters_retained_control_t
         Some(Vec::new()),
         "retained control state with a terminal is not outstanding"
     );
-}
-
-#[test]
-pub(super) fn durable_wait_index_epoch_rejects_legacy_state_and_accepts_fresh_state() {
-    let error = validate_durable_wait_index_epoch(None, &["waits".to_string()])
-        .expect_err("pre-cutover aggregate state must be rejected");
-    assert!(error.contains("drain and recreate"));
-    assert!(
-        validate_durable_wait_index_epoch(None, &["wait-index/v1/metadata".to_string()])
-            .expect_err("v1 wait-index state must be rejected")
-            .contains("pre-cutover")
-    );
-    validate_durable_wait_index_epoch(None, &[]).expect("fresh state opens");
-    validate_durable_wait_index_epoch(
-        Some(DURABLE_WAIT_INDEX_IDENTITY_EPOCH),
-        &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()],
-    )
-    .expect("matching epoch reopens current state");
-    let wrong_epoch = validate_durable_wait_index_epoch(
-        Some(DURABLE_WAIT_INDEX_IDENTITY_EPOCH - 1),
-        &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()],
-    )
-    .expect_err("wrong identity epoch must be rejected");
-    assert!(wrong_epoch.contains("incompatible with epoch 6"));
-    assert!(wrong_epoch.contains("drain and recreate"));
-    assert!(DURABLE_WAIT_INDEX_METADATA_KEY.starts_with("wait-index/v2/"));
-}
-
-#[test]
-pub(super) fn durable_wait_identity_epoch_six_rejects_epoch_five_state() {
-    let error =
-        validate_durable_wait_index_epoch(Some(5), &[DURABLE_WAIT_INDEX_METADATA_KEY.to_string()])
-            .expect_err("epoch-5 durable-wait state must not open under epoch 6");
-    assert!(error.contains("identity epoch 5 is incompatible with epoch 6"));
-    assert!(error.contains("drain and recreate"));
 }
 
 pub(super) fn wait_index_measurement_key(ordinal: usize) -> AwaitEventKey {

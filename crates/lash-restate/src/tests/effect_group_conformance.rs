@@ -894,7 +894,7 @@ impl LiveConformanceHarness {
         );
         let probe = ingress
             .call_object_empty_json::<crate::EffectGroupProbeResponse>(
-                crate::LashService::EffectGroupIndex,
+                crate::LashService::EffectGroupState,
                 &operation,
                 "probe",
             )
@@ -1045,7 +1045,7 @@ impl LiveConformanceHarness {
             "a late resolution after the close is not accepted: {late:?}"
         );
         let _: EffectGroupRetireResponse = ingress
-            .call_object_empty_json(crate::LashService::EffectGroupIndex, &group_key, "retire")
+            .call_object_empty_json(crate::LashService::EffectGroupState, &group_key, "retire")
             .await
             .expect("the wait group tombstones");
         println!("EFFECT_GROUP_WITNESS unstarted-wait-child-release PASS");
@@ -1177,7 +1177,7 @@ impl LiveConformanceHarness {
             "a late resolution after the close is not accepted: {late:?}"
         );
         let _: EffectGroupRetireResponse = ingress
-            .call_object_empty_json(crate::LashService::EffectGroupIndex, &group_key, "retire")
+            .call_object_empty_json(crate::LashService::EffectGroupState, &group_key, "retire")
             .await
             .expect("the admitting group tombstones");
         println!("EFFECT_GROUP_WITNESS admitting-wait-child-release PASS");
@@ -1947,7 +1947,7 @@ async fn run_design_witnesses(
     );
     let retired: EffectGroupRetireResponse = ingress
         .call_object_empty_json(
-            crate::LashService::EffectGroupIndex,
+            crate::LashService::EffectGroupState,
             &admission_group,
             "retire",
         )
@@ -1982,7 +1982,7 @@ async fn run_design_witnesses(
         .await
         .expect("send-record-gap witness opens");
     let _: EffectGroupRetireResponse = ingress
-        .call_object_empty_json(crate::LashService::EffectGroupIndex, &gap_group, "retire")
+        .call_object_empty_json(crate::LashService::EffectGroupState, &gap_group, "retire")
         .await
         .expect("send-record-gap witness tombstones");
     let executions_before_child = gap_executions.load(Ordering::SeqCst);
@@ -2097,7 +2097,7 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
     assert_eq!(released, EffectGroupWaitResolution::Retired);
     println!("EFFECT_GROUP_WITNESS n drained-wake-retired PASS");
 
-    let stale_group = witness_key("stale-protocol");
+    let stale_group = witness_key("stale-format");
     let stale_child = witness_child(&stale_group, 0);
     let stale_shape = witness_shape(&stale_group, std::slice::from_ref(&stale_child));
     let _: EffectGroupOpenResponse = ingress
@@ -2111,9 +2111,9 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
             },
         )
         .await
-        .expect("stale-protocol witness opens");
-    // Rewrite the group's state as a deployment that predates the stamp
-    // left it: the same record with no protocol version.
+        .expect("stale-format witness opens");
+    // Rewrite the group's state as a deployment that predates the stamped
+    // envelope left it: the same record with no format stamp.
     let stale_state = serde_json::json!({
         "shape_digest": stale_shape.digest().expect("witness shape digest"),
         "lifecycle": {"type": "retired", "cleanup": {"type": "complete"}},
@@ -2138,13 +2138,13 @@ async fn run_drain_barrier_witnesses(ingress: &RestateIngressClient, admin: &Har
     })
     .await
     .expect("the rewritten state reaches the index");
-    let typed = crate::effect_host::ingress_protocol_refusal(&refused)
+    let typed = crate::effect_host::ingress_stored_format_refusal(&refused)
         .unwrap_or_else(|| panic!("the refusal is typed: {refused}"));
     assert_eq!(
         typed.code,
-        RuntimeErrorCode::EngineEffectGroupProtocolRetired
+        RuntimeErrorCode::EngineObjectStateFormatUnsupported
     );
-    println!("EFFECT_GROUP_WITNESS o stale-protocol-refused-typed PASS");
+    println!("EFFECT_GROUP_WITNESS o stale-format-refused-typed PASS");
 }
 
 /// Replace an effect-group index's retained state through the Restate admin

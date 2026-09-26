@@ -72,15 +72,11 @@
 //! deadline timers for every [`ExecutionScope`](lash_core::ExecutionScope),
 //! and the durable-wait index, which indexes session-owned waits so
 //! cancellation and deletion can resolve them durably.
-//! Await-event identity epoch 6 uses the v2 wait-index namespace and marker;
-//! requests and indexed wait values carry the `AwaitEventKey` preimage so each
-//! handler derives scope, classification, and workflow address locally.
-//! There is no migration across that cutover: every register, resolve,
-//! renew, and woken-settle path crosses the index epoch gate and refuses
-//! pre-cutover state, typed and before any effect. A pre-cutover invocation
-//! suspended on a v2 workflow address never reaches that gate and is
-//! unreachable from v4 resolutions, so it never self-terminates; an operator
-//! cancels it.
+//! The durable-wait services use the v2 wait-index namespace; requests and
+//! indexed wait values carry the `AwaitEventKey` preimage so each handler
+//! derives scope, classification, and workflow address locally. A pre-cutover
+//! invocation suspended on a v2 workflow address is unreachable from v4
+//! resolutions, so it never self-terminates; an operator cancels it.
 
 mod controller;
 mod durable_wait;
@@ -89,6 +85,7 @@ mod effect_host;
 mod engine;
 mod formats;
 mod ingress;
+mod object_state;
 mod process;
 mod process_attach;
 mod process_stop;
@@ -105,7 +102,7 @@ pub use controller::{
     RestateEffectControllerOptions, RestateEffectError, RestateRuntimeEffectController,
 };
 pub use durable_wait::{
-    DURABLE_WAIT_INDEX_IDENTITY_EPOCH, DURABLE_WAIT_REQUEST_VERSION, RestateDurableWaitAddress,
+    DURABLE_WAIT_REGISTRY_FORMAT_VERSION, DURABLE_WAIT_REQUEST_VERSION, RestateDurableWaitAddress,
     RestateDurableWaitAwaitInput, RestateDurableWaitAwaitRequest,
     RestateDurableWaitAwakeableRequest, RestateDurableWaitCancelDecidedRequest,
     RestateDurableWaitClassification, RestateDurableWaitDeadline, RestateDurableWaitEffectRequest,
@@ -114,14 +111,15 @@ pub use durable_wait::{
     RestateDurableWaitSettleRequest,
 };
 pub use effect_group::{
-    EFFECT_GROUP_INDEX_PROTOCOL_VERSION, EffectGroupAdmissionRequest, EffectGroupAdmissionResponse,
-    EffectGroupAdoptRequest, EffectGroupCleanup, EffectGroupCleanupFacts,
-    EffectGroupCloseDisposition, EffectGroupCloseRequest, EffectGroupCloseResponse,
-    EffectGroupDispatchRequest, EffectGroupDispatchState, EffectGroupFinishRetirementResponse,
-    EffectGroupOpenRequest, EffectGroupOpenResponse, EffectGroupPayloadGetResponse,
-    EffectGroupPayloadPutRequest, EffectGroupPayloadPutResponse, EffectGroupPhase,
-    EffectGroupProbeAdoptResponse, EffectGroupProbeResponse, EffectGroupReadRankRequest,
-    EffectGroupReadRankResponse, EffectGroupRecordDispatchRequest,
+    EFFECT_GROUP_DISPATCH_JOURNAL_VERSION, EFFECT_GROUP_PAYLOAD_FORMAT_VERSION,
+    EFFECT_GROUP_STATE_FORMAT_VERSION, EFFECT_GROUP_WIRE_VERSION, EffectGroupAdmissionRequest,
+    EffectGroupAdmissionResponse, EffectGroupAdoptRequest, EffectGroupCleanup,
+    EffectGroupCleanupFacts, EffectGroupCloseDisposition, EffectGroupCloseRequest,
+    EffectGroupCloseResponse, EffectGroupDispatchRequest, EffectGroupDispatchState,
+    EffectGroupFinishRetirementResponse, EffectGroupOpenRequest, EffectGroupOpenResponse,
+    EffectGroupPayloadGetResponse, EffectGroupPayloadPutRequest, EffectGroupPayloadPutResponse,
+    EffectGroupPhase, EffectGroupProbeAdoptResponse, EffectGroupProbeResponse,
+    EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupRecordDispatchRequest,
     EffectGroupRecordDispatchResponse, EffectGroupRecordSettlementRequest,
     EffectGroupRecordSettlementResponse, EffectGroupRefusal, EffectGroupRefusalRequest,
     EffectGroupRegisterRefusalResponse, EffectGroupRegisterRequest, EffectGroupRegisterResponse,
@@ -166,7 +164,7 @@ pub use durable_wait::RestateTurnCancelRaceOutcome;
 // crate's tests drive them one at a time.
 #[cfg(test)]
 pub(crate) use durable_wait::{
-    LashDurableWaitIndex, LashDurableWaitIndexImpl, LashDurableWaitWorkflow,
+    LashDurableWaitRegistry, LashDurableWaitRegistryImpl, LashDurableWaitWorkflow,
     LashDurableWaitWorkflowImpl,
 };
 #[cfg(test)]

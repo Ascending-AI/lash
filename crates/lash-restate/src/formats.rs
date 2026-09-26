@@ -12,8 +12,11 @@
 use lash_core::engine::UpgradePolicy;
 
 use crate::controller::{EFFECT_JOURNAL_VERSION, PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION};
-use crate::durable_wait::{DURABLE_WAIT_INDEX_IDENTITY_EPOCH, DURABLE_WAIT_REQUEST_VERSION};
-use crate::effect_group::EFFECT_GROUP_INDEX_PROTOCOL_VERSION;
+use crate::durable_wait::{DURABLE_WAIT_REGISTRY_FORMAT_VERSION, DURABLE_WAIT_REQUEST_VERSION};
+use crate::effect_group::{
+    EFFECT_GROUP_DISPATCH_JOURNAL_VERSION, EFFECT_GROUP_PAYLOAD_FORMAT_VERSION,
+    EFFECT_GROUP_STATE_FORMAT_VERSION, EFFECT_GROUP_WIRE_VERSION,
+};
 use crate::process::RESTATE_PROCESS_JOURNAL_VERSION;
 use crate::session_driver::LASH_SESSION_DRIVE_VERSION;
 
@@ -65,11 +68,11 @@ static DURABLE_FORMATS: &[EngineDurableFormat] = &[
         unwalkable_reason: UNWALKABLE_REASON,
     },
     EngineDurableFormat {
-        id: "restate.durable_wait_index_epoch",
-        name: "Restate durable-wait index epoch",
-        version: DURABLE_WAIT_INDEX_IDENTITY_EPOCH as u32,
-        constant: "DURABLE_WAIT_INDEX_IDENTITY_EPOCH",
-        upgrade_policy: UpgradePolicy::Coexist,
+        id: "restate.durable_wait_registry_format",
+        name: "Restate durable-wait registry format",
+        version: DURABLE_WAIT_REGISTRY_FORMAT_VERSION as u32,
+        constant: "DURABLE_WAIT_REGISTRY_FORMAT_VERSION",
+        upgrade_policy: UpgradePolicy::Migrate,
         unwalkable_reason: UNWALKABLE_REASON,
     },
     EngineDurableFormat {
@@ -81,11 +84,35 @@ static DURABLE_FORMATS: &[EngineDurableFormat] = &[
         unwalkable_reason: UNWALKABLE_REASON,
     },
     EngineDurableFormat {
-        id: "restate.effect_group_index_protocol",
-        name: "Restate effect-group index protocol",
-        version: EFFECT_GROUP_INDEX_PROTOCOL_VERSION,
-        constant: "EFFECT_GROUP_INDEX_PROTOCOL_VERSION",
+        id: "restate.effect_group_state_format",
+        name: "Restate effect-group state format",
+        version: EFFECT_GROUP_STATE_FORMAT_VERSION as u32,
+        constant: "EFFECT_GROUP_STATE_FORMAT_VERSION",
+        upgrade_policy: UpgradePolicy::Migrate,
+        unwalkable_reason: UNWALKABLE_REASON,
+    },
+    EngineDurableFormat {
+        id: "restate.effect_group_wire",
+        name: "Restate effect-group wire",
+        version: EFFECT_GROUP_WIRE_VERSION,
+        constant: "EFFECT_GROUP_WIRE_VERSION",
         upgrade_policy: UpgradePolicy::Coexist,
+        unwalkable_reason: UNWALKABLE_REASON,
+    },
+    EngineDurableFormat {
+        id: "restate.effect_group_dispatch_journal",
+        name: "Restate effect-group dispatch journal",
+        version: EFFECT_GROUP_DISPATCH_JOURNAL_VERSION,
+        constant: "EFFECT_GROUP_DISPATCH_JOURNAL_VERSION",
+        upgrade_policy: UpgradePolicy::Drain,
+        unwalkable_reason: UNWALKABLE_REASON,
+    },
+    EngineDurableFormat {
+        id: "restate.effect_group_payload_format",
+        name: "Restate effect-group payload format",
+        version: EFFECT_GROUP_PAYLOAD_FORMAT_VERSION as u32,
+        constant: "EFFECT_GROUP_PAYLOAD_FORMAT_VERSION",
+        upgrade_policy: UpgradePolicy::Migrate,
         unwalkable_reason: UNWALKABLE_REASON,
     },
     EngineDurableFormat {

@@ -39,7 +39,7 @@ pub(crate) fn drained_wait_lifted(
 
 /// Every committed sibling below `below` that still owes its seat — the §5
 /// barrier as the index sees it.
-pub(super) fn blocking_positions(live: &EffectGroupIndexLiveRecord, below: u64) -> Vec<usize> {
+pub(super) fn blocking_positions(live: &EffectGroupStateLiveRecord, below: u64) -> Vec<usize> {
     live.commit_states
         .iter()
         .filter_map(|(position, state)| match state {

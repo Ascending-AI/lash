@@ -135,7 +135,7 @@ pub trait EffectHost: AwaitEventResolver {
     /// and the four-step cursor a finalizer advances.
     ///
     /// `None` on a tier that keeps no group row — Restate answers the same
-    /// lifecycle through its engine-side `EffectGroupIndex` `Closed`/`Retired`
+    /// lifecycle through its engine-side `EffectGroupState` `Closed`/`Retired`
     /// states, which are the twin of this seam, so there is nothing to hand
     /// out. The SQL hosts answer with the shared driver's closing object.
     fn effect_group_closing(

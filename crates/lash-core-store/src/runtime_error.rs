@@ -273,10 +273,10 @@ pub enum RuntimeErrorCode {
     /// A Restate DirectProcess journal entry has an unsupported version or a
     /// shape this build cannot decode exactly.
     EngineProcessJournalPayloadIncompatible,
-    /// A Restate effect-group index holds state written under another
-    /// effect-group protocol version; the index refuses it at handler entry,
-    /// before any effect.
-    EngineEffectGroupProtocolRetired,
+    /// A Restate object's retained state carries a stored-format stamp this
+    /// build does not read — unstamped pre-format state, or a newer or
+    /// skipped format; the handler refuses the value before any effect.
+    EngineObjectStateFormatUnsupported,
     EngineProcessIngressSubmit,
     /// The ingress target names an unbound service; retry cannot change that
     /// deployment fact, so this code is terminal.
@@ -625,7 +625,7 @@ impl RuntimeErrorCode {
             Self::EngineProcessJournalPayloadIncompatible => {
                 "engine_process_journal_payload_incompatible"
             }
-            Self::EngineEffectGroupProtocolRetired => "engine_effect_group_protocol_retired",
+            Self::EngineObjectStateFormatUnsupported => "engine_object_state_format_unsupported",
             Self::EngineProcessIngressSubmit => "engine_process_ingress_submit",
             Self::EngineServiceUnregistered => "engine_service_unregistered",
             Self::EngineProcessAwaitAfterTurnCancel => "engine_process_await_after_turn_cancel",
@@ -880,7 +880,7 @@ impl RuntimeErrorCode {
         Self::EngineProcessCancel,
         Self::EngineProcessJournalIdentityDrift,
         Self::EngineProcessJournalPayloadIncompatible,
-        Self::EngineEffectGroupProtocolRetired,
+        Self::EngineObjectStateFormatUnsupported,
         Self::EngineProcessIngressSubmit,
         Self::EngineServiceUnregistered,
         Self::EngineProcessAwaitAfterTurnCancel,
@@ -1081,7 +1081,7 @@ impl RuntimeErrorCode {
             "engine_process_journal_payload_incompatible" => {
                 Self::EngineProcessJournalPayloadIncompatible
             }
-            "engine_effect_group_protocol_retired" => Self::EngineEffectGroupProtocolRetired,
+            "engine_object_state_format_unsupported" => Self::EngineObjectStateFormatUnsupported,
             "engine_process_ingress_submit" => Self::EngineProcessIngressSubmit,
             "engine_service_unregistered" => Self::EngineServiceUnregistered,
             "engine_process_await_after_turn_cancel" => Self::EngineProcessAwaitAfterTurnCancel,

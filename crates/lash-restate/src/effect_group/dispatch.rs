@@ -137,7 +137,7 @@ impl EffectGroupDispatch {
         matches!(
             self.ingress
                 .call_object_empty_json::<EffectGroupProbeResponse>(
-                    crate::LashService::EffectGroupIndex,
+                    crate::LashService::EffectGroupState,
                     group_key,
                     "probe",
                 )
@@ -160,7 +160,7 @@ impl EffectGroupDispatch {
     ) -> HandlerResult<Json<()>> {
         let own_id = ctx.invocation_id().to_string();
         let Json(adopted) = ctx
-            .object_client::<EffectGroupIndexClient>(request.group_key.clone())
+            .object_client::<EffectGroupStateClient>(request.group_key.clone())
             .probe_and_adopt(Json(EffectGroupAdoptRequest {
                 invocation_id: own_id,
             }))
@@ -217,7 +217,7 @@ impl EffectGroupDispatch {
             .await?;
         if let Some(position) = missing {
             let Json(outcome) = ctx
-                .object_client::<EffectGroupIndexClient>(request.group_key.clone())
+                .object_client::<EffectGroupStateClient>(request.group_key.clone())
                 .register_refusal(Json(EffectGroupRefusalRequest {
                     reason: EffectGroupRefusal::NoExecutor { position },
                 }))
@@ -270,7 +270,7 @@ impl EffectGroupDispatch {
                 .call();
             let invocation_id = call.invocation_handle().await?.invocation_id().to_owned();
             let Json(recorded) = ctx
-                .object_client::<EffectGroupIndexClient>(request.group_key.clone())
+                .object_client::<EffectGroupStateClient>(request.group_key.clone())
                 .record_dispatch(Json(EffectGroupRecordDispatchRequest {
                     position,
                     invocation_id: invocation_id.clone(),
@@ -293,7 +293,7 @@ impl EffectGroupDispatch {
             calls.push((position, call));
         }
         let Json(registered) = ctx
-            .object_client::<EffectGroupIndexClient>(request.group_key.clone())
+            .object_client::<EffectGroupStateClient>(request.group_key.clone())
             .register_children(Json(EffectGroupRegisterRequest { addresses }))
             .call()
             .await?;
@@ -386,7 +386,7 @@ impl EffectGroupDispatch {
             invocation_id: own_id,
         };
         let Json(first) = ctx
-            .object_client::<EffectGroupIndexClient>(request.group_key.clone())
+            .object_client::<EffectGroupStateClient>(request.group_key.clone())
             .admit_child(Json(admission_request.clone()))
             .call()
             .await?;
@@ -440,7 +440,7 @@ impl EffectGroupDispatch {
                 // ADMIT is notification only. Authorization always comes from
                 // this one fresh, mapping-exact call after the wake.
                 let Json(fresh) = ctx
-                    .object_client::<EffectGroupIndexClient>(request.group_key.clone())
+                    .object_client::<EffectGroupStateClient>(request.group_key.clone())
                     .admit_child(Json(admission_request))
                     .call()
                     .await?;
@@ -486,7 +486,7 @@ impl EffectGroupDispatch {
         // settles nowhere.
         let child_replay_key = request.envelope.invocation.replay_key().to_string();
         let Json(membership_admitted) = ctx
-            .object_client::<LashDurableWaitIndexClient>(durable_wait_index_key_for_scope(
+            .object_client::<LashDurableWaitRegistryClient>(durable_wait_index_key_for_scope(
                 request.envelope.invocation.execution_scope(),
             ))
             .record_group_child(Json(RestateDurableWaitGroupChildRequest {
@@ -732,7 +732,7 @@ impl EffectGroupDispatch {
         group_key: String,
     ) -> HandlerResult<Json<()>> {
         let Json(retired) = ctx
-            .object_client::<EffectGroupIndexClient>(group_key.clone())
+            .object_client::<EffectGroupStateClient>(group_key.clone())
             .retire()
             .call()
             .await?;
@@ -753,7 +753,7 @@ impl EffectGroupDispatch {
             ctx.invocation_handle(invocation_id.clone()).cancel();
         }
         let Json(cancelled) = ctx
-            .object_client::<EffectGroupIndexClient>(group_key.clone())
+            .object_client::<EffectGroupStateClient>(group_key.clone())
             .retirement_cancel()
             .call()
             .await?;
@@ -813,7 +813,7 @@ impl EffectGroupDispatch {
             let replay_key = key.key_id.clone();
             let address = RestateDurableWaitAddress::for_key(&key);
             let Json(()) = ctx
-                .object_client::<LashDurableWaitIndexClient>(durable_wait_index_object_key(
+                .object_client::<LashDurableWaitRegistryClient>(durable_wait_index_object_key(
                     &address,
                 ))
                 .retain_resolution(Json(RestateDurableWaitResolveRequest {
@@ -832,7 +832,7 @@ impl EffectGroupDispatch {
                 .await?;
         }
         let Json(finished) = ctx
-            .object_client::<EffectGroupIndexClient>(group_key.clone())
+            .object_client::<EffectGroupStateClient>(group_key.clone())
             .finish_retirement()
             .call()
             .await?;
@@ -1019,7 +1019,7 @@ async fn record_child_settlement(
     // the cancel disposition beat is refused by name, and its payload
     // and settlement never write.
     let Json(committed) = ctx
-        .object_client::<EffectGroupIndexClient>(request.group_key.clone())
+        .object_client::<EffectGroupStateClient>(request.group_key.clone())
         .commit_child(Json(EffectGroupCommitChildRequest {
             replay_key: request.envelope.invocation.replay_key().to_string(),
         }))
@@ -1125,7 +1125,7 @@ async fn record_child_settlement(
         }
     };
     let Json(recorded) = ctx
-        .object_client::<EffectGroupIndexClient>(request.group_key.clone())
+        .object_client::<EffectGroupStateClient>(request.group_key.clone())
         .record_settlement(Json(EffectGroupRecordSettlementRequest {
             position: request.position,
             terminal,

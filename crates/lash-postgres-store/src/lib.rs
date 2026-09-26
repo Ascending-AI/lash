@@ -557,7 +557,13 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // in the fleet emits. `lash migrate` carries a component-135 catalog forward
 // by creating the table; the first open provisions the row, and durable
 // writers consult it until `finalize-upgrade` (FIG-3800) moves it.
-const SCHEMA_VERSION: i32 = 136;
+//
+// Version 137 (FIG-3814) swaps `engine_effect_group_protocol_retired` for
+// `engine_object_state_format_unsupported` in the durable runtime-error
+// vocabulary with the effect-group protocol's exact-version refusal. No
+// relation changes: `lash migrate` restamps a component-136 catalog through
+// the expand step of the same name.
+const SCHEMA_VERSION: i32 = 137;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
 ///

@@ -25,9 +25,8 @@ use lash_core::{
     RuntimeEffectOutcome, RuntimeErrorCode,
 };
 use restate_sdk::context::{
-    CallFuture, ContextClient, ContextReadState, ContextSideEffects, ContextWriteState,
-    ObjectContext, RunFuture, RunRetryPolicy, SharedObjectContext, SharedWorkflowContext,
-    WorkflowContext,
+    CallFuture, ContextClient, ContextSideEffects, ContextWriteState, ObjectContext, RunFuture,
+    RunRetryPolicy, SharedObjectContext, SharedWorkflowContext, WorkflowContext,
 };
 use restate_sdk::errors::{HandlerResult, TerminalError};
 use restate_sdk::serde::Json;
@@ -36,15 +35,14 @@ use sha2::{Digest, Sha256};
 
 use crate::RestateIngressClient;
 use crate::durable_wait::{
-    LASH_REPLAY_KEY_HEADER, LashDurableWaitIndexClient, LashDurableWaitWorkflowClient,
+    LASH_REPLAY_KEY_HEADER, LashDurableWaitRegistryClient, LashDurableWaitWorkflowClient,
     RestateDurableWaitAddress, RestateDurableWaitAwaitRequest, RestateDurableWaitGroupChildRequest,
     RestateDurableWaitResolveRequest, durable_wait_index_key_for_scope,
     durable_wait_index_object_key, restate_await_event_key,
 };
+use crate::object_state::{self, StoredValueFormats};
 
 const INDEX_STATE_KEY: &str = "effect-group/v1/state";
-const PAYLOAD_STATE_KEY: &str = "effect-group/v1/payload";
-const PAYLOAD_RETIRED_KEY: &str = "effect-group/v1/retired";
 
 #[cfg(test)]
 static ADMISSION_WITNESSES: std::sync::OnceLock<Mutex<HashMap<String, Arc<tokio::sync::Notify>>>> =
@@ -58,10 +56,11 @@ mod wire;
 use drain_barrier::blocking_positions;
 pub(crate) use drain_barrier::{drained_wait_lifted, drained_wait_request};
 use group_waits::{resolve_group_wait, seal_cancel_decisions, wait_resolution};
-pub use protocol::EFFECT_GROUP_INDEX_PROTOCOL_VERSION;
-pub(crate) use protocol::protocol_refusal_in;
-#[cfg(test)]
-pub(crate) use protocol::protocol_retired_error;
+pub(crate) use protocol::EFFECT_GROUP_STATE_FORMATS;
+pub use protocol::{
+    EFFECT_GROUP_DISPATCH_JOURNAL_VERSION, EFFECT_GROUP_STATE_FORMAT_VERSION,
+    EFFECT_GROUP_WIRE_VERSION,
+};
 use protocol::{load_index, load_index_shared};
 pub(crate) use reopen::{content_checked_shape_mismatch, content_mismatch};
 pub(crate) use wire::btree_map_as_pairs;
@@ -84,8 +83,8 @@ pub enum EffectGroupDispatchState {
     },
 }
 
-mod index_record;
-pub use index_record::*;
+mod state_record;
+pub use state_record::*;
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
@@ -507,15 +506,15 @@ fn phase(lifecycle: &EffectGroupLifecycle) -> EffectGroupPhase {
     }
 }
 
-fn store_index(ctx: &ObjectContext<'_>, record: EffectGroupIndexRecord) {
-    ctx.set(INDEX_STATE_KEY, Json(record));
+fn store_index(ctx: &ObjectContext<'_>, record: EffectGroupStateRecord) {
+    object_state::set_stamped(ctx, INDEX_STATE_KEY, &EFFECT_GROUP_STATE_FORMATS, record);
 }
 
 #[derive(Clone, Copy, Debug)]
-pub(crate) struct EffectGroupIndex;
+pub(crate) struct EffectGroupState;
 
 #[restate_sdk::object(name = "EffectGroupIndex")]
-impl EffectGroupIndex {
+impl EffectGroupState {
     #[handler]
     async fn probe(
         &self,
@@ -558,12 +557,11 @@ impl EffectGroupIndex {
             let shape_digest = request.shape.digest()?;
             store_index(
                 &ctx,
-                EffectGroupIndexRecord {
-                    protocol_version: EFFECT_GROUP_INDEX_PROTOCOL_VERSION,
+                EffectGroupStateRecord {
                     shape_digest,
                     lifecycle: EffectGroupLifecycle::Preparing {
                         dispatch: EffectGroupDispatchState::Unadopted,
-                        live: EffectGroupIndexLiveRecord {
+                        live: EffectGroupStateLiveRecord {
                             shape: request.shape,
                             next_rank: 1,
                             next_commit_seq: 1,
@@ -1520,86 +1518,18 @@ impl EffectGroupIndex {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupPayloadPutResponse {
-    Written,
-    Duplicate,
-    Conflict,
-    Retired,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum EffectGroupPayloadGetResponse {
-    Stored { bytes: Vec<u8> },
-    Missing,
-    Retired,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct EffectGroupPayloadPutRequest {
-    pub bytes: Vec<u8>,
-}
-
-#[derive(Clone, Copy, Debug)]
-pub(crate) struct EffectGroupPayload;
-
-#[restate_sdk::object(name = "EffectGroupPayload")]
-impl EffectGroupPayload {
-    #[handler]
-    async fn put(
-        &self,
-        ctx: ObjectContext<'_>,
-        Json(request): Json<EffectGroupPayloadPutRequest>,
-    ) -> HandlerResult<Json<EffectGroupPayloadPutResponse>> {
-        if ctx.get::<bool>(PAYLOAD_RETIRED_KEY).await?.unwrap_or(false) {
-            return Ok(Json(EffectGroupPayloadPutResponse::Retired));
-        }
-        let response = match ctx.get::<Vec<u8>>(PAYLOAD_STATE_KEY).await? {
-            None => {
-                ctx.set(PAYLOAD_STATE_KEY, request.bytes);
-                EffectGroupPayloadPutResponse::Written
-            }
-            Some(existing) if existing == request.bytes => EffectGroupPayloadPutResponse::Duplicate,
-            Some(_) => EffectGroupPayloadPutResponse::Conflict,
-        };
-        Ok(Json(response))
-    }
-
-    #[handler]
-    async fn get(
-        &self,
-        ctx: SharedObjectContext<'_>,
-    ) -> HandlerResult<Json<EffectGroupPayloadGetResponse>> {
-        if ctx.get::<bool>(PAYLOAD_RETIRED_KEY).await?.unwrap_or(false) {
-            return Ok(Json(EffectGroupPayloadGetResponse::Retired));
-        }
-        Ok(Json(match ctx.get::<Vec<u8>>(PAYLOAD_STATE_KEY).await? {
-            Some(bytes) => EffectGroupPayloadGetResponse::Stored { bytes },
-            None => EffectGroupPayloadGetResponse::Missing,
-        }))
-    }
-
-    #[handler]
-    async fn retire(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {
-        ctx.set(PAYLOAD_RETIRED_KEY, true);
-        Ok(Json(()))
-    }
-
-    #[handler]
-    async fn delete_bytes(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {
-        ctx.clear(PAYLOAD_STATE_KEY);
-        Ok(Json(()))
-    }
-}
-
 mod dispatch;
+mod payload;
 #[cfg(test)]
 pub(crate) use dispatch::EffectGroupChildRequest;
 pub(crate) use dispatch::EffectGroupDispatch;
 pub(crate) use dispatch::EffectGroupDispatchClient;
 pub use dispatch::EffectGroupDispatchRequest;
+pub use payload::{
+    EFFECT_GROUP_PAYLOAD_FORMAT_VERSION, EffectGroupPayloadGetResponse,
+    EffectGroupPayloadPutRequest, EffectGroupPayloadPutResponse,
+};
+pub(crate) use payload::{EffectGroupPayload, EffectGroupPayloadClient};
 pub(crate) fn payload_key(group_key: &str, position: usize) -> String {
     let digest = Sha256::digest(group_key.as_bytes());
     format!("{:x}:{position}", digest)

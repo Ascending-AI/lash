@@ -2,7 +2,7 @@
 //!
 //! Forwards every call to the handler controller and records executing
 //! effects and opened groups of a non-session scope in the scope's
-//! `LashDurableWaitIndex` object, so the scope's quiescence proof counts them.
+//! `LashDurableWaitRegistry` object, so the scope's quiescence proof counts them.
 
 use lash_sansio::SessionId;
 use std::sync::Arc;
@@ -21,7 +21,7 @@ use crate::durable_wait::durable_wait_index_key_for_scope;
 
 /// One scope's view of the in-handler controller: forwards everything, and
 /// records executing effects and opened groups of a non-session scope in the
-/// scope's `LashDurableWaitIndex` object so its quiescence proof counts them.
+/// scope's `LashDurableWaitRegistry` object so its quiescence proof counts them.
 pub(super) struct ScopeRecordingController<'run, 'ctx, C> {
     pub(super) inner: HandlerController<'run, 'ctx, C>,
     /// The admitted scope this controller serves: the claim address its

@@ -258,9 +258,9 @@ impl RuntimeErrorCode {
             Self::EngineProcessJournalIdentityDrift => Terminal,
             // the journal entry does not decode in this build.
             Self::EngineProcessJournalPayloadIncompatible => Terminal,
-            // the index state was written under another protocol version; a
-            // redrive meets the same state.
-            Self::EngineEffectGroupProtocolRetired => Terminal,
+            // the value's format stamp names a stored format this build does
+            // not read; a redrive meets the same stamp.
+            Self::EngineObjectStateFormatUnsupported => Terminal,
             // engine interaction failed; the engine redrives the invocation.
             Self::EngineProcessIngressSubmit => Retryable,
             // a deployment fact: the service is not bound.

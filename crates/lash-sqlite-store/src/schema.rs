@@ -951,7 +951,12 @@ CREATE TABLE IF NOT EXISTS fleet_format (
 /// durable-format generation every writer in the fleet emits. A pre-95
 /// database has no such table and, under the reject-and-recreate policy, is
 /// refused at open rather than midwifed one.
-pub(crate) const SCHEMA_VERSION: i32 = 95;
+/// Bumped to 96 for FIG-3814: the `engine_effect_group_protocol_retired` code
+/// leaves the durable runtime-error vocabulary for
+/// `engine_object_state_format_unsupported`, with the effect-group protocol's
+/// exact-version refusal. No relation changes; a pre-96 database is rejected at
+/// open and recreated; it is not migrated.
+pub(crate) const SCHEMA_VERSION: i32 = 96;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

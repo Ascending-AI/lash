@@ -8,7 +8,7 @@
 //! One responsibility: every Lash await-event key is turned into an exact
 //! Restate address here, and the two services that own that address live here
 //! too — `LashDurableWaitWorkflow` owns the promise and its deadline timer,
-//! `LashDurableWaitIndex` owns the session-to-wait index that cancellation,
+//! `LashDurableWaitRegistry` owns the session-to-wait index that cancellation,
 //! revocation, and session deletion resolve through.
 //!
 //! Handler-scoped key derivation is deliberately pure: it validates and derives
@@ -19,12 +19,9 @@
 //! from ingress-side `RestateEffectHostController::await_event_key`, which is not
 //! executing inside a Restate journal and still refuses revoked sessions eagerly.
 //!
-//! Identity epoch 6 is a hard cutover: every externally minted wait request
-//! and indexed state value carries the full authority-bound [`AwaitEventKey`]
-//! preimage, and handlers derive scope, classification, and workflow address
-//! locally. Deployments must drain and recreate both durable-wait services
-//! before upgrading; there is no tolerant decoder, address migration, or
-//! overlap window for pre-epoch-6 state.
+//! Every externally minted wait request and indexed state value carries the
+//! full authority-bound [`AwaitEventKey`] preimage, and handlers derive scope,
+//! classification, and workflow address locally.
 
 use lash_sansio::SessionId;
 use std::time::Duration;
@@ -43,6 +40,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::ingress::RestateAuthorityId;
+use crate::object_state::{self, StoredValueFormats};
 
 pub(crate) const LASH_REPLAY_KEY_HEADER: &str = "x-lash-replay-key";
 
@@ -132,12 +130,24 @@ pub(crate) const DURABLE_WAIT_PROMISE_KEY: &str = "resolution";
 /// decoder rejects the version-1 field instead of silently granting a fresh
 /// relative timeout after a worker replacement.
 pub const DURABLE_WAIT_REQUEST_VERSION: u8 = 2;
-/// Identity epoch the durable-wait index stamps into its object state; an
-/// object holding another epoch, or pre-cutover state with none, is refused at
-/// open with a drain-and-recreate instruction.
-pub const DURABLE_WAIT_INDEX_IDENTITY_EPOCH: u8 = 6;
-const DURABLE_WAIT_INDEX_EPOCH_KEY: &str = "wait-index/v2/identity-epoch";
+/// The stored format every value the durable-wait index keeps under its
+/// `wait-index/v2/` keys stamps into its object-state envelope (FIG-3814):
+/// metadata, wait, resolution, marker, and membership rows alike. Bump it
+/// when a stored shape under those keys changes; the previous format reads
+/// through the N-1 upcaster slot in [`DURABLE_WAIT_REGISTRY_FORMATS`].
+pub const DURABLE_WAIT_REGISTRY_FORMAT_VERSION: u16 = 1;
+/// The wait registry's stored-format table: the current stamp, plus the N-1
+/// upcaster hooks (empty while the first stamped layout is the baseline).
+pub(crate) const DURABLE_WAIT_REGISTRY_FORMATS: StoredValueFormats = StoredValueFormats {
+    what: "durable-wait registry",
+    current: DURABLE_WAIT_REGISTRY_FORMAT_VERSION,
+    upcast_n1: &[],
+};
 pub(crate) const DURABLE_WAIT_INDEX_METADATA_KEY: &str = "wait-index/v2/metadata";
+/// State keys a pre-stamp deployment wrote that mark the object as one this
+/// build must refuse before any effect — the deleted identity-epoch marker
+/// refuses by name whatever its bytes look like.
+const RETIRED_DURABLE_WAIT_STATE_KEYS: &[&str] = &["wait-index/v2/identity-epoch"];
 const DURABLE_WAIT_INDEX_WAIT_PREFIX: &str = "wait-index/v2/wait/";
 const DURABLE_WAIT_INDEX_RESOLUTION_PREFIX: &str = "wait-index/v2/resolution/";
 /// An effect executing under the scope inside a handler, keyed by replay
@@ -212,7 +222,7 @@ impl RestateDurableWaitAddress {
     }
 }
 
-/// Which `LashDurableWaitIndex` object owns a wait: the session's object for
+/// Which `LashDurableWaitRegistry` object owns a wait: the session's object for
 /// a session-bearing scope, or the object of the exact non-session scope
 /// (a process or runtime operation, keyed by its journal identity). One
 /// object per scope is what lets a scope-exact retirement revoke every wait
@@ -248,7 +258,7 @@ impl RestateDurableWaitScope {
     }
 }
 
-/// The `LashDurableWaitIndex` object key that owns every wait of `scope`.
+/// The `LashDurableWaitRegistry` object key that owns every wait of `scope`.
 pub(crate) fn durable_wait_index_key_for_scope(scope: &ExecutionScope) -> String {
     RestateDurableWaitScope::for_scope(scope).index_key("")
 }
@@ -629,7 +639,7 @@ where
     let entry = RestateDurableWaitAwakeableRequest { key, awakeable_id };
     let replay_key = entry.key.key_id.clone();
     let register = context
-        .object_client::<LashDurableWaitIndexClient>(session_id)
+        .object_client::<LashDurableWaitRegistryClient>(session_id)
         .register_awakeable(Json(entry.clone()))
         .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
     let Json(registration) = register.call().await?;
@@ -654,7 +664,7 @@ where
 {
     let replay_key = entry.key.key_id.clone();
     let unregister = context
-        .object_client::<LashDurableWaitIndexClient>(session_id)
+        .object_client::<LashDurableWaitRegistryClient>(session_id)
         .unregister_awakeable(Json(entry))
         .header(LASH_REPLAY_KEY_HEADER.to_string(), replay_key);
     let Json(()) = unregister.call().await?;
@@ -705,7 +715,7 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
         let index_key = durable_wait_index_object_key(&address);
         let replay_key = request.key.key_id.clone();
         let registration = ctx
-            .object_client::<LashDurableWaitIndexClient>(index_key.clone())
+            .object_client::<LashDurableWaitRegistryClient>(index_key.clone())
             .register(Json(RestateDurableWaitIndexRequest {
                 key: request.key.clone(),
             }))
@@ -756,14 +766,13 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
                 serde_json::from_str(&payload).map_err(TerminalError::from_error)?
             };
 
-        // A workflow that wakes after a deployment upgrade must cross the
-        // index epoch gate before it can return a resolution. Restate replays
-        // the old registration command, so this settle call is the first new
-        // command a previously parked invocation can execute. Fully parked v2
-        // invocations never reach it; the module and migration docs therefore
-        // require a pre-cutover drain/purge rather than claiming self-healing.
+        // A workflow that wakes after a deployment upgrade replays the old
+        // registration command, so this settle call is the first new command
+        // a previously parked invocation can execute. Fully parked v2
+        // invocations never reach it; pre-stamp object state is instead
+        // refused typed at the registry's stamped-state gate.
         let settle = ctx
-            .object_client::<LashDurableWaitIndexClient>(index_key)
+            .object_client::<LashDurableWaitRegistryClient>(index_key)
             .settle(Json(RestateDurableWaitSettleRequest {
                 key: request.key,
                 resolution: resolution.clone(),
@@ -806,8 +815,12 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
 ///
 /// Object serialization makes registration, cancellation, and revocation atomic for one
 /// session.
+// The registered service keeps its `LashDurableWaitIndex` name (FIG-3814):
+// the trait flavor of the object macro takes the name from `#[name]`, not
+// from the macro's own arguments.
 #[restate_sdk::object]
-pub trait LashDurableWaitIndex {
+#[name = "LashDurableWaitIndex"]
+pub trait LashDurableWaitRegistry {
     async fn is_revoked(request: Json<()>) -> HandlerResult<Json<bool>>;
     /// Read registered waits that have no retained terminal.
     async fn outstanding() -> HandlerResult<Json<Vec<AwaitEventKey>>>;
@@ -883,7 +896,7 @@ pub trait LashDurableWaitIndex {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct LashDurableWaitIndexImpl;
+pub(crate) struct LashDurableWaitRegistryImpl;
 pub(crate) fn durable_wait_index_state_key(address: &RestateDurableWaitAddress) -> String {
     let classification = match address.classification {
         RestateDurableWaitClassification::DurableWait => "durable",
@@ -963,84 +976,70 @@ pub(crate) fn durable_wait_address_from_state_key(
         .then_some(address)
 }
 
-pub(crate) fn validate_durable_wait_index_epoch(
-    stored_epoch: Option<u8>,
-    existing_keys: &[String],
-) -> Result<(), String> {
-    match stored_epoch {
-        Some(DURABLE_WAIT_INDEX_IDENTITY_EPOCH) => Ok(()),
-        Some(epoch) => Err(format!(
-            "Lash Restate await-event identity epoch {epoch} is incompatible with epoch {DURABLE_WAIT_INDEX_IDENTITY_EPOCH}; drain and recreate LashDurableWaitIndex and LashDurableWaitWorkflow state before opening this deployment"
-        )),
-        None if existing_keys.is_empty() => Ok(()),
-        None => Err(format!(
-            "pre-cutover Lash Restate await-event state was found without identity epoch {DURABLE_WAIT_INDEX_IDENTITY_EPOCH}; drain and recreate LashDurableWaitIndex and LashDurableWaitWorkflow state before opening this deployment"
-        )),
-    }
-}
-
-async fn open_durable_wait_index_epoch(ctx: &ObjectContext<'_>) -> Result<(), TerminalError> {
-    let stored_epoch = ctx
-        .get::<Json<u8>>(DURABLE_WAIT_INDEX_EPOCH_KEY)
-        .await?
-        .map(|Json(epoch)| epoch);
-    let existing_keys = if stored_epoch == Some(DURABLE_WAIT_INDEX_IDENTITY_EPOCH) {
-        Vec::new()
-    } else {
-        ctx.get_keys().await?
-    };
-    validate_durable_wait_index_epoch(stored_epoch, &existing_keys).map_err(TerminalError::new)?;
-    if stored_epoch.is_none() {
-        ctx.set(
-            DURABLE_WAIT_INDEX_EPOCH_KEY,
-            Json(DURABLE_WAIT_INDEX_IDENTITY_EPOCH),
-        );
-    }
-    Ok(())
-}
-
-/// Open the v2 wait index only inside the await-event v4 identity epoch.
+/// Load the index's metadata, initializing it for a pristine object.
 ///
 /// Restate object state is not part of an invocation's replayed journal: these
 /// index handlers are short-lived single calls, so changing their command
 /// sequence does not alter an in-flight multi-call journal. Object state does,
-/// however, survive a deployment upgrade. Any object with pre-cutover state
-/// but no matching epoch marker is rejected with a recreate instruction; old
-/// wait addresses are never migrated into the v4 identity world.
+/// however, survive a deployment upgrade, so a pre-stamp object — one holding
+/// the old `wait-index/v2/identity-epoch` marker or any value without the
+/// envelope's format stamp — is refused typed before this write can plant
+/// fresh metadata beside it.
 async fn load_durable_wait_index_metadata(
     ctx: &ObjectContext<'_>,
 ) -> Result<RestateDurableWaitIndexMetadata, TerminalError> {
-    open_durable_wait_index_epoch(ctx).await?;
-    if let Some(Json(metadata)) = ctx
-        .get::<Json<RestateDurableWaitIndexMetadata>>(DURABLE_WAIT_INDEX_METADATA_KEY)
-        .await?
+    object_state::gate_stamped_object_state(
+        ctx,
+        &DURABLE_WAIT_REGISTRY_FORMATS,
+        RETIRED_DURABLE_WAIT_STATE_KEYS,
+    )
+    .await?;
+    if let Some(metadata) = object_state::get_stamped::<RestateDurableWaitIndexMetadata>(
+        ctx,
+        DURABLE_WAIT_INDEX_METADATA_KEY,
+        &DURABLE_WAIT_REGISTRY_FORMATS,
+    )
+    .await?
     {
         return Ok(metadata);
     }
 
     let metadata = RestateDurableWaitIndexMetadata::default();
-    ctx.set(DURABLE_WAIT_INDEX_METADATA_KEY, Json(metadata.clone()));
+    object_state::set_stamped(
+        ctx,
+        DURABLE_WAIT_INDEX_METADATA_KEY,
+        &DURABLE_WAIT_REGISTRY_FORMATS,
+        metadata.clone(),
+    );
     Ok(metadata)
 }
 
+/// The index's metadata when the object holds any state, `None` when the
+/// object is pristine. State without a metadata row reads as a default one,
+/// the same answer the epoch era gave a marked object whose metadata had not
+/// yet been written.
 async fn read_durable_wait_index_metadata(
     ctx: &ObjectContext<'_>,
 ) -> Result<Option<RestateDurableWaitIndexMetadata>, TerminalError> {
-    let existing_keys = ctx.get_keys().await?;
-    let stored_epoch = ctx
-        .get::<Json<u8>>(DURABLE_WAIT_INDEX_EPOCH_KEY)
-        .await?
-        .map(|Json(epoch)| epoch);
-    validate_durable_wait_index_epoch(stored_epoch, &existing_keys).map_err(TerminalError::new)?;
-    let Some(_) = stored_epoch else {
+    object_state::gate_stamped_object_state(
+        ctx,
+        &DURABLE_WAIT_REGISTRY_FORMATS,
+        RETIRED_DURABLE_WAIT_STATE_KEYS,
+    )
+    .await?;
+    if let Some(metadata) = object_state::get_stamped::<RestateDurableWaitIndexMetadata>(
+        ctx,
+        DURABLE_WAIT_INDEX_METADATA_KEY,
+        &DURABLE_WAIT_REGISTRY_FORMATS,
+    )
+    .await?
+    {
+        return Ok(Some(metadata));
+    }
+    if ctx.get_keys().await?.is_empty() {
         return Ok(None);
-    };
-    Ok(Some(
-        ctx.get::<Json<RestateDurableWaitIndexMetadata>>(DURABLE_WAIT_INDEX_METADATA_KEY)
-            .await?
-            .map(|Json(metadata)| metadata)
-            .unwrap_or_default(),
-    ))
+    }
+    Ok(Some(RestateDurableWaitIndexMetadata::default()))
 }
 
 async fn load_indexed_waits(ctx: &ObjectContext<'_>) -> Result<Vec<AwaitEventKey>, TerminalError> {
@@ -1051,14 +1050,14 @@ async fn load_indexed_waits(ctx: &ObjectContext<'_>) -> Result<Vec<AwaitEventKey
         .into_iter()
         .filter(|state_key| state_key.starts_with(DURABLE_WAIT_INDEX_WAIT_PREFIX))
     {
-        let Json(key) = ctx
-            .get::<Json<AwaitEventKey>>(&state_key)
-            .await?
-            .ok_or_else(|| {
-                TerminalError::new(format!(
-                    "durable-wait index entry {state_key} has no key preimage"
-                ))
-            })?;
+        let key: AwaitEventKey =
+            object_state::get_stamped(ctx, &state_key, &DURABLE_WAIT_REGISTRY_FORMATS)
+                .await?
+                .ok_or_else(|| {
+                    TerminalError::new(format!(
+                        "durable-wait index entry {state_key} has no key preimage"
+                    ))
+                })?;
         let address = durable_wait_address_from_state_key(&key, &state_key).ok_or_else(|| {
             TerminalError::new(format!(
                 "durable-wait index entry {state_key} does not match its key preimage"
@@ -1089,10 +1088,13 @@ async fn read_outstanding_waits(
     let mut outstanding = Vec::new();
     for key in load_indexed_waits(ctx).await? {
         let address = RestateDurableWaitAddress::for_key(&key);
-        if ctx
-            .get::<Json<Resolution>>(&durable_wait_index_resolution_key(&address))
-            .await?
-            .is_none()
+        if object_state::get_stamped::<Resolution>(
+            ctx,
+            &durable_wait_index_resolution_key(&address),
+            &DURABLE_WAIT_REGISTRY_FORMATS,
+        )
+        .await?
+        .is_none()
             && !metadata.is_cancel_decided(&key.scope, &key.wait)?
         {
             outstanding.push(key);
@@ -1138,7 +1140,12 @@ fn mirror_resolve_outcome(
         ResolveOutcome::Accepted => accepted_terminal,
         ResolveOutcome::UnknownOrRevoked => return,
     };
-    ctx.set(&durable_wait_index_resolution_key(address), Json(terminal));
+    object_state::set_stamped(
+        ctx,
+        &durable_wait_index_resolution_key(address),
+        &DURABLE_WAIT_REGISTRY_FORMATS,
+        terminal,
+    );
 }
 
 /// Revoke the index: fence it, revoke its awakeables, and cancel its waits.
@@ -1164,11 +1171,12 @@ async fn revoke_index(
     let awakeables = std::mem::take(&mut metadata.awakeables);
     metadata.revoked = true;
     ctx.clear_all();
-    ctx.set(
-        DURABLE_WAIT_INDEX_EPOCH_KEY,
-        Json(DURABLE_WAIT_INDEX_IDENTITY_EPOCH),
+    object_state::set_stamped(
+        ctx,
+        DURABLE_WAIT_INDEX_METADATA_KEY,
+        &DURABLE_WAIT_REGISTRY_FORMATS,
+        metadata,
     );
-    ctx.set(DURABLE_WAIT_INDEX_METADATA_KEY, Json(metadata));
     for entry in awakeables {
         revoke_durable_wait_awakeable(ctx, &entry);
     }
@@ -1197,7 +1205,7 @@ async fn scope_effects_and_groups_are_quiescent(
             .map(|group_key| (state_key, group_key))
     }) {
         let Json(unsettled) = ctx
-            .object_client::<crate::effect_group::EffectGroupIndexClient>(group_key.to_string())
+            .object_client::<crate::effect_group::EffectGroupStateClient>(group_key.to_string())
             .unsettled_children()
             .call()
             .await?;
@@ -1234,7 +1242,7 @@ pub(crate) fn split_cancellable_waits(
         .into_iter()
         .partition(|key| !key.wait.is_turn_control())
 }
-impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
+impl LashDurableWaitRegistry for LashDurableWaitRegistryImpl {
     async fn is_revoked(
         &self,
         ctx: ObjectContext<'_>,
@@ -1260,15 +1268,20 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         let metadata = load_durable_wait_index_metadata(&ctx).await?;
         let registration = if metadata.revoked {
             RestateDurableWaitRegistration::Revoked
-        } else if let Some(Json(resolution)) = ctx
-            .get::<Json<Resolution>>(&durable_wait_index_resolution_key(&address))
-            .await?
+        } else if let Some(resolution) = object_state::get_stamped::<Resolution>(
+            &ctx,
+            &durable_wait_index_resolution_key(&address),
+            &DURABLE_WAIT_REGISTRY_FORMATS,
+        )
+        .await?
         {
             RestateDurableWaitRegistration::Resolved(resolution)
         } else {
-            ctx.set(
+            object_state::set_stamped(
+                &ctx,
                 &durable_wait_index_state_key(&address),
-                Json(request.key.clone()),
+                &DURABLE_WAIT_REGISTRY_FORMATS,
+                request.key.clone(),
             );
             RestateDurableWaitRegistration::Registered
         };
@@ -1284,9 +1297,11 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
     ) -> HandlerResult<Json<()>> {
         let address = derive_durable_wait_index_address(ctx.key(), &request.key)?;
         let _metadata = load_durable_wait_index_metadata(&ctx).await?;
-        ctx.set(
+        object_state::set_stamped(
+            &ctx,
             &durable_wait_index_resolution_key(&address),
-            Json(request.resolution),
+            &DURABLE_WAIT_REGISTRY_FORMATS,
+            request.resolution,
         );
         if address.classification == RestateDurableWaitClassification::DurableWait {
             ctx.clear(&durable_wait_index_state_key(&address));
@@ -1313,9 +1328,11 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         // it in the index even when the workflow promise already held READY,
         // RANK, CANCEL, or ADMIT so a later registration cannot park or revive
         // the pre-retirement terminal.
-        ctx.set(
+        object_state::set_stamped(
+            &ctx,
             &durable_wait_index_resolution_key(&address),
-            Json(request.resolution),
+            &DURABLE_WAIT_REGISTRY_FORMATS,
+            request.resolution,
         );
         ctx.clear(&durable_wait_index_state_key(&address));
         Ok(Json(()))
@@ -1331,9 +1348,12 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         if metadata.revoked {
             return Ok(Json(RestateDurableWaitRegistration::Revoked));
         }
-        if let Some(Json(resolution)) = ctx
-            .get::<Json<Resolution>>(&durable_wait_index_resolution_key(&address))
-            .await?
+        if let Some(resolution) = object_state::get_stamped::<Resolution>(
+            &ctx,
+            &durable_wait_index_resolution_key(&address),
+            &DURABLE_WAIT_REGISTRY_FORMATS,
+        )
+        .await?
         {
             resolve_durable_wait_awakeable(&ctx, &request, &resolution);
             return Ok(Json(RestateDurableWaitRegistration::Registered));
@@ -1354,7 +1374,12 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
             .any(|entry| entry.key == request.key && entry.awakeable_id == request.awakeable_id)
         {
             metadata.awakeables.push(request);
-            ctx.set(DURABLE_WAIT_INDEX_METADATA_KEY, Json(metadata));
+            object_state::set_stamped(
+                &ctx,
+                DURABLE_WAIT_INDEX_METADATA_KEY,
+                &DURABLE_WAIT_REGISTRY_FORMATS,
+                metadata,
+            );
         }
         Ok(Json(RestateDurableWaitRegistration::Registered))
     }
@@ -1369,7 +1394,12 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         metadata
             .awakeables
             .retain(|entry| entry.key != request.key || entry.awakeable_id != request.awakeable_id);
-        ctx.set(DURABLE_WAIT_INDEX_METADATA_KEY, Json(metadata));
+        object_state::set_stamped(
+            &ctx,
+            DURABLE_WAIT_INDEX_METADATA_KEY,
+            &DURABLE_WAIT_REGISTRY_FORMATS,
+            metadata,
+        );
         Ok(Json(()))
     }
 
@@ -1394,7 +1424,13 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
             )));
         }
         let resolution_key = durable_wait_index_resolution_key(&address);
-        if let Some(Json(terminal)) = ctx.get::<Json<Resolution>>(&resolution_key).await? {
+        if let Some(terminal) = object_state::get_stamped::<Resolution>(
+            &ctx,
+            &resolution_key,
+            &DURABLE_WAIT_REGISTRY_FORMATS,
+        )
+        .await?
+        {
             return Ok(Json(RestateDurableWaitResolveResponse::Outcome(
                 ResolveOutcome::AlreadyResolved { terminal },
             )));
@@ -1425,7 +1461,12 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
             }
         }
         metadata.awakeables = retained;
-        ctx.set(DURABLE_WAIT_INDEX_METADATA_KEY, Json(metadata));
+        object_state::set_stamped(
+            &ctx,
+            DURABLE_WAIT_INDEX_METADATA_KEY,
+            &DURABLE_WAIT_REGISTRY_FORMATS,
+            metadata,
+        );
         Ok(Json(RestateDurableWaitResolveResponse::Outcome(outcome)))
     }
 
@@ -1448,7 +1489,12 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
                 .cancel_decided
                 .insert(cancel_decided_id(&request.scope, &request.wait)?)
         {
-            ctx.set(DURABLE_WAIT_INDEX_METADATA_KEY, Json(metadata));
+            object_state::set_stamped(
+                &ctx,
+                DURABLE_WAIT_INDEX_METADATA_KEY,
+                &DURABLE_WAIT_REGISTRY_FORMATS,
+                metadata,
+            );
         }
         Ok(Json(()))
     }
@@ -1490,7 +1536,12 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         let mut metadata = load_durable_wait_index_metadata(&ctx).await?;
         if metadata.revoked {
             metadata.revoked = false;
-            ctx.set(DURABLE_WAIT_INDEX_METADATA_KEY, Json(metadata));
+            object_state::set_stamped(
+                &ctx,
+                DURABLE_WAIT_INDEX_METADATA_KEY,
+                &DURABLE_WAIT_REGISTRY_FORMATS,
+                metadata,
+            );
         }
         Ok(Json(()))
     }
@@ -1504,9 +1555,11 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         if metadata.revoked {
             return Ok(Json(false));
         }
-        ctx.set(
+        object_state::set_stamped(
+            &ctx,
             &durable_wait_index_effect_key(&request.replay_key),
-            Json(true),
+            &DURABLE_WAIT_REGISTRY_FORMATS,
+            true,
         );
         Ok(Json(true))
     }
@@ -1530,9 +1583,11 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         if metadata.revoked {
             return Ok(Json(false));
         }
-        ctx.set(
+        object_state::set_stamped(
+            &ctx,
             &durable_wait_index_group_key(&request.group_key),
-            Json(true),
+            &DURABLE_WAIT_REGISTRY_FORMATS,
+            true,
         );
         Ok(Json(true))
     }
@@ -1546,9 +1601,11 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         if metadata.revoked {
             return Ok(Json(false));
         }
-        ctx.set(
+        object_state::set_stamped(
+            &ctx,
             &durable_wait_index_group_child_key(&request.replay_key),
-            Json(request.group_key),
+            &DURABLE_WAIT_REGISTRY_FORMATS,
+            request.group_key,
         );
         Ok(Json(true))
     }
@@ -1560,9 +1617,12 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
     ) -> HandlerResult<Json<Option<String>>> {
         let _metadata = load_durable_wait_index_metadata(&ctx).await?;
         Ok(Json(
-            ctx.get::<Json<String>>(&durable_wait_index_group_child_key(&request.replay_key))
-                .await?
-                .map(|Json(group_key)| group_key),
+            object_state::get_stamped::<String>(
+                &ctx,
+                &durable_wait_index_group_child_key(&request.replay_key),
+                &DURABLE_WAIT_REGISTRY_FORMATS,
+            )
+            .await?,
         ))
     }
 
@@ -1575,9 +1635,11 @@ impl LashDurableWaitIndex for LashDurableWaitIndexImpl {
         if metadata.revoked {
             return Ok(Json(false));
         }
-        ctx.set(
+        object_state::set_stamped(
+            &ctx,
             &durable_wait_index_closure_participant_key(&request.participant_id),
-            Json(request.participant_id),
+            &DURABLE_WAIT_REGISTRY_FORMATS,
+            request.participant_id,
         );
         Ok(Json(true))
     }
