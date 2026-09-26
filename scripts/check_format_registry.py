@@ -16,9 +16,11 @@ cannot rot into a blanket allowance.
 
 The format manifest in ``crates/lash/src/formats.rs`` is checked against the
 same registry, in both directions: every registered surface either names its
-manifest row (``manifest = "<DurableFormat variant>"``), states why it is
-outside the manifest (``outside_manifest = "<reason>"``), or belongs to an
-excluded class; and every manifest row is exactly one registered surface whose
+manifest row (``manifest = "<DurableFormat variant>"``, or
+``manifest = "engine:<id>"`` for a row the build's effect engine registers
+through ``lash::restate`` — ADR 0104 §2), states why it is outside the
+manifest (``outside_manifest = "<reason>"``), or belongs to an excluded
+class; and every manifest row is exactly one registered surface whose
 ``manifest`` names it. That is what makes the manifest's exhaustiveness claim
 checkable rather than aspirational.
 
@@ -38,6 +40,10 @@ import tomllib
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = Path(__file__).with_name("versioned-surfaces.toml")
 MANIFEST = Path("crates/lash/src/formats.rs")
+# An engine contributes its durable formats under its own crate
+# (ADR 0104 §2), so the rows are parsed where the engine declares them; a
+# surface claims such a row as ``manifest = "engine:<id>"``.
+ENGINE_REGISTRIES = (Path("crates/lash-restate/src/formats.rs"),)
 SWEPT_ROOTS = ("crates", "examples")
 
 VERSION_CONSTANT = re.compile(
@@ -61,6 +67,14 @@ RUST_POLICY_NAME = {
     "drain": "Drain",
     "coexist": "Coexist",
 }
+ENGINE_ROW = re.compile(
+    r"id:\s*\"(?P<id>[^\"]+)\",\s*"
+    r"name:\s*\"[^\"]+\",\s*"
+    r"version:\s*(?P<symbol>\w+)(?:\s+as\s+u32)?,\s*"
+    r"constant:\s*\"(?P<constant>\w+)\",\s*"
+    r"upgrade_policy:\s*UpgradePolicy::(?P<policy>\w+)"
+)
+ENGINE_ENTRY = re.compile(r"\bEngineDurableFormat\s*\{")
 TEST_ATTRIBUTE = re.compile(r"#\[cfg\(test\)\]\s*(?:pub(?:\([^)]*\))?\s+)?mod\s+\w+\s*\{")
 
 
@@ -239,6 +253,62 @@ def manifest_rows(text: str) -> dict[str, str]:
     return rows
 
 
+def engine_manifest_rows(repo: Path) -> tuple[dict[str, str], dict[str, str]]:
+    """``(constant -> engine:<id>, engine:<id> -> policy)`` over every engine
+    format registry.
+
+    Engine-registered rows carry the fields the facade table needs, in the
+    order ``id, name, version, constant, upgrade_policy``; the check reads
+    them with the same strictness as the facade's own literals so a malformed
+    row cannot silently un-claim a surface. An engine row's ``upgrade_policy``
+    field stands in for the ``upgrade_policy()`` arm a facade variant would
+    carry: the registry's ``upgrade`` is held equal to it all the same.
+    """
+    toml_of = {rust: toml for toml, rust in RUST_POLICY_NAME.items()}
+    rows: dict[str, str] = {}
+    policies: dict[str, str] = {}
+    for relative in ENGINE_REGISTRIES:
+        path = repo / relative
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8", errors="surrogateescape")
+        entries = len(ENGINE_ENTRY.findall(text)) - 1  # minus the struct itself
+        matches = list(ENGINE_ROW.finditer(text))
+        if len(matches) != entries:
+            raise RegistryError(
+                f"{relative}: parsed {len(matches)} rows but found {entries} "
+                "EngineDurableFormat literals; keep each row's fields in the "
+                "order id, name, version, constant, upgrade_policy"
+            )
+        for match in matches:
+            constant = match.group("constant")
+            if match.group("symbol") != constant:
+                raise RegistryError(
+                    f"{relative}: row {match.group('id')} reports "
+                    f"{match.group('symbol')} but names constant {constant}"
+                )
+            if constant in rows:
+                raise RegistryError(f"{relative}: {constant} is listed twice")
+            policy = toml_of.get(match.group("policy"))
+            if policy is None:
+                raise RegistryError(
+                    f"{relative}: row {match.group('id')} declares "
+                    f"UpgradePolicy::{match.group('policy')}, which is not "
+                    "one of " + "|".join(UPGRADE_POLICIES)
+                )
+            claim = f"engine:{match.group('id')}"
+            rows[constant] = claim
+            policies[claim] = policy
+    return rows, policies
+
+
+def row_label(row: str) -> str:
+    """How a table row prints in a finding: a facade variant or an engine id."""
+    if row.startswith("engine:"):
+        return f"engine format `{row[len('engine:'):]}`"
+    return f"DurableFormat::{row}"
+
+
 def check(repo: Path, registry: Registry, manifest_text: str) -> list[str]:
     problems: list[str] = []
 
@@ -263,6 +333,15 @@ def check(repo: Path, registry: Registry, manifest_text: str) -> list[str]:
             problems.append(f"{key} is both a registered surface and [[unregistered]]")
 
     rows = manifest_rows(manifest_text)
+    engine_rows, engine_policies = engine_manifest_rows(repo)
+    for constant, row in engine_rows.items():
+        if constant in rows:
+            problems.append(
+                f"an engine format registry reports {constant}, which the "
+                f"facade's own manifest already reports; a constant names one row"
+            )
+            continue
+        rows[constant] = row
     claimed: dict[str, str] = {}
     for key, raw in sorted(registry.surfaces.items()):
         constant = raw.get("constant")
@@ -290,7 +369,10 @@ def check(repo: Path, registry: Registry, manifest_text: str) -> list[str]:
         if manifest is None:
             continue
         if not isinstance(manifest, str) or not manifest:
-            problems.append(f"{key} manifest must name a DurableFormat variant")
+            problems.append(
+                f"{key} manifest must name a DurableFormat variant or an "
+                "engine:<id> row"
+            )
             continue
         if constant in claimed:
             problems.append(
@@ -302,19 +384,19 @@ def check(repo: Path, registry: Registry, manifest_text: str) -> list[str]:
         row = rows.get(constant)
         if row is None:
             problems.append(
-                f"{key} declares manifest = {manifest!r} but {MANIFEST} has no row "
-                f"reporting {constant}"
+                f"{key} declares manifest = {manifest!r} but the format table "
+                f"has no row reporting {constant}"
             )
         elif row != manifest:
             problems.append(
-                f"{key} declares manifest = {manifest!r} but {MANIFEST} reports "
-                f"{constant} as DurableFormat::{row}"
+                f"{key} declares manifest = {manifest!r} but the format table "
+                f"reports {constant} as {row_label(row)}"
             )
-    for constant, variant in sorted(rows.items()):
+    for constant, row in sorted(rows.items()):
         if constant not in claimed:
             problems.append(
-                f"{MANIFEST} row DurableFormat::{variant} reports {constant}, which "
-                f"no registered surface claims with manifest = {variant!r}"
+                f"format-table row {row_label(row)} reports {constant}, which "
+                f"no registered surface claims with manifest = {row!r}"
             )
 
     # The registry's `upgrade` is the one place a policy value is written;
@@ -326,6 +408,15 @@ def check(repo: Path, registry: Registry, manifest_text: str) -> list[str]:
     for key, raw in sorted(registry.surfaces.items()):
         variant = raw.get("manifest")
         if not isinstance(variant, str) or not variant:
+            continue
+        if variant.startswith("engine:"):
+            policy = engine_policies.get(variant)
+            if policy is not None and policy != raw.get("upgrade"):
+                problems.append(
+                    f"{key} declares upgrade = {raw.get('upgrade')!r} but "
+                    f"engine format `{variant[len('engine:'):]}` declares "
+                    f"{policy!r}"
+                )
             continue
         arm = arms.get(variant)
         if arm is None:

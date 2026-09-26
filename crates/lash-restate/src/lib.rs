@@ -87,6 +87,7 @@ mod durable_wait;
 mod effect_group;
 mod effect_host;
 mod engine;
+mod formats;
 mod ingress;
 mod process;
 mod process_attach;
@@ -128,6 +129,7 @@ pub use effect_group::{
 };
 pub use effect_host::RestateEffectHost;
 pub use engine::{RestateConfig, RestateEngine, RestateQueuedWork};
+pub use formats::{EngineDurableFormat, durable_formats};
 pub use ingress::{
     DeploymentOpenInvocations, RestateAdminClient, RestateAuthorityId, RestateConnection,
     RestateConnectionConfig, RestateHttpError, RestateIngressClient, RestateInvocationId,

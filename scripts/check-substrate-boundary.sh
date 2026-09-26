@@ -284,6 +284,27 @@ if [[ ${#engine_error_roots[@]} -gt 0 ]]; then
   fi
 fi
 
+# The facade's durable-format table names no engine either (FIG-3670 format
+# slice, ADR 0104 §2): the formats an engine writes are rows the engine
+# registers under `lash::restate`, so the table and the preflight that walks
+# it may not spell `Restate*` identifiers. The check is scoped to the format
+# table and preflight files so `lash::restate` and the engine crate keep
+# naming their own formats.
+engine_format_roots=()
+for path in crates/lash/src/formats.rs crates/lash/src/preflight.rs \
+  crates/lash/src/preflight; do
+  [[ -e $path ]] && engine_format_roots+=("$path")
+done
+if [[ ${#engine_format_roots[@]} -gt 0 ]]; then
+  engine_format_forbidden='(^|[^[:alnum:]_])Restate[A-Z][A-Za-z]*'
+  capture_search "engine-named durable formats" "$engine_format_forbidden" "$tmp_dir/rule4e.hits" "${engine_format_roots[@]}"
+  if [[ -s "$tmp_dir/rule4e.hits" ]]; then
+    cat "$tmp_dir/rule4e.hits" >&2
+    echo "substrate boundary rule 4 failed: a Restate-named durable-format identifier was found in the facade's format table or preflight" >&2
+    failed=1
+  fi
+fi
+
 # Rule 5 — drive determinism ratchet.
 #
 # The turn driver is workflow code: on replay it must re-issue exactly the

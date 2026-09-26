@@ -55,6 +55,7 @@ pub use context::{
 pub use contracts::{
     BuildGeneration, BuildGenerationParseError, DriveHandover, DriveRequest, Never,
     PendingResolution, ResolveAck, RootProgress, TurnSegmentHandover, UnresolvedChild,
+    UpgradePolicy,
 };
 pub use groups::{DriveGroups, GroupClosed, GroupKey};
 

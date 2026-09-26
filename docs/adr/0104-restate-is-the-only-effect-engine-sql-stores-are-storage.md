@@ -181,21 +181,13 @@ The rules:
 - **The storage side is engine-neutral too.** `StoreSet` is storage-only, so an
   engine takes any SQL store set, and a store set assumes no engine.
 
-**Known violations at origin/main `b4e1318cc`.** Each is a defect against this
-section. FIG-3670 removes them: it renames the `restate_*` identifiers to
-engine-neutral opaque ids (landed: `RuntimeExecutionContext::engine_execution_id`,
-`ProcessExecutionWriteAuthority::engine_execution_id`,
-`LeaseOwnerIdentity::engine_process_execution` and
-`engine_process_execution_id`, and the `engine_execution_id` field of
-lash-trace's language-execution identity with its OpenTelemetry attribute
-`lash.language_execution.engine_execution_id`), renames the
-`RuntimeErrorCode::Restate*` error vocabulary to `Engine*` variants with
-`engine_*` wire strings (landed), moves the Restate format vocabulary below
-`lash-restate`, and makes the substrate boundary gate refuse new ones. None
-may be added.
-
-- The Restate durable formats in the facade's format registry
-  (`DurableFormat::Restate*`, `crates/lash/src/formats.rs`).
+**Known violations: none.** FIG-3670 removed each defect this section once
+listed at origin/main `b4e1318cc`: the `restate_*` execution and lease
+identifiers became engine-neutral `engine_*` names, the
+`RuntimeErrorCode::Restate*` error vocabulary became `Engine*` variants
+with `engine_*` wire strings, and the Restate durable formats moved below
+`lash-restate`, where the engine registers them with the facade's format
+table. The substrate boundary gate refuses new ones.
 
 ### 3. Engine obligations are contracts
 
