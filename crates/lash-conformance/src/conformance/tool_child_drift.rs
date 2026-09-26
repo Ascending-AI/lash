@@ -42,9 +42,10 @@ const NATIVE_CALL: &str = "native-probe-1";
 /// How long a law waits for a park an engine writes on its own.
 const PARK_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 
-/// How long an attempt waits for the session's execution lane to become
-/// admissible: a hang detector for a durable fact, not a latency expectation.
-const LANE_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+/// How long an attempt waits for the session's execution lane to read
+/// released: bounded below the lease's TTL so a dropped guard that never
+/// releases fails the law instead of passing once the lease lapses.
+const LANE_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
 
 /// Poll interval for the lane wait's durable read.
 const LANE_POLL: std::time::Duration = std::time::Duration::from_millis(25);
@@ -190,14 +191,17 @@ fn attempt(
 }
 
 /// Drive the attempt's turn, retrying the retryable `SessionExecutionLaneBusy`
-/// refusal until the lane admits it.
+/// refusal until the lane's release lands.
 ///
 /// The redrive reaches admission on the engine's own schedule — a Restate
 /// redelivery of the cut invocation — which can land before the crashed
 /// attempt's lane release has: a dropped runtime's lease guard publishes it on
 /// a spawned best-effort task. A caller that gets `SessionExecutionLaneBusy`
-/// is meant to retry, so the attempt waits the lane out and drives again
-/// rather than reporting the refusal as the redrive's answer.
+/// is meant to retry, so the attempt waits for the release and drives again
+/// rather than reporting the refusal as the redrive's answer. A lane still
+/// held when the wait elapses means the dropped guard never released, so the
+/// refusal is reported as the answer instead: the law's assertions on the
+/// answer fail where the release is owed.
 async fn drive(
     world: &World,
     shape: Shape,
@@ -224,36 +228,46 @@ async fn drive(
         if !busy {
             return turn;
         }
-        until_lane_claimable(store, session_id).await;
+        if !until_lane_released(store, session_id).await {
+            return turn;
+        }
     }
 }
 
-/// Wait until `session_id`'s execution lane is admissible again: released, or
-/// held past its expiry at the store's own observation time, which the next
-/// claim displaces. Bounded by [`LANE_WAIT`] as a hang detector — the wait
-/// `drain_end`'s interrupted-drain retry does on the dead drain's lane.
+/// Wait until `session_id`'s execution lane reads released — the lease row
+/// gone, not merely expired — answering false when [`LANE_WAIT`] elapsed with
+/// the lane still held. An expired-but-held lease would still let the next
+/// claim displace it, so waiting for claimability instead would pass a
+/// dropped guard that never released; `LANE_WAIT` stays below the lease TTL
+/// so that regression surfaces here instead of resolving on expiry — the same
+/// wait `drain_end`'s interrupted-drain retry does on the dead drain's lane.
+///
+/// The caller answers the refusal rather than panicking: an attempt's panic
+/// is the engine's retryable handler failure — on a re-driving engine the
+/// same attempt runs again and the holder's expiry still rescues the claim —
+/// so only a reported answer reaches the law's assertions.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each read is established by the setup"
 )]
-async fn until_lane_claimable(store: &Arc<dyn crate::RuntimePersistence>, session_id: &SessionId) {
+async fn until_lane_released(
+    store: &Arc<dyn crate::RuntimePersistence>,
+    session_id: &SessionId,
+) -> bool {
     tokio::time::timeout(LANE_WAIT, async {
         loop {
             let observation = store
                 .get_session_execution_lease(session_id)
                 .await
                 .expect("read the session's execution lease");
-            if observation
-                .lease
-                .is_none_or(|lease| lease.expires_at_epoch_ms <= observation.observed_at_epoch_ms)
-            {
+            if observation.lease.is_none() {
                 return;
             }
             tokio::time::sleep(LANE_POLL).await;
         }
     })
     .await
-    .unwrap_or_else(|_| panic!("`{session_id}`'s execution lane becomes claimable"));
+    .is_ok()
 }
 
 /// Where the law cuts the first attempt.
