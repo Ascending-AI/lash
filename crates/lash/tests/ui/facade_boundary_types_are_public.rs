@@ -524,6 +524,7 @@ fn persistence_types_are_nameable(
         root_terminal: None,
         release_session_execution_lease: None,
         config: PersistedSessionConfig::new(lash::TurnBudget::Unbounded),
+        execution_config: None,
         current_frame_node_id: None,
         graph,
         graph_base_leaf_node_id: None,

@@ -799,3 +799,67 @@ fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlem
     assert_eq!(state.to_snapshot().policy.provider_id, "sticky-route");
     assert_eq!(state.to_snapshot().policy.prompt, sticky.prompt.unwrap());
 }
+
+/// A root's commit is identified by the view it ran under, never by the
+/// head's sticky config it writes back: a redrive that replays a committed
+/// root after a config change moved the head builds the same identity, so
+/// the store answers its receipt instead of refusing a conflict. The written
+/// config is still the head's.
+#[test]
+fn a_root_commit_identity_covers_its_view_not_the_sticky_config_it_writes() {
+    let mut state =
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    state.session_id = SessionId::from("root-config-identity");
+    state.policy.provider_id = "first-route".into();
+    let first = crate::store::persisted_session_config_from_state(&state);
+    let commit_under = |state: &RuntimeSessionState| {
+        crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
+            state,
+            crate::store::GraphAppend::PreserveHead,
+            &[],
+            boundary_operation(&state.session_id, "root", "final"),
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::store::FleetFormat::current(),
+        )
+        .expect("root commit")
+    };
+
+    // The first execution: the root's recorded view is the head's config.
+    adopt_root_execution_config(&mut state, &first);
+    let original = commit_under(&state);
+    assert_eq!(original.config, first);
+    assert!(
+        original.execution_config.is_none(),
+        "the view is the head's"
+    );
+
+    // A config change lands on the head after the root committed; the
+    // redrive adopts that head, then replays the root's recorded view.
+    let mut changed = first.clone();
+    changed.provider_id = "second-route".into();
+    changed.config_revision += 1;
+    state.authority.committed_config = None;
+    adopt_session_config(&mut state, &changed);
+    adopt_root_execution_config(&mut state, &first);
+    let replayed = commit_under(&state);
+    assert_eq!(
+        replayed.config, changed,
+        "the commit writes the head's config"
+    );
+    assert_eq!(
+        replayed.turn_commit_hash().expect("replay identity"),
+        original.turn_commit_hash().expect("original identity"),
+        "the replay is the root's committed operation"
+    );
+
+    // A root that ran under another view is another operation.
+    let mut other = first.clone();
+    other.provider_id = "other-route".into();
+    adopt_root_execution_config(&mut state, &other);
+    assert_ne!(
+        commit_under(&state)
+            .turn_commit_hash()
+            .expect("other identity"),
+        original.turn_commit_hash().expect("original identity"),
+    );
+}

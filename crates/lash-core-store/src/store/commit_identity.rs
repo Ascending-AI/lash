@@ -1258,7 +1258,7 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
         };
         Self {
             session_id: &commit.session_id,
-            config: &commit.config,
+            config: commit.execution_config.as_deref().unwrap_or(&commit.config),
             current_frame_node_id: commit.current_frame_node_id.as_deref(),
             graph,
             checkpoint: CheckpointIntent::from(&commit.checkpoint),

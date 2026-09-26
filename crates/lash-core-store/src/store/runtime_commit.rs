@@ -131,6 +131,16 @@ pub struct RuntimeCommit {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_session_execution_lease: Option<SessionExecutionLeaseAuthority>,
     pub config: crate::PersistedSessionConfig,
+    /// The config the committing root ran under, when it is not the config
+    /// the commit writes: a root runs under its recorded execution view and
+    /// writes the head's sticky config back (FIG-3841). The view is the
+    /// commit's content, so the commit identity covers it in place of
+    /// [`Self::config`]; the sticky config is the head's, not the operation's,
+    /// and may have moved since the root first committed, so a redrive that
+    /// replays the root's committed operation still answers its receipt. An
+    /// input to the identity, never stored: `None` when the two agree.
+    #[serde(skip)]
+    pub execution_config: Option<Box<crate::PersistedSessionConfig>>,
     pub current_frame_node_id: Option<crate::FrameNodeId>,
     pub graph: GraphAppend,
     /// Resident leaf observed when this commit was built. For
