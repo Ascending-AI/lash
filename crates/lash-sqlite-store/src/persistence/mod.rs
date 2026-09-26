@@ -33,6 +33,7 @@ use lash_sansio::TurnId;
 fn load_turn_failure_settlements_conn(
     conn: &rusqlite::Connection,
     session_id: &SessionId,
+    fleet: lash_core_execution::FleetFormat,
 ) -> Result<Vec<lash_core_execution::TurnFailureSettlement>, StoreError> {
     let mut statement = conn
         .prepare(session_sql().turn_commits.select_failure_settlements.sql())
@@ -45,10 +46,11 @@ fn load_turn_failure_settlements_conn(
     let mut settlements = Vec::new();
     for row in rows {
         let (turn_id, result_json) = row.map_err(sqlite_error)?;
-        let receipt = lash_core_execution::store::decode_runtime_commit_receipt(
+        let receipt = lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
             session_id,
             &turn_id,
             &result_json,
+            fleet,
         )?;
         if !receipt.failure_evidence.is_empty() {
             settlements.push(lash_core_execution::TurnFailureSettlement {
@@ -63,6 +65,7 @@ fn load_turn_failure_settlements_conn(
 fn read_session_state_version_conn(
     conn: &rusqlite::Connection,
     session_id: &SessionId,
+    fleet: lash_core_execution::FleetFormat,
 ) -> Result<u32, StoreError> {
     let marker = conn
         .query_row(
@@ -83,7 +86,7 @@ fn read_session_state_version_conn(
             })
         })
         .transpose()?;
-    lash_core_execution::store::resolve_session_state_version(marker)
+    lash_core_execution::store::resolve_session_state_version(marker, fleet)
 }
 
 /// Refuse a write into session `session_id` once its close began: the

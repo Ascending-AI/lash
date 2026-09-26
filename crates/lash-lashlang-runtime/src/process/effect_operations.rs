@@ -94,16 +94,19 @@ impl EffectSummaryWriter {
     }
 
     /// The run's terminal batch: every pending occurrence, then the omission
-    /// record when any occurrence went uncounted one by one.
+    /// record when any occurrence went uncounted one by one. `fleet_format`
+    /// stamps the omission payload's version (FIG-3796).
     pub(super) fn terminal_prelude(
         &self,
         omissions_key: String,
+        fleet_format: lash_core::FleetFormat,
     ) -> Vec<lash_core::ProcessEventAppendRequest> {
         let mut prelude = self.prelude().requests;
         let omissions = self.omissions();
         if !omissions.is_empty() {
             prelude.push(
-                lash_core::ProcessEffectOmissions::new(omissions).append_request(omissions_key),
+                lash_core::ProcessEffectOmissions::new(omissions, fleet_format)
+                    .append_request(omissions_key),
             );
         }
         prelude
@@ -157,6 +160,7 @@ impl LashlangProcessHost<'_> {
                 outcome_class,
                 code,
                 replay_key,
+                self.ctx.fleet_format(),
             ));
     }
 

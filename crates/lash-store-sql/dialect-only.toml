@@ -2562,25 +2562,15 @@ so the read forks on the flag alone.
 """
 
 [[dialect_only]]
-statement = "fleet_format.upsert"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-A single-process SQLite deployment finalizes the fleet format on open (ADR
-0106 §1): the open transaction writes this build's own generation
-unconditionally, so the statement is an upsert. PostgreSQL provisions only —
-see `fleet_format.insert_if_absent` — because its row belongs to the fleet,
-not to whichever build opens first.
-"""
-
-[[dialect_only]]
 statement = "fleet_format.insert_if_absent"
-backends = ["postgres"]
-kind = "operation exists on one backend only"
+backends = ["sqlite", "postgres"]
+kind = "boolean representation"
 reason = """
-PostgreSQL provisions the row and never rewrites it at open: a worker joining
+Both backends provision the row and never rewrite it at open: a worker joining
 mid-upgrade keeps the fleet's recorded generation until `finalize-upgrade`
-(FIG-3800) moves it, so the write is an insert-if-absent, not an upsert.
+(FIG-3800) moves it, so the write is an insert-if-absent, not an upsert. The
+row's singleton key is the integer `1` on SQLite and `TRUE` on PostgreSQL, so
+the statement forks on the flag alone.
 """
 
 [[dialect_only]]

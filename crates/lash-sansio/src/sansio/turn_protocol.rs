@@ -448,6 +448,16 @@ impl<'a, M: TurnProtocol> DriverContextView<'a, M> {
         self.protocol_iteration
     }
 
+    /// The version this fleet's writers emit for the surface registered under
+    /// `constant`, whose build-newest version is `build_newest` (FIG-3796).
+    /// Drivers stamp durable envelopes through this — usually via the
+    /// `driver_writer_version!` macro — never the bare build constant.
+    pub fn writer_version(&self, constant: &'static str, build_newest: u32) -> u32 {
+        self.config
+            .writer_formats
+            .writer_version(constant, build_newest)
+    }
+
     pub fn protocol_run_offset(&self) -> usize {
         self.protocol_run_offset
     }
@@ -660,6 +670,10 @@ pub struct TurnMachineConfig<M: TurnProtocol = UnitTurnProtocol> {
     pub agent_frame_id: String,
     pub turn_id: TurnId,
     pub emit_llm_trace: bool,
+    /// The fleet's writer-version table (FIG-3796): drivers stamp durable
+    /// envelopes through `DriverContextView::writer_version`, which resolves
+    /// here rather than at build time.
+    pub writer_formats: Arc<dyn crate::WriterFormats>,
     pub termination: M::Termination,
 }
 

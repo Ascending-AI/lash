@@ -411,9 +411,9 @@ pub mod persistence {
     pub use lash_core::{
         BlobRef, CURRENT_SESSION_STATE_VERSION, DurableItem, DurablePayload, DurableScan,
         DurableScanPage, DurableSurface, ExecutedCall, ExecutedCallOutcome, ExecutedCallRecord,
-        FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, GcReport, LeaseClaimNonce,
-        LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal, MaintenanceReport,
-        MaintenanceResult, MaintenanceStop, MaintenanceSweep,
+        FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, FleetFormatStore, GcReport,
+        LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal,
+        MaintenanceReport, MaintenanceResult, MaintenanceStop, MaintenanceSweep,
         OLDEST_SUPPORTED_SESSION_STATE_VERSION, PersistedSessionConfig, PersistedTurnState,
         ProtocolEvent, QueuedWorkStore, RetentionBound, RetentionReport, RuntimePersistence,
         ScanCoverage, SessionAdmission, SessionBinding, SessionBlobReclaimReport,

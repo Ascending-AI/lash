@@ -381,6 +381,7 @@ async fn commit_initialized_session(
             &[],
             operation,
             materialized.runtime.host.core.durability.commit_budget,
+            materialized.runtime.fleet_format(),
         )
         .map_err(|err| crate::PluginError::Session(err.to_string()))?;
     // Stamp last: the semantic-boundary identity hashes the commit's

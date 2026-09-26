@@ -46,12 +46,12 @@ struct Envelope {
     clippy::expect_used,
     reason = "the envelope carries a u32 schema version and crate-owned transport data, so serde_json encoding cannot fail"
 )]
-fn event(transport: Transport) -> SessionHistoryRecord {
+fn event(transport: Transport, schema_version: u32) -> SessionHistoryRecord {
     SessionHistoryRecord::Protocol(crate::projection::rlm_protocol_event(
         RlmProtocolEvent::RlmDiagnostic(RlmDiagnosticEvent {
             phase: PHASE.to_string(),
             payload: serde_json::to_value(Envelope {
-                schema_version: NATIVE_TRANSPORT_VERSION,
+                schema_version,
                 transport,
             })
             .expect("native envelope serializes"),
@@ -59,21 +59,29 @@ fn event(transport: Transport) -> SessionHistoryRecord {
     ))
 }
 
-pub(super) fn execution_event(step_id: String, parts: Vec<Part>) -> SessionHistoryRecord {
-    event(Transport::Execution { step_id, parts })
+pub(super) fn execution_event(
+    step_id: String,
+    parts: Vec<Part>,
+    schema_version: u32,
+) -> SessionHistoryRecord {
+    event(Transport::Execution { step_id, parts }, schema_version)
 }
 pub(super) fn repair_event(
     turn_id: &TurnId,
     protocol_iteration: usize,
     parts: Vec<Part>,
     text: String,
+    schema_version: u32,
 ) -> SessionHistoryRecord {
-    event(Transport::Repair {
-        turn_id: TurnId::from(turn_id.to_string()),
-        protocol_iteration,
-        parts,
-        text,
-    })
+    event(
+        Transport::Repair {
+            turn_id: TurnId::from(turn_id.to_string()),
+            protocol_iteration,
+            parts,
+            text,
+        },
+        schema_version,
+    )
 }
 fn decode(event: &lash_core::ProtocolEvent) -> Result<Option<Transport>, DecodeError> {
     let Some(RlmProtocolEvent::RlmDiagnostic(diagnostic)) =
@@ -204,7 +212,8 @@ mod tests {
     }
     #[test]
     fn envelope_version_pin_and_refusal_witness() {
-        let SessionHistoryRecord::Protocol(event) = execution_event("step".into(), Vec::new())
+        let SessionHistoryRecord::Protocol(event) =
+            execution_event("step".into(), Vec::new(), NATIVE_TRANSPORT_VERSION)
         else {
             panic!()
         };

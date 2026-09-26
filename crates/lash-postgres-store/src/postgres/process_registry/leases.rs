@@ -14,7 +14,7 @@ impl lash_core_execution::ProcessLeases for PostgresProcessRegistry {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         require_process_tx(&mut tx, process_id).await?;
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        let current = load_process_lease_tx(&mut tx, process_id).await?;
+        let current = load_process_lease_tx(&mut tx, process_id, self.fleet_format).await?;
         let fencing_token = match registry_transitions::decide_process_lease_claim(
             current.as_ref(),
             owner,
@@ -45,9 +45,16 @@ impl lash_core_execution::ProcessLeases for PostgresProcessRegistry {
                 )?
             }
         };
-        let lease =
-            acquire_process_lease_tx(&mut tx, process_id, owner, fencing_token, now, lease_ttl_ms)
-                .await?;
+        let lease = acquire_process_lease_tx(
+            &mut tx,
+            process_id,
+            owner,
+            fencing_token,
+            now,
+            lease_ttl_ms,
+            self.fleet_format,
+        )
+        .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(lash_core_execution::ProcessLeaseClaimOutcome::Acquired(
             lease,
@@ -64,7 +71,7 @@ impl lash_core_execution::ProcessLeases for PostgresProcessRegistry {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         require_process_tx(&mut tx, process_id).await?;
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        let current = load_process_lease_tx(&mut tx, process_id).await?;
+        let current = load_process_lease_tx(&mut tx, process_id, self.fleet_format).await?;
         let fencing_token =
             match registry_transitions::decide_process_lease_reclaim(current.as_ref(), now)? {
                 registry_transitions::ProcessLeaseReclaimDecision::AcquireOnRetainedFence => {
@@ -82,9 +89,16 @@ impl lash_core_execution::ProcessLeases for PostgresProcessRegistry {
                     return Ok(lash_core_execution::ProcessLeaseClaimOutcome::Busy { holder });
                 }
             };
-        let lease =
-            acquire_process_lease_tx(&mut tx, process_id, owner, fencing_token, now, lease_ttl_ms)
-                .await?;
+        let lease = acquire_process_lease_tx(
+            &mut tx,
+            process_id,
+            owner,
+            fencing_token,
+            now,
+            lease_ttl_ms,
+            self.fleet_format,
+        )
+        .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(lash_core_execution::ProcessLeaseClaimOutcome::Acquired(
             lease,
@@ -98,7 +112,7 @@ impl lash_core_execution::ProcessLeases for PostgresProcessRegistry {
     ) -> Result<ProcessLease, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        let current = load_process_lease_tx(&mut tx, &lease.process_id).await?;
+        let current = load_process_lease_tx(&mut tx, &lease.process_id, self.fleet_format).await?;
         registry_transitions::authorize_process_lease_write(
             &lease.process_id,
             lease,
@@ -125,7 +139,7 @@ impl lash_core_execution::ProcessLeases for PostgresProcessRegistry {
         process_id: &ProcessId,
     ) -> Result<Option<ProcessLease>, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        let lease = load_process_lease_tx(&mut tx, process_id).await?;
+        let lease = load_process_lease_tx(&mut tx, process_id, self.fleet_format).await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(lease)
     }
@@ -158,7 +172,7 @@ impl lash_core_execution::ProcessLeases for PostgresProcessRegistry {
                 claimed_at_ms: row.get(4),
                 expires_at_ms: row.get(5),
             }
-            .project(&process_id);
+            .project(&process_id, self.fleet_format);
             leases_by_id.insert(process_id, lease);
         }
         Ok(process_ids

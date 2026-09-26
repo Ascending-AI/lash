@@ -37,6 +37,7 @@ mod tests {
             fencing_token,
             now_ms,
             ttl_ms,
+            lash_core_execution::FleetFormat::current(),
         )
     }
 
@@ -383,7 +384,10 @@ mod tests {
     #[test]
     fn a_populated_lease_row_projects() {
         let lease = populated_row()
-            .project(&lash_core_execution::ProcessId::fixture("process"))
+            .project(
+                &lash_core_execution::ProcessId::fixture("process"),
+                lash_core_execution::FleetFormat::current(),
+            )
             .expect("a row with an owner and a token records a holder");
         assert_eq!(lease.schema_version, PROCESS_LEASE_SCHEMA_VERSION);
         assert_eq!(
@@ -404,7 +408,10 @@ mod tests {
                 owner_id: None,
                 ..populated_row()
             }
-            .project(&lash_core_execution::ProcessId::fixture("process"))
+            .project(
+                &lash_core_execution::ProcessId::fixture("process"),
+                lash_core_execution::FleetFormat::current()
+            )
             .is_none()
         );
     }
@@ -416,7 +423,10 @@ mod tests {
                 lease_token: None,
                 ..populated_row()
             }
-            .project(&lash_core_execution::ProcessId::fixture("process"))
+            .project(
+                &lash_core_execution::ProcessId::fixture("process"),
+                lash_core_execution::FleetFormat::current()
+            )
             .is_none()
         );
     }
@@ -427,7 +437,10 @@ mod tests {
             incarnation_id: None,
             ..populated_row()
         }
-        .project(&lash_core_execution::ProcessId::fixture("process"))
+        .project(
+            &lash_core_execution::ProcessId::fixture("process"),
+            lash_core_execution::FleetFormat::current(),
+        )
         .expect("pre-incarnation rows still record a holder");
         assert_eq!(lease.owner, owner("worker", "worker"));
     }
@@ -445,7 +458,10 @@ mod tests {
         let retained = released.fencing_token as u64;
         assert!(
             released
-                .project(&lash_core_execution::ProcessId::fixture("process"))
+                .project(
+                    &lash_core_execution::ProcessId::fixture("process"),
+                    lash_core_execution::FleetFormat::current()
+                )
                 .is_none(),
             "a released lease is not a holder"
         );
@@ -466,6 +482,7 @@ mod tests {
             5,
             1_700_000_000_000,
             30_000,
+            lash_core_execution::FleetFormat::current(),
         );
         // blake3("p_c5546c16060677e5a56c42a3a5c9a6fc:owner-a:incarnation-a:1700000000000:5").
         // Durable value: changing this literal changes every backend's lease
@@ -492,6 +509,7 @@ mod tests {
             1,
             10,
             10,
+            lash_core_execution::FleetFormat::current(),
         );
         let swapped = acquired_process_lease(
             &lash_core_execution::ProcessId::fixture("p"),
@@ -499,6 +517,7 @@ mod tests {
             1,
             10,
             10,
+            lash_core_execution::FleetFormat::current(),
         );
         assert_ne!(
             straight.lease_token, swapped.lease_token,
@@ -512,6 +531,7 @@ mod tests {
                     2,
                     10,
                     10,
+                    lash_core_execution::FleetFormat::current(),
                 )
                 .lease_token,
                 straight.lease_token.clone(),
@@ -523,6 +543,7 @@ mod tests {
                     1,
                     11,
                     10,
+                    lash_core_execution::FleetFormat::current(),
                 )
                 .lease_token,
                 straight.lease_token.clone(),
@@ -534,6 +555,7 @@ mod tests {
                     1,
                     10,
                     10,
+                    lash_core_execution::FleetFormat::current(),
                 )
                 .lease_token,
                 straight.lease_token.clone(),
@@ -551,6 +573,7 @@ mod tests {
             1,
             u64::MAX - 1,
             10,
+            lash_core_execution::FleetFormat::current(),
         );
         assert_eq!(minted.expires_at_epoch_ms, u64::MAX);
     }
@@ -758,7 +781,9 @@ mod tests {
     fn a_populated_wake_delivery_row_projects() {
         let row = wake_row();
         let delivery_id = row.delivery_id.clone();
-        let delivery = row.project().expect("a well-formed row projects");
+        let delivery = row
+            .project(lash_core_execution::FleetFormat::current())
+            .expect("a well-formed row projects");
         assert_eq!(delivery.delivery_id, delivery_id);
         assert_eq!(delivery.state(), WakeDeliveryState::Enqueuing);
         assert_eq!(delivery.claim_token().expect("claim token"), "claim");
@@ -783,7 +808,7 @@ mod tests {
             delivery_json: serde_json::to_string(&payload).expect("wake delivery JSON"),
             ..wake_row()
         }
-        .project()
+        .project(lash_core_execution::FleetFormat::current())
         .expect_err("a pre-version wake delivery row must be refused");
 
         assert!(matches!(
@@ -804,7 +829,7 @@ mod tests {
             delivery_json: serde_json::to_string(&payload).expect("wake delivery JSON"),
             ..wake_row()
         }
-        .project()
+        .project(lash_core_execution::FleetFormat::current())
         .expect_err("a version-3 wake delivery row must be refused");
 
         assert!(matches!(
@@ -828,7 +853,7 @@ mod tests {
             delivery_json: serde_json::to_string(&payload).expect("future wake delivery JSON"),
             ..wake_row()
         }
-        .project()
+        .project(lash_core_execution::FleetFormat::current())
         .expect_err("a future wake-delivery format must be refused");
 
         assert!(
@@ -853,7 +878,7 @@ mod tests {
             delivery_json: serde_json::to_string(&payload).expect("wake delivery JSON"),
             ..wake_row()
         }
-        .project()
+        .project(lash_core_execution::FleetFormat::current())
         .expect_err("a wake delivery without event_type must be refused");
 
         assert!(
@@ -872,7 +897,7 @@ mod tests {
             claim_token: None,
             ..wake_row()
         }
-        .project()
+        .project(lash_core_execution::FleetFormat::current())
         .expect("a discarded row projects");
         assert_eq!(delivery.state(), WakeDeliveryState::Discarded);
         assert_eq!(
@@ -891,7 +916,7 @@ mod tests {
             claim_token: None,
             ..wake_row()
         }
-        .project()
+        .project(lash_core_execution::FleetFormat::current())
         .expect("a deliberately-valid reasonless discard projects");
 
         assert_eq!(
@@ -909,7 +934,7 @@ mod tests {
             claim_token: None,
             ..wake_row()
         }
-        .project()
+        .project(lash_core_execution::FleetFormat::current())
         .expect_err("an enqueuing delivery without its claim token must be refused");
 
         assert!(
@@ -927,7 +952,7 @@ mod tests {
             delivery_json: "{".to_string(),
             ..wake_row()
         }
-        .project()
+        .project(lash_core_execution::FleetFormat::current())
         .expect_err("a corrupt payload is a decode failure");
         assert!(
             matches!(&error, PluginError::Session(message)
@@ -943,7 +968,7 @@ mod tests {
             delivery_json: "{".to_string(),
             ..wake_row()
         }
-        .project()
+        .project(lash_core_execution::FleetFormat::current())
         .expect_err("the state label is parsed before the payload is decoded");
         assert!(
             matches!(&error, PluginError::Session(message)

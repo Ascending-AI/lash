@@ -68,6 +68,9 @@ pub struct ProcessWakeDeliveryRequest {
     pub authority: crate::QueuedWorkAuthority,
     pub wake: ProcessWake,
     pub occurred_at_ms: u64,
+    /// `F` the persisting store recorded: the delivery row's `version` stamps
+    /// through `writer_version`, never the bare build constant (FIG-3796).
+    pub fleet_format: crate::FleetFormat,
 }
 
 pub fn process_wake_delivery(
@@ -83,10 +86,13 @@ pub fn process_wake_delivery(
         authority,
         wake,
         occurred_at_ms,
+        fleet_format,
     } = request;
     let wake_id = process_wake_id(&target_session_id, &process_id, sequence);
     Ok(ProcessWakeDelivery {
-        version: PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        version: fleet_format.writer_version(lash_core_store::surface_format!(
+            PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+        )),
         wake_id,
         target_session_id,
         process_id,

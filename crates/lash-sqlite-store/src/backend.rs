@@ -480,11 +480,28 @@ impl SqliteStoreSet {
         let registry = database(SqliteDatabase::ProcessRegistry);
         let triggers = database(SqliteDatabase::Triggers);
 
+        let process_env_store = Arc::new(
+            Store::open_at(
+                &core,
+                options.store,
+                Arc::clone(&clock),
+                None,
+                None,
+                lash_core_execution::FleetFormat::writable_range(),
+                #[cfg(feature = "testing")]
+                None,
+            )
+            .await?,
+        );
+        // The durable-core store opens first so its admitted `F` stamps the
+        // process registry's durable payloads too (FIG-3796): one fleet row
+        // governs both databases.
         let process_registry = Arc::new(
             SqliteProcessRegistry::open_at(
                 &registry,
                 Arc::clone(&clock),
                 core.clone(),
+                lash_core_execution::FleetFormatStore::fleet_format(process_env_store.as_ref()),
                 #[cfg(feature = "testing")]
                 None,
             )
@@ -496,18 +513,6 @@ impl SqliteStoreSet {
             Arc::new(SqliteTriggerStore::open_at(&triggers, Arc::clone(&clock)).await?);
         let process_definitions =
             Arc::new(SqliteProcessDefinitionRegistry::open_at(&core, Arc::clone(&clock)).await?);
-        let process_env_store = Arc::new(
-            Store::open_at(
-                &core,
-                options.store,
-                Arc::clone(&clock),
-                None,
-                None,
-                #[cfg(feature = "testing")]
-                None,
-            )
-            .await?,
-        );
         let attachment_store = Arc::new(SqliteAttachmentStore::for_store(&process_env_store));
         let factory = SqliteSessionStoreFactory::at(
             core,
@@ -605,6 +610,7 @@ impl SqliteStoreSet {
             Arc::clone(&self.inner.clock),
             None,
             None,
+            lash_core_execution::FleetFormat::writable_range(),
             #[cfg(feature = "testing")]
             None,
         )

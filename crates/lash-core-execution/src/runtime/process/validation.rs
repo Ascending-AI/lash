@@ -755,6 +755,10 @@ fn repair_lifecycle_projection(
     Ok((repaired != *record).then_some(repaired))
 }
 
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the append plan carries the journal's own positional facts; fleet format joins them as one more stamped input (FIG-3796)"
+)]
 pub fn prepare_process_event_append(
     record: &ProcessRecord,
     request: ProcessEventAppendRequest,
@@ -763,6 +767,7 @@ pub fn prepare_process_event_append(
     replay_lookup: Option<ProcessEvent>,
     occurred_at_ms: u64,
     wake_session_id: Option<&SessionId>,
+    fleet_format: crate::FleetFormat,
 ) -> Result<ProcessEventAppendPlan, PluginError> {
     let process_id = &record.id;
     let wake_suppressed = request.wake_suppressed;
@@ -775,6 +780,7 @@ pub fn prepare_process_event_append(
         ProcessEventKind::EffectOutcome => {
             let outcome = super::effect_summary::ProcessEffectSummaryOccurrence::decode(
                 request.payload.clone(),
+                fleet_format,
             )
             .map_err(|error| PluginError::Session(error.to_string()))?;
             if request.replay.as_ref().map(|replay| replay.key.as_str())
@@ -787,8 +793,11 @@ pub fn prepare_process_event_append(
             }
         }
         ProcessEventKind::EffectOmissions => {
-            super::effect_summary::ProcessEffectOmissions::decode(request.payload.clone())
-                .map_err(|error| PluginError::Session(error.to_string()))?;
+            super::effect_summary::ProcessEffectOmissions::decode(
+                request.payload.clone(),
+                fleet_format,
+            )
+            .map_err(|error| PluginError::Session(error.to_string()))?;
         }
         _ => {}
     }
@@ -817,6 +826,7 @@ pub fn prepare_process_event_append(
                 existing.semantics.wake.clone(),
                 wake_session_id,
                 wake_suppressed,
+                fleet_format,
             )?;
             return Ok(ProcessEventAppendPlan::Replay {
                 event: existing,
@@ -921,6 +931,7 @@ pub fn prepare_process_event_append(
         semantics.wake.clone(),
         wake_session_id,
         wake_suppressed,
+        fleet_format,
     )?;
     debug_assert!(
         !is_runtime_lifecycle_event_type(&event.event_type)
@@ -951,6 +962,7 @@ fn prepare_wake_delivery(
     wake: Option<super::events::ProcessWake>,
     wake_session_id: Option<&SessionId>,
     wake_suppressed: bool,
+    fleet_format: crate::FleetFormat,
 ) -> Result<Option<ProcessWakeDelivery>, PluginError> {
     // A suppressed append still materializes its event and its semantics; it
     // only withholds the delivery. The wake is the one thing a session would
@@ -990,6 +1002,7 @@ fn prepare_wake_delivery(
         },
         wake,
         occurred_at_ms: occurred_at,
+        fleet_format,
     })
     .map(Some)
 }

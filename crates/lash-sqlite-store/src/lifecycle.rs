@@ -12,6 +12,7 @@
 
 use super::*;
 use crate::location::{DatabaseLocation, DatabaseTarget, validate_file_database_path};
+use lash_core_execution::FleetFormatStore;
 use lash_sansio::SessionId;
 
 impl SqliteSessionStoreFactory {
@@ -40,6 +41,7 @@ impl Store {
             clock,
             None,
             turn_cancel_closure_owner,
+            lash_core_execution::FleetFormat::writable_range(),
             #[cfg(feature = "testing")]
             fault_injector,
         )
@@ -112,6 +114,7 @@ impl Store {
             clock,
             None,
             None,
+            lash_core_execution::FleetFormat::writable_range(),
             #[cfg(feature = "testing")]
             None,
         )
@@ -120,15 +123,50 @@ impl Store {
         Ok(store)
     }
 
+    /// Open the durable-core database admitting `writable` as the opening
+    /// build's fleet-format writable range.
+    ///
+    /// Testing seam for FIG-3796's rollout proofs: the recorded row is read
+    /// against `writable` rather than this binary's own
+    /// [`lash_core_execution::FleetFormat::writable_range`], so a test can
+    /// stand in for a build whose range does — or does not — still write the
+    /// generation the fleet recorded. Production opens always pass this
+    /// build's range.
+    #[cfg(feature = "testing")]
+    pub async fn open_with_fleet_writable_range_for_testing(
+        path: &Path,
+        writable: std::ops::RangeInclusive<u32>,
+    ) -> Result<Self, lash_core_execution::StoreError> {
+        validate_file_database_path(path, "Store").map_err(sqlite_async_error)?;
+        let store = Self::open_at(
+            &DatabaseLocation::standalone_file(path),
+            StoreOptions::default(),
+            Arc::new(lash_core_execution::facade_support::SystemClock),
+            None,
+            None,
+            writable,
+            None,
+        )
+        .await
+        .map_err(sqlite_async_error)?;
+        warn_process_registry_not_wired("Store::open_with_fleet_writable_range_for_testing");
+        Ok(store)
+    }
+
     /// Open the durable-core database at `core`, attaching the process
     /// registry at `process_registry` when given. Internal opens inherit the
     /// factory's warning or the direct entry's warning.
+    ///
+    /// `writable` is the opening build's fleet-format writable range: the
+    /// recorded row is admitted against it, so a generation the build cannot
+    /// write refuses the open rather than being wound back.
     pub(crate) async fn open_at(
         core: &DatabaseLocation,
         options: StoreOptions,
         clock: Arc<dyn lash_core_execution::Clock>,
         process_registry: Option<&DatabaseTarget>,
         turn_cancel_closure_owner: Option<lash_core_execution::TurnCancelClosureOwnerBinding>,
+        writable: std::ops::RangeInclusive<u32>,
         #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
         #[cfg(feature = "testing")]
@@ -143,12 +181,7 @@ impl Store {
             SqliteConnection::open_with_policy(core.target(), options.connection_policy).await?;
         ensure_versioned_schema(&conn, SqliteDatabase::DurableCore).await?;
         let fleet_format = conn
-            .call(|conn| {
-                crate::fleet_format::read_recorded(
-                    conn,
-                    lash_core_execution::FleetFormat::writable_range(),
-                )
-            })
+            .call(move |conn| crate::fleet_format::read_recorded(conn, writable))
             .await?;
         let process_registry_attached = if let Some(process_registry) = process_registry {
             attach_process_registry(&conn, process_registry, options.connection_policy).await?;
@@ -228,9 +261,10 @@ impl Store {
         let Some(session_id) = self.resolve_session_id_for_read().await? else {
             return Ok(None);
         };
+        let fleet = self.fleet_format();
         self.conn
             .call(move |conn| {
-                try_load_session_head_meta_from_conn(conn, &session_id)
+                try_load_session_head_meta_from_conn(conn, &session_id, fleet)
                     .map_err(sqlite_conversion_error)
             })
             .await

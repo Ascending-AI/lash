@@ -119,9 +119,28 @@ impl State {
 
     /// Captures the durable form, re-encoding only the fragments that differ
     /// from `since`.
+    ///
+    /// `fleet_format` is the `F` the bound writer's store recorded: the header
+    /// stamps the fleet's writer version for the `LASHLANG_SNAPSHOT_VERSION`
+    /// surface (FIG-3796); the fixed-point read re-encodes at the version the
+    /// recorded header carried.
     pub fn durable_parts(
         &self,
         since: &DurableBaseline,
+        fleet_format: lash_core_execution::FleetFormat,
+    ) -> Result<DurableParts, ContinuationError> {
+        self.durable_parts_stamped(
+            since,
+            fleet_format.writer_version(lash_core_execution::surface_format!(
+                LASHLANG_SNAPSHOT_VERSION
+            )),
+        )
+    }
+
+    fn durable_parts_stamped(
+        &self,
+        since: &DurableBaseline,
+        snapshot_version: u32,
     ) -> Result<DurableParts, ContinuationError> {
         let (record, heap) = match &self.mode {
             StateMode::Plain(globals) => (globals.as_ref(), None),
@@ -140,7 +159,7 @@ impl State {
             })
             .transpose()?;
         let header = CanonicalDurableHeader {
-            version: LASHLANG_SNAPSHOT_VERSION,
+            version: snapshot_version,
             heap: heap
                 .zip(partition.as_ref())
                 .map(|(heap, partition)| CanonicalHeapCounters {
@@ -190,18 +209,37 @@ impl State {
     /// this writer would not have produced byte-for-byte. Returns the state
     /// and the baseline the fragments stand for, so the next capture diffs
     /// against exactly what was read.
+    ///
+    /// `fleet_format` is the `F` the bound store recorded: the read admits the
+    /// pair `{fleet's writer version, this build's newest}` — ADR 0106 §2's
+    /// `[N-1, N]` window (FIG-3796). A header at the fleet's older recorded
+    /// version would climb to the newest through a surface-owned lift step
+    /// before it decodes; this canonical form has no lift step yet, so an
+    /// admitted older version is refused closed rather than decoded on shape
+    /// alone.
     pub fn from_durable_parts<'a>(
         header: &[u8],
         fragments: impl IntoIterator<Item = (&'a str, &'a [u8])>,
+        fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<(Self, DurableBaseline), SnapshotDecodeError> {
+        let window = fleet_format.read_window(lash_core_execution::surface_format!(
+            LASHLANG_SNAPSHOT_VERSION
+        ));
         let found = probe_header_version(header)?;
-        if found != LASHLANG_SNAPSHOT_VERSION {
+        if !window.admits(found) {
             return Err(SnapshotDecodeError::VersionMismatch {
-                expected: LASHLANG_SNAPSHOT_VERSION,
+                expected: window.newest(),
                 found,
             });
         }
         let decoded_header: CanonicalDurableHeader = decode_canonical(header, "snapshot header")?;
+        if decoded_header.version != window.newest() {
+            return Err(SnapshotDecodeError::VersionMismatch {
+                expected: window.newest(),
+                found: decoded_header.version,
+            });
+        }
+        let recorded_version = decoded_header.version;
         let fragments = fragments.into_iter().collect::<BTreeMap<_, _>>();
         let mut roots = Vec::with_capacity(fragments.len());
         let mut objects = Vec::new();
@@ -254,7 +292,7 @@ impl State {
         // non-canonical scalar, a reordered or duplicated key, an object
         // carried by the wrong root, and counters that disagree with the heap.
         let parts = state
-            .durable_parts(&DurableBaseline::default())
+            .durable_parts_stamped(&DurableBaseline::default(), recorded_version)
             .map_err(|error| SnapshotDecodeError::InvalidEncoding(error.to_string()))?;
         if parts.header != header {
             return Err(non_fixed_point("snapshot header"));

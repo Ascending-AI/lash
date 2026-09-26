@@ -183,8 +183,12 @@ fn snapshot_globals(
         };
         (global.as_str(), body)
     });
-    let (reloaded, _) = lashlang::State::from_durable_parts(&root.state_header, fragments)
-        .expect("reload the persisted globals");
+    let (reloaded, _) = lashlang::State::from_durable_parts(
+        &root.state_header,
+        fragments,
+        lash_core::FleetFormat::current(),
+    )
+    .expect("reload the persisted globals");
     let value = root
         .globals
         .contains_key(name)
@@ -1439,7 +1443,7 @@ async fn next_commit_after(backend: &Backend, rolled_back_append: bool) -> NextC
         .count();
     let refs = commit
         .checkpoint
-        .manifest()
+        .manifest(lash_core::FleetFormat::current())
         .expect("manifest")
         .components
         .into_iter()

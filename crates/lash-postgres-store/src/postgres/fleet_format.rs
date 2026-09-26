@@ -74,7 +74,13 @@ fn recorded_fleet_format(
 /// open against a catalog that predates the table itself — the transaction is
 /// aborted by the missing-relation error, which `commit` turns into a
 /// rollback, matching [`read`]'s `Unrecorded` verdict.
-pub(crate) async fn admit(tx: &mut Transaction<'_, Postgres>) -> Result<FleetFormat, StoreError> {
+/// `writable` is the opening build's `[min_F, max_F]` — production opens
+/// pass [`FleetFormat::writable_range`], and a test simulating a different
+/// build passes that build's range instead.
+pub(crate) async fn admit(
+    tx: &mut Transaction<'_, Postgres>,
+    writable: RangeInclusive<u32>,
+) -> Result<FleetFormat, StoreError> {
     if fleet_format_is_writable(tx)
         .await
         .map_err(crate::store_sqlx_error)?
@@ -86,9 +92,7 @@ pub(crate) async fn admit(tx: &mut Transaction<'_, Postgres>) -> Result<FleetFor
             .map_err(crate::store_sqlx_error)?;
     }
     match read_in_tx(tx).await {
-        Ok(Some(version)) => {
-            recorded_fleet_format(i64::from(version), FleetFormat::writable_range())
-        }
+        Ok(Some(version)) => recorded_fleet_format(i64::from(version), writable),
         Ok(None) => Ok(FleetFormat::current()),
         Err(err) if missing_relation(&err) => Ok(FleetFormat::current()),
         Err(err) => Err(crate::store_sqlx_error(err)),
@@ -128,4 +132,18 @@ fn missing_relation(err: &sqlx::Error) -> bool {
     err.as_database_error()
         .and_then(|db| db.code().map(|code| code.into_owned()))
         .is_some_and(|code| code == "42P01")
+}
+
+impl lash_core_execution::FleetFormatStore for crate::PostgresSessionStore {
+    /// The fleet format this store's durable writers emit — the `F` of ADR
+    /// 0106 §1 the opening `PostgresStorage` admitted.
+    ///
+    /// This is the hook durable writers consult for their writer version:
+    /// `self.fleet_format().writer_version(surface_format!(…))` maps a
+    /// format's build-newest version onto the generation the fleet agreed to
+    /// write, which is the identity map until `finalize-upgrade` (FIG-3800)
+    /// exists.
+    fn fleet_format(&self) -> FleetFormat {
+        self.fleet_format
+    }
 }

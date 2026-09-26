@@ -246,12 +246,20 @@ pub(crate) enum ProcessEventAppendArm {
 
 /// A batch of process-event appends staged against one in-memory projection
 /// inside one transaction (FIG-3571), saved once by [`Self::commit`].
-#[derive(Default)]
 pub(crate) struct ProcessEventBatch {
+    fleet_format: lash_core_execution::FleetFormat,
     record_changed: bool,
 }
 
 impl ProcessEventBatch {
+    /// Start an empty batch whose appends stamp `fleet_format`'s versions.
+    pub(crate) fn for_fleet(fleet_format: lash_core_execution::FleetFormat) -> Self {
+        Self {
+            fleet_format,
+            record_changed: false,
+        }
+    }
+
     /// Stage one preauthorized append of the batch.
     pub(crate) async fn stage(
         &mut self,
@@ -291,6 +299,7 @@ impl ProcessEventBatch {
             occurred_at_ms,
             wake_delivery_config,
             authorization,
+            self.fleet_format,
         )
         .await?;
         self.record_changed |= record_changed;
@@ -320,8 +329,9 @@ pub(crate) async fn append_process_event_batch_tx(
     requests: Vec<ProcessEventAppendRequest>,
     occurred_at_ms: u64,
     wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<Vec<ProcessEventAppendReceipt>, PluginError> {
-    let mut batch = ProcessEventBatch::default();
+    let mut batch = ProcessEventBatch::for_fleet(fleet_format);
     let mut receipts = Vec::with_capacity(requests.len());
     for request in requests {
         receipts.push(
@@ -353,6 +363,7 @@ pub(crate) async fn apply_process_event_append_tx(
     occurred_at_ms: u64,
     wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     authorization: ProcessEventWriteAuthorization<'_>,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), PluginError> {
     let (receipt, arm, record_changed) = stage_process_event_append_tx(
         tx,
@@ -361,6 +372,7 @@ pub(crate) async fn apply_process_event_append_tx(
         occurred_at_ms,
         wake_delivery_config,
         authorization,
+        fleet_format,
     )
     .await?;
     if record_changed {
@@ -393,6 +405,7 @@ async fn stage_process_event_append_tx(
     occurred_at_ms: u64,
     wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     authorization: ProcessEventWriteAuthorization<'_>,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm, bool), PluginError> {
     let process_id = record.id.clone();
     let replay_lookup =
@@ -412,6 +425,7 @@ async fn stage_process_event_append_tx(
         replay_lookup,
         occurred_at_ms,
         wake_session_id.as_ref(),
+        fleet_format,
     )?;
     match prepared {
         lash_core_execution::facade_support::ProcessEventAppendPlan::Replay {
@@ -495,6 +509,7 @@ async fn stage_process_event_append_tx(
                     tx,
                     &lash_core_execution::ParentScope::process(process_id.clone()),
                     occurred_at_ms,
+                    fleet_format,
                 )
                 .await?;
             }
@@ -521,6 +536,7 @@ pub(crate) async fn append_process_event_tx(
     request: ProcessEventAppendRequest,
     occurred_at_ms: u64,
     wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<ProcessEventAppendReceipt, PluginError> {
     apply_process_event_append_tx(
         tx,
@@ -529,6 +545,7 @@ pub(crate) async fn append_process_event_tx(
         occurred_at_ms,
         wake_delivery_config,
         ProcessEventWriteAuthorization::Preauthorized,
+        fleet_format,
     )
     .await
     .map(|(receipt, _)| receipt)
@@ -609,11 +626,12 @@ pub(crate) async fn load_process_lease_row_tx(
 pub(crate) async fn load_process_lease_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     process_id: &ProcessId,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<Option<ProcessLease>, PluginError> {
     let Some(row) = load_process_lease_row_tx(tx, process_id).await? else {
         return Ok(None);
     };
-    Ok(row.project(process_id))
+    Ok(row.project(process_id, fleet_format))
 }
 
 /// Insert-or-replace the persisted lease row for `process_id` with a fresh
@@ -625,6 +643,7 @@ pub(crate) async fn acquire_process_lease_tx(
     fencing_token: u64,
     now: u64,
     lease_ttl_ms: u64,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<ProcessLease, PluginError> {
     let lease = registry_transitions::acquired_process_lease(
         process_id,
@@ -632,6 +651,7 @@ pub(crate) async fn acquire_process_lease_tx(
         fencing_token,
         now,
         lease_ttl_ms,
+        fleet_format,
     );
     let sql_fencing_token = plugin_sql_monotonic_counter_value(
         "process_lease_fencing_token",
@@ -679,6 +699,7 @@ pub(crate) async fn validate_process_execution_authority_tx(
     authority: &ProcessExecutionWriteAuthority,
     start: Option<&ProcessStarted>,
     now: u64,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(), PluginError> {
     match authority {
         ProcessExecutionWriteAuthority::Invocation { .. } => {
@@ -700,7 +721,7 @@ pub(crate) async fn validate_process_execution_authority_tx(
                     process_id: process_id.clone(),
                 });
             }
-            let current = load_process_lease_tx(tx, process_id).await?;
+            let current = load_process_lease_tx(tx, process_id, fleet_format).await?;
             registry_transitions::authorize_process_lease_write(
                 process_id,
                 lease,

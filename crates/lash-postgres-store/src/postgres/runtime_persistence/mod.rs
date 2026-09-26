@@ -343,6 +343,7 @@ async fn read_session_state_version_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
     lock: bool,
+    fleet: lash_core_execution::FleetFormat,
 ) -> Result<u32, StoreError> {
     // One statement per filter shape, not a suffix appended per call: the
     // locked read is a different statement from the unlocked one.
@@ -370,7 +371,7 @@ async fn read_session_state_version_tx(
             })
         })
         .transpose()?;
-    lash_core_execution::store::resolve_session_state_version(marker)
+    lash_core_execution::store::resolve_session_state_version(marker, fleet)
 }
 
 mod claim_support;

@@ -4,6 +4,7 @@ pub(in crate::runtime) fn initial_park_preview(
     state: &crate::RuntimeSessionState,
     pending_usage: &[crate::TokenLedgerEntry],
     commit_budget: crate::CommitBudget,
+    fleet_format: crate::FleetFormat,
 ) -> Result<crate::store::RuntimeCommit, crate::StoreError> {
     let operation =
         super::state::boundary_operation(&state.session_id, "initial-park-preview", "preview");
@@ -18,6 +19,7 @@ pub(in crate::runtime) fn initial_park_preview(
         pending_usage,
         operation,
         commit_budget,
+        fleet_format,
     )
 }
 
@@ -636,12 +638,14 @@ impl LashRuntime {
             "record-config",
         );
         let protocol_only_first_commit = self.state.checkpoint_ref.is_none();
+        let fleet_format = self.fleet_format();
         let (mut commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
                 &mut self.state,
                 &[],
                 operation,
                 self.host.core.durability.commit_budget,
+                fleet_format,
             )
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
         if protocol_only_first_commit {
@@ -711,6 +715,7 @@ impl LashRuntime {
                 &self.state,
                 &pending_usage,
                 self.host.core.durability.commit_budget,
+                self.fleet_format(),
             )
             .map_err(|err| SessionError::Protocol(err.to_string()))?;
             let operation = initial_park_operation(&proposed)
@@ -727,12 +732,14 @@ impl LashRuntime {
                 )
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
             }
+            let fleet_format = self.fleet_format();
             let (commit, persisted_node_ids) =
                 crate::store::RuntimeCommit::persisted_state_with_operation_and_staged_usage_and_budget(
                     &mut self.state,
                     staged.deltas(),
                     operation,
                     self.host.core.durability.commit_budget,
+                    fleet_format,
                 )
                 .map_err(|err| SessionError::Protocol(err.to_string()))?;
             // Lane-less host lifecycle boundary: `park` runs between turns and
@@ -845,16 +852,19 @@ mod tests {
             "persist me before parking",
         )]);
         let budget = crate::CommitBudget::bounded(1024 * 1024, 512);
-        let first = initial_park_preview(&state, &[], budget).expect("first park preview");
+        let first = initial_park_preview(&state, &[], budget, crate::FleetFormat::current())
+            .expect("first park preview");
 
         let mut retry_state = state.clone();
         retry_state.head_revision = 41;
-        let retry = initial_park_preview(&retry_state, &[], budget).expect("retry park preview");
+        let retry = initial_park_preview(&retry_state, &[], budget, crate::FleetFormat::current())
+            .expect("retry park preview");
 
         let mut changed_state = retry_state.clone();
         changed_state.turn_index = 1;
         let changed =
-            initial_park_preview(&changed_state, &[], budget).expect("changed park preview");
+            initial_park_preview(&changed_state, &[], budget, crate::FleetFormat::current())
+                .expect("changed park preview");
 
         // A park whose only content is a pending correction still has to be a
         // distinct request per correction: two different recovered charges must
@@ -871,12 +881,27 @@ mod tests {
                 attempt_ordinal: 0,
             },
         };
-        let corrected = initial_park_preview(&state, &[correction("call-a", 334)], budget)
-            .expect("correction park preview");
-        let corrected_again = initial_park_preview(&state, &[correction("call-a", 334)], budget)
-            .expect("correction park preview retry");
-        let other_correction = initial_park_preview(&state, &[correction("call-b", 334)], budget)
-            .expect("other correction park preview");
+        let corrected = initial_park_preview(
+            &state,
+            &[correction("call-a", 334)],
+            budget,
+            crate::FleetFormat::current(),
+        )
+        .expect("correction park preview");
+        let corrected_again = initial_park_preview(
+            &state,
+            &[correction("call-a", 334)],
+            budget,
+            crate::FleetFormat::current(),
+        )
+        .expect("correction park preview retry");
+        let other_correction = initial_park_preview(
+            &state,
+            &[correction("call-b", 334)],
+            budget,
+            crate::FleetFormat::current(),
+        )
+        .expect("other correction park preview");
 
         let first = initial_park_operation(&first).expect("first park identity");
         let retry = initial_park_operation(&retry).expect("retry park identity");

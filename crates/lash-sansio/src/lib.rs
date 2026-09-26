@@ -161,7 +161,8 @@ pub use tool_output::{
 };
 pub use turn::{PreparedTurnMachine, SansIoTurnInput, build_turn};
 pub use turn_driver::{
-    TurnDriverConfig, TurnDriverPreamble, append_assistant_text_part, normalized_response_parts,
+    BuildNewestWriterFormats, TurnDriverConfig, TurnDriverPreamble, WriterFormats,
+    append_assistant_text_part, build_newest_writer_formats, normalized_response_parts,
     reasoning_part, visible_response_parts, visible_response_text_from_parts,
 };
 pub use workflow::WorkflowExecutionSite;

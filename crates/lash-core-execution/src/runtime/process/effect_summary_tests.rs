@@ -8,6 +8,7 @@ fn occurrence(node: &str, occurrence: u64) -> ProcessEffectSummaryOccurrence {
         ProcessEffectOutcomeClass::Success,
         None,
         format!("effect:{node}:{occurrence}"),
+        crate::FleetFormat::current(),
     )
 }
 
@@ -22,6 +23,7 @@ fn the_append_payload_is_the_serde_encoding_and_round_trips() {
             lash_sansio::TurnFailureCode::from_wire("trigger_conflict"),
         )),
         "effect:node:3",
+        crate::FleetFormat::current(),
     );
     let request = outcome.append_request();
     assert_eq!(request.payload, serde_json::to_value(&outcome).unwrap());
@@ -31,7 +33,8 @@ fn the_append_payload_is_the_serde_encoding_and_round_trips() {
         Some("effect:node:3")
     );
     assert_eq!(
-        ProcessEffectSummaryOccurrence::decode(request.payload).unwrap(),
+        ProcessEffectSummaryOccurrence::decode(request.payload, crate::FleetFormat::current())
+            .unwrap(),
         outcome
     );
 }
@@ -41,14 +44,14 @@ fn decode_refuses_other_versions_unknown_fields_and_uncapped_occurrences() {
     let mut payload = occurrence("node", 1).append_request().payload;
     payload["vocabulary_version"] = serde_json::json!(0);
     assert!(matches!(
-        ProcessEffectSummaryOccurrence::decode(payload),
+        ProcessEffectSummaryOccurrence::decode(payload, crate::FleetFormat::current()),
         Err(ProcessEffectSummaryError::UnsupportedVocabularyVersion { actual: 0, .. })
     ));
 
     let mut payload = occurrence("node", 1).append_request().payload;
     payload["unknown"] = serde_json::json!(true);
     assert!(matches!(
-        ProcessEffectSummaryOccurrence::decode(payload),
+        ProcessEffectSummaryOccurrence::decode(payload, crate::FleetFormat::current()),
         Err(ProcessEffectSummaryError::InvalidPayload(_))
     ));
 
@@ -56,24 +59,33 @@ fn decode_refuses_other_versions_unknown_fields_and_uncapped_occurrences() {
     assert!(!ProcessEffectSummaryOccurrence::is_within_cap(beyond));
     assert!(!ProcessEffectSummaryOccurrence::is_within_cap(0));
     assert!(matches!(
-        ProcessEffectSummaryOccurrence::decode(occurrence("node", beyond).append_request().payload),
+        ProcessEffectSummaryOccurrence::decode(occurrence("node", beyond).append_request().payload, crate::FleetFormat::current()),
         Err(ProcessEffectSummaryError::OccurrenceOutsideCap { occurrence }) if occurrence == beyond
     ));
 }
 
 #[test]
 fn omission_records_are_strict() {
-    let empty = ProcessEffectOmissions::new(BTreeMap::new());
+    let empty = ProcessEffectOmissions::new(BTreeMap::new(), crate::FleetFormat::current());
     assert!(matches!(
-        ProcessEffectOmissions::decode(empty.append_request("omissions").payload),
+        ProcessEffectOmissions::decode(
+            empty.append_request("omissions").payload,
+            crate::FleetFormat::current()
+        ),
         Err(ProcessEffectSummaryError::EmptyOmissions)
     ));
     let mut counts = ProcessEffectOmittedCounts::default();
     counts.record(ProcessEffectOutcomeClass::Failure);
-    let mut omissions = ProcessEffectOmissions::new(BTreeMap::from([("node".to_string(), counts)]));
+    let mut omissions = ProcessEffectOmissions::new(
+        BTreeMap::from([("node".to_string(), counts)]),
+        crate::FleetFormat::current(),
+    );
     omissions.occurrence_cap += 1;
     assert!(matches!(
-        ProcessEffectOmissions::decode(omissions.append_request("omissions").payload),
+        ProcessEffectOmissions::decode(
+            omissions.append_request("omissions").payload,
+            crate::FleetFormat::current()
+        ),
         Err(ProcessEffectSummaryError::UnsupportedOccurrenceCap { .. })
     ));
 }
@@ -88,20 +100,31 @@ fn the_fold_reads_the_written_bound_in_any_page_order() {
         occurrence("node-b", 1).append_request(),
         occurrence("node-a", 2).append_request(),
         occurrence("node-a", 1).append_request(),
-        ProcessEffectOmissions::new(BTreeMap::from([("node-a".to_string(), counts)]))
-            .append_request("omissions"),
+        ProcessEffectOmissions::new(
+            BTreeMap::from([("node-a".to_string(), counts)]),
+            crate::FleetFormat::current(),
+        )
+        .append_request("omissions"),
         ProcessEventAppendRequest::new("process.custom", serde_json::json!({})),
     ];
     let mut forward = ProcessEffectSummary::default();
     for request in &events {
         forward
-            .fold_event(&request.event_type, &request.payload)
+            .fold_event(
+                &request.event_type,
+                &request.payload,
+                crate::FleetFormat::current(),
+            )
             .unwrap();
     }
     let mut reverse = ProcessEffectSummary::default();
     for request in events.iter().rev() {
         reverse
-            .fold_event(&request.event_type, &request.payload)
+            .fold_event(
+                &request.event_type,
+                &request.payload,
+                crate::FleetFormat::current(),
+            )
             .unwrap();
     }
     assert_eq!(forward, reverse);

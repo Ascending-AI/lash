@@ -483,6 +483,16 @@ impl Session {
         self.services.store.clone()
     }
 
+    /// The `F` the bound store recorded; a session with no durable store falls
+    /// back to this build's own fleet format (FIG-3796).
+    pub fn fleet_format(&self) -> crate::FleetFormat {
+        self.services
+            .store
+            .as_ref()
+            .map(|store| crate::store::FleetFormatStore::fleet_format(store.as_ref()))
+            .unwrap_or_else(crate::FleetFormat::current)
+    }
+
     fn tool_catalog_cache_key(
         &self,
         tool_access: &crate::SessionToolAccess,
@@ -515,6 +525,7 @@ impl Session {
             plugin_extensions: self.plugins().extensions().clone(),
             trigger_events: self.plugins().triggers().clone(),
             extra_prompt_contributions: self.protocol_extra_prompt_contributions(),
+            writer_formats: Arc::new(crate::FleetWriterFormats(self.fleet_format())),
         };
         let driver = self.plugins().protocol_driver();
         let preamble = driver.build_preamble(input);
@@ -569,6 +580,7 @@ impl Session {
                 plugin_extensions: self.plugins().extensions().clone(),
                 trigger_events: self.plugins().triggers().clone(),
                 extra_prompt_contributions: self.protocol_extra_prompt_contributions(),
+                writer_formats: Arc::new(crate::FleetWriterFormats(self.fleet_format())),
             });
         let handle = ToolCatalogHandle(Arc::new(ToolCatalogArtifact {
             tool_registry,
@@ -597,6 +609,7 @@ impl Session {
                     plugin_extensions: self.plugins().extensions().clone(),
                     trigger_events: self.plugins().triggers().clone(),
                     extra_prompt_contributions: self.protocol_extra_prompt_contributions(),
+                    writer_formats: Arc::new(crate::FleetWriterFormats(self.fleet_format())),
                 });
         preamble.config.sync_execution_environment = true;
         Arc::new(preamble)
@@ -812,6 +825,13 @@ impl Session {
         .map(|context| {
             context
                 .with_execution_env_spec(execution_env_spec)
+                .with_fleet_format(
+                    self.services
+                        .store
+                        .as_ref()
+                        .map(|store| crate::store::FleetFormatStore::fleet_format(store.as_ref()))
+                        .unwrap_or_else(crate::FleetFormat::current),
+                )
                 .with_live_tool_catalog(tool_surface.live_tool_catalog())
                 .with_unrecorded_session_sources(crate::runtime::effect::UnrecordedSessionSources {
                     context_overlay_tools: !self.context_tools.is_empty(),

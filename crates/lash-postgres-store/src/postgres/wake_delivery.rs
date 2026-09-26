@@ -34,7 +34,7 @@ pub(super) async fn claim_pending_wake_deliveries(
             .execute(&mut *tx)
             .await
             .map_err(plugin_sqlx_error)?;
-        deliveries.push(load_wake_delivery_tx(&mut tx, &id).await?);
+        deliveries.push(load_wake_delivery_tx(&mut tx, &id, registry.fleet_format).await?);
     }
     tx.commit().await.map_err(plugin_sqlx_error)?;
     Ok(deliveries)
@@ -43,6 +43,7 @@ pub(super) async fn claim_pending_wake_deliveries(
 pub(super) async fn load_wake_delivery_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     delivery_id: &str,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<lash_core_execution::WakeDelivery, PluginError> {
     let row = sqlx::query(process_sql().wake_postgres.select_report.sql())
         .bind(delivery_id)
@@ -50,11 +51,12 @@ pub(super) async fn load_wake_delivery_tx(
         .await
         .map_err(plugin_sqlx_error)?
         .ok_or_else(|| registry_transitions::unknown_wake_delivery(delivery_id))?;
-    decode_wake_delivery_row(row)
+    decode_wake_delivery_row(row, fleet_format)
 }
 
 pub(super) fn decode_wake_delivery_row(
     row: sqlx::postgres::PgRow,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<lash_core_execution::WakeDelivery, PluginError> {
     registry_transitions::WakeDeliveryRow {
         delivery_id: row.get(0),
@@ -67,7 +69,7 @@ pub(super) fn decode_wake_delivery_row(
         discard_reason_label: row.get(7),
         delivery_json: row.get(8),
     }
-    .project()
+    .project(fleet_format)
 }
 
 pub(super) fn wake_delivery_report<'a>(

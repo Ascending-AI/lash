@@ -836,6 +836,7 @@ fn a_segment_boundary_carries_at_most_the_cap_per_node_of_pending_summary() {
             lash_core::ProcessEffectOutcomeClass::Success,
             None,
             format!("run:{node}:{occurrence}"),
+            lash_core::FleetFormat::current(),
         )
     };
     let writer = EffectSummaryWriter::default();
@@ -899,16 +900,22 @@ fn a_segment_boundary_carries_at_most_the_cap_per_node_of_pending_summary() {
         successor.pending().is_empty(),
         "a committed boundary drops what it carried"
     );
-    let terminal = successor.terminal_prelude("run:omissions".to_string());
+    let terminal = successor.terminal_prelude(
+        "run:omissions".to_string(),
+        lash_core::FleetFormat::current(),
+    );
     assert_eq!(
         terminal.len(),
         1,
         "the terminal batch carries only the omission record"
     );
     assert_eq!(
-        lash_core::ProcessEffectOmissions::decode(terminal[0].payload.clone())
-            .expect("decode the omission record")
-            .nodes["node:a"]
+        lash_core::ProcessEffectOmissions::decode(
+            terminal[0].payload.clone(),
+            lash_core::FleetFormat::current(),
+        )
+        .expect("decode the omission record")
+        .nodes["node:a"]
             .success,
         2 * cap + 1
     );

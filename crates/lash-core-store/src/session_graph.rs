@@ -693,9 +693,17 @@ impl SessionNodeRecord {
     /// re-derive reachability without parsing an opaque JSON blob. The body
     /// states its own node-body generation so a reader never has to infer the
     /// shape it is holding.
-    pub fn encode_storage_body(&self) -> Result<String, serde_json::Error> {
+    ///
+    /// The stamp is the fleet's writer version for the node-body surface
+    /// (FIG-3796): `fleet_format` is the `F` the store recorded, never the
+    /// bare build constant.
+    pub fn encode_storage_body(
+        &self,
+        fleet_format: crate::store::FleetFormat,
+    ) -> Result<String, serde_json::Error> {
         serde_json::to_string(&StoredSessionNodeBody {
-            schema_version: SESSION_NODE_BODY_SCHEMA_VERSION,
+            schema_version: fleet_format
+                .writer_version(crate::surface_format!(SESSION_NODE_BODY_SCHEMA_VERSION)),
             timestamp: self.timestamp.clone(),
             payload: self.payload.clone(),
         })
@@ -704,30 +712,50 @@ impl SessionNodeRecord {
     /// Reassembles a node for store implementors from dedicated identity/parent columns and the
     /// immutable JSON body; malformed body JSON is returned as an error.
     ///
-    /// The body must carry a `schema_version` stamp equal to this build's
-    /// [`SESSION_NODE_BODY_SCHEMA_VERSION`], and that stamp is checked before
-    /// the payload decodes. A missing stamp or an older generation is
-    /// pre-cutover data and is refused rather than reconstructed; a newer
-    /// generation is refused rather than decoded on a shape this build does
-    /// not know.
+    /// This is the no-store form: it admits this build's newest generation
+    /// alone. Store-bound reads go through [`Self::decode_storage_body_for_fleet`].
     pub fn decode_storage_body(
         node_id: String,
         parent_node_id: Option<String>,
         node_json: &str,
     ) -> Result<Self, serde_json::Error> {
-        let value = serde_json::from_str::<serde_json::Value>(node_json)?;
+        Self::decode_storage_body_for_fleet(
+            node_id,
+            parent_node_id,
+            node_json,
+            crate::store::FleetFormat::current(),
+        )
+    }
+
+    /// The fleet leg of [`Self::decode_storage_body`]: the body admits the
+    /// version `fleet` records for the node-body surface as well as this
+    /// build's newest — the `[N-1, N]` reader window of ADR 0106 §2
+    /// (FIG-3796). An admitted older payload climbs to the newest through the
+    /// surface's [`crate::store::RecordUpcaster`] hooks before it decodes; a
+    /// missing stamp or a version outside the window is refused.
+    pub fn decode_storage_body_for_fleet(
+        node_id: String,
+        parent_node_id: Option<String>,
+        node_json: &str,
+        fleet_format: crate::store::FleetFormat,
+    ) -> Result<Self, serde_json::Error> {
+        let mut value = serde_json::from_str::<serde_json::Value>(node_json)?;
+        let window =
+            fleet_format.read_window(crate::surface_format!(SESSION_NODE_BODY_SCHEMA_VERSION));
         let body_schema_version = value
             .get("schema_version")
             .and_then(serde_json::Value::as_u64)
             .ok_or_else(|| {
                 serde::de::Error::custom(format!(
-                    "graph node body carries no schema_version stamp; this build reads exactly \
-                     generation {SESSION_NODE_BODY_SCHEMA_VERSION}; remedy: the body is \
-                     pre-cutover data, so recreate the session store under this build"
+                    "graph node body carries no schema_version stamp; this build reads generation \
+                     {} and the fleet's recorded {} (FIG-3796); remedy: the body is \
+                     pre-cutover data, so recreate the session store under this build",
+                    window.newest(),
+                    window.recorded(),
                 ))
             })?;
-        if body_schema_version != u64::from(SESSION_NODE_BODY_SCHEMA_VERSION) {
-            let remedy = if body_schema_version > u64::from(SESSION_NODE_BODY_SCHEMA_VERSION) {
+        if !window.admits(u32::try_from(body_schema_version).unwrap_or(u32::MAX)) {
+            let remedy = if body_schema_version > u64::from(window.newest()) {
                 "run a Lash build at that node-body generation".to_string()
             } else {
                 "the body is pre-cutover data, so recreate the session store under this build"
@@ -735,8 +763,20 @@ impl SessionNodeRecord {
             };
             return Err(serde::de::Error::custom(format!(
                 "graph node body is schema version {body_schema_version}, but this build reads \
-                 exactly {SESSION_NODE_BODY_SCHEMA_VERSION}; remedy: {remedy}"
+                 generation {} and the fleet's recorded {} (FIG-3796); remedy: {remedy}",
+                window.newest(),
+                window.recorded(),
             )));
+        }
+        if body_schema_version != u64::from(window.newest()) {
+            crate::store::upcast_json_record(
+                "graph node body",
+                crate::surface_format!(SESSION_NODE_BODY_SCHEMA_VERSION),
+                u32::try_from(body_schema_version).unwrap_or(u32::MAX),
+                window.newest(),
+                &mut value,
+            )
+            .map_err(serde::de::Error::custom)?;
         }
         let body = serde_json::from_value::<StoredSessionNodeBody>(value)?;
         Ok(Self {

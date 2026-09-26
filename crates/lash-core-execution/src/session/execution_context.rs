@@ -3,6 +3,9 @@ use crate::SessionId;
 use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 
+mod trigger_scope;
+use trigger_scope::{missing_process_execution_error, resolve_trigger_owner_scope};
+
 use tokio_util::sync::CancellationToken;
 
 use crate::tool_dispatch::ToolDispatchContext;
@@ -51,6 +54,11 @@ pub struct RuntimeExecutionContext<'run> {
     /// catalog is live.
     live_tool_catalog: Option<Arc<crate::ToolCatalog>>,
     process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
+    /// `F` this execution's durable writers emit — recorded by the bound
+    /// session's store, so a stamped surface version is the fleet's, not the
+    /// build's newest (FIG-3796). Contexts with no store default to the
+    /// build's own generation.
+    fleet_format: crate::FleetFormat,
     attachment_store: Arc<crate::SessionAttachmentStore>,
     chronological_projection: Arc<crate::ChronologicalProjection>,
     protocol_extension: Option<crate::ProtocolTurnExtensionHandle>,
@@ -509,6 +517,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             protocol_extension,
             turn_context,
             live_tool_catalog: None,
+            fleet_format: crate::FleetFormat::current(),
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -546,6 +555,7 @@ impl<'run> RuntimeExecutionContext<'run> {
             dispatch: Arc::new(self.dispatch.to_static()?),
             live_tool_catalog: self.live_tool_catalog.clone(),
             process_env_store: Arc::clone(&self.process_env_store),
+            fleet_format: self.fleet_format,
             attachment_store: Arc::clone(&self.attachment_store),
             chronological_projection: Arc::clone(&self.chronological_projection),
             protocol_extension: self.protocol_extension.clone(),
@@ -716,6 +726,22 @@ impl<'run> RuntimeExecutionContext<'run> {
         sources: crate::runtime::effect::UnrecordedSessionSources,
     ) -> Self {
         self.unrecorded_sources = self.unrecorded_sources.union(sources);
+        self
+    }
+
+    /// The fleet-format generation this context's durable writers emit —
+    /// `F` as the bound store recorded it, or this build's own generation
+    /// where the context holds no store (FIG-3796).
+    pub fn fleet_format(&self) -> crate::FleetFormat {
+        self.fleet_format
+    }
+
+    /// Binds the fleet format the bound session's store recorded. Every
+    /// durable stamp produced inside this context — effect summaries, parent
+    /// scopes, leases — routes through `writer_version` on this value.
+    #[must_use]
+    pub fn with_fleet_format(mut self, fleet_format: crate::FleetFormat) -> Self {
+        self.fleet_format = fleet_format;
         self
     }
 
@@ -1829,32 +1855,6 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub fn turn_context(&self) -> &crate::TurnContext {
         &self.turn_context
-    }
-}
-
-fn missing_process_execution_error() -> crate::RuntimeEffectControllerError {
-    crate::RuntimeEffectControllerError::new(
-        crate::RuntimeErrorCode::ProcessRegistryUnavailable,
-        "process execution is unavailable outside a durable process execution",
-    )
-}
-
-fn resolve_trigger_owner_scope(
-    root_session_id: &SessionId,
-    originator: Option<&crate::ProcessOriginator>,
-) -> Result<crate::TriggerOwnerScope, crate::PluginError> {
-    match originator {
-        Some(crate::ProcessOriginator::Host {
-            scope: Some(binding_id),
-        }) => crate::TriggerOwnerScope::host(binding_id.clone()),
-        Some(crate::ProcessOriginator::Host { scope: None }) => Err(crate::PluginError::Session(
-            "bare host authority cannot own user trigger subscriptions; use an explicit host binding"
-                .to_string(),
-        )),
-        Some(crate::ProcessOriginator::Session { session_id, .. }) => {
-            Ok(crate::TriggerOwnerScope::session(session_id.clone()))
-        }
-        None => Ok(crate::TriggerOwnerScope::session(root_session_id)),
     }
 }
 

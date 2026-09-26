@@ -129,6 +129,12 @@ impl EffectSummaryAppendFaults {
     }
 }
 
+impl crate::FleetFormatStore for EffectSummaryAppendFaults {
+    fn fleet_format(&self) -> crate::FleetFormat {
+        self.inner.fleet_format()
+    }
+}
+
 delegate_process_query!(EffectSummaryAppendFaults, inner);
 
 delegate_process_registrar!(

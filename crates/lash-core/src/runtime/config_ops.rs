@@ -54,6 +54,7 @@ impl SessionConfigPatch {
 fn reopen_seed_operation(
     state: &crate::RuntimeSessionState,
     commit_budget: crate::CommitBudget,
+    fleet_format: crate::FleetFormat,
 ) -> Result<crate::OperationId, crate::StoreError> {
     let preview_operation = super::state::boundary_operation(
         &state.session_id,
@@ -69,6 +70,7 @@ fn reopen_seed_operation(
             &[],
             preview_operation,
             commit_budget,
+            fleet_format,
         )?;
     let content_hash = preview.turn_commit_hash()?;
     Ok(super::state::boundary_operation(
@@ -111,8 +113,12 @@ impl LashRuntime {
         candidate = self
             .resolve_session_config_mutations(previous.clone(), candidate)
             .await;
-        let durable_patch =
-            ApplyConfigPatch::between(&previous, &candidate, self.state.config_revision);
+        let durable_patch = ApplyConfigPatch::between(
+            &previous,
+            &candidate,
+            self.state.config_revision,
+            self.fleet_format(),
+        );
         if !durable_patch.is_empty() {
             self.settle_config_patch(durable_patch).await?;
         }
@@ -212,14 +218,20 @@ impl LashRuntime {
         // revision by one (ADR 0101 §12): a patch written against the pre-seed
         // revision must not compare-and-set onto the seeded config.
         self.state.config_revision = self.state.config_revision.saturating_add(1);
-        let operation = reopen_seed_operation(&self.state, self.host.core.durability.commit_budget)
-            .map_err(|error| SessionError::Protocol(error.to_string()))?;
+        let operation = reopen_seed_operation(
+            &self.state,
+            self.host.core.durability.commit_budget,
+            self.fleet_format(),
+        )
+        .map_err(|error| SessionError::Protocol(error.to_string()))?;
+        let fleet_format = self.fleet_format();
         let (commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
                 &mut self.state,
                 &[],
                 operation,
                 self.host.core.durability.commit_budget,
+                fleet_format,
             )
             .map_err(|error| SessionError::Protocol(error.to_string()))?;
         let result = super::commit_runtime_state_with_fresh_session_execution_lease(
@@ -302,8 +314,8 @@ impl LashRuntime {
         }
         self.settle_config_patch(ApplyConfigPatch {
             base_config_revision: self.state.config_revision,
-            protocol_turn_options: Some(options),
-            ..ApplyConfigPatch::default()
+            protocol_turn_options: Some(options.restamped_for_fleet(self.fleet_format())),
+            ..ApplyConfigPatch::for_fleet(self.fleet_format())
         })
         .await?;
         Ok(Ok(true))
@@ -324,7 +336,7 @@ impl LashRuntime {
         self.settle_config_patch(ApplyConfigPatch {
             base_config_revision: self.state.config_revision,
             tool_access: Some(access),
-            ..ApplyConfigPatch::default()
+            ..ApplyConfigPatch::for_fleet(self.fleet_format())
         })
         .await
     }
@@ -502,18 +514,22 @@ mod reopen_seed_identity_tests {
         };
         state.ensure_agent_frame_initialized();
         let budget = crate::CommitBudget::bounded(1024 * 1024, 512);
-        let first = reopen_seed_operation(&state, budget).expect("first seed identity");
+        let first = reopen_seed_operation(&state, budget, crate::FleetFormat::current())
+            .expect("first seed identity");
 
         let mut retry_state = state.clone();
-        let retry = reopen_seed_operation(&retry_state, budget).expect("retry seed identity");
+        let retry = reopen_seed_operation(&retry_state, budget, crate::FleetFormat::current())
+            .expect("retry seed identity");
         retry_state.head_revision = 41;
-        let advanced = reopen_seed_operation(&retry_state, budget).expect("advanced seed identity");
+        let advanced = reopen_seed_operation(&retry_state, budget, crate::FleetFormat::current())
+            .expect("advanced seed identity");
 
         let mut changed_state = retry_state;
         changed_state.policy.prompt = crate::PromptLayer::new().with_contribution(
             crate::PromptContribution::guidance("Host", "A DIFFERENT RECONCILED SEED"),
         );
-        let changed = reopen_seed_operation(&changed_state, budget).expect("changed seed identity");
+        let changed = reopen_seed_operation(&changed_state, budget, crate::FleetFormat::current())
+            .expect("changed seed identity");
 
         assert_eq!(
             first, retry,

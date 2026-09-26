@@ -443,6 +443,12 @@ impl super::super::registry_concerns::ProcessQuery for ProcessRegistryFaults {
     }
 }
 
+impl crate::FleetFormatStore for ProcessRegistryFaults {
+    fn fleet_format(&self) -> crate::FleetFormat {
+        self.inner.fleet_format()
+    }
+}
+
 delegate_process_registrar!(
     ProcessRegistryFaults,
     inner,

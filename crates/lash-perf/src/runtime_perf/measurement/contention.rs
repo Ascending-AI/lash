@@ -1037,6 +1037,7 @@ pub(crate) async fn run_once_durable_queued_work_contention(
             &session_id,
             &format!("durable contention batch {index}"),
             (index + 1) as u64,
+            store.fleet_format(),
         );
         store
             .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(wake))

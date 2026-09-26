@@ -3,6 +3,7 @@
 //! suite variants.
 
 use super::*;
+use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 
 pub(crate) fn assert_fresh_instances<T: ?Sized>(left: &Arc<T>, right: &Arc<T>, suite: &str) {
     assert!(
@@ -130,7 +131,9 @@ pub(crate) fn process_wake_work(
 ) -> crate::QueuedWorkBatchDraft {
     let process_id = crate::ProcessId::fixture(process);
     let wake = crate::ProcessWakeDelivery {
-        version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
+            PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+        )),
         wake_id: format!("wake:{session_id}:{process}:{sequence}"),
         target_session_id: session_id.clone(),
         process_id: process_id.clone(),

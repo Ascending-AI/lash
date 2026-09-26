@@ -171,6 +171,18 @@ impl PostgresSessionStore {
         self.lease_clock_for_testing = Some(clock);
         self
     }
+
+    /// Stand this store's writers up on `fleet_format` — typically one
+    /// carrying a pin table via [`lash_core_execution::FleetFormat::with_writer_pins`]
+    /// — so a test proves they emit the version `F` assigns rather than the
+    /// build constant they would stamp anyway (FIG-3796).
+    pub fn with_fleet_format_for_testing(
+        mut self,
+        fleet_format: lash_core_execution::FleetFormat,
+    ) -> Self {
+        self.fleet_format = fleet_format;
+        self
+    }
 }
 
 pub(crate) async fn set_transaction_lease_clock_for_testing(

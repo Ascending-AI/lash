@@ -43,6 +43,12 @@ use lash::{ModelLimits, ModelSpec, QueuedWorkClaimRefusal};
 
 struct FacadeStore;
 
+impl lash::persistence::FleetFormatStore for FacadeStore {
+    fn fleet_format(&self) -> lash::persistence::FleetFormat {
+        lash::persistence::FleetFormat::current()
+    }
+}
+
 lash_core::impl_noop_attachment_manifest!(FacadeStore);
 
 #[async_trait]
@@ -89,7 +95,9 @@ impl SessionCommitStore for FacadeStore {
                 timestamp: node.timestamp.clone(),
             })
             .collect();
-        let manifest: SessionCheckpoint = commit.checkpoint.manifest()?;
+        let manifest: SessionCheckpoint = commit
+            .checkpoint
+            .manifest(lash::persistence::FleetFormat::current())?;
         Ok(RuntimeCommitReceipt {
             schema_version: lash_core::store::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
             head_revision: commit.expected_head_revision + 1,

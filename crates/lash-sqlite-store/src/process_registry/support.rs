@@ -29,12 +29,20 @@ impl ProcessEventAppendArm {
 
 /// A batch of process-event appends staged against one in-memory projection
 /// inside one transaction (FIG-3571), saved once by [`Self::commit`].
-#[derive(Default)]
 pub(crate) struct ProcessEventBatch {
+    fleet_format: lash_core_execution::FleetFormat,
     record_changed: bool,
 }
 
 impl ProcessEventBatch {
+    /// Start an empty batch whose appends stamp `fleet_format`'s versions.
+    pub(crate) fn for_fleet(fleet_format: lash_core_execution::FleetFormat) -> Self {
+        Self {
+            fleet_format,
+            record_changed: false,
+        }
+    }
+
     /// Stage one preauthorized append of the batch.
     pub(crate) fn stage(
         &mut self,
@@ -74,6 +82,7 @@ impl ProcessEventBatch {
             occurred_at_ms,
             wake_delivery_config,
             authorization,
+            self.fleet_format,
         )?;
         self.record_changed |= arm.record_changed();
         Ok((receipt, arm))
@@ -241,6 +250,7 @@ impl SqliteProcessRegistry {
         let process_id = process_id.clone();
         let now = self.clock.timestamp_ms();
         let config = self.wake_delivery_config;
+        let fleet_format = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -267,7 +277,14 @@ impl SqliteProcessRegistry {
                                 &by,
                             )
                         };
-                        Self::append_event_conn(tx, &mut record, request, now, config)?;
+                        Self::append_event_conn(
+                            tx,
+                            &mut record,
+                            request,
+                            now,
+                            config,
+                            fleet_format,
+                        )?;
                     }
                     Ok(())
                 })()))
@@ -285,6 +302,7 @@ impl SqliteProcessRegistry {
         let target = target.map(ToOwned::to_owned);
         let now = self.clock.timestamp_ms();
         let config = self.wake_delivery_config;
+        let fleet_format = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -308,6 +326,7 @@ impl SqliteProcessRegistry {
                         ),
                         now,
                         config,
+                        fleet_format,
                     )?;
                     tx.execute(
                         process_sql().process.set_wake_session_id.sql(),
@@ -356,6 +375,7 @@ impl SqliteProcessRegistry {
             DatabaseLocation::standalone_file(
                 &session_store_root.into().join(crate::DURABLE_CORE_DB_FILE),
             ),
+            lash_core_execution::FleetFormat::current(),
             #[cfg(feature = "testing")]
             None,
         )
@@ -375,6 +395,7 @@ impl SqliteProcessRegistry {
             DatabaseLocation::standalone_file(
                 &session_store_root.into().join(crate::DURABLE_CORE_DB_FILE),
             ),
+            lash_core_execution::FleetFormat::current(),
             Some(fault_injector),
         )
         .await
@@ -386,6 +407,7 @@ impl SqliteProcessRegistry {
         location: &DatabaseLocation,
         clock: Arc<dyn lash_core_execution::Clock>,
         process_session_catalog: DatabaseLocation,
+        fleet_format: lash_core_execution::FleetFormat,
         #[cfg(feature = "testing")] fault_injector: Option<crate::testing::SqliteFaultInjector>,
     ) -> tokio_rusqlite::Result<Self> {
         #[cfg(feature = "testing")]
@@ -407,6 +429,7 @@ impl SqliteProcessRegistry {
             scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
             location: location.clone(),
             process_id_mint: lash_core_execution::ProcessIdMint::default(),
+            fleet_format,
         })
     }
 
@@ -546,6 +569,7 @@ impl SqliteProcessRegistry {
         occurred_at_ms: u64,
         wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
         authorization: ProcessEventWriteAuthorization<'_>,
+        fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), lash_core_execution::PluginError>
     {
         let (receipt, arm) = Self::stage_process_event_append_conn(
@@ -555,6 +579,7 @@ impl SqliteProcessRegistry {
             occurred_at_ms,
             wake_delivery_config,
             authorization,
+            fleet_format,
         )?;
         if arm.record_changed() {
             Self::save_process_conn(conn, record)?;
@@ -573,8 +598,9 @@ impl SqliteProcessRegistry {
         requests: Vec<ProcessEventAppendRequest>,
         occurred_at_ms: u64,
         wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
+        fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<Vec<ProcessEventAppendReceipt>, lash_core_execution::PluginError> {
-        let mut batch = ProcessEventBatch::default();
+        let mut batch = ProcessEventBatch::for_fleet(fleet_format);
         let receipts = requests
             .into_iter()
             .map(|request| batch.stage(conn, record, request, occurred_at_ms, wake_delivery_config))
@@ -606,6 +632,7 @@ impl SqliteProcessRegistry {
         occurred_at_ms: u64,
         wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
         authorization: ProcessEventWriteAuthorization<'_>,
+        fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), lash_core_execution::PluginError>
     {
         let process_id = record.id.clone();
@@ -626,6 +653,7 @@ impl SqliteProcessRegistry {
             replay_lookup,
             occurred_at_ms,
             wake_session_id.as_ref(),
+            fleet_format,
         )?;
         match prepared {
             lash_core_execution::facade_support::ProcessEventAppendPlan::Replay {
@@ -720,6 +748,7 @@ impl SqliteProcessRegistry {
                         conn,
                         &lash_core_execution::ParentScope::process(process_id.clone()),
                         occurred_at_ms,
+                        fleet_format,
                     )?;
                 }
                 Self::insert_wake_delivery_conn(
@@ -752,6 +781,7 @@ impl SqliteProcessRegistry {
         request: ProcessEventAppendRequest,
         occurred_at_ms: u64,
         wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
+        fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<(ProcessEventAppendReceipt, bool), lash_core_execution::PluginError> {
         let (receipt, arm) = Self::apply_process_event_append_conn(
             conn,
@@ -760,6 +790,7 @@ impl SqliteProcessRegistry {
             occurred_at_ms,
             wake_delivery_config,
             ProcessEventWriteAuthorization::Preauthorized,
+            fleet_format,
         )?;
         Ok((receipt, arm.record_changed()))
     }
@@ -876,9 +907,10 @@ impl SqliteProcessRegistry {
     pub(crate) fn load_process_lease_conn(
         conn: &Connection,
         process_id: &ProcessId,
+        fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<Option<ProcessLease>, lash_core_execution::PluginError> {
         Ok(Self::load_process_lease_row_conn(conn, process_id)?
-            .and_then(|row| row.project(process_id)))
+            .and_then(|row| row.project(process_id, fleet_format)))
     }
 
     /// Insert-or-replace the persisted lease row for `process_id` with a fresh
@@ -890,6 +922,7 @@ impl SqliteProcessRegistry {
         fencing_token: u64,
         now: u64,
         lease_ttl_ms: u64,
+        fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<ProcessLease, lash_core_execution::PluginError> {
         let lease = registry_transitions::acquired_process_lease(
             process_id,
@@ -897,6 +930,7 @@ impl SqliteProcessRegistry {
             fencing_token,
             now,
             lease_ttl_ms,
+            fleet_format,
         );
         let sql_fencing_token = plugin_sql_monotonic_counter_value(
             "process_lease_fencing_token",

@@ -846,9 +846,8 @@ async fn final_commit_refuses_a_historical_frame_switch_outcome_before_any_durab
     )
     .expect("open frame b");
     assert!(frame_b.opened);
-    state.protocol_turn_options = crate::ProtocolTurnOptions {
-        payload: serde_json::json!({ "mode": "frame-b" }),
-    };
+    state.protocol_turn_options =
+        crate::ProtocolTurnOptions::from_payload(serde_json::json!({ "mode": "frame-b" }));
     let expected_policy = state.policy.clone();
     let expected_protocol_turn_options = state.protocol_turn_options.clone();
     let expected_leaf = state.session_graph.leaf_node_id.clone();

@@ -24,6 +24,7 @@ fn persisted_state_hydrates_provider_id_without_live_provider_rebinding() {
             token_ledger: Vec::new(),
         },
         None,
+        crate::store::FleetFormat::current(),
     )
     .expect("valid persisted state");
 
@@ -180,7 +181,7 @@ fn session_meta_rejects_removed_observer_inheritance() {
 }
 
 fn options(payload: serde_json::Value) -> crate::ProtocolTurnOptions {
-    crate::ProtocolTurnOptions { payload }
+    crate::ProtocolTurnOptions::from_payload(payload)
 }
 
 fn head_with_protocol_turn_options(
@@ -208,7 +209,8 @@ fn checkpoint_with_protocol_turn_options(
     state.checkpoint_components =
         crate::runtime::state::RuntimeCheckpointComponents::complete_empty();
     state.protocol_turn_options = options;
-    build_checkpoint_from_persisted_state(&state).expect("build fixture checkpoint")
+    build_checkpoint_from_persisted_state(&state, crate::store::FleetFormat::current())
+        .expect("build fixture checkpoint")
 }
 
 /// FIG-2479: the commanded head value (SESSION_HEAD_META v6) is authoritative
@@ -222,6 +224,7 @@ fn head_protocol_turn_options_override_the_checkpoint_copy_on_load() {
     let state = persisted_session_state_from_head(
         head_with_protocol_turn_options(Some(head_options.clone())),
         Some(checkpoint),
+        crate::store::FleetFormat::current(),
     )
     .expect("valid persisted state");
     assert_eq!(state.protocol_turn_options, head_options);
@@ -233,9 +236,12 @@ fn head_protocol_turn_options_override_the_checkpoint_copy_on_load() {
 fn absent_head_protocol_turn_options_fall_back_to_the_checkpoint_copy() {
     let checkpoint_options = options(serde_json::json!({"dialect": "checkpoint-copy"}));
     let checkpoint = checkpoint_with_protocol_turn_options(checkpoint_options.clone());
-    let state =
-        persisted_session_state_from_head(head_with_protocol_turn_options(None), Some(checkpoint))
-            .expect("valid persisted state");
+    let state = persisted_session_state_from_head(
+        head_with_protocol_turn_options(None),
+        Some(checkpoint),
+        crate::store::FleetFormat::current(),
+    )
+    .expect("valid persisted state");
     assert_eq!(state.protocol_turn_options, checkpoint_options);
 }
 
@@ -303,4 +309,82 @@ fn fig1123_reasoning_retention_policy_survives_session_head_cold_decode() {
         *decoded.config.model.capability.reasoning_retention,
         retention
     );
+}
+
+#[test]
+fn fleet_reader_decodes_the_newest_version_verbatim() {
+    #[derive(Debug, serde::Deserialize)]
+    struct Probe {
+        schema_version: u32,
+        payload: String,
+    }
+
+    let surface = SurfaceFormat::of("PROBE_SURFACE_VERSION", 2);
+    let decoded: Probe = decode_versioned_json_record_for_fleet(
+        r#"{"schema_version":2,"payload":"x"}"#,
+        "Probe",
+        surface,
+        FleetFormat::current(),
+    )
+    .expect("the newest version decodes natively");
+    assert_eq!(decoded.schema_version, 2);
+    assert_eq!(decoded.payload, "x");
+}
+
+#[test]
+fn fleet_reader_refuses_a_record_outside_the_read_window() {
+    // The fleet's writers emit version 1 for this surface; the build knows 2.
+    let surface = SurfaceFormat::of("PROBE_SURFACE_VERSION", 2);
+    let fleet = FleetFormat::current().with_writer_pins(&[WriterPin {
+        constant: "PROBE_SURFACE_VERSION",
+        generation: FLEET_FORMAT_VERSION,
+        version: 1,
+    }]);
+    // A version that is neither the build's newest nor `F`'s recorded writer
+    // version is refused at admission, exactly as the exact-version check
+    // refuses it.
+    let err = decode_versioned_json_record_for_fleet::<serde_json::Value>(
+        r#"{"schema_version":3,"payload":"x"}"#,
+        "Probe",
+        surface,
+        fleet,
+    )
+    .expect_err("a version outside the {recorded, newest} window is refused");
+    assert!(matches!(
+        err,
+        StoreError::UnsupportedRecordSchemaVersion {
+            record_kind: "Probe",
+            actual: 3,
+            expected: 2,
+        }
+    ));
+}
+
+#[test]
+fn fleet_reader_fails_closed_on_an_admitted_older_version_without_an_upcaster() {
+    // ADR 0106 §2's `[N-1, N]` window admits the version `F` records for the
+    // surface — but no `RecordUpcaster` is registered for the walk, so the
+    // admitted older payload refuses rather than decoding at a shape it was
+    // never written for (no fake previous format is invented, FIG-3796).
+    let surface = SurfaceFormat::of("PROBE_SURFACE_VERSION", 2);
+    let fleet = FleetFormat::current().with_writer_pins(&[WriterPin {
+        constant: "PROBE_SURFACE_VERSION",
+        generation: FLEET_FORMAT_VERSION,
+        version: 1,
+    }]);
+    let err = decode_versioned_json_record_for_fleet::<serde_json::Value>(
+        r#"{"schema_version":1,"payload":"x"}"#,
+        "Probe",
+        surface,
+        fleet,
+    )
+    .expect_err("an admitted older version with no upcaster refuses, not decodes");
+    assert!(matches!(
+        err,
+        StoreError::UnsupportedRecordSchemaVersion {
+            record_kind: "Probe",
+            actual: 1,
+            expected: 2,
+        }
+    ));
 }

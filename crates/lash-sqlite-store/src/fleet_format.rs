@@ -132,15 +132,16 @@ pub(crate) fn recorded_or_current(conn: &Connection) -> rusqlite::Result<FleetFo
     }
 }
 
-impl crate::Store {
+impl lash_core_execution::FleetFormatStore for crate::Store {
     /// The fleet format this store's durable writers emit — the `F` of ADR
     /// 0106 §1 as the fleet-format row recorded it at open.
     ///
     /// This is the hook durable writers consult for their writer version:
-    /// `self.fleet_format.writer_version(CURRENT_…)` maps a format's
-    /// build-newest version onto the generation the fleet agreed to write,
-    /// which is the identity map until `finalize-upgrade` (FIG-3800) exists.
-    pub fn fleet_format(&self) -> FleetFormat {
+    /// `self.fleet_format().writer_version(surface_format!(…))` maps a
+    /// format's build-newest version onto the generation the fleet agreed to
+    /// write, which is the identity map until `finalize-upgrade` (FIG-3800)
+    /// exists.
+    fn fleet_format(&self) -> FleetFormat {
         self.fleet_format
     }
 }

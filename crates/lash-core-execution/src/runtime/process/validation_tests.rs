@@ -63,6 +63,7 @@ fn effect_summary_request() -> crate::ProcessEventAppendRequest {
         ProcessEffectOutcomeClass::Failure,
         Some(crate::FailureCode::from_foreign_wire("fixture:failed")),
         "lashlang:scope:resource:17:fixture.operation:23:resource_operation:node:1",
+        crate::FleetFormat::current(),
     )
     .append_request()
 }
@@ -77,8 +78,17 @@ fn effect_summary_refuses_predecessor_vocabulary() {
     request.payload["vocabulary_version"] = serde_json::json!(0);
     request.payload["unknown_predecessor_field"] = serde_json::json!(true);
 
-    let error = prepare_process_event_append(&record, request, 1, None, None, 42, None)
-        .expect_err("a predecessor effect-summary payload must be refused");
+    let error = prepare_process_event_append(
+        &record,
+        request,
+        1,
+        None,
+        None,
+        42,
+        None,
+        crate::FleetFormat::current(),
+    )
+    .expect_err("a predecessor effect-summary payload must be refused");
     assert!(
         error
             .to_string()
@@ -96,8 +106,17 @@ fn effect_summary_refuses_unknown_field() {
     let mut request = effect_summary_request();
     request.payload["unknown"] = serde_json::json!(true);
 
-    let error = prepare_process_event_append(&record, request, 1, None, None, 42, None)
-        .expect_err("an unknown effect-summary payload field must be refused");
+    let error = prepare_process_event_append(
+        &record,
+        request,
+        1,
+        None,
+        None,
+        42,
+        None,
+        crate::FleetFormat::current(),
+    )
+    .expect_err("an unknown effect-summary payload field must be refused");
     assert!(
         error.to_string().contains("unknown field `unknown`"),
         "{error}"
@@ -120,8 +139,17 @@ fn effect_summary_refuses_unknown_runtime_kind() {
         crate::ProcessEventAppendRequest::new("process.effect_future", serde_json::json!({}))
             .with_replay_key("future-effect");
 
-    let error = prepare_process_event_append(&record, request, 1, None, None, 42, None)
-        .expect_err("an unknown runtime-owned effect kind must be refused");
+    let error = prepare_process_event_append(
+        &record,
+        request,
+        1,
+        None,
+        None,
+        42,
+        None,
+        crate::FleetFormat::current(),
+    )
+    .expect_err("an unknown runtime-owned effect kind must be refused");
     assert!(matches!(
         error,
         crate::PluginError::ReservedProcessEvent { .. }
@@ -141,8 +169,17 @@ fn effect_summary_refuses_payload_and_append_identity_drift() {
         .expect("effect event has a replay key")
         .key = "different-effect".to_string();
 
-    let error = prepare_process_event_append(&record, request, 1, None, None, 42, None)
-        .expect_err("the payload may not claim a different effect");
+    let error = prepare_process_event_append(
+        &record,
+        request,
+        1,
+        None,
+        None,
+        42,
+        None,
+        crate::FleetFormat::current(),
+    )
+    .expect_err("the payload may not claim a different effect");
     assert!(
         error
             .to_string()
@@ -158,8 +195,17 @@ fn effect_summary_replay_is_a_noop_and_changed_payload_conflicts() {
         crate::process_id_for_test("record"),
     );
     let request = effect_summary_request();
-    let insert = prepare_process_event_append(&record, request.clone(), 1, None, None, 42, None)
-        .expect("the first effect outcome inserts");
+    let insert = prepare_process_event_append(
+        &record,
+        request.clone(),
+        1,
+        None,
+        None,
+        42,
+        None,
+        crate::FleetFormat::current(),
+    )
+    .expect("the first effect outcome inserts");
     let ProcessEventAppendPlan::Insert { event, .. } = insert else {
         panic!("the first effect outcome must insert")
     };
@@ -171,6 +217,7 @@ fn effect_summary_replay_is_a_noop_and_changed_payload_conflicts() {
         Some(event.clone()),
         43,
         None,
+        crate::FleetFormat::current(),
     )
     .expect("an identical effect outcome replays");
     assert!(matches!(replay, ProcessEventAppendPlan::Replay { .. }));
@@ -182,8 +229,17 @@ fn effect_summary_replay_is_a_noop_and_changed_payload_conflicts() {
         .as_object_mut()
         .expect("object")
         .remove("code");
-    let error = prepare_process_event_append(&record, changed, 2, Some(1), Some(event), 43, None)
-        .expect_err("a changed outcome under one replay key must conflict");
+    let error = prepare_process_event_append(
+        &record,
+        changed,
+        2,
+        Some(1),
+        Some(event),
+        43,
+        None,
+        crate::FleetFormat::current(),
+    )
+    .expect_err("a changed outcome under one replay key must conflict");
     assert!(
         error
             .to_string()
@@ -197,10 +253,10 @@ fn the_generic_append_refuses_runtime_owned_effect_summary_kinds() {
     counts.record(ProcessEffectOutcomeClass::Success);
     for request in [
         effect_summary_request(),
-        ProcessEffectOmissions::new(std::collections::BTreeMap::from([(
-            "node".to_string(),
-            counts,
-        )]))
+        ProcessEffectOmissions::new(
+            std::collections::BTreeMap::from([("node".to_string(), counts)]),
+            crate::FleetFormat::current(),
+        )
         .append_request("omissions"),
     ] {
         let event_type = request.event_type.clone();
@@ -228,19 +284,41 @@ fn effect_summary_refuses_occurrences_beyond_the_cap_and_malformed_omissions() {
         ProcessEffectOutcomeClass::Success,
         None,
         "effect:beyond",
+        crate::FleetFormat::current(),
     )
     .append_request();
-    let error = prepare_process_event_append(&record, beyond, 1, None, None, 42, None)
-        .expect_err("the writer never records an occurrence past the cap");
+    let error = prepare_process_event_append(
+        &record,
+        beyond,
+        1,
+        None,
+        None,
+        42,
+        None,
+        crate::FleetFormat::current(),
+    )
+    .expect_err("the writer never records an occurrence past the cap");
     assert!(
         error.to_string().contains("outside the recorded cap"),
         "{error}"
     );
 
-    let empty =
-        ProcessEffectOmissions::new(std::collections::BTreeMap::new()).append_request("omissions");
-    let error = prepare_process_event_append(&record, empty, 1, None, None, 42, None)
-        .expect_err("an omission record must name an omission");
+    let empty = ProcessEffectOmissions::new(
+        std::collections::BTreeMap::new(),
+        crate::FleetFormat::current(),
+    )
+    .append_request("omissions");
+    let error = prepare_process_event_append(
+        &record,
+        empty,
+        1,
+        None,
+        None,
+        42,
+        None,
+        crate::FleetFormat::current(),
+    )
+    .expect_err("an omission record must name an omission");
     assert!(
         error.to_string().contains("no omitted occurrence"),
         "{error}"
@@ -403,6 +481,7 @@ fn persisted_record_without_lifecycle_declarations_accepts_runtime_events() {
             None,
             sequence + 10,
             None,
+            crate::FleetFormat::current(),
         )
         .expect("runtime-owned lifecycle append must validate");
         let ProcessEventAppendPlan::Insert {
@@ -437,8 +516,17 @@ fn host_signal_replay_key_with_fold_validation_suffix_does_not_panic() {
     )
     .with_replay_key("host-supplied:fold-validation");
 
-    let plan = prepare_process_event_append(&record, request, 1, None, None, 42, None)
-        .expect("host-supplied signal replay key should retain the existing append contract");
+    let plan = prepare_process_event_append(
+        &record,
+        request,
+        1,
+        None,
+        None,
+        42,
+        None,
+        crate::FleetFormat::current(),
+    )
+    .expect("host-supplied signal replay key should retain the existing append contract");
     assert!(matches!(plan, ProcessEventAppendPlan::Insert { .. }));
 }
 

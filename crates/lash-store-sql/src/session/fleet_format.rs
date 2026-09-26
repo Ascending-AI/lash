@@ -2,11 +2,11 @@
 //! writer in the fleet emits (ADR 0106 §1 `F`).
 //!
 //! Every statement over this table forks. SQLite spells the singleton flag as
-//! the integer `1` and PostgreSQL as `TRUE`, and SQLite *upserts* the row —
-//! a single-process deployment finalizes on open — where PostgreSQL only ever
-//! provisions it, because the shared store's row belongs to the fleet rather
-//! than to whichever build opens first. The module owns only the table's name
-//! and its column lists.
+//! the integer `1` and PostgreSQL as `TRUE`, and both backends *provision* the
+//! row — insert-if-absent, never an overwrite — because the store's row
+//! belongs to the fleet rather than to whichever build opens first; moving it
+//! is the finalize operation's job alone (FIG-3800). The module owns only the
+//! table's name and its column lists.
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "fleet_format";

@@ -212,9 +212,10 @@ impl PostgresSessionStore {
             }
             return Ok(resumed);
         }
-        let actual = load_session_head_meta_tx(&mut tx, &request.session_id, false)
-            .await?
-            .map_or(0, |head| head.head_revision);
+        let actual =
+            load_session_head_meta_tx(&mut tx, &request.session_id, false, self.fleet_format)
+                .await?
+                .map_or(0, |head| head.head_revision);
         if actual != request.expected_head_revision {
             return Err(StoreError::HeadRevisionConflict {
                 expected: request.expected_head_revision,

@@ -181,3 +181,16 @@ macro_rules! emit_component_impls {
 
 persistence_operations!(emit_decorator_trait);
 persistence_operations!(emit_component_impls);
+
+/// `FleetFormatStore` is a synchronous segment the `persistence_operations!`
+/// list cannot express — its entries are emitted as `async fn`. The same
+/// wholesale-delegation norm holds: a decorator answers its inner handle's
+/// fleet format rather than maintaining one of its own.
+impl<T> FleetFormatStore for T
+where
+    T: RuntimePersistenceDecorator + ?Sized,
+{
+    fn fleet_format(&self) -> FleetFormat {
+        self.inner().fleet_format()
+    }
+}

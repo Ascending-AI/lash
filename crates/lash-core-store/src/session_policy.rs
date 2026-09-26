@@ -155,9 +155,23 @@ pub struct ApplyConfigPatch {
     pub protocol_turn_options: Option<crate::ProtocolTurnOptions>,
 }
 impl Default for ApplyConfigPatch {
+    /// A patch outside any store — a caller with no durable write ahead of it
+    /// — carries this build's own fleet format, the only generation a context
+    /// that never consulted a store could write. Durable writers stamp
+    /// [`Self::for_fleet`] or pass their store's `F` to [`Self::between`].
     fn default() -> Self {
+        Self::for_fleet(crate::store::FleetFormat::current())
+    }
+}
+impl ApplyConfigPatch {
+    /// A patch stamped with the fleet's writer version for the head-meta
+    /// surface (FIG-3796): `fleet_format` is the `F` the bound session's store
+    /// recorded, never the bare build constant.
+    pub fn for_fleet(fleet_format: crate::store::FleetFormat) -> Self {
         Self {
-            schema_version: crate::store::SESSION_HEAD_META_SCHEMA_VERSION,
+            schema_version: fleet_format.writer_version(crate::surface_format!(
+                crate::store::SESSION_HEAD_META_SCHEMA_VERSION
+            )),
             base_config_revision: 0,
             provider_id: None,
             model: None,
@@ -168,8 +182,7 @@ impl Default for ApplyConfigPatch {
             protocol_turn_options: None,
         }
     }
-}
-impl ApplyConfigPatch {
+
     /// The patch that carries `next` over `previous`, written against
     /// `base_config_revision` — the `config_revision` the submitter read when
     /// it computed `next`.
@@ -177,6 +190,7 @@ impl ApplyConfigPatch {
         previous: &crate::SessionPolicy,
         next: &crate::SessionPolicy,
         base_config_revision: u64,
+        fleet_format: crate::store::FleetFormat,
     ) -> Self {
         Self {
             base_config_revision,
@@ -187,18 +201,37 @@ impl ApplyConfigPatch {
             generation: (previous.generation != next.generation)
                 .then(|| crate::GenerationOverlay::Replace(next.generation.clone())),
             turn_budget: (previous.turn_budget != next.turn_budget).then_some(next.turn_budget),
-            ..Self::default()
+            ..Self::for_fleet(fleet_format)
         }
     }
 
+    /// A patch outside any store admits this build's newest schema version
+    /// alone; a patch read on a bound store validates through
+    /// [`Self::validate_for_fleet`].
     pub fn validate(&self) -> Result<(), crate::RuntimeError> {
-        if self.schema_version != crate::store::SESSION_HEAD_META_SCHEMA_VERSION {
+        self.validate_for_fleet(crate::store::FleetFormat::current())
+    }
+
+    /// The fleet leg of [`Self::validate`]: the patch's `schema_version`
+    /// admits this build's newest and the version `fleet` records for the
+    /// head-meta surface — the `[N-1, N]` window a store reads through while
+    /// a finalize is pending (FIG-3796, ADR 0106 §2). The patch's fields are
+    /// overlays consumed as a set, so the window needs no payload lift: an
+    /// admitted patch applies on the shape this build knows.
+    pub fn validate_for_fleet(
+        &self,
+        fleet_format: crate::store::FleetFormat,
+    ) -> Result<(), crate::RuntimeError> {
+        let window = fleet_format.read_window(crate::surface_format!(
+            crate::store::SESSION_HEAD_META_SCHEMA_VERSION
+        ));
+        if !window.admits(self.schema_version) {
             return Err(crate::RuntimeError::new(
                 crate::RuntimeErrorCode::SessionCommandClaim,
                 format!(
                     "unsupported config patch schema version {}; expected {}",
                     self.schema_version,
-                    crate::store::SESSION_HEAD_META_SCHEMA_VERSION
+                    window.newest()
                 ),
             ));
         }

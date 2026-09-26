@@ -25,6 +25,19 @@ use lash_core::{FleetFormat, FleetFormatState, StoreError, StoreSchemaStatus};
 pub trait FleetFormatDeployment: Send + Sync {
     async fn open(&self) -> Result<FleetFormat, StoreError>;
 
+    /// Open the deployment admitting `writable` as the opening build's
+    /// fleet-format writable range — the seam the rollout arms use to stand
+    /// in for a build whose `[min_F, max_F]` differs from this binary's.
+    async fn open_admitting(
+        &self,
+        writable: std::ops::RangeInclusive<u32>,
+    ) -> Result<FleetFormat, StoreError>;
+
+    /// Record `version` in the fleet-format row as an operator or a newer
+    /// build's `finalize-upgrade` would (FIG-3800). The law uses it to stand
+    /// up the rollout states the upgrade arc must survive.
+    async fn record_fleet_format(&self, version: u32) -> Result<(), StoreError>;
+
     async fn preflight(&self) -> Result<StoreSchemaStatus, StoreError>;
 }
 
@@ -84,5 +97,48 @@ pub async fn fleet_format_conformance(deployment: &dyn FleetFormatDeployment) {
     assert_eq!(
         after_reopen, recorded,
         "reopening under the same build leaves the fleet-format row untouched"
+    );
+
+    // A build whose writable range does not contain the recorded generation
+    // refuses the open with the typed routing error (ADR 0106 §7): a worker
+    // that opened anyway would emit a format the fleet retired.
+    let next_generation = lash_core::FLEET_FORMAT_VERSION + 1;
+    deployment
+        .record_fleet_format(next_generation)
+        .await
+        .expect("record a next-generation fleet format");
+    let refused = deployment
+        .open_admitting(lash_core::FLEET_FORMAT_VERSION..=lash_core::FLEET_FORMAT_VERSION)
+        .await;
+    let error = refused.expect_err("a build whose range excludes the row refuses the open");
+    assert!(
+        matches!(
+            error,
+            StoreError::FleetFormatOutsideWritableRange { recorded, current }
+                if recorded == next_generation && current == lash_core::FLEET_FORMAT_VERSION
+        ),
+        "an out-of-range fleet format must surface the typed refusal: {error}"
+    );
+
+    // The build that can still write it preserves the row: the reopen reads
+    // the recorded generation rather than winding `F` back to its own.
+    let admitted = deployment
+        .open_admitting(lash_core::FLEET_FORMAT_VERSION..=next_generation)
+        .await
+        .expect("a build whose range admits the recorded generation opens");
+    assert_eq!(
+        admitted,
+        FleetFormat::from_version(next_generation),
+        "the opened store reports the recorded fleet format"
+    );
+    let still_recorded = deployment
+        .preflight()
+        .await
+        .expect("preflight reads the preserved row")
+        .fleet_format;
+    assert_eq!(
+        still_recorded,
+        FleetFormatState::Recorded(FleetFormat::from_version(next_generation)),
+        "reopening under a different build leaves the fleet-format row untouched"
     );
 }

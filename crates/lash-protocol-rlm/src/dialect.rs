@@ -137,18 +137,23 @@ impl DialectSession {
 
     pub(crate) fn snapshot_execution_state(
         &mut self,
+        fleet_format: lash_core::FleetFormat,
     ) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
-        self.state.snapshot_execution_state()
+        self.state.snapshot_execution_state(fleet_format)
     }
 
-    pub(crate) fn probe_execution_state_capture(&mut self) -> Result<(), SessionError> {
-        self.state.probe_execution_state_capture()
+    pub(crate) fn probe_execution_state_capture(
+        &mut self,
+        fleet_format: lash_core::FleetFormat,
+    ) -> Result<(), SessionError> {
+        self.state.probe_execution_state_capture(fleet_format)
     }
 
     pub(crate) fn hydrated_execution_state(
         &self,
+        fleet_format: lash_core::FleetFormat,
     ) -> Result<lash_core::plugin::HydratedExecutionState, SessionError> {
-        self.state.hydrated_execution_state()
+        self.state.hydrated_execution_state(fleet_format)
     }
 
     pub(crate) fn acknowledge_execution_state_capture(&mut self) -> Result<(), SessionError> {
@@ -180,9 +185,10 @@ impl DialectSession {
     pub(crate) fn restore_execution_state(
         &mut self,
         state: &lash_core::plugin::HydratedExecutionState,
+        fleet_format: lash_core::FleetFormat,
     ) -> Result<(), SessionError> {
         self.state
-            .restore_execution_state(state)
+            .restore_execution_state(state, fleet_format)
             .map_err(|error| SessionError::Protocol(error.to_string()))
     }
 

@@ -35,7 +35,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         }
         authority.validate(&record, &await_output)?;
         let occurred_at_ms = self.clock.timestamp_ms();
-        let mut batch = ProcessEventBatch::default();
+        let mut batch = ProcessEventBatch::for_fleet(self.fleet_format);
         for request in prelude {
             batch
                 .stage(
@@ -104,6 +104,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             now,
             self.wake_delivery_config,
             ProcessEventWriteAuthorization::Lease(lease),
+            self.fleet_format,
         )
         .await?;
         if arm == ProcessEventAppendArm::Replayed {
@@ -142,21 +143,27 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         &self,
         parent: &lash_core_execution::ParentScope,
     ) -> Result<(), PluginError> {
-        parent_end::record(&self.pool, parent, self.clock.timestamp_ms()).await
+        parent_end::record(
+            &self.pool,
+            parent,
+            self.clock.timestamp_ms(),
+            self.fleet_format,
+        )
+        .await
     }
 
     async fn list_pending_parent_end_plans(
         &self,
         limit: std::num::NonZeroUsize,
     ) -> Result<Vec<lash_core_execution::ParentEndPlan>, PluginError> {
-        parent_end::list_pending(&self.pool, limit).await
+        parent_end::list_pending(&self.pool, limit, self.fleet_format).await
     }
 
     async fn get_parent_end_plan(
         &self,
         parent: &lash_core_execution::ParentScope,
     ) -> Result<Option<lash_core_execution::ParentEndPlan>, PluginError> {
-        parent_end::get(&self.pool, parent).await
+        parent_end::get(&self.pool, parent, self.fleet_format).await
     }
 
     async fn list_parent_end_children(
@@ -199,6 +206,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             authority,
             Some(&started),
             now,
+            self.fleet_format,
         )
         .await?;
         match lash_core_execution::runtime::prepare_process_start(&record, &started, authority)? {
@@ -238,6 +246,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             request,
             now,
             self.wake_delivery_config,
+            self.fleet_format,
         )
         .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
@@ -290,6 +299,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
                     *append,
                     now,
                     self.wake_delivery_config,
+                    self.fleet_format,
                 )
                 .await?;
             }
@@ -320,6 +330,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
                     *append,
                     self.clock.timestamp_ms(),
                     self.wake_delivery_config,
+                    self.fleet_format,
                 )
                 .await?;
             }
@@ -350,6 +361,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             append,
             self.clock.timestamp_ms(),
             self.wake_delivery_config,
+            self.fleet_format,
         )
         .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
@@ -367,13 +379,19 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         let mut record = require_process_tx(&mut tx, process_id).await?;
         let lease_now = process_lease_now_epoch_ms_tx(&mut tx).await?;
         validate_process_execution_authority_tx(
-            &mut tx, process_id, &record, authority, None, lease_now,
+            &mut tx,
+            process_id,
+            &record,
+            authority,
+            None,
+            lease_now,
+            self.fleet_format,
         )
         .await?;
         let occurred_at_ms = self.clock.timestamp_ms();
         // The run's pending prelude commits ahead of the transition, in its
         // transaction (FIG-3571).
-        let mut batch = ProcessEventBatch::default();
+        let mut batch = ProcessEventBatch::for_fleet(self.fleet_format);
         for request in prelude {
             batch
                 .stage(
@@ -415,11 +433,19 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        validate_process_execution_authority_tx(&mut tx, process_id, &record, authority, None, now)
-            .await?;
+        validate_process_execution_authority_tx(
+            &mut tx,
+            process_id,
+            &record,
+            authority,
+            None,
+            now,
+            self.fleet_format,
+        )
+        .await?;
         // The run's pending prelude commits ahead of the transition, in its
         // transaction (FIG-3571).
-        let mut batch = ProcessEventBatch::default();
+        let mut batch = ProcessEventBatch::for_fleet(self.fleet_format);
         for request in prelude {
             batch
                 .stage(
@@ -461,8 +487,16 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        validate_process_execution_authority_tx(&mut tx, process_id, &record, authority, None, now)
-            .await?;
+        validate_process_execution_authority_tx(
+            &mut tx,
+            process_id,
+            &record,
+            authority,
+            None,
+            now,
+            self.fleet_format,
+        )
+        .await?;
         let request = match lash_core_execution::runtime::prepare_process_transition(
             &record,
             ProcessTransition::Park(park),
@@ -479,6 +513,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             request,
             now,
             self.wake_delivery_config,
+            self.fleet_format,
         )
         .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
@@ -493,8 +528,16 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
         let now = process_lease_now_epoch_ms_tx(&mut tx).await?;
-        validate_process_execution_authority_tx(&mut tx, process_id, &record, authority, None, now)
-            .await?;
+        validate_process_execution_authority_tx(
+            &mut tx,
+            process_id,
+            &record,
+            authority,
+            None,
+            now,
+            self.fleet_format,
+        )
+        .await?;
         let request = match lash_core_execution::runtime::prepare_process_transition(
             &record,
             ProcessTransition::BeginParkedRerun,
@@ -511,6 +554,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             request,
             now,
             self.wake_delivery_config,
+            self.fleet_format,
         )
         .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;

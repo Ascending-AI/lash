@@ -112,9 +112,14 @@ pub(crate) fn decode_artifact_blob(bytes: &[u8]) -> Result<Vec<u8>, StoreError> 
 
 /// Synchronous because it runs inside a `conn.call`/`conn.write` closure on the connection
 /// thread.
+///
+/// `fleet` is the store's recorded `F`: the head-meta JSON admits the
+/// `[N-1, N]` reader window `F` names while a finalize is pending
+/// (FIG-3796).
 pub(crate) fn try_load_session_head_meta_from_conn(
     conn: &Connection,
     session_id: &SessionId,
+    fleet: lash_core_execution::FleetFormat,
 ) -> Result<Option<SessionHeadMeta>, StoreError> {
     let row = conn
         .query_row(
@@ -141,12 +146,16 @@ pub(crate) fn try_load_session_head_meta_from_conn(
             session_id,
             pending_follow_on.as_deref(),
         )?;
-    let payload: SessionHeadPayload = lash_core_execution::store::decode_versioned_json_record(
-        &head_json,
-        "SessionHeadMeta",
-        lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION,
-    )
-    .map_err(|error| map_record_decode_error("SessionHeadMeta", error))?;
+    let payload: SessionHeadPayload =
+        lash_core_execution::store::decode_versioned_json_record_for_fleet(
+            &head_json,
+            "SessionHeadMeta",
+            lash_core_execution::surface_format!(
+                lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION
+            ),
+            fleet,
+        )
+        .map_err(|error| map_record_decode_error("SessionHeadMeta", error))?;
     Ok(Some(
         SessionHeadMeta::assemble(
             session_id,
@@ -164,15 +173,21 @@ pub(crate) fn try_load_session_head_meta_from_conn(
     ))
 }
 
-pub(crate) fn decode_checkpoint(bytes: &[u8]) -> Result<SessionCheckpoint, StoreError> {
-    let value: serde_json::Value = rmp_serde::from_slice(bytes)
-        .map_err(|err| stored_data_corrupt("SessionCheckpoint", err))?;
-    lash_core_execution::store::ensure_supported_record_schema_version(
+/// Decode a checkpoint manifest under the store's recorded `F`: the manifest
+/// admits the `[N-1, N]` reader window `fleet` names and an admitted older
+/// payload climbs the surface's upcaster hooks before decode (FIG-3796).
+pub(crate) fn decode_checkpoint_for_fleet(
+    bytes: &[u8],
+    fleet: lash_core_execution::FleetFormat,
+) -> Result<SessionCheckpoint, StoreError> {
+    lash_core_execution::store::decode_versioned_msgpack_record_for_fleet(
+        bytes,
         "SessionCheckpoint",
-        &value,
-        lash_core_execution::store::SESSION_CHECKPOINT_SCHEMA_VERSION,
-    )?;
-    rmp_serde::from_slice(bytes).map_err(|err| stored_data_corrupt("SessionCheckpoint", err))
+        lash_core_execution::surface_format!(
+            lash_core_execution::store::SESSION_CHECKPOINT_SCHEMA_VERSION
+        ),
+        fleet,
+    )
 }
 
 pub(crate) fn encode_msgpack<T: serde::Serialize>(
