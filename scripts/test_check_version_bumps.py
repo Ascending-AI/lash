@@ -571,32 +571,67 @@ class VersionBumpFixtureTest(unittest.TestCase):
 
                 self.assertEqual(result.returncode, expected_exit, result.stderr)
 
-    def test_pre_release_switch_pauses_the_gate(self) -> None:
-        fixture = self.fixture()
+    def test_pre_1_0_freeze_reports_findings_without_enforcing(self) -> None:
+        fixture = FixtureRepository('[policy]\nfreeze = "pre-1.0"\n\n' + CONFIG)
+        self.addCleanup(fixture.close)
         fixture.write(LIB_V1, WIRE_BASE)
         base = fixture.commit("base")
         fixture.write(LIB_V1, WIRE_CHANGED)
-        head = fixture.commit("bump violation under the switch")
-        fixture.write_file("tools/release-mode.toml", "pre_release = true\n")
+        head = fixture.commit("bump violation under the freeze")
 
         result = self.check_cli(fixture, base, head)
 
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertIn("paused pre-1.0", result.stdout)
+        self.assertIn(
+            "version freeze active (pre-1.0): findings reported, not enforced",
+            result.stdout,
+        )
+        # The findings still print, verbatim -- report, not skip.
+        self.assertIn("version-bump check findings", result.stderr)
+        self.assertIn("WIRE_VERSION is 1; merge-base value is 1", result.stderr)
 
-    def test_pre_release_switch_off_enforces_as_before(self) -> None:
-        for switch in ("pre_release = false\n", "# no switch key\n"):
+    def test_pre_1_0_freeze_reports_surface_errors_without_enforcing(self) -> None:
+        # A frozen-schema change can move a guard's symbols out from under it;
+        # the evaluation error reports under the freeze too.
+        fixture = FixtureRepository('[policy]\nfreeze = "pre-1.0"\n\n' + CONFIG)
+        self.addCleanup(fixture.close)
+        fixture.write(LIB_V1, WIRE_BASE)
+        base = fixture.commit("base")
+        fixture.write(
+            LIB_V1,
+            WIRE_BASE.replace(
+                "#[derive(Serialize, Deserialize)]", "#[derive(Clone, Debug)]"
+            ),
+        )
+        head = fixture.commit("guard loses its must_cover under the freeze")
+
+        result = self.check_cli(fixture, base, head)
+
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(
+            "version freeze active (pre-1.0): findings reported, not enforced",
+            result.stdout,
+        )
+        self.assertIn("version-bump check errors", result.stderr)
+
+    def test_freeze_off_enforces_as_before(self) -> None:
+        for switch in (
+            '[policy]\nfreeze = "off"\n\n',
+            "[policy]\n\n",
+            "",
+        ):
             with self.subTest(switch=switch):
-                fixture = self.fixture()
+                fixture = FixtureRepository(switch + CONFIG)
+                self.addCleanup(fixture.close)
                 fixture.write(LIB_V1, WIRE_BASE)
                 base = fixture.commit("base")
                 fixture.write(LIB_V1, WIRE_CHANGED)
                 head = fixture.commit("bump violation under the switch")
-                fixture.write_file("tools/release-mode.toml", switch)
 
                 result = self.check_cli(fixture, base, head)
 
                 self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn("version-bump check failed", result.stderr)
 
     def test_wire_variant_without_bump_fails(self) -> None:
         fixture = self.fixture()

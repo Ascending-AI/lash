@@ -88,10 +88,11 @@ Rust type, while the live verifier attaches the same derived listing to the cata
 shape. A diff gate additionally requires the PostgreSQL component version to move
 when an already-registered payload listing changes, so regenerating the artifact at
 the old version cannot bless a cross-version decode hazard.
-That per-PR bump requirement is paused until the lash 1.0 cut under
-`tools/release-mode.toml` (`pre_release = true`, FIG-3660): while it holds the
-gate reports "paused pre-1.0" and exits 0, and the post-1.0 migration policy
-(ADR 0106) restores it.
+That per-PR bump requirement is frozen until the lash 1.0 cut under the
+`[policy]` table's `freeze = "pre-1.0"` in `scripts/versioned-surfaces.toml`
+(FIG-3846): while it holds the gate prints its findings, reports the freeze,
+and exits 0, and removing the key restores strict enforcement under the
+post-1.0 migration policy (ADR 0106).
 
 Objects are matched by **what they enforce**, never by how they were written.
 Columns are matched by name and never by ordinal position. Guards and keys are

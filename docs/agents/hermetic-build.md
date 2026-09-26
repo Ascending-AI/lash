@@ -130,9 +130,10 @@ gates CI runs as `Test repository scripts`
 `scripts/test-agent-workbench-dev-reset.sh`, which the local run skips and
 names in its table row because it alone took 170 s — CI still runs it,
 `scripts/ci/repository-gates.sh --all` restores it — and the two
-version-bump checks (paused pre-1.0 under `tools/release-mode.toml`,
-FIG-3660: while `pre_release = true` holds they report "paused pre-1.0" and
-exit 0), all run concurrently and reported as one PASS/FAIL
+version-bump checks (frozen pre-1.0 under the `[policy]` table's
+`freeze = "pre-1.0"` in `scripts/versioned-surfaces.toml`, FIG-3846: while it
+holds they print their findings, report the freeze, and exit 0), all run
+concurrently and reported as one PASS/FAIL
 table — run it on a committed head because `check_version_bumps.py` reads
 committed state. `just bump-check` narrows that to the store-bump gates: both
 version-bump checks, `scripts/check-store-sql-ownership.py`, the lash-sim

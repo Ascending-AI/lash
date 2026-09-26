@@ -32,9 +32,13 @@ arguments, and every ``serde`` attribute.
 Only the Python standard library is used so the check can run before the Rust
 toolchain is installed.  Pull-request CI passes the PR merge-base explicitly.
 
-The gate is paused until the lash 1.0 cut: while ``tools/release-mode.toml``
-carries ``pre_release = true`` it reports "paused pre-1.0" and exits 0
-(FIG-3660).
+The gate is frozen until the lash 1.0 cut: while the surface inventory's
+top-level ``[policy]`` table carries ``freeze = "pre-1.0"`` it prints its
+findings -- bump failures and per-surface evaluation errors alike -- reports
+the freeze, and exits 0 (FIG-3846); only a check that cannot run at all
+(malformed inventory, unreadable revisions) still fails. Removing the key
+restores strict enforcement unchanged, under the post-1.0 migration policy
+(ADR 0106).
 """
 
 from __future__ import annotations
@@ -51,7 +55,7 @@ import tomllib
 from typing import Iterable
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from release_mode import pre_release  # noqa: E402
+from version_freeze import FREEZE, FREEZE_NOTICE, declared_freeze  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -2378,12 +2382,6 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv or sys.argv[1:])
-    if pre_release(args.repo):
-        print(
-            "version-bump check paused pre-1.0 under tools/release-mode.toml "
-            "(pre_release = true; FIG-3660); set it false at the lash 1.0 cut"
-        )
-        return 0
     try:
         surfaces = load_config(args.config)
         if args.surface:
@@ -2397,6 +2395,7 @@ def main(argv: list[str] | None = None) -> int:
             surfaces,
             base_inventory_keys(args.repo, base, args.config),
         )
+        freeze = declared_freeze(args.config) == FREEZE
     except CheckError as error:
         print(f"version-bump check error: {error}", file=sys.stderr)
         return 2
@@ -2410,8 +2409,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"- {error.surface.key}: {error.detail}", file=sys.stderr)
 
     if result.failures or result.unregistered:
+        verdict = "findings" if freeze else "failed"
         print(
-            f"version-bump check failed against merge-base {base[:12]}:",
+            f"version-bump check {verdict} against merge-base {base[:12]}:",
             file=sys.stderr,
         )
         for entry in result.unregistered:
@@ -2440,8 +2440,17 @@ def main(argv: list[str] | None = None) -> int:
                 file=sys.stderr,
             )
     if result.errors:
+        # A frozen-schema change can move a guard's symbols out from under it;
+        # under the freeze the errors report like the findings do.
+        if freeze:
+            print(FREEZE_NOTICE)
+            return 0
         return 2
-    if result.failures or result.unregistered:
+    if freeze:
+        print(FREEZE_NOTICE)
+        if result.failures or result.unregistered:
+            return 0
+    elif result.failures or result.unregistered:
         return 1
 
     registered = ""
