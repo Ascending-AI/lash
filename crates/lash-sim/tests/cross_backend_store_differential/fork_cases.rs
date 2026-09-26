@@ -11,7 +11,7 @@ pub(super) async fn cross_owner_attachment_adoption(
     sqlite_root: &Path,
     postgres: &PostgresStorage,
 ) {
-    let memory = lash_sqlite_store::SqliteBackend::memory()
+    let memory = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("SQLite memory backend");
     let factories: [Arc<dyn SessionStoreFactory>; 3] = [
@@ -322,7 +322,7 @@ pub(super) async fn selected_observer_intents(
     let sqlite = lash_sqlite_store::SqliteProcessRegistry::open(&path, &root)
         .await
         .expect("SQLite observer registry");
-    let memory = lash_sqlite_store::SqliteBackend::memory()
+    let memory = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("SQLite memory observer backend");
     let backends: Vec<(

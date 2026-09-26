@@ -8,7 +8,7 @@ use std::sync::LazyLock;
 
 use lash_store_sql::session_ingress::SessionIngressStatements;
 
-use crate::scope_fence::Schema;
+use crate::schema_layout::Schema;
 
 lash_store_sql::statements! {
     /// `session_ingress` statements only SQLite issues.

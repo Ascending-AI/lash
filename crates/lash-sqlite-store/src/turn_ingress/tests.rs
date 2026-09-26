@@ -11,7 +11,7 @@
 use rusqlite::Connection;
 
 use super::{closure_participant_sql, tool_intent_sql, turn_ingress_sql};
-use crate::scope_fence::Schema;
+use crate::schema_layout::Schema;
 
 /// A catalog with this crate's real session schema, in memory.
 fn catalog() -> Connection {

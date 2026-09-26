@@ -15,9 +15,7 @@
 //! own redrive, so `AlreadyCommitted` reports it `None`.
 
 use crate::durable_wait::RestateTurnCancelRaceOutcome;
-use lash_core::facade_support::effect_replay_driver::{
-    EffectGroupChildCommitOutcome, GroupChildFinalCommit,
-};
+use lash_core::facade_support::{EffectGroupChildCommitOutcome, GroupChildFinalCommit};
 use lash_core::{ExecutionScope, RuntimeEffectControllerError};
 
 use crate::effect_group::{

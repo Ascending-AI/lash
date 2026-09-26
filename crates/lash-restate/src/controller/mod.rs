@@ -960,9 +960,9 @@ where
     /// workflow's own redrive, so `AlreadyCommitted` reports it `None`.
     async fn commit_group_child_final(
         &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+        commit: lash_core::facade_support::GroupChildFinalCommit,
     ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core::facade_support::EffectGroupChildCommitOutcome,
         RuntimeEffectControllerError,
     > {
         group_commit::commit_group_child_final(&self.context, commit).await

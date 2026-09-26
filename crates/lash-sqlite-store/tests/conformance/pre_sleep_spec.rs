@@ -72,7 +72,7 @@ fn rewrite_sleep_command_to_resolved_duration(canonical_json: &str) -> String {
 
 #[tokio::test]
 async fn sqlite_refuses_pre_sleep_spec_effect_journal_at_open() {
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let controller = backend
         .open_effect_controller(durable_turn_scope("cutover-session", "cutover-turn"))
         .await
@@ -124,7 +124,7 @@ async fn sqlite_refuses_pre_sleep_spec_effect_journal_at_open() {
 
 #[tokio::test]
 async fn sqlite_fresh_effect_journal_round_trips_a_sleep_across_reopen() {
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let controller = backend
         .open_effect_controller(durable_turn_scope("cutover-session", "cutover-turn"))
         .await

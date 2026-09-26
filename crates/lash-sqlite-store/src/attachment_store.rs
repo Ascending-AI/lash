@@ -29,7 +29,7 @@ use rusqlite::{OptionalExtension, params};
 use crate::Store;
 use crate::conn::SqliteConnection;
 use crate::location::DatabaseTarget;
-use crate::scope_fence::Schema;
+use crate::schema_layout::Schema;
 
 lash_store_sql::statements! {
     /// `attachment_blobs` statements. SQLite alone issues them: the table

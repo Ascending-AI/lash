@@ -397,9 +397,7 @@ impl EffectHost for RestateEffectHost {
             {
                 let identity = scope.journal_identity()?;
                 return Err(
-                    lash_core::facade_support::effect_replay_driver::scope_not_quiescent(
-                        identity.key(),
-                    ),
+                    lash_core::facade_support::scope_status::scope_not_quiescent(identity.key()),
                 );
             }
             return Ok(0);
@@ -1304,12 +1302,12 @@ impl RuntimeEffectController for RestateEffectHostController {
     /// dispatch workflow's redrive is the resumable publication obligation.
     async fn commit_group_child_final(
         &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+        commit: lash_core::facade_support::GroupChildFinalCommit,
     ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core::facade_support::EffectGroupChildCommitOutcome,
         RuntimeEffectControllerError,
     > {
-        use lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome as Outcome;
+        use lash_core::facade_support::EffectGroupChildCommitOutcome as Outcome;
         let scope = ExecutionScope::from_journal_key(&commit.scope_id).ok_or_else(|| {
             group_shape_error(format!(
                 "group-child commit scope id `{}` does not decode to an execution scope",

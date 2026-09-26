@@ -8,6 +8,7 @@ use super::*;
 
 mod tx;
 
+use lash_core_execution::facade_support::scope_status;
 use tx::*;
 
 #[async_trait::async_trait]
@@ -1050,7 +1051,7 @@ impl EffectReplayRowStore for SqliteEffectReplayRowStore {
             })
             .await
             .map_err(effect_sqlite_error)?
-            .ok_or_else(|| effect_replay_driver::scope_retired(&scope_id))
+            .ok_or_else(|| scope_status::scope_retired(&scope_id))
     }
 
     async fn read_group_membership(
@@ -1615,7 +1616,7 @@ impl SqliteEffectReplayRowStore {
                 .map_err(retirement_error)?
         };
         let Some(purged) = fenced else {
-            return Err(effect_replay_driver::scope_not_quiescent(
+            return Err(scope_status::scope_not_quiescent(
                 retired_scope_key.as_deref().unwrap_or_default(),
             ));
         };

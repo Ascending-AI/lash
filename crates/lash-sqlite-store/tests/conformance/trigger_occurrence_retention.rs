@@ -46,7 +46,7 @@ lash_conformance::trigger_retention_fault_tests!({
 });
 
 lash_conformance::process_trigger_retention_tests!({
-    let retained = Retained::default();
+    let retained: Retained<TestBackend> = Retained::default();
     ((), move || {
         let retained = retained.clone();
         async move {

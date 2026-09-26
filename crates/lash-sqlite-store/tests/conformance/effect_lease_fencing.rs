@@ -1,5 +1,5 @@
 lash_conformance::effect_controller_lease_fencing_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let make_backend = backend.clone();
     let steal_backend = backend.clone();
     let expire_backend = backend.clone();

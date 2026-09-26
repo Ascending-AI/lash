@@ -16,10 +16,10 @@ use lash_core_execution::{EffectHost, ProcessRegistry, SessionStoreFactory};
 use lash_sansio::SessionId;
 
 use super::{Retained, SUBSTRATE};
-use crate::backend_fixture::TestBackend;
+use crate::backend_fixture::TestEngineBackend;
 
-async fn sqlite_drain_end_world(retained: Retained) -> DrainEndWorld {
-    let backend = TestBackend::open(SUBSTRATE).await;
+async fn sqlite_drain_end_world(retained: Retained<TestEngineBackend>) -> DrainEndWorld {
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let store = backend
         .session_store_factory()
         .create_store(&lash_core_execution::SessionStoreCreateRequest {
@@ -54,7 +54,7 @@ async fn sqlite_drain_end_world(retained: Retained) -> DrainEndWorld {
 }
 
 lash_conformance::drain_end_tests!({
-    let retained = Retained::default();
+    let retained: Retained<TestEngineBackend> = Retained::default();
     let worlds = retained.clone();
     (
         retained,

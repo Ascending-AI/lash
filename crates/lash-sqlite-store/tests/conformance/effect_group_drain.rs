@@ -19,7 +19,7 @@ use lash_core_execution::EffectHost;
 use lash_sqlite_store::{SqliteBackendOptions, SqliteEffectReplayOptions};
 
 use super::SUBSTRATE;
-use crate::backend_fixture::{TestBackend, system_clock};
+use crate::backend_fixture::{TestEngineBackend, system_clock};
 
 /// A world over one backend's journal.
 ///
@@ -27,7 +27,7 @@ use crate::backend_fixture::{TestBackend, system_clock};
 /// outer one, because a crash law calls this factory from the runtime it is
 /// about to destroy: the SQLite connection must belong to that runtime so it
 /// dies with it.
-async fn world(backend: TestBackend, spec: DrainWorldSpec) -> DrainWorld {
+async fn world(backend: TestEngineBackend, spec: DrainWorldSpec) -> DrainWorld {
     let ttl = Duration::from_millis(spec.lease_ttl_ms);
     let effect_replay = SqliteEffectReplayOptions {
         lease_timings: lash_core_execution::facade_support::LeaseTimings::new(ttl, ttl / 3)
@@ -63,7 +63,7 @@ async fn world(backend: TestBackend, spec: DrainWorldSpec) -> DrainWorld {
 
 // The durable SQLite tier answers the loser-drain contract (FIG-1536).
 lash_conformance::store_effect_group_drain_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let worlds = backend.clone();
     let make: DrainWorldFactory =
         Arc::new(move |spec: DrainWorldSpec| Box::pin(world(worlds.clone(), spec)));
@@ -73,7 +73,7 @@ lash_conformance::store_effect_group_drain_tests!({
 // The durable SQLite tier answers the §7 durable-closing contract (FIG-3410) —
 // the same world factory, the closing seam beside the drain on the same host.
 lash_conformance::store_effect_group_closing_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let worlds = backend.clone();
     let make: DrainWorldFactory =
         Arc::new(move |spec: DrainWorldSpec| Box::pin(world(worlds.clone(), spec)));

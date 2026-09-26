@@ -74,7 +74,7 @@ fn rewrite_completed_continue_as_outcome_to_frame_id(outcome_json: &str) -> Stri
 
 #[tokio::test]
 async fn sqlite_refuses_completed_pre_frame_key_continue_as_at_open() {
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let (envelope, outcome) = completed_continue_as_effect_fixture();
     let controller = backend
         .open_effect_controller(durable_turn_scope("cutover-session", "cutover-turn"))

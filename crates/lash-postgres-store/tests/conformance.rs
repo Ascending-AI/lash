@@ -119,18 +119,20 @@ fn sync_await<T: Send + 'static>(
 ///
 /// PostgreSQL journals no effects (ADR 0104): a deployment's promises are its
 /// Restate engine's. A storage law that mints, settles and reads turn-control
-/// promises only to drive what the store records needs some authority, and a
-/// SQLite effect journal in a scratch file is the one that runs in process.
-/// What the law certifies is the PostgreSQL rows; the authority is scaffolding.
-async fn promise_authority() -> (tempfile::TempDir, Arc<dyn lash_core_execution::EffectHost>) {
-    let dir = tempfile::tempdir().expect("promise authority directory");
-    let host = lash_sqlite_store::SqliteEffectHost::open(&dir.path().join("promises.db"))
+/// promises only to drive what the store records needs a real authority, so
+/// it borrows the same scratch SQLite engine [`pg_law_backend`] opens. What
+/// the law certifies is the PostgreSQL rows; the authority is scaffolding the
+/// caller's guard keeps alive until the law finishes.
+async fn promise_authority() -> (
+    (tempfile::TempDir, lash_sqlite_store::SqliteBackend),
+    Arc<dyn lash_core_execution::EffectHost>,
+) {
+    let engine_dir = tempfile::tempdir().expect("promise authority directory");
+    let engine = lash_sqlite_store::SqliteBackend::open(engine_dir.path())
         .await
-        .expect("open the promise authority");
-    (
-        dir,
-        Arc::new(host) as Arc<dyn lash_core_execution::EffectHost>,
-    )
+        .expect("open the promise authority's scratch engine");
+    let host: Arc<dyn lash_core_execution::EffectHost> = engine.effect_host();
+    ((engine_dir, engine), host)
 }
 
 async fn storage() -> Option<(SharedDatabaseLock, PostgresStorage)> {
@@ -155,20 +157,33 @@ fn pg_law_stores(
     (attachments, stores)
 }
 
-/// A backend for a law's runtime over `storage`'s store set, its effects
-/// journaled by the promise authority. The guard keeps the attachment bytes
-/// and the authority's journal alive.
+/// A backend for a law's runtime over `storage`'s store set. These laws drive
+/// real turns, so the host must execute effects: a full SQLite engine in a
+/// scratch directory is the one executing host an in-process test can drive.
+/// The store under test is still Postgres; the guard keeps the attachment
+/// bytes and the engine's scratch directory alive.
 async fn pg_law_backend(
     storage: &PostgresStorage,
 ) -> (
-    (tempfile::TempDir, tempfile::TempDir),
+    (
+        tempfile::TempDir,
+        tempfile::TempDir,
+        lash_sqlite_store::SqliteBackend,
+    ),
     lash_core_execution::Backend,
 ) {
     let (attachments, stores) = pg_law_stores(storage);
-    let (promise_dir, effect_host) = promise_authority().await;
+    let engine_dir = tempfile::tempdir().expect("effect engine directory");
+    let engine = lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
+        engine_dir.path(),
+        lash_sqlite_store::SqliteBackendOptions::default(),
+        stores.clock(),
+    )
+    .await
+    .expect("open the law's effect engine");
     (
-        (attachments, promise_dir),
-        lash_conformance::backend_over(stores, effect_host),
+        (attachments, engine_dir, engine.clone()),
+        lash_conformance::backend_over(stores, engine.effect_host()),
     )
 }
 
@@ -310,9 +325,9 @@ lash_conformance::runtime_persistence_reopenable_tests!({
     let database_url = database_url().expect("configured Postgres database URL");
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(10_000));
     let lease_clock = Arc::clone(&clock);
-    let (promise_dir, effect_host) = promise_authority().await;
+    let (promise_guard, effect_host) = promise_authority().await;
     (
-        (database_lock, promise_dir),
+        (database_lock, promise_guard),
         move |session_id: &str| {
             let effect_host = Arc::clone(&effect_host);
             let storage = Arc::clone(&storage);
@@ -770,9 +785,9 @@ lash_conformance::session_store_factory_tests!({
             )
         })
     };
-    let (promise_dir, effect_host) = promise_authority().await;
+    let (promise_guard, effect_host) = promise_authority().await;
     (
-        (_database_lock, attachments, promise_dir),
+        (_database_lock, attachments, promise_guard),
         "postgres",
         None,
         make,
@@ -1311,9 +1326,9 @@ lash_conformance::process_prune_session_store_tests!({
     let factory = Arc::new(storage.session_store_factory_with_shared_process_registry())
         as Arc<dyn SessionStoreFactory>;
     let registry = Arc::new(storage.process_registry()) as Arc<dyn ProcessRegistry>;
-    let (promise_dir, effect_host) = promise_authority().await;
+    let (promise_guard, effect_host) = promise_authority().await;
     (
-        (_database_lock, promise_dir),
+        (_database_lock, promise_guard),
         factory,
         registry,
         effect_host,
@@ -1778,10 +1793,20 @@ lash_conformance::session_failure_evidence_tests!({
         lash_core_execution::WakeDeliveryConfig::default(),
         Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
     ));
-    let (promise_dir, effect_host) = promise_authority().await;
-    let backend = lash_conformance::backend_over(stores, effect_host);
+    // The law streams real turns, so its host must execute effects: a full
+    // SQLite engine in a scratch directory is the one executing host an
+    // in-process test can drive. The store under test is still Postgres.
+    let engine_dir = tempfile::tempdir().expect("effect engine directory");
+    let engine = lash_sqlite_store::SqliteBackend::open_with_options_and_clock(
+        engine_dir.path(),
+        lash_sqlite_store::SqliteBackendOptions::default(),
+        Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
+    )
+    .await
+    .expect("open the failure-evidence effect engine");
+    let backend = lash_conformance::backend_over(stores, engine.effect_host());
     (
-        (_database_lock, attachments, promise_dir),
+        (_database_lock, attachments, engine_dir, engine),
         backend,
         move || clock.advance(1),
     )

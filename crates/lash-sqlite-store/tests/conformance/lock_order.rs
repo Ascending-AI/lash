@@ -17,7 +17,7 @@ use lash_core_execution::{
 };
 
 use super::SUBSTRATE;
-use crate::backend_fixture::TestBackend;
+use crate::backend_fixture::TestEngineBackend;
 
 const ROUNDS: usize = 200;
 
@@ -58,7 +58,7 @@ async fn mint(
 /// retained evidence across the catalog, the journal and the registry.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn retention_sweeps_and_process_scope_promises_never_wait_on_each_other() {
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let reader = backend.effect_host();
     let writer = backend.reopen().await.effect_host();
     let factory = backend.session_store_factory();

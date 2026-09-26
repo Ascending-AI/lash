@@ -14,7 +14,7 @@ use lash_core_execution::{EffectHost, GroupExecutors};
 use lash_sqlite_store::{SqliteDatabase, SqliteEffectHost};
 
 use super::{SUBSTRATE, with_lease_timings};
-use crate::backend_fixture::{TestBackend, sync_await, system_clock};
+use crate::backend_fixture::{TestEngineBackend, sync_await, system_clock};
 
 /// One host over `backend`'s journal, registered with the suite's executor
 /// resolver.
@@ -25,7 +25,7 @@ use crate::backend_fixture::{TestBackend, sync_await, system_clock};
 /// are about — the same database, so "a refused open journals nothing" is asked
 /// of the journal the wired hosts read.
 fn host(
-    backend: &TestBackend,
+    backend: &TestEngineBackend,
     executors: Option<Arc<dyn GroupExecutors>>,
 ) -> Arc<SqliteEffectHost> {
     let backend = backend.clone();
@@ -40,7 +40,7 @@ fn host(
 // The durable SQLite tier answers the effect-group contract the same way the
 // in-memory reference host does (FIG-1564).
 lash_conformance::effect_group_host_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let hosts = backend.clone();
     (backend, move |executors| {
         host(&hosts, executors) as Arc<dyn EffectHost>
@@ -49,7 +49,7 @@ lash_conformance::effect_group_host_tests!({
 
 // A close racing its own children's settlements seats one terminal per child.
 lash_conformance::effect_group_close_race_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let hosts = backend.clone();
     (backend, move |executors| {
         host(&hosts, executors) as Arc<dyn EffectHost>
@@ -57,7 +57,7 @@ lash_conformance::effect_group_close_race_tests!({
 });
 
 lash_conformance::effect_group_unwired_host_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let hosts = backend.clone();
     (backend, move |executors| {
         host(&hosts, executors) as Arc<dyn EffectHost>
@@ -67,7 +67,7 @@ lash_conformance::effect_group_unwired_host_tests!({
 // A cancelled child's cancellation is journaled as its terminal, and a host
 // that was not running when the close happened reads it back (FIG-1564).
 lash_conformance::effect_group_cancelled_child_terminal_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let hosts = backend.clone();
     (backend, move |executors| {
         host(&hosts, executors) as Arc<dyn EffectHost>
@@ -78,7 +78,7 @@ lash_conformance::effect_group_cancelled_child_terminal_tests!({
 // transaction and leaves the fence, while an in-flight operation keeps every
 // row (FIG-2500).
 lash_conformance::effect_group_runtime_retirement_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let hosts = backend.clone();
     let verify = backend.clone();
     (
@@ -147,7 +147,7 @@ async fn concurrent_registration_of_different_resolvers_refuses_every_loser() {
         }
     }
 
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let host = host(&backend, None);
     // Before any registration the host does no groups, and says so through the
     // group surface itself rather than through a capability flag (FIG-2266).
@@ -261,7 +261,7 @@ const CRASH_LEASE_MS: u64 = 900;
 /// One host over `backend`'s journal with the drain suite's lease window,
 /// so a killed process's claims lapse on a scale a test can wait out.
 fn host_with_lease(
-    backend: &TestBackend,
+    backend: &TestEngineBackend,
     executors: Arc<dyn GroupExecutors>,
 ) -> Arc<SqliteEffectHost> {
     let backend = backend.clone();
@@ -394,7 +394,7 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
     const KEY: &str = "canonical-reopen";
     const CHILD_KEY: &str = "canonical-reopen:child:0";
 
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
 
     // Process A: open the group, observe the claim row, die with the runtime.
     let crash_backend = backend.clone();
@@ -565,7 +565,7 @@ async fn an_honest_reopen_lends_its_staged_runner_when_the_retained_json_is_form
 // fences nothing; once the drain settles it removes the rows and leaves the
 // fence (FIG-2499 fix round 1).
 lash_conformance::effect_group_quiescent_retirement_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let hosts = backend.clone();
     let verify = backend.clone();
     (

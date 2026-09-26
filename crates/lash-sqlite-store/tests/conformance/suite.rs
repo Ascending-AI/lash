@@ -37,11 +37,12 @@ use lash_core_execution::{
 };
 use lash_sqlite_store::{
     SqliteBackendOptions, SqliteDatabase, SqliteEffectReplayOptions, SqliteRuntimeEffectController,
+    SqliteStoreSetOptions,
 };
 
 use super::SUBSTRATE;
 use crate::backend_fixture::durable_turn_scope;
-use crate::backend_fixture::{TestBackend, sync_await};
+use crate::backend_fixture::{Substrate, TestBackend, TestEngineBackend, sync_await};
 
 #[path = "attachment_store.rs"]
 mod attachment_store;
@@ -97,18 +98,43 @@ mod wake_delivery;
 include!("append_identity.rs");
 include!("effect_lease_fencing.rs");
 
-/// Backends a fixture opened and must keep alive for its whole law.
-#[derive(Clone, Default)]
-struct Retained(Arc<Mutex<Vec<TestBackend>>>);
+/// A fixture flavor [`Retained`] opens from synchronous code.
+trait BlockingFixture: Clone {
+    fn open_on(substrate: Substrate) -> Self;
+}
 
-impl Retained {
-    fn keep(&self, backend: &TestBackend) {
+impl BlockingFixture for TestBackend {
+    fn open_on(substrate: Substrate) -> Self {
+        Self::blocking(substrate)
+    }
+}
+
+impl BlockingFixture for TestEngineBackend {
+    fn open_on(substrate: Substrate) -> Self {
+        Self::blocking(substrate)
+    }
+}
+
+/// Backends a fixture opened and must keep alive for its whole law.
+#[derive(Clone)]
+struct Retained<B = TestBackend>(Arc<Mutex<Vec<B>>>);
+
+impl<B> Default for Retained<B> {
+    fn default() -> Self {
+        Self(Arc::new(Mutex::new(Vec::new())))
+    }
+}
+
+impl<B: Clone> Retained<B> {
+    fn keep(&self, backend: &B) {
         self.0.lock_recover().push(backend.clone());
     }
+}
 
+impl<B: BlockingFixture> Retained<B> {
     /// A fresh backend, kept alive with the fixture.
-    fn open_blocking(&self) -> TestBackend {
-        let backend = TestBackend::blocking(SUBSTRATE);
+    fn open_blocking(&self) -> B {
+        let backend = B::open_on(SUBSTRATE);
         self.keep(&backend);
         backend
     }
@@ -229,7 +255,7 @@ async fn sqlite_attachment_condemnation_enumeration_refuses_corrupt_rows() {
 }
 
 lash_conformance::abandoned_attachment_recovery_tests!({
-    let retained = Retained::default();
+    let retained: Retained<TestBackend> = Retained::default();
     let bytes_root = Arc::new(tempfile::tempdir().expect("attachment bytes root"));
     let make_bytes = crate::backend_fixture::attachment_bytes(&bytes_root);
     ((retained.clone(), bytes_root), move || {
@@ -266,8 +292,8 @@ fn sqlite_conformance_invocation(
 /// keeps it alive.
 async fn open_effect_controller(
     scope: ExecutionScope,
-) -> (TestBackend, SqliteRuntimeEffectController) {
-    let backend = TestBackend::open(SUBSTRATE).await;
+) -> (TestEngineBackend, SqliteRuntimeEffectController) {
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let controller = backend
         .open_effect_controller(scope)
         .await
@@ -679,7 +705,7 @@ lash_conformance::signed_counter_write_domain_tests!({
 });
 
 lash_conformance::artifact_store_reopenable_tests!({
-    let retained = Retained::default();
+    let retained: Retained<TestBackend> = Retained::default();
     (retained.clone(), move || {
         let backend = retained.open_blocking();
         lash_conformance::fused_artifact_store::ReopenableArtifactStore {
@@ -744,7 +770,7 @@ fn current_epoch_ms_for_test() -> u64 {
 }
 
 lash_conformance::process_registry_reopenable_tests!({
-    let retained = Retained::default();
+    let retained: Retained<TestBackend> = Retained::default();
     (retained.clone(), move |_label: &str| {
         let backend = retained.open_blocking();
         let reopened = sync_await({
@@ -866,7 +892,7 @@ lash_conformance::process_projection_repair_tests!({
 });
 
 lash_conformance::store_contract_state_machine_tests!({
-    let retained = Retained::default();
+    let retained: Retained<TestBackend> = Retained::default();
     ((), "sqlite", move |_seed, _| {
         let retained = retained.clone();
         async move {
@@ -881,7 +907,7 @@ lash_conformance::store_contract_state_machine_tests!({
 });
 
 lash_conformance::runtime_persistence_state_machine_tests!({
-    let retained = Retained::default();
+    let retained: Retained<TestBackend> = Retained::default();
     ((), "sqlite", move |_| {
         let retained = retained.clone();
         async move {
@@ -899,7 +925,7 @@ lash_conformance::runtime_persistence_state_machine_tests!({
 });
 
 lash_conformance::session_graph_state_machine_tests!({
-    let retained = Retained::default();
+    let retained: Retained<TestBackend> = Retained::default();
     ((), "sqlite", move |_| {
         let retained = retained.clone();
         async move {
@@ -919,7 +945,7 @@ lash_conformance::process_continuation_store_tests!({
 });
 
 lash_conformance::session_store_factory_tests!({
-    let retained = Retained::default();
+    let retained: Retained<TestBackend> = Retained::default();
     let unbound_backend = TestBackend::open(SUBSTRATE).await;
     retained.keep(&unbound_backend);
     let unbound =
@@ -937,9 +963,13 @@ lash_conformance::session_store_factory_tests!({
             backend.attachment_store() as Arc<dyn lash_core_execution::AttachmentStore>,
         )
     };
-    let effect_host = unbound_backend.effect_host() as Arc<dyn EffectHost>;
+    // Hosted turn-cancel laws mint and settle real await-event keys: the host
+    // must own a journal, so a dedicated engine backend supplies it while the
+    // laws' stores stay on the storage-only fixture.
+    let engine = TestEngineBackend::open(SUBSTRATE).await;
+    let effect_host = engine.effect_host() as Arc<dyn EffectHost>;
     (
-        retained,
+        (retained, engine),
         "sqlite",
         unbound,
         make,
@@ -949,7 +979,7 @@ lash_conformance::session_store_factory_tests!({
 });
 
 lash_conformance::fresh_session_admission_tests!({
-    let retained = Retained::default();
+    let retained: Retained<TestBackend> = Retained::default();
     (retained.clone(), move |_session_id: &str| {
         retained.open_blocking().blocking_store() as Arc<dyn RuntimePersistence>
     })
@@ -971,7 +1001,7 @@ lash_conformance::attachment_owner_cold_replay_tests!({
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(
         current_epoch_ms_for_test().saturating_sub(100_000),
     ));
-    let backend = TestBackend::open_with_clock(
+    let backend = TestEngineBackend::open_with_clock(
         SUBSTRATE,
         clock.clone() as Arc<dyn lash_core_execution::Clock>,
     )
@@ -1027,8 +1057,12 @@ lash_conformance::process_prune_session_store_tests!({
     let backend = TestBackend::open(SUBSTRATE).await;
     let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
     let factory = backend.session_store_factory() as Arc<dyn SessionStoreFactory>;
-    let effect_host = backend.effect_host() as Arc<dyn EffectHost>;
-    (backend, factory, registry, effect_host)
+    // The closure authorizations this law drives carry real minted await-event
+    // keys, so the host is a dedicated engine backend's, kept alive with the
+    // fixture.
+    let engine = TestEngineBackend::open(SUBSTRATE).await;
+    let effect_host = engine.effect_host() as Arc<dyn EffectHost>;
+    ((backend, engine), factory, registry, effect_host)
 });
 
 lash_conformance::runtime_persistence_clock_tests!({
@@ -1060,7 +1094,7 @@ lash_conformance::runtime_persistence_clock_tests!({
 });
 
 lash_conformance::trigger_store_reopenable_tests!({
-    let retained = Retained::default();
+    let retained: Retained<TestBackend> = Retained::default();
     (retained.clone(), move || {
         let backend = retained.open_blocking();
         let reopened = sync_await({
@@ -1154,11 +1188,14 @@ async fn sqlite_trigger_ingress_skips_malformed_matching_subscription() {
 }
 
 lash_conformance::runtime_persistence_reopenable_tests!({
-    let retained = Retained::default();
+    let retained: Retained<TestBackend> = Retained::default();
+    // Hosted laws mint and settle await-event keys, so each fixture pair gets
+    // a dedicated engine backend for its host, kept alive with the fixture.
+    let engines: Retained<TestEngineBackend> = Retained::default();
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(10_000));
     let store_clock = Arc::clone(&clock);
     (
-        retained.clone(),
+        (retained.clone(), engines.clone()),
         move |session_id: &str| {
             let request = root_session_request(session_id);
             let clock = store_clock.clone() as Arc<dyn lash_core_execution::Clock>;
@@ -1176,7 +1213,8 @@ lash_conformance::runtime_persistence_reopenable_tests!({
                     .expect("created SQLite conformance store exists");
                 (backend, open, reopen)
             });
-            let effect_host = backend.effect_host() as Arc<dyn EffectHost>;
+            let engine = engines.open_blocking();
+            let effect_host = engine.effect_host() as Arc<dyn EffectHost>;
             retained.keep(&backend);
             ReopenableRuntimePersistence {
                 open,
@@ -1192,15 +1230,20 @@ lash_conformance::runtime_persistence_reopenable_tests!({
 });
 
 lash_conformance::unbound_session_read_tests!({
-    (Retained::default(), move |_admission_state| async move {
-        let backend = TestBackend::open(SUBSTRATE).await;
-        let factory = backend.session_store_factory();
-        lash_conformance::UnboundSessionResolutionHandles {
-            backend_name: "SQLite",
-            factory,
-            open_unbound: Arc::new(move || backend.blocking_store() as Arc<dyn RuntimePersistence>),
-        }
-    })
+    (
+        Retained::<TestBackend>::default(),
+        move |_admission_state| async move {
+            let backend = TestBackend::open(SUBSTRATE).await;
+            let factory = backend.session_store_factory();
+            lash_conformance::UnboundSessionResolutionHandles {
+                backend_name: "SQLite",
+                factory,
+                open_unbound: Arc::new(move || {
+                    backend.blocking_store() as Arc<dyn RuntimePersistence>
+                }),
+            }
+        },
+    )
 });
 
 lash_conformance::store_recovery_tests!({
@@ -1220,9 +1263,9 @@ lash_conformance::store_recovery_tests!({
 /// drain turn included, binds the same turn-control authority, which is this
 /// journal's. Its effect leases lapse on the recovery timings, so a successor
 /// controller reclaims what a crashed one held.
-fn crash_journal() -> TestBackend {
+fn crash_journal() -> TestEngineBackend {
     sync_await(async move {
-        TestBackend::open_with(
+        TestEngineBackend::open_with(
             SUBSTRATE,
             with_lease_timings(
                 lash_core_execution::facade_support::LeaseTimings::new(
@@ -1241,7 +1284,7 @@ fn crash_journal() -> TestBackend {
 /// controller over the same journal, the way a restarted process does: its
 /// own group-executor registration, the journal's completed effects replayed.
 fn journaled_crash_invocation(
-    journal: &TestBackend,
+    journal: &TestEngineBackend,
     scope: ExecutionScope,
 ) -> lash_conformance::ConformanceInvocation {
     let open = {
@@ -1271,9 +1314,9 @@ fn journaled_crash_invocation(
 
 /// The error-return sweep's journal (FIG-3524): its short renew interval lets
 /// a `renew` fault fire while the parked tool attempt is still open.
-fn error_return_journal() -> TestBackend {
+fn error_return_journal() -> TestEngineBackend {
     sync_await(async move {
-        TestBackend::open_with(
+        TestEngineBackend::open_with(
             SUBSTRATE,
             with_lease_timings(
                 lash_core_execution::facade_support::LeaseTimings::new(
@@ -1297,7 +1340,7 @@ type JournalStoreOpener =
 /// macros destructure: `guard` keeps the fixture's backends alive, `host` is
 /// the journal's own effect host and `runner` cuts its turns.
 type JournalRunnerFixture = (
-    Retained,
+    Retained<TestEngineBackend>,
     Arc<dyn lash_core_execution::StoreSet>,
     JournalStoreOpener,
     Arc<dyn EffectHost>,
@@ -1306,9 +1349,9 @@ type JournalRunnerFixture = (
 
 /// A turn-crash runner fixture over `journal`'s own effect host: the runner
 /// cuts turns with that journal's fault injector.
-fn journal_runner_fixture(journal: TestBackend) -> JournalRunnerFixture {
+fn journal_runner_fixture(journal: TestEngineBackend) -> JournalRunnerFixture {
     let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
-    let retained = Retained::default();
+    let retained: Retained<TestEngineBackend> = Retained::default();
     let stores = retained.open_blocking().as_stores();
     retained.keep(&journal);
     let host = journal.effect_host();
@@ -1347,7 +1390,7 @@ lash_conformance::effect_layer_group_child_tests!({ journal_runner_fixture(crash
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn sqlite_held_turn_input_visibility_survives_claim_holder_crash() {
     let scenarios = ScenarioBackends::new(crate::backend_fixture::system_clock());
-    let retained = Retained::default();
+    let retained: Retained<TestEngineBackend> = Retained::default();
     let stores = retained.open_blocking().as_stores();
     let journal = crash_journal();
     retained.keep(&journal);
@@ -1426,7 +1469,7 @@ mod cancelled_queued_append {
             SUBSTRATE,
             {
                 let injector = injector.clone();
-                move |options| SqliteBackendOptions {
+                move |options| SqliteStoreSetOptions {
                     fault_injector: Some(injector),
                     ..options
                 }
@@ -1556,7 +1599,7 @@ fn raw_count(conn: &rusqlite::Connection, sql: &str, name: &str) -> i64 {
 }
 
 lash_conformance::effect_host_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let reopen = backend.clone();
     (backend, move || {
         let backend = reopen.clone();
@@ -1565,7 +1608,7 @@ lash_conformance::effect_host_tests!({
 });
 
 lash_conformance::turn_work_driver_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let host = backend.effect_host() as Arc<dyn EffectHost>;
     let law_backend = backend.as_stores();
     (
@@ -1577,9 +1620,9 @@ lash_conformance::turn_work_driver_tests!({
 });
 
 lash_conformance::effect_host_await_event_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let reopen = backend.clone();
-    let foreign = Retained::default();
+    let foreign: Retained<TestEngineBackend> = Retained::default();
     (
         (backend, foreign.clone()),
         move || {
@@ -1593,7 +1636,7 @@ lash_conformance::effect_host_await_event_tests!({
 });
 
 lash_conformance::tool_batch_parallelism_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let host = backend.effect_host() as Arc<dyn EffectHost>;
     let law_backend = backend.as_stores();
     (
@@ -1630,7 +1673,7 @@ async fn sqlite_backends_issue_completion_keys() {
 }
 
 lash_conformance::effect_host_cold_await_event_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     // The parked-owner vector abandons an in-progress effect, so its cold
     // successor must wait one lease TTL before reclaiming it. A one-second
     // test policy preserves that semantic wait without spending the
@@ -1664,7 +1707,7 @@ lash_conformance::effect_host_cold_await_event_tests!({
 
 #[tokio::test]
 async fn sqlite_await_event_key_mint_is_pure_and_store_secret_is_stable() {
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let scope = durable_turn_scope("pure-key-session", "pure-key-turn");
     let wait = AwaitEventWaitIdentity::tool_completion("pure-key-call");
 
@@ -1738,7 +1781,7 @@ async fn sqlite_await_event_key_mint_is_pure_and_store_secret_is_stable() {
 /// which is also what PostgreSQL always reported.
 #[tokio::test]
 async fn sqlite_await_event_terminal_decode_failures_report_the_decode_vocabulary() {
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let scope = durable_turn_scope("corrupt-terminal-session", "corrupt-terminal-turn");
     let host = backend.effect_host();
     let key = host
@@ -1783,7 +1826,7 @@ async fn sqlite_await_event_terminal_decode_failures_report_the_decode_vocabular
 async fn sqlite_await_event_rows_are_stamped_by_the_injected_clock() {
     const INJECTED_MS: u64 = 1_234_567_890_000;
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(INJECTED_MS));
-    let backend = TestBackend::open_with_clock(
+    let backend = TestEngineBackend::open_with_clock(
         SUBSTRATE,
         Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
     )
@@ -1826,7 +1869,7 @@ async fn sqlite_await_event_rows_are_stamped_by_the_injected_clock() {
 async fn sqlite_effect_replay_rows_are_stamped_by_the_injected_clock() {
     const INJECTED_MS: u64 = 1_234_567_890_000;
     let clock = Arc::new(lash_core_execution::testing::TestClock::new(INJECTED_MS));
-    let backend = TestBackend::open_with_clock(
+    let backend = TestEngineBackend::open_with_clock(
         SUBSTRATE,
         Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>,
     )
@@ -1963,7 +2006,7 @@ async fn sqlite_effect_controller_replays_without_local_executor() {
 
 #[tokio::test]
 async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let scope = durable_turn_scope("sqlite-intent-session", "sqlite-intent-turn");
     let envelope = RuntimeEffectEnvelope::new(
         RuntimeEffectInvocation::new(
@@ -2063,7 +2106,7 @@ async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
 }
 
 lash_conformance::effect_host_retirement_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let host = backend.effect_host() as Arc<dyn EffectHost>;
     (backend, host)
 });

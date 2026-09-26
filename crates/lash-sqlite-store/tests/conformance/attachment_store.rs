@@ -18,7 +18,7 @@ const PERSISTENCE: AttachmentStorePersistence = match SUBSTRATE {
 };
 
 lash_conformance::attachment_store_reopenable_tests!({
-    let retained = Retained::default();
+    let retained: Retained<TestBackend> = Retained::default();
     (
         retained.clone(),
         move || {
@@ -38,7 +38,7 @@ lash_conformance::attachment_store_reopenable_tests!({
 });
 
 lash_conformance::attachment_store_tests!({
-    let retained = Retained::default();
+    let retained: Retained<TestBackend> = Retained::default();
     (
         retained.clone(),
         move || retained.open_blocking().attachment_store() as Arc<dyn AttachmentStore>,

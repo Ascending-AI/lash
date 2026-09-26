@@ -47,7 +47,8 @@ use crate::await_event::{SqliteAwaitEventBackend, sqlite_await_events, wait_sql}
 #[cfg(any(test, feature = "testing"))]
 use crate::location::validate_file_database_path;
 use crate::location::{DatabaseLocation, DatabaseTarget};
-use crate::scope_fence::{FenceLocations, RegistryAttachment, Schema, fence_sql};
+use crate::schema_layout::Schema;
+use crate::scope_fence::{FenceLocations, RegistryAttachment, fence_sql};
 
 mod row_store;
 

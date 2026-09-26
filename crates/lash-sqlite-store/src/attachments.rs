@@ -15,7 +15,7 @@
 
 use std::sync::LazyLock;
 
-use crate::scope_fence::Schema;
+use crate::schema_layout::Schema;
 use lash_sansio::SessionId;
 use lash_store_sql::attachment::condemnation::CondemnationStatements;
 use lash_store_sql::attachment::manifest::{ManifestProcessOwnerStatements, ManifestStatements};

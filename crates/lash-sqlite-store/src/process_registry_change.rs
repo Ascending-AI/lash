@@ -296,7 +296,7 @@ mod tests {
 
     #[tokio::test]
     async fn candidate_tombstone_divergence_rolls_back_all_prune_mutations() {
-        let registry = crate::SqliteBackend::memory()
+        let registry = crate::SqliteStoreSet::memory()
             .await
             .expect("open prune rollback registry")
             .process_registry();

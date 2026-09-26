@@ -22,9 +22,9 @@ impl FencedRestateController {
             .await?
         {
             let identity = self.admitted.scope().journal_identity()?;
-            return Err(
-                lash_core::facade_support::effect_replay_driver::scope_retired(identity.key()),
-            );
+            return Err(lash_core::facade_support::scope_status::scope_retired(
+                identity.key(),
+            ));
         }
         Ok(())
     }
@@ -180,9 +180,9 @@ impl RuntimeEffectController for FencedRestateController {
                 .await?
         {
             let identity = self.admitted.scope().journal_identity()?;
-            return Err(
-                lash_core::facade_support::effect_replay_driver::scope_retired(identity.key()),
-            );
+            return Err(lash_core::facade_support::scope_status::scope_retired(
+                identity.key(),
+            ));
         }
         self.controller
             .open_effect_group_opened_by(group, &self.admitted)
@@ -217,9 +217,9 @@ impl RuntimeEffectController for FencedRestateController {
 
     async fn commit_group_child_final(
         &self,
-        commit: lash_core::facade_support::effect_replay_driver::GroupChildFinalCommit,
+        commit: lash_core::facade_support::GroupChildFinalCommit,
     ) -> Result<
-        lash_core::facade_support::effect_replay_driver::EffectGroupChildCommitOutcome,
+        lash_core::facade_support::EffectGroupChildCommitOutcome,
         RuntimeEffectControllerError,
     > {
         self.controller.commit_group_child_final(commit).await

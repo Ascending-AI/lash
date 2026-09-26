@@ -2,7 +2,7 @@ use super::*;
 
 #[tokio::test]
 async fn sqlite_await_event_discovery_refuses_inconsistent_persisted_rows() {
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let host = backend.effect_host();
 
     let inconsistent_session = SessionId::from("inconsistent-discovery-session");

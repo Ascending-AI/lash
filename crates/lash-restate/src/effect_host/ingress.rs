@@ -157,7 +157,7 @@ pub(super) async fn retire_restate_scope_via_ingress(
         Ok(())
     } else {
         Err(
-            lash_core::facade_support::effect_replay_driver::scope_not_quiescent(
+            lash_core::facade_support::scope_status::scope_not_quiescent(
                 scope.journal_identity()?.key(),
             ),
         )

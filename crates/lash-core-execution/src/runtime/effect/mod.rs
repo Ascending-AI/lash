@@ -11,6 +11,7 @@ pub mod group_drain;
 mod group_journal;
 #[cfg(any(test, feature = "testing"))]
 mod layered_host;
+pub mod scope_status;
 use lash_core_store::effect_identity as identity_types;
 mod live_openers;
 pub use live_openers::{LiveOpenerContext, LiveOpenerGuard, LiveOpenerRegistry};
