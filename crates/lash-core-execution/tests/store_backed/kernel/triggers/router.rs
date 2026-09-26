@@ -6,9 +6,10 @@ mod tests {
     use crate::SessionId;
     use crate::triggers::*;
 
+    const SEED: u64 = 0x5_f710;
+
     /// Every port of one memory backend the router tests route through.
     struct RouterWorld {
-        backend: lash_sqlite_store::SqliteBackend,
         store: Arc<dyn crate::TriggerStore>,
         registry: Arc<dyn crate::ProcessRegistry>,
         process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
@@ -16,28 +17,16 @@ mod tests {
     }
 
     async fn router_world() -> RouterWorld {
-        let backend = crate::support::memory_backend().await;
+        let stores = crate::support::memory_store_set().await;
         let process_env_store: Arc<dyn crate::ProcessExecutionEnvStore> =
-            backend.process_env_store();
+            stores.process_env_store();
         let env_ref =
             crate::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
         RouterWorld {
-            store: backend.trigger_store(),
-            registry: backend.process_registry(),
+            store: stores.trigger_store(),
+            registry: stores.process_registry(),
             process_env_store,
             env_ref,
-            backend,
-        }
-    }
-
-    impl RouterWorld {
-        fn controller(&self, operation: &str) -> crate::ScopedEffectController<'static> {
-            crate::EffectHost::scoped_static(
-                self.backend.effect_host().as_ref(),
-                crate::AdmittedScope::runtime_operation(operation),
-            )
-            .expect("bind scope")
-            .expect("the backend host lends a static controller")
         }
     }
 
@@ -250,7 +239,7 @@ mod tests {
 
     /// FIG-2913: a delivery validates the occurrence against the captured
     /// source contract, not against the live catalog.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn delivery_refuses_an_occurrence_that_leaves_the_captured_contract() {
         let world = router_world().await;
         let store = Arc::clone(&world.store);
@@ -272,7 +261,13 @@ mod tests {
             None,
         )
         .await;
-        let scoped = world.controller("captured-contract");
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::AdmittedScope::runtime_operation("captured-contract"))
+            .await
+            .expect("open the emit handler");
+        let scoped = handler.scoped();
 
         let report = router
             .emit(
@@ -314,13 +309,21 @@ mod tests {
             on_contract.deliveries[0].outcome,
             TriggerDeliveryEmitOutcome::Started
         );
+        drop(scoped);
+        handler.close().await.expect("close the emit handler");
     }
 
     /// FIG-2913: a temporarily unavailable provider keeps the reserved work and
     /// retries the same delivery identity; a revoked route refuses visibly and
     /// never reports a false start.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn transient_route_failure_retries_the_same_identity_and_revocation_refuses() {
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::AdmittedScope::runtime_operation("route-restore"))
+            .await
+            .expect("open the emit handler");
         for (refusal, marker) in [
             (
                 TriggerRouteRefusal::Unavailable {
@@ -362,7 +365,7 @@ mod tests {
                 Some(Arc::clone(&restorer)),
             )
             .await;
-            let scoped = world.controller("route-restore");
+            let scoped = handler.scoped();
             let occurrence = || {
                 TriggerOccurrenceRequest::new(
                     "ui.button.pressed",
@@ -420,7 +423,9 @@ mod tests {
                 retry.deliveries[0].outcome,
                 TriggerDeliveryEmitOutcome::AlreadyReserved
             );
+            drop(scoped);
         }
+        handler.close().await.expect("close the emit handler");
     }
 
     #[tokio::test]
@@ -456,7 +461,7 @@ mod tests {
             .expect("a label no longer gates registration");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn trigger_emit_report_records_started_and_already_reserved_deliveries() {
         let world = router_world().await;
         let store = Arc::clone(&world.store);
@@ -475,7 +480,15 @@ mod tests {
             crate::testing::process_work_wiring_for_registry(Arc::clone(&registry)),
         )
         .with_process_artifacts(process_env_store, crate::testing::process_engine_fixture());
-        let scoped_controller = world.controller("trigger-blue-report");
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::AdmittedScope::runtime_operation(
+                "trigger-blue-report",
+            ))
+            .await
+            .expect("open the emit handler");
+        let scoped_controller = handler.scoped();
 
         let report = router
             .emit(
@@ -517,9 +530,11 @@ mod tests {
             TriggerDeliveryEmitOutcome::AlreadyReserved
         );
         assert_eq!(replay.deliveries[0].process_id, delivery.process_id);
+        drop(scoped_controller);
+        handler.close().await.expect("close the emit handler");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn session_trigger_process_is_observed_by_its_registrant() {
         let world = router_world().await;
         let store = Arc::clone(&world.store);
@@ -541,7 +556,15 @@ mod tests {
             ),
         )
         .with_process_artifacts(process_env_store, crate::testing::process_engine_fixture());
-        let scoped_controller = world.controller("session-trigger-blue");
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::AdmittedScope::runtime_operation(
+                "session-trigger-blue",
+            ))
+            .await
+            .expect("open the emit handler");
+        let scoped_controller = handler.scoped();
 
         let report = router
             .emit(
@@ -561,5 +584,7 @@ mod tests {
             .expect("read initial observer"),
             "the session that explicitly registered the trigger must observe its process"
         );
+        drop(scoped_controller);
+        handler.close().await.expect("close the emit handler");
     }
 }

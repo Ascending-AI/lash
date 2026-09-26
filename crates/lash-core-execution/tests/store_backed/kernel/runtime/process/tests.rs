@@ -15,10 +15,10 @@ use crate::{
     OnParentEnd, ParentScope, ProcessId, ProcessLifecyclePolicy, ProcessRegistry, SessionId,
 };
 
-use crate::support::memory_backend;
+use crate::support::{memory_backend, memory_store_set};
 
 async fn memory_registry() -> Arc<dyn ProcessRegistry> {
-    memory_backend().await.process_registry()
+    memory_store_set().await.process_registry()
 }
 
 fn registration(id: &str) -> ProcessRegistration {
@@ -463,7 +463,7 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
 /// `ProcessExecutionEnvStore` classifies by code.
 #[tokio::test]
 async fn env_store_reports_typed_retirement_and_edge_refusals() {
-    let backend = memory_backend().await;
+    let backend = memory_store_set().await;
     let store = backend.process_env_store();
     let spec = ProcessExecutionEnvSpec::new(
         crate::PluginOptions::default(),

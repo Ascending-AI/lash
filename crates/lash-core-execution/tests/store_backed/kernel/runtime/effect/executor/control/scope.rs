@@ -17,7 +17,7 @@ mod admitted_scope_tests {
     /// stale pin would present.
     #[tokio::test]
     async fn a_rescope_onto_a_same_name_successor_incarnation_is_refused() {
-        let registry = crate::support::memory_backend().await.process_registry();
+        let registry = crate::support::memory_store_set().await.process_registry();
         let process_id = crate::ProcessId::from("worker");
         let registration = || {
             crate::ProcessRegistration::new(

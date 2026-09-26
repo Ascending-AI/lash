@@ -55,6 +55,8 @@ mod tests {
         }
     }
 
+    const SEED: u64 = 0x5_f720;
+
     async fn await_external_process_attachment(
         source: crate::AttachmentSource,
     ) -> (
@@ -70,7 +72,7 @@ mod tests {
             .build_session("root")
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
-        let backend = crate::support::memory_backend().await;
+        let backend = crate::support::memory_store_backend().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let host = Arc::new(
             crate::testing::MockSessionManager::default()
@@ -123,9 +125,9 @@ mod tests {
             .create_store(&request)
             .await
             .expect("create real in-memory manifest store");
-        let attachment_backend = crate::Backend::from(backend.clone()).attachment_store();
+        let attachment_backend = backend.attachment_store();
         let attachment_store = Arc::new(crate::SessionAttachmentStore::new(
-            Arc::clone(&attachment_backend) as Arc<dyn crate::AttachmentStore>,
+            Arc::clone(&attachment_backend),
             Arc::new(crate::attachments::PersistenceManifestAdapter(Arc::clone(
                 &persistence,
             ))),
@@ -299,7 +301,7 @@ mod tests {
             .expect("plugin session");
         let tools = Arc::clone(&provider);
         let tool_catalog = Arc::new(catalog_for(&provider));
-        let backend = crate::support::memory_backend().await;
+        let backend = crate::support::memory_store_set().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let host = Arc::new(
             crate::testing::MockSessionManager::default()
@@ -461,7 +463,7 @@ mod tests {
             .build_session("root")
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
-        let backend = crate::support::memory_backend().await;
+        let backend = crate::support::memory_store_set().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let host = Arc::new(
             crate::testing::MockSessionManager::default()
@@ -599,7 +601,7 @@ mod tests {
             .build_session("root")
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
-        let backend = crate::support::memory_backend().await;
+        let backend = crate::support::memory_store_set().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let host = Arc::new(
             crate::testing::MockSessionManager::default()
@@ -739,7 +741,7 @@ mod tests {
             .build_session("root")
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
-        let backend = crate::support::memory_backend().await;
+        let backend = crate::support::memory_store_set().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let host = Arc::new(
             crate::testing::MockSessionManager::default()
@@ -1098,7 +1100,7 @@ mod tests {
     /// `started_process_ids()` is the possession set a scripted-program segment
     /// handover carries and `restore_started_process_ids` reinstalls, so the
     /// same grant is what survives a segment boundary.
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn a_realized_start_intent_grants_the_run_possession_of_its_child() {
         let provider: Arc<dyn ToolProvider> = Arc::new(PrepareRecordingTool {
             prepares: Arc::new(AtomicUsize::new(0)),
@@ -1107,7 +1109,9 @@ mod tests {
             .build_session("root")
             .expect("plugin session");
         let tool_catalog = Arc::new(catalog_for(&provider));
-        let backend = crate::support::memory_backend().await;
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let backend = double.lash_backend();
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let host = Arc::new(
             crate::testing::MockSessionManager::default()
@@ -1139,6 +1143,12 @@ mod tests {
             )
             .await
             .expect("complete the started child");
+        let handler = double
+            .open_handler(crate::AdmittedScope::runtime_operation(
+                "test-runtime-effect-controller",
+            ))
+            .await
+            .expect("open the presentation handler");
         let dispatch = Arc::new(ToolDispatchContext {
             plugins,
             tools: provider,
@@ -1152,13 +1162,8 @@ mod tests {
             process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
             // The completion presents through the journaled boundary, so the
-            // context runs on the backend's own controller.
-            effect_controller: RuntimeEffectControllerHandle::shared(
-                crate::support::scoped_controller(
-                    &backend,
-                    crate::AdmittedScope::runtime_operation("test-runtime-effect-controller"),
-                ),
-            ),
+            // context runs on the open handler's lent controller.
+            effect_controller: RuntimeEffectControllerHandle::borrowed(handler.scoped()),
             direct_completions: crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",
             ),
@@ -1261,5 +1266,10 @@ mod tests {
             "the run must resolve the handle its own realized start answered: {:?}",
             awaited.output.value_for_projection()
         );
+        drop(context);
+        handler
+            .close()
+            .await
+            .expect("close the presentation handler");
     }
 }

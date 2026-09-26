@@ -56,7 +56,7 @@ async fn runtime_feedback_process_environment_refuses_prior_family() {
         ArtifactOwner, ProcessExecutionEnvStore, load_process_execution_env,
         publish_process_execution_env,
     };
-    let backend = crate::support::memory_backend().await;
+    let backend = crate::support::memory_store_set().await;
     let store = backend.process_env_store();
     let mut policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
     policy.model = crate::ModelSpec::builder("model")

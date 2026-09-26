@@ -1,7 +1,6 @@
 mod tests {
     use std::sync::Arc;
 
-    use crate::support::prelude::*;
     use crate::{ProcessId, RuntimeExecutionContext};
 
     fn registration_for_parent_scope(process_id: &str) -> crate::ProcessRegistration {
@@ -22,14 +21,14 @@ mod tests {
     /// A context whose controller is the backend host's own, admitted under
     /// `admitted`.
     fn scoped_context(
-        backend: &lash_sqlite_store::SqliteBackend,
+        backend: &crate::Backend,
         session_id: &str,
         admitted: crate::AdmittedScope,
     ) -> RuntimeExecutionContext<'static> {
         let controller = crate::EffectHost::scoped_static(backend.effect_host().as_ref(), admitted)
             .expect("the test scope validates")
             .expect("the backend host lends a static controller");
-        crate::testing::TestExecutionContextBuilder::for_backend(&backend.clone().into())
+        crate::testing::TestExecutionContextBuilder::for_backend(backend)
             .session_id(session_id)
             .borrowed_effect_controller(controller)
             .build()
@@ -64,13 +63,12 @@ mod tests {
     /// (`runtime::effect::executor::process_local`) exercises it there.
     #[tokio::test]
     async fn a_session_path_process_start_publishes_no_environment_before_its_journal() {
-        let backend = crate::support::memory_backend().await;
+        let backend = crate::support::memory_store_backend().await;
         let env_store = backend.process_env_store();
-        let context =
-            crate::testing::TestExecutionContextBuilder::for_backend(&backend.clone().into())
-                .session_id("session")
-                .build()
-                .into_runtime();
+        let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
+            .session_id("session")
+            .build()
+            .into_runtime();
         let registration = crate::ProcessRegistration::new(
             "journaled-process",
             crate::ProcessInput::Engine {
@@ -108,13 +106,12 @@ mod tests {
     /// reference to bytes the retirement reclaimed.
     #[tokio::test]
     async fn a_retired_durable_owner_still_fails_the_public_env_ref_publish() {
-        let backend = crate::support::memory_backend().await;
+        let backend = crate::support::memory_store_backend().await;
         let env_store = backend.process_env_store();
-        let context =
-            crate::testing::TestExecutionContextBuilder::for_backend(&backend.clone().into())
-                .session_id("session")
-                .build()
-                .into_runtime();
+        let context = crate::testing::TestExecutionContextBuilder::for_backend(&backend)
+            .session_id("session")
+            .build()
+            .into_runtime();
         let owner = crate::ArtifactOwner::Execution(crate::ExecutionScope::runtime_operation(
             "durable-owner",
         ));
@@ -146,7 +143,7 @@ mod tests {
     /// refusal prove the derivation never asks it.
     #[tokio::test]
     async fn a_process_scope_without_an_admitted_incarnation_is_unconstructible() {
-        let backend = crate::support::memory_backend().await;
+        let backend = crate::support::memory_store_backend().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         registry
             .register_process(registration_for_parent_scope("worker"))
@@ -166,7 +163,7 @@ mod tests {
     /// incarnation 1 even though the registry now holds incarnation 2.
     #[tokio::test]
     async fn a_child_started_from_a_process_incarnation_keeps_the_pinned_parent() {
-        let backend = crate::support::memory_backend().await;
+        let backend = crate::support::memory_store_backend().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let retired = registry
             .register_process(registration_for_parent_scope("worker"))

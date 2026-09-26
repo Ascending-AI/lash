@@ -16,7 +16,7 @@ mod tests {
     }
 
     async fn reg() -> Arc<dyn ProcessDefinitionRegistry> {
-        crate::support::memory_backend()
+        crate::support::memory_store_set()
             .await
             .process_definition_registry()
     }

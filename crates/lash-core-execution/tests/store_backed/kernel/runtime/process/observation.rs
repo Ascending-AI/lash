@@ -18,7 +18,7 @@ mod tests {
     use crate::{ProcessId, ProcessRegistry, SessionId};
 
     async fn memory_registry() -> Arc<dyn ProcessRegistry> {
-        crate::support::memory_backend().await.process_registry()
+        crate::support::memory_store_set().await.process_registry()
     }
 
     fn observer(registry: Arc<dyn ProcessRegistry>) -> ProcessWorkObserver {

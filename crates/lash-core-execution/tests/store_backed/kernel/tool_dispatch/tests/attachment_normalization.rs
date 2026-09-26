@@ -140,7 +140,7 @@ async fn durable_attachment_context(
     Arc<dyn crate::RuntimePersistence>,
     Arc<dyn crate::AttachmentStore>,
 ) {
-    let backend = crate::support::memory_backend().await;
+    let backend = crate::support::memory_store_backend().await;
     let factory = backend.session_store_factory();
     let request = crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
@@ -152,8 +152,7 @@ async fn durable_attachment_context(
         .create_store(&request)
         .await
         .expect("create the manifest store");
-    let backend: Arc<dyn crate::AttachmentStore> =
-        crate::Backend::from(backend.clone()).attachment_store();
+    let backend: Arc<dyn crate::AttachmentStore> = backend.attachment_store();
     let attachment_store = Arc::new(crate::SessionAttachmentStore::new(
         Arc::clone(&backend),
         Arc::new(crate::attachments::PersistenceManifestAdapter(Arc::clone(
@@ -461,7 +460,7 @@ async fn deferred_completion_after_hook_attachment_is_normalized_before_recordin
     let execution = crate::RuntimeExecutionContext::new(
         SessionId::from("session"),
         Arc::new(context),
-        crate::support::memory_backend().await.process_env_store(),
+        crate::support::memory_store_set().await.process_env_store(),
         attachment_store,
         Arc::new(crate::ChronologicalProjection::default()),
         None,

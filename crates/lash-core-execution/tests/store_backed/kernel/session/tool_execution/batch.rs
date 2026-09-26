@@ -6,6 +6,8 @@ mod tests {
     use std::sync::Mutex;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
+    const SEED: u64 = 0x5_f730;
+
     fn granted_tool_definition() -> crate::ToolDefinition {
         crate::ToolDefinition::raw(
             "tool:granted_orchestration_probe",
@@ -58,9 +60,11 @@ mod tests {
         }
     }
 
-    async fn granted_call_context(
+    async fn granted_call_context<'run>(
+        backend: &crate::Backend,
+        scoped: crate::ScopedEffectController<'run>,
         observer: Arc<dyn crate::engine::ObservationSink>,
-    ) -> (crate::RuntimeExecutionContext<'static>, Arc<AtomicUsize>) {
+    ) -> (crate::RuntimeExecutionContext<'run>, Arc<AtomicUsize>) {
         let executions = Arc::new(AtomicUsize::default());
         let orchestrating =
             crate::facade_support::OrchestratingToolDef::new(Arc::new(OrchestrationProbe {
@@ -72,18 +76,10 @@ mod tests {
         let plugins = crate::support::plugin_host(Vec::new())
             .build_session("granted-call-session")
             .expect("plugin session");
-        let backend = crate::support::memory_backend().await;
         let attachment_store = Arc::new(crate::SessionAttachmentStore::ephemeral(
-            crate::Backend::from(backend.clone()).attachment_store(),
+            backend.attachment_store(),
         ));
         let host = Arc::new(crate::testing::MockSessionManager::default());
-        let controller = crate::support::scoped_controller(
-            &backend,
-            crate::AdmittedScope::turn(
-                SessionId::from("granted-call-session"),
-                crate::TurnId::from("test-turn"),
-            ),
-        );
         let dispatch = crate::tool_dispatch::ToolDispatchContext {
             plugins,
             tools: Arc::new(GrantedLeafTool),
@@ -98,13 +94,7 @@ mod tests {
             trigger_router: None,
             process_definitions: None,
             process_engines: crate::ProcessEngineRegistry::default(),
-            effect_controller: crate::runtime::RuntimeEffectControllerHandle::Shared {
-                controller: controller.clone(),
-                admitted: crate::AdmittedScope::turn(
-                    SessionId::from("granted-call-session"),
-                    crate::TurnId::from("test-turn"),
-                ),
-            },
+            effect_controller: crate::runtime::RuntimeEffectControllerHandle::borrowed(scoped),
             direct_completions: crate::DirectCompletionClient::unavailable(
                 "direct completions are unavailable in this test context",
             ),
@@ -150,10 +140,24 @@ mod tests {
         crate::ToolExecutionGrant::from_definition(granted_tool_definition())
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn scalar_granted_call_never_orchestrates() {
-        let (context, orchestration_executions) =
-            granted_call_context(crate::engine::NullObservationSink::arc()).await;
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let backend = double.lash_backend();
+        let handler = double
+            .open_handler(crate::AdmittedScope::turn(
+                SessionId::from("granted-call-session"),
+                crate::TurnId::from("test-turn"),
+            ))
+            .await
+            .expect("open the granted-call handler");
+        let (context, orchestration_executions) = granted_call_context(
+            &backend,
+            handler.scoped(),
+            crate::engine::NullObservationSink::arc(),
+        )
+        .await;
 
         let reply = context
             .call_command_tool(
@@ -176,12 +180,31 @@ mod tests {
             reply.output.value_for_projection(),
             serde_json::json!("granted leaf")
         );
+        drop(context);
+        handler
+            .close()
+            .await
+            .expect("close the granted-call handler");
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn batch_granted_call_never_orchestrates() {
-        let (context, orchestration_executions) =
-            granted_call_context(crate::engine::NullObservationSink::arc()).await;
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let backend = double.lash_backend();
+        let handler = double
+            .open_handler(crate::AdmittedScope::turn(
+                SessionId::from("granted-call-session"),
+                crate::TurnId::from("test-turn"),
+            ))
+            .await
+            .expect("open the granted-call handler");
+        let (context, orchestration_executions) = granted_call_context(
+            &backend,
+            handler.scoped(),
+            crate::engine::NullObservationSink::arc(),
+        )
+        .await;
 
         let replies = context
             .call_tool_batch(vec![
@@ -203,6 +226,11 @@ mod tests {
             replies.replies[0].output.value_for_projection(),
             serde_json::json!("granted leaf")
         );
+        drop(context);
+        handler
+            .close()
+            .await
+            .expect("close the granted-call handler");
     }
 
     #[derive(Default)]
@@ -373,14 +401,25 @@ mod tests {
         }
     }
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn start_event_transcript_preserves_stream_trace_activity_order() {
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
         let (turn_tx, turn_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (context, _) = granted_call_context(crate::testing::ChannelObservationSink::new(
-            Some(event_tx),
-            Some(turn_tx),
-        ))
+        let double =
+            crate::support::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let backend = double.lash_backend();
+        let handler = double
+            .open_handler(crate::AdmittedScope::turn(
+                SessionId::from("granted-call-session"),
+                crate::TurnId::from("test-turn"),
+            ))
+            .await
+            .expect("open the granted-call handler");
+        let (context, _) = granted_call_context(
+            &backend,
+            handler.scoped(),
+            crate::testing::ChannelObservationSink::new(Some(event_tx), Some(turn_tx)),
+        )
         .await;
         let sink = Arc::new(StartEventTranscriptSink {
             stream_rx: Mutex::new(event_rx),
@@ -429,6 +468,11 @@ mod tests {
         trace ToolCallStarted
         activity ToolCallStarted
         "#);
+        drop(context);
+        handler
+            .close()
+            .await
+            .expect("close the granted-call handler");
     }
 
     /// A controller with no group substrate: formation of the batch's group

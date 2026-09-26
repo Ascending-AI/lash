@@ -474,7 +474,7 @@ async fn fig790_process_await_context(
     // The recording controllers answer every process command themselves, so
     // the registry behind the effect-backed service is never consulted; a
     // backend supplies it because the local executor is built over one.
-    let backend = crate::support::memory_backend().await;
+    let backend = crate::support::memory_store_set().await;
     let host = Arc::new(crate::testing::MockSessionManager::default());
     let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
     let processes: Arc<dyn crate::ProcessService> =
