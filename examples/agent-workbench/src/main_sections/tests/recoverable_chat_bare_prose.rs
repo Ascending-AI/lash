@@ -60,9 +60,9 @@ async fn interactive_bare_prose_termination_leaves_one_committed_agent_reply() {
     // turn reaches when the send path does not force the answer through
     // `finish`, and the one every queued turn reaches.
     let output = session
-        .turn(lash::TurnInput::text("answer in prose"))
-        .turn_id("bare-prose-turn")
-        .stream_to(&ChannelTurnEvents {
+        .send(lash::TurnInput::text("answer in prose"))
+        .id("bare-prose-turn")
+        .output_into(&ChannelTurnEvents {
             turn_state: Arc::clone(&turn_state),
         })
         .await
@@ -165,9 +165,9 @@ async fn bare_prose_reply_with_reasoning_renders_its_committed_prose_once() {
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     // No `require_finish`: the termination every queued turn reaches.
     let output = session
-        .turn(lash::TurnInput::text("answer in prose, thinking first"))
-        .turn_id("reasoned-prose-turn")
-        .stream_to(&ChannelTurnEvents {
+        .send(lash::TurnInput::text("answer in prose, thinking first"))
+        .id("reasoned-prose-turn")
+        .output_into(&ChannelTurnEvents {
             turn_state: Arc::clone(&turn_state),
         })
         .await
@@ -281,9 +281,9 @@ async fn mid_turn_protocol_prose_stays_out_of_the_chat_rows() {
         .expect("open mid-turn prose session");
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let output = session
-        .turn(lash::TurnInput::text("take a step, then answer"))
-        .turn_id("mid-turn-prose-turn")
-        .stream_to(&ChannelTurnEvents {
+        .send(lash::TurnInput::text("take a step, then answer"))
+        .id("mid-turn-prose-turn")
+        .output_into(&ChannelTurnEvents {
             turn_state: Arc::clone(&turn_state),
         })
         .await

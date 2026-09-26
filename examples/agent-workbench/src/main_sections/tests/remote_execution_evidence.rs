@@ -1,4 +1,5 @@
 use super::*;
+use lash::rlm::RlmSendBuilderExt;
 
 pub(crate) fn browser_projection_trigger_identities() -> serde_json::Value {
     serde_json::json!({
@@ -55,11 +56,11 @@ async fn workbench_remote_recovery_facades_deliver_cursor_events_and_terminal_re
         .expect("subscribe and recover remote");
 
     session
-        .turn(lash::TurnInput::text("prove remote recovery facades"))
-        .turn_id("remote-recovery-facade-turn")
+        .send(lash::TurnInput::text("prove remote recovery facades"))
+        .id("remote-recovery-facade-turn")
         .require_finish()
         .expect("require finish")
-        .run()
+        .output()
         .await
         .expect("run remote recovery facade turn");
 

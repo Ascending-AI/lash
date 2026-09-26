@@ -1,6 +1,7 @@
 use super::*;
 use lash::SessionId;
 use lash::TurnId;
+use lash::rlm::RlmSendBuilderExt;
 
 async fn run_provider_evidence_turn(
     state: &AppState,
@@ -10,11 +11,11 @@ async fn run_provider_evidence_turn(
     state.track_turn(&session.session_id(), turn_id);
     let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let output = session
-        .turn(lash::TurnInput::text("answer directly"))
-        .turn_id(turn_id)
+        .send(lash::TurnInput::text("answer directly"))
+        .id(turn_id)
         .require_finish()
         .expect("require provider fixture finish")
-        .stream_to(&ChannelTurnEvents {
+        .output_into(&ChannelTurnEvents {
             turn_state: Arc::clone(&turn_state),
         })
         .await

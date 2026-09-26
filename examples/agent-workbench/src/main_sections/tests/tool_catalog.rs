@@ -93,9 +93,9 @@ pub(crate) async fn assert_plugin_provider_execution(
     plugin_mail_world: &mail::MailWorld,
 ) {
     let output = session
-        .turn(lash::TurnInput::text("send through the plugin provider"))
-        .turn_id(format!("workbench-test-turn:{}", uuid::Uuid::new_v4()))
-        .run()
+        .send(lash::TurnInput::text("send through the plugin provider"))
+        .id(format!("workbench-test-turn:{}", uuid::Uuid::new_v4()))
+        .output()
         .await
         .expect("turn should resolve and execute inbox.test.send");
     assert_eq!(output.final_value(), Some(&serde_json::json!("test-1")));
@@ -170,9 +170,9 @@ pub(crate) async fn assert_live_tool_provider_execution_and_removal(
 ) {
     let live = add_live_provider(core, session).await;
     let output = session
-        .turn(lash::TurnInput::text("send through the live provider"))
-        .turn_id(format!("workbench-test-turn:{}", uuid::Uuid::new_v4()))
-        .run()
+        .send(lash::TurnInput::text("send through the live provider"))
+        .id(format!("workbench-test-turn:{}", uuid::Uuid::new_v4()))
+        .output()
         .await
         .expect("turn should resolve and execute inbox.live.send");
     assert_eq!(output.final_value(), Some(&serde_json::json!("live-1")));

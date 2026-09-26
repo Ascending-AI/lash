@@ -1,5 +1,7 @@
 use super::*;
 
+const SEED: u64 = 0xf9_0005;
+
 #[derive(Clone, Copy)]
 struct WorkbenchControlTools;
 
@@ -128,7 +130,8 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
             .await
             .expect("open tool control process registry"),
         ) as Arc<dyn lash::process::ProcessRegistry>;
-        let core = explicit_durable_test_facets(&data_dir)
+        let double = test_double_backend(SEED).await;
+        let core = explicit_durable_test_facets_on(double.lash_backend())
             .provider(provider)
             .model(
                 lash::ModelSpec::builder("workbench-tool-control-model")
@@ -138,7 +141,6 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
             )
             .tools(workbench_control_tools())
             .plugin(Arc::new(WorkbenchPluginFactory::new()))
-            .without_queued_work()
             .build(crate::test_core_owner())
             .expect("build tool control workbench core");
         let session = core
@@ -148,8 +150,8 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
             .expect("open tool control session");
 
         let cancelled = session
-            .turn(lash::TurnInput::text("cancel the action"))
-            .run()
+            .send(lash::TurnInput::text("cancel the action"))
+            .output()
             .await
             .expect("run cancellation turn")
             .result;
@@ -175,8 +177,8 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
         );
 
         let finished = session
-            .turn(lash::TurnInput::text("finish from the tool"))
-            .run()
+            .send(lash::TurnInput::text("finish from the tool"))
+            .output()
             .await
             .expect("run tool finish turn")
             .result;
@@ -188,8 +190,8 @@ fn workbench_tools_expose_typed_cancellation_and_turn_control() {
         ));
 
         let failed = session
-            .turn(lash::TurnInput::text("reject from the tool"))
-            .run()
+            .send(lash::TurnInput::text("reject from the tool"))
+            .output()
             .await
             .expect("run tool failure turn")
             .result;
