@@ -81,7 +81,7 @@ fn assert_duplicate_identity(
 #[tokio::test]
 async fn redelivered_start_realizes_one_process_and_a_changed_declaration_returns_it() -> Result<()>
 {
-    let (core, registry, _process) = ingress_core().await?;
+    let (core, registry, _process) = ingress_core(memory_store_backend().await).await?;
     let key = ingress_of(&core)?.key("redelivered-start", 0);
 
     let first = ingress_of(&core)?
@@ -164,7 +164,7 @@ async fn redelivered_start_realizes_one_process_and_a_changed_declaration_return
 /// rather than the store's verdict.
 #[tokio::test]
 async fn a_coalesced_start_reports_replayed_and_a_fresh_start_does_not() -> Result<()> {
-    let (core, registry, _process) = ingress_core().await?;
+    let (core, registry, _process) = ingress_core(memory_store_backend().await).await?;
     let key = ingress_of(&core)?.key("coalesced-start", 0);
 
     let realized = ingress_of(&core)?
@@ -207,7 +207,7 @@ async fn a_coalesced_start_reports_replayed_and_a_fresh_start_does_not() -> Resu
 
 #[tokio::test]
 async fn redelivered_event_appends_once_and_refuses_a_changed_payload() -> Result<()> {
-    let (core, registry, process) = ingress_core().await?;
+    let (core, registry, process) = ingress_core(memory_store_backend().await).await?;
     let key = ingress_of(&core)?.key("redelivered-emit", 0);
 
     let first = ingress_of(&core)?
@@ -255,7 +255,7 @@ async fn redelivered_event_appends_once_and_refuses_a_changed_payload() -> Resul
 
 #[tokio::test]
 async fn redelivered_signal_appends_once_and_refuses_a_changed_payload() -> Result<()> {
-    let (core, registry, process) = ingress_core().await?;
+    let (core, registry, process) = ingress_core(memory_store_backend().await).await?;
     let key = ingress_of(&core)?.key("redelivered-signal", 0);
     let signal_event = format!("signal.{SIGNAL}");
 
@@ -304,7 +304,7 @@ async fn redelivered_signal_appends_once_and_refuses_a_changed_payload() -> Resu
 
 #[tokio::test]
 async fn redelivered_cancel_requests_the_same_cancellation_once() -> Result<()> {
-    let (core, registry, process) = ingress_core().await?;
+    let (core, registry, process) = ingress_core(memory_store_backend().await).await?;
     let key = ingress_of(&core)?.key("redelivered-cancel", 0);
 
     let first = ingress_of(&core)?
@@ -390,8 +390,11 @@ async fn redelivered_cancel_requests_the_same_cancellation_once() -> Result<()> 
 
 #[tokio::test]
 async fn redelivered_trigger_ingests_once_and_refuses_a_changed_payload() -> Result<()> {
-    let (core, store, _subscription, _registry) =
-        ingress_core_with_trigger_store(Arc::new(KeyJournalController::default())).await?;
+    let (core, store, _subscription, _registry) = ingress_core_with_trigger_store(
+        memory_store_backend().await,
+        Arc::new(KeyJournalController::default()),
+    )
+    .await?;
     let key = ingress_of(&core)?.key("redelivered-trigger", 0);
 
     let first = ingress_of(&core)?

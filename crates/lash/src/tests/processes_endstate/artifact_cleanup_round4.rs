@@ -4,15 +4,14 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
+use crate::tests::restate_double;
+
+const SEED: u64 = 0x5eed_f303;
 
 #[tokio::test]
 async fn a_pruned_process_cleanup_cannot_release_its_successor_owner() -> Result<()> {
-    let dir = tempfile::tempdir().expect("stale cleanup tempdir");
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::open(dir.path())
-            .await
-            .expect("open the stale cleanup backend"),
-    );
+    let double = restate_double(SEED).await;
+    let backend = double.lash_backend();
     let registry = backend.process_registry();
     let artifact_store = backend.process_env_store();
     let engine = Arc::new(FailOnceReleaseEngine {
@@ -56,8 +55,8 @@ async fn a_pruned_process_cleanup_cannot_release_its_successor_owner() -> Result
         .await?;
 
     let core = prune_recovery_core(
-        backend.clone().into(),
-        artifact_store.clone() as Arc<dyn lash_core::ProcessExecutionEnvStore>,
+        backend.clone(),
+        Arc::clone(&artifact_store),
         Arc::clone(&engine),
     )?;
     assert!(

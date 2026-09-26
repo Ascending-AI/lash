@@ -8,23 +8,26 @@ const SCOPE: &str = "intent-ingress-turn";
 const EVENT: &str = "intent.ingress.realized";
 const SIGNAL: &str = "ingress-signal";
 
-/// The controller-owned (ordinal-addressed) tier: a memory backend whose
+/// The controller-owned (ordinal-addressed) tier: a backend whose
 /// effect host is a [`KeyJournalController`].
 /// The core, its registry, and the id of the fixture process every emit,
 /// signal and cancel intent targets.
-async fn ingress_core() -> Result<(LashCore, Arc<dyn ProcessRegistry>, ProcessId)> {
-    ingress_core_with_effect_host(Arc::new(KeyJournalController::default())).await
+async fn ingress_core(
+    backend: lash_core::Backend,
+) -> Result<(LashCore, Arc<dyn ProcessRegistry>, ProcessId)> {
+    ingress_core_with_effect_host(backend, Arc::new(KeyJournalController::default())).await
 }
 
-/// A memory backend with its effect host replaced by `effect_host`.
+/// `backend` with its effect host replaced by `effect_host`.
 async fn ingress_core_with_effect_host(
+    backend: lash_core::Backend,
     effect_host: Arc<dyn lash_core::EffectHost>,
 ) -> Result<(LashCore, Arc<dyn ProcessRegistry>, ProcessId)> {
-    ingress_core_over(memory_backend().await, Some(effect_host), None).await
+    ingress_core_over(backend, Some(effect_host), None).await
 }
 
 async fn ingress_core_over(
-    backend: Arc<lash_sqlite_store::SqliteBackend>,
+    backend: lash_core::Backend,
     effect_host: Option<Arc<dyn lash_core::EffectHost>>,
     process_env_store: Option<Arc<dyn lash_core::ProcessExecutionEnvStore>>,
 ) -> Result<(LashCore, Arc<dyn ProcessRegistry>, ProcessId)> {
@@ -59,7 +62,7 @@ async fn ingress_core_over(
         .await?
         .id;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        ingress_backend(backend.into(), effect_host, process_env_store),
+        ingress_backend(backend, effect_host, process_env_store),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -179,6 +182,7 @@ async fn register_ingress_trigger_subscription(
 }
 
 async fn ingress_core_with_trigger_store(
+    backend: lash_core::Backend,
     effect_host: Arc<dyn lash_core::EffectHost>,
 ) -> Result<(
     LashCore,
@@ -186,14 +190,13 @@ async fn ingress_core_with_trigger_store(
     lash_core::TriggerSubscriptionRecord,
     Arc<dyn ProcessRegistry>,
 )> {
-    let backend = memory_backend().await;
     let store: Arc<dyn lash_core::TriggerStore> = backend.trigger_store();
     let subscription =
         register_ingress_trigger_subscription(store.as_ref(), backend.process_env_store().as_ref())
             .await?;
     let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
-        ingress_backend(backend.into(), Some(effect_host), None),
+        ingress_backend(backend, Some(effect_host), None),
         crate::TurnBudget::Unbounded,
     ))
     .provider(mock_provider())
@@ -220,8 +223,9 @@ fn trigger_intent(session_id: &SessionId) -> lash_core::ToolIntent {
 /// router, and re-submitting the same identity cannot emit a second time.
 #[tokio::test]
 async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
+    let backend = memory_store_backend().await;
     let (core, store, subscription, _) =
-        ingress_core_with_trigger_store(Arc::new(KeyJournalController::default())).await?;
+        ingress_core_with_trigger_store(backend, Arc::new(KeyJournalController::default())).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("host-trigger-call", 0);
 
@@ -305,8 +309,9 @@ async fn host_submitted_trigger_intent_emits_one_occurrence() -> Result<()> {
 #[tokio::test]
 async fn distinct_host_trigger_declarations_create_two_occurrences_and_redrive_exactly_once()
 -> Result<()> {
+    let backend = memory_store_backend().await;
     let (core, store, _subscription, _) =
-        ingress_core_with_trigger_store(Arc::new(KeyJournalController::default())).await?;
+        ingress_core_with_trigger_store(backend, Arc::new(KeyJournalController::default())).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let first_key = ingress.key("host-trigger-call-a", 0);
     let second_key = ingress.key("host-trigger-call-b", 0);
@@ -386,8 +391,9 @@ async fn distinct_host_trigger_declarations_create_two_occurrences_and_redrive_e
 
 #[tokio::test]
 async fn predecessor_host_trigger_key_is_refused_before_store_ingress() -> Result<()> {
+    let backend = memory_store_backend().await;
     let (core, store, _, _) =
-        ingress_core_with_trigger_store(Arc::new(KeyJournalController::default())).await?;
+        ingress_core_with_trigger_store(backend, Arc::new(KeyJournalController::default())).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let mut predecessor = serde_json::to_value(ingress.key("predecessor-trigger-call", 0))?;
     predecessor
@@ -872,7 +878,7 @@ fn cancel_intent_for_target(session_id: &SessionId, target: &ProcessId) -> lash_
 
 #[tokio::test]
 async fn duplicate_host_submit_returns_the_same_outcome_and_realizes_once() -> Result<()> {
-    let (core, registry, process) = ingress_core().await?;
+    let (core, registry, process) = ingress_core(memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("host-call", 0);
 
@@ -930,7 +936,7 @@ async fn duplicate_host_submit_returns_the_same_outcome_and_realizes_once() -> R
 
 #[tokio::test]
 async fn identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking() -> Result<()> {
-    let (core, registry, process) = ingress_core().await?;
+    let (core, registry, process) = ingress_core(memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("kind-swap-start-emit", 0);
 
@@ -975,7 +981,7 @@ async fn identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking
 
 #[tokio::test]
 async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -> Result<()> {
-    let (core, registry, process) = ingress_core().await?;
+    let (core, registry, process) = ingress_core(memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("kind-swap-emit-cancel", 0);
 
@@ -1034,9 +1040,11 @@ async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -
 #[tokio::test]
 async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -> Result<()> {
     let controller = Arc::new(KeyJournalController::default());
-    let (core, registry, process) =
-        ingress_core_with_effect_host(Arc::clone(&controller) as Arc<dyn lash_core::EffectHost>)
-            .await?;
+    let (core, registry, process) = ingress_core_with_effect_host(
+        memory_store_backend().await,
+        Arc::clone(&controller) as Arc<dyn lash_core::EffectHost>,
+    )
+    .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("seeded-outside-protocol", 0);
     controller
@@ -1079,7 +1087,7 @@ async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -
 
 #[tokio::test]
 async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
-    let (core, registry, process) = ingress_core().await?;
+    let (core, registry, process) = ingress_core(memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let foreign_session =
         crate::tools::ToolIntentIngressKey::derive("foreign-session", SCOPE, "host-call", 0);
@@ -1122,7 +1130,7 @@ async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
 
 #[tokio::test]
 async fn malformed_key_is_a_typed_refusal_before_realization() -> Result<()> {
-    let (core, registry, process) = ingress_core().await?;
+    let (core, registry, process) = ingress_core(memory_store_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let mut malformed = serde_json::to_value(crate::tools::ToolIntentIngressKey::derive(
         SESSION,
@@ -1286,9 +1294,11 @@ fn ingress_transport_fields_are_required_and_have_no_implicit_serde_defaults() {
 #[tokio::test]
 async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<()> {
     let controller = Arc::new(AdmissionCrashController::default());
-    let (core, registry, process) =
-        ingress_core_with_effect_host(Arc::clone(&controller) as Arc<dyn lash_core::EffectHost>)
-            .await?;
+    let (core, registry, process) = ingress_core_with_effect_host(
+        memory_store_backend().await,
+        Arc::clone(&controller) as Arc<dyn lash_core::EffectHost>,
+    )
+    .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("crash-redrive-call", 0);
     let expected_admission = key.identity().replay_key.clone();
@@ -1383,7 +1393,7 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
 #[tokio::test]
 async fn start_env_is_persisted_after_admission_and_matching_redrive_completes() -> Result<()> {
     let controller = Arc::new(AdmissionCrashController::default());
-    let backend = memory_backend().await;
+    let backend = memory_store_backend().await;
     let env_store = Arc::new(ProbeProcessEnvStore::over(backend.process_env_store()));
     let (core, registry, _process) = ingress_core_over(
         backend,
@@ -1453,7 +1463,7 @@ async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()>
     let env_store = Arc::new(ProbeProcessEnvStore::over(backend.process_env_store()));
     env_store.fail_put.store(true, Ordering::SeqCst);
     let (core, registry, _process) = ingress_core_over(
-        backend,
+        backend.into(),
         None,
         Some(Arc::clone(&env_store) as Arc<dyn lash_core::ProcessExecutionEnvStore>),
     )
@@ -1626,8 +1636,9 @@ impl lash_core::plugin::PluginFactory for IngressAdmissionEngineFactory {
     }
 }
 
-async fn ingress_engine_core() -> Result<(LashCore, Arc<dyn ProcessRegistry>)> {
-    let backend = memory_backend().await;
+async fn ingress_engine_core(
+    backend: Arc<lash_sqlite_store::SqliteBackend>,
+) -> Result<(LashCore, Arc<dyn ProcessRegistry>)> {
     let registry = backend.process_registry();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         backend.clone().into(),
@@ -1682,7 +1693,7 @@ fn ingress_engine_env_spec() -> lash_core::ProcessExecutionEnvSpec {
 /// stamp — neither happened while ingress built its Start command unchecked.
 #[tokio::test]
 async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> {
-    let (core, registry) = ingress_engine_core().await?;
+    let (core, registry) = ingress_engine_core(memory_backend().await).await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
 
     let unregistered_key = ingress.key("ingress-unregistered-engine", 0);
@@ -1757,7 +1768,7 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
 #[tokio::test]
 async fn equivalent_recorded_start_has_same_environment_sensitive_identity_across_routes()
 -> Result<()> {
-    let (core, registry) = ingress_engine_core().await?;
+    let (core, registry) = ingress_engine_core(memory_backend().await).await?;
     let payload = serde_json::json!({"program": "environment-sensitive"});
 
     let ingress = core.tool_intents(
