@@ -1387,6 +1387,7 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         context.runs.lock_recover().as_slice(),
         [
             "lash:fig1767-process-cmd.journal-budget",
+            "lash:fig1767-process-cmd.process-signal-append:v1",
             "lash:fig1767-process-cmd"
         ],
         "the eager effect must journal its decisions after its budget verdict and before its recorded effect"
