@@ -28,7 +28,7 @@ use lash_store_sql::process::{
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
-use crate::scope_fence::Schema;
+use crate::schema_layout::Schema;
 
 /// `<column> = '<state>'`, for the one wake-delivery state named.
 ///

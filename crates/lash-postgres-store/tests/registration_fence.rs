@@ -65,11 +65,10 @@ async fn registration_reinstates_every_bound_host() {
     )) as Arc<dyn lash_core_execution::ProcessRegistry>;
     // A host whose fence lives outside this registry's store, bound by hand.
     let journal = tempfile::tempdir().expect("journal directory");
-    let other: Arc<dyn EffectHost> = Arc::new(
-        lash_sqlite_store::SqliteEffectHost::open(&journal.path().join("effects.db"))
-            .await
-            .expect("open the other host"),
-    );
+    let other_backend = lash_sqlite_store::SqliteBackend::open(journal.path())
+        .await
+        .expect("open the other host's backend");
+    let other: Arc<dyn EffectHost> = other_backend.effect_host();
     registry.bind_effect_host(&other);
     let process_id = ProcessId::from("reused-across-hosts");
     other

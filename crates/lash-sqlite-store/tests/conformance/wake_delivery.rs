@@ -29,7 +29,7 @@ lash_conformance::wake_delivery_crash_tests!({
     ));
     let backend = TestBackend::open_with(
         SUBSTRATE,
-        |options| SqliteBackendOptions {
+        |options| SqliteStoreSetOptions {
             wake_delivery: lash_core_execution::WakeDeliveryConfig::new(10_000)
                 .expect("valid test retention")
                 .with_enqueuing_stale_after_ms(25)

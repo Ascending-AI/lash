@@ -42,7 +42,7 @@ impl lash_conformance::StoreMaintenanceFaultInjector for SqliteCorruptRootedMani
 }
 
 lash_conformance::store_maintenance_tests!({
-    let retained = Retained::default();
+    let retained: Retained<TestBackend> = Retained::default();
     let make_retained = retained.clone();
     let bytes_retained = retained.clone();
     (
@@ -59,7 +59,7 @@ lash_conformance::store_maintenance_tests!({
 });
 
 lash_conformance::store_maintenance_fault_tests!({
-    let retained = Retained::default();
+    let retained: Retained<TestBackend> = Retained::default();
     let backend = Arc::new(Mutex::new(None));
     let make_backend = Arc::clone(&backend);
     (

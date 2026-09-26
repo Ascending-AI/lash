@@ -155,7 +155,7 @@ fn head_revision_cas_holds_across_two_connections() {
 // the commit while doing so.
 #[tokio::test]
 async fn gc_keeps_live_committed_checkpoint_blobs() {
-    let store = lash_sqlite_store::SqliteBackend::memory()
+    let store = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("memory backend")
         .open_store()
@@ -282,7 +282,7 @@ fn exclusive_draft(session_id: &SessionId, text: &str) -> QueuedWorkBatchDraft {
 // SQLite lane independently sensitive to both production claim-id spellings.
 #[tokio::test]
 async fn sqlite_claims_pin_both_production_claim_id_spellings() {
-    let store = lash_sqlite_store::SqliteBackend::memory()
+    let store = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("memory backend")
         .open_store()
@@ -348,7 +348,7 @@ async fn sqlite_claims_pin_both_production_claim_id_spellings() {
 // get `None`.
 #[tokio::test]
 async fn second_claim_on_held_batch_is_not_won() {
-    let store = lash_sqlite_store::SqliteBackend::memory()
+    let store = lash_sqlite_store::SqliteStoreSet::memory()
         .await
         .expect("memory backend")
         .open_store()

@@ -14,7 +14,7 @@
 
 use std::sync::LazyLock;
 
-use crate::scope_fence::Schema;
+use crate::schema_layout::Schema;
 use lash_store_sql::artifact::blobs::BlobStatements;
 use lash_store_sql::artifact::owner_retirements::OwnerRetirementStatements;
 use lash_store_sql::artifact::owners::OwnerStatements;

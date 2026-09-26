@@ -1062,7 +1062,7 @@ async fn open_existing_store_aborts_on_unreadable_requested_session_meta() {
 
 #[tokio::test]
 async fn segment_handover_persist_keeps_current_input_for_crash_replay() {
-    let registry = crate::SqliteBackend::memory()
+    let registry = crate::SqliteStoreSet::memory()
         .await
         .expect("memory registry")
         .process_registry();
@@ -1107,7 +1107,7 @@ async fn segment_handover_persist_keeps_current_input_for_crash_replay() {
 
 #[tokio::test]
 async fn terminal_segment_handover_cleanup_removes_continuation_state() {
-    let registry = crate::SqliteBackend::memory()
+    let registry = crate::SqliteStoreSet::memory()
         .await
         .expect("memory registry")
         .process_registry();

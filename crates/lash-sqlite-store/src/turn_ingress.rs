@@ -33,7 +33,7 @@ use lash_store_sql::turn_ingress::{
 };
 use lash_store_sql::{Dialect, Vocabulary, VocabularyTerm};
 
-use crate::scope_fence::Schema;
+use crate::schema_layout::Schema;
 
 mod family;
 mod pending_inputs;

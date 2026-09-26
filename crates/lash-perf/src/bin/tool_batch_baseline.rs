@@ -660,10 +660,11 @@ async fn run_restate(
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
-    // The RLM producer's Lashlang artifacts live in a memory backend of their
-    // own: the batch is measured over each lane's bare effect host.
-    let artifacts = lash_sqlite_store::SqliteBackend::memory().await?;
-    let producers = producers(&args.producers, &artifacts.clone().into());
+    // The RLM producer's Lashlang artifacts live in a memory store set of
+    // their own: the batch is measured over each lane's bare effect host.
+    let artifacts = lash_sqlite_store::SqliteStoreSet::memory().await?;
+    let artifacts_backend = lash_conformance::recording_backend_over(Arc::new(artifacts.clone()));
+    let producers = producers(&args.producers, &artifacts_backend);
     match args.backend.as_str() {
         "sqlite" => run_sqlite(&args, &producers).await?,
         "restate" => run_restate(&args, &producers).await?,

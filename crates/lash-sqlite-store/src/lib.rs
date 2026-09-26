@@ -90,10 +90,10 @@ use lash_core_execution::{
     ProcessRegistry, ProcessStartOutcome, ProcessStarted, QueuedWorkStore, RuntimePersistence,
     SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
     SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore,
-    SessionListFilter, SessionMeta, SessionRelationKind, SessionStoreCreateRequest,
-    SessionStoreFactory, SessionSummary, StoreError, StoreMaintenance, TurnInputStore,
-    VacuumReport, facade_support::ProcessStartPlan, facade_support::ProcessTransition,
-    facade_support::ProcessTransitionPlan, facade_support::registry_transitions,
+    SessionListFilter, SessionMeta, SessionStoreCreateRequest, SessionStoreFactory, SessionSummary,
+    StoreError, StoreMaintenance, TurnInputStore, VacuumReport, facade_support::ProcessStartPlan,
+    facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,
+    facade_support::registry_transitions,
 };
 use rusqlite::{Connection, OptionalExtension, Transaction, params};
 
@@ -136,8 +136,10 @@ mod release_stamp;
 mod required_constraints;
 mod schema;
 mod schema_fragments;
+mod schema_layout;
 mod scope_fence;
 mod session_ingress;
+mod session_listing;
 mod session_meta;
 mod session_sql;
 #[cfg(test)]
@@ -178,6 +180,7 @@ pub use lash_core_execution::store_backend_support::required_constraints::{
 pub use preflight::{SqliteStorePreflight, verify_schema_at};
 pub use required_constraints::inspect_required_constraints_at;
 pub use schema::SqliteDatabase;
+use session_listing::list_session_summaries;
 
 use forks::*;
 use pending_turn_inputs::*;
@@ -781,6 +784,11 @@ impl SqliteSessionStoreFactory {
         self
     }
 
+    /// The clock a session store opened by this factory runs on.
+    fn session_store_clock(&self) -> Arc<dyn lash_core_execution::Clock> {
+        Arc::clone(&self.clock)
+    }
+
     /// The method and backing field do not exist without the `testing` feature.
     #[cfg(feature = "testing")]
     pub fn with_fault_injector(mut self, injector: testing::SqliteFaultInjector) -> Self {
@@ -840,7 +848,7 @@ impl SqliteSessionStoreFactory {
                 &self.core,
                 &request.session_id,
                 self.options,
-                Arc::clone(&self.clock),
+                self.session_store_clock(),
                 self.turn_cancel_closure_owner_binding(),
                 #[cfg(feature = "testing")]
                 self.fault_injector.clone(),
@@ -903,7 +911,7 @@ impl SqliteSessionStoreFactory {
                 &self.core,
                 &request.session_id,
                 self.options,
-                Arc::clone(&self.clock),
+                self.session_store_clock(),
                 self.turn_cancel_closure_owner_binding(),
                 #[cfg(feature = "testing")]
                 self.fault_injector.clone(),
@@ -1320,7 +1328,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                 &self.core,
                 session_id,
                 self.options,
-                Arc::clone(&self.clock),
+                self.session_store_clock(),
                 self.turn_cancel_closure_owner_binding(),
                 #[cfg(feature = "testing")]
                 self.fault_injector.clone(),
@@ -1536,63 +1544,6 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         )
         .await
     }
-}
-
-fn list_session_summaries(
-    conn: &Connection,
-    filter: &SessionListFilter,
-) -> rusqlite::Result<Vec<SessionSummary>> {
-    let mut stmt = conn.prepare(
-        crate::session_sql::session_sql()
-            .meta_sqlite
-            .select_catalog
-            .sql(),
-    )?;
-    let rows = stmt.query_map([], |row| {
-        let stored = crate::session_meta::stored_relation_from_row(row)?;
-        let relation = match stored.relation_kind.as_str() {
-            "root" => SessionRelationKind::Root,
-            "child" => SessionRelationKind::Child,
-            "fork" => SessionRelationKind::Fork,
-            other => {
-                return Err(sqlite_conversion_error(stored_data_corrupt(
-                    "SessionSummary",
-                    format!("unknown relation_kind `{other}`"),
-                )));
-            }
-        };
-        let parent_session_id = stored.parent_session_id.clone();
-        let deleted = row.get::<_, i64>(20)? != 0;
-        let durable_relation = if deleted {
-            None
-        } else {
-            Some(
-                crate::session_meta::decode_catalog_relation(stored, &row.get::<_, String>(21)?)
-                    .map_err(sqlite_conversion_error)?,
-            )
-        };
-        Ok(SessionSummary {
-            session_id: SessionId::from(row.get::<_, String>(0)?),
-            created_at_ms: u64_from_sql("SessionSummary", "created_at_ms", row.get(17)?)?,
-            last_commit_at_ms: row
-                .get::<_, Option<i64>>(18)?
-                .map(|value| u64_from_sql("SessionSummary", "last_commit_at_ms", value))
-                .transpose()?,
-            head_revision: u64_from_sql("SessionSummary", "head_revision", row.get(19)?)?,
-            relation,
-            durable_relation,
-            parent_session_id,
-            deleted,
-        })
-    })?;
-    let mut summaries = Vec::new();
-    for row in rows {
-        let summary = row?;
-        if filter.matches(&summary) {
-            summaries.push(summary);
-        }
-    }
-    Ok(summaries)
 }
 
 #[async_trait::async_trait]

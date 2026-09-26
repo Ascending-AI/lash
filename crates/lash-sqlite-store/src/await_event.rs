@@ -20,7 +20,8 @@ use lash_store_sql::wait::waits::{WaitRow, WaitStatements};
 use rusqlite::{OptionalExtension, params};
 
 use crate::conn::SqliteConnection;
-use crate::scope_fence::{FenceLocations, RegistryAttachment, Schema};
+use crate::schema_layout::Schema;
+use crate::scope_fence::{FenceLocations, RegistryAttachment};
 
 /// The SQLite promise coordinator: one shared state machine over
 /// [`SqliteAwaitEventBackend`].

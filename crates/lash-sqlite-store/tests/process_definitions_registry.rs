@@ -17,7 +17,7 @@ fn clock() -> Arc<dyn lash_core_execution::Clock> {
 fn sqlite_registration_is_cas_fenced_and_durable() {
     let rt = tokio::runtime::Runtime::new().unwrap();
     rt.block_on(async move {
-        let registry = lash_sqlite_store::SqliteBackend::memory_with_clock(clock())
+        let registry = lash_sqlite_store::SqliteStoreSet::memory_with_clock(clock())
             .await
             .unwrap()
             .process_definition_registry();

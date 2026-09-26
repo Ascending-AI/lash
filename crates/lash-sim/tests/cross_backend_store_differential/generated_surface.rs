@@ -765,7 +765,7 @@ async fn attachment_blob_store_differential_agrees() {
         eprintln!("SKIPPED attachment blob-store differential: LASH_REQUIRE_S3 is not set");
         return;
     }
-    let memory_backend = lash_sqlite_store::SqliteBackend::memory().await.unwrap();
+    let memory_backend = lash_sqlite_store::SqliteStoreSet::memory().await.unwrap();
     let memory = memory_backend.attachment_store();
     let root = tempfile::tempdir().unwrap();
     let file = lash_core::facade_support::FileAttachmentStore::new(root.path());

@@ -380,13 +380,13 @@ async fn measured_refcount_replacement_operations() {
         .expect("connect benchmark Postgres");
     let sqlite_dir = tempfile::tempdir().expect("SQLite benchmark directory");
     let run_id = uuid::Uuid::new_v4().simple().to_string();
-    let sqlite_memory = lash_sqlite_store::SqliteBackend::memory()
+    let sqlite_memory = lash_sqlite_store::SqliteStoreSet::memory()
         .await
-        .expect("open a SQLite memory backend");
+        .expect("open a SQLite memory store set");
     let backends: Vec<(&str, Arc<dyn SessionStoreFactory>)> = vec![
         (
             "sqlite_memory",
-            lash_core_execution::Backend::from(sqlite_memory.clone()).session_store_factory(),
+            sqlite_memory.session_store_factory() as Arc<dyn SessionStoreFactory>,
         ),
         (
             "sqlite",

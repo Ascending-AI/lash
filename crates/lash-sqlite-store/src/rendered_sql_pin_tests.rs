@@ -23,7 +23,7 @@
 
 use lash_store_sql::Statement;
 
-use crate::scope_fence::Schema;
+use crate::schema_layout::Schema;
 
 /// Every statement set the effect and wait families declare on this backend,
 /// shared and SQLite-only, in a fixed order.

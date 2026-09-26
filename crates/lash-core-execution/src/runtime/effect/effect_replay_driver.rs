@@ -113,6 +113,7 @@ pub use super::group_journal::{
     EffectGroupLifecycle, EffectGroupLifecyclePhase, EffectGroupRecord, FinalizationStep,
     GroupChildFinalCommit, StoredChildArbitration, StoredGroupSettlement, UnsettledGroupChild,
 };
+use super::scope_status::scope_retired;
 use super::validation::{CanonicalRuntimeEffectEnvelope, validate_replayed_effect_envelope};
 use crate::store::LeaseTimings;
 use journal_wait::Finalized;
@@ -1257,30 +1258,6 @@ pub trait EffectReplayRowStore: sealed::EffectReplayBackend + Send + Sync {
     /// the caller is deciding whether to write an owner's end fact (FIG-3419),
     /// not deleting the scope, so it needs the answer without the exclusion.
     async fn scope_is_quiescent(&self, scope: &ExecutionScope) -> Result<bool, RuntimeError>;
-}
-
-/// The refusal a quiescence-gated retirement reports for a scope that still
-/// has live work: nothing was deleted or fenced, and the caller retries once
-/// the work settles.
-pub fn scope_not_quiescent(scope_id: &str) -> RuntimeError {
-    RuntimeError::new(
-        RuntimeErrorCode::EffectScopeNotQuiescent,
-        format!(
-            "effect scope `{scope_id}` still has in-progress effects or an open group; retirement deferred until it is quiescent"
-        ),
-    )
-}
-
-/// The refusal every admission path reports for a scope whose retirement
-/// tombstone exists: the journal under it was deleted as unreachable, so a
-/// late redrive must fail closed rather than re-execute under an empty journal.
-pub fn scope_retired(scope_id: &str) -> RuntimeEffectControllerError {
-    RuntimeEffectControllerError::new(
-        RuntimeErrorCode::EffectScopeRetired,
-        format!(
-            "effect scope `{scope_id}` has been retired: its journal was deleted as unreachable and the scope cannot be re-admitted"
-        ),
-    )
 }
 
 pub fn tool_intent_replay_key_format_cutover(

@@ -39,8 +39,7 @@ pub struct SqliteBackendOptions {
     pub fault_injector: Option<crate::testing::SqliteFaultInjector>,
 }
 
-/// Construction-time choices for a [`SqliteStoreSet`]: the
-/// [`SqliteBackendOptions`] that apply to a store set, which opens no effect
+/// Construction-time choices for a [`SqliteStoreSet`], which opens no effect
 /// journal and so has no effect-replay options.
 #[derive(Clone, Debug, Default)]
 pub struct SqliteStoreSetOptions {
@@ -53,6 +52,20 @@ pub struct SqliteStoreSetOptions {
     /// store set's factory opens.
     #[cfg(feature = "testing")]
     pub fault_injector: Option<crate::testing::SqliteFaultInjector>,
+}
+
+impl SqliteStoreSetOptions {
+    /// The options [`SqliteStoreSet::memory`] uses: uncompressed blobs,
+    /// since an in-memory catalog spends CPU, not disk, on compression.
+    pub fn memory() -> Self {
+        Self {
+            store: StoreOptions {
+                blob_profile: BuiltinBlobProfile::LowLatency,
+                ..StoreOptions::default()
+            },
+            ..Self::default()
+        }
+    }
 }
 
 impl From<SqliteStoreSetOptions> for SqliteBackendOptions {
@@ -79,6 +92,16 @@ impl SqliteBackendOptions {
             ..Self::default()
         }
     }
+
+    /// The store-set half of these options.
+    fn store_set_options(&self) -> SqliteStoreSetOptions {
+        SqliteStoreSetOptions {
+            store: self.store,
+            wake_delivery: self.wake_delivery,
+            #[cfg(feature = "testing")]
+            fault_injector: self.fault_injector.clone(),
+        }
+    }
 }
 
 /// One SQLite substrate: the session-store factory, the effect host, the
@@ -92,6 +115,7 @@ impl SqliteBackendOptions {
 pub struct SqliteBackend {
     stores: Arc<SqliteStoreSet>,
     effect_host: Arc<SqliteEffectHost>,
+    options: SqliteBackendOptions,
 }
 
 /// Every persistence port of one SQLite substrate without an effect host:
@@ -115,7 +139,7 @@ struct StoreParts {
     /// [`Self::identity`] as the store set's binding identity.
     binding: lash_core_execution::StoreBindingId,
     anchors: Option<Arc<MemoryAnchors>>,
-    options: SqliteBackendOptions,
+    options: SqliteStoreSetOptions,
     clock: Arc<dyn Clock>,
     session_store_factory: Arc<SqliteSessionStoreFactory>,
     process_registry: Arc<SqliteProcessRegistry>,
@@ -205,7 +229,7 @@ impl SqliteBackend {
 
     /// [`Self::reopen`] on `clock`.
     pub async fn reopen_with_clock(&self, clock: Arc<dyn Clock>) -> tokio_rusqlite::Result<Self> {
-        self.reopen_with_options_and_clock(self.stores.inner.options.clone(), clock)
+        self.reopen_with_options_and_clock(self.options.clone(), clock)
             .await
     }
 
@@ -242,9 +266,15 @@ impl SqliteBackend {
             SqliteEffectHost::open_at(&journal, options.effect_replay.clone(), Arc::clone(&clock))
                 .await?,
         );
-        let stores =
-            SqliteStoreSet::assemble(location, identity, anchors, options, clock, Some(&journal))
-                .await?;
+        let stores = SqliteStoreSet::assemble(
+            location,
+            identity,
+            anchors,
+            options.store_set_options(),
+            clock,
+            Some(&journal),
+        )
+        .await?;
         effect_host.attach_process_registry(
             stores
                 .database(SqliteDatabase::ProcessRegistry)
@@ -254,6 +284,7 @@ impl SqliteBackend {
         Ok(Self {
             stores: Arc::new(stores),
             effect_host,
+            options,
         })
     }
 
@@ -269,7 +300,7 @@ impl SqliteBackend {
 
     /// The options this backend was opened with.
     pub fn options(&self) -> &SqliteBackendOptions {
-        &self.stores.inner.options
+        &self.options
     }
 
     /// `sqlite:<canonical effect-replay.db path>` or `sqlite-memory:<id>`;
@@ -339,7 +370,7 @@ impl SqliteBackend {
         self.effect_host
             .open_scoped_controller(
                 scope,
-                self.stores.inner.options.effect_replay.clone(),
+                self.options.effect_replay.clone(),
                 Arc::clone(&self.stores.inner.clock),
             )
             .await
@@ -368,7 +399,7 @@ impl SqliteStoreSet {
     ) -> tokio_rusqlite::Result<Self> {
         let location = file_location(root.as_ref(), "SqliteStoreSet")?;
         let identity: Arc<str> = Arc::from(location.identity());
-        Self::assemble(location, identity, None, options.into(), clock, None).await
+        Self::assemble(location, identity, None, options, clock, None).await
     }
 
     /// A fresh named in-memory store set; see [`SqliteBackend::memory`]
@@ -379,14 +410,45 @@ impl SqliteStoreSet {
 
     /// A fresh named in-memory store set on `clock`.
     pub async fn memory_with_clock(clock: Arc<dyn Clock>) -> tokio_rusqlite::Result<Self> {
+        Self::memory_with_options_and_clock(SqliteStoreSetOptions::memory(), clock).await
+    }
+
+    /// A fresh named in-memory store set with explicit options and clock.
+    pub async fn memory_with_options_and_clock(
+        options: SqliteStoreSetOptions,
+        clock: Arc<dyn Clock>,
+    ) -> tokio_rusqlite::Result<Self> {
         let location = SqliteLocation::fresh_memory();
         let anchors = MemoryAnchors::pin(&location).map_err(tokio_rusqlite::Error::Error)?;
         let identity: Arc<str> = Arc::from(location.identity());
+        Self::assemble(location, identity, Some(anchors), options, clock, None).await
+    }
+
+    /// Fresh handles on this store set's databases: every store opened again
+    /// over the same location, identity, options and clock — what a second
+    /// runtime over the same store set is.
+    pub async fn reopen(&self) -> tokio_rusqlite::Result<Self> {
+        self.reopen_with_clock(Arc::clone(&self.inner.clock)).await
+    }
+
+    /// [`Self::reopen`] on `clock`.
+    pub async fn reopen_with_clock(&self, clock: Arc<dyn Clock>) -> tokio_rusqlite::Result<Self> {
+        self.reopen_with_options_and_clock(self.inner.options.clone(), clock)
+            .await
+    }
+
+    /// [`Self::reopen`] with other construction-time options: another
+    /// runtime over the same databases, configured differently.
+    pub async fn reopen_with_options_and_clock(
+        &self,
+        options: SqliteStoreSetOptions,
+        clock: Arc<dyn Clock>,
+    ) -> tokio_rusqlite::Result<Self> {
         Self::assemble(
-            location,
-            identity,
-            Some(anchors),
-            SqliteBackendOptions::memory(),
+            self.inner.location.clone(),
+            Arc::clone(&self.inner.identity),
+            self.inner.anchors.clone(),
+            options,
             clock,
             None,
         )
@@ -397,7 +459,7 @@ impl SqliteStoreSet {
         location: SqliteLocation,
         identity: Arc<str>,
         anchors: Option<Arc<MemoryAnchors>>,
-        options: SqliteBackendOptions,
+        options: SqliteStoreSetOptions,
         clock: Arc<dyn Clock>,
         journal: Option<&DatabaseLocation>,
     ) -> tokio_rusqlite::Result<Self> {
@@ -476,6 +538,11 @@ impl SqliteStoreSet {
     /// effect host: a store set opens none.
     pub fn identity(&self) -> &str {
         &self.inner.identity
+    }
+
+    /// The options this store set was opened with.
+    pub fn options(&self) -> &SqliteStoreSetOptions {
+        &self.inner.options
     }
 
     /// The URI a raw SQLite connection opens `database` through. An

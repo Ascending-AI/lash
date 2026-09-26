@@ -3,7 +3,7 @@
 use crate::*;
 
 use crate::await_event::wait_sql;
-use crate::scope_fence::Schema;
+use crate::schema_layout::Schema;
 use crate::session_sql::session_sql;
 
 /// The schema the bound effect journal is attached under for a sweep.

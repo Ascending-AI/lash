@@ -17,7 +17,7 @@ use lash_conformance::{ToolChildLawFixture, ToolChildWorld, ToolChildWorldSpec};
 use lash_core_execution::{EffectHost, StoreSet};
 
 use super::{Retained, SUBSTRATE, with_lease_timings};
-use crate::backend_fixture::{TestBackend, system_clock};
+use crate::backend_fixture::{TestEngineBackend, system_clock};
 
 /// A world over one backend's journal.
 ///
@@ -25,7 +25,7 @@ use crate::backend_fixture::{TestBackend, system_clock};
 /// outer one, because the recovery law calls this factory from the runtime it
 /// is about to destroy: the SQLite connection must belong to that runtime so
 /// it dies with it.
-async fn world(backend: TestBackend, spec: ToolChildWorldSpec) -> ToolChildWorld {
+async fn world(backend: TestEngineBackend, spec: ToolChildWorldSpec) -> ToolChildWorld {
     let ttl = Duration::from_millis(spec.lease_ttl_ms);
     let host = backend
         .reopen_with(
@@ -47,19 +47,23 @@ async fn world(backend: TestBackend, spec: ToolChildWorldSpec) -> ToolChildWorld
 /// The fixture both catalogues share: one backend per invocation (the
 /// macro evaluates the block per law), a world factory over its journal, and a
 /// fresh backend's store set per scenario.
-fn fixture() -> ((TestBackend, Retained), &'static str, ToolChildLawFixture) {
-    let backend = TestBackend::blocking(SUBSTRATE);
+fn fixture() -> (
+    (TestEngineBackend, Retained<TestEngineBackend>),
+    &'static str,
+    ToolChildLawFixture,
+) {
+    let backend = TestEngineBackend::blocking(SUBSTRATE);
     let worlds = backend.clone();
     let make_world: lash_conformance::ToolChildWorldFactory =
         Arc::new(move |spec: ToolChildWorldSpec| Box::pin(world(worlds.clone(), spec)));
     // Each scenario opens its own backend, so a durable registry cannot
     // carry the previous scenario's rows.
-    let retained = Retained::default();
+    let retained: Retained<TestEngineBackend> = Retained::default();
     let registries = retained.clone();
     let make_processes: lash_conformance::ToolChildProcessesFactory = Arc::new(move || {
         let registries = registries.clone();
         Box::pin(async move {
-            let backend = TestBackend::open(SUBSTRATE).await;
+            let backend = TestEngineBackend::open(SUBSTRATE).await;
             registries.keep(&backend);
             Arc::new(backend.stores().clone()) as Arc<dyn StoreSet>
         })

@@ -107,10 +107,11 @@ pub use lash_core_execution::triggers;
 
 pub mod facade_support {
     pub use crate::runtime::effect::{
-        ContextSourceInstall, DeploymentToolChildContext, LiveOpenerContext, LiveOpenerGuard,
-        LiveOpenerRegistry, ToolChildContextSource, ToolChildDriver, ToolChildHost,
-        ToolChildRebuildRefusal, ToolChildRequest, ToolChildSessionFacts, UnrecordedSessionSources,
-        opener_for_execution_scope,
+        ContextSourceInstall, DeploymentToolChildContext, EffectGroupChildCommitOutcome,
+        GroupChildFinalCommit, LiveOpenerContext, LiveOpenerGuard, LiveOpenerRegistry,
+        ToolChildContextSource, ToolChildDriver, ToolChildHost, ToolChildRebuildRefusal,
+        ToolChildRequest, ToolChildSessionFacts, UnrecordedSessionSources,
+        opener_for_execution_scope, scope_status,
     };
     pub use crate::runtime::{DurableSessionOps, EMPTY_HEAD_REVISION};
     /// Apply the canonical runtime invocation projection to an existing trace

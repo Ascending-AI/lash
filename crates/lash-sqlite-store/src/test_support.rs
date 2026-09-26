@@ -164,11 +164,11 @@ impl ConformanceSessionStoreFactory for SqliteSessionStoreFactory {
     }
 }
 
-/// An unbound durable-core store on a fresh memory backend. The store holds
-/// the backend's anchors, so the database lives as long as it does.
+/// An unbound durable-core store on a fresh memory store set. The store holds
+/// the store set's anchors, so the database lives as long as it does.
 #[cfg(test)]
 pub(crate) async fn memory_store() -> tokio_rusqlite::Result<Store> {
-    memory_store_with_options(crate::SqliteBackendOptions::memory().store).await
+    memory_store_with_options(crate::SqliteStoreSetOptions::memory().store).await
 }
 
 /// [`memory_store`] with explicit store options.
@@ -176,10 +176,10 @@ pub(crate) async fn memory_store() -> tokio_rusqlite::Result<Store> {
 pub(crate) async fn memory_store_with_options(
     options: StoreOptions,
 ) -> tokio_rusqlite::Result<Store> {
-    crate::SqliteBackend::memory_with_options_and_clock(
-        crate::SqliteBackendOptions {
+    crate::SqliteStoreSet::memory_with_options_and_clock(
+        crate::SqliteStoreSetOptions {
             store: options,
-            ..crate::SqliteBackendOptions::memory()
+            ..crate::SqliteStoreSetOptions::memory()
         },
         Arc::new(lash_core_execution::facade_support::SystemClock),
     )

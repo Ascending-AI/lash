@@ -4,7 +4,7 @@ use super::*;
 /// native process-work substrate over its process registry, and a runner that
 /// scopes each turn on the same host.
 type SqliteTurnRunnerFixture = (
-    TestBackend,
+    TestEngineBackend,
     &'static str,
     Arc<dyn EffectHost>,
     Arc<dyn lash_core_execution::StoreSet>,
@@ -14,7 +14,7 @@ type SqliteTurnRunnerFixture = (
 );
 
 async fn sqlite_turn_runner_fixture() -> SqliteTurnRunnerFixture {
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let effect_host = backend.effect_host() as Arc<dyn EffectHost>;
     let registry = backend.process_registry() as Arc<dyn ProcessRegistry>;
     let process_work = Arc::new(lash_core_execution::NativeProcessWork::for_registry(

@@ -8,7 +8,7 @@
 //! place is a render refusal, which is the point of the layout and also the
 //! way a new statement can fail for one connection shape and not another.
 
-use crate::scope_fence::Schema;
+use crate::schema_layout::Schema;
 
 #[test]
 fn every_rendered_statement_set_renders_for_every_layout() {

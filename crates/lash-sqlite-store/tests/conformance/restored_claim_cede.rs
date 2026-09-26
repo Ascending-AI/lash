@@ -11,9 +11,11 @@ use lash_core::SessionStoreFactory as _;
 use lash_core::store::RuntimePersistence;
 
 use super::SUBSTRATE;
-use crate::backend_fixture::TestBackend;
+use crate::backend_fixture::TestEngineBackend;
 
-async fn sqlite_restored_claim_cede_store(backend: &TestBackend) -> Arc<dyn RuntimePersistence> {
+async fn sqlite_restored_claim_cede_store(
+    backend: &TestEngineBackend,
+) -> Arc<dyn RuntimePersistence> {
     backend
         .session_store_factory()
         .create_store(&lash_core::SessionStoreCreateRequest {
@@ -27,7 +29,7 @@ async fn sqlite_restored_claim_cede_store(backend: &TestBackend) -> Arc<dyn Runt
 }
 
 lash_conformance::restored_claim_cede_tests!({
-    let backend = TestBackend::open(SUBSTRATE).await;
+    let backend = TestEngineBackend::open(SUBSTRATE).await;
     let store = sqlite_restored_claim_cede_store(&backend).await;
     let law_backend = backend.as_backend();
     (backend, "sqlite", law_backend, store)
