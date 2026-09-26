@@ -16,8 +16,12 @@
 //! `committed_turn_exists`, the pending inputs), the orphaned-input repair
 //! that runs before the claim, and the session-state version read ahead of
 //! `AdmitDrive`. These are fenced by the session's execution lease, and a
-//! replay re-evaluates them. Moving them into recorded steps, and teaching the
-//! determinism lint to see store calls, is FIG-3824.
+//! replay re-evaluates them. Moving them into recorded steps is FIG-3824.
+//! The substrate lint's rule 6 pins every direct store call in this module
+//! and its children, tagged `RECORDED` when a recorded step's body makes it
+//! and `FIG-3824` when the drive makes it outside any step, so a new
+//! unrecorded read cannot land unseen. It cannot see a helper the drive
+//! calls that reaches the store itself, such as the orphaned-input repair.
 //!
 //! Serialization is the SQL session execution lease's until S8: the drive
 //! epoch the seal raises answers a stale admission `Superseded`, but claims

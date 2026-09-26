@@ -1,0 +1,33 @@
+# Drive store-call allowlist (FIG-3824). One entry per (file, normalized line
+# text) pair, in the rule-5 format:
+#
+#   path  |  <normalized line text>  |  <occurrence count>  # <tag>
+#
+# Every direct persistence-trait call in the session drive is pinned. The tag
+# says where it runs: RECORDED is a call inside a recorded step's body (the
+# step's output is what a replay reads); a ticket id is a call the drive still
+# makes outside any recorded step, which that ticket moves or retires;
+# RECONCILE is the reconcile sweep, which schedules drives and decides
+# nothing inside one. A hit fails when its (file, text) is unlisted or occurs
+# more times than the count; a count above the current occurrences is stale
+# and fails. The total may only shrink (scripts/drive-store-allowlist.count).
+crates/lash-core/src/runtime/drive.rs  |  store.read_session_state_version().await.map_err(|error| {  |  1  # FIG-3824
+crates/lash-core/src/runtime/drive/admission.rs  |  .drive_epoch(session_id)  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/admission.rs  |  .list_pending_queued_work(session_id)  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/admission.rs  |  .list_pending_turn_inputs(session_id)  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/admission.rs  |  .pending_queued_run(session_id)  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/admission.rs  |  .pending_session_work_ordering(session_id)  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/admission.rs  |  .read_session_state_version()  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/admission.rs  |  .seal_drive_epoch(  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/admission.rs  |  let park = match self.store.load_turn_park(session_id).await {  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/reconcile.rs  |  let Some(store) = sessions.open_existing_store_by_id(session).await? else {  |  1  # RECONCILE
+crates/lash-core/src/runtime/drive/reconcile.rs  |  let batches = store.list_pending_queued_work(session).await?;  |  1  # RECONCILE
+crates/lash-core/src/runtime/drive/reconcile.rs  |  let inputs = store.list_pending_turn_inputs(session).await?;  |  1  # RECONCILE
+crates/lash-core/src/runtime/drive/root.rs  |  .claim_next_turn_inputs(&self.session_id, &self.fence, &self.owner, self.max_inputs)  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/root.rs  |  .committed_turn_exists(turn_id)  |  1  # FIG-3824
+crates/lash-core/src/runtime/drive/root.rs  |  .list_pending_turn_inputs(&self.session_id)  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/root.rs  |  .list_pending_turn_inputs(&self.state.session_id)  |  1  # FIG-3824
+crates/lash-core/src/runtime/drive/root.rs  |  .reclaim_turn_bound_inputs(&self.session_id, &self.fence, &self.owner, &self.root)  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/root.rs  |  generation: self.store.read_session_state_version().await?,  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/root.rs  |  self.store.abandon_turn_input_claim(&claim).await?;  |  2  # RECORDED
+crates/lash-core/src/runtime/drive/root.rs  |  self.store.retain_admission_base(&self.fence, &base).await?;  |  1  # RECORDED

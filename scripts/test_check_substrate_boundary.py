@@ -11,6 +11,8 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/check-substrate-boundary.sh"
 ALLOWLIST = ROOT / "scripts/drive-determinism-allowlist.txt"
 COUNT = ROOT / "scripts/drive-determinism-allowlist.count"
+STORE_ALLOWLIST = ROOT / "scripts/drive-store-allowlist.txt"
+STORE_COUNT = ROOT / "scripts/drive-store-allowlist.count"
 
 ENTRY_SEPARATOR = "  |  "
 
@@ -64,6 +66,9 @@ FIXTURE_ENGINE_ERROR_FILE = "crates/lash-core-store/src/runtime_error.rs"
 FIXTURE_ENGINE_ERROR_LINE = "    RestateProcessAwait,"
 FIXTURE_ENGINE_FORMAT_FILE = "crates/lash/src/formats.rs"
 FIXTURE_ENGINE_FORMAT_LINE = "    RestateDurableWaitRequest,"
+FIXTURE_STORE_FILE = "crates/lash-core/src/runtime/drive.rs"
+FIXTURE_STORE_LINE = "    let open = store.list_pending_turn_inputs(session).await?;"
+FIXTURE_STORE_TEXT = "let open = store.list_pending_turn_inputs(session).await?;"
 
 
 class DriveDeterminismRatchetTests(unittest.TestCase):
@@ -77,12 +82,17 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
         )
 
     def build_fixture(
-        self, root: Path, drive_lines: list[str], allowlist_entries: list[str]
+        self,
+        root: Path,
+        drive_lines: list[str],
+        allowlist_entries: list[str],
+        store_entries: list[str] | None = None,
     ) -> None:
         scripts = root / "scripts"
         scripts.mkdir(parents=True)
         shutil.copy2(SCRIPT, scripts / SCRIPT.name)
         (scripts / ALLOWLIST.name).write_text("\n".join(allowlist_entries) + "\n")
+        (scripts / STORE_ALLOWLIST.name).write_text("\n".join(store_entries or []) + "\n")
         for directory in FIXTURE_DIRS:
             (root / directory).mkdir(parents=True)
         for file in FIXTURE_FILES:
@@ -114,6 +124,57 @@ class DriveDeterminismRatchetTests(unittest.TestCase):
                 self.assertGreaterEqual(count, 1, path)
         cap = int(COUNT.read_text().strip())
         self.assertLessEqual(sum(count for _, _, count in entries), cap)
+
+    def test_store_allowlist_only_shrinks(self) -> None:
+        # The store-call rule pins every direct persistence call in the
+        # session drive the same way; its total is capped by its count file.
+        entries = parse_allowlist(STORE_ALLOWLIST.read_text())
+        for path, text, count in entries:
+            with self.subTest(path=path, text=text):
+                self.assertTrue(path.startswith("crates/"), path)
+                self.assertTrue(text, path)
+                self.assertGreaterEqual(count, 1, path)
+        cap = int(STORE_COUNT.read_text().strip())
+        self.assertLessEqual(sum(count for _, _, count in entries), cap)
+
+    def test_unpinned_store_call_in_the_drive_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(root, ["fn drive() {", "}"], [])
+            hit = root / FIXTURE_STORE_FILE
+            hit.parent.mkdir(parents=True, exist_ok=True)
+            hit.write_text("async fn drive() {\n" + FIXTURE_STORE_LINE + "\n}\n")
+            result = self.run_check(root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rule 6 failed", result.stderr)
+
+    def test_pinned_store_call_in_the_drive_passes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(
+                root,
+                ["fn drive() {", "}"],
+                [],
+                [f"{FIXTURE_STORE_FILE}{ENTRY_SEPARATOR}{FIXTURE_STORE_TEXT}{ENTRY_SEPARATOR}1  # FIG-3824"],
+            )
+            hit = root / FIXTURE_STORE_FILE
+            hit.parent.mkdir(parents=True, exist_ok=True)
+            hit.write_text("async fn drive() {\n" + FIXTURE_STORE_LINE + "\n}\n")
+            result = self.run_check(root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_stale_store_entry_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.build_fixture(
+                root,
+                ["fn drive() {", "}"],
+                [],
+                [f"{FIXTURE_STORE_FILE}{ENTRY_SEPARATOR}{FIXTURE_STORE_TEXT}{ENTRY_SEPARATOR}1  # FIG-3824"],
+            )
+            result = self.run_check(root)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("rule 6 failed: stale allowlist entry", result.stderr)
 
     def test_blank_lines_above_a_hit_still_pass(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
