@@ -131,6 +131,25 @@ async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs(
     .expect("the drive is not refused");
 
     assert_eq!(outcome.stop, lash_core::engine::DriveStop::Idle);
+    let mut observed = outcome.ran.len();
+    if matches!(engine, Engine::Restate) {
+        // The waiter observes the roots of every leg in its own chain; a
+        // reconcile sweep's sibling chain legitimately owns the roots it
+        // claimed first. Await those chains before the global assertions:
+        // the direct chain can report Idle while a sibling still runs the
+        // roots it claimed, so completion is only settled once every
+        // sibling's await resolves.
+        for root in sibling_drive_roots(&fixture, &session_id, request.as_str()).await? {
+            let sibling = tokio::time::timeout(
+                std::time::Duration::from_secs(120),
+                engine_port.await_drive(&session_id, &lash_core::engine::DriveRequestId::new(root)),
+            )
+            .await
+            .expect("a sibling drive chain ends")
+            .expect("a sibling drive is not refused");
+            observed += sibling.ran.len();
+        }
+    }
     assert!(
         session.durable().pending_turn_inputs().await?.is_empty(),
         "the chain drained the session"
@@ -142,20 +161,6 @@ async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs(
     );
     assert_eq!(fixture.calls.load(Ordering::SeqCst), INPUTS);
     if matches!(engine, Engine::Restate) {
-        // The waiter observes the roots of every leg in its own chain; a
-        // reconcile sweep's sibling chain legitimately owns the roots it
-        // claimed first, so fold those chains in before asserting.
-        let mut observed = outcome.ran.len();
-        for root in sibling_drive_roots(&fixture, &session_id, request.as_str()).await? {
-            let sibling = tokio::time::timeout(
-                std::time::Duration::from_secs(120),
-                engine_port.await_drive(&session_id, &lash_core::engine::DriveRequestId::new(root)),
-            )
-            .await
-            .expect("a sibling drive chain ends")
-            .expect("a sibling drive is not refused");
-            observed += sibling.ran.len();
-        }
         assert_eq!(
             observed, INPUTS,
             "the waiter observes every leg of its chain; sibling chains own the rest"
