@@ -835,7 +835,7 @@ impl LashRuntime {
                             .durability
                             .queued_work_batching
                             .max_turn_input_claim(),
-                        &crate::store::persisted_session_config_from_state(&self.state),
+                        &crate::store::execution_session_config_from_state(&self.state),
                         self.host
                             .core
                             .durability

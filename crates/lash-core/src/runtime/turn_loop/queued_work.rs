@@ -453,7 +453,7 @@ impl LashRuntime {
                 .map_or(crate::store::QueuedRunRequest::Automatic, |batch_ids| {
                     crate::store::QueuedRunRequest::Selected { batch_ids }
                 }),
-            configuration: crate::store::persisted_session_config_from_state(&self.state),
+            configuration: crate::store::execution_session_config_from_state(&self.state),
             expected_head_revision: self.state.head_revision,
             initial_turn_index: crate::StoreError::checked_monotonic_increment(
                 "queued_run_turn_index",
@@ -570,7 +570,7 @@ impl LashRuntime {
                     .durability
                     .queued_work_batching
                     .max_turn_input_claim(),
-                &crate::store::persisted_session_config_from_state(&self.state),
+                &crate::store::execution_session_config_from_state(&self.state),
                 self.host
                     .core
                     .durability

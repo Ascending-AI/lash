@@ -725,3 +725,77 @@ fn config_revision_round_trips_through_the_persisted_head_config() {
     assert_eq!(restored.config_revision, 5);
     assert_eq!(restored.policy.model, config.model);
 }
+
+#[test]
+fn recorded_root_view_never_becomes_sticky_after_commit_replay_or_failed_settlement() {
+    let mut state =
+        RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded));
+    state.session_id = SessionId::from("root-config-law");
+    state.policy.provider_id = "sticky-route".into();
+    let sticky = crate::store::persisted_session_config_from_state(&state);
+    let mut root = sticky.clone();
+    root.provider_id = "root-route".into();
+    root.prompt = Some(crate::PromptLayer::with_template(
+        crate::PromptTemplate::new(vec![]),
+    ));
+
+    adopt_root_execution_config(&mut state, &root);
+    assert_eq!(
+        crate::store::execution_session_config_from_state(&state),
+        root
+    );
+    let commit =
+        crate::store::RuntimeCommit::persisted_state_with_graph_commit_and_operation_and_budget(
+            &state,
+            crate::store::GraphAppend::PreserveHead,
+            &[],
+            boundary_operation(&state.session_id, "root", "commit"),
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::store::FleetFormat::current(),
+        )
+        .expect("root commit");
+    assert_eq!(commit.config, sticky);
+    assert_eq!(commit.config.provider_id, "sticky-route");
+
+    // A failed settlement leaves only the in-memory execution view. A
+    // subsequent head reload and recorded replay must still commit the head.
+    let head = crate::store::SessionHead {
+        session_id: state.session_id.clone(),
+        head_revision: 1,
+        current_frame_node_id: None,
+        pending_follow_on: None,
+        graph: state.session_graph.clone(),
+        config: sticky.clone(),
+        checkpoint_ref: None,
+        token_ledger: vec![],
+    };
+    let live_owned = LiveOwnedSessionFacts::of(&state.policy);
+    adopt_durable_head(
+        &mut state,
+        &head,
+        None,
+        live_owned,
+        crate::store::FleetFormat::current(),
+    )
+    .expect("head reload");
+    assert_eq!(
+        crate::store::persisted_session_config_from_state(&state),
+        sticky
+    );
+    adopt_root_execution_config(&mut state, &root);
+    assert_eq!(
+        crate::store::persisted_session_config_from_state(&state),
+        sticky
+    );
+    let live_owned = LiveOwnedSessionFacts::of(&state.policy);
+    adopt_durable_head(
+        &mut state,
+        &head,
+        None,
+        live_owned,
+        crate::store::FleetFormat::current(),
+    )
+    .expect("next root reload");
+    assert_eq!(state.to_snapshot().policy.provider_id, "sticky-route");
+    assert_eq!(state.to_snapshot().policy.prompt, sticky.prompt.unwrap());
+}

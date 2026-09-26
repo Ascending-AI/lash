@@ -450,6 +450,16 @@ impl SessionHeadMeta {
 pub fn persisted_session_config_from_state(
     state: &crate::RuntimeSessionState,
 ) -> crate::PersistedSessionConfig {
+    if let Some(config) = &state.authority.committed_config {
+        return (**config).clone();
+    }
+    execution_session_config_from_state(state)
+}
+
+/// The config used by the running root, including its recorded execution view.
+pub fn execution_session_config_from_state(
+    state: &crate::RuntimeSessionState,
+) -> crate::PersistedSessionConfig {
     let mut config = crate::PersistedSessionConfig::from(&state.policy);
     config.tool_access = state.authority.tool_access.clone();
     config.subagent = state.authority.subagent.clone();

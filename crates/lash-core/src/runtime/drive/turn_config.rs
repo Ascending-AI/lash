@@ -40,7 +40,7 @@ fn turn_config_replay_key(root: &TurnId) -> String {
 
 impl LashRuntime {
     /// Resolve the config `root`'s logical turn runs under, as one recorded
-    /// step on `controller`, and adopt it on resident state.
+    /// step on `controller`, and adopt it as the execution view.
     pub(in crate::runtime) async fn resolve_turn_config(
         &mut self,
         controller: &ScopedEffectController<'_>,
@@ -73,13 +73,10 @@ impl LashRuntime {
         Ok(())
     }
 
-    /// Adopt the root's recorded config on resident state: a no-op on the
-    /// first execution, which recorded the resident config, and the
-    /// correction a replay needs when the live config moved since. Adoption
-    /// must leave the resident revision equal to the recorded one — a root's
-    /// resident revision never moves inside the root (D3 Q11).
+    /// Preserve the sticky config before installing the recorded execution
+    /// view. A replay may name a config that differs from the current head.
     fn apply_turn_config(&mut self, config: &PersistedSessionConfig) {
-        crate::runtime::state::adopt_session_config(&mut self.state, config);
+        crate::runtime::state::adopt_root_execution_config(&mut self.state, config);
         debug_assert_eq!(
             self.state.config_revision, config.config_revision,
             "a root's resident config revision moved inside the root"
