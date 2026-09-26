@@ -237,19 +237,13 @@ async fn execute_orchestration(
             immediate_outcomes.push(BatchResultRow::failure(
                 spec.index,
                 spec.tool,
-                0,
                 serde_json::json!("Tool 'batch' is not allowed inside batch"),
             ));
             continue;
         }
         let Some(manifest) = context.callable_tool_manifest(&spec.tool) else {
             let error = format!("Tool '{}' is unavailable in this session", spec.tool);
-            immediate_outcomes.push(BatchResultRow::failure(
-                spec.index,
-                spec.tool,
-                0,
-                error.into(),
-            ));
+            immediate_outcomes.push(BatchResultRow::failure(spec.index, spec.tool, error.into()));
             continue;
         };
         parallel_specs.push((
@@ -283,16 +277,12 @@ async fn execute_orchestration(
             tool: tool_label,
             args: invocation.args,
             output: outcome.output,
-            duration_ms: 0,
         });
         let value = tool_record.output.value_for_projection();
-        // Batch results are replay data. Wall-clock child timing remains
-        // available on traces, but cannot participate in a cross-tier
-        // literal outcome.
         immediate_outcomes.push(if tool_record.output.is_success() {
-            BatchResultRow::success(index, tool_record.tool, 0, value)
+            BatchResultRow::success(index, tool_record.tool, value)
         } else {
-            BatchResultRow::failure(index, tool_record.tool, 0, value)
+            BatchResultRow::failure(index, tool_record.tool, value)
         });
     }
 
@@ -300,7 +290,6 @@ async fn execute_orchestration(
         immediate_outcomes.push(BatchResultRow::failure(
             spec.index,
             spec.tool,
-            0,
             serde_json::json!("Maximum of 25 tool calls allowed in batch"),
         ));
     }
@@ -535,7 +524,6 @@ fn refused_tool_call_completion(
         args,
         output,
         model_return,
-        duration_ms: 0,
         intent_outcomes: Vec::new(),
         replay,
     }
@@ -604,7 +592,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for StandardDriver {
         actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {
             protocol_iteration: ctx.protocol_iteration(),
             content: response.assistant_text.clone(),
-            duration_ms: 0,
         }));
 
         let has_tool_calls = response

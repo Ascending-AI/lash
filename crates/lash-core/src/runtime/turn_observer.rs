@@ -186,34 +186,6 @@ impl TurnObserver {
         discard_lagging_deltas(&mut self.queue.state.lock_recover().events);
     }
 
-    /// Publish a session event, preceded by the turn activity it projects to
-    /// when it has one. Drive code goes through
-    /// [`ObservationCursor`](crate::engine::ObservationCursor) instead, so the
-    /// projected activity takes its id from `(key, ordinal)` — these helpers
-    /// survive for tests that drive the queue directly.
-    #[cfg(test)]
-    pub(in crate::runtime) fn session(&self, event: SessionStreamEvent) {
-        if let Some(projected) = crate::engine::activity_projection(&event) {
-            self.independent(projected);
-        }
-        self.publish(RuntimeStreamEvent::Session(event));
-    }
-
-    /// Publish a turn activity correlated with `correlation_id`.
-    #[cfg(test)]
-    pub(in crate::runtime) fn activity(&self, correlation_id: TurnActivityId, event: TurnEvent) {
-        self.publish(RuntimeStreamEvent::Turn(TurnActivity::new(
-            correlation_id,
-            event,
-        )));
-    }
-
-    /// Publish a turn activity correlated with nothing else.
-    #[cfg(test)]
-    pub(in crate::runtime) fn independent(&self, event: TurnEvent) {
-        self.publish(RuntimeStreamEvent::Turn(TurnActivity::independent(event)));
-    }
-
     /// Whether the drive is over and publications are dropped.
     pub(in crate::runtime) fn is_closed(&self) -> bool {
         self.queue.state.lock_recover().closed

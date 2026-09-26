@@ -67,7 +67,6 @@ impl lash_core::plugin::CodeExecutorPlugin for EffectControllerTestCodeExecutor 
             calls: Vec::new(),
             printed_images: Vec::new(),
             error: None,
-            duration_ms: 1,
             degraded_bindings: Vec::new(),
             terminal_finish: None,
         })

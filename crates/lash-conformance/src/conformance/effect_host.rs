@@ -653,7 +653,6 @@ where
                             calls: Vec::new(),
                             printed_images: Vec::new(),
                             error: None,
-                            duration_ms: 0,
                             degraded_bindings: Vec::new(),
                             terminal_finish: Some(value),
                         })),
@@ -2307,7 +2306,6 @@ fn replay_conformance_tool_attempt_outcome(
                     "call": call_id,
                     "tool": tool_name,
                 })),
-                duration_ms: 0,
             }),
             intents: crate::ToolIntents::v3(vec![crate::ToolIntent::StartProcess(Box::new(
                 crate::StartProcessIntent {

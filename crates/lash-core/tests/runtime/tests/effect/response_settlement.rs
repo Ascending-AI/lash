@@ -79,7 +79,6 @@ impl lash_core::plugin::CodeExecutorPlugin for SettlementExecutor {
                     lash_core::CellFailureKind::Host,
                     "code execution stopped",
                 )),
-                duration_ms: 1,
                 degraded_bindings: Vec::new(),
                 terminal_finish: None,
             });
@@ -92,7 +91,6 @@ impl lash_core::plugin::CodeExecutorPlugin for SettlementExecutor {
             calls: Vec::new(),
             printed_images: Vec::new(),
             error: None,
-            duration_ms: 1,
             degraded_bindings: Vec::new(),
             terminal_finish: None,
         })

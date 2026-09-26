@@ -144,6 +144,7 @@ fn lent_with_direct_completions(
         )),
         direct_completions,
         parent_invocation: Some(invocation("opener-parent")),
+        observation_call_key: None,
         execution_env_spec: spec(9),
         session_id: SessionId::from("opener-session"),
         agent_frame_id: FrameNodeId::new("opener-frame").expect("a valid frame id"),
@@ -601,8 +602,6 @@ fn probed_call_record() -> crate::LlmCallRecord {
         replay_drops: Vec::new(),
         attempts: vec![crate::AttemptRecord {
             ordinal: 1,
-            started_at: 0,
-            duration: std::time::Duration::ZERO,
             outcome: crate::AttemptOutcome::Completed,
             protocol_position: crate::ProtocolPosition::ResponseObserved,
             retry_budget_consumed: false,
@@ -1182,7 +1181,6 @@ async fn a_refused_presentation_refuses_the_child_rather_than_settling_as_its_re
             tool: "tool".to_string(),
             args: serde_json::json!({}),
             output: crate::ToolCallOutput::success(serde_json::json!("settled")),
-            duration_ms: 0,
         },
         attempts: Vec::new(),
         intents: crate::ToolIntents::default(),
@@ -1190,7 +1188,7 @@ async fn a_refused_presentation_refuses_the_child_rather_than_settling_as_its_re
         captures: Vec::new(),
         triggers: Vec::new(),
     };
-    let refused = resolve_model_return(&dispatch, &request, &outcome, &[])
+    let refused = resolve_model_return(&dispatch, &request, &outcome, &[], 0)
         .await
         .expect_err("the child's controller refuses the presentation effect");
     assert!(

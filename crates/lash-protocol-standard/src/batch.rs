@@ -48,11 +48,10 @@ fn batch_output_schema() -> serde_json::Value {
                         "index": { "type": "integer", "minimum": 0 },
                         "tool": { "type": "string" },
                         "success": { "type": "boolean" },
-                        "duration_ms": { "type": "integer", "minimum": 0 },
                         "result": {},
                         "error": {}
                     },
-                    "required": ["index", "tool", "success", "duration_ms"],
+                    "required": ["index", "tool", "success"],
                     "additionalProperties": false
                 }
             }
@@ -95,8 +94,8 @@ mod tests {
             .collect();
 
         for row in [
-            BatchResultRow::success(0, "tool:alpha", 0, serde_json::json!("ok")),
-            BatchResultRow::failure(1, "tool:beta", 0, serde_json::json!("boom")),
+            BatchResultRow::success(0, "tool:alpha", serde_json::json!("ok")),
+            BatchResultRow::failure(1, "tool:beta", serde_json::json!("boom")),
         ] {
             let serialized = serde_json::to_value(&row).expect("row serializes");
             let keys: std::collections::BTreeSet<&str> = serialized

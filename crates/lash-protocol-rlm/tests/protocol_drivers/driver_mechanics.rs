@@ -822,12 +822,10 @@ fn rlm_checkpoint_redrives_pending_exec_code_with_driver_state() {
                             ),
                         )),
                     ),
-                    duration_ms: 1,
                 }),
             }],
             printed_images: Vec::new(),
             error: None,
-            duration_ms: 1,
             degraded_bindings: Vec::new(),
             terminal_finish: None,
         }),
@@ -1160,7 +1158,6 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
                         tool: "ok".to_string(),
                         args: serde_json::json!({}),
                         output: lash_core::ToolCallOutput::success(serde_json::json!("ok")),
-                        duration_ms: 1,
                     }),
                 },
                 lash_core::ExecutedCall {
@@ -1175,7 +1172,6 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
                             "tool_failed",
                             "failed but captured",
                         )),
-                        duration_ms: 2,
                     }),
                 },
                 lash_core::ExecutedCall {
@@ -1188,13 +1184,11 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
                         output: lash_core::ToolCallOutput::cancelled(
                             lash_core::ToolCancellation::runtime("cancelled sibling"),
                         ),
-                        duration_ms: 3,
                     }),
                 },
             ],
             printed_images: Vec::new(),
             error: None,
-            duration_ms: 3,
             degraded_bindings: Vec::new(),
             terminal_finish: None,
         }),
@@ -1209,8 +1203,7 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
                 name,
                 args,
                 output,
-                duration_ms,
-            }) => Some((call_id, name, args, output, duration_ms)),
+            }) => Some((call_id, name, args, output)),
             _ => None,
         })
         .collect::<Vec<_>>();
@@ -1219,7 +1212,6 @@ fn rlm_checkpoint_after_exec_fanout_tool_outputs_preserves_structured_outcomes()
     assert_eq!(emitted[0].1, "ok");
     assert_eq!(emitted[0].2, &serde_json::json!({}));
     assert!(emitted[0].3.is_success());
-    assert_eq!(*emitted[0].4, 1);
     assert_eq!(emitted[1].0.as_deref(), Some("fanout-fail"));
     assert!(!emitted[1].3.is_success());
     assert_eq!(emitted[2].0.as_deref(), Some("fanout-cancel"));

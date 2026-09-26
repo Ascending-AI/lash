@@ -709,7 +709,6 @@ impl ModelStore {
                             "session": event.actor_alias,
                         },
                         "output": tool_output,
-                        "duration_ms": 0,
                     },
                 })
             }
@@ -743,7 +742,6 @@ impl ModelStore {
                             format!("exit code {exit_code}"),
                         )
                     }),
-                    duration_ms: 0,
                     degraded_bindings: Vec::new(),
                     terminal_finish: Some(json!({
                         "output": output,
@@ -1005,7 +1003,6 @@ impl ModelStore {
                         "tool": "sim_opaque_effect",
                         "args": null,
                         "output": lash_core::ToolCallOutput::success(result),
-                        "duration_ms": 0,
                     },
                     "intents": recorded_intents,
                 },

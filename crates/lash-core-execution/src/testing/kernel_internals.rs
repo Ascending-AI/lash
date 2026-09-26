@@ -85,9 +85,10 @@ pub fn emit_tool_call_completed(
     record: &crate::ToolCallRecord,
     attempts: &[lash_trace::TraceRetryAttempt],
     issuing_node_id: Option<&str>,
+    duration_ms: u64,
     clock: &dyn crate::Clock,
 ) {
-    tracing.emit_tool_call_completed(record, attempts, issuing_node_id, clock);
+    tracing.emit_tool_call_completed(record, attempts, issuing_node_id, duration_ms, clock);
 }
 
 /// `RuntimeExecutionContext::process_start_execution_env`: the reference and
@@ -202,12 +203,13 @@ pub async fn await_process_with_cancellation(
 
 pub fn emit_tool_call_started(
     context: &crate::RuntimeExecutionContext<'_>,
+    call_key: &str,
     call_id: &str,
     name: &str,
     args: serde_json::Value,
     activity_id: crate::TurnActivityId,
 ) {
-    context.emit_tool_call_started(call_id, name, args, activity_id);
+    context.emit_tool_call_started(call_key, call_id, name, args, activity_id);
 }
 
 /// `ToolRegistry::from_tool_registrations`: a registry over explicit source,

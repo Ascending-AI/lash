@@ -272,10 +272,17 @@ impl RuntimeExecutionContext<'_> {
 
         // Live trace/activity is the opener's (ToolSettlement plan rule 3):
         // started events are emitted here, at formation, exactly as the batch
-        // path emitted them at each child's dispatch.
-        for leaf in children.iter().filter_map(PreparedGroupChild::tool) {
+        // path emitted them at each child's dispatch. Each lane keys on the
+        // child's own invocation replay key — `{group}:child:{position}`,
+        // minted below — so children whose model-given call ids repeat still
+        // mint distinct observations (ADR 0105 §1).
+        for (position, leaf) in children.iter().enumerate() {
+            let Some(leaf) = leaf.tool() else {
+                continue;
+            };
             let call_id = leaf.call.call.call_id.clone();
             self.emit_tool_call_started(
+                &format!("{group_key}:child:{position}"),
                 &call_id,
                 &leaf.call.call.tool_name,
                 leaf.call.call.args.clone(),
@@ -456,6 +463,11 @@ impl RuntimeExecutionContext<'_> {
     ) -> Result<ToolChildGroupSettled, crate::RuntimeEffectControllerError> {
         let controller = self.dispatch.effect_controller.controller();
         let cancel = self.cancellation_token.clone().unwrap_or_default();
+        // Each child's observed duration is the opener's wait window: the
+        // child ran inside its journaled invocation and records no clock
+        // facts, so the Completed activity carries this measured elapsed
+        // (FIG-3696).
+        let consume_started = self.dispatch.clock.now();
         let mut settled: Vec<Option<GroupChildSettled>> =
             (0..children.len()).map(|_| None).collect();
         let mut settlement_positions = Vec::with_capacity(children.len());
@@ -569,7 +581,17 @@ impl RuntimeExecutionContext<'_> {
                         settlement,
                     }),
                 ) => match self
-                    .apply_tool_child_settlement(leaf, *outcome, *settlement)
+                    .apply_tool_child_settlement(
+                        &format!("{}:child:{position}", handle.group_key()),
+                        leaf,
+                        *outcome,
+                        *settlement,
+                        self.dispatch
+                            .clock
+                            .now()
+                            .saturating_duration_since(consume_started)
+                            .as_millis() as u64,
+                    )
                     .await
                 {
                     Ok(completed) => GroupChildSettled::Tool(Box::new(completed)),
@@ -670,13 +692,21 @@ impl RuntimeExecutionContext<'_> {
     /// intent outcomes and their activity events ride the carried
     /// `ToolDispatchOutcome`.
     ///
+    /// `call_key` is the child's own effect-invocation replay key —
+    /// `{group}:child:{position}` — under which its settlement's observation
+    /// lanes emit (ADR 0105 §1). `duration_ms` is the observed window the
+    /// opener measured for the child — it rides the Completed activity only;
+    /// the journaled outcome holds no wall-clock fields (FIG-3696).
+    ///
     /// Deliberately absent here, and owned by FIG-3411's remaining steps:
     /// cross-invocation carriage of the settlement facts (ADR 0099 §8).
     pub(crate) async fn apply_tool_child_settlement(
         &self,
+        call_key: &str,
         leaf: &PreparedToolChildLeaf,
         outcome: ToolDispatchOutcome,
         settlement: crate::runtime::ToolSettlement,
+        duration_ms: u64,
     ) -> Result<CompletedProtocolToolCall, crate::RuntimeEffectControllerError> {
         let call_id = leaf.call.call.call_id.clone();
         let correlation_id = tool_activity_id(&call_id);
@@ -691,12 +721,13 @@ impl RuntimeExecutionContext<'_> {
         // A child that ran with no live opener recorded its stream instead of
         // sending it (FIG-3712); it reaches the stream here, before the
         // child's own completion.
-        self.emit_recorded_child_stream(&call_id, &outcome.record, &settlement.stream);
+        self.emit_recorded_child_stream(call_key, &call_id, &outcome.record, &settlement.stream);
         {
-            let mut cursor = self.observation_cursor(&format!("tool:{call_id}:intents"));
+            let context = self.with_call_observation_key(self.call_observation_key(call_key));
+            let mut cursor = context.observation_cursor(&format!("tool:{call_id}:intents"));
             for intent_outcome in &outcome.intent_outcomes {
                 cursor.observe(
-                    self.dispatch.observer.as_ref(),
+                    context.dispatch.observer.as_ref(),
                     crate::engine::ObservedEvent::Activity {
                         correlation_id: Some(correlation_id.clone()),
                         event: TurnEvent::ToolIntentOutcome {
@@ -712,9 +743,8 @@ impl RuntimeExecutionContext<'_> {
             tool: outcome.record.tool.clone(),
             args: outcome.record.args.clone(),
             output: outcome.record.output.clone(),
-            duration_ms: outcome.record.duration_ms,
         };
-        self.emit_tool_call_completed(&record, &outcome.attempts);
+        self.emit_tool_call_completed(call_key, &record, &outcome.attempts, duration_ms);
         Ok(CompletedProtocolToolCall {
             completed: crate::sansio::CompletedToolCall {
                 call_id,
@@ -722,7 +752,6 @@ impl RuntimeExecutionContext<'_> {
                 args: outcome.record.args,
                 output: outcome.record.output,
                 model_return: settlement.model_return,
-                duration_ms: outcome.record.duration_ms,
                 intent_outcomes: outcome.intent_outcomes,
                 replay: leaf.call.call.replay.clone(),
             },
@@ -826,7 +855,6 @@ fn cancelled_group_leaf(leaf: &PreparedToolChildLeaf) -> CompletedProtocolToolCa
         tool: completed.tool_name.clone(),
         args: completed.args.clone(),
         output: completed.output.clone(),
-        duration_ms: completed.duration_ms,
     };
     CompletedProtocolToolCall { completed, record }
 }
@@ -835,15 +863,16 @@ fn cancelled_group_leaf(leaf: &PreparedToolChildLeaf) -> CompletedProtocolToolCa
 /// (FIG-3712).
 impl RuntimeExecutionContext<'_> {
     /// Emits the stream events a group child recorded because no opener was
-    /// live where it ran (FIG-3712): its session events on the session
-    /// stream, its turn activities on the activity stream, each in recorded
-    /// order and each verbatim — the events carry the identities the child's
-    /// recorder minted, so they publish through `Recorded*` variants rather
-    /// than being re-projected or re-keyed. A stream the recording budget
-    /// cut says so on the session stream, as a `child_stream_truncated`
-    /// message.
+    /// live where it ran (FIG-3712): its session events publish through
+    /// `ObservedEvent::Session`, so they project at emission exactly as the
+    /// live opener's forwarder projected them, and its turn activities publish
+    /// verbatim — they carry the identities the child's recorder minted and
+    /// are not re-keyed. Both lanes key under the child's own replay key
+    /// (`call_key`). A stream the recording budget cut says so on the session
+    /// stream, as a `child_stream_truncated` message.
     fn emit_recorded_child_stream(
         &self,
+        call_key: &str,
         call_id: &str,
         record: &crate::ToolCallRecord,
         stream: &crate::runtime::effect::RecordedChildStream,
@@ -858,15 +887,13 @@ impl RuntimeExecutionContext<'_> {
                  they are skipped"
             );
         }
-        let mut cursor = self.observation_cursor(&format!("tool:{call_id}:stream"));
-        let observer = self.dispatch.observer.as_ref();
+        let context = self.with_call_observation_key(self.call_observation_key(call_key));
+        let mut cursor = context.observation_cursor("stream");
+        let observer = context.dispatch.observer.as_ref();
         for event in events {
             match event {
                 crate::runtime::effect::DecodedChildEvent::Session(event) => {
-                    cursor.observe(
-                        observer,
-                        crate::engine::ObservedEvent::RecordedSession(event),
-                    );
+                    cursor.observe(observer, crate::engine::ObservedEvent::Session(event));
                 }
                 crate::runtime::effect::DecodedChildEvent::Activity(activity) => {
                     cursor.observe(

@@ -286,7 +286,6 @@ async fn a_fast_and_a_slow_run_present_under_one_replay_identity() {
                         tool: "timed".to_string(),
                         args: serde_json::json!({}),
                         output: crate::ToolCallOutput::success(serde_json::json!("timed")),
-                        duration_ms,
                     },
                     attempts: Vec::new(),
                     intents: crate::ToolIntents::default(),
@@ -294,6 +293,8 @@ async fn a_fast_and_a_slow_run_present_under_one_replay_identity() {
                     captures: Vec::new(),
                     triggers: Vec::new(),
                 },
+                "timed-call",
+                duration_ms,
             )
             .await
             .expect("the call presents");

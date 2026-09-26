@@ -900,18 +900,6 @@ pub async fn append_usage_cancellation_exactly_once_conformance<A, W, R>(
     assert_eq!(matching[0].usage, usage);
 }
 
-pub(super) async fn emit_session_events_to_sink(
-    events: &dyn EventSink,
-    plugin_events: Vec<SessionStreamEvent>,
-) {
-    if events.is_noop() {
-        return;
-    }
-    for event in plugin_events {
-        events.emit(event).await;
-    }
-}
-
 pub(super) async fn emit_session_event_to_sink(events: &dyn EventSink, event: SessionStreamEvent) {
     if !events.is_noop() {
         events.emit(event).await;

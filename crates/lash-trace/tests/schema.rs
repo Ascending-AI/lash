@@ -1596,7 +1596,6 @@ fn retry_attempts_are_optional_additive_event_fields() {
         lash_trace::TraceRetryAttempt {
             ordinal: 1,
             outcome: TraceRetryAttemptOutcome::Failed,
-            duration_ms: 10,
             reason: Some("http_429".to_string()),
             delay_ms: Some(250),
             execution_evidence: Some(lash_trace::TraceExecutionEvidence {
@@ -1620,7 +1619,6 @@ fn retry_attempts_are_optional_additive_event_fields() {
         lash_trace::TraceRetryAttempt {
             ordinal: 2,
             outcome: TraceRetryAttemptOutcome::Completed,
-            duration_ms: 20,
             reason: None,
             delay_ms: None,
             execution_evidence: None,
@@ -1683,7 +1681,6 @@ fn typed_exec_code_completed_full_shape() {
         json!([{
             "call_id": "call-1",
             "name": "read_file",
-            "duration_ms": 5,
             "status": "success",
         }])
     );
@@ -1962,7 +1959,6 @@ fn exec_code_completed_event() -> TraceEvent {
         tool_calls: vec![TraceExecToolCall {
             call_id: Some("call-1".to_string()),
             name: "read_file".to_string(),
-            duration_ms: 5,
             status: TraceToolCallStatus::Success,
         }],
     }
@@ -2028,7 +2024,6 @@ fn jsonl_round_trip_preserves_records() {
     let tool_call = &value["tool_calls"][0];
     assert_eq!(tool_call["call_id"], "call-1");
     assert_eq!(tool_call["name"], "read_file");
-    assert_eq!(tool_call["duration_ms"], 5);
     assert_eq!(tool_call["status"], "success");
 }
 

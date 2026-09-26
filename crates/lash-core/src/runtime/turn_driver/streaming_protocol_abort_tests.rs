@@ -20,14 +20,8 @@ fn abort_persists_request_disposition_and_typed_interruption() {
         ..Default::default()
     };
 
-    let (response, record) = synthesize_protocol_abort(
-        &accumulator,
-        LlmUsage::default(),
-        &evidence,
-        17,
-        std::time::Duration::from_millis(3),
-        Vec::new(),
-    );
+    let (response, record) =
+        synthesize_protocol_abort(&accumulator, LlmUsage::default(), &evidence, Vec::new());
 
     assert_eq!(
         response
@@ -74,8 +68,6 @@ fn abort_retains_provider_usage_delivered_before_preemption() {
         &LlmStreamAccumulator::default(),
         usage.clone(),
         &evidence,
-        19,
-        std::time::Duration::from_millis(5),
         Vec::new(),
     );
 
@@ -93,8 +85,6 @@ fn abort_suppression_updates_response_and_attempt_together() {
             generation_disposition: Some(request_disposition()),
             ..Default::default()
         },
-        23,
-        std::time::Duration::ZERO,
         Vec::new(),
     );
     let mut result = Ok(response);

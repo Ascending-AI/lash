@@ -1351,7 +1351,6 @@ async fn replayed_exec_tool_output_is_a_gc_root_without_pending_or_message_refs(
         output: crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(
             crate::AttachmentSource::stored(attachment.clone()),
         )),
-        duration_ms: 1,
     }];
     let state = RuntimeSessionState::new(crate::SessionPolicy::new(UNBOUNDED));
     let committed = committed_attachment_ids(&state, &tool_calls, None);

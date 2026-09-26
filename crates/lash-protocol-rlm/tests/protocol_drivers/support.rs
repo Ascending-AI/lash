@@ -353,7 +353,6 @@ pub(crate) fn exec_response(
         error: error.map(|message| {
             lash_sansio::CellFailure::new(lash_sansio::CellFailureKind::Program, message)
         }),
-        duration_ms: 1,
         degraded_bindings: Vec::new(),
         terminal_finish: final_output,
     }

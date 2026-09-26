@@ -89,6 +89,7 @@ fn tool_argument_projection_policy_resolves_from_active_catalog_and_defaults_unk
             "direct completions are unavailable in this test context",
         ),
         parent_invocation: None,
+        observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -154,6 +155,7 @@ fn test_execution_context_with_env_store(
             "direct completions are unavailable in this test context",
         ),
         parent_invocation: None,
+        observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -397,4 +399,78 @@ async fn a_child_started_from_a_queued_drain_parents_on_the_drain() {
             .expect("a queued drain admits its own parent scope"),
         crate::ParentScope::queue_drain("session-1", "drain-3"),
     );
+}
+
+/// Records the `(key, ordinal)` every emitted observation lands under: the
+/// identity the spec pins (ADR 0105 §1).
+#[derive(Default)]
+struct ObservationIds(std::sync::Mutex<Vec<String>>);
+
+impl crate::engine::ObservationSink for ObservationIds {
+    fn observe(&self, observation: crate::engine::DriveObservation) {
+        self.0
+            .lock()
+            .expect("observation ids")
+            .push(format!("{}#{}", observation.key, observation.ordinal));
+    }
+}
+
+fn emit_started(context: &RuntimeExecutionContext<'_>, material: &str, sink: &ObservationIds) {
+    let call = context.with_call_observation_key(context.call_observation_key(material));
+    call.observation_cursor("directives:before").observe(
+        sink,
+        crate::engine::ObservedEvent::Activity {
+            correlation_id: None,
+            event: crate::TurnEvent::ToolCallStarted {
+                call_id: Some(material.to_string()),
+                name: "tool".to_string(),
+                args: serde_json::json!({}),
+                graph_key: None,
+                parent_call_id: None,
+            },
+        },
+    );
+}
+
+/// Two tool calls in one turn share the dispatch's observation base — on the
+/// turn-dispatched protocol path there is no per-call invocation — so their
+/// before-directive lanes only stay distinct because each call carries its
+/// own qualified key (ADR 0105 §1).
+#[test]
+fn two_calls_on_one_base_mint_distinct_before_directive_ids() {
+    let context = test_execution_context();
+    let sink = ObservationIds::default();
+    emit_started(&context, "0:0:lookup", &sink);
+    emit_started(&context, "0:1:lookup", &sink);
+    let ids = sink.0.lock().expect("observation ids").clone();
+    assert_eq!(
+        ids,
+        [
+            format!(
+                "{}:call:0:0:lookup:directives:before#0",
+                context.dispatch.observation_base_key()
+            ),
+            format!(
+                "{}:call:0:1:lookup:directives:before#0",
+                context.dispatch.observation_base_key()
+            ),
+        ],
+        "each call's lane keys under its own material; a shared base would mint the same id twice"
+    );
+}
+
+/// The model may repeat one `call_id` across protocol iterations: the
+/// iteration is part of the lane material, so both calls mint distinct ids
+/// (ADR 0105 §1).
+#[test]
+fn a_call_id_repeated_across_iterations_mints_distinct_ids() {
+    let context = test_execution_context();
+    let sink = ObservationIds::default();
+    emit_started(&context, "0:0:dup", &sink);
+    emit_started(&context, "1:0:dup", &sink);
+    let ids = sink.0.lock().expect("observation ids").clone();
+    assert_eq!(ids.len(), 2);
+    assert_ne!(ids[0], ids[1], "iterations qualify the reused call id");
+    assert!(ids[0].ends_with(":call:0:0:dup:directives:before#0"));
+    assert!(ids[1].ends_with(":call:1:0:dup:directives:before#0"));
 }

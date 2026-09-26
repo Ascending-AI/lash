@@ -151,6 +151,7 @@ mod tests {
                 "direct completions are unavailable in this test context",
             ),
             parent_invocation: None,
+            observation_call_key: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -323,6 +324,7 @@ mod tests {
                 "direct completions are unavailable in this test context",
             ),
             parent_invocation: None,
+            observation_call_key: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -514,6 +516,7 @@ mod tests {
                 "direct completions are unavailable in this test context",
             ),
             parent_invocation: None,
+            observation_call_key: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -621,6 +624,7 @@ mod tests {
                 "direct completions are unavailable in this test context",
             ),
             parent_invocation: None,
+            observation_call_key: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -782,6 +786,7 @@ mod tests {
                 "direct completions are unavailable in this test context",
             ),
             parent_invocation: None,
+            observation_call_key: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -1158,6 +1163,7 @@ mod tests {
                 "direct completions are unavailable in this test context",
             ),
             parent_invocation: None,
+            observation_call_key: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -1223,7 +1229,6 @@ mod tests {
                         tool: "start_process".to_string(),
                         args: json!({}),
                         output: crate::ToolCallOutput::success(realized_handle.clone()),
-                        duration_ms: 0,
                     },
                     attempts: Vec::new(),
                     intents: crate::ToolIntents::default(),
@@ -1235,6 +1240,8 @@ mod tests {
                     captures: Vec::new(),
                     triggers: Vec::new(),
                 },
+                "test:start-child",
+                3,
             )
             .await
             .expect("the start call presents");

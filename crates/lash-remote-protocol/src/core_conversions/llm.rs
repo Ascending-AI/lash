@@ -691,8 +691,6 @@ impl From<core_llm::AttemptRecord> for RemoteAttemptRecord {
     fn from(value: core_llm::AttemptRecord) -> Self {
         let core_llm::AttemptRecord {
             ordinal,
-            started_at,
-            duration,
             outcome,
             protocol_position,
             retry_budget_consumed,
@@ -705,8 +703,6 @@ impl From<core_llm::AttemptRecord> for RemoteAttemptRecord {
         } = value;
         Self {
             ordinal,
-            started_at_ms: started_at,
-            duration_ms: duration.as_millis().try_into().unwrap_or(u64::MAX),
             outcome: outcome.into(),
             protocol_position: protocol_position.into(),
             retry_budget_consumed,

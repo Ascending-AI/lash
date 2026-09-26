@@ -332,8 +332,6 @@ impl ProviderHandle {
             return Err(ProviderCompletionError {
                 call_record: Box::new(synthetic_terminal_call_record(
                     call_id,
-                    self.components.rate_limiter.clock().timestamp_ms(),
-                    Duration::ZERO,
                     AttemptOutcome::Failed,
                     &error,
                     false,
@@ -353,9 +351,6 @@ impl ProviderHandle {
                 .rate_limiter
                 .admit(self.components.provider.as_ref(), &request)
                 .await;
-            let clock = self.components.rate_limiter.clock();
-            let started_at = clock.timestamp_ms();
-            let started = clock.now();
             let (mut result, panic_payload) = match std::panic::AssertUnwindSafe(
                 self.components.provider.complete(request.clone()),
             )
@@ -400,8 +395,6 @@ impl ProviderHandle {
                         .map(|_| response.usage.clone());
                     records.push(AttemptRecord {
                         ordinal: records.len() as u32 + 1,
-                        started_at,
-                        duration: clock.now().saturating_duration_since(started),
                         outcome,
                         protocol_position: success_protocol_position(&response, outcome),
                         retry_budget_consumed: true,
@@ -518,8 +511,6 @@ impl ProviderHandle {
                     let unsafe_retry = charge_safety_decision.is_some();
                     records.push(failure_attempt_record(
                         records.len() as u32 + 1,
-                        started_at,
-                        clock.now().saturating_duration_since(started),
                         recorded_failure,
                         consumed,
                         protocol_position,
@@ -1093,23 +1084,14 @@ pub fn call_id_for_scope(scope: &LlmRequestScope) -> LlmCallId {
 )]
 pub fn synthetic_terminal_call_record(
     call_id: LlmCallId,
-    started_at: u64,
-    duration: Duration,
     outcome: AttemptOutcome,
     failure: &LlmTransportError,
     retry_budget_consumed: bool,
     protocol_position: ProtocolPosition,
     replay_drops: Vec<crate::ProviderReplayDrop>,
 ) -> LlmCallRecord {
-    let mut attempt = failure_attempt_record(
-        1,
-        started_at,
-        duration,
-        failure,
-        retry_budget_consumed,
-        protocol_position,
-        None,
-    );
+    let mut attempt =
+        failure_attempt_record(1, failure, retry_budget_consumed, protocol_position, None);
     attempt.outcome = outcome;
     LlmCallRecord {
         call_id,
@@ -1121,8 +1103,6 @@ pub fn synthetic_terminal_call_record(
 
 fn failure_attempt_record(
     ordinal: u32,
-    started_at: u64,
-    duration: Duration,
     failure: &LlmTransportError,
     retry_budget_consumed: bool,
     protocol_position: ProtocolPosition,
@@ -1153,8 +1133,6 @@ fn failure_attempt_record(
     });
     AttemptRecord {
         ordinal,
-        started_at,
-        duration,
         outcome,
         protocol_position,
         retry_budget_consumed,

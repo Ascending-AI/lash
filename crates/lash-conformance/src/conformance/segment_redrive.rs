@@ -315,7 +315,6 @@ impl Scenario {
                         output: crate::ToolCallOutput::success(serde_json::json!({
                             "run": ordinal,
                         })),
-                        duration_ms: 0,
                     }),
                     intents: crate::ToolIntents::default(),
                 }),

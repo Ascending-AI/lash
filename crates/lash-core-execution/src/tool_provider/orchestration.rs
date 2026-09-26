@@ -268,7 +268,7 @@ async fn coordinate_nested_tool_batch<'run>(
 
     let run_call = {
         let dispatch = Arc::clone(dispatch);
-        move |mut call: crate::ToolInvocation| {
+        move |(index, mut call): (usize, crate::ToolInvocation)| {
             let dispatch = Arc::clone(&dispatch);
             let sinks = sinks.clone();
             let turn_cancel_wait = turn_cancel_wait.clone();
@@ -278,6 +278,14 @@ async fn coordinate_nested_tool_batch<'run>(
             let parent_call_id = parent_call_id.clone();
             async move {
                 let call_id = call.id.clone();
+                // The nested call's own observation key: the body's dispatch
+                // base is its child's parent invocation, so a body's repeated
+                // `call_id`s — and calls nested under another keyed call —
+                // still mint distinct observations (ADR 0105 §1).
+                let dispatch = Arc::new(dispatch.observation_keyed(format!("{index}:{call_id}")));
+                // Observation-only: the nested call's wall-clock window,
+                // published on the Completed activity and never journaled.
+                let call_started = dispatch.clock.now();
                 let call_args = call.args.clone();
                 let call_tool_id = call.tool_id.to_string();
                 let activity_id = crate::session::tool_execution::tool_activity_id(&call_id);
@@ -313,8 +321,7 @@ async fn coordinate_nested_tool_batch<'run>(
                     // activity pair a turn-dispatched call emits, parented to
                     // the body that named it, through the dispatch's lent
                     // observation sink (ADR 0105 §1).
-                    let mut cursor =
-                        dispatch.observation_cursor(&format!("nested:{call_id}:start"));
+                    let mut cursor = dispatch.observation_cursor("nested:start");
                     cursor.observe(
                         dispatch.observer.as_ref(),
                         crate::engine::ObservedEvent::Session(
@@ -474,13 +481,18 @@ async fn coordinate_nested_tool_batch<'run>(
                 // The completion pair to the start emitted above: the record
                 // when the call produced one, the reply's output otherwise.
                 {
+                    let duration_ms = dispatch
+                        .clock
+                        .now()
+                        .duration_since(call_started)
+                        .as_millis() as u64;
                     let completed = match reply.record.as_ref() {
                         Some(record) => crate::TurnEvent::ToolCallCompleted {
                             call_id: record.call_id.clone().or_else(|| Some(call_id.clone())),
                             name: record.tool.clone(),
                             args: record.args.clone(),
                             output: record.output.clone(),
-                            duration_ms: record.duration_ms,
+                            duration_ms,
                             graph_key: None,
                             parent_call_id: parent_call_id.clone(),
                         },
@@ -489,20 +501,18 @@ async fn coordinate_nested_tool_batch<'run>(
                             name: tool_name.unwrap_or(call_tool_id),
                             args: call_args,
                             output: reply.output.clone(),
-                            duration_ms: 0,
+                            duration_ms,
                             graph_key: None,
                             parent_call_id,
                         },
                     };
-                    dispatch
-                        .observation_cursor(&format!("nested:{call_id}:complete"))
-                        .observe(
-                            dispatch.observer.as_ref(),
-                            crate::engine::ObservedEvent::Activity {
-                                correlation_id: Some(activity_id),
-                                event: completed,
-                            },
-                        );
+                    dispatch.observation_cursor("nested:complete").observe(
+                        dispatch.observer.as_ref(),
+                        crate::engine::ObservedEvent::Activity {
+                            correlation_id: Some(activity_id),
+                            event: completed,
+                        },
+                    );
                 }
                 reply
             }
@@ -516,9 +526,10 @@ async fn coordinate_nested_tool_batch<'run>(
         calls.iter().map(|_| std::sync::Mutex::new(None)).collect();
     let work = calls
         .into_iter()
+        .enumerate()
         .zip(&slots)
-        .map(|(call, slot)| {
-            let reply = run_call(call);
+        .map(|((index, call), slot)| {
+            let reply = run_call((index, call));
             Box::pin(async move {
                 let reply = reply.await;
                 *slot

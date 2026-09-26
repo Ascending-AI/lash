@@ -24,6 +24,7 @@ use crate::engine::testing::{
     DeterminismCheck, DeterminismFailure, FailureCause, LocalEngine, LocalTestCx, RunMode,
     TranscriptDivergence, TranscriptEntry,
 };
+use crate::engine::{ObservationCursor, ObservedEvent, ReplayKey};
 use crate::llm::types::StreamBlockIdentity;
 use crate::runtime::turn_observer::TurnObservations;
 use crate::runtime::{RuntimeStreamEvent, TerminationPolicy, TurnObserver};
@@ -93,16 +94,20 @@ async fn model_call(
     emissions: Vec<SessionStreamEvent>,
 ) -> Vec<SessionStreamEvent> {
     let block = StreamBlockIdentity::new(format!("text:{call}"), 0);
+    let mut cursor = ObservationCursor::new(ReplayKey::new(format!("turn/llm/{call}")));
     for delta in 0..deltas {
         observer.publish(RuntimeStreamEvent::Session(SessionStreamEvent::TextDelta {
             content: format!("d{delta}"),
             block: block.clone(),
         }));
-        observer.activity(
-            TurnActivityId::new(block.id.clone()),
-            TurnEvent::AssistantProseDelta {
-                text: format!("d{delta}").into(),
-                block: block.clone(),
+        cursor.observe(
+            &observer,
+            ObservedEvent::Activity {
+                correlation_id: Some(TurnActivityId::new(block.id.clone())),
+                event: TurnEvent::AssistantProseDelta {
+                    text: format!("d{delta}").into(),
+                    block: block.clone(),
+                },
             },
         );
         tokio::task::yield_now().await;
@@ -117,18 +122,20 @@ async fn tool_call(
     index: usize,
     name: &'static str,
 ) -> Vec<SessionStreamEvent> {
-    observer.session(SessionStreamEvent::ToolCallStart {
-        call_id: Some(format!("call-{index}")),
-        name: name.to_string(),
-        args: serde_json::json!({ "value": name }),
-    });
+    ObservationCursor::new(ReplayKey::new(format!("turn/tool/{index}"))).observe(
+        &observer,
+        ObservedEvent::Session(SessionStreamEvent::ToolCallStart {
+            call_id: Some(format!("call-{index}")),
+            name: name.to_string(),
+            args: serde_json::json!({ "value": name }),
+        }),
+    );
     tokio::time::sleep(Duration::from_millis(((TOOLS.len() - index) * 3) as u64)).await;
     vec![SessionStreamEvent::ToolCall {
         call_id: Some(format!("call-{index}")),
         name: name.to_string(),
         args: serde_json::json!({ "value": name }),
         output: ToolCallOutput::success(serde_json::json!({ "echo": name })),
-        duration_ms: 0,
     }]
 }
 
@@ -136,10 +143,11 @@ async fn mini_turn(turn: MiniTurn, cx: &LocalTestCx) {
     let (observer, observations) = TurnObserver::unread();
     publish_host_end(turn.host, observations);
     let mut assembly = RecordedTurnAssembly::new();
-    let fold = |assembly: &mut RecordedTurnAssembly, emissions: Vec<SessionStreamEvent>| {
+    let mut fold_cursor = ObservationCursor::new(ReplayKey::new("turn/fold"));
+    let mut fold = |assembly: &mut RecordedTurnAssembly, emissions: Vec<SessionStreamEvent>| {
         for event in emissions {
             assembly.record(&event);
-            observer.session(event);
+            fold_cursor.observe(&observer, ObservedEvent::Session(event));
         }
     };
 
@@ -196,12 +204,15 @@ async fn mini_turn(turn: MiniTurn, cx: &LocalTestCx) {
             "exec_code",
             &serde_json::json!({ "cell": 0 }),
             async {
-                observer.activity(
-                    TurnActivityId::new("code:0"),
-                    TurnEvent::CodeBlockStarted {
-                        language: "cell".to_string(),
-                        code: "echo()".to_string(),
-                        graph_key: None,
+                ObservationCursor::new(ReplayKey::new("turn/exec/0")).observe(
+                    &observer,
+                    ObservedEvent::Activity {
+                        correlation_id: Some(TurnActivityId::new("code:0")),
+                        event: TurnEvent::CodeBlockStarted {
+                            language: "cell".to_string(),
+                            code: "echo()".to_string(),
+                            graph_key: None,
+                        },
                     },
                 );
                 Vec::<SessionStreamEvent>::new()

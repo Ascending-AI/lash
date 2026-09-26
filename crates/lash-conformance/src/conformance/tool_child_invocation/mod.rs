@@ -725,8 +725,6 @@ fn law_direct_completion() -> crate::DirectCompletion {
             replay_drops: Vec::new(),
             attempts: vec![crate::AttemptRecord {
                 ordinal: 1,
-                started_at: 0,
-                duration: std::time::Duration::ZERO,
                 outcome: crate::AttemptOutcome::Completed,
                 protocol_position: crate::ProtocolPosition::ResponseObserved,
                 retry_budget_consumed: false,
@@ -776,8 +774,6 @@ fn law_billed_completion() -> crate::DirectCompletion {
             attempts: vec![
                 crate::AttemptRecord {
                     ordinal: 1,
-                    started_at: 0,
-                    duration: std::time::Duration::ZERO,
                     outcome: crate::AttemptOutcome::Failed,
                     protocol_position: crate::ProtocolPosition::ResponseObserved,
                     retry_budget_consumed: false,
@@ -797,8 +793,6 @@ fn law_billed_completion() -> crate::DirectCompletion {
                 },
                 crate::AttemptRecord {
                     ordinal: 2,
-                    started_at: 0,
-                    duration: std::time::Duration::ZERO,
                     outcome: crate::AttemptOutcome::Completed,
                     protocol_position: crate::ProtocolPosition::ResponseObserved,
                     retry_budget_consumed: false,

@@ -476,7 +476,6 @@ pub enum SessionStreamEvent {
         name: String,
         args: serde_json::Value,
         output: crate::ToolCallOutput,
-        duration_ms: u64,
     },
     /// Typed accounting for host tool records beyond the bounded turn view.
     #[serde(rename = "tool_calls_omitted")]
@@ -500,7 +499,6 @@ pub enum SessionStreamEvent {
     LlmResponse {
         protocol_iteration: usize,
         content: String,
-        duration_ms: u64,
     },
     #[serde(rename = "token_usage")]
     TokenUsage {

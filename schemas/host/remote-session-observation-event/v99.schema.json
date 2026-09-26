@@ -305,11 +305,6 @@
     },
     "RemoteAttemptRecord": {
       "properties": {
-        "duration_ms": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
         "error": {
           "anyOf": [
             {
@@ -364,11 +359,6 @@
             }
           ]
         },
-        "started_at_ms": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
         "usage": {
           "anyOf": [
             {
@@ -389,12 +379,10 @@
         }
       },
       "required": [
-        "duration_ms",
         "ordinal",
         "outcome",
         "protocol_position",
-        "retry_budget_consumed",
-        "started_at_ms"
+        "retry_budget_consumed"
       ],
       "type": "object"
     },

@@ -217,8 +217,6 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                     replay_drops: Vec::new(),
                     attempts: vec![AttemptRecord {
                         ordinal: 1,
-                        started_at: 7,
-                        duration: std::time::Duration::from_millis(3),
                         outcome: AttemptOutcome::Completed,
                         protocol_position: ProtocolPosition::TerminalObserved,
                         retry_budget_consumed: true,
@@ -238,8 +236,6 @@ fn sample_events() -> Vec<(&'static str, TurnEvent, serde_json::Value)> {
                     "label": "primary",
                     "attempts": [{
                         "ordinal": 1,
-                        "started_at": 7,
-                        "duration": { "secs": 0, "nanos": 3000000 },
                         "outcome": "completed",
                         "protocol_position": "terminal_observed",
                         "retry_budget_consumed": true,

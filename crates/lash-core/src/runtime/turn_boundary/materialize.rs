@@ -169,7 +169,6 @@ mod tests {
             output: crate::ToolCallOutput::success_tool_value(crate::ToolValue::Attachment(
                 crate::AttachmentSource::stored(tool_ref),
             )),
-            duration_ms: 1,
         }];
 
         let ids = committed_attachment_ids(&state, &tool_calls, None);

@@ -136,14 +136,16 @@ impl RuntimeExecutionContext<'_> {
         let mut timers: Vec<(usize, u64)> = Vec::new();
         for (index, leaf) in leaves.into_iter().enumerate() {
             match leaf {
-                ToolAggregateLeaf::Tool(call) => match self.prepare_tool_leaf(index, call).await {
-                    ToolLeafPreparation::Prepared(entry) => entries.push(*entry),
-                    ToolLeafPreparation::Completed(reply) => {
-                        let reply = ToolAggregateLeafReply::Tool(reply);
-                        prefix[index] = Some(reply.fulfilled());
-                        replies[index] = Some(reply);
+                ToolAggregateLeaf::Tool(call) => {
+                    match self.prepare_tool_leaf(&batch_id, index, call).await {
+                        ToolLeafPreparation::Prepared(entry) => entries.push(*entry),
+                        ToolLeafPreparation::Completed(reply) => {
+                            let reply = ToolAggregateLeafReply::Tool(reply);
+                            prefix[index] = Some(reply.fulfilled());
+                            replies[index] = Some(reply);
+                        }
                     }
-                },
+                }
                 ToolAggregateLeaf::Timer { duration_ms } => timers.push((index, duration_ms)),
                 ToolAggregateLeaf::Settled { fulfilled } => prefix[index] = Some(fulfilled),
             }

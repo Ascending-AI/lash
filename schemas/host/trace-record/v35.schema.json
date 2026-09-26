@@ -1237,11 +1237,6 @@
             "null"
           ]
         },
-        "duration_ms": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
         "name": {
           "type": "string"
         },
@@ -1250,7 +1245,6 @@
         }
       },
       "required": [
-        "duration_ms",
         "name",
         "status"
       ],
@@ -2356,11 +2350,6 @@
             "null"
           ]
         },
-        "duration_ms": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
         "execution_evidence": {
           "anyOf": [
             {
@@ -2420,7 +2409,6 @@
         }
       },
       "required": [
-        "duration_ms",
         "ordinal",
         "outcome"
       ],

@@ -318,7 +318,6 @@ fn response(finish: Option<serde_json::Value>) -> lash_core::ExecResponse {
         calls: Vec::new(),
         printed_images: Vec::new(),
         error: None,
-        duration_ms: 0,
         degraded_bindings: Vec::new(),
         terminal_finish: finish,
     }

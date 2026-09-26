@@ -185,7 +185,7 @@ pub async fn execute_orchestrating_tool<'run>(
             "orchestrating tools must immediately await journaled actions and return a completed result",
         )),
     };
-    let mut outcome = normalized_outcome(context, tool_name, args, result, duration_ms).await;
+    let mut outcome = normalized_outcome(context, tool_name, args, result).await;
     outcome.record.call_id = Some(prepared.call_id);
     outcome
 }
@@ -250,7 +250,7 @@ pub async fn execute_internal_process_tool<'run>(
             "internal process-body tools must return a completed result",
         )),
     };
-    let mut outcome = normalized_outcome(context, tool_name, args, result, duration_ms).await;
+    let mut outcome = normalized_outcome(context, tool_name, args, result).await;
     outcome.record.call_id = Some(prepared.call_id);
     outcome
 }
@@ -273,7 +273,6 @@ async fn unavailable_prepared_tool_outcome(
             "tool_unavailable",
             "Tool is unavailable in this session",
         ),
-        0,
     )
     .await;
     unavailable.record.call_id = Some(prepared.call_id);
@@ -362,21 +361,22 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
                     "tool_unavailable",
                     "Tool is unavailable in this session",
                 ),
-                0,
             )
             .await,
         );
     };
     let tool_name = authority.manifest().name.clone();
     if let Err(failure) = authority.verify_prepared_identity(&prepared) {
-        return launch_done(normalized_outcome(context, tool_name, args, failure, 0).await);
+        return launch_done(normalized_outcome(context, tool_name, args, failure).await);
     }
 
-    let tool_start = context.clock.now();
     let tool_context = authority.apply_execution_binding(
         tool_context.with_prepared_payload(prepared.prepared_payload.clone()),
     );
     let completion_context = tool_context.clone();
+    // Measured for the result hook's observation input only; nothing journaled
+    // may read it.
+    let tool_started = context.clock.now();
     let attempt_result = Box::pin(execute_leaf_tool_attempt(
         context,
         &authority,
@@ -386,7 +386,7 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
         max_attempts,
     ))
     .await;
-    let duration_ms = context.clock.now().duration_since(tool_start).as_millis() as u64;
+    let duration_ms = context.clock.now().duration_since(tool_started).as_millis() as u64;
     let (result, intents) = match attempt_result {
         crate::ToolAttemptOutcome::Done { result, intents } => {
             (ToolOutcome::from_output(result.into_output()), intents)
@@ -404,16 +404,14 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
                             ToolFailureClass::Internal,
                             "pending_tool_missing_completion_key",
                             "tool returned Pending without first obtaining a completion key",
-                        ),
-                        duration_ms,
-                    ).await);
+                        )).await);
                     }
                 };
             let pending = match announce_pending_park(&completion_context, pending).await {
                 Ok(pending) => pending,
                 Err(failure) => {
                     return launch_done(
-                        normalized_outcome(context, tool_name, args, failure, duration_ms).await,
+                        normalized_outcome(context, tool_name, args, failure).await,
                     );
                 }
             };
@@ -422,7 +420,6 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
                 args,
                 key,
                 pending,
-                duration_ms,
                 attempts: Vec::new(),
                 captures: Vec::new(),
                 triggers: Vec::new(),
@@ -440,7 +437,7 @@ pub(super) async fn dispatch_prepared_tool_attempt_launch_with_execution_context
     )
     .await;
 
-    let mut outcome = normalized_outcome(context, tool_name, args, result, duration_ms).await;
+    let mut outcome = normalized_outcome(context, tool_name, args, result).await;
     outcome.intents = intents;
     launch_done(outcome)
 }
@@ -485,7 +482,6 @@ pub async fn execute_prepared_tool_attempt_effect<'run>(
         ToolCallLaunch::Pending(pending) => crate::ToolAttemptLaunch::Pending {
             key: Box::new(pending.key),
             pending: pending.pending,
-            duration_ms: pending.duration_ms,
         },
         ToolCallLaunch::ControllerAborted(error) => return Err(error),
     };
@@ -554,7 +550,6 @@ async fn tool_call_launch_into_done_or_runtime_failure(
                     "pending_tool_not_supported_here",
                     "pending tool completion is not supported on this dispatch path",
                 ),
-                pending.duration_ms,
             )
             .await
         }
@@ -568,7 +563,6 @@ async fn tool_call_launch_into_done_or_runtime_failure(
                     error.code.as_str(),
                     error.message,
                 ),
-                0,
             )
             .await
         }

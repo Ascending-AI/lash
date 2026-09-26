@@ -371,7 +371,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
                             name: outcome.tool_name.clone(),
                             args: outcome.args.clone(),
                             output: outcome.output.clone(),
-                            duration_ms: outcome.duration_ms,
                         })
                         .collect::<Vec<_>>();
                     self.side_effect_outbox
@@ -722,7 +721,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
         self.emit(SessionStreamEvent::LlmResponse {
             protocol_iteration: self.protocol_iteration,
             content: visible_text,
-            duration_ms: 0,
         });
         let reason = llm_response.terminal_reason;
         let diagnostic = llm_response
@@ -888,7 +886,6 @@ impl<M: TurnProtocol> TurnMachine<M> {
                 name: outcome.tool_name.clone(),
                 args: outcome.args.clone(),
                 output: outcome.output.clone(),
-                duration_ms: outcome.duration_ms,
             });
         }
 

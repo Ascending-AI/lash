@@ -29,7 +29,6 @@ pub struct ToolCallRecord {
     pub tool: String,
     pub args: Value,
     pub output: ToolCallOutput,
-    pub duration_ms: u64,
 }
 
 /// Generates the canonical tool-intent kind set from the vocabulary in

@@ -729,7 +729,7 @@
       "observed": {
         "active_turn_id": "session-001:provider:001",
         "ingress_mode": "active_turn",
-        "input_id": "ti:c5f5cf3426b55fda66aa7eb27c016cfa847fbbdbba5d012b14df352459b41cc6",
+        "input_id": "ti:c33098f457ceba72241686655891ee606dd5d5c37bf65a5e9f1cb2f5b094dc93",
         "input_state": "pending_active",
         "queued_ingress": true,
         "session": "session-001",
@@ -1313,7 +1313,6 @@
             "session": "session-001"
           },
           "call_id": "session-001:tool:001",
-          "duration_ms": 0,
           "output": {
             "outcome": {
               "payload": {
@@ -1440,7 +1439,6 @@
           "result": {
             "Ok": {
               "calls": [],
-              "duration_ms": 0,
               "error": null,
               "observations": [
                 {
@@ -1545,7 +1543,7 @@
       "observed": {
         "active_turn_id": null,
         "ingress_mode": "next_turn",
-        "input_id": "ti:5c07d75e8a219e9fed48fe838c243a53b7f4feaf7bf7819cf9889647b5f63e43",
+        "input_id": "ti:34c9b98cd5c7529abb17a7f6f7bc19f82bf5ddfcce73a8ad6bfa80f71dd748d4",
         "input_state": "deferred_next_turn",
         "queued_ingress": true,
         "session": "session-002",
@@ -1721,7 +1719,7 @@
       "observed": {
         "active_turn_id": "session-003:provider:001",
         "ingress_mode": "active_turn",
-        "input_id": "ti:2861a60c968e5db4d4a9ff1e872b47141e3f51b6cd21ea738c998a4e3318f46a",
+        "input_id": "ti:7bd7815a873afe1806f6b3ec9d92372247571f40836e538f00e8016e7d1d7953",
         "input_state": "pending_active",
         "queued_ingress": true,
         "session": "session-003",
@@ -4422,7 +4420,6 @@
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-001/001",
-              "duration_ms": 0,
               "output": {
                 "outcome": {
                   "payload": {
@@ -4599,7 +4596,6 @@
             "session": "session-001"
           },
           "call_id": "session-001:tool:002",
-          "duration_ms": 0,
           "output": {
             "outcome": {
               "payload": {
@@ -7011,7 +7007,6 @@
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-001/002",
-              "duration_ms": 0,
               "output": {
                 "outcome": {
                   "payload": {
@@ -7132,7 +7127,6 @@
           "result": {
             "Ok": {
               "calls": [],
-              "duration_ms": 0,
               "error": null,
               "observations": [
                 {
@@ -8574,7 +8568,6 @@
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-003/001",
-              "duration_ms": 0,
               "output": {
                 "outcome": {
                   "payload": {
@@ -9479,7 +9472,6 @@
           "result": {
             "Ok": {
               "calls": [],
-              "duration_ms": 0,
               "error": null,
               "observations": [
                 {
@@ -9843,7 +9835,6 @@
             "record": {
               "args": null,
               "call_id": "effect/sleep/session-004/001",
-              "duration_ms": 0,
               "output": {
                 "outcome": {
                   "payload": {
@@ -10451,7 +10442,6 @@
           "result": {
             "Ok": {
               "calls": [],
-              "duration_ms": 0,
               "error": null,
               "observations": [
                 {
@@ -10542,7 +10532,6 @@
             "session": "session-004"
           },
           "call_id": "session-004:tool:001",
-          "duration_ms": 0,
           "output": {
             "outcome": {
               "payload": {
@@ -17544,7 +17533,7 @@
           "component": "tool_state",
           "kind": {
             "kind": "stored",
-            "logical_bytes": 1833
+            "logical_bytes": 1717
           }
         },
         {
@@ -17597,7 +17586,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.339763231+00:00"
+              "timestamp": "2026-09-26T01:11:14.729951401+00:00"
             },
             {
               "event": {
@@ -17706,7 +17695,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.339763231+00:00"
+              "timestamp": "2026-09-26T01:11:14.729951401+00:00"
             },
             {
               "event": {
@@ -17923,7 +17912,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:58.210813463+00:00"
+              "timestamp": "2026-09-26T01:11:16.469704662+00:00"
             },
             {
               "event": {
@@ -18042,7 +18031,7 @@
               "attempts": [
                 {
                   "attempt_ordinal": 1,
-                  "call_id": "8f0184d6-4a21-476a-b960-652ac3726bec"
+                  "call_id": "sim-agent-foreground-tool-contract:turn:sim-agent-foreground-tool-contract-turn:llm:0"
                 }
               ],
               "kind": "unreported"
@@ -18082,7 +18071,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:58.210813463+00:00"
+              "timestamp": "2026-09-26T01:11:16.469704662+00:00"
             },
             {
               "event": {
@@ -18181,7 +18170,7 @@
                 "attempts": [
                   {
                     "attempt_ordinal": 1,
-                    "call_id": "8f0184d6-4a21-476a-b960-652ac3726bec"
+                    "call_id": "sim-agent-foreground-tool-contract:turn:sim-agent-foreground-tool-contract-turn:llm:0"
                   }
                 ],
                 "kind": "unreported"
@@ -18337,7 +18326,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:58.289945777+00:00"
+              "timestamp": "2026-09-26T01:11:16.609048715+00:00"
             },
             {
               "event": {
@@ -18460,7 +18449,7 @@
               "attempts": [
                 {
                   "attempt_ordinal": 1,
-                  "call_id": "28589106-2646-4c0d-8b9f-f6ab1c7953a1"
+                  "call_id": "sim-agent-started-process-tool-contract:turn:sim-agent-started-process-tool-contract-turn:llm:0"
                 }
               ],
               "kind": "unreported"
@@ -18500,7 +18489,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:58.289945777+00:00"
+              "timestamp": "2026-09-26T01:11:16.609048715+00:00"
             },
             {
               "event": {
@@ -18603,7 +18592,7 @@
                 "attempts": [
                   {
                     "attempt_ordinal": 1,
-                    "call_id": "28589106-2646-4c0d-8b9f-f6ab1c7953a1"
+                    "call_id": "sim-agent-started-process-tool-contract:turn:sim-agent-started-process-tool-contract-turn:llm:0"
                   }
                 ],
                 "kind": "unreported"
@@ -18759,7 +18748,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:58.518068780+00:00"
+              "timestamp": "2026-09-26T01:11:16.911908633+00:00"
             },
             {
               "event": {
@@ -18880,7 +18869,7 @@
               "attempts": [
                 {
                   "attempt_ordinal": 1,
-                  "call_id": "421102a4-4e2e-46e2-a367-b6c84614de4f"
+                  "call_id": "sim-agent-durable-input-contract:turn:sim-agent-durable-input-turn:llm:0"
                 }
               ],
               "kind": "unreported"
@@ -18920,7 +18909,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:58.518068780+00:00"
+              "timestamp": "2026-09-26T01:11:16.911908633+00:00"
             },
             {
               "event": {
@@ -19021,7 +19010,7 @@
                 "attempts": [
                   {
                     "attempt_ordinal": 1,
-                    "call_id": "421102a4-4e2e-46e2-a367-b6c84614de4f"
+                    "call_id": "sim-agent-durable-input-contract:turn:sim-agent-durable-input-turn:llm:0"
                   }
                 ],
                 "kind": "unreported"
@@ -19512,7 +19501,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:58.740676121+00:00"
+              "timestamp": "2026-09-26T01:11:17.172803590+00:00"
             },
             {
               "event": {
@@ -19635,7 +19624,7 @@
               "attempts": [
                 {
                   "attempt_ordinal": 1,
-                  "call_id": "9bed9a61-6991-478d-93ab-d03039cc5dab"
+                  "call_id": "sim-agent-started-process-subagent-contract:turn:sim-agent-started-process-subagent-contract-turn:llm:0"
                 }
               ],
               "kind": "unreported"
@@ -19675,7 +19664,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:58.740676121+00:00"
+              "timestamp": "2026-09-26T01:11:17.172803590+00:00"
             },
             {
               "event": {
@@ -19778,7 +19767,7 @@
                 "attempts": [
                   {
                     "attempt_ordinal": 1,
-                    "call_id": "9bed9a61-6991-478d-93ab-d03039cc5dab"
+                    "call_id": "sim-agent-started-process-subagent-contract:turn:sim-agent-started-process-subagent-contract-turn:llm:0"
                   }
                 ],
                 "kind": "unreported"
@@ -19930,7 +19919,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:59.278844494+00:00"
+              "timestamp": "2026-09-26T01:11:17.656199459+00:00"
             },
             {
               "event": {
@@ -20053,7 +20042,7 @@
               "attempts": [
                 {
                   "attempt_ordinal": 1,
-                  "call_id": "bdcfbb92-6f7b-4675-819d-96f96a2c9b93"
+                  "call_id": "sim-agent-nested-process-contract:turn:sim-agent-nested-process-contract-turn:llm:0"
                 }
               ],
               "kind": "unreported"
@@ -20093,7 +20082,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:59.278844494+00:00"
+              "timestamp": "2026-09-26T01:11:17.656199459+00:00"
             },
             {
               "event": {
@@ -20196,7 +20185,7 @@
                 "attempts": [
                   {
                     "attempt_ordinal": 1,
-                    "call_id": "bdcfbb92-6f7b-4675-819d-96f96a2c9b93"
+                    "call_id": "sim-agent-nested-process-contract:turn:sim-agent-nested-process-contract-turn:llm:0"
                   }
                 ],
                 "kind": "unreported"
@@ -20348,7 +20337,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:59.637398899+00:00"
+              "timestamp": "2026-09-26T01:11:17.970762829+00:00"
             },
             {
               "event": {
@@ -20471,7 +20460,7 @@
               "attempts": [
                 {
                   "attempt_ordinal": 1,
-                  "call_id": "25267052-fc0b-411f-9946-05524d5f9a91"
+                  "call_id": "sim-agent-session-turn-process-child-contract:turn:sim-agent-session-turn-process-child-contract-turn:llm:0"
                 }
               ],
               "kind": "unreported"
@@ -20511,7 +20500,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:59.637398899+00:00"
+              "timestamp": "2026-09-26T01:11:17.970762829+00:00"
             },
             {
               "event": {
@@ -20614,7 +20603,7 @@
                 "attempts": [
                   {
                     "attempt_ordinal": 1,
-                    "call_id": "25267052-fc0b-411f-9946-05524d5f9a91"
+                    "call_id": "sim-agent-session-turn-process-child-contract:turn:sim-agent-session-turn-process-child-contract-turn:llm:0"
                   }
                 ],
                 "kind": "unreported"
@@ -21069,7 +21058,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:59.861190298+00:00"
+              "timestamp": "2026-09-26T01:11:18.100038126+00:00"
             },
             {
               "event": {
@@ -21186,7 +21175,7 @@
               "attempts": [
                 {
                   "attempt_ordinal": 1,
-                  "call_id": "ba3c6632-5947-47d0-a334-04169205a094"
+                  "call_id": "sim-agent-failed-child-contract:turn:sim-agent-failed-child-turn:llm:0"
                 }
               ],
               "kind": "unreported"
@@ -21228,7 +21217,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:59.861190298+00:00"
+              "timestamp": "2026-09-26T01:11:18.100038126+00:00"
             },
             {
               "event": {
@@ -21325,7 +21314,7 @@
                 "attempts": [
                   {
                     "attempt_ordinal": 1,
-                    "call_id": "ba3c6632-5947-47d0-a334-04169205a094"
+                    "call_id": "sim-agent-failed-child-contract:turn:sim-agent-failed-child-turn:llm:0"
                   }
                 ],
                 "kind": "unreported"
@@ -21477,7 +21466,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:54:00.299126196+00:00"
+              "timestamp": "2026-09-26T01:11:18.304392234+00:00"
             },
             {
               "event": {
@@ -21611,7 +21600,7 @@
               "attempts": [
                 {
                   "attempt_ordinal": 1,
-                  "call_id": "612dcb58-543f-48a9-b9b1-e06a5a9f0ce8"
+                  "call_id": "sim-agent-parallel-spawn-join-contract:turn:sim-agent-parallel-spawn-join-contract-turn:llm:0"
                 }
               ],
               "kind": "unreported"
@@ -21651,7 +21640,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:54:00.299126196+00:00"
+              "timestamp": "2026-09-26T01:11:18.304392234+00:00"
             },
             {
               "event": {
@@ -21765,7 +21754,7 @@
                 "attempts": [
                   {
                     "attempt_ordinal": 1,
-                    "call_id": "612dcb58-543f-48a9-b9b1-e06a5a9f0ce8"
+                    "call_id": "sim-agent-parallel-spawn-join-contract:turn:sim-agent-parallel-spawn-join-contract-turn:llm:0"
                   }
                 ],
                 "kind": "unreported"
@@ -21913,7 +21902,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:54:00.669757887+00:00"
+              "timestamp": "2026-09-26T01:11:18.448464764+00:00"
             },
             {
               "event": {
@@ -22043,7 +22032,7 @@
               "attempts": [
                 {
                   "attempt_ordinal": 1,
-                  "call_id": "eec96395-4537-4458-9804-ed7231f00c21"
+                  "call_id": "sim-agent-tuple-json-array-contract:turn:sim-agent-tuple-json-array-contract-turn:llm:0"
                 }
               ],
               "kind": "unreported"
@@ -22083,7 +22072,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:54:00.669757887+00:00"
+              "timestamp": "2026-09-26T01:11:18.448464764+00:00"
             },
             {
               "event": {
@@ -22193,7 +22182,7 @@
                 "attempts": [
                   {
                     "attempt_ordinal": 1,
-                    "call_id": "eec96395-4537-4458-9804-ed7231f00c21"
+                    "call_id": "sim-agent-tuple-json-array-contract:turn:sim-agent-tuple-json-array-contract-turn:llm:0"
                   }
                 ],
                 "kind": "unreported"
@@ -22397,7 +22386,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.339763231+00:00"
+              "timestamp": "2026-09-26T01:11:14.729951401+00:00"
             },
             {
               "event": {
@@ -22762,7 +22751,7 @@
               "attempts": [
                 {
                   "attempt_ordinal": 1,
-                  "call_id": "27466e0c-10cb-4b5f-bf3d-7cf7d4508c6c"
+                  "call_id": "session:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000:turn:process:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000:llm:0"
                 }
               ],
               "kind": "unreported"
@@ -22954,7 +22943,7 @@
                 "attempts": [
                   {
                     "attempt_ordinal": 1,
-                    "call_id": "27466e0c-10cb-4b5f-bf3d-7cf7d4508c6c"
+                    "call_id": "session:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000:turn:process:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000:llm:0"
                   }
                 ],
                 "kind": "unreported"
@@ -23202,7 +23191,7 @@
               "attempts": [
                 {
                   "attempt_ordinal": 1,
-                  "call_id": "665890a7-28f0-49e4-a532-61e701f707ed"
+                  "call_id": "session:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000:turn:process:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000:llm:0"
                 }
               ],
               "kind": "unreported"
@@ -23378,7 +23367,7 @@
                 "attempts": [
                   {
                     "attempt_ordinal": 1,
-                    "call_id": "665890a7-28f0-49e4-a532-61e701f707ed"
+                    "call_id": "session:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000:turn:process:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000:llm:0"
                   }
                 ],
                 "kind": "unreported"
@@ -23477,7 +23466,7 @@
           "component": "tool_state",
           "kind": {
             "kind": "stored",
-            "logical_bytes": 1833
+            "logical_bytes": 1717
           }
         },
         {
@@ -23530,7 +23519,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.359965622+00:00"
+              "timestamp": "2026-09-26T01:11:14.768445733+00:00"
             },
             {
               "event": {
@@ -23649,7 +23638,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.359965622+00:00"
+              "timestamp": "2026-09-26T01:11:14.768445733+00:00"
             },
             {
               "event": {
@@ -23882,7 +23871,7 @@
               "kind": "event",
               "node_id": "n_7672595bed029bfb8068b11c4321b0365161729a3d20990a148173686bbf1b7e",
               "parent_node_id": "n_a85889bfd198034dff6a8fcee95009deff18955306e1334e7e0fc760da3ed5b7",
-              "timestamp": "2027-01-15T08:00:00.485+00:00"
+              "timestamp": "2027-01-15T08:00:00.894+00:00"
             }
           ]
         },
@@ -23948,7 +23937,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.359965622+00:00"
+              "timestamp": "2026-09-26T01:11:14.768445733+00:00"
             },
             {
               "event": {
@@ -24054,7 +24043,7 @@
               "kind": "event",
               "node_id": "n_7672595bed029bfb8068b11c4321b0365161729a3d20990a148173686bbf1b7e",
               "parent_node_id": "n_a85889bfd198034dff6a8fcee95009deff18955306e1334e7e0fc760da3ed5b7",
-              "timestamp": "2027-01-15T08:00:00.485+00:00"
+              "timestamp": "2027-01-15T08:00:00.894+00:00"
             }
           ],
           "token_ledger": [
@@ -24207,7 +24196,7 @@
           "component": "tool_state",
           "kind": {
             "kind": "stored",
-            "logical_bytes": 1833
+            "logical_bytes": 1717
           }
         },
         {
@@ -24260,7 +24249,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.386170060+00:00"
+              "timestamp": "2026-09-26T01:11:14.818612838+00:00"
             },
             {
               "event": {
@@ -24369,7 +24358,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.386170060+00:00"
+              "timestamp": "2026-09-26T01:11:14.818612838+00:00"
             },
             {
               "event": {
@@ -24572,7 +24561,7 @@
               "kind": "event",
               "node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
               "parent_node_id": "n_92b4ec69cdcbb9ec8ab6efd733263589a1657879d4e9861876496640b014df7a",
-              "timestamp": "2027-01-15T08:00:00.485+00:00"
+              "timestamp": "2027-01-15T08:00:00.894+00:00"
             }
           ]
         },
@@ -24638,7 +24627,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.386170060+00:00"
+              "timestamp": "2026-09-26T01:11:14.818612838+00:00"
             },
             {
               "event": {
@@ -24724,7 +24713,7 @@
               "kind": "event",
               "node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
               "parent_node_id": "n_92b4ec69cdcbb9ec8ab6efd733263589a1657879d4e9861876496640b014df7a",
-              "timestamp": "2027-01-15T08:00:00.485+00:00"
+              "timestamp": "2027-01-15T08:00:00.894+00:00"
             }
           ],
           "token_ledger": [
@@ -24892,7 +24881,7 @@
               "kind": "event",
               "node_id": "n_5a4208b9b28ceade3741adee646095bbb5355bdd47d556a1d8018c9af66d2698",
               "parent_node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
-              "timestamp": "2027-01-15T08:00:00.485+00:00"
+              "timestamp": "2027-01-15T08:00:00.894+00:00"
             },
             {
               "event": {
@@ -24911,7 +24900,7 @@
               "kind": "event",
               "node_id": "n_c0c71a9bb847ab472abefba00a4caaf91232ad5aee6c9efdb5cc20b38f1dc25f",
               "parent_node_id": "n_5a4208b9b28ceade3741adee646095bbb5355bdd47d556a1d8018c9af66d2698",
-              "timestamp": "2027-01-15T08:00:00.604+00:00"
+              "timestamp": "2027-01-15T08:00:01.115+00:00"
             }
           ]
         },
@@ -24977,7 +24966,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.386170060+00:00"
+              "timestamp": "2026-09-26T01:11:14.818612838+00:00"
             },
             {
               "event": {
@@ -25063,7 +25052,7 @@
               "kind": "event",
               "node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
               "parent_node_id": "n_92b4ec69cdcbb9ec8ab6efd733263589a1657879d4e9861876496640b014df7a",
-              "timestamp": "2027-01-15T08:00:00.485+00:00"
+              "timestamp": "2027-01-15T08:00:00.894+00:00"
             },
             {
               "event": {
@@ -25087,7 +25076,7 @@
               "kind": "event",
               "node_id": "n_5a4208b9b28ceade3741adee646095bbb5355bdd47d556a1d8018c9af66d2698",
               "parent_node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
-              "timestamp": "2027-01-15T08:00:00.485+00:00"
+              "timestamp": "2027-01-15T08:00:00.894+00:00"
             },
             {
               "event": {
@@ -25106,7 +25095,7 @@
               "kind": "event",
               "node_id": "n_c0c71a9bb847ab472abefba00a4caaf91232ad5aee6c9efdb5cc20b38f1dc25f",
               "parent_node_id": "n_5a4208b9b28ceade3741adee646095bbb5355bdd47d556a1d8018c9af66d2698",
-              "timestamp": "2027-01-15T08:00:00.604+00:00"
+              "timestamp": "2027-01-15T08:00:01.115+00:00"
             }
           ],
           "token_ledger": [
@@ -25266,7 +25255,7 @@
           "component": "tool_state",
           "kind": {
             "kind": "stored",
-            "logical_bytes": 1833
+            "logical_bytes": 1717
           }
         },
         {
@@ -25319,7 +25308,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.407088338+00:00"
+              "timestamp": "2026-09-26T01:11:14.860566279+00:00"
             },
             {
               "event": {
@@ -25428,7 +25417,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.407088338+00:00"
+              "timestamp": "2026-09-26T01:11:14.860566279+00:00"
             },
             {
               "event": {
@@ -25631,7 +25620,7 @@
               "kind": "event",
               "node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
               "parent_node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
-              "timestamp": "2027-01-15T08:00:00.485+00:00"
+              "timestamp": "2027-01-15T08:00:00.894+00:00"
             }
           ]
         },
@@ -25697,7 +25686,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.407088338+00:00"
+              "timestamp": "2026-09-26T01:11:14.860566279+00:00"
             },
             {
               "event": {
@@ -25783,7 +25772,7 @@
               "kind": "event",
               "node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
               "parent_node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
-              "timestamp": "2027-01-15T08:00:00.485+00:00"
+              "timestamp": "2027-01-15T08:00:00.894+00:00"
             }
           ],
           "token_ledger": [
@@ -25951,7 +25940,7 @@
               "kind": "event",
               "node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
               "parent_node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
-              "timestamp": "2027-01-15T08:00:00.485+00:00"
+              "timestamp": "2027-01-15T08:00:00.894+00:00"
             },
             {
               "event": {
@@ -25970,7 +25959,7 @@
               "kind": "event",
               "node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
               "parent_node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
-              "timestamp": "2027-01-15T08:00:00.604+00:00"
+              "timestamp": "2027-01-15T08:00:01.115+00:00"
             }
           ]
         },
@@ -26036,7 +26025,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.407088338+00:00"
+              "timestamp": "2026-09-26T01:11:14.860566279+00:00"
             },
             {
               "event": {
@@ -26122,7 +26111,7 @@
               "kind": "event",
               "node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
               "parent_node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
-              "timestamp": "2027-01-15T08:00:00.485+00:00"
+              "timestamp": "2027-01-15T08:00:00.894+00:00"
             },
             {
               "event": {
@@ -26146,7 +26135,7 @@
               "kind": "event",
               "node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
               "parent_node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
-              "timestamp": "2027-01-15T08:00:00.485+00:00"
+              "timestamp": "2027-01-15T08:00:00.894+00:00"
             },
             {
               "event": {
@@ -26165,7 +26154,7 @@
               "kind": "event",
               "node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
               "parent_node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
-              "timestamp": "2027-01-15T08:00:00.604+00:00"
+              "timestamp": "2027-01-15T08:00:01.115+00:00"
             }
           ],
           "token_ledger": [
@@ -26360,7 +26349,7 @@
               "kind": "event",
               "node_id": "n_4685b079ab678bbef20a3e35b0feb6e1ec8a446753c2dc2a3788a4d563f06bdb",
               "parent_node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
-              "timestamp": "2027-01-15T08:00:00.604+00:00"
+              "timestamp": "2027-01-15T08:00:01.115+00:00"
             },
             {
               "event": {
@@ -26379,7 +26368,7 @@
               "kind": "event",
               "node_id": "n_3c1b0d3e5a7a05994e5912786f2c6b052de8c8b785c04b0db48abfe169ebbc50",
               "parent_node_id": "n_4685b079ab678bbef20a3e35b0feb6e1ec8a446753c2dc2a3788a4d563f06bdb",
-              "timestamp": "2027-01-15T08:00:00.683+00:00"
+              "timestamp": "2027-01-15T08:00:01.295+00:00"
             }
           ]
         },
@@ -26445,7 +26434,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.407088338+00:00"
+              "timestamp": "2026-09-26T01:11:14.860566279+00:00"
             },
             {
               "event": {
@@ -26531,7 +26520,7 @@
               "kind": "event",
               "node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
               "parent_node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
-              "timestamp": "2027-01-15T08:00:00.485+00:00"
+              "timestamp": "2027-01-15T08:00:00.894+00:00"
             },
             {
               "event": {
@@ -26555,7 +26544,7 @@
               "kind": "event",
               "node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
               "parent_node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
-              "timestamp": "2027-01-15T08:00:00.485+00:00"
+              "timestamp": "2027-01-15T08:00:00.894+00:00"
             },
             {
               "event": {
@@ -26574,7 +26563,7 @@
               "kind": "event",
               "node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
               "parent_node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
-              "timestamp": "2027-01-15T08:00:00.604+00:00"
+              "timestamp": "2027-01-15T08:00:01.115+00:00"
             },
             {
               "event": {
@@ -26598,7 +26587,7 @@
               "kind": "event",
               "node_id": "n_4685b079ab678bbef20a3e35b0feb6e1ec8a446753c2dc2a3788a4d563f06bdb",
               "parent_node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
-              "timestamp": "2027-01-15T08:00:00.604+00:00"
+              "timestamp": "2027-01-15T08:00:01.115+00:00"
             },
             {
               "event": {
@@ -26617,7 +26606,7 @@
               "kind": "event",
               "node_id": "n_3c1b0d3e5a7a05994e5912786f2c6b052de8c8b785c04b0db48abfe169ebbc50",
               "parent_node_id": "n_4685b079ab678bbef20a3e35b0feb6e1ec8a446753c2dc2a3788a4d563f06bdb",
-              "timestamp": "2027-01-15T08:00:00.683+00:00"
+              "timestamp": "2027-01-15T08:00:01.295+00:00"
             }
           ],
           "token_ledger": [
@@ -26804,7 +26793,7 @@
           "component": "tool_state",
           "kind": {
             "kind": "stored",
-            "logical_bytes": 2160
+            "logical_bytes": 2044
           }
         },
         {
@@ -26861,7 +26850,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.470470814+00:00"
+              "timestamp": "2026-09-26T01:11:14.923184273+00:00"
             },
             {
               "event": {
@@ -26906,7 +26895,7 @@
               "kind": "event",
               "node_id": "n_c8be6696dd3f59bb15c4c4bb9186403e03871e44ea17d639e69bf4f8a6ba7581",
               "parent_node_id": "n_270eccff0ba95d649c0ca05487d60c80587269c1fa55f7fd6669a941cc0d50db",
-              "timestamp": "2027-01-15T08:00:00.718+00:00"
+              "timestamp": "2027-01-15T08:00:01.370+00:00"
             },
             {
               "event": {
@@ -26932,7 +26921,7 @@
               "kind": "event",
               "node_id": "n_58cd8b1f4bd9a387252840a0dc7a90c9c4da825d3cacf869b2a200b3c3711a6c",
               "parent_node_id": "n_c8be6696dd3f59bb15c4c4bb9186403e03871e44ea17d639e69bf4f8a6ba7581",
-              "timestamp": "2027-01-15T08:00:00.718+00:00"
+              "timestamp": "2027-01-15T08:00:01.370+00:00"
             },
             {
               "event": {
@@ -26951,7 +26940,7 @@
               "kind": "event",
               "node_id": "n_3959d4d6e9b55560cdcb325721e1ba83be72da0a5840d9e3ea6875547c7d2a19",
               "parent_node_id": "n_58cd8b1f4bd9a387252840a0dc7a90c9c4da825d3cacf869b2a200b3c3711a6c",
-              "timestamp": "2027-01-15T08:00:00.718+00:00"
+              "timestamp": "2027-01-15T08:00:01.370+00:00"
             }
           ]
         },
@@ -26998,7 +26987,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.470470814+00:00"
+              "timestamp": "2026-09-26T01:11:14.923184273+00:00"
             },
             {
               "event": {
@@ -27043,7 +27032,7 @@
               "kind": "event",
               "node_id": "n_c8be6696dd3f59bb15c4c4bb9186403e03871e44ea17d639e69bf4f8a6ba7581",
               "parent_node_id": "n_270eccff0ba95d649c0ca05487d60c80587269c1fa55f7fd6669a941cc0d50db",
-              "timestamp": "2027-01-15T08:00:00.718+00:00"
+              "timestamp": "2027-01-15T08:00:01.370+00:00"
             },
             {
               "event": {
@@ -27069,7 +27058,7 @@
               "kind": "event",
               "node_id": "n_58cd8b1f4bd9a387252840a0dc7a90c9c4da825d3cacf869b2a200b3c3711a6c",
               "parent_node_id": "n_c8be6696dd3f59bb15c4c4bb9186403e03871e44ea17d639e69bf4f8a6ba7581",
-              "timestamp": "2027-01-15T08:00:00.718+00:00"
+              "timestamp": "2027-01-15T08:00:01.370+00:00"
             },
             {
               "event": {
@@ -27088,7 +27077,7 @@
               "kind": "event",
               "node_id": "n_3959d4d6e9b55560cdcb325721e1ba83be72da0a5840d9e3ea6875547c7d2a19",
               "parent_node_id": "n_58cd8b1f4bd9a387252840a0dc7a90c9c4da825d3cacf869b2a200b3c3711a6c",
-              "timestamp": "2027-01-15T08:00:00.718+00:00"
+              "timestamp": "2027-01-15T08:00:01.370+00:00"
             }
           ],
           "token_ledger": [],
@@ -27206,7 +27195,7 @@
           "component": "tool_state",
           "kind": {
             "kind": "stored",
-            "logical_bytes": 2135
+            "logical_bytes": 2019
           }
         },
         {
@@ -27263,7 +27252,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.491939498+00:00"
+              "timestamp": "2026-09-26T01:11:15.088095243+00:00"
             },
             {
               "event": {
@@ -27308,7 +27297,7 @@
               "kind": "event",
               "node_id": "n_fb621545030c058fda0d4f6bc2749a8fcd4f5a8be261c4a6f5b169fd7a886c7b",
               "parent_node_id": "n_ccc2ad193b10f29f3e638a7a75cccf47bf4d8f0d9caf5c9b4451d2fc28dffc69",
-              "timestamp": "2027-01-15T08:00:00.718+00:00"
+              "timestamp": "2027-01-15T08:00:01.370+00:00"
             },
             {
               "event": {
@@ -27334,7 +27323,7 @@
               "kind": "event",
               "node_id": "n_e23c0f48c12a2d00e317af16e81606c4fe565484096772239f3e367590dc9ace",
               "parent_node_id": "n_fb621545030c058fda0d4f6bc2749a8fcd4f5a8be261c4a6f5b169fd7a886c7b",
-              "timestamp": "2027-01-15T08:00:00.718+00:00"
+              "timestamp": "2027-01-15T08:00:01.370+00:00"
             },
             {
               "event": {
@@ -27353,7 +27342,7 @@
               "kind": "event",
               "node_id": "n_31dea96e0b9842837e784ee3677941527d5909425d9440993836dc3062bb29e5",
               "parent_node_id": "n_e23c0f48c12a2d00e317af16e81606c4fe565484096772239f3e367590dc9ace",
-              "timestamp": "2027-01-15T08:00:00.718+00:00"
+              "timestamp": "2027-01-15T08:00:01.370+00:00"
             }
           ]
         },
@@ -27400,7 +27389,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.491939498+00:00"
+              "timestamp": "2026-09-26T01:11:15.088095243+00:00"
             },
             {
               "event": {
@@ -27445,7 +27434,7 @@
               "kind": "event",
               "node_id": "n_fb621545030c058fda0d4f6bc2749a8fcd4f5a8be261c4a6f5b169fd7a886c7b",
               "parent_node_id": "n_ccc2ad193b10f29f3e638a7a75cccf47bf4d8f0d9caf5c9b4451d2fc28dffc69",
-              "timestamp": "2027-01-15T08:00:00.718+00:00"
+              "timestamp": "2027-01-15T08:00:01.370+00:00"
             },
             {
               "event": {
@@ -27471,7 +27460,7 @@
               "kind": "event",
               "node_id": "n_e23c0f48c12a2d00e317af16e81606c4fe565484096772239f3e367590dc9ace",
               "parent_node_id": "n_fb621545030c058fda0d4f6bc2749a8fcd4f5a8be261c4a6f5b169fd7a886c7b",
-              "timestamp": "2027-01-15T08:00:00.718+00:00"
+              "timestamp": "2027-01-15T08:00:01.370+00:00"
             },
             {
               "event": {
@@ -27490,7 +27479,7 @@
               "kind": "event",
               "node_id": "n_31dea96e0b9842837e784ee3677941527d5909425d9440993836dc3062bb29e5",
               "parent_node_id": "n_e23c0f48c12a2d00e317af16e81606c4fe565484096772239f3e367590dc9ace",
-              "timestamp": "2027-01-15T08:00:00.718+00:00"
+              "timestamp": "2027-01-15T08:00:01.370+00:00"
             }
           ],
           "token_ledger": [],
@@ -27608,7 +27597,7 @@
           "component": "tool_state",
           "kind": {
             "kind": "stored",
-            "logical_bytes": 2110
+            "logical_bytes": 1994
           }
         },
         {
@@ -27665,7 +27654,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.431418168+00:00"
+              "timestamp": "2026-09-26T01:11:14.900433424+00:00"
             },
             {
               "event": {
@@ -27710,7 +27699,7 @@
               "kind": "event",
               "node_id": "n_95f2e43ca2ffd8c9997355c3a985971f02f1be771128f12a44dcf26aaba10573",
               "parent_node_id": "n_808f443440c2b4e6259cf792f26133b585c444d27be079000d531c5857ab4f66",
-              "timestamp": "2027-01-15T08:00:00.718+00:00"
+              "timestamp": "2027-01-15T08:00:01.370+00:00"
             },
             {
               "event": {
@@ -27736,7 +27725,7 @@
               "kind": "event",
               "node_id": "n_6f4e33c379e9e6873025c0065fb4bbb63755c00b98a90fd6f2897197e144c4c5",
               "parent_node_id": "n_95f2e43ca2ffd8c9997355c3a985971f02f1be771128f12a44dcf26aaba10573",
-              "timestamp": "2027-01-15T08:00:00.718+00:00"
+              "timestamp": "2027-01-15T08:00:01.370+00:00"
             },
             {
               "event": {
@@ -27755,7 +27744,7 @@
               "kind": "event",
               "node_id": "n_4b710976f683da656774dc15a7f0c8e781f1d4eb5f066edf4b4e2adb110c24e4",
               "parent_node_id": "n_6f4e33c379e9e6873025c0065fb4bbb63755c00b98a90fd6f2897197e144c4c5",
-              "timestamp": "2027-01-15T08:00:00.718+00:00"
+              "timestamp": "2027-01-15T08:00:01.370+00:00"
             }
           ]
         },
@@ -27802,7 +27791,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-25T10:53:57.431418168+00:00"
+              "timestamp": "2026-09-26T01:11:14.900433424+00:00"
             },
             {
               "event": {
@@ -27847,7 +27836,7 @@
               "kind": "event",
               "node_id": "n_95f2e43ca2ffd8c9997355c3a985971f02f1be771128f12a44dcf26aaba10573",
               "parent_node_id": "n_808f443440c2b4e6259cf792f26133b585c444d27be079000d531c5857ab4f66",
-              "timestamp": "2027-01-15T08:00:00.718+00:00"
+              "timestamp": "2027-01-15T08:00:01.370+00:00"
             },
             {
               "event": {
@@ -27873,7 +27862,7 @@
               "kind": "event",
               "node_id": "n_6f4e33c379e9e6873025c0065fb4bbb63755c00b98a90fd6f2897197e144c4c5",
               "parent_node_id": "n_95f2e43ca2ffd8c9997355c3a985971f02f1be771128f12a44dcf26aaba10573",
-              "timestamp": "2027-01-15T08:00:00.718+00:00"
+              "timestamp": "2027-01-15T08:00:01.370+00:00"
             },
             {
               "event": {
@@ -27892,7 +27881,7 @@
               "kind": "event",
               "node_id": "n_4b710976f683da656774dc15a7f0c8e781f1d4eb5f066edf4b4e2adb110c24e4",
               "parent_node_id": "n_6f4e33c379e9e6873025c0065fb4bbb63755c00b98a90fd6f2897197e144c4c5",
-              "timestamp": "2027-01-15T08:00:00.718+00:00"
+              "timestamp": "2027-01-15T08:00:01.370+00:00"
             }
           ],
           "token_ledger": [],

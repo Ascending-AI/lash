@@ -390,7 +390,6 @@ impl StandardToolResult {
                 .collect(),
                 attachment_notices: Vec::new(),
             },
-            duration_ms: 1,
             intent_outcomes: self.intent_outcomes.clone(),
             replay: None,
         }

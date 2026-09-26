@@ -140,7 +140,6 @@ fn pending_tool() -> crate::tool_dispatch::PendingToolDispatchOutcome {
             signature: "signature".to_string(),
         },
         pending: crate::PendingCompletion::default(),
-        duration_ms: 0,
         attempts: Vec::new(),
         captures: Vec::new(),
         triggers: Vec::new(),

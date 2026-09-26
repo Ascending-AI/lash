@@ -1006,7 +1006,6 @@ pub enum ToolAttemptLaunch {
         // enum's size.
         key: Box<crate::AwaitEventKey>,
         pending: crate::PendingCompletion,
-        duration_ms: u64,
     },
 }
 

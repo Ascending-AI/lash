@@ -566,6 +566,10 @@ impl RuntimeTurnDriver<'_> {
                 },
             },
         );
+        // The observed duration is measured around the journaled invocation:
+        // the recorded `ExecResponse` carries no wall-clock fields, so the
+        // Completed activity and its trace mirror take the live window here.
+        let cell_started = self.host.core.clock.now();
         let result = match self
             .invoke_turn_exec_effect(
                 machine,
@@ -644,6 +648,13 @@ impl RuntimeTurnDriver<'_> {
                 return Ok(());
             }
         };
+        let cell_duration_ms = self
+            .host
+            .core
+            .clock
+            .now()
+            .saturating_duration_since(cell_started)
+            .as_millis() as u64;
         match &result {
             Ok(output) => {
                 code_observations.observe(
@@ -655,7 +666,7 @@ impl RuntimeTurnDriver<'_> {
                             output: join_observations(&output.observations),
                             error: output.error.clone(),
                             success: output.error.is_none(),
-                            duration_ms: output.duration_ms,
+                            duration_ms: cell_duration_ms,
                             tool_call_ids: output
                                 .calls
                                 .iter()
@@ -703,7 +714,6 @@ impl RuntimeTurnDriver<'_> {
                     .map(|record| lash_trace::TraceExecToolCall {
                         call_id: record.call_id.clone(),
                         name: record.tool.clone(),
-                        duration_ms: record.duration_ms,
                         status: match record.output.status() {
                             lash_sansio::ToolCallStatus::Success => {
                                 lash_trace::TraceToolCallStatus::Success
@@ -720,7 +730,7 @@ impl RuntimeTurnDriver<'_> {
                 self.emit_trace(
                     iteration,
                     lash_trace::TraceEvent::ExecCodeCompleted {
-                        duration_ms: output.duration_ms,
+                        duration_ms: cell_duration_ms,
                         output: observations_text.clone(),
                         output_chars: observations_text.chars().count(),
                         observation_count: output.observations.len(),

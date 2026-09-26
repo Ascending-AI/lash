@@ -772,6 +772,9 @@ pub(crate) fn rebind_child_dispatch<'run>(
     child.tool_catalog = Arc::new(admitted_catalog(request));
     // Lineage is recorded, not the opener's current one.
     child.parent_invocation = request.attempt_identity.parent_invocation().cloned();
+    // Observation keying is likewise call-scoped: the child's own call sites
+    // install their keys, so the opener's is cleared here (Fresh).
+    child.observation_call_key = None;
     // The environment the child was admitted under, resolved from its recorded
     // reference rather than inherited from whatever the opener is running now.
     child.execution_env_spec = execution_env_spec.clone();
@@ -996,6 +999,9 @@ async fn run_tool_child<'run>(
         ),
         None => None,
     };
+    // The presentation hook's duration input is this observed window — the
+    // journaled outcome carries no clock facts (FIG-3696).
+    let run_started = dispatch.clock.now();
     // Boxed for the same reason the runner's call is: `drive` holds the
     // coordinator and its attempt machinery live across every await.
     let driven = Box::pin(drive(
@@ -1032,8 +1038,18 @@ async fn run_tool_child<'run>(
     // constructor every terminal owns (FIG-3411): per-attempt facts ride
     // `outcome.captures` and its `triggers`; what the orchestrating lane wrote
     // outside any attempt frame still drains from the child-local buffers.
-    let model_return =
-        resolve_model_return(&dispatch, request, &outcome, &outcome.intent_outcomes).await?;
+    let model_return = resolve_model_return(
+        &dispatch,
+        request,
+        &outcome,
+        &outcome.intent_outcomes,
+        dispatch
+            .clock
+            .now()
+            .saturating_duration_since(run_started)
+            .as_millis() as u64,
+    )
+    .await?;
     let mut settlement = ToolSettlement::from_dispatch(&outcome, model_return);
     settlement
         .checkpoint_messages
@@ -1392,10 +1408,17 @@ pub(crate) async fn await_journaled_tool_completion(
         ));
     };
     let resolver = pending.pending.resolved_by.clone();
+    // The journaled await's replay key is the settled call's observation key:
+    // unique per (parent, call id) and re-derived identically on a redrive
+    // (ADR 0105 §1).
+    let settle_key = invocation.replay_key().to_owned();
     let deadline = pending
         .pending
         .deadline
         .map(|duration| dispatch.clock.now() + duration);
+    // The settled call's observed duration is this resume's live window —
+    // the journaled await and pending row carry no clock facts (FIG-3696).
+    let settle_started = dispatch.clock.now();
     let outcome = dispatch
         .effect_controller
         .scoped()
@@ -1424,14 +1447,19 @@ pub(crate) async fn await_journaled_tool_completion(
         }
         Err(error) => return Err(error),
     };
+    let settle_dispatch = dispatch.observation_keyed(settle_key);
     let mut outcome = crate::tool_dispatch::settle_completed_pending_tool_call(
-        dispatch,
+        &settle_dispatch,
         call_id,
         pending.tool_name,
         pending.args,
         resolution,
         resolver.as_ref(),
-        pending.duration_ms,
+        dispatch
+            .clock
+            .now()
+            .saturating_duration_since(settle_started)
+            .as_millis() as u64,
         pending.attempts,
     )
     .await;
@@ -1480,7 +1508,6 @@ fn unarmed_child_outcome(
                 "pending_tool_resolver_unarmed",
                 format!("the declared resolver for this group child could not be armed: {reason}"),
             )),
-            duration_ms: pending.duration_ms,
         },
         attempts: pending.attempts,
         intents: crate::ToolIntents::default(),
@@ -1505,7 +1532,6 @@ fn failed_child_outcome(
                 "pending_tool_completion_failed",
                 reason.to_string(),
             )),
-            duration_ms: pending.duration_ms,
         },
         attempts: pending.attempts,
         intents: crate::ToolIntents::default(),
@@ -1533,6 +1559,7 @@ async fn resolve_model_return(
     request: &ToolChildRequest,
     outcome: &ToolDispatchOutcome,
     intent_outcomes: &[crate::ToolIntentExecutionOutcome],
+    duration_ms: u64,
 ) -> Result<crate::ModelToolReturn, RuntimeEffectControllerError> {
     let baseline = crate::ModelToolReturn::from_output(
         request.call.call_id.clone(),
@@ -1574,7 +1601,7 @@ async fn resolve_model_return(
                             .capability
                             .attachment_acceptance)
                             .clone(),
-                        outcome.record.duration_ms,
+                        duration_ms,
                     ),
                 )
                 .await

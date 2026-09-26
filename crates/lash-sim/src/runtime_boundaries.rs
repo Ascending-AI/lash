@@ -250,7 +250,6 @@ impl RuntimeBoundaryHarness {
                     tool: "sim_opaque_effect".to_string(),
                     args: Value::Null,
                     output: ToolCallOutput::success(result),
-                    duration_ms: 0,
                 }),
                 intents: recorded_intents.clone(),
             }),
@@ -394,7 +393,6 @@ impl RuntimeBoundaryHarness {
                                 tool: tool_name.clone(),
                                 args,
                                 output: ToolCallOutput::success(output.clone()),
-                                duration_ms: 0,
                             }),
                             intents: lash_core::ToolIntents::default(),
                         }),
@@ -480,7 +478,6 @@ impl RuntimeBoundaryHarness {
                     format!("exit code {exit_code}"),
                 )
             }),
-            duration_ms: 0,
             degraded_bindings: Vec::new(),
             terminal_finish: Some(json!({
                 "output": output,

@@ -1774,7 +1774,6 @@ pub(super) fn completed_tool_record(call_id: &str, tool_name: &str) -> lash_core
         tool: tool_name.to_string(),
         args: serde_json::json!({ "call": call_id }),
         output: lash_core::ToolCallOutput::success(serde_json::json!({ "call": call_id })),
-        duration_ms: 1,
     }
 }
 

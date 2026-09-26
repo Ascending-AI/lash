@@ -183,26 +183,6 @@ impl ToolAttemptEffectIdentity {
             Self::Command { command } => Some(command),
         }
     }
-
-    /// The call's duration once the current attempt reported
-    /// `attempt_duration_ms`, given the `elapsed_ms` its earlier attempts and
-    /// the backoffs between them took.
-    ///
-    /// Both inputs are recorded: an attempt measures its own duration inside
-    /// its journaled step, and a backoff is the delay the recorded outcome and
-    /// the retry policy chose. A replay therefore reports the duration the
-    /// first execution reported, byte for byte, where a clock read here would
-    /// measure the replay itself — and the duration rides the group child's
-    /// settlement, which the engine journals. A batch call reports its
-    /// attempt alone, as it always has.
-    fn duration_ms(&self, elapsed_ms: u64, attempt_duration_ms: u64) -> u64 {
-        match self {
-            Self::Batch { .. } => attempt_duration_ms,
-            Self::Scalar { .. } | Self::Command { .. } | Self::Process { .. } => {
-                elapsed_ms.saturating_add(attempt_duration_ms)
-            }
-        }
-    }
 }
 
 pub struct CoordinatedToolInvocation {
@@ -269,9 +249,6 @@ pub async fn coordinate_tool_invocation<'run>(
     child_trace_hook: Option<crate::ToolChildExecutionTraceHook>,
     mut local_executor: impl FnMut(Option<crate::AwaitEventKey>) -> RuntimeEffectLocalExecutor<'run>,
 ) -> CoordinatedToolInvocation {
-    // The recorded time the call's finished attempts and backoffs took; see
-    // `ToolAttemptEffectIdentity::duration_ms`.
-    let mut elapsed_ms: u64 = 0;
     let max_attempts = retry_policy.max_attempts().max(1);
     let mut triggers = Vec::new();
     let mut captures = Vec::new();
@@ -361,7 +338,6 @@ pub async fn coordinate_tool_invocation<'run>(
                         &call,
                         "tool_attempt_failed",
                         err.to_string(),
-                        identity.duration_ms(elapsed_ms, 0),
                         attempts,
                         captures,
                         triggers,
@@ -396,19 +372,13 @@ pub async fn coordinate_tool_invocation<'run>(
         // replayed attempt indistinguishable from a fresh one (ADR 0099 §13).
         captures.push(outcome.capture);
         match outcome.launch {
-            crate::ToolAttemptLaunch::Pending {
-                key,
-                pending,
-                duration_ms,
-            } => {
-                let duration_ms = identity.duration_ms(elapsed_ms, duration_ms);
+            crate::ToolAttemptLaunch::Pending { key, pending } => {
                 return CoordinatedToolInvocation {
                     launch: ToolCallLaunch::Pending(Box::new(PendingToolDispatchOutcome {
                         tool_name: call.tool_name,
                         args: call.args,
                         key: *key,
                         pending,
-                        duration_ms,
                         attempts,
                         captures,
                         triggers,
@@ -435,7 +405,6 @@ pub async fn coordinate_tool_invocation<'run>(
                     record.as_ref(),
                     (attempt < max_attempts).then_some(retry_after).flatten(),
                 ));
-                record.duration_ms = identity.duration_ms(elapsed_ms, record.duration_ms);
                 let Some(retry_after) = retry_after else {
                     return CoordinatedToolInvocation {
                         launch: match settle_terminal_attempt(
@@ -491,7 +460,6 @@ pub async fn coordinate_tool_invocation<'run>(
                         },
                     };
                 }
-                elapsed_ms = record.duration_ms.saturating_add(retry_after);
                 if retry_after > 0
                     && let Err(err) = sleep_before_retry(
                         context,
@@ -515,7 +483,6 @@ pub async fn coordinate_tool_invocation<'run>(
                                     "retry sleep for tool `{}` failed after attempt {attempt}: {err}",
                                     call.tool_name
                                 ),
-                                identity.duration_ms(elapsed_ms, 0),
                                 attempts,
                                 captures,
                                 triggers,
@@ -536,7 +503,6 @@ pub async fn coordinate_tool_invocation<'run>(
             &call,
             "tool_retry_loop_failed",
             "tool retry loop exited without a terminal result",
-            identity.duration_ms(elapsed_ms, 0),
             attempts,
             captures,
             triggers,
@@ -642,6 +608,7 @@ async fn settle_terminal_attempt(
     }
     let mut intent_context = context.clone();
     intent_context.parent_invocation = Some(minting_emission.clone().into_runtime_invocation());
+    intent_context.observation_call_key = None;
     let intent_outcomes = super::execute_final_tool_intents(
         &intent_context,
         recorded_call_id.as_deref(),
@@ -946,7 +913,6 @@ fn runtime_failure_outcome(
     call: &PreparedToolCall,
     code: impl Into<String>,
     message: impl Into<String>,
-    duration_ms: u64,
     attempts: Vec<lash_trace::TraceRetryAttempt>,
     captures: Vec<crate::runtime::ToolAttemptCapture>,
     triggers: Vec<ToolTriggerEffectOutcome>,
@@ -961,7 +927,6 @@ fn runtime_failure_outcome(
                 code,
                 message,
             )),
-            duration_ms,
         },
         attempts,
         intents: crate::ToolIntents::default(),

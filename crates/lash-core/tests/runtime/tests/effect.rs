@@ -1726,3 +1726,125 @@ mod effect_driver_support;
 use effect_driver_support::{
     EffectControllerTestCodeExecutor, EffectControllerTestProtocolFactory,
 };
+
+/// The nested call of an in-turn (turn-dispatched) orchestrating tool runs as
+/// a `ToolInvocation` group child: its observation lane must surface exactly
+/// one `ToolCallStarted`/`ToolCallCompleted` activity pair on the turn's
+/// activity stream — no more, no fewer (ADR 0105 §1).
+struct NestedEchoBatchTool;
+
+fn nested_echo_tool_definition() -> lash_core::ToolDefinition {
+    lash_core::ToolDefinition::raw(
+        "tool:nested_echo_tool",
+        "nested_echo_tool",
+        "Call echo_tool once through a nested tool batch.",
+        serde_json::json!({
+            "type": "object",
+            "properties": {},
+            "additionalProperties": false
+        }),
+        serde_json::json!({ "type": "object", "additionalProperties": true }),
+    )
+}
+
+#[async_trait::async_trait]
+impl lash_core::facade_support::OrchestratingToolImplementation for NestedEchoBatchTool {
+    fn manifest(&self) -> lash_core::ToolManifest {
+        nested_echo_tool_definition().manifest()
+    }
+
+    fn contract(&self) -> Arc<lash_core::ToolContract> {
+        Arc::new(nested_echo_tool_definition().contract())
+    }
+
+    async fn execute(
+        &self,
+        _args: &serde_json::Value,
+        context: &lash_core::facade_support::OrchestrationContext<'_>,
+    ) -> lash_core::ToolOutcome {
+        let replies = context
+            .call_tool_batch(vec![lash_core::facade_support::ToolInvocation::new(
+                "nested-call-1",
+                lash_core::ToolId::from("tool:echo_tool"),
+                serde_json::json!({ "value": "leaf" }),
+            )])
+            .await;
+        assert_eq!(replies.len(), 1);
+        lash_core::ToolOutcome::ok(serde_json::json!({ "nested": replies[0].output.clone() }))
+    }
+}
+
+#[expect(
+    unsafe_code,
+    reason = "OrchestratingToolDef::from_first_party is lash-core's unsafe capability boundary, and this crate owns the tool contract it registers"
+)]
+fn nested_echo_orchestrating_tool() -> lash_core::facade_support::OrchestratingToolDef {
+    let implementation: Arc<dyn lash_core::facade_support::OrchestratingToolImplementation> =
+        Arc::new(NestedEchoBatchTool);
+    // SAFETY: lash-core owns this test-only nested-call contract and its body.
+    unsafe { lash_core::facade_support::OrchestratingToolDef::from_first_party(implementation) }
+}
+
+#[tokio::test]
+async fn an_in_turn_orchestrating_tools_nested_call_emits_one_started_completed_pair() {
+    let backend = memory_backend().await;
+    let controller = CapturingRuntimeReplayController::calling("nested_echo_tool");
+    let mut config = runtime_host_config_with_effect_layer(&backend, Arc::new(controller.clone()));
+    config.providers.provider_resolver =
+        Arc::new(lash_core::facade_support::SingleProviderResolver::new(
+            mock_provider(Vec::new()).into_handle(),
+        ));
+    let mut runtime = runtime_with_plugins_and_tools_and_host(
+        vec![Arc::new(StaticPluginFactory::new(
+            "nested-echo",
+            lash_core::facade_support::PluginSpec::new()
+                .with_orchestrating_tool(nested_echo_orchestrating_tool()),
+        ))],
+        Arc::new(EchoTool),
+        mock_provider(Vec::new()),
+        EmbeddedRuntimeHost::new(config),
+    )
+    .await;
+
+    let activities = RecordingTurnEvents::default();
+    let turn = runtime
+        .stream_turn(
+            TurnInput::text("call the nested echo"),
+            TurnOptions::new(
+                CancellationToken::new(),
+                layered_scope(
+                    &backend,
+                    Arc::new(controller.clone()),
+                    AdmittedScope::turn("root", "nested-echo-turn"),
+                ),
+            )
+            .with_events(&NoopEventSink)
+            .with_turn_events(&activities),
+        )
+        .await
+        .expect("turn");
+
+    assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
+    let nested = |f: &dyn Fn(&TurnEvent) -> bool| {
+        activities
+            .snapshot()
+            .into_iter()
+            .filter(|activity| f(&activity.event))
+            .count()
+    };
+    let is_nested = |call_id: &Option<String>| call_id.as_deref() == Some("nested-call-1");
+    assert_eq!(
+        nested(
+            &|event| matches!(event, TurnEvent::ToolCallStarted { call_id, .. } if is_nested(call_id))
+        ),
+        1,
+        "the nested call emits exactly one ToolCallStarted activity"
+    );
+    assert_eq!(
+        nested(
+            &|event| matches!(event, TurnEvent::ToolCallCompleted { call_id, .. } if is_nested(call_id))
+        ),
+        1,
+        "the nested call emits exactly one ToolCallCompleted activity"
+    );
+}

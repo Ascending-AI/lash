@@ -4,8 +4,6 @@ pub(super) fn synthesize_protocol_abort(
     stream_accumulator: &LlmStreamAccumulator,
     streamed_usage: LlmUsage,
     stream_evidence: &crate::LlmStreamEvidence,
-    started_at: u64,
-    duration: std::time::Duration,
     replay_drops: Vec<crate::ProviderReplayDrop>,
 ) -> (LlmResponse, crate::LlmCallRecord) {
     let mut execution_evidence = stream_evidence
@@ -43,8 +41,6 @@ pub(super) fn synthesize_protocol_abort(
         replay_drops,
         attempts: vec![crate::AttemptRecord {
             ordinal: 1,
-            started_at,
-            duration,
             outcome: crate::AttemptOutcome::Aborted,
             protocol_position: crate::ProtocolPosition::OutputStarted,
             retry_budget_consumed: true,

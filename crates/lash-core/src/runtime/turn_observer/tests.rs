@@ -2,14 +2,22 @@ use std::future::Future;
 use std::task::{Context, Poll};
 
 use super::{LAG_BUDGET, ObservationSource, RuntimeStreamEvent, TurnObservations, TurnObserver};
-use crate::engine::{DriveObservation, ObservationSink, ObservedEvent, ReplayKey};
+use crate::engine::{
+    DriveObservation, ObservationCursor, ObservationSink, ObservedEvent, ReplayKey,
+};
 use crate::llm::types::StreamBlockIdentity;
 use crate::session_model::SessionStreamEvent;
 use crate::{
     TurnActivity, TurnActivityId, TurnCancellationEvidence, TurnEvent, TurnOutcome, TurnStop,
 };
 
-fn delta(observer: &TurnObserver, reasoning: bool, block: &str, text: &str) {
+fn delta(
+    observer: &TurnObserver,
+    cursor: &mut ObservationCursor,
+    reasoning: bool,
+    block: &str,
+    text: &str,
+) {
     let identity = StreamBlockIdentity::new(block, 0);
     let (session, turn) = if reasoning {
         (
@@ -35,7 +43,13 @@ fn delta(observer: &TurnObserver, reasoning: bool, block: &str, text: &str) {
         )
     };
     observer.publish(RuntimeStreamEvent::Session(session));
-    observer.activity(TurnActivityId::new(block), turn);
+    cursor.observe(
+        observer,
+        ObservedEvent::Activity {
+            correlation_id: Some(TurnActivityId::new(block)),
+            event: turn,
+        },
+    );
 }
 
 /// Each queued event as `(lane, block, text)`; any other event as its lane
@@ -81,11 +95,14 @@ fn row(lane: &str, block: &str, text: &str) -> (String, String, String) {
     (lane.to_string(), block.to_string(), text.to_string())
 }
 
-fn marker(observer: &TurnObserver, label: &str) {
-    observer.activity(
-        TurnActivityId::new(label),
-        TurnEvent::Error {
-            message: label.to_string(),
+fn marker(observer: &TurnObserver, cursor: &mut ObservationCursor, label: &str) {
+    cursor.observe(
+        observer,
+        ObservedEvent::Activity {
+            correlation_id: Some(TurnActivityId::new(label)),
+            event: TurnEvent::Error {
+                message: label.to_string(),
+            },
         },
     );
 }
@@ -93,10 +110,11 @@ fn marker(observer: &TurnObserver, label: &str) {
 #[test]
 fn a_host_that_keeps_up_receives_every_delta_as_published() {
     let (observer, mut observations) = TurnObserver::unread();
+    let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
     for chunk in ["Hello", " world"] {
-        delta(&observer, false, "A", chunk);
+        delta(&observer, &mut cursor, false, "A", chunk);
     }
-    delta(&observer, true, "R", "why");
+    delta(&observer, &mut cursor, true, "R", "why");
     assert_eq!(
         drain(&mut observations),
         vec![
@@ -114,16 +132,12 @@ fn a_host_that_keeps_up_receives_every_delta_as_published() {
 fn a_lagging_single_lane_host_gets_merged_deltas() {
     // An activity-only host: session events are never queued, so no pairs.
     let (observer, mut observations) = TurnObserver::with_quiet_lanes(true, false);
+    let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
     for index in 0..LAG_BUDGET {
-        observer.activity(
-            TurnActivityId::new("x"),
-            TurnEvent::Error {
-                message: index.to_string(),
-            },
-        );
+        marker(&observer, &mut cursor, &index.to_string());
     }
     for index in 0..50 {
-        delta(&observer, false, "A", &format!("<{index}>"));
+        delta(&observer, &mut cursor, false, "A", &format!("<{index}>"));
     }
     let rows = drain(&mut observations);
     let text = (0..50)
@@ -136,19 +150,20 @@ fn a_lagging_single_lane_host_gets_merged_deltas() {
 #[test]
 fn each_lane_merges_on_its_own_and_never_across_blocks_kinds_or_events() {
     let (observer, mut observations) = TurnObserver::unread();
+    let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
     for index in 0..LAG_BUDGET {
-        marker(&observer, &index.to_string());
+        marker(&observer, &mut cursor, &index.to_string());
     }
     // The first event beyond the budget is queued as it is; later ones merge.
-    delta(&observer, false, "A", "a1");
-    delta(&observer, false, "A", "a2");
-    delta(&observer, false, "B", "b");
-    delta(&observer, true, "B", "r1");
-    delta(&observer, true, "B", "r2");
-    marker(&observer, "semantic");
-    delta(&observer, true, "B", "s");
+    delta(&observer, &mut cursor, false, "A", "a1");
+    delta(&observer, &mut cursor, false, "A", "a2");
+    delta(&observer, &mut cursor, false, "B", "b");
+    delta(&observer, &mut cursor, true, "B", "r1");
+    delta(&observer, &mut cursor, true, "B", "r2");
+    marker(&observer, &mut cursor, "semantic");
+    delta(&observer, &mut cursor, true, "B", "s");
     observer.publish(RuntimeStreamEvent::Session(SessionStreamEvent::Done));
-    delta(&observer, true, "B", "t");
+    delta(&observer, &mut cursor, true, "B", "t");
     let rows = drain(&mut observations);
     let semantic = format!(
         "{:?}",
@@ -178,19 +193,23 @@ fn each_lane_merges_on_its_own_and_never_across_blocks_kinds_or_events() {
 #[test]
 fn a_cancellation_discards_the_lagging_deltas_and_keeps_every_other_event() {
     let (observer, mut observations) = TurnObserver::unread();
+    let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
     for index in 0..LAG_BUDGET / 2 {
-        delta(&observer, false, "A", &index.to_string());
+        delta(&observer, &mut cursor, false, "A", &index.to_string());
     }
-    marker(&observer, "tool");
+    marker(&observer, &mut cursor, "tool");
     for index in 0..40 {
-        delta(&observer, false, "A", &format!("late{index}"));
+        delta(&observer, &mut cursor, false, "A", &format!("late{index}"));
     }
-    observer.session(SessionStreamEvent::TurnOutcome {
-        outcome: TurnOutcome::Stopped(TurnStop::Cancelled {
-            evidence: TurnCancellationEvidence::internal("observer-test"),
+    cursor.observe(
+        &observer,
+        ObservedEvent::Session(SessionStreamEvent::TurnOutcome {
+            outcome: TurnOutcome::Stopped(TurnStop::Cancelled {
+                evidence: TurnCancellationEvidence::internal("observer-test"),
+            }),
         }),
-    });
-    observer.session(SessionStreamEvent::Done);
+    );
+    cursor.observe(&observer, ObservedEvent::Session(SessionStreamEvent::Done));
     let rows = drain(&mut observations);
 
     assert_eq!(rows.len(), LAG_BUDGET + 3, "{:?}", &rows[LAG_BUDGET..]);
@@ -262,7 +281,8 @@ fn keyed_observations_take_their_ids_from_key_and_ordinal() {
 #[test]
 fn published_waits_until_the_host_has_taken_and_published_everything() {
     let (observer, mut observations) = TurnObserver::unread();
-    delta(&observer, false, "A", "tail");
+    let mut cursor = ObservationCursor::new(ReplayKey::new("test"));
+    delta(&observer, &mut cursor, false, "A", "tail");
     let waker = std::task::Waker::noop();
     let mut context = Context::from_waker(waker);
     let mut published = std::pin::pin!(observer.published());

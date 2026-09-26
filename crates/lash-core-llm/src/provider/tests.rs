@@ -855,8 +855,6 @@ fn task_join_failure_constructor_records_a_real_interrupted_attempt() {
         .with_retry_verdict(TransportRetryVerdict::NotRetryable);
     let record = synthetic_terminal_call_record(
         LlmCallId("task-join-call".to_string()),
-        7,
-        Duration::from_millis(11),
         AttemptOutcome::Interrupted,
         &failure,
         true,
@@ -1787,8 +1785,6 @@ fn trace_consumer_reads_completed_attempt_disposition_and_usage() {
         replay_drops: Vec::new(),
         attempts: vec![crate::AttemptRecord {
             ordinal: 1,
-            started_at: 0,
-            duration: std::time::Duration::from_millis(7),
             outcome: crate::AttemptOutcome::Completed,
             protocol_position: crate::ProtocolPosition::TerminalObserved,
             retry_budget_consumed: true,

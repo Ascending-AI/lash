@@ -1661,9 +1661,6 @@ impl AttemptUsageDisposition {
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct AttemptRecord {
     pub ordinal: u32,
-    /// Wall-clock epoch milliseconds read from the injected runtime clock.
-    pub started_at: u64,
-    pub duration: std::time::Duration,
     pub outcome: AttemptOutcome,
     pub protocol_position: ProtocolPosition,
     pub retry_budget_consumed: bool,

@@ -353,7 +353,6 @@ pub struct RemoteToolCallRecord {
     #[serde(default)]
     pub args: serde_json::Value,
     pub outcome: RemoteToolCallOutcome,
-    pub duration_ms: u64,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

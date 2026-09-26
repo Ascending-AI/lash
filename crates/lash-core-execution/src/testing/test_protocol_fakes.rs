@@ -286,7 +286,6 @@ async fn execute_test_batch(
             results.push(lash_sansio::BatchResultRow::failure(
                 index,
                 tool,
-                0,
                 serde_json::json!("Tool 'batch' is not allowed inside batch"),
             ));
             continue;
@@ -299,7 +298,6 @@ async fn execute_test_batch(
             results.push(lash_sansio::BatchResultRow::failure(
                 index,
                 tool,
-                0,
                 serde_json::json!(format!("Tool '{tool}' is unavailable in this session")),
             ));
             continue;
@@ -325,23 +323,12 @@ async fn execute_test_batch(
             tool: tool_label,
             args: invocation.args,
             output: outcome.output,
-            duration_ms: 0,
         });
         let value = tool_record.output.value_for_projection();
         results.push(if tool_record.output.is_success() {
-            lash_sansio::BatchResultRow::success(
-                index,
-                tool_record.tool,
-                tool_record.duration_ms,
-                value,
-            )
+            lash_sansio::BatchResultRow::success(index, tool_record.tool, value)
         } else {
-            lash_sansio::BatchResultRow::failure(
-                index,
-                tool_record.tool,
-                tool_record.duration_ms,
-                value,
-            )
+            lash_sansio::BatchResultRow::failure(index, tool_record.tool, value)
         });
     }
 
@@ -353,7 +340,6 @@ async fn execute_test_batch(
                 .and_then(|item| item.get("tool"))
                 .and_then(|value| value.as_str())
                 .unwrap_or("unknown"),
-            0,
             serde_json::json!("Maximum of 25 tool calls allowed in batch"),
         ));
     }
@@ -477,7 +463,6 @@ impl ProtocolDriverHandle<crate::HostTurnProtocol> for TestDriver {
         actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {
             protocol_iteration: ctx.protocol_iteration(),
             content: assistant_text.clone(),
-            duration_ms: 0,
         }));
 
         if tool_calls.is_empty() {

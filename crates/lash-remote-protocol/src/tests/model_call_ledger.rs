@@ -12,8 +12,6 @@ fn model_call_records_are_validated_from_result_and_activity_envelopes() {
         replay_drops: Vec::new(),
         attempts: vec![RemoteAttemptRecord {
             ordinal: 1,
-            started_at_ms: 0,
-            duration_ms: 0,
             outcome: RemoteAttemptOutcome::Completed,
             protocol_position: RemoteProtocolPosition::TerminalObserved,
             retry_budget_consumed: false,
@@ -89,8 +87,6 @@ fn turn_result_rejects_conflicting_summary_and_activity_for_the_same_model_call(
         replay_drops: Vec::new(),
         attempts: vec![RemoteAttemptRecord {
             ordinal: 1,
-            started_at_ms: 7,
-            duration_ms: 9,
             outcome: RemoteAttemptOutcome::Completed,
             protocol_position: RemoteProtocolPosition::TerminalObserved,
             retry_budget_consumed: true,
@@ -109,8 +105,6 @@ fn turn_result_rejects_conflicting_summary_and_activity_for_the_same_model_call(
     let activity_record = RemoteLlmCallRecord {
         attempts: vec![RemoteAttemptRecord {
             ordinal: 1,
-            started_at_ms: 7,
-            duration_ms: 9,
             outcome: RemoteAttemptOutcome::Failed,
             protocol_position: RemoteProtocolPosition::NoResponse,
             retry_budget_consumed: true,
@@ -170,8 +164,6 @@ fn turn_result_requires_one_summary_and_one_activity_per_model_call() {
             replay_drops: Vec::new(),
             attempts: vec![RemoteAttemptRecord {
                 ordinal: 1,
-                started_at_ms: 1,
-                duration_ms: 2,
                 outcome: RemoteAttemptOutcome::Completed,
                 protocol_position: RemoteProtocolPosition::TerminalObserved,
                 retry_budget_consumed: true,
@@ -245,8 +237,6 @@ fn contradictory_model_call_ledgers_are_rejected_from_both_envelopes() {
     fn valid_attempt() -> RemoteAttemptRecord {
         RemoteAttemptRecord {
             ordinal: 1,
-            started_at_ms: 0,
-            duration_ms: 0,
             outcome: RemoteAttemptOutcome::Completed,
             protocol_position: RemoteProtocolPosition::TerminalObserved,
             retry_budget_consumed: true,
@@ -383,8 +373,6 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
 
     assert_accepted(vec![RemoteAttemptRecord {
         ordinal: 1,
-        started_at_ms: 0,
-        duration_ms: 1,
         outcome: RemoteAttemptOutcome::Failed,
         protocol_position: RemoteProtocolPosition::NoResponse,
         retry_budget_consumed: false,
@@ -397,8 +385,6 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
     }]);
     assert_accepted(vec![RemoteAttemptRecord {
         ordinal: 1,
-        started_at_ms: 0,
-        duration_ms: 1,
         outcome: RemoteAttemptOutcome::Interrupted,
         protocol_position: RemoteProtocolPosition::OutputStarted,
         retry_budget_consumed: false,
@@ -417,8 +403,6 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
     assert_accepted(vec![
         RemoteAttemptRecord {
             ordinal: 1,
-            started_at_ms: 0,
-            duration_ms: 1,
             outcome: RemoteAttemptOutcome::Failed,
             protocol_position: RemoteProtocolPosition::NoResponse,
             retry_budget_consumed: true,
@@ -435,8 +419,6 @@ fn valid_panic_partial_and_retry_ledgers_are_accepted_from_both_envelopes() {
         },
         RemoteAttemptRecord {
             ordinal: 2,
-            started_at_ms: 2,
-            duration_ms: 1,
             outcome: RemoteAttemptOutcome::Completed,
             protocol_position: RemoteProtocolPosition::TerminalObserved,
             retry_budget_consumed: true,

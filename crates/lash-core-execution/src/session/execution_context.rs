@@ -228,6 +228,7 @@ impl RuntimeExecutionTracing {
         record: &crate::ToolCallRecord,
         attempts: &[lash_trace::TraceRetryAttempt],
         issuing_node_id: Option<&str>,
+        duration_ms: u64,
         clock: &dyn crate::Clock,
     ) {
         self.emit(
@@ -236,7 +237,7 @@ impl RuntimeExecutionTracing {
                 name: record.tool.clone(),
                 args: record.args.clone(),
                 output: crate::trace::trace_tool_call_output(&record.output),
-                duration_ms: record.duration_ms,
+                duration_ms,
                 issuing_node_id: issuing_node_id.map(str::to_string),
                 attempts: (!attempts.is_empty()).then(|| attempts.to_vec()),
             },
@@ -660,19 +661,50 @@ impl<'run> RuntimeExecutionContext<'run> {
     }
 
     /// A fresh observation cursor for one emission lane of this execution —
-    /// keyed under the enclosing cell's invocation when the context carries
-    /// one, else the dispatch's own base (ADR 0105 §1).
+    /// keyed under the dispatch's per-call key when one is installed
+    /// ([`ToolDispatchContext::observation_keyed`]), else the enclosing
+    /// cell's invocation, else the dispatch's own base (ADR 0105 §1).
+    ///
+    /// [`ToolDispatchContext::observation_keyed`]: crate::tool_dispatch::ToolDispatchContext::observation_keyed
     pub(crate) fn observation_cursor(&self, lane: &str) -> crate::engine::ObservationCursor {
-        if let Some(key) = self
-            .parent_invocation
-            .as_ref()
-            .and_then(crate::RuntimeInvocation::replay_key)
+        if self.dispatch.observation_call_key.is_none()
+            && let Some(key) = self
+                .parent_invocation
+                .as_ref()
+                .and_then(crate::RuntimeInvocation::replay_key)
         {
             return crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new(format!(
                 "{key}:{lane}"
             )));
         }
         self.dispatch.observation_cursor(lane)
+    }
+
+    /// `material` qualified under the base this context's lanes resolve — its
+    /// own invocation when it carries one, else the dispatch's. The protocol
+    /// path's `{iteration}:{index}:{call_id}` material is what a caller
+    /// passes; the returned string is the call's fully-qualified observation
+    /// key (ADR 0105 §1).
+    pub(crate) fn call_observation_key(&self, material: &str) -> String {
+        let base = self
+            .parent_invocation
+            .as_ref()
+            .and_then(crate::RuntimeInvocation::replay_key)
+            .map(str::to_owned)
+            .unwrap_or_else(|| self.dispatch.observation_base_key());
+        format!("{base}:call:{material}")
+    }
+
+    /// This context with one call's resolved observation key installed on its
+    /// dispatch — [`Self::call_observation_key`] output or the call's own
+    /// effect-invocation replay key. The clone shares every buffer and
+    /// service; only emissions re-key.
+    pub(crate) fn with_call_observation_key(&self, key: impl Into<String>) -> Self {
+        let mut context = self.clone();
+        let mut dispatch = (*context.dispatch).clone();
+        dispatch.observation_call_key = Some(key.into());
+        context.dispatch = std::sync::Arc::new(dispatch);
+        context
     }
 
     /// Adds sources this context was built from that have no recorded form:
@@ -758,17 +790,21 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    /// No-op when the host installed no trace sink.
+    /// No-op when the host installed no trace sink. `duration_ms` is the
+    /// observed window the caller measured — the record itself carries no
+    /// wall-clock fields (FIG-3696).
     pub(super) fn emit_tool_call_completed_trace(
         &self,
         record: &crate::ToolCallRecord,
         attempts: &[lash_trace::TraceRetryAttempt],
+        duration_ms: u64,
     ) {
         if let Some(tracing) = self.tracing.as_ref() {
             tracing.emit_tool_call_completed(
                 record,
                 attempts,
                 self.issuing_language_node_id.as_deref(),
+                duration_ms,
                 self.dispatch.clock.as_ref(),
             );
         }

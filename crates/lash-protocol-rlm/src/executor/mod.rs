@@ -156,7 +156,6 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
     execution_bounds: lashlang::ExecutionBounds,
     channel: crate::plugin::RlmChannel,
 ) -> ExecResponse {
-    let start = std::time::Instant::now();
     let clean_code = clean_model_code(&request.code);
     // The cell's replay run (FIG-3586): every command it issues is keyed by
     // its issue ordinal under the cell's own replay key, and the cell seals
@@ -170,7 +169,6 @@ pub(crate) async fn execute_code_with_channel_and_bounds_with_trigger_resolver(
         ctx,
         Arc::clone(&cell),
         &clean_code,
-        start,
         artifact_store,
         lashlang_surface,
         deferred_tool_resolver,
@@ -316,7 +314,6 @@ async fn execute_code_inner(
     ctx: RuntimeExecutionContext<'_>,
     cell: Arc<Result<cell_run::CellRun, cell_run::LashlangCellOpener>>,
     code: &str,
-    start: std::time::Instant,
     artifact_store: lashlang::LashlangArtifacts,
     lashlang_surface: LashlangSurface,
     deferred_tool_resolver: Option<lash_lashlang_runtime::SharedDeferredToolResolver>,
@@ -370,7 +367,6 @@ async fn execute_code_inner(
                     &ctx,
                     lash_core::CellFailureKind::Host,
                     error.to_string(),
-                    start,
                     Vec::new(),
                 );
             }
@@ -415,7 +411,6 @@ async fn execute_code_inner(
                         &ctx,
                         lash_core::CellFailureKind::Host,
                         message,
-                        start,
                         Vec::new(),
                     );
                 }
@@ -451,7 +446,6 @@ async fn execute_code_inner(
                     &ctx,
                     lash_core::CellFailureKind::Host,
                     error.to_string(),
-                    start,
                     Vec::new(),
                 );
             }
@@ -470,7 +464,6 @@ async fn execute_code_inner(
                     &ctx,
                     lash_core::CellFailureKind::Host,
                     format!("invalid Lashlang host tool surface: {error}"),
-                    start,
                     Vec::new(),
                 );
             }
@@ -549,7 +542,7 @@ async fn execute_code_inner(
     let cached_program = match compile_result {
         Ok(program) => program,
         Err((kind, error)) => {
-            return exec_setup_failure_or_stop(state, &ctx, kind, error, start, Vec::new());
+            return exec_setup_failure_or_stop(state, &ctx, kind, error, Vec::new());
         }
     };
     let linked_module = cached_program.linked_module();
@@ -573,7 +566,6 @@ async fn execute_code_inner(
                 &ctx,
                 lash_core::CellFailureKind::Host,
                 format!("failed to store lashlang module artifact: {err}"),
-                start,
                 Vec::new(),
             );
         }
@@ -595,7 +587,6 @@ async fn execute_code_inner(
                 &ctx,
                 lash_core::CellFailureKind::Host,
                 err,
-                start,
                 Vec::new(),
             );
         }
@@ -611,7 +602,6 @@ async fn execute_code_inner(
                     &ctx,
                     lash_core::CellFailureKind::Host,
                     err,
-                    start,
                     degraded_bindings,
                 );
             }
@@ -669,7 +659,6 @@ async fn execute_code_inner(
                     format!("foreground execution stopped while returning failure: {value}"),
                 )),
                 None,
-                start,
                 degraded_bindings.clone(),
             );
         }
@@ -681,7 +670,6 @@ async fn execute_code_inner(
                     format!("process failed in foreground execution: {value}"),
                 )),
                 None,
-                start,
                 degraded_bindings.clone(),
             );
         }
@@ -707,7 +695,6 @@ async fn execute_code_inner(
                 host.into_collected(),
                 Some(lash_core::CellFailure::new(kind, message)),
                 None,
-                start,
                 degraded_bindings.clone(),
             );
         }
@@ -716,7 +703,6 @@ async fn execute_code_inner(
         host.into_collected(),
         None,
         terminal_finish,
-        start,
         degraded_bindings,
     )
 }
@@ -754,7 +740,6 @@ fn lashlang_runtime_feedback_kind(
 
 fn exec_setup_failure_with_degraded(
     error: lash_core::CellFailure,
-    start: std::time::Instant,
     degraded_bindings: Vec<lash_core::DegradedBinding>,
 ) -> ExecResponse {
     ExecResponse {
@@ -762,7 +747,6 @@ fn exec_setup_failure_with_degraded(
         calls: Vec::new(),
         printed_images: Vec::new(),
         error: Some(error),
-        duration_ms: start.elapsed().as_millis() as u64,
         degraded_bindings,
         terminal_finish: None,
     }
@@ -773,7 +757,6 @@ fn exec_setup_failure_or_stop(
     ctx: &RuntimeExecutionContext<'_>,
     kind: lash_core::CellFailureKind,
     error: impl Into<String>,
-    start: std::time::Instant,
     degraded_bindings: Vec<lash_core::DegradedBinding>,
 ) -> ExecResponse {
     if ctx.is_cancelled() {
@@ -783,22 +766,16 @@ fn exec_setup_failure_or_stop(
                 lash_core::CellFailureKind::Host,
                 "foreground execution stopped during setup",
             ),
-            start,
             degraded_bindings,
         );
     }
-    exec_setup_failure_with_degraded(
-        lash_core::CellFailure::new(kind, error),
-        start,
-        degraded_bindings,
-    )
+    exec_setup_failure_with_degraded(lash_core::CellFailure::new(kind, error), degraded_bindings)
 }
 
 fn exec_response_from(
     collected: CollectedExecutionOutput,
     error: Option<lash_core::CellFailure>,
     terminal_finish: Option<serde_json::Value>,
-    start: std::time::Instant,
     degraded_bindings: Vec<lash_core::DegradedBinding>,
 ) -> ExecResponse {
     ExecResponse {
@@ -806,7 +783,6 @@ fn exec_response_from(
         calls: collected.calls,
         printed_images: collected.printed_images,
         error,
-        duration_ms: start.elapsed().as_millis() as u64,
         degraded_bindings,
         terminal_finish,
     }

@@ -788,6 +788,7 @@ impl Session {
             effect_controller,
             direct_completions: direct_completions.clone(),
             parent_invocation: None,
+            observation_call_key: None,
             execution_env_spec: execution_env_spec.clone(),
             session_id: SessionId::from(session_id.to_string()),
             agent_frame_id,

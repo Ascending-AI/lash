@@ -128,6 +128,7 @@ mod tests {
             )),
             direct_completions,
             parent_invocation: Some(invocation("opener-parent")),
+            observation_call_key: None,
             execution_env_spec: spec(9),
             session_id: SessionId::from("opener-session"),
             agent_frame_id: FrameNodeId::new("opener-frame").expect("a valid frame id"),
