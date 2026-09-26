@@ -783,6 +783,7 @@ impl SessionDriver for TickingDriver {
 fn detached_session_work() -> crate::RestateSessionWork {
     crate::RestateSessionWork::new(
         crate::RestateIngressClient::new(crate::RestateConnection::new("http://127.0.0.1:9")),
+        crate::RestateAdminClient::new(crate::RestateConnection::new("http://127.0.0.1:9")),
         crate::RestateSessionDriverSlot::new(),
         BuildGeneration::for_test("recovery-interval"),
         Arc::new(NoEngineControl),
