@@ -1647,6 +1647,7 @@ macro_rules! process_prune_session_store_tests {
     ($fixture:block) => {
         $crate::process_prune_session_store_tests!(@catalogue $fixture; [
             (process_prune_deletes_owned_session_stores, "process-prune-session-store-cleanup"),
+            (a_same_start_key_successor_after_prune_owns_fresh_session_stores, "same-key-successor-after-prune"),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
