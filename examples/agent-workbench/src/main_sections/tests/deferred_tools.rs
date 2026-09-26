@@ -4,7 +4,7 @@ use lash::rlm::RlmSendBuilderExt;
 const SEED: u64 = 0xf9_0002;
 
 fn deferred_tools_test_core(
-    backend: Arc<dyn lash::Backend>,
+    backend: lash::Backend,
     provider: ProviderHandle,
     deferred: deferred_tools::WorkbenchDeferredTools,
 ) -> LashCore {
@@ -15,10 +15,10 @@ fn deferred_tools_test_core(
             .memory_limit(lash::rlm::MemoryBound::mebibytes(64))
             .build()
             .with_lashlang_abilities(workbench_lashlang_abilities()),
-        &backend.clone().into(),
+        &backend,
     )
     .with_deferred_tool_resolver(deferred.resolver());
-    LashCore::rlm_builder(backend.into(), lash::TurnBudget::Unbounded, factory)
+    LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1))
         .provider(provider)
@@ -31,7 +31,6 @@ fn deferred_tools_test_core(
         .plugin(Arc::new(
             WorkbenchPluginFactory::new().with_deferred_tools(deferred),
         ))
-        .without_queued_work()
         .build(crate::test_core_owner())
         .expect("build deferred-tool test core")
 }

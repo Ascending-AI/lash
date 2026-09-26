@@ -133,7 +133,6 @@ fn workbench_plugin_observes_session_config_policy_transition() {
             .provider(provider)
             .model(initial_model)
             .plugin(plugin)
-            .without_queued_work()
             .build(crate::test_core_owner())
             .expect("build config change workbench core");
         let session = core
@@ -218,7 +217,6 @@ fn workbench_context_transform_shapes_the_prompt_the_provider_receives() {
                     .expect("context transform model"),
             )
             .plugin(plugin)
-            .without_queued_work()
             .build(crate::test_core_owner())
             .expect("build context transform workbench core");
         let session = core

@@ -3,8 +3,6 @@ use lash::SessionId;
 use lash::TurnId;
 use lash::rlm::RlmSendBuilderExt;
 
-const SEED: u64 = 0xf9_0004;
-
 // Coverage for `/api/admin/store-maintenance`: the two levers that bound
 // session-store growth, and — the point of the route — the destruction it
 // refuses to perform.
@@ -100,8 +98,7 @@ async fn store_maintenance_fixture(
     // `AttachmentRootSet`, wired to the process registry so it resolves
     // process-owned attachment intents instead of warning and failing safe, and
     // its attachment store holds the bytes the core writes.
-    let double = test_double_backend(SEED).await;
-    let backend = double.lash_backend();
+    let backend = test_file_backend(data_dir);
     let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
         backend.session_store_factory();
     let attachment_store: Arc<dyn lash::persistence::AttachmentStore> = backend.attachment_store();
@@ -111,7 +108,7 @@ async fn store_maintenance_fixture(
             .build()
             .expect("store-maintenance model spec"),
     );
-    let core = explicit_durable_test_facets_on(backend)
+    let core = explicit_durable_test_facets_over(backend)
         .provider(provider)
         .model(model)
         .without_queued_work()
