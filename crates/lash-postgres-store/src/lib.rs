@@ -596,7 +596,13 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // `lash_turn_parks.engine_ref` and `resume_intent`, and the
 // `redrive_requested` park-event kind. `lash migrate` carries a
 // component-139 catalog forward with the 0140 expand step.
-const SCHEMA_VERSION: i32 = 140;
+//
+// Version 141 (FIG-3600 S7) journals a session's close: the effect envelope
+// a PostgreSQL effect journal stores gains the `BeginSessionClose` command and
+// outcome, the recorded start of a deletion. No relation changes: `lash
+// migrate` restamps a component-140 catalog through the expand step of the
+// same name.
+const SCHEMA_VERSION: i32 = 141;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
 ///
