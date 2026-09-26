@@ -103,6 +103,7 @@ enum CaseName {
     DeleteThenAttemptAdmission,
     StaleHandleAfterDelete,
     StoreSurfaceSweep,
+    PendingFollowOnRaise,
     TurnBoundClaimBindAndReclaim,
     RefusedSurfaceOnDeletedSession,
     CorruptGraphNodeRefusals,
@@ -154,6 +155,7 @@ impl CaseName {
             Self::DeleteThenAttemptAdmission => "delete_then_attempt_admission",
             Self::StaleHandleAfterDelete => "stale_handle_after_delete",
             Self::StoreSurfaceSweep => "store_surface_sweep",
+            Self::PendingFollowOnRaise => "pending_follow_on_raise_and_clear",
             Self::TurnBoundClaimBindAndReclaim => {
                 "turn_bound_claim_binds_defers_and_reclaims_across_generations"
             }
@@ -198,6 +200,17 @@ enum StoreOperation {
         checkpoint: CheckpointSpec,
         usage: bool,
         adopt_attachment: bool,
+    },
+    /// A turn's terminal head write over the pending follow-on fact
+    /// (ADR 0101 §3): `owed_turn_id` set is the frame-switch commit that
+    /// leaves the head owing that turn; `None` is the follow-on turn's own
+    /// terminal commit, which clears the fact. Seeded so the inventory can
+    /// drive `raise_pending_follow_on_attempts` over a live fact.
+    CommitFollowOn {
+        label: &'static str,
+        expected_head_revision: u64,
+        turn_id: &'static str,
+        owed_turn_id: Option<&'static str>,
     },
     RecordAttachmentIntent,
     ReclaimRetainedEvidence,
@@ -245,9 +258,11 @@ enum StoreOperation {
     /// retained factory and does not prove cold-instance reconstruction.
     ColdReopenSession,
     /// Enter deletion through `LashCore::delete_session` to exercise the store
-    /// tombstone and subsequent admission refusal. This fixture deliberately
-    /// wires neither a process registry nor a trigger store, so it does not
-    /// cover the process-deletion or trigger-subscription deletion legs.
+    /// tombstone and subsequent admission refusal. The lifecycle backend's
+    /// store set supplies its real process registry and trigger store, and the
+    /// recording effect host runs the process-deletion effect through the
+    /// local executor it is handed rather than synthesizing an outcome, so
+    /// this leg covers the full delete path an embedder sees.
     DeleteSession,
     AttemptAdmission,
     CreateHandle {
@@ -282,7 +297,7 @@ enum StoreOperation {
 impl StoreOperation {
     fn label(&self) -> &'static str {
         match self {
-            Self::Commit { label, .. } => label,
+            Self::Commit { label, .. } | Self::CommitFollowOn { label, .. } => label,
             Self::RecordAttachmentIntent => "record_attachment_intent",
             Self::ReclaimRetainedEvidence => "reclaim_terminal_evidence_with_retained_fork",
             Self::PinLeaf => "pin_leaf",
@@ -638,6 +653,7 @@ fn generated_cases() -> Vec<GeneratedCase> {
             ],
         },
         surface_sweep::surface_sweep_case(),
+        surface_sweep::pending_follow_on_raise_case(),
         surface_sweep::turn_bound_claim_case(),
         surface_sweep::refused_surface_on_deleted_session_case(),
         GeneratedCase {
@@ -1185,6 +1201,45 @@ impl BackendRunner {
         }
     }
 
+    /// Drive `commit` through the store and, on success, thread the runner's
+    /// frame/leaf tracking and checkpoint expectations forward.
+    async fn commit_and_track(
+        &mut self,
+        commit: RuntimeCommit,
+        checkpoint: CheckpointSpec,
+    ) -> Result<Option<ComparableRuntimeCommitResult>, StoreError> {
+        let next_frame_node_id = commit.current_frame_node_id.clone();
+        let result = self.store().commit_runtime_state(commit).await;
+        match result {
+            Ok(result) => {
+                self.current_frame_node_id = next_frame_node_id;
+                self.current_leaf_node_id = result
+                    .committed_leaf_node_id
+                    .clone()
+                    .map(|id| id.to_string());
+                if matches!(checkpoint, CheckpointSpec::Bodies) {
+                    self.checkpoint_component_refs = Some(CheckpointComponentRefs {
+                        components: result.manifest.components.clone(),
+                    });
+                }
+                match checkpoint {
+                    CheckpointSpec::Bodies => {
+                        self.expected_execution_state = checkpoint_bodies()
+                            .component_body(lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT)
+                            .map(ToOwned::to_owned);
+                    }
+                    CheckpointSpec::PriorRefs => {}
+                    CheckpointSpec::Empty | CheckpointSpec::ClearedComponents => {
+                        self.expected_execution_state = None;
+                    }
+                    CheckpointSpec::MissingExecutionStateRef => {}
+                }
+                Ok(Some(result.into()))
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     #[expect(
         clippy::expect_used,
         reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
@@ -1219,38 +1274,58 @@ impl BackendRunner {
                         .into_iter()
                         .collect(),
                 );
-                let next_frame_node_id = commit.current_frame_node_id.clone();
-                let result = self.store().commit_runtime_state(commit).await;
-                match result {
-                    Ok(result) => {
-                        self.current_frame_node_id = next_frame_node_id;
-                        self.current_leaf_node_id = result
-                            .committed_leaf_node_id
+                self.commit_and_track(commit, *checkpoint).await
+            }
+            StoreOperation::CommitFollowOn {
+                expected_head_revision,
+                turn_id,
+                owed_turn_id,
+                ..
+            } => {
+                // The follow-on fact rides a turn's terminal head write
+                // (ADR 0101 §3): `owed_turn_id` set is the frame switch, and
+                // `None` is the follow-on's own terminal commit clearing it.
+                let head = self.store().load_session_head_meta().await?;
+                let mut commit = runtime_commit(
+                    &self.session_id,
+                    *expected_head_revision,
+                    &append(Vec::new(), None),
+                    None,
+                    self.current_frame_node_id.clone(),
+                    HydratedSessionCheckpoint::default(),
+                    Vec::new(),
+                    Vec::new(),
+                );
+                let (frame, leaf) = head
+                    .map(|head| {
+                        (
+                            head.current_frame_node_id
+                                .filter(|_| head.leaf_node_id.is_some()),
+                            head.leaf_node_id,
+                        )
+                    })
+                    .unwrap_or_default();
+                commit.current_frame_node_id = frame;
+                commit.graph_base_leaf_node_id = leaf;
+                commit.turn_commit =
+                    RuntimeTurnCommitStamp::new(lash_core::store::OperationId::turn(
+                        &self.session_id,
+                        *turn_id,
+                        lash_core::store::pending_follow_on::TURN_TERMINAL_OPERATION_KEY,
+                    ));
+                commit.pending_follow_on =
+                    owed_turn_id.map(|owed_turn_id| lash_core::store::PendingFollowOn {
+                        follow_on_turn_id: lash_core::TurnId::from(owed_turn_id),
+                        frame_id: commit
+                            .current_frame_node_id
                             .clone()
-                            .map(|id| id.to_string());
-                        if matches!(*checkpoint, CheckpointSpec::Bodies) {
-                            self.checkpoint_component_refs = Some(CheckpointComponentRefs {
-                                components: result.manifest.components.clone(),
-                            });
-                        }
-                        match checkpoint {
-                            CheckpointSpec::Bodies => {
-                                self.expected_execution_state = checkpoint_bodies()
-                                    .component_body(
-                                        lash_core::store::EXECUTION_STATE_CHECKPOINT_COMPONENT,
-                                    )
-                                    .map(ToOwned::to_owned);
-                            }
-                            CheckpointSpec::PriorRefs => {}
-                            CheckpointSpec::Empty | CheckpointSpec::ClearedComponents => {
-                                self.expected_execution_state = None;
-                            }
-                            CheckpointSpec::MissingExecutionStateRef => {}
-                        }
-                        Ok(Some(result.into()))
-                    }
-                    Err(error) => Err(error),
-                }
+                            .expect("a pending follow-on owes the head's current frame"),
+                        task: "fig-2841 follow-on task".to_string(),
+                        options: None,
+                        chain_depth: 1,
+                        attempts: 0,
+                    });
+                self.commit_and_track(commit, CheckpointSpec::Empty).await
             }
             StoreOperation::RecordAttachmentIntent => {
                 attachment_seeding::seed_differential_attachment_rows(
@@ -2261,7 +2336,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 28);
+    assert_eq!(cases.len(), 29);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases
@@ -2290,6 +2365,7 @@ fn generated_catalog_covers_required_adversarial_shapes() {
             "turn_input_claim_superseded_after_successor_reclaim",
             "delete_then_attempt_admission",
             "store_surface_sweep",
+            "pending_follow_on_raise_and_clear",
             "turn_bound_claim_binds_defers_and_reclaims_across_generations",
             "refused_surface_on_deleted_session_leaves_no_residue",
             "stale_handle_after_delete",
