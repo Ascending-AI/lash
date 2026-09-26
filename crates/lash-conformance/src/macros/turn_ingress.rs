@@ -6,10 +6,13 @@
 //! session store of that backend's catalog. They share one catalogue arm.
 
 /// Register one independently reported test per direct-turn acceptance law.
+///
+/// A tier that must park the laws hands them attributes:
+/// `direct_turn_acceptance_tests!(#[ignore = "why"] { fixture })`.
 #[macro_export]
 macro_rules! direct_turn_acceptance_tests {
-    ($fixture:block) => {
-        $crate::direct_turn_acceptance_tests!(@catalogue $fixture; [
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::direct_turn_acceptance_tests!(@catalogue [$(#[$attr])*] $fixture; [
             (direct_turn_accepts_before_driving, "direct-turn-accepts-before-driving"),
             (orphaned_direct_turn_input_is_drivable_by_another_worker, "direct-turn-orphan-recovery"),
             (direct_turn_acceptance_mints_no_idempotency_key, "direct-turn-identity"),
@@ -25,16 +28,20 @@ macro_rules! direct_turn_acceptance_tests {
             (accept_turn_input_redrive_after_store_commit_admits_one_row, "direct-turn-acceptance-lost-outcome"),
         ]);
     };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+    (@catalogue $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
         $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, prefix, backend, store) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(prefix, backend, store).await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-            }
+            $crate::direct_turn_acceptance_tests!(@law $attrs $fixture; ($law, $label));
         )*
+    };
+    (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
+        $($attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_fixture_guard, prefix, backend, store) = $fixture;
+            let _ = $label;
+            $crate::registration_macro_support::$law(prefix, backend, store).await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
     };
 }
 
@@ -44,7 +51,7 @@ macro_rules! direct_turn_acceptance_tests {
 #[macro_export]
 macro_rules! cancelled_turn_withheld_input_tests {
     ($fixture:block) => {
-        $crate::direct_turn_acceptance_tests!(@catalogue $fixture; [
+        $crate::direct_turn_acceptance_tests!(@catalogue [] $fixture; [
             (immediate_cancel_defers_withheld_inject_now_input, "cancel-defers-withheld-input"),
         ]);
     };
@@ -52,11 +59,12 @@ macro_rules! cancelled_turn_withheld_input_tests {
 
 /// Register one independently reported test per restored-claim cede law
 /// (FIG-3552). The fixture shape is the direct-turn one, so the catalogue arm
-/// is shared.
+/// is shared. It accepts the same leading attributes: a tier that must park
+/// the laws writes `restored_claim_cede_tests!(#[ignore = "why"] { fixture })`.
 #[macro_export]
 macro_rules! restored_claim_cede_tests {
-    ($fixture:block) => {
-        $crate::direct_turn_acceptance_tests!(@catalogue $fixture; [
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::direct_turn_acceptance_tests!(@catalogue [$(#[$attr])*] $fixture; [
             (a_redrive_commits_nothing_for_input_a_recovery_drain_answered, "restored-claim-recovery-answered-input"),
             (a_redrive_commits_nothing_for_work_a_recovery_checkpoint_answered, "restored-claim-recovery-answered-work"),
             (a_redrive_answers_checkpoint_input_a_peer_could_not_take, "restored-claim-cede-input"),

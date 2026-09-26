@@ -1614,23 +1614,29 @@ macro_rules! session_read_view_tests {
 /// a backend with an effect engine.
 ///
 /// The fixture yields `(guard, Backend, advance-commit-clock)`.
+/// A tier that must park the law writes
+/// `session_failure_evidence_tests!(#[ignore = "why"] { fixture })`.
 #[macro_export]
 macro_rules! session_failure_evidence_tests {
-    ($fixture:block) => {
-        $crate::session_failure_evidence_tests!(@catalogue $fixture; [
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::session_failure_evidence_tests!(@catalogue [$(#[$attr])*] $fixture; [
             (session_store_factory_mid_stream_failure_evidence, "session-read-mid-stream-failure"),
         ]);
     };
-    (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
+    (@catalogue $attrs:tt $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {
         $(
-            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn $law() {
-                let (_fixture_guard, backend, advance) = $fixture;
-                let _ = $label;
-                $crate::registration_macro_support::$law(backend, advance).await;
-                $crate::law_receipt::record(module_path!(), stringify!($law), $label);
-            }
+            $crate::session_failure_evidence_tests!(@law $attrs $fixture; ($law, $label));
         )*
+    };
+    (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
+        $($attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_fixture_guard, backend, advance) = $fixture;
+            let _ = $label;
+            $crate::registration_macro_support::$law(backend, advance).await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
     };
 }
 
