@@ -8,6 +8,7 @@
 use std::io::{BufRead, BufReader, Write};
 use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::{Arc, Mutex, Weak};
 
 use serde::Serialize;
 
@@ -133,9 +134,14 @@ pub(super) struct NodeCell<'a> {
     pub(super) reject: Option<&'a str>,
 }
 
+/// Every running oracle's child, weakly: a caller that abandons a session
+/// stuck inside a non-terminating cell kills the oracle still spinning on
+/// it rather than leave it burning a core as an orphan ([`kill_oracles`]).
+static LIVE_ORACLES: Mutex<Vec<Weak<Mutex<Child>>>> = Mutex::new(Vec::new());
+
 /// A running `oracle.mjs`: one realm per session it is asked about.
 pub(super) struct NodeOracle {
-    child: Child,
+    child: Arc<Mutex<Child>>,
     stdin: ChildStdin,
     stdout: BufReader<ChildStdout>,
 }
@@ -189,6 +195,11 @@ impl NodeOracle {
             });
         let stdin = child.stdin.take().expect("the oracle's stdin is piped");
         let stdout = BufReader::new(child.stdout.take().expect("the oracle's stdout is piped"));
+        let child = Arc::new(Mutex::new(child));
+        LIVE_ORACLES
+            .lock()
+            .expect("the live oracle registry")
+            .push(Arc::downgrade(&child));
         Self {
             child,
             stdin,
@@ -218,7 +229,23 @@ impl NodeOracle {
 
 impl Drop for NodeOracle {
     fn drop(&mut self) {
-        let _ = self.child.kill();
-        let _ = self.child.wait();
+        let mut child = self.child.lock().expect("the oracle's child");
+        let _ = child.kill();
+        let _ = child.wait();
     }
+}
+
+/// Kills every running oracle's child and prunes the registry: the
+/// live-Node run calls this when a session exceeds its deadline, so the
+/// abandoned worker's `read_line` ends instead of hanging on an oracle
+/// spinning forever inside the session's cell.
+pub(super) fn kill_oracles() {
+    let mut live = LIVE_ORACLES.lock().expect("the live oracle registry");
+    live.retain(|weak| {
+        let Some(child) = weak.upgrade() else {
+            return false;
+        };
+        let _ = child.lock().expect("the oracle's child").kill();
+        true
+    });
 }
