@@ -1060,32 +1060,6 @@ pub(crate) async fn record_turn_output(
     .await
 }
 
-#[cfg(test)]
-pub(crate) async fn record_turn_output_with_durable_turn_id(
-    state: &AppState,
-    session: &lash::LashSession,
-    turn_id: &TurnId,
-    durable_turn_id: &TurnId,
-    output: lash::TurnReport,
-    turn_state: Arc<Mutex<TurnStreamState>>,
-    trace_name: &str,
-) -> Result<(), AppError> {
-    let selected_model = state.selected_model();
-    record_turn_output_for_model(
-        state,
-        session,
-        TurnOutputIdentity {
-            turn_id,
-            durable_turn_id,
-        },
-        output,
-        turn_state,
-        trace_name,
-        Some(&selected_model.model),
-    )
-    .await
-}
-
 pub(crate) struct TurnOutputIdentity<'a> {
     pub(crate) turn_id: &'a TurnId,
     pub(crate) durable_turn_id: &'a TurnId,

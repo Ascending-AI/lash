@@ -117,23 +117,16 @@ async fn scenario_wiring_drives_the_benchmark_plugin_list_in_order() {
 }
 
 #[test]
-fn rlm_globals_carve_out_lives_only_in_the_rlm_arm() {
-    // The queued-work carve-out used to be written in both execution-mode
-    // arms; in the Standard arm `RlmGlobals` cannot appear because the metadata
-    // table declares it RLM, so both predicates were unconditionally constant.
-    // The wiring column now carries the fact once.
-    let wiring = RuntimePerfScenario::RlmGlobals.wiring();
+fn rlm_globals_runs_on_the_default_wiring() {
+    // Every benchmark core runs its session drive, so the RLM globals lane no
+    // longer carves anything out of the default wiring.
     assert_eq!(
         RuntimePerfScenario::RlmGlobals.execution_mode(),
         ExecutionMode::Rlm
     );
-    assert!(!wiring.queued_work);
     assert_eq!(
         RuntimePerfScenario::RlmGlobals.wiring(),
-        ScenarioWiring {
-            queued_work: false,
-            ..ScenarioWiring::DEFAULT
-        }
+        ScenarioWiring::DEFAULT
     );
 }
 

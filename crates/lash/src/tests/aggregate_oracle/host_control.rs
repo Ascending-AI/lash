@@ -80,8 +80,8 @@ async fn a_settlement_store_failure_is_not_caught_by_the_cell(tier: &JournaledTi
         let report = tokio::time::timeout(
             RENDEZVOUS_BUDGET,
             session
-                .turn(TurnInput::text("settle the aggregate"))
-                .stream_to(theatre.as_ref()),
+                .send(TurnInput::text("settle the aggregate"))
+                .output_into(theatre.as_ref()),
         )
         .await
         .expect("the turn reports");

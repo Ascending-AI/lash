@@ -380,15 +380,15 @@ async fn standard_compaction_projection_usage_is_pinned_across_a_cold_mid_turn_r
     let core = build_core(store_factory.clone())?;
     let session = core.session(session_id).open().await?;
     session
-        .turn(TurnInput::text("prime request"))
-        .turn_id("projection-prime")
-        .run()
+        .send(TurnInput::text("prime request"))
+        .id("projection-prime")
+        .output()
         .await?;
 
     let interrupted = session
-        .turn(TurnInput::text("threshold request"))
-        .turn_id("projection-redrive")
-        .run()
+        .send(TurnInput::text("threshold request"))
+        .id("projection-redrive")
+        .output()
         .await;
     assert!(
         interrupted.is_err(),
@@ -407,9 +407,9 @@ async fn standard_compaction_projection_usage_is_pinned_across_a_cold_mid_turn_r
     let reopened = reopened_core.session(session_id).open().await?;
     let restored_projection_basis = reopened.read_view().last_prompt_usage().cloned();
     reopened
-        .turn(TurnInput::text("threshold request"))
-        .turn_id("projection-redrive")
-        .run()
+        .send(TurnInput::text("threshold request"))
+        .id("projection-redrive")
+        .output()
         .await?;
     assert!(
         !provider_requests.lock_recover()[2].contains("prime request"),
@@ -441,9 +441,9 @@ async fn standard_compaction_projection_usage_is_pinned_across_a_cold_mid_turn_r
     );
 
     reopened
-        .turn(TurnInput::text("fresh request"))
-        .turn_id("projection-fresh")
-        .run()
+        .send(TurnInput::text("fresh request"))
+        .id("projection-fresh")
+        .output()
         .await?;
 
     let requests = provider_requests.lock_recover();

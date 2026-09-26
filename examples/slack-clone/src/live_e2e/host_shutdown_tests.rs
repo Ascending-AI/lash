@@ -23,7 +23,7 @@ impl lash::plugins::PluginFactory for ShutdownOrderWitness {
     async fn shutdown(&self) -> std::result::Result<(), lash::plugins::PluginError> {
         if !self.turn_joined.load(Ordering::SeqCst) {
             return Err(lash::plugins::PluginError::Session(
-                "factory shutdown ran before the timed-out TurnStream was joined".to_string(),
+                "factory shutdown ran before the timed-out turn stream was joined".to_string(),
             ));
         }
         self.shutdown_called.store(true, Ordering::SeqCst);

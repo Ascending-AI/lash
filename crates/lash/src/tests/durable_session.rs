@@ -373,7 +373,10 @@ async fn durable_serves_a_metadata_only_session_and_a_checkpointed_one() -> Resu
 
     // Checkpointed: a committed turn behind it.
     let session = core.session("checkpointed").open().await?;
-    session.turn(TurnInput::text("commit a turn")).run().await?;
+    session
+        .send(TurnInput::text("commit a turn"))
+        .output()
+        .await?;
     drop(session);
     let checkpointed = core.session("checkpointed").durable().await?;
     assert!(checkpointed.exists().await?);
@@ -431,7 +434,10 @@ async fn sqlite_durable_acquisition_covers_absent_metadata_only_and_checkpointed
     assert_eq!(metadata_only.pending_turn_inputs().await?.len(), 1);
 
     let session = core.session("sqlite-checkpointed").open().await?;
-    session.turn(TurnInput::text("commit a turn")).run().await?;
+    session
+        .send(TurnInput::text("commit a turn"))
+        .output()
+        .await?;
     drop(session);
     let checkpointed = core.session("sqlite-checkpointed").durable().await?;
     assert!(checkpointed.exists().await?);
@@ -528,7 +534,10 @@ async fn queue_events_publish_with_no_live_runtime_and_replay_from_a_cursor() ->
     let session_id = SessionId::from("durable-no-runtime");
     // Create the session, then release every runtime: nothing is live.
     let session = core.session(session_id.clone()).open().await?;
-    session.turn(TurnInput::text("commit a turn")).run().await?;
+    session
+        .send(TurnInput::text("commit a turn"))
+        .output()
+        .await?;
     // A cursor minted while the session was live, at its committed head: the
     // runtime-free publication that follows must be reachable from it.
     let cursor = session.observe().current_observation().cursor;
@@ -600,8 +609,8 @@ async fn two_durable_handles_operate_beside_an_independently_leased_writer() -> 
     // The writer keeps committing turns on its own lease throughout, and the
     // durable handles keep answering across the commit.
     writer
-        .turn(TurnInput::text("writer keeps its lease"))
-        .run()
+        .send(TurnInput::text("writer keeps its lease"))
+        .output()
         .await?;
     assert!(
         first.exists().await?,
@@ -866,8 +875,8 @@ async fn durable_queue_access_on_a_grantless_core_builds_no_runtime() -> Result<
         "the granting core registers the tool this session will persist"
     );
     granted
-        .turn(TurnInput::text("persist a checkpoint with tool state"))
-        .run()
+        .send(TurnInput::text("persist a checkpoint with tool state"))
+        .output()
         .await?;
     let queued = granted
         .durable()
@@ -1255,7 +1264,8 @@ async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Res
 
     let drain = tokio::spawn({
         let session = session.clone();
-        async move { session.queued_turn().drain_id("held-drain").run().await }
+        let input = accepted.input_id.clone();
+        async move { session.attach(input).output().await }
     });
     tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
         .await
@@ -1277,10 +1287,7 @@ async fn a_held_input_is_still_listed_held_by_a_separate_durable_handle() -> Res
     }
 
     release.add_permits(1);
-    drain
-        .await
-        .expect("drain task")?
-        .expect("the queued turn runs");
+    drain.await.expect("drain task")?;
     Ok(())
 }
 
@@ -1346,11 +1353,7 @@ async fn create_admits_an_absent_id_and_builds_no_runtime() -> Result<()> {
     // The session a host creates this way is an ordinary session: opening it
     // runs the input that was waiting.
     let session = core.session("created-then-queued").open().await?;
-    let drained = session
-        .queued_turn()
-        .run()
-        .await?
-        .expect("the pending input becomes a turn");
+    let drained = session.attach(accepted.input_id.clone()).output().await?;
     assert_eq!(
         drained.assistant_message(),
         Some("echo: queued before the first turn")

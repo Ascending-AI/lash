@@ -363,6 +363,21 @@ impl RestateTestBackend {
         );
     }
 
+    /// Hold the engine's drive of `session`: its `LashSession` object runs
+    /// no attempt until the returned [`Hold`](crate::Hold) is released or
+    /// dropped. Inputs accepted meanwhile stay pending — no drive admits
+    /// them — while a root already admitted runs on in its own `LashTurn`
+    /// and settles. A drive running when the hold is taken stops at its next
+    /// step (the call it awaits, the next admission); an admission already
+    /// under way completes first. A test asserting what is still pending
+    /// holds the engine rather than draining the queue itself: the caller
+    /// never drives.
+    pub async fn hold_session_drive(&self, session: &lash_core::SessionId) -> crate::Hold {
+        self.server
+            .hold(SESSION_DRIVER_SERVICE, session.as_str())
+            .await
+    }
+
     #[expect(
         clippy::result_large_err,
         reason = "the ingress client's RestateHttpError is unboxed across its public API"

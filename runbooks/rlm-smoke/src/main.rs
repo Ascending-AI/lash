@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail, ensure};
 use async_trait::async_trait;
 use clap::Parser;
 use lash::provider::{ProviderHandle, ProviderOptions};
-use lash::rlm::RlmTurnBuilderExt as _;
+use lash::rlm::RlmSendBuilderExt as _;
 use lash::tools::{
     StaticToolExecute, StaticToolProvider, ToolAttemptOutcome, ToolBinding, ToolCall,
     ToolDefinition, ToolDefinitionBindingExt as _, ToolOutcome, ToolProvider,
@@ -494,7 +494,6 @@ async fn main() -> Result<()> {
         .insert("runbook_trace_offset".to_string(), json!(args.trace_offset));
     let core = LashCore::rlm_builder(backend.into(), lash::TurnBudget::bounded(12), protocol)
         .no_progress_budget(lash::NoProgressBudget::bounded(4))
-        .without_queued_work()
         .plugins(lash::plugins::runtime_plugin_stack())
         .provider(provider)
         .model(
@@ -527,10 +526,10 @@ async fn main() -> Result<()> {
     let output = tokio::time::timeout(
         TURN_TIMEOUT,
         session
-            .turn(TurnInput::text(prompt))
+            .send(TurnInput::text(prompt))
             .require_finish()
             .context("require an explicit RLM finish")?
-            .run(),
+            .output(),
     )
     .await
     .context("RLM smoke turn timed out")?

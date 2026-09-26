@@ -168,7 +168,7 @@ The deferred cross-backend suites run in their named service gates.
   (`sim.oracle.provider-turn-interleaving-depth.v1`).
 - Tool, durable-effect, and exec-code coverage pass through real turns that
   SUSPEND and RESUME: a generated suspend session runs a real
-  `session.turn().run()` over the real `ScriptedLlmHttpTransport`, parks on a
+  `session.send(...)` whose root the engine runs over the real `ScriptedLlmHttpTransport`, parks on a
   tool/durable/exec await key, and is resumed only by a scheduler-delivered
   completion boundary (`sim.oracle.generated-suspend-resume.v1`). Both the
   tool-call exchange that suspends the turn and the post-resume exchange

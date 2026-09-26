@@ -53,7 +53,7 @@ pub use open_handler::OpenHandler;
 pub use protocol::ProtocolVersion;
 pub use server::{
     AttemptDispatch, CrashListener, CrashPoint, CrashRule, DeploymentHooks, DeploymentId,
-    DropWatch, InvocationView, JournalEntryView, OutsideGate, OutsideGates, RandomCrashes, Refusal,
-    RefuseHook, RemoveDeploymentError, RestateTestServer, ResumeDeployment, ResumeRefusal,
+    DropWatch, Hold, InvocationView, JournalEntryView, OutsideGate, OutsideGates, RandomCrashes,
+    Refusal, RefuseHook, RemoveDeploymentError, RestateTestServer, ResumeDeployment, ResumeRefusal,
     RetryPolicy, Scheduling, ServedHook, ServerConfig, StartError, Stats, TimeMode, TimerView,
 };

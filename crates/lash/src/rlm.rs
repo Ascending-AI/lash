@@ -1,45 +1,10 @@
-use crate::support::{EmbedError, ProtocolTurnOptions, Result, SessionError, TurnBuilder};
+use crate::support::{EmbedError, ProtocolTurnOptions, Result, SessionError};
 use lash_core::facade_support::ProtocolTurnOptionsFacadeOps;
 
 #[cfg(feature = "rlm")]
 pub use lash_lashlang_runtime::LanguageTraceHost;
 
-#[cfg(feature = "rlm")]
-pub trait RlmTurnBuilderExt: Sized {
-    /// Requires the RLM turn to finish through the finish tool.
-    fn require_finish(self) -> Result<Self>;
-    /// Requires the RLM finish tool to produce a value matching the schema.
-    fn require_finish_schema(self, schema: serde_json::Value) -> Result<Self>;
-    /// Allows an RLM turn to return prose or invoke the finish tool.
-    fn allow_prose_or_finish(self) -> Result<Self>;
-}
-
-#[cfg(feature = "rlm")]
-impl RlmTurnBuilderExt for TurnBuilder {
-    fn require_finish(self) -> Result<Self> {
-        rlm_termination(
-            self,
-            lash_rlm_types::RlmTermination::FinishRequired { schema: None },
-        )
-    }
-
-    fn require_finish_schema(self, schema: serde_json::Value) -> Result<Self> {
-        rlm_termination(
-            self,
-            lash_rlm_types::RlmTermination::FinishRequired {
-                schema: Some(schema),
-            },
-        )
-    }
-
-    fn allow_prose_or_finish(self) -> Result<Self> {
-        rlm_termination(self, lash_rlm_types::RlmTermination::Natural)
-    }
-}
-
-/// The RLM termination setters on a [`send`](crate::LashSession::send): the
-/// same names and signatures as [`RlmTurnBuilderExt`], so a turn chain keeps
-/// its text when it moves onto `send()`.
+/// The RLM termination setters on a [`send`](crate::LashSession::send).
 #[cfg(feature = "rlm")]
 pub trait RlmSendBuilderExt: Sized {
     /// Requires the RLM turn to finish through the finish tool.
@@ -276,18 +241,6 @@ pub use lash_protocol_rlm::{
 /// splitting it here would give the same name two homes.
 pub mod lang {
     pub use lashlang::*;
-}
-
-#[cfg(feature = "rlm")]
-fn rlm_termination(
-    mut builder: TurnBuilder,
-    termination: lash_rlm_types::RlmTermination,
-) -> Result<TurnBuilder> {
-    builder.protocol_turn_options = Some(rlm_termination_options(
-        builder.protocol_turn_options.as_ref(),
-        termination,
-    )?);
-    Ok(builder)
 }
 
 /// `current` with its RLM termination overridden by `termination`.

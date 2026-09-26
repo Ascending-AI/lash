@@ -118,8 +118,8 @@ async fn overflow_and_recovery(
     let session = harness.open(&session_id).await?;
 
     let overflow = session
-        .turn(lash::TurnInput::text("summarize the attached report"))
-        .run()
+        .send(lash::TurnInput::text("summarize the attached report"))
+        .output()
         .await;
     let overflow = match overflow {
         Ok(output) => output,
@@ -155,8 +155,8 @@ async fn overflow_and_recovery(
 
     // The same session, not a new one: the claim is that the session continues.
     let continued = session
-        .turn(lash::TurnInput::text("now give me the verdict"))
-        .run()
+        .send(lash::TurnInput::text("now give me the verdict"))
+        .output()
         .await
         .map_err(|err| anyhow!("{err}"))
         .context("the post-recovery turn")?;
@@ -238,8 +238,8 @@ async fn provider_error_control(run_id: &str) -> Result<Value> {
     let session = harness.open(&session_id).await?;
 
     let failed = session
-        .turn(lash::TurnInput::text("summarize the attached report"))
-        .run()
+        .send(lash::TurnInput::text("summarize the attached report"))
+        .output()
         .await;
     let outcome = match failed {
         Ok(output) => {

@@ -189,26 +189,6 @@ async fn sim_engine() -> lash_sim::backend::SimEngine {
         .expect("sim engine")
 }
 
-/// Drain `session`'s next queued work inside a handler on `engine`.
-#[expect(
-    clippy::expect_used,
-    reason = "test support: a drain whose handler never completes panics the harness with its case name by design"
-)]
-async fn drain(
-    engine: &lash_sim::backend::SimEngine,
-    session: &lash::LashSession,
-    drain_id: &str,
-) -> lash::Result<lash::QueuedTurnDrain<lash::TurnOutput>> {
-    engine
-        .run_queued_turn(
-            session,
-            drain_id,
-            Arc::new(|session: &lash::LashSession| session.queued_turn()),
-        )
-        .await
-        .expect("queued drain handler")
-}
-
 async fn standard_core(
     provider: lash_core::facade_support::ProviderHandle,
     tools: Arc<dyn ToolProvider>,
@@ -257,7 +237,6 @@ fn standard_core_on(
         .queued_work_batching(lash_core::QueuedWorkBatchingConfig::new(1))
         .max_attachment_bytes(max_attachment_bytes)
         .trace_sink(trace)
-        .without_queued_work()
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "logical-turn-test",
             "logical-turn-test-boot",
@@ -314,38 +293,42 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
             let completions = Arc::clone(&completions);
             let first_provider_started_tx = Arc::clone(&first_provider_started_tx);
             let release_first_provider_rx = Arc::clone(&release_first_provider_rx);
-            move |_| {
+            // Each exchange is scripted by the input it answers, not by call
+            // order: the engine drives every input as soon as it is accepted.
+            move |request| {
                 let provider_call = Arc::clone(&provider_call);
                 let completions = Arc::clone(&completions);
                 let first_provider_started_tx = Arc::clone(&first_provider_started_tx);
                 let release_first_provider_rx = Arc::clone(&release_first_provider_rx);
+                let request = serde_json::to_string(&request).unwrap_or_default();
                 async move {
-                    Ok(match provider_call.fetch_add(1, Ordering::SeqCst) {
-                        0 => {
-                            if let Some(started) = first_provider_started_tx.lock_recover().take() {
-                                let _ = started.send(());
-                            }
-                            if let Some(release) = release_first_provider_rx.lock().await.take() {
-                                let _ = release.await;
-                            }
-                            tool_call_response()
+                    provider_call.fetch_add(1, Ordering::SeqCst);
+                    Ok(if request.contains("second queued turn") {
+                        completions.lock_recover().push("pending-next".to_string());
+                        text_response("pending next complete")
+                    } else if request.contains("run seeded follow-on") {
+                        completions.lock_recover().push("follow-on".to_string());
+                        text_response("seeded follow-on complete")
+                    } else {
+                        if let Some(started) = first_provider_started_tx.lock_recover().take() {
+                            let _ = started.send(());
                         }
-                        1 => {
-                            completions.lock_recover().push("follow-on".to_string());
-                            text_response("seeded follow-on complete")
+                        if let Some(release) = release_first_provider_rx.lock().await.take() {
+                            let _ = release.await;
                         }
-                        2 => {
-                            completions.lock_recover().push("pending-next".to_string());
-                            text_response("pending next complete")
-                        }
-                        index => panic!("unexpected provider call {index}"),
+                        tool_call_response()
                     })
                 }
             }
         })
         .build()
         .into_handle();
-    let engine = sim_engine().await;
+    // The law holds the engine's drive while a root runs; the hold reaches
+    // the running drive at its next step, which needs a server whose attempts
+    // run concurrently.
+    let engine = lash_sim::backend::SimEngine::concurrent(0x5eed_7010)
+        .await
+        .expect("concurrent sim engine");
     let backend = engine.backend();
     let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
@@ -354,7 +337,6 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         .model(model())
         .tools(Arc::new(SeedSwitchTool { initial_nodes }))
         .trace_sink(trace.clone())
-        .without_queued_work()
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "logical-turn-test",
             "logical-turn-test-boot",
@@ -365,30 +347,22 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         .open()
         .await
         .expect("open sim session");
-    let first = session
-        .durable()
-        .enqueue(TurnInput::text("first queued turn"))
-        .id("first")
-        .send()
-        .await
-        .expect("enqueue first turn");
     let (reached_tx, reached_rx) = std::sync::mpsc::channel();
     let pause = Arc::new(PauseAfterFirstCommittedTurn::new(reached_tx));
     session.set_turn_phase_probe(pause.clone()).await;
-    let drain_session = session.clone();
-    let drain_engine = engine.clone();
-    let first_drain =
-        tokio::spawn(async move { drain(&drain_engine, &drain_session, "first-drain").await });
+    let first = session
+        .send(TurnInput::text("first queued turn"))
+        .id("first")
+        .await
+        .expect("send first turn");
     first_provider_started_rx
         .await
         .expect("first provider call started");
     let second = session
-        .durable()
-        .enqueue(TurnInput::text("second queued turn"))
+        .send(TurnInput::text("second queued turn"))
         .id("second")
-        .send()
         .await
-        .expect("enqueue second turn while chain is active");
+        .expect("send second turn while chain is active");
     release_first_provider_tx
         .send(())
         .expect("release first provider call");
@@ -417,10 +391,10 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
             .pending_follow_on;
     let inbound_completed = pending_at_commit
         .iter()
-        .all(|input| input.input.input_id != first.input_id);
+        .all(|input| input.input.input_id != *first.input_id());
     let second_still_pending = pending_at_commit
         .iter()
-        .any(|input| input.input.input_id == second.input_id);
+        .any(|input| input.input.input_id == *second.input_id());
     let expected_frame_id = lash_core::facade_support::frame_node_id(
         &SessionId::from("logical-turn-sim"),
         lash_core::FrameKey::from_caller_material("sim-seeded-follow-frame")
@@ -442,13 +416,13 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
         }])
         .is_passed()
     );
+    // Hold the engine's drive before the root goes on: the root runs its
+    // follow-on to its answer, and the held drive admits nothing after it, so
+    // the unrelated input is still pending once the root has settled.
+    let hold = engine.hold_session_drive(&session).await;
     pause.resume();
 
-    let first_output = first_drain
-        .await
-        .expect("join first drain")
-        .expect("first drain succeeds")
-        .expect("first drain ran a turn");
+    let first_output = first.output().await.expect("the first root settles");
     assert_eq!(
         first_output.assistant_message(),
         Some("seeded follow-on complete")
@@ -477,13 +451,11 @@ async fn claimed_switch_is_seeded_atomic_ordered_and_exactly_once() {
             .iter()
             .map(|input| input.input.input_id.as_str())
             .collect::<Vec<_>>(),
-        vec![second.input_id.as_str()]
+        vec![second.input_id().as_str()]
     );
 
-    let second_output = drain(&engine, &session, "second-drain")
-        .await
-        .expect("second drain succeeds")
-        .expect("second queued turn ran");
+    hold.release();
+    let second_output = second.output().await.expect("the second input settles");
     assert_eq!(
         second_output.assistant_message(),
         Some("pending next complete")
@@ -592,15 +564,11 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .await
         .expect("open finish session");
     finish_session
-        .durable()
-        .enqueue(TurnInput::text("finish claimed input"))
-        .send()
+        .send(TurnInput::text("finish claimed input"))
+        .output()
         .await
-        .expect("enqueue finish input");
-    drain(&finish_engine, &finish_session, "finish-drain")
-        .await
-        .expect("finish drain succeeds")
         .expect("finish input runs");
+    drop(finish_engine);
     let finish_verdict = logical_turn_claims_settle_exactly_once(&finish_trace.snapshot());
     assert!(finish_verdict.is_passed(), "{finish_verdict:?}");
 
@@ -640,22 +608,17 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .open()
         .await
         .expect("open cancel session");
-    cancel_session
-        .durable()
-        .enqueue(TurnInput::text("cancel claimed input"))
-        .send()
+    let cancelled = cancel_session
+        .send(TurnInput::text("cancel claimed input"))
         .await
-        .expect("enqueue cancel input");
-    let drain_session = cancel_session.clone();
-    let cancelled =
-        tokio::spawn(async move { drain(&cancel_engine, &drain_session, "cancel-drain").await });
+        .expect("send cancel input");
     provider_started_rx.await.expect("cancel provider started");
-    assert_eq!(cancel_session.cancel_running_turns(), 1);
-    let cancelled = cancelled
+    cancelled
+        .cancel()
         .await
-        .expect("join cancelled turn")
-        .expect("cancel drain succeeds")
-        .expect("cancel input runs");
+        .expect("cancel the running input's root");
+    let cancelled = cancelled.output().await.expect("cancel input runs");
+    drop(cancel_engine);
     assert!(matches!(
         cancelled.result.outcome,
         lash_core::facade_support::TurnOutcome::Stopped(TurnStop::Cancelled { .. })
@@ -683,21 +646,17 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .open()
         .await
         .expect("open error session");
-    error_session
-        .durable()
-        .enqueue(TurnInput::items([InputItem::attachment(
+    let invalid = error_session
+        .send(TurnInput::items([InputItem::attachment(
             lash_core::AttachmentSource::inline(
                 lash_core::MediaType::parse("application/pdf").unwrap(),
                 vec![0_u8; 64],
             ),
         )]))
-        .send()
+        .output()
         .await
-        .expect("enqueue invalid input");
-    let invalid = drain(&error_engine, &error_session, "invalid-drain")
-        .await
-        .expect("invalid drain succeeds")
         .expect("invalid input terminalizes");
+    drop(error_engine);
     assert!(matches!(
         invalid.result.outcome,
         lash_core::facade_support::TurnOutcome::Stopped(TurnStop::InvalidInput)
@@ -744,16 +703,12 @@ async fn claims_settle_for_finish_cancel_error_and_chain_bound() {
         .open()
         .await
         .expect("open bound session");
-    bound_session
-        .durable()
-        .enqueue(TurnInput::text("run beyond the frame switch bound"))
-        .send()
+    let bounded = bound_session
+        .send(TurnInput::text("run beyond the frame switch bound"))
+        .output()
         .await
-        .expect("enqueue bounded chain");
-    let bounded = drain(&bound_engine, &bound_session, "bounded-drain")
-        .await
-        .expect("bounded chain drain succeeds")
         .expect("bounded chain terminalizes");
+    drop(bound_engine);
     assert!(matches!(
         bounded.result.outcome,
         lash_core::facade_support::TurnOutcome::Stopped(TurnStop::RuntimeError)
@@ -839,7 +794,6 @@ finish({ baton: baton });
         .provider(provider)
         .model(model())
         .trace_sink(trace.clone())
-        .without_queued_work()
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "logical-turn-test",
             "logical-turn-test-boot",
@@ -850,15 +804,10 @@ finish({ baton: baton });
         .open()
         .await
         .expect("open RLM seed session");
-    session
-        .durable()
-        .enqueue(TurnInput::text("switch with an RLM seed"))
-        .send()
+    let terminal = session
+        .send(TurnInput::text("switch with an RLM seed"))
+        .output()
         .await
-        .expect("enqueue RLM seed turn");
-    let terminal = drain(&engine, &session, "rlm-seed-drain")
-        .await
-        .expect("RLM seed drain succeeds")
         .expect("RLM seed turn runs");
     assert_eq!(
         terminal
@@ -958,7 +907,6 @@ await control.continue_as({
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .provider(provider)
         .model(model())
-        .without_queued_work()
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "logical-turn-test",
             "logical-turn-test-boot",
@@ -969,15 +917,10 @@ await control.continue_as({
         .open()
         .await
         .expect("open shadowed-control session");
-    session
-        .durable()
-        .enqueue(TurnInput::text("bind a local `control`"))
-        .send()
+    let bound = session
+        .send(TurnInput::text("bind a local `control`"))
+        .output()
         .await
-        .expect("enqueue binding turn");
-    let bound = drain(&engine, &session, "binding-drain")
-        .await
-        .expect("binding drain succeeds")
         .expect("binding turn runs");
     assert_eq!(
         bound
@@ -988,15 +931,10 @@ await control.continue_as({
     );
     let calls_after_binding = call_index.load(Ordering::SeqCst);
 
-    session
-        .durable()
-        .enqueue(TurnInput::text("switch with an RLM seed"))
-        .send()
+    let switched = session
+        .send(TurnInput::text("switch with an RLM seed"))
+        .output()
         .await
-        .expect("enqueue frame-switch turn");
-    let switched = drain(&engine, &session, "frame-switch-drain")
-        .await
-        .expect("frame-switch drain succeeds")
         .expect("frame-switch turn runs");
     assert!(
         matches!(
@@ -1097,7 +1035,6 @@ async fn terminal_checkpoint_withheld_claim_is_traced_once() {
         .model(model())
         .tools(Arc::new(NoTools))
         .trace_sink(trace.clone())
-        .without_queued_work()
         .build(lash::persistence::LeaseOwnerIdentity::opaque(
             "withheld-trace-test",
             "withheld-trace-test-boot",
@@ -1105,15 +1042,10 @@ async fn terminal_checkpoint_withheld_claim_is_traced_once() {
         .unwrap();
     let session = core.session(session_id.as_str()).open().await.unwrap();
     session
-        .durable()
-        .enqueue(TurnInput::text("start the logical run"))
-        .send()
+        .send(TurnInput::text("start the logical run"))
+        .output()
         .await
-        .unwrap();
-    drain(&engine, &session, "withheld-drain")
-        .await
-        .unwrap()
-        .expect("withheld drain runs");
+        .expect("the logical run settles");
     assert_eq!(
         calls.load(Ordering::SeqCst),
         2,

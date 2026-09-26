@@ -780,7 +780,7 @@ async fn a_mention_interrupted_mid_turn_is_deferred_and_never_terminalized() {
         matches!(
             report.settled.first(),
             Some(Disposition::Deferred {
-                reason: "drain_did_not_reach_admission",
+                reason: "session_admission_contended",
                 ..
             })
         ),
@@ -814,7 +814,7 @@ async fn a_deferred_mention_is_answered_once_the_dead_boots_lease_lapses() {
     let scratch = scratch();
     let platform = TestPlatform::start(scratch.path()).await;
     let bot_dir = bot_dir(scratch.path());
-    let (_dying, dying_script, turn, app_mention, channel) =
+    let (dying, dying_script, turn, app_mention, channel) =
         stage_interrupted_mention_turn(&platform, &bot_dir).await;
 
     let script = Script::prose("The queue backed up; it is draining now.");
@@ -822,8 +822,12 @@ async fn a_deferred_mention_is_answered_once_the_dead_boots_lease_lapses() {
     let report = reborn.recover().await.expect("recovery pass");
     assert_eq!(report.deferred, vec![app_mention.event_id.clone()]);
 
-    // The dead boot really is gone, and its lease TTL elapses.
+    // The dead boot really is gone, and its lease TTL elapses. Its turn ran on
+    // its own core's engine, which dies with the core: the gate it waits on is
+    // released only after nothing is left to answer it.
     turn.abort();
+    let _ = turn.await;
+    drop(dying);
     dying_script.release_gate();
     assert!(
         super::support::expire_session_leases(&bot_dir) > 0,
@@ -837,17 +841,20 @@ async fn a_deferred_mention_is_answered_once_the_dead_boots_lease_lapses() {
         )
         .await
         .expect("deferred retry");
-    // The interrupted turn never committed, so there is nothing to recover from
-    // the transcript: the retry runs the turn the dead boot never finished.
+    // The interrupted turn never committed on the dead boot: the new boot's
+    // engine runs it once the lease lapses. Whether the retry waits on that
+    // turn or reads its committed answer depends only on when the engine
+    // finished relative to the retry; either way this boot's model answered,
+    // exactly once.
     assert!(
         matches!(
             outcome,
             Disposition::Replied {
-                source: ReplySource::Turn,
+                source: ReplySource::Turn | ReplySource::Transcript,
                 ..
             }
         ),
-        "the deferred mention must be answered by a fresh turn: {outcome:?}"
+        "the deferred mention must be answered by the new boot's turn: {outcome:?}"
     );
     assert_eq!(script.calls(), 1);
 
@@ -917,7 +924,7 @@ async fn a_thread_mention_interrupted_mid_turn_uses_the_same_deferral_recovery()
     assert!(matches!(
         report.settled.first(),
         Some(Disposition::Deferred {
-            reason: "drain_did_not_reach_admission",
+            reason: "session_admission_contended",
             ..
         })
     ));
@@ -932,16 +939,20 @@ async fn a_thread_mention_interrupted_mid_turn_uses_the_same_deferral_recovery()
     assert_eq!(record.thread_ts.as_deref(), Some(root_ts.as_str()));
 
     turn.abort();
+    let _ = turn.await;
+    drop(dying);
     dying_script.release_gate();
     assert!(super::support::expire_session_leases(&bot_dir) > 0);
     let outcome = reborn
         .retry_deferred(app_mention.event_id, std::time::Duration::from_secs(30))
         .await
         .expect("settle deferred thread mention");
+    // As in the channel case, the new boot's engine answers the thread mention
+    // once the lease lapses, whether the retry waits on it or reads it back.
     assert!(matches!(
         outcome,
         Disposition::Replied {
-            source: ReplySource::Turn,
+            source: ReplySource::Turn | ReplySource::Transcript,
             ..
         }
     ));

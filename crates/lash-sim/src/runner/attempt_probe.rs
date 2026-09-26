@@ -111,7 +111,6 @@ async fn probe_session(
         .observing(collector.clone())
         .into();
     let core = lash::LashCore::standard_builder(backend.clone(), lash::TurnBudget::Unbounded)
-        .without_queued_work()
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -134,7 +133,7 @@ async fn probe_session(
             format!("{session_id}-turn"),
             Arc::new(super::runtime_proofs::RuntimeProofRecordingEvents::default()),
             Arc::new(|session: &lash::LashSession| {
-                Ok(session.turn(lash::TurnInput::text("Run the attempt usage probe.")))
+                Ok(session.send(lash::TurnInput::text("Run the attempt usage probe.")))
             }),
         )
         .await?;
@@ -171,10 +170,7 @@ mod tests {
         drive_generated_workload(&mut world, &workload)
             .await
             .expect("drive");
-        let mut content = world
-            .content_evidence(world.reopen_factory().as_ref())
-            .await
-            .expect("content evidence");
+        let mut content = world.content_evidence().await.expect("content evidence");
         content.extend(drive_attempt_usage_probe(5).await.expect("probe"));
         let verdict = crate::content_oracle::durable_content(&content);
         assert!(verdict.is_passed(), "{}", verdict.message);

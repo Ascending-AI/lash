@@ -154,25 +154,31 @@ async fn ambient_traffic_folds_into_the_session_without_a_turn_or_a_reply() {
         "and no reply is posted"
     );
 
-    // Lash's own evidence: two durable admissions waiting for the next turn.
+    // The ledger's evidence: two ambient lines waiting for the next mention,
+    // and nothing sent to Lash.
+    let unfolded = bot
+        .ledger()
+        .unfolded_context(channel.clone(), None)
+        .await
+        .expect("read unfolded context");
+    assert_eq!(unfolded.len(), 2, "both ambient lines wait: {unfolded:?}");
     let session = bot
         .core()
         .session(session_id(&channel))
         .open()
         .await
         .expect("open channel session");
-    let pending = session
-        .durable()
-        .pending_turn_inputs()
-        .await
-        .expect("read pending turn inputs");
-    assert_eq!(
-        pending.len(),
-        2,
-        "both ambient lines are queued: {pending:?}"
+    assert!(
+        session
+            .durable()
+            .pending_turn_inputs()
+            .await
+            .expect("read pending turn inputs")
+            .is_empty(),
+        "ambient traffic is not a turn input"
     );
 
-    // Now a mention: one drain folds the room context and the mention into one turn.
+    // Now a mention: one send folds the room context and the mention into one turn.
     let mention = platform.mention();
     platform
         .say(&channel, &ada, &format!("{mention} what happened?"))
@@ -188,7 +194,15 @@ async fn ambient_traffic_folds_into_the_session_without_a_turn_or_a_reply() {
             .await
             .expect("read pending turn inputs")
             .is_empty(),
-        "the drain consumed every queued input"
+        "the mention's turn consumed its send"
+    );
+    assert!(
+        bot.ledger()
+            .unfolded_context(channel.clone(), None)
+            .await
+            .expect("read unfolded context")
+            .is_empty(),
+        "the mention folded every waiting ambient line"
     );
     assert!(
         script.saw("the deploy is stuck") && script.saw("rolling it back now"),
@@ -284,18 +298,11 @@ async fn each_channel_gets_its_own_session_and_neither_sees_the_others_context()
         script.requests()
     );
 
-    let secret_session = bot
-        .core()
-        .session(session_id(&secrets))
-        .open()
-        .await
-        .expect("open secrets session");
     assert_eq!(
-        secret_session
-            .durable()
-            .pending_turn_inputs()
+        bot.ledger()
+            .unfolded_context(secrets.clone(), None)
             .await
-            .expect("pending inputs")
+            .expect("read unfolded context")
             .len(),
         1,
         "the other channel's queued context is untouched"
@@ -314,7 +321,7 @@ async fn each_channel_gets_its_own_session_and_neither_sees_the_others_context()
             .expect("pending inputs")
             .is_empty()
     );
-    assert_ne!(secret_session.session_id(), public_session.session_id());
+    assert_ne!(session_id(&secrets), public_session.session_id().as_str());
 }
 
 #[tokio::test]
@@ -1157,21 +1164,14 @@ async fn thread_and_channel_traffic_are_isolated_after_the_fork() {
     );
     assert!(!channel_text.contains("first thread turn"));
     assert!(!channel_text.contains("second thread turn"));
-    let channel_session = bot
-        .core()
-        .session(session_id(&channel))
-        .open()
-        .await
-        .expect("open channel session");
     assert_eq!(
-        channel_session
-            .durable()
-            .pending_turn_inputs()
+        bot.ledger()
+            .unfolded_context(channel.clone(), None)
             .await
-            .expect("channel pending inputs")
+            .expect("read the channel's unfolded context")
             .len(),
         2,
-        "the root and post-fork channel traffic remain queued only on the channel session"
+        "the root and post-fork channel traffic still wait only on the channel route"
     );
     assert_eq!(
         bot.session_lock_count(),
@@ -1248,15 +1248,23 @@ async fn an_ambient_thread_reply_creates_the_fork_and_waits_for_a_mention() {
         .open()
         .await
         .expect("open fork created by first reply");
-    assert_eq!(
+    assert!(
         thread
             .durable()
             .pending_turn_inputs()
             .await
             .expect("thread pending inputs")
+            .is_empty(),
+        "nothing is sent to the child before a mention"
+    );
+    assert_eq!(
+        bot.ledger()
+            .unfolded_context(channel.clone(), Some(root.to_string()))
+            .await
+            .expect("read the thread's unfolded context")
             .len(),
-        2,
-        "the inherited root and ambient thread reply wait in the child"
+        1,
+        "the ambient thread reply waits on the thread route for its first mention"
     );
 
     platform

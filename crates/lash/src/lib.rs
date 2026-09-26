@@ -85,7 +85,7 @@ pub use crate::admin::{
 };
 pub use crate::core::{DeploymentDrainStatus, LashCore, LashCoreBuilder, SessionDeleteReport};
 pub use crate::durable_session::{DurableSession, EnqueueTurnBuilder};
-pub use crate::error::{EmbedError, Result, SelectedQueuedWorkDrainRefusalCause, SendError};
+pub use crate::error::{EmbedError, Result, SendError};
 pub use crate::parked_work::{
     ParkedKinds, ParkedWork, ParkedWorkCursor, ParkedWorkEvent, ParkedWorkEventPage,
     ParkedWorkEventsCursor, ParkedWorkPage, ParkedWorkQuery, ParkedWorkRecord, ParkedWorkRef,
@@ -99,10 +99,8 @@ pub use crate::send::{
 };
 pub use crate::session::{LashSession, ObservableSession, ParkedSession, SessionBuilder};
 pub use crate::tool_catalog::{ToolCatalogMiss, ToolCatalogView};
-pub use crate::turn::queued_drain::{EmptyQueuedDrainReason, QueuedTurnDrain};
 pub use crate::turn::{
-    QueuedTurnBuilder, ReportSource, SelectedQueuedTurnBuilder, TurnActivityFanout, TurnBuilder,
-    TurnOutput, TurnReport, TurnStream, message_role, message_text,
+    ReportSource, TurnActivityFanout, TurnOutput, TurnReport, message_role, message_text,
 };
 /// Re-exported so implementors of `#[async_trait]` facade traits (for example
 /// [`tools::StaticToolExecute`]) apply the macro without carrying their own
@@ -115,8 +113,7 @@ pub use lash_core::async_trait;
 /// memory) until FIG-3668 deletes the SQLite engine.
 pub use lash_core::engine::BuildGeneration;
 pub use lash_core::facade_support::{
-    SelectedQueuedWorkBatchSatisfaction, SelectedQueuedWorkDrainOutcome, TurnCancelAffectedInput,
-    TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
+    TurnCancelAffectedInput, TurnCancelClosureAuthorization, TurnCancelClosureAuthorizationOutcome,
     TurnCancelClosureProposal, TurnCancelClosureSettlement, TurnCancelDisposition,
     TurnCancelInputOutcome, TurnCancelIntentSnapshot, TurnCancelMode, TurnCancelRequestRecord,
 };
@@ -151,9 +148,8 @@ pub use lash_core::{
 /// feature-gated modules (`restate`, `sqlite`, `postgres`) build one.
 pub use lash_core::{Backend, EffectEngine, StoreBindingId, StoreSet};
 pub use lash_core::{SessionAdministration, SessionDeleteContext, SessionDeleteExecution};
-/// Cooperative cancellation handle accepted by
-/// [`TurnBuilder::cancel`](crate::TurnBuilder::cancel); re-exported so
-/// embedders cancel turns without depending on `tokio-util` themselves.
+/// Cooperative cancellation handle; re-exported so embedders hold one
+/// without depending on `tokio-util` themselves.
 pub use tokio_util::sync::CancellationToken;
 
 /// `use lash::prelude::*;` brings in the daily core/session/turn vocabulary
@@ -165,14 +161,14 @@ pub mod prelude {
         DurableSession, EmbedError, EnqueueTurnBuilder, InputItem, LashCore, LashCoreBuilder,
         LashSession, ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder, NoProgressBudget,
         ObservableSession, ParkedSession, PendingTurnInputCancelOutcome, PluginBinding,
-        PluginOperations, PluginStack, PromptLayerSink, QueuedTurnBuilder, Result, SendBuilder,
-        SendHandle, SendOutcome, SessionBuilder, SessionCommand, SessionCommandAdmin,
-        SessionCommandReceipt, SessionConfigPatch, SessionCreateRequest, SessionDeleteReport,
-        SessionListFilter, SessionRelationKind, SessionSpec, SessionStartPoint, SessionSummary,
-        SessionTriggerAdmin, ToolAdmin, TurnActivity, TurnActivityFanout, TurnActivityId,
-        TurnActivitySink, TurnBudget, TurnBuilder, TurnCause, TurnEvent, TurnExecutionMetrics,
-        TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport,
-        TurnStatus, TurnStop, TurnStream, message_role, message_text,
+        PluginOperations, PluginStack, PromptLayerSink, Result, SendBuilder, SendHandle,
+        SendOutcome, SessionBuilder, SessionCommand, SessionCommandAdmin, SessionCommandReceipt,
+        SessionConfigPatch, SessionCreateRequest, SessionDeleteReport, SessionListFilter,
+        SessionRelationKind, SessionSpec, SessionStartPoint, SessionSummary, SessionTriggerAdmin,
+        ToolAdmin, TurnActivity, TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBudget,
+        TurnCause, TurnEvent, TurnExecutionMetrics, TurnFinish, TurnInput,
+        TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport, TurnStatus, TurnStop,
+        message_role, message_text,
     };
 }
 

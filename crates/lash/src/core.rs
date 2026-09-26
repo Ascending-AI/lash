@@ -1198,6 +1198,7 @@ impl LashCoreBuilder {
             config: native_substrate,
             process: process_port,
             queued: queued_port,
+            store_binding: backend.binding_identity(),
             wake: WakeDeliveryDriverSetup {
                 registry: Arc::clone(&process_registry),
                 factory: Arc::clone(&store_factory),

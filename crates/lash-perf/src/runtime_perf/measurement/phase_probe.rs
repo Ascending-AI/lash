@@ -582,7 +582,7 @@ async fn run_once_inner(
                         turn_index,
                         "run_turn",
                         Some(cancel.clone()),
-                        runtime.run_turn_with_execution_scope(turn_input, &turn_id, cancel),
+                        runtime.run_turn_with_id(turn_input, &turn_id, cancel),
                     )
                     .await
                 } else if matches!(scenario, RuntimePerfScenario::TurnCancelRoundTrip) {

@@ -135,7 +135,6 @@ pub(crate) struct ScenarioWiring {
     pub(crate) oblique_tools_plugin: bool,
     pub(crate) large_tool_catalog_plugin: bool,
     pub(crate) workbench_trigger_plugin: bool,
-    pub(crate) queued_work: bool,
     pub(crate) measure_commit_bytes: bool,
     pub(crate) session_store_handle: bool,
 }
@@ -149,7 +148,6 @@ impl ScenarioWiring {
         oblique_tools_plugin: false,
         large_tool_catalog_plugin: false,
         workbench_trigger_plugin: false,
-        queued_work: true,
         measure_commit_bytes: true,
         session_store_handle: false,
     };
@@ -442,7 +440,7 @@ impl RuntimePerfScenario {
             Rlm,
             RlmProtocolScenario,
             "Measures RLM protocol prompt/context handling for fixed session-scoped projected bindings.",
-            wiring { queued_work = false }
+            wiring {}
         ),
         runtime_perf_metadata!(
             RlmLargePrint,
@@ -712,7 +710,7 @@ impl RuntimePerfScenario {
             "Measures configurable concurrent claim, renew, complete, abandon, and reclaim traffic below protocol and facade ownership against one shared SQLite backend. Wall-clock throughput and latency are meaningful only on a quiet box.",
             Durable,
             QueuedWorkContention,
-            wiring { queued_work = false, session_store_handle = true },
+            wiring { session_store_handle = true },
             false
         ),
         runtime_perf_metadata!(
@@ -757,7 +755,7 @@ impl RuntimePerfScenario {
             "Measures an open-throughput mixed-session deployment simulation below protocol and facade ownership against shared SQLite persistence.",
             Durable,
             HighTraffic,
-            wiring { subagents_plugin = true, workbench_trigger_plugin = true, queued_work = false },
+            wiring { subagents_plugin = true, workbench_trigger_plugin = true },
             false
         ),
         runtime_perf_metadata!(
@@ -768,7 +766,7 @@ impl RuntimePerfScenario {
             "Searches mixed-session saturation steps below protocol and facade ownership against isolated SQLite persistence per step. Closed-loop mode (arrival rate 0) detects p95 latency growth versus the first step; open-loop arrival pacing is the meaningful mode for offered-load saturation search.",
             Durable,
             HighTraffic,
-            wiring { subagents_plugin = true, workbench_trigger_plugin = true, queued_work = false },
+            wiring { subagents_plugin = true, workbench_trigger_plugin = true },
             false
         ),
         runtime_perf_metadata!(

@@ -74,7 +74,7 @@ cargo nextest run --workspace --all-targets --locked \
 
 The Slack test fills the real bounded activity channel, triggers the smoke
 timeout, drains after existing process-local cancellation, joins the real
-`TurnStream`, and then lets an installed shutdown factory run. The toolbench
+send handle's activity stream, and then lets an installed shutdown factory run. The toolbench
 test takes its real zero-wall-limit owner path and observes an installed
 factory's awaited shutdown. Both providers remain local; do not execute the
 paid live-model harness for this deterministic runbook.

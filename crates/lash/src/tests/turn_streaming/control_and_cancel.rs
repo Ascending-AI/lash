@@ -127,9 +127,9 @@ pub(super) async fn queued_input_acceptance_streams_semantic_ack_with_id() -> Re
     let turn_events = Arc::clone(&events);
     let turn = tokio::spawn(async move {
         turn_session
-            .turn(TurnInput::text("hello"))
-            .turn_id("queued-input-turn")
-            .stream_to(turn_events.as_ref())
+            .send(TurnInput::text("hello"))
+            .id("queued-input-turn")
+            .output_into(turn_events.as_ref())
             .await
     });
 
@@ -258,18 +258,15 @@ pub(super) async fn cancel_running_turns_stops_inflight_turn() -> Result<()> {
     let session = core.session("cancel-inflight").open().await?;
     let stopper = session.clone();
 
-    let externally_owned_cancel = CancellationToken::new();
-    let stream = session
-        .turn(TurnInput::text("hang forever"))
-        .cancel_with_origin(externally_owned_cancel, Some("shutdown".to_string()))
-        .stream()?;
+    let handle = session.send(TurnInput::text("hang forever")).await?;
+    let settled = tokio::spawn(async move { handle.output().await });
     started_rx.await.expect("provider reached");
     assert_eq!(
         stopper.cancel_running_turns_with_origin(Some("user".to_string())),
         1
     );
 
-    let result = stream.finish().await?;
+    let result = settled.await.expect("send task")?.result;
     assert!(matches!(
         result.outcome,
         TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
@@ -281,7 +278,7 @@ pub(super) async fn cancel_running_turns_stops_inflight_turn() -> Result<()> {
             ..
         }) if origin == "user"
     ));
-    // The registry entry is gone once the turn finished.
+    // The registry entry is gone once the handle answered.
     assert_eq!(stopper.cancel_running_turns(), 0);
     Ok(())
 }
@@ -794,7 +791,7 @@ pub(super) async fn a_local_stop_commits_the_request_it_was_forwarded_as() -> Re
 }
 
 #[tokio::test]
-pub(super) async fn cancel_running_turns_reaches_queued_turn_drains() -> Result<()> {
+pub(super) async fn cancel_running_turns_reaches_a_sent_input() -> Result<()> {
     // Queued drains register in the same session registry as foreground
     // turns, so a stop sweep reaches them too.
     let (started_tx, started_rx) = oneshot::channel::<()>();
@@ -809,24 +806,18 @@ pub(super) async fn cancel_running_turns_reaches_queued_turn_drains() -> Result<
     .build(crate::testing::runtime_lease_owner())
     .expect("core");
     let session = core.session("cancel-queued-drain").open().await?;
-    session
-        .durable()
-        .enqueue(TurnInput::text("hang queued"))
-        .send()
-        .await?;
+    let handle = session.send(TurnInput::text("hang queued")).await?;
 
-    let drainer = session.clone();
-    let drain = tokio::spawn(async move { drainer.queued_turn().run().await });
-    started_rx.await.expect("queued drain reached the provider");
+    let drain = tokio::spawn(async move { handle.output().await });
+    started_rx
+        .await
+        .expect("the sent input reached the provider");
     assert_eq!(
         session.cancel_running_turns_with_origin(Some("user".to_string())),
         1
     );
 
-    let output = drain
-        .await
-        .expect("drain task")?
-        .expect("queued drain should produce a turn");
+    let output = drain.await.expect("send task")?;
     assert!(matches!(
         output.result.outcome,
         TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
@@ -1300,10 +1291,10 @@ pub(super) fn rlm_active_input_reaches_the_next_provider_iteration() -> Result<(
         let turn_session = session.clone();
         let turn = tokio::spawn(async move {
             turn_session
-                .turn(TurnInput::text("perform two iterations"))
-                .turn_id(active_turn_id)
+                .send(TurnInput::text("perform two iterations"))
+                .id(active_turn_id)
                 .require_finish()?
-                .run()
+                .output()
                 .await
         });
 
@@ -1371,9 +1362,8 @@ pub(super) async fn turn_stream_receives_semantic_activities() -> Result<()> {
     let turn_events = RecordingEvents::default();
 
     let result = session
-        .turn(TurnInput::text("semantic stream"))
-        .cancel(CancellationToken::new())
-        .stream_to(&turn_events)
+        .send(TurnInput::text("semantic stream"))
+        .output_into(&turn_events)
         .await?;
 
     assert!(matches!(
@@ -1539,10 +1529,11 @@ pub(super) async fn turn_event_fanout_streams_to_collector_and_live_sink() -> Re
     let session = core.session("fanout-tool-events").open().await?;
 
     let output = session
-        .turn(TurnInput::text("use tool"))
-        .advanced()
-        .collect_with_scope(live.as_ref(), turn_scope(&core, &session.session_id()))
-        .await?;
+        .send(TurnInput::text("use tool"))
+        .outcome_into(live.as_ref())
+        .await?
+        .output
+        .expect("an answered send has its output");
 
     assert!(matches!(
         output.result.outcome,

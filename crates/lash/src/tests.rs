@@ -3,10 +3,10 @@ use crate::support::SessionWorkEngine;
 use crate::support::{
     Arc, CancellationToken, EffectHost, EmbedError, LashCore, PluginFactory, ProcessRegistry,
     PromptContribution, PromptLayerSink, PromptSlot, PromptTemplate, ProviderHandle, Result,
-    RunActivityCollector, RuntimeSessionState, SelectedQueuedWorkDrainRefusalCause, SessionError,
-    SessionObservationSubscription, SessionResume, SessionStoreFactory, StaticPluginFactory,
-    StdMutex, ToolProvider, TurnActivity, TurnActivityId, TurnActivitySink, TurnEvent, TurnInput,
-    TurnOutcome, TurnReport, async_trait, message_text,
+    RunActivityCollector, RuntimeSessionState, SessionError, SessionObservationSubscription,
+    SessionResume, SessionStoreFactory, StaticPluginFactory, StdMutex, ToolProvider, TurnActivity,
+    TurnActivityId, TurnActivitySink, TurnEvent, TurnInput, TurnOutcome, TurnReport, async_trait,
+    message_text,
 };
 #[cfg(feature = "rlm")]
 use crate::support::{BTreeMap, SessionSpec};
@@ -2378,7 +2378,6 @@ fn rlm_core_builder_over(backend: lash_core::Backend) -> crate::core::LashCoreBu
 mod scope_support;
 use scope_support::{
     delete_bound_session, host_scope, process_scope, runtime_operation_scope, text_message,
-    turn_scope,
 };
 mod control_admin;
 mod core_session_builder;
@@ -2386,12 +2385,11 @@ mod deployment_and_testing_facade;
 mod durable_session;
 mod harness;
 pub(crate) use harness::{
-    DecoratedBackend, backend_work_facets_with_budget, explicit_ephemeral_facets,
+    DecoratedBackend, backend_work_facets_with_budget, drain_queued, explicit_ephemeral_facets,
     explicit_ephemeral_facets_with_backend_work, explicit_ephemeral_facets_with_budget,
     memory_backend, memory_backend_with_clock, memory_store_backend, memory_store_set,
-    mock_model_spec, model_spec, restate_double, run_async_test_on_stack_budget,
-    run_async_test_on_stack_size, sqlite_queued_run_count, sqlite_queued_work_claims,
-    sqlite_turn_input_states,
+    mock_model_spec, model_spec, output_into_cancelled_by, restate_double,
+    run_async_test_on_stack_budget, run_async_test_on_stack_size, sqlite_turn_input_states,
 };
 mod aborted_turn_groups;
 mod agent_scenarios;

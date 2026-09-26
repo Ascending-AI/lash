@@ -466,9 +466,7 @@ pub(super) async fn durable_queued_chained_continue_as_survives_nested_commit_ha
         .send()
         .await?;
 
-    let output = session
-        .queued_turn()
-        .run()
+    let output = drain_queued(&session, None)
         .await?
         .expect("queued chained turn should run");
 
@@ -508,11 +506,6 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
     let store_factory = backend.session_store_factory();
     let controller = EffectRecorder::default();
     let backend = controller.layered_over(backend);
-    let scoped_effect_controller = lash_core::Backend::from(backend.clone())
-        .effect_host()
-        .scoped_static(lash_core::AdmittedScope::turn(session_id, root_turn_id))
-        .expect("scope the root turn")
-        .expect("the backend host lends a static controller");
     let core = LashCore::standard_builder(backend.into(), crate::TurnBudget::Unbounded)
         .without_queued_work()
         .provider(agent_frame_switch_provider())
@@ -524,10 +517,9 @@ pub(super) async fn durable_agent_frame_follow_through_uses_distinct_turn_scopes
     let session = core.session(session_id).open().await?;
     let activities = RecordingEvents::default();
     let output = session
-        .turn(TurnInput::text("switch frames"))
-        .turn_id(root_turn_id)
-        .advanced()
-        .stream_to_with_scope(&activities, scoped_effect_controller)
+        .send(TurnInput::text("switch frames"))
+        .id(root_turn_id)
+        .output_into(&activities)
         .await?;
 
     assert_eq!(output.assistant_message(), Some("done after frame switch"));
@@ -642,12 +634,10 @@ finish(value);"#,
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-process-control-tool").open().await?;
     let turn_session = session.clone();
-    let scoped_effect_controller = turn_scope(&core, &turn_session.session_id());
     let turn = tokio::spawn(async move {
         turn_session
-            .turn(TurnInput::text("start tool"))
-            .advanced()
-            .run_with_scope(scoped_effect_controller)
+            .send(TurnInput::text("start tool"))
+            .output()
             .await
     });
 
@@ -724,12 +714,10 @@ finish(value);"#,
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-lashlang-graph-store").open().await?;
     let turn_session = session.clone();
-    let scoped_effect_controller = turn_scope(&core, &turn_session.session_id());
     let turn = tokio::spawn(async move {
         turn_session
-            .turn(TurnInput::text("start tool"))
-            .advanced()
-            .run_with_scope(scoped_effect_controller)
+            .send(TurnInput::text("start tool"))
+            .output()
             .await
     });
 
@@ -1026,7 +1014,7 @@ pub(super) async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_l
 
     let mut claimed_at_ms = None;
     for _attempt in 0..8 {
-        if let Some(output) = second_session.queued_turn().run().await?.ran() {
+        if let Some(output) = drain_queued(&second_session, None).await?.ran() {
             assert_eq!(output.assistant_message(), Some("the migration is green"));
             claimed_at_ms = Some(lash_core::ClockWallTime::timestamp_ms(clock.as_ref()));
             break;
@@ -1123,9 +1111,9 @@ pub(super) async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained
         .await?;
     {
         let running = first_session
-            .turn(TurnInput::text("start the long turn"))
-            .turn_id(interrupted_turn_id)
-            .run();
+            .send(TurnInput::text("start the long turn"))
+            .id(interrupted_turn_id)
+            .output();
         let mut running = std::pin::pin!(running);
         tokio::select! {
             _ = &mut running => panic!("the hung provider must not complete the turn"),
@@ -1169,7 +1157,7 @@ pub(super) async fn fig1573_active_turn_input_orphaned_by_a_hard_kill_is_drained
     // claimable once a drain that finds nothing runs the FIG-1573 backstop.
     let mut claimed = None;
     for _attempt in 0..10 {
-        if let Some(output) = second_session.queued_turn().run().await?.ran() {
+        if let Some(output) = drain_queued(&second_session, None).await?.ran() {
             claimed = Some(output);
             if second_session
                 .durable()
@@ -1390,12 +1378,10 @@ async fn definition_filtered_process_list(cell: &str) -> Result<serde_json::Valu
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("rlm-process-definition-filter").open().await?;
     let turn_session = session.clone();
-    let scoped_effect_controller = turn_scope(&core, &turn_session.session_id());
     let turn = tokio::spawn(async move {
         turn_session
-            .turn(TurnInput::text("start tool"))
-            .advanced()
-            .run_with_scope(scoped_effect_controller)
+            .send(TurnInput::text("start tool"))
+            .output()
             .await
     });
 

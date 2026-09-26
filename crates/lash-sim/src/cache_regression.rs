@@ -1,7 +1,7 @@
 use lash_sansio::sync::MutexExt;
 use std::sync::Arc;
 
-use lash::rlm::RlmTurnBuilderExt;
+use lash::rlm::RlmSendBuilderExt;
 use lash_core::llm::types::{LlmContentBlock, LlmMessage, LlmRequest, LlmRole};
 use lash_core::provider::{CacheControlDialect, CacheRetention};
 use lash_llm_transport::cache_regression::{
@@ -179,7 +179,7 @@ async fn captured_rlm_iterations() -> Vec<LlmRequest> {
             Arc::new(crate::backend::DiscardedTurnActivity),
             Arc::new(|session: &lash::LashSession| {
                 session
-                    .turn(lash::TurnInput::text("increment a bound value twice"))
+                    .send(lash::TurnInput::text("increment a bound value twice"))
                     .require_finish()
             }),
         )

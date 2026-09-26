@@ -1014,10 +1014,10 @@ impl AgentDurableInputSuspensionScenario {
         let turn_events = Arc::clone(&events);
         let mut turn = tokio::spawn(async move {
             turn_session
-                .turn(TurnInput::text(
+                .send(TurnInput::text(
                     "Start a process that asks for durable input.",
                 ))
-                .stream_to(turn_events.as_ref())
+                .output_into(turn_events.as_ref())
                 .await
         });
 

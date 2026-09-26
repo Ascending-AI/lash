@@ -19,22 +19,18 @@ use crate::store::{CheckpointWriteCollector, ObservedSessionStoreFactory};
 /// in-process Restate server double under the scenario's seed, with serial
 /// scheduling, over a SQLite memory store set.
 ///
-/// The engine refuses an effect outside a handler, so a turn enters one
-/// through [`run_turn`](Self::run_turn), and a core that starts processes
-/// serves their segments through [`serve_processes`](Self::serve_processes).
+/// A turn is sent to the session and the engine's session drive runs it
+/// ([`run_turn`](Self::run_turn)); a core that starts processes serves their
+/// segments through [`serve_processes`](Self::serve_processes).
 #[derive(Clone, Debug)]
 pub struct SimEngine {
     restate: lash_restate_test::RestateTestBackend,
 }
 
-/// Builds the turn a handler attempt runs. Restate re-runs a handler from the
-/// top on every replay, so the turn is built afresh on each attempt.
+/// Builds the send a turn starts from. The input is accepted on the
+/// session and the engine's session drive runs it, on the server double.
 pub type SimTurnBuild =
-    Arc<dyn Fn(&lash::LashSession) -> lash::Result<lash::TurnBuilder> + Send + Sync>;
-
-/// Builds the queued drain a handler attempt runs, afresh on each attempt.
-pub type SimQueuedTurnBuild =
-    Arc<dyn Fn(&lash::LashSession) -> lash::QueuedTurnBuilder + Send + Sync>;
+    Arc<dyn Fn(&lash::LashSession) -> lash::Result<lash::SendBuilder> + Send + Sync>;
 
 impl SimEngine {
     /// A fresh engine on a server double under `seed`, scheduled serially:
@@ -94,66 +90,8 @@ impl SimEngine {
         Ok(())
     }
 
-    /// Drain `session`'s next claimable queued work as one turn inside a
-    /// handler on the server, under the idempotent drain id `drain_id`. The
-    /// outer result is the handler's; the inner one is the drain's own.
-    pub async fn run_queued_turn(
-        &self,
-        session: &lash::LashSession,
-        drain_id: impl Into<String>,
-        build: SimQueuedTurnBuild,
-    ) -> Result<lash::Result<lash::QueuedTurnDrain<lash::TurnOutput>>, FixedScriptRunnerError> {
-        let drain_id = drain_id.into();
-        let admitted = lash_core::AdmittedScope::new(lash_core::ExecutionScope::queue_drain(
-            session.session_id(),
-            drain_id.clone(),
-        ));
-        type Drained = lash::Result<lash::QueuedTurnDrain<lash::TurnOutput>>;
-        let slot: Arc<std::sync::Mutex<Option<Drained>>> = Arc::new(std::sync::Mutex::new(None));
-        let attempt: lash_restate_test::HandlerAttempt = {
-            let session = session.clone();
-            let slot = Arc::clone(&slot);
-            Arc::new(move |scoped| {
-                let session = session.clone();
-                let drain_id = drain_id.clone();
-                let build = Arc::clone(&build);
-                let slot = Arc::clone(&slot);
-                Box::pin(async move {
-                    // The handler minted the drain's controller from its own
-                    // context, so it crosses the host's stack here, once.
-                    let scoped = match session.effect_host().route_handler_child_controller(scoped)
-                    {
-                        Ok(scoped) => scoped,
-                        Err(err) => {
-                            *slot.lock_recover() = Some(Err(err.into()));
-                            return;
-                        }
-                    };
-                    let collected = CollectedTurnActivity::default();
-                    let drained = build(&session)
-                        .drain_id(drain_id)
-                        .advanced()
-                        .stream_to_with_scope(&collected, scoped)
-                        .await;
-                    let activities = std::mem::take(&mut *collected.activities.lock_recover());
-                    *slot.lock_recover() =
-                        Some(drained.map(|drain| {
-                            drain.map(|result| lash::TurnOutput { result, activities })
-                        }));
-                })
-            })
-        };
-        self.restate
-            .run_in_handler(admitted, attempt)
-            .await
-            .map_err(FixedScriptRunnerError::Runtime)?;
-        slot.lock_recover().take().ok_or_else(|| {
-            FixedScriptRunnerError::Runtime("the drain's handler recorded no outcome".to_string())
-        })
-    }
-
-    /// Run one turn of `session` on `prompt`, named `turn_id`, inside a
-    /// handler on the server, keeping only its output.
+    /// Run one turn of `session` on `prompt`, named `turn_id`, keeping only
+    /// its output.
     pub async fn run_text_turn(
         &self,
         session: &lash::LashSession,
@@ -166,15 +104,17 @@ impl SimEngine {
             turn_id,
             Arc::new(DiscardedTurnActivity),
             Arc::new(move |session: &lash::LashSession| {
-                Ok(session.turn(lash::TurnInput::text(prompt.clone())))
+                Ok(session.send(lash::TurnInput::text(prompt.clone())))
             }),
         )
         .await
     }
 
-    /// Run one turn of `session`, named `turn_id`, inside a handler on the
-    /// server, streaming its activity to `events`. The outer result is the
-    /// handler's; the inner one is the turn's own.
+    /// Send one turn of `session`, named `turn_id`, and wait for the
+    /// engine's session drive to settle it on the server double, streaming
+    /// its activity to `events`. The host never drives the turn (D5): it
+    /// accepts the input and waits. The outer result is the harness's; the
+    /// inner one is the turn's own.
     pub async fn run_turn(
         &self,
         session: &lash::LashSession,
@@ -182,62 +122,117 @@ impl SimEngine {
         events: Arc<dyn lash::TurnActivitySink>,
         build: SimTurnBuild,
     ) -> Result<lash::Result<lash::TurnOutput>, FixedScriptRunnerError> {
-        let turn_id = turn_id.into();
-        let admitted = lash_core::AdmittedScope::new(session.turn_scope(turn_id.clone()));
-        let slot: Arc<std::sync::Mutex<Option<lash::Result<lash::TurnOutput>>>> =
-            Arc::new(std::sync::Mutex::new(None));
-        let attempt: lash_restate_test::HandlerAttempt = {
-            let session = session.clone();
-            let slot = Arc::clone(&slot);
-            Arc::new(move |scoped| {
-                let session = session.clone();
-                let turn_id = turn_id.clone();
-                let events = Arc::clone(&events);
-                let build = Arc::clone(&build);
-                let slot = Arc::clone(&slot);
-                Box::pin(async move {
-                    // The handler minted the turn's controller from its own
-                    // context, so it crosses the host's stack here, once.
-                    let scoped = match session.effect_host().route_handler_child_controller(scoped)
-                    {
-                        Ok(scoped) => scoped,
-                        Err(err) => {
-                            *slot.lock_recover() = Some(Err(err.into()));
-                            return;
-                        }
-                    };
-                    let result = async {
-                        build(&session)?
-                            .turn_id(turn_id)
-                            .advanced()
-                            .collect_with_scope(events.as_ref(), scoped)
-                            .await
-                    }
-                    .await;
-                    *slot.lock_recover() = Some(result);
-                })
-            })
-        };
-        self.restate
-            .run_in_handler(admitted, attempt)
+        self.run_turn_releasing(session, turn_id, events, build, None)
             .await
-            .map_err(FixedScriptRunnerError::Runtime)?;
-        slot.lock_recover().take().ok_or_else(|| {
-            FixedScriptRunnerError::Runtime("the turn's handler recorded no report".to_string())
-        })
+    }
+
+    /// [`run_turn`](Self::run_turn) on a session whose drive `hold` holds:
+    /// the hold is released once the input is accepted, so the drive admits
+    /// it together with whatever the hold kept pending — one root, as a turn
+    /// sent while those inputs wait is admitted.
+    pub async fn run_turn_releasing(
+        &self,
+        session: &lash::LashSession,
+        turn_id: impl Into<lash::TurnId>,
+        events: Arc<dyn lash::TurnActivitySink>,
+        build: SimTurnBuild,
+        hold: Option<lash_restate_test::Hold>,
+    ) -> Result<lash::Result<lash::TurnOutput>, FixedScriptRunnerError> {
+        let turn_id = turn_id.into();
+        let collected = CollectedTurnActivity {
+            live: Some(events),
+            activities: std::sync::Mutex::new(Vec::new()),
+        };
+        let accepted = match build(session) {
+            Ok(send) => send.id(turn_id).await,
+            Err(err) => Err(err),
+        };
+        drop(hold);
+        let report = match accepted {
+            Ok(handle) => {
+                self.await_input_drive(session, handle.input_id()).await;
+                handle.output_into(&collected).await
+            }
+            Err(err) => Err(err),
+        };
+        let activities = std::mem::take(&mut *collected.activities.lock_recover());
+        Ok(report.map(|result| lash::TurnOutput { result, activities }))
+    }
+
+    /// Wait for the drive `input`'s acceptance scheduled to stop: by then the
+    /// root that took the input has settled on the engine, and this
+    /// process's driver has deposited its report. The handle read after it
+    /// answers from that report at once, so a harness waiting on a turn
+    /// makes no request of its own to the server while the turn runs, and
+    /// the server's grant order stays a function of the seed. A drive the
+    /// engine refused ends the wait too; the handle then reports why.
+    async fn await_input_drive(&self, session: &lash::LashSession, input: &lash::InputId) {
+        let request = lash_core::engine::DriveRequestId::new(input.to_string());
+        let session_id = session.session_id();
+        loop {
+            match self
+                .restate
+                .attach_drive(&session_id, request.clone())
+                .await
+            {
+                Err(error) if error.is_timeout() => continue,
+                Ok(_) | Err(_) => return,
+            }
+        }
+    }
+
+    /// Wait until the engine has no drive of `session` in flight: every
+    /// `LashSession` invocation for it has completed. A turn sent while the
+    /// session's last drive is still winding down (its closing admission
+    /// answering idle) would race that admission, and which drive admits the
+    /// new input would then depend on task timing; a world that wants one
+    /// grant order per seed sends into a settled session.
+    pub async fn settle_session_drive(&self, session: &lash::LashSession) {
+        let prefix = format!(
+            "{}/{}/",
+            lash_restate_test::SESSION_DRIVER_SERVICE,
+            session.session_id()
+        );
+        let server = self.restate.server();
+        while server
+            .invocations()
+            .iter()
+            .any(|view| view.target.starts_with(&prefix) && view.status != "completed")
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+        }
+    }
+
+    /// Hold the engine's drive of `session` on the server double
+    /// ([`RestateTestBackend::hold_session_drive`](lash_restate_test::RestateTestBackend::hold_session_drive)):
+    /// what is sent there meanwhile stays pending until the hold is
+    /// released. The world asserts what is still pending this way; it never
+    /// drives a turn itself.
+    pub async fn hold_session_drive(&self, session: &lash::LashSession) -> lash_restate_test::Hold {
+        self.restate.hold_session_drive(&session.session_id()).await
     }
 }
 
-/// The activity a queued drain's turn streamed, kept for its output.
-#[derive(Default)]
+/// The activity a turn streamed, kept for its output and forwarded live.
 struct CollectedTurnActivity {
+    live: Option<Arc<dyn lash::TurnActivitySink>>,
     activities: std::sync::Mutex<Vec<lash::TurnActivity>>,
 }
 
 #[async_trait::async_trait]
 impl lash::TurnActivitySink for CollectedTurnActivity {
     async fn emit(&self, activity: lash::TurnActivity) {
-        self.activities.lock_recover().push(activity);
+        self.activities.lock_recover().push(activity.clone());
+        if let Some(live) = &self.live {
+            live.emit(activity).await;
+        }
+    }
+
+    async fn emit_for_turn(&self, turn_id: &lash::TurnId, activity: lash::TurnActivity) {
+        self.activities.lock_recover().push(activity.clone());
+        if let Some(live) = &self.live {
+            live.emit_for_turn(turn_id, activity).await;
+        }
     }
 }
 

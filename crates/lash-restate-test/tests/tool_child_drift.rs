@@ -1,7 +1,8 @@
 //! A group tool child whose tool drifted, redeployed while the child was in
 //! flight (FIG-3725).
 //!
-//! Each law runs a real tool turn and holds its tool child mid-flight: the
+//! Each law sends a real tool turn, which the engine drives in the root's
+//! `LashTurn` workflow, and holds its tool child mid-flight: the
 //! child's first effect, or its orchestrating body, waits on a gate. The turn
 //! is then suspended, so no opener is live, and the deployment is replaced by
 //! one whose tool drifted (another retry policy). The child's attempt dies,
@@ -22,9 +23,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use lash_core::engine::{DriveOutcome, DriveRequestId, RootOutcome};
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
-use lash_restate_test::{RestateTestBackend, ServerConfig, TimeMode};
+use lash_restate_test::{
+    RestateTestBackend, SESSION_DRIVER_SERVICE, ServerConfig, TURN_DRIVER_SERVICE, TimeMode,
+};
 use serde_json::json;
 
 const DISPATCH: &str = "EffectGroupDispatch";
@@ -319,10 +323,10 @@ struct Turn {
     backend: RestateTestBackend,
     world: World,
     called: Called,
-    /// The deployment every run of the turn's handler runs on.
+    /// The deployment whose core's driver the engine runs the turn on.
     live: Arc<Mutex<Option<Deployment>>>,
-    answer: Arc<Mutex<Option<String>>>,
-    run: tokio::task::JoinHandle<Result<(), String>>,
+    /// The turn's drive, attached to until it stops.
+    run: tokio::task::JoinHandle<DriveOutcome>,
 }
 
 async fn start_turn(called: Called) -> Turn {
@@ -332,56 +336,34 @@ async fn start_turn(called: Called) -> Turn {
             .expect("build the Restate test backend");
     let world = World::default();
     let first = deploy(&backend, &world, called, false).await;
-    let admitted =
-        lash_core::AdmittedScope::new(first.session.turn_scope(lash::TurnId::from(TURN)));
+    let handle = first
+        .session
+        .send(lash::TurnInput::text("call the tool"))
+        .id(TURN)
+        .await
+        .expect("accept the turn input");
+    let request = DriveRequestId::new(handle.input_id().to_string());
     let live = Arc::new(Mutex::new(Some(first)));
-    let answer = Arc::new(Mutex::new(None));
-    let attempt: lash_restate_test::HandlerAttempt = {
-        let live = Arc::clone(&live);
-        let answer = Arc::clone(&answer);
-        Arc::new(move |scoped| {
-            let live = Arc::clone(&live);
-            let answer = Arc::clone(&answer);
-            Box::pin(async move {
-                // An attempt that starts between two deployments waits for
-                // the next one, as a request queued across a rollout does.
-                let session = loop {
-                    let current = live
-                        .lock()
-                        .unwrap()
-                        .as_ref()
-                        .map(|deployment| deployment.session.clone());
-                    if let Some(session) = current {
-                        break session;
-                    }
-                    tokio::time::sleep(Duration::from_millis(5)).await;
-                };
-                let output = session
-                    .turn(lash::TurnInput::text("call the tool"))
-                    .turn_id(lash::TurnId::from(TURN))
-                    .advanced()
-                    .run_with_scope(scoped)
-                    .await;
-                *answer.lock().unwrap() = Some(match output {
-                    Ok(output) => output
-                        .result
-                        .assistant_message()
-                        .map_or_else(|| format!("{:?}", output.result.outcome), str::to_owned),
-                    Err(error) => format!("error: {error}"),
-                });
-            })
-        })
-    };
+    // The acceptance scheduled the drive under the input's own request: the
+    // attach waits on that one drive, across the redeploys, until it stops.
     let run = tokio::spawn({
         let backend = backend.clone();
-        async move { backend.run_in_handler(admitted, attempt).await }
+        async move {
+            let session = lash_core::SessionId::from(SESSION);
+            loop {
+                match backend.attach_drive(&session, request.clone()).await {
+                    Ok(outcome) => return outcome,
+                    Err(error) if error.is_timeout() => {}
+                    Err(error) => panic!("the turn's drive failed: {error}"),
+                }
+            }
+        }
     });
     Turn {
         backend,
         world,
         called,
         live,
-        answer,
         run,
     }
 }
@@ -440,16 +422,18 @@ impl Turn {
     /// Replaces the deployment: the old one is dropped first, so exactly one
     /// deployment's context source is installed.
     ///
-    /// A redeploy kills what the old deployment was running: a turn handler
-    /// attempt in flight keeps the old deployment's session, so it would go
-    /// on serving the turn — and lending its children the old context —
-    /// under the build the redeploy replaced. Its retry runs on the new one.
+    /// A redeploy kills what the old deployment was running: a drive or root
+    /// attempt in flight keeps the old deployment's driver, so it would go on
+    /// serving the turn — and lending its children the old context — under
+    /// the build the redeploy replaced. Its retry runs on the new one.
     async fn redeploy(&self, drifted: bool) {
         drop(self.live.lock().unwrap().take());
         let next = deploy(&self.backend, &self.world, self.called, drifted).await;
         *self.live.lock().unwrap() = Some(next);
         for view in self.backend.server().invocations() {
-            if view.target.starts_with("LashTestHandlerHost") && view.status == "running" {
+            let driving = view.target.starts_with(TURN_DRIVER_SERVICE)
+                || view.target.starts_with(SESSION_DRIVER_SERVICE);
+            if driving && view.status == "running" {
                 self.backend.server().crash(&view.id);
             }
         }
@@ -458,7 +442,7 @@ impl Turn {
     async fn turn_suspended(&self) {
         loop {
             if self.backend.server().invocations().into_iter().any(|view| {
-                view.target.starts_with("LashTestHandlerHost") && view.status == "suspended"
+                view.target.starts_with(TURN_DRIVER_SERVICE) && view.status == "suspended"
             }) {
                 return;
             }
@@ -548,7 +532,18 @@ impl Turn {
         let finished = tokio::time::timeout(Duration::from_secs(30), self.run).await;
         ticker.abort();
         let answer = match finished {
-            Ok(Ok(Ok(()))) => self.answer.lock().unwrap().clone().unwrap_or_default(),
+            Ok(Ok(outcome)) => match outcome.ran.as_slice() {
+                [
+                    RootOutcome::Committed {
+                        outcome:
+                            lash_core::facade_support::TurnOutcome::Finished(
+                                lash_core::facade_support::TurnFinish::AssistantMessage { text },
+                            ),
+                        ..
+                    },
+                ] => text.clone(),
+                other => format!("drive ran {other:?}, stopped {:?}", outcome.stop),
+            },
             other => format!(
                 "stuck: {other:?}; open: {:#?}",
                 self.backend.server().invocations()

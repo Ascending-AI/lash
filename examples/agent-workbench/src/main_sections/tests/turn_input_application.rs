@@ -4,20 +4,13 @@ pub(crate) async fn assert_typed_turn_input_application(
     session: &lash::LashSession,
     rx: &mut mpsc::Receiver<ObservationStreamItem>,
 ) {
-    let admission = session
-        .durable()
-        .enqueue(lash::TurnInput::text("queued workbench input"))
+    let handle = session
+        .send(lash::TurnInput::text("queued workbench input"))
         .id("workbench-queued-input")
-        .send()
         .await
         .expect("admit queued workbench input");
-    session
-        .queued_turn()
-        .drain_id("workbench-queued-turn")
-        .run()
-        .await
-        .expect("drain queued workbench input")
-        .expect("queued workbench turn");
+    let admission = handle.receipt().clone();
+    handle.output().await.expect("queued workbench turn");
     let mut typed_application = None;
     for _ in 0..64 {
         let item = tokio::time::timeout(Duration::from_secs(2), rx.recv())
@@ -46,25 +39,24 @@ pub(crate) async fn assert_typed_turn_input_application(
     );
     assert_eq!(
         typed_application.get("source_key").and_then(Value::as_str),
-        Some("host:workbench-queued-input")
+        Some("workbench-queued-input")
     );
     assert_eq!(
         typed_application.get("turn_id").and_then(Value::as_str),
-        Some("workbench-queued-turn")
+        Some("workbench-queued-input")
     );
     let durable = session
         .durable()
         .remote_turn_input_applications()
         .await
         .expect("durable workbench applications");
-    // The turn that drained this admission was itself admitted first
-    // (ADR 0069), so the session settles that acceptance too; what this test
-    // pins is the queued admission's own settled evidence.
+    // The input's own settled evidence: the root it started is named by the
+    // send's id.
     let settled = durable
         .iter()
         .find(|application| application.input_id == admission.input_id)
         .expect("the queued admission settles as durable application evidence");
-    assert_eq!(settled.turn_id.as_str(), "workbench-queued-turn");
+    assert_eq!(settled.turn_id.as_str(), "workbench-queued-input");
     assert!(
         session
             .durable()

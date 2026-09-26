@@ -23,8 +23,8 @@ pub(super) async fn pending_host_tool_completion_parks_turn_and_resolves_through
     let turn_events = Arc::clone(&events);
     let mut turn = tokio::spawn(async move {
         turn_session
-            .turn(TurnInput::text("use async tool"))
-            .stream_to(turn_events.as_ref())
+            .send(TurnInput::text("use async tool"))
+            .output_into(turn_events.as_ref())
             .await
     });
 
@@ -691,7 +691,7 @@ pub(super) fn rlm_abort_drain_deadline_proceeds_with_default_usage() -> Result<(
 
         let result = tokio::time::timeout(
             std::time::Duration::from_secs(3),
-            session.turn(TurnInput::text("finish")).run(),
+            session.send(TurnInput::text("finish")).output(),
         )
         .await
         .expect("abort drain deadline must not wedge")?;
@@ -1316,8 +1316,8 @@ pub(super) async fn rlm_pending_host_tool_completion_resumes_lashlang_await_inne
     let turn_events = Arc::clone(&events);
     let mut turn = tokio::spawn(async move {
         turn_session
-            .turn(TurnInput::text("await async app lookup"))
-            .stream_to(turn_events.as_ref())
+            .send(TurnInput::text("await async app lookup"))
+            .output_into(turn_events.as_ref())
             .await
     });
 
@@ -1403,8 +1403,8 @@ finish(result);"#,
     let turn_events = Arc::clone(&events);
     let mut turn = tokio::spawn(async move {
         turn_session
-            .turn(TurnInput::text("start process with async app lookup"))
-            .stream_to(turn_events.as_ref())
+            .send(TurnInput::text("start process with async app lookup"))
+            .output_into(turn_events.as_ref())
             .await
     });
 
@@ -1661,9 +1661,7 @@ pub(super) async fn durable_queued_continue_as_survives_post_commit_graph_append
         .send()
         .await?;
 
-    let output = session
-        .queued_turn()
-        .run()
+    let output = drain_queued(&session, None)
         .await?
         .expect("queued turn should run");
 
@@ -1768,10 +1766,10 @@ finish({ established: established.total });"#,
         .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     let established = session
-        .turn(TurnInput::text(
+        .send(TurnInput::text(
             "establish a durable global carried across the frame switch",
         ))
-        .run()
+        .output()
         .await?;
     assert_eq!(
         established.final_value(),
@@ -1794,7 +1792,7 @@ finish({ established: established.total });"#,
         .await?;
 
     let turn_session = session.clone();
-    let turn = tokio::spawn(async move { turn_session.queued_turn().run().await });
+    let turn = tokio::spawn(async move { drain_queued(&turn_session, None).await });
     tokio::time::timeout(std::time::Duration::from_secs(1), first_provider_call_rx)
         .await
         .expect("first provider call should start")

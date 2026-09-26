@@ -197,11 +197,11 @@ async fn one_turn_run(seed: u64, worker: bool) -> lash_restate_test::DropWatch {
     }
     let session = core.session("drop").open().await.expect("open the session");
     let receipt = session
-        .durable()
-        .enqueue(lash::TurnInput::text("count once"))
-        .send()
+        .send(lash::TurnInput::text("count once"))
         .await
-        .expect("accept the turn input");
+        .expect("accept the turn input")
+        .receipt()
+        .clone();
     // The engine drives the accepted input: its LashSession drive admits it
     // and its root runs in a LashTurn workflow.
     let outcome = tokio::time::timeout(

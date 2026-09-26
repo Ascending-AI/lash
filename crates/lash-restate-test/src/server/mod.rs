@@ -409,6 +409,43 @@ impl Drop for OutsideGate {
     }
 }
 
+/// A hold on one virtual object or workflow key, taken with
+/// [`RestateTestServer::hold`]. Releasing it, or dropping it, starts the
+/// attempts it kept back. A weak handle: it does not keep the server alive.
+#[derive(Debug)]
+#[must_use = "dropping a hold releases it"]
+pub struct Hold {
+    shared: Weak<Shared>,
+    target: Option<(String, String)>,
+}
+
+impl Hold {
+    /// Release the hold now.
+    pub fn release(mut self) {
+        self.release_now();
+    }
+
+    fn release_now(&mut self) {
+        let (Some(shared), Some(target)) = (self.shared.upgrade(), self.target.take()) else {
+            return;
+        };
+        let mut state = shared.lock();
+        state.release_hold(&shared, &target);
+        let granted = state.schedule();
+        drop(state);
+        if granted {
+            shared.turn_granted();
+        }
+        shared.activity.notify_waiters();
+    }
+}
+
+impl Drop for Hold {
+    fn drop(&mut self) {
+        self.release_now();
+    }
+}
+
 /// Counts one server task while it lives.
 pub(crate) struct TaskGuard(Arc<AtomicUsize>);
 
@@ -1022,6 +1059,37 @@ impl RestateTestServer {
                 }
             }
             let _ = tokio::time::timeout(Duration::from_millis(5), notified).await;
+        }
+    }
+
+    // --- holds -------------------------------------------------------------
+
+    /// Hold the virtual object or workflow `service/key`: from now until the
+    /// returned [`Hold`] is released or dropped, no attempt of an invocation
+    /// on it starts — not a new one, not a resume from suspension, not a
+    /// retry. A running attempt has its input closed, so its handler
+    /// suspends at its next await the journal cannot resolve; the hold is in
+    /// place once none runs any more. Its calls, sends and the invocations
+    /// it waits on go on; what reaches it waits in its journal, and the
+    /// release starts it over that journal.
+    ///
+    /// What an attempt already began before it suspends — a `ctx.run`
+    /// closure in flight — completes: a hold stops a handler at its next
+    /// step, never mid-step.
+    pub async fn hold(&self, service: &str, key: &str) -> Hold {
+        let target = (service.to_owned(), key.to_owned());
+        self.shared.lock().hold(target.clone());
+        self.shared.activity.notify_waiters();
+        loop {
+            let notified = self.shared.activity.notified();
+            if !self.shared.lock().runs_on(&target) {
+                break;
+            }
+            let _ = tokio::time::timeout(Duration::from_millis(2), notified).await;
+        }
+        Hold {
+            shared: Arc::downgrade(&self.shared),
+            target: Some(target),
         }
     }
 

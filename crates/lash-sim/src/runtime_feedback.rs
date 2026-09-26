@@ -292,7 +292,7 @@ fn runtime_feedback_host_instruction_role_controls_all_openai_wires() {
     }
 }
 
-use lash::rlm::RlmTurnBuilderExt;
+use lash::rlm::RlmSendBuilderExt;
 use lash_sansio::sync::MutexExt;
 async fn captured_output_limit_retry() -> Vec<LlmRequest> {
     use std::collections::VecDeque;
@@ -371,7 +371,7 @@ async fn captured_output_limit_retry() -> Vec<LlmRequest> {
             Arc::new(crate::backend::DiscardedTurnActivity),
             Arc::new(|session: &lash::LashSession| {
                 session
-                    .turn(lash::TurnInput::text("increment a bound value twice"))
+                    .send(lash::TurnInput::text("increment a bound value twice"))
                     .require_finish()
             }),
         )

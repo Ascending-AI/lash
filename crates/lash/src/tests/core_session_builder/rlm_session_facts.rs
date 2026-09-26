@@ -262,7 +262,7 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
 /// A per-turn protocol override naming the retired `dialect` field cannot
 /// re-point the language a turn is served in, and never reaches durable state.
 ///
-/// `TurnBuilder::protocol_turn_options` is public host surface and the merge
+/// `SendBuilder::protocol_turn_options` is public host surface and the merge
 /// behind it is a shallow key merge, so a host-supplied `{"dialect":"..."}` is
 /// a write that reaches the protocol without passing through create-time
 /// resolution. TypeScript is now the only language (ADR 0096), so the field

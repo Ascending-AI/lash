@@ -155,12 +155,12 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
         .expect("open the session");
     let session_id = lash_core::SessionId::from("turn-crash-replay");
     let receipt = session
-        .durable()
-        .enqueue(lash::TurnInput::text("count once"))
+        .send(lash::TurnInput::text("count once"))
         .id("turn-1")
-        .send()
         .await
-        .expect("accept the turn input");
+        .expect("accept the turn input")
+        .receipt()
+        .clone();
     // The acceptance scheduled the drive under the input's own request; the
     // attach names the same request, so it waits on that one drive.
     let request = DriveRequestId::new(receipt.input_id.to_string());

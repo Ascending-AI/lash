@@ -480,7 +480,7 @@ fn content_delta_index_for_kind(provider_kind: &str) -> Result<usize, RuntimePro
 
 /// A runtime provider wire script that streams `prose_deltas` VALID content
 /// deltas (each carrying `LIVE_FAILURE_LEAK_PROSE`) and THEN a non-retryable
-/// malformed SSE chunk, so a live `session.turn().run()` first receives genuine
+/// malformed SSE chunk, so a live `session.send().output()` first receives genuine
 /// partial prose and then fails mid-stream. Because real prose is offered before
 /// the fault, the oracle's "no committed output" assertion is non-vacuous: a
 /// runtime that leaks the partial prose on terminal failure WOULD commit it. The

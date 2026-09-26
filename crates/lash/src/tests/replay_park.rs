@@ -418,9 +418,9 @@ async fn a_cell_whose_tool_drifted_after_its_result_completes_its_turn() -> Resu
             .await
             .expect("open the session");
         let output = session
-            .turn(TurnInput::text("call the probe"))
-            .turn_id(TURN)
-            .run()
+            .send(TurnInput::text("call the probe"))
+            .id(TURN)
+            .output()
             .await
             .unwrap_or_else(|error| panic!("{drift:?}: the redrive completes: {error:?}"));
         assert!(
@@ -457,9 +457,9 @@ async fn a_redescribed_tool_never_parks() -> Result<()> {
     let redescribed = backend.core_for(Probe::Described("Reworded at length."));
     let session = redescribed.session(SESSION).open().await?;
     let output = session
-        .turn(TurnInput::text("call the probe"))
-        .turn_id(TURN)
-        .run()
+        .send(TurnInput::text("call the probe"))
+        .id(TURN)
+        .output()
         .await?;
     assert!(output.is_success(), "{:?}", output.result.errors);
     assert_eq!(
@@ -555,7 +555,7 @@ impl Backend {
     async fn drain(
         &self,
         session_id: &str,
-    ) -> Result<crate::turn::QueuedTurnDrain<crate::TurnOutput>> {
+    ) -> Result<lash_core::facade_support::QueuedTurnDrain<crate::TurnOutput>> {
         let core = self.core("probe");
         let session = core.session(session_id).open().await?;
         if session.durable().pending_queued_run().await?.is_none() {
@@ -566,7 +566,7 @@ impl Backend {
                 .send()
                 .await?;
         }
-        session.queued_turn().drain_id(DRAIN).run().await
+        drain_queued(&session, Some(DRAIN)).await
     }
 
     /// Rewrites the generation the pending queued run of `session_id` was
@@ -737,9 +737,9 @@ async fn a_completed_spawn_whose_capabilities_changed_replays() -> Result<()> {
         .session(PROBE)
         .open()
         .await?
-        .turn(TurnInput::text("spawn"))
-        .turn_id(TURN)
-        .run()
+        .send(TurnInput::text("spawn"))
+        .id(TURN)
+        .output()
         .await?;
     let seal_key = backend
         .keys_of(PROBE)
@@ -755,9 +755,9 @@ async fn a_completed_spawn_whose_capabilities_changed_replays() -> Result<()> {
         .session(SESSION)
         .open()
         .await?
-        .turn(TurnInput::text("spawn"))
-        .turn_id(TURN)
-        .run()
+        .send(TurnInput::text("spawn"))
+        .id(TURN)
+        .output()
         .await
         .expect_err("the seal fault aborts the turn after the spawn completed");
     assert!(faults.fired(), "the armed seal fault fired: {error:?}");
@@ -768,9 +768,9 @@ async fn a_completed_spawn_whose_capabilities_changed_replays() -> Result<()> {
         .session(SESSION)
         .open()
         .await?
-        .turn(TurnInput::text("spawn"))
-        .turn_id(TURN)
-        .run()
+        .send(TurnInput::text("spawn"))
+        .id(TURN)
+        .output()
         .await?;
     assert!(output.is_success(), "{:?}", output.result.errors);
     assert_eq!(
@@ -914,9 +914,9 @@ impl Backend {
             .open()
             .await
             .expect("open the session")
-            .turn(TurnInput::text("call the probe"))
-            .turn_id(TURN)
-            .run()
+            .send(TurnInput::text("call the probe"))
+            .id(TURN)
+            .output()
             .await
     }
 }

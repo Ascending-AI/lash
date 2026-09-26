@@ -166,8 +166,8 @@ async fn deterministic_before_llm_failure_on_a_direct_turn_is_a_recorded_failed_
     let session = core.session("direct-before-llm").open().await?;
 
     let output = session
-        .turn(TurnInput::text("refused before the model call"))
-        .run()
+        .send(TurnInput::text("refused before the model call"))
+        .output()
         .await
         .expect("a deterministic failure is an outcome, not an aborted invocation");
 
@@ -212,9 +212,7 @@ async fn deterministic_before_llm_failure_on_a_queued_run_settles_after_one_atte
         .send()
         .await?;
 
-    let drained = session
-        .queued_turn()
-        .run()
+    let drained = drain_queued(&session, None)
         .await
         .expect("a deterministic failure settles the queued run instead of retaining it");
 
@@ -229,7 +227,7 @@ async fn deterministic_before_llm_failure_on_a_queued_run_settles_after_one_atte
         "the run settled after one attempt; nothing is retained for retry"
     );
     assert!(session.durable().pending_turn_inputs().await?.is_empty());
-    let again = format!("{:?}", session.queued_turn().run().await?);
+    let again = format!("{:?}", drain_queued(&session, None).await?);
     assert_eq!(
         protocol.calls.load(Ordering::SeqCst),
         1,
@@ -355,7 +353,7 @@ async fn a_replay_refusal_keeps_a_queued_run_pending_and_parked() -> Result<()> 
         .await?;
 
     for attempt in 1..=3 {
-        assert_queued_run_pending(session.queued_turn().run().await);
+        assert_queued_run_pending(drain_queued(&session, None).await);
         assert_eq!(protocol.calls.load(Ordering::SeqCst), attempt);
         assert!(
             session.durable().pending_queued_run().await?.is_some(),
@@ -382,9 +380,9 @@ async fn abort_direct_turn_with_live_fault(
     );
 
     let error = session
-        .turn(TurnInput::text(STRANDED_WORDS))
-        .turn_id(turn_id)
-        .run()
+        .send(TurnInput::text(STRANDED_WORDS))
+        .id(turn_id)
+        .output()
         .await
         .expect_err("a live journal fault aborts the direct turn");
 
@@ -557,9 +555,9 @@ async fn a_new_direct_turn_runs_after_the_aborted_turn_is_redriven() -> Result<(
     let _ = abort_direct_turn_with_live_fault(&backend, &session, SESSION, "bound-turn").await;
 
     let next = session
-        .turn(TurnInput::text("the next turn"))
-        .turn_id("next-turn")
-        .run()
+        .send(TurnInput::text("the next turn"))
+        .id("next-turn")
+        .output()
         .await?;
     assert!(next.is_success(), "{:?}", next.result.outcome);
     let seen = requests.lock_recover().clone();
@@ -628,9 +626,9 @@ async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation() -> R
         let session = session.clone();
         async move {
             session
-                .turn(TurnInput::text(STRANDED_WORDS))
-                .turn_id("crashed-turn")
-                .run()
+                .send(TurnInput::text(STRANDED_WORDS))
+                .id("crashed-turn")
+                .output()
                 .await
         }
     });
@@ -647,9 +645,9 @@ async fn a_crashed_direct_turns_input_is_reclaimed_by_the_next_generation() -> R
     // lease, which keeps the generation and with it the crashed claim.
     clock.advance(lash_core::facade_support::LeaseTimings::default().ttl_ms());
     let next = session
-        .turn(TurnInput::text("the next turn"))
-        .turn_id("next-generation-turn")
-        .run()
+        .send(TurnInput::text("the next turn"))
+        .id("next-generation-turn")
+        .output()
         .await?;
     assert!(next.is_success(), "{:?}", next.result.outcome);
     // The next drive admits the crashed turn's input first, under its own
@@ -694,7 +692,9 @@ fn failing_after_turn(calls: Arc<AtomicUsize>, failures: usize) -> Arc<dyn Plugi
     )
 }
 
-fn assert_queued_run_pending(result: Result<crate::QueuedTurnDrain<crate::TurnOutput>>) {
+fn assert_queued_run_pending(
+    result: Result<lash_core::facade_support::QueuedTurnDrain<crate::TurnOutput>>,
+) {
     match result {
         Err(EmbedError::Runtime(error)) => assert_eq!(
             error.code,
@@ -726,10 +726,10 @@ async fn a_plugin_session_fault_in_a_queued_finalize_hook_is_retried_to_completi
         .send()
         .await?;
 
-    assert_queued_run_pending(session.queued_turn().run().await);
+    assert_queued_run_pending(drain_queued(&session, None).await);
     assert!(session.durable().pending_queued_run().await?.is_some());
 
-    let completed = format!("{:?}", session.queued_turn().run().await?);
+    let completed = format!("{:?}", drain_queued(&session, None).await?);
     assert!(
         completed.contains("Ran") || completed.contains("Replayed"),
         "{completed}"
@@ -770,15 +770,12 @@ async fn a_journal_store_fault_on_a_queued_run_stays_pending_and_completes_on_re
         &first_llm_call_key(SESSION, "queued-turn"),
     );
 
-    assert_queued_run_pending(session.queued_turn().turn_id("queued-turn").run().await);
+    assert_queued_run_pending(drain_queued(&session, Some("queued-turn")).await);
     assert!(faults.fired(), "the armed model-call claim fault fired");
     assert_eq!(provider_calls.load(Ordering::SeqCst), 0);
     assert!(session.durable().pending_queued_run().await?.is_some());
 
-    let completed = format!(
-        "{:?}",
-        session.queued_turn().turn_id("queued-turn").run().await?
-    );
+    let completed = format!("{:?}", drain_queued(&session, Some("queued-turn")).await?);
     assert!(
         completed.contains("Ran") || completed.contains("Replayed"),
         "{completed}"
@@ -831,11 +828,11 @@ async fn a_journaled_live_coded_failure_replays_as_a_recorded_failed_turn() -> R
         .send()
         .await?;
 
-    assert_queued_run_pending(session.queued_turn().run().await);
+    assert_queued_run_pending(drain_queued(&session, None).await);
     let recorded_checkpoints = checkpoint_calls.load(Ordering::SeqCst);
     assert!(recorded_checkpoints > 0, "the checkpoint ran and failed");
 
-    let settled = format!("{:?}", session.queued_turn().run().await?);
+    let settled = format!("{:?}", drain_queued(&session, None).await?);
     assert!(
         settled.contains("RuntimeError") && settled.contains("plugin_session_manager"),
         "the redrive records the journaled failure as a failed turn: {settled}"
@@ -875,24 +872,26 @@ async fn cancellation_still_settles_stopped_cancelled() -> Result<()> {
         let session = session.clone();
         let cancel = cancel.clone();
         async move {
-            session
-                .turn(TurnInput::text("cancel me"))
-                .cancel(cancel)
-                .run()
-                .await
+            output_into_cancelled_by(
+                session.send(TurnInput::text("cancel me")),
+                &lash_core::facade_support::NoopTurnActivitySink,
+                cancel,
+                None,
+            )
+            .await
         }
     });
     entered_rx.await.expect("the provider call started");
     cancel.cancel();
 
-    let output = running.await.expect("turn task")?;
+    let report = running.await.expect("turn task")?;
     assert!(
         matches!(
-            output.result.outcome,
+            report.outcome,
             TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { .. })
         ),
         "{:?}",
-        output.result.outcome
+        report.outcome
     );
     Ok(())
 }

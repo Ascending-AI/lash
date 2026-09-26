@@ -160,11 +160,11 @@ async fn new_turn_waits_for_dead_lease_ttl_before_admission() {
         turn_state: Arc::clone(&turn_state),
     };
     let output = successor
-        .turn(lash::TurnInput::text("complete after process loss"))
-        .turn_id(turn_id)
+        .send(lash::TurnInput::text("complete after process loss"))
+        .id(turn_id)
         .require_finish()
         .expect("require finish")
-        .stream_to(&ui_events)
+        .output_into(&ui_events)
         .await
         .expect("the replacement runtime completes after lease takeover");
     crate::restate::record_turn_output(

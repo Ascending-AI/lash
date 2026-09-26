@@ -1,9 +1,5 @@
-use lash_sansio::{SessionId, TurnId, sync::MutexExt};
-use std::{
-    fmt::Write as _,
-    path::PathBuf,
-    sync::{Arc, Mutex},
-};
+use lash_sansio::{SessionId, TurnId};
+use std::{fmt::Write as _, future::IntoFuture as _, path::PathBuf, sync::Arc};
 
 use lash::{
     LashCore, TurnOutcome,
@@ -136,59 +132,30 @@ impl BenchmarkCore {
     }
 }
 
-/// How a benchmark turn reaches its effect controller.
+/// Where a benchmark turn's session lives. A turn is always sent to the
+/// session and the engine's session drive runs it (FIG-3600): the host
+/// waits on the sent input's answer and never runs the turn itself.
 #[derive(Clone)]
 pub(crate) enum TurnEntry {
-    /// The backend's host scopes the turn itself: the durable SQLite and
-    /// PostgreSQL lanes.
+    /// A durable SQLite or PostgreSQL lane: the core's in-process engine
+    /// drives the session.
     Host,
-    /// The turn runs inside a handler on the Restate server double, where a
-    /// Restate deployment runs one. Restate re-runs the handler from the top
-    /// on every replay, so a turn that suspends runs again under its turn id.
-    RestateHandler(lash_restate_test::RestateTestBackend),
-}
-
-/// Which facade call drives a benchmark turn on its scoped controller.
-#[derive(Clone, Copy)]
-pub(crate) enum TurnDrive {
-    /// `collect_session_events_with_scope`, the path every runtime scenario
-    /// measures.
-    CollectEvents,
-    /// `run_with_scope`, the caller-supplied-controller path the
-    /// scoped-effect scenario measures.
-    RunWithScope,
-}
-
-async fn drive_turn(
-    session: &lash::LashSession,
-    input: lash::TurnInput,
-    turn_id: Option<TurnId>,
-    cancel: tokio_util::sync::CancellationToken,
-    scoped: lash::runtime::ScopedEffectController<'_>,
-    drive: TurnDrive,
-) -> anyhow::Result<lash::TurnReport> {
-    let mut turn = session.turn(input).cancel(cancel);
-    if let Some(turn_id) = turn_id {
-        turn = turn.turn_id(turn_id);
-    }
-    let turn = turn.advanced();
-    match drive {
-        TurnDrive::CollectEvents => turn
-            .collect_session_events_with_scope(&lash::runtime::NoopEventSink, scoped)
-            .await
-            .map_err(anyhow::Error::from),
-        TurnDrive::RunWithScope => turn
-            .run_with_scope(scoped)
-            .await
-            .map(|output| output.result)
-            .map_err(anyhow::Error::from),
-    }
+    /// The in-process lane on the Restate server double, whose engine drives
+    /// the session in its `LashSession` and `LashTurn` handlers. The handle
+    /// lets a test watch the double's teardown.
+    RestateHandler(
+        #[cfg_attr(
+            not(test),
+            expect(dead_code, reason = "only tests watch the server double")
+        )]
+        lash_restate_test::RestateTestBackend,
+    ),
 }
 
 impl TurnEntry {
-    /// Run one turn of `session` to its report. Without a `turn_id` the host
-    /// lane lets the session name the turn; the Restate lane names it, since
-    /// its handler is keyed by the turn scope.
+    /// Send one turn to `session` and wait for its report. Without a
+    /// `turn_id` the send names the root itself. `cancel` withdraws the
+    /// input, or cancels its running root, when it fires.
     pub(crate) async fn run(
         &self,
         session: &lash::LashSession,
@@ -196,69 +163,23 @@ impl TurnEntry {
         turn_id: Option<&TurnId>,
         cancel: tokio_util::sync::CancellationToken,
     ) -> anyhow::Result<lash::TurnReport> {
-        self.run_driven(session, input, turn_id, cancel, TurnDrive::CollectEvents)
-            .await
-    }
-
-    pub(crate) async fn run_driven(
-        &self,
-        session: &lash::LashSession,
-        input: lash::TurnInput,
-        turn_id: Option<&TurnId>,
-        cancel: tokio_util::sync::CancellationToken,
-        drive: TurnDrive,
-    ) -> anyhow::Result<lash::TurnReport> {
-        match self {
-            Self::Host => {
-                let scope_turn_id = turn_id.cloned().unwrap_or_else(|| {
-                    TurnId::from(
-                        lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string())
-                            .0
-                            .to_string(),
-                    )
-                });
-                let effect_host = session.effect_host();
-                let scoped = effect_host
-                    .scoped(lash_core::AdmittedScope::new(
-                        session.turn_scope(scope_turn_id),
-                    ))
-                    .map_err(anyhow::Error::from)?;
-                drive_turn(session, input, turn_id.cloned(), cancel, scoped, drive).await
-            }
-            Self::RestateHandler(restate) => {
-                let turn_id = turn_id.cloned().unwrap_or_else(|| {
-                    TurnId::from(format!("runtime-perf-turn-{}", uuid::Uuid::new_v4()))
-                });
-                let admitted = lash_core::AdmittedScope::new(session.turn_scope(turn_id.clone()));
-                let report: Arc<Mutex<Option<anyhow::Result<lash::TurnReport>>>> =
-                    Arc::new(Mutex::new(None));
-                let attempt: lash_restate_test::HandlerAttempt = {
-                    let session = session.clone();
-                    let report = Arc::clone(&report);
-                    Arc::new(move |scoped| {
-                        let session = session.clone();
-                        let input = input.clone();
-                        let turn_id = turn_id.clone();
-                        let cancel = cancel.clone();
-                        let report = Arc::clone(&report);
-                        Box::pin(async move {
-                            let result =
-                                drive_turn(&session, input, Some(turn_id), cancel, scoped, drive)
-                                    .await;
-                            *report.lock_recover() = Some(result);
-                        })
-                    })
-                };
-                restate
-                    .run_in_handler(admitted, attempt)
-                    .await
-                    .map_err(|err| anyhow::anyhow!("runtime perf turn handler: {err}"))?;
-                report
-                    .lock_recover()
-                    .take()
-                    .ok_or_else(|| anyhow::anyhow!("the turn's handler recorded no report"))?
-            }
+        let mut send = session.send(input);
+        if let Some(turn_id) = turn_id {
+            send = send.id(turn_id.clone());
         }
+        // Boxed: the send and wait futures are large, and every measured
+        // scenario awaits this one.
+        let handle = Box::pin(send.into_future()).await?;
+        let stop = handle.cancel().reason("runtime perf turn cancelled");
+        let mut output = Box::pin(handle.output());
+        let output = tokio::select! {
+            output = &mut output => output,
+            () = cancel.cancelled() => {
+                stop.await?;
+                output.await
+            }
+        };
+        Ok(output?.result)
     }
 }
 
@@ -472,15 +393,14 @@ impl BenchmarkRuntime {
         self.session
             .as_ref()
             .expect("benchmark session")
-            .durable()
-            .enqueue(input)
+            .send(input)
             .id(source_id)
             .ingress(lash_core::TurnInputIngress::active_turn(
                 turn_id,
                 lash_core::TurnInputCheckpointBoundary::AfterWork,
             ))
-            .send()
             .await
+            .map(|handle| handle.receipt().clone())
             .map_err(anyhow::Error::from)
     }
 
@@ -568,28 +488,6 @@ impl BenchmarkRuntime {
         .await?;
         control.release_provider.notify_one();
         turn.await.map(|turn| (turn, projection_started.elapsed()))
-    }
-
-    #[expect(
-        clippy::expect_used,
-        reason = "the benchmark session is taken by set_up before scoped-effect turn work runs"
-    )]
-    pub(crate) async fn run_turn_with_execution_scope(
-        &self,
-        input: lash::TurnInput,
-        turn_id: &TurnId,
-        cancel: tokio_util::sync::CancellationToken,
-    ) -> anyhow::Result<lash::TurnReport> {
-        let session = self.session.as_ref().expect("benchmark session");
-        self.turn_entry
-            .run_driven(
-                session,
-                input,
-                Some(turn_id),
-                cancel,
-                TurnDrive::RunWithScope,
-            )
-            .await
     }
 
     #[expect(
@@ -1073,11 +971,6 @@ pub(crate) async fn build_runtime(
                 }
                 builder = builder.trace_level(config.trace_level);
             }
-            if !wiring.queued_work {
-                // Scenarios without a queued-work lane still use the decorated
-                // catalog installed above.
-                builder = builder.without_queued_work();
-            }
             BenchmarkCore::Standard(builder.build(runtime_perf_owner())?)
         }
         ExecutionMode::Rlm => {
@@ -1096,11 +989,6 @@ pub(crate) async fn build_runtime(
                     builder = builder.trace_jsonl_path(path);
                 }
                 builder = builder.trace_level(config.trace_level);
-            }
-            if !wiring.queued_work {
-                // Scenarios without a queued-work lane still use the decorated
-                // catalog installed above.
-                builder = builder.without_queued_work();
             }
             BenchmarkCore::Rlm(builder.build(runtime_perf_owner())?)
         }
@@ -1291,8 +1179,7 @@ pub(crate) async fn build_runtime_with_sqlite_store(
     for factory in benchmark_plugin_factories(scenario, &effect_host, None, None) {
         plugin_stack.push(factory);
     }
-    let core =
-        durable_benchmark_core(backend, mode_id, provider, plugin_stack, wiring.queued_work)?;
+    let core = durable_benchmark_core(backend, mode_id, provider, plugin_stack)?;
     let session_id = SessionId::from(format!("runtime-perf-{}", scenario.name()));
     let session = core.open_session(session_id.clone()).await?;
     let persistence = if wiring.session_store_handle {
@@ -1329,7 +1216,6 @@ fn durable_benchmark_core(
     mode_id: ExecutionMode,
     provider: ProviderHandle,
     plugin_stack: lash::PluginStack,
-    queued_work: bool,
 ) -> anyhow::Result<BenchmarkCore> {
     let builder = match mode_id {
         ExecutionMode::Standard => benchmark_standard_builder(backend, provider),
@@ -1338,13 +1224,10 @@ fn durable_benchmark_core(
             benchmark_rlm_builder(backend, provider, factory)
         }
     };
-    let mut builder = builder
+    let builder = builder
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
         .plugins(plugin_stack);
-    if !queued_work {
-        builder = builder.without_queued_work();
-    }
     let core = builder.build(runtime_perf_owner())?;
     Ok(match mode_id {
         ExecutionMode::Standard => BenchmarkCore::Standard(core),

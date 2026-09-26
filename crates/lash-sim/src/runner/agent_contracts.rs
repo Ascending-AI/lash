@@ -42,7 +42,7 @@ async fn contract_world(
 
 /// A turn build that submits `prompt` as text.
 fn contract_turn(prompt: &'static str) -> crate::backend::SimTurnBuild {
-    Arc::new(move |session: &lash::LashSession| Ok(session.turn(lash::TurnInput::text(prompt))))
+    Arc::new(move |session: &lash::LashSession| Ok(session.send(lash::TurnInput::text(prompt))))
 }
 
 fn observe_contract_checkpoints<T>(
@@ -649,7 +649,7 @@ async fn facade_final_value_execution_inner(
             format!("{session_id}-turn"),
             events.clone(),
             Arc::new(move |session: &lash::LashSession| {
-                session.turn(lash::TurnInput::text(prompt)).require_finish()
+                session.send(lash::TurnInput::text(prompt)).require_finish()
             }),
         )
         .await?

@@ -22,8 +22,8 @@ error[E0599]: no method named `model_variant` found for struct `LashCoreBuilder`
   | |_________|
   |
 
-error[E0599]: no method named `model` found for struct `TurnBuilder` in the current scope
+error[E0599]: no method named `model` found for struct `SendBuilder` in the current scope
  --> tests/ui/model_selection_requires_variant.rs:9:21
   |
 9 |     let _ = builder.model("model-only");
-  |                     ^^^^^ method not found in `TurnBuilder`
+  |                     ^^^^^ method not found in `SendBuilder`

@@ -995,14 +995,8 @@ async fn observation_reads_do_not_wait_for_active_turn() -> Result<()> {
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("nonblocking-observation").open().await?;
     let turn_session = session.clone();
-    let scoped_effect_controller = turn_scope(&core, &turn_session.session_id());
-    let turn = tokio::spawn(async move {
-        turn_session
-            .turn(TurnInput::text("blocked"))
-            .advanced()
-            .run_with_scope(scoped_effect_controller)
-            .await
-    });
+    let turn =
+        tokio::spawn(async move { turn_session.send(TurnInput::text("blocked")).output().await });
 
     entered_rx.await.expect("provider entered");
 

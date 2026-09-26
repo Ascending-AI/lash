@@ -15,11 +15,11 @@
 //!   strictly higher generation, and the dead holder must emit nothing at all:
 //!   that is the case a takeover reported from the loser's renewal path missed
 //!   entirely.
-//! * `direct-turn`: the killed-worker case for a turn that entered through
-//!   `TurnBuilder::run` rather than the queue. Direct ingress accepts before it
-//!   drives (ADR 0069), so the request is durable while the provider is still
-//!   parked, and the peer that takes the lane recovers it through the ordinary
-//!   queued drain under the same generation fence. The lane is re-staged after
+//! * `direct-turn`: the killed-worker case for a turn a host sent and waited
+//!   on. A send accepts before the engine drives it (ADR 0069), so the request
+//!   is durable while the provider is still parked, and the peer that takes
+//!   the lane recovers it through its own engine's session drive under the
+//!   same generation fence. The lane is re-staged after
 //!   the kill in the `takeover` shape, because the in-process drop the harness
 //!   kills with does release the lane and a dead worker does not.
 //! * `livelock`: the cause the procedure names for repeated CAS rejections,
@@ -503,9 +503,9 @@ async fn provider_hang(
     let session = running.open(&session_id).await?;
     let turn = tokio::spawn(async move {
         session
-            .turn(lash::TurnInput::text(TURN_PROMPT))
-            .turn_id("lease-triage-hang-turn".to_string())
-            .run()
+            .send(lash::TurnInput::text(TURN_PROMPT))
+            .id("lease-triage-hang-turn".to_string())
+            .output()
             .await
     });
     provider.wait_until_parked().await?;
@@ -607,9 +607,9 @@ async fn lease_takeover(
     let seed = backend.core(scripted_provider(), successor.clone(), quiet_timings())?;
     let seed_session = seed.open(&session_id).await?;
     seed_session
-        .turn(lash::TurnInput::text(TURN_PROMPT))
-        .turn_id("lease-triage-takeover-seed".to_string())
-        .run()
+        .send(lash::TurnInput::text(TURN_PROMPT))
+        .id("lease-triage-takeover-seed".to_string())
+        .output()
         .await
         .map_err(anyhow::Error::msg)?;
     drop(seed_session);
@@ -635,13 +635,18 @@ async fn lease_takeover(
         .await
         .map_err(anyhow::Error::msg)?;
 
-    // A real turn sweeps the lane. Its claim is the takeover.
-    let sweeper = backend.core(scripted_provider(), successor.clone(), quiet_timings())?;
+    // A real turn sweeps the lane. Its claim is the takeover. The sweeper is
+    // another process: the successor under a fresh incarnation.
+    let sweeper = backend.core(
+        scripted_provider(),
+        owner("triage-successor-worker", "triage-successor-worker:boot-2"),
+        quiet_timings(),
+    )?;
     let sweeper_session = sweeper.open(&session_id).await?;
     let swept = sweeper_session
-        .turn(lash::TurnInput::text(TURN_PROMPT))
-        .turn_id("lease-triage-takeover-sweep".to_string())
-        .run()
+        .send(lash::TurnInput::text(TURN_PROMPT))
+        .id("lease-triage-takeover-sweep".to_string())
+        .output()
         .await;
     let (turn_committed, turn_error) = match &swept {
         Ok(output) => (output.final_value() == Some(&json!("ok")), None),
@@ -706,9 +711,9 @@ async fn commit_cas_livelock(
     let seed_core = backend.core(scripted_provider(), shared.clone(), quiet_timings())?;
     let seed_session = seed_core.open(&session_id).await?;
     seed_session
-        .turn(lash::TurnInput::text(TURN_PROMPT))
-        .turn_id("lease-triage-livelock-seed".to_string())
-        .run()
+        .send(lash::TurnInput::text(TURN_PROMPT))
+        .id("lease-triage-livelock-seed".to_string())
+        .output()
         .await
         .map_err(anyhow::Error::msg)
         .context("materialize the CAS-livelock session")?;
@@ -903,12 +908,13 @@ async fn commit_cas_livelock(
 /// The killed-worker recovery case, run against a *direct* turn (ADR 0069).
 ///
 /// Phase 2 sweeps a lane whose queued work was always durable. This phase asks
-/// the harder question the single-ingress rule answers: a host called
-/// `TurnBuilder::run` and the process died mid-turn, so nothing but the store
-/// remembers the request. Because direct ingress accepts before it drives, the
-/// input is a pending row while the provider is still parked, and the peer that
-/// takes the lane rediscovers it through the ordinary queued drain — the same
-/// path, the same generation fence (ADR 0029), no direct-turn-shaped repair.
+/// the harder question the single-ingress rule answers: a host sent a turn and
+/// waited on it, and the process died mid-turn, so nothing but the store
+/// remembers the request. Because a send accepts before the engine drives it,
+/// the input is a pending row while the provider is still parked, and the peer
+/// that takes the lane rediscovers it through its own engine's session drive —
+/// the same path, the same generation fence (ADR 0029), no direct-turn-shaped
+/// repair.
 ///
 /// Fixture honesty: aborting the in-flight turn future and dropping the core is
 /// not a SIGKILL. Nothing cancels the accepted row and nothing hands the lane
@@ -940,11 +946,12 @@ async fn direct_turn_recovery(
     let seed = backend.core(scripted_provider(), successor.clone(), quiet_timings())?;
     let seed_session = seed.open(&session_id).await?;
     let seeded = seed_session
-        .turn(lash::TurnInput::text(TURN_PROMPT))
-        .turn_id(SEED_TURN_ID.to_string())
-        .run()
+        .send(lash::TurnInput::text(TURN_PROMPT))
+        .id(SEED_TURN_ID.to_string())
+        .output()
         .await
-        .map_err(anyhow::Error::msg)?;
+        .map_err(anyhow::Error::msg)
+        .context("the seed turn")?;
     let seed_acceptance = seeded.result.acceptance.clone();
     drop(seed_session);
     drop(seed);
@@ -973,9 +980,9 @@ async fn direct_turn_recovery(
     let dead_session = dead.open(&session_id).await?;
     let abandoned = tokio::spawn(async move {
         dead_session
-            .turn(lash::TurnInput::text(TURN_PROMPT))
-            .turn_id(abandoned_turn_id.to_string())
-            .run()
+            .send(lash::TurnInput::text(TURN_PROMPT))
+            .id(abandoned_turn_id.to_string())
+            .output()
             .await
     });
     provider.wait_until_parked().await?;
@@ -1003,28 +1010,39 @@ async fn direct_turn_recovery(
     let abandoned_lease = stage_abandoned_lane(store.as_ref(), &session_id, &abandoned_by).await?;
     capture.reset();
 
-    // A peer takes the lane through the ordinary queued drain. It was told
-    // nothing about the abandoned request.
-    let sweeper = backend.core(scripted_provider(), successor.clone(), quiet_timings())?;
+    // A peer takes the lane through its own engine's session drive. It was
+    // told nothing about the abandoned request: it finds the pending row in
+    // the store and attaches to it, which asks its engine to drive the session.
+    // The peer is another process: the same owner under a fresh incarnation.
+    // A core's engine names its admissions by its incarnation, so a second
+    // core under the seed's incarnation would replay the seed's admission.
+    let sweeper = backend.core(
+        scripted_provider(),
+        owner("triage-direct-successor", "triage-direct-successor:boot-2"),
+        quiet_timings(),
+    )?;
     let sweeper_session = sweeper.open(&session_id).await?;
-    let drained = tokio::time::timeout(
-        GATE_TIMEOUT,
-        sweeper_session
-            .queued_turn()
-            .drain_id("lease-triage-direct-turn-recovery")
-            .run(),
-    )
-    .await
-    .context("the recovery drain never settled")?
-    .map_err(anyhow::Error::msg)?;
-    let (drain_ran, drain_empty_reason, recovered_committed) = match &drained {
-        lash::QueuedTurnDrain::Ran(output) => {
-            (true, None, output.final_value() == Some(&json!("ok")))
+    let orphaned = sweeper_session
+        .durable()
+        .pending_turn_inputs()
+        .await
+        .map_err(anyhow::Error::msg)
+        .context("the successor reads the session's pending inputs")?;
+    let (drain_ran, drain_empty_reason, recovered_committed) = match orphaned.first() {
+        Some(orphan) => {
+            let recovered = tokio::time::timeout(
+                GATE_TIMEOUT,
+                sweeper_session
+                    .attach(orphan.input.input_id.clone())
+                    .output(),
+            )
+            .await
+            .context("the recovery drive never settled")?
+            .map_err(anyhow::Error::msg)
+            .context("the recovered turn")?;
+            (true, None, recovered.final_value() == Some(&json!("ok")))
         }
-        lash::QueuedTurnDrain::Empty(reason) => (false, Some(format!("{reason:?}")), false),
-        lash::QueuedTurnDrain::Replayed(_) => {
-            anyhow::bail!("first recovery drain unexpectedly replayed a terminal receipt")
-        }
+        None => (false, Some("no pending input".to_string()), false),
     };
 
     let applications = store
@@ -1055,7 +1073,7 @@ async fn direct_turn_recovery(
             lease_event(event, &session_id, "session_execution_lease.acquired")
                 && owner_id_of(event) == Some(successor.owner_id.as_str())
         })
-        .context("the recovery drain recorded no session execution lease acquisition")?;
+        .context("the recovery drive recorded no session execution lease acquisition")?;
     let abandoned_released_at = timeline.iter().position(|event| {
         lease_event(event, &session_id, "session_execution_lease.release")
             && owner_id_of(event) == Some(abandoned_by.owner_id.as_str())
@@ -1080,7 +1098,7 @@ async fn direct_turn_recovery(
         .collect::<Vec<_>>();
     let taken_over_from_dead_worker = taken_over.first().cloned().with_context(|| {
         format!(
-            "the recovery drain never took the lane over from `{}` at fencing token {}; \
+            "the recovery drive never took the lane over from `{}` at fencing token {}; \
              timeline: {timeline:?}",
             abandoned_by.owner_id, abandoned_lease.fencing_token
         )

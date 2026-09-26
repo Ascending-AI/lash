@@ -6,18 +6,20 @@
 //! bot's memory of a room is exactly as long-lived as the room, survives
 //! restarts, and never leaks between channels.
 //!
-//! **Ambient traffic is queued turn input, not a turn.** Messages that do not
-//! mention the bot are admitted with [`lash::DurableSession::enqueue`] — durable,
-//! ordered, model-visible — and no turn runs. When somebody finally does mention
-//! the bot, one queued drain folds the accumulated room context *and* the mention
-//! into a single turn. The bot has been listening the whole time without saying a
-//! word or spending a token.
+//! **Ambient traffic is context, not a turn.** Messages that do not mention the
+//! bot are recorded in the ledger and no turn runs. When somebody finally does
+//! mention the bot, the bot folds the route's accumulated ambient text *and*
+//! the mention into one [`lash::LashSession::send`]; the session's engine runs
+//! that turn as soon as it is accepted (FIG-3600), and the bot only waits on
+//! it. The bot has been listening the whole time without saying a word or
+//! spending a token. A thread starts the same way: its first send carries the
+//! parent channel's folded context up to the thread root, labelled.
 //!
 //! **Deduplication is staged, not boolean, and every stage is resumable.** See
 //! [`super::ledger`] for the record and [`ChannelBot::recover`] for what a new
 //! boot does with it. The invariant that makes resumption safe is that every step
-//! is idempotent: the admission by its Lash source key, the drain by its
-//! `drain_id`, and the post by the `event_id` its `metadata` carries.
+//! is idempotent: the admission and its turn by the send's id, and the post by
+//! the `event_id` its `metadata` carries.
 
 use lash::TurnId;
 use lash::sync::MutexExt;
@@ -28,10 +30,7 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, Result};
 use lash::messages::{MessageOrigin, MessageRole};
 use lash::persistence::ChronologicalPayload;
-use lash::{
-    EmptyQueuedDrainReason, LashCore, LashSession, QueuedTurnDrain, QueuedWorkClaimRefusal,
-    TurnInput, TurnOutcome, TurnStop,
-};
+use lash::{LashCore, LashSession, SendHandle, TurnInput, TurnOutcome, TurnStatus, TurnStop};
 use tokio::sync::RwLock;
 
 use super::ledger::{
@@ -52,6 +51,10 @@ type SessionLockRegistry = Arc<Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>
 /// Short relative to the lease TTL it is waiting out, so the mention is answered
 /// promptly once the lease lapses, and long enough that the poll costs nothing.
 const RETRY_INTERVAL: Duration = Duration::from_secs(2);
+
+/// How long a resumed mention waits for its turn before it is deferred to
+/// the retry loop.
+const RESUMED_TURN_WAIT: Duration = Duration::from_secs(2);
 
 /// Default deadline for [`ChannelBot::retry_deferred`].
 ///
@@ -98,12 +101,9 @@ pub enum Disposition {
         event_id: String,
         reason: &'static str,
     },
-    /// Folded into the channel session as context. No turn, no reply.
-    Folded {
-        event_id: String,
-        channel: String,
-        input_id: String,
-    },
+    /// Kept in the ledger as context for the route's next mention. No turn,
+    /// no reply.
+    Folded { event_id: String, channel: String },
     /// A reply was posted.
     Replied {
         event_id: String,
@@ -575,7 +575,7 @@ impl ChannelBot {
             });
         }
 
-        let session = if record.thread_ts.is_some() {
+        let (session, inherited_context) = if record.thread_ts.is_some() {
             match threads::open_thread_session(
                 &self.core,
                 &self.ledger,
@@ -586,7 +586,10 @@ impl ChannelBot {
             )
             .await?
             {
-                threads::ThreadSessionOpen::Ready(session) => session,
+                threads::ThreadSessionOpen::Ready {
+                    session,
+                    inherited_context,
+                } => (session, Some(inherited_context)),
                 threads::ThreadSessionOpen::Retired => {
                     self.settle(
                         record,
@@ -601,11 +604,11 @@ impl ChannelBot {
                     });
                 }
                 threads::ThreadSessionOpen::AdmissionContended => {
-                    Self::log_drain_deferral(record, EmptyQueuedDrainReason::ExecutionLaneBusy);
+                    Self::log_turn_deferral(record, "the session lane is held elsewhere");
                     return Ok(Disposition::Deferred {
                         event_id: record.event_id.clone(),
                         channel: record.channel_id.clone(),
-                        reason: "drain_did_not_reach_admission",
+                        reason: "session_admission_contended",
                     });
                 }
                 threads::ThreadSessionOpen::RootNotProcessed => {
@@ -629,41 +632,23 @@ impl ChannelBot {
             }
         } else {
             match self.open_session(&record.channel_id).await {
-                Ok(session) => session,
+                Ok(session) => (session, None),
                 Err(error) if threads::anyhow_session_admission_contended(&error) => {
-                    Self::log_drain_deferral(record, EmptyQueuedDrainReason::ExecutionLaneBusy);
+                    Self::log_turn_deferral(record, "the session lane is held elsewhere");
                     return Ok(Disposition::Deferred {
                         event_id: record.event_id.clone(),
                         channel: record.channel_id.clone(),
-                        reason: "drain_did_not_reach_admission",
+                        reason: "session_admission_contended",
                     });
                 }
                 Err(error) => return Err(error),
             }
         };
-        // The source key is derived from the message's `ts`, not the `event_id`:
-        // `ts` *is* the message's identity, so a redelivery — or the same message
-        // arriving under a second event — resolves to the one admission record
-        // Lash already holds instead of a duplicate context line. A consumed
-        // input keeps its row, so this stays idempotent even after the turn that
-        // drained it committed.
-        let prefix = if is_mention { "mention" } else { "ambient" };
-        let receipt = session
-            .durable()
-            .enqueue(TurnInput::text(text))
-            .id(format!(
-                "{prefix}:{}:{}",
-                record.channel_id, record.message_ts
-            ))
-            .send()
-            .await
-            .context("admit routed message as queued turn input")?;
-        self.ledger
-            .record_input_id(record.event_id.clone(), receipt.input_id.to_string())
-            .await
-            .context("record Lash admission identity")?;
-
         if !is_mention {
+            // Ambient traffic is context, not a turn input: it waits in the
+            // ledger until a mention on its route folds it into that mention's
+            // send, so no turn runs and no token is spent for it. A thread
+            // rooted at this message forks from the channel head *before* it.
             if record.thread_ts.is_none() {
                 threads::retain_admission_boundary(
                     &self.core,
@@ -678,10 +663,37 @@ impl ChannelBot {
             return Ok(Disposition::Folded {
                 event_id: record.event_id.clone(),
                 channel: record.channel_id.clone(),
-                input_id: receipt.input_id.to_string(),
             });
         }
-        self.run_mention_turn(&session, record, &receipt.input_id)
+        // One send per mention: the route's folded ambient context, then the
+        // mention itself. The ledger binds the folded rows to this mention and
+        // stores the composed text on first use, so a redelivery or a recovery
+        // pass sends the same bytes under the same id and resolves to the
+        // admission Lash already holds. Once RunSpec (FIG-3838) lands, the
+        // folded block moves into the send's `RunSpec.context`.
+        let send_text = self
+            .ledger
+            .bind_mention_send(
+                record.event_id.clone(),
+                text,
+                inherited_context.unwrap_or_default(),
+            )
+            .await
+            .context("fold the route's ambient context into the mention")?;
+        let handle = session
+            .send(TurnInput::text(send_text))
+            .id(format!(
+                "mention:{}:{}",
+                record.channel_id, record.message_ts
+            ))
+            .await
+            .context("send the mention to its session")?;
+        let input_id = handle.input_id().to_string();
+        self.ledger
+            .record_mention_input_id(record.event_id.clone(), input_id)
+            .await
+            .context("record Lash admission identity")?;
+        self.run_mention_turn(&session, record, handle, resuming)
             .await
     }
 
@@ -758,44 +770,50 @@ impl ChannelBot {
         })
     }
 
-    /// Drain every queued input for the channel into one turn and post the reply.
+    /// Wait for the mention's turn and post its reply. The session's engine
+    /// runs the turn as soon as the mention is sent; the bot only waits on it.
+    ///
+    /// A resumed mention whose input a committed turn already answered is
+    /// read back out of the transcript. A resumed mention whose turn has not
+    /// settled within [`RESUMED_TURN_WAIT`] is deferred, never terminalized:
+    /// its root may be held by a previous boot's live session lease, and the
+    /// retry loop re-attaches to the same input until it settles.
     async fn run_mention_turn(
         &self,
         session: &LashSession,
         record: &EventRecord,
-        input_id: &str,
+        handle: SendHandle,
+        resuming: bool,
     ) -> Result<Disposition> {
-        // The drain id is stable per event, so the queue-drain effect scope is
-        // the same on a redelivery as it was on the first attempt.
-        let drain = session
-            .queued_turn()
-            .drain_id(format!("mention:{}", record.event_id))
-            .run()
-            .await
-            .context("run channel mention turn")?;
-
-        let output = match drain {
-            QueuedTurnDrain::Ran(output) => output,
-            QueuedTurnDrain::Replayed(receipt) => {
-                if let Some(lash::persistence::QueuedRunTerminal::Failed { code, message }) =
-                    receipt.terminal
-                {
-                    anyhow::bail!("queued mention failed ({code}): {message}");
-                }
-                return self
-                    .settle_empty_drain(
-                        session,
-                        record,
-                        input_id,
-                        EmptyQueuedDrainReason::ClaimRefused(QueuedWorkClaimRefusal::Empty),
-                    )
-                    .await;
+        let input_id = handle.input_id().to_string();
+        let input_id = input_id.as_str();
+        if resuming
+            && session
+                .durable()
+                .turn_input_applications()
+                .await
+                .context("read the channel's applied inputs")?
+                .iter()
+                .any(|application| application.input_id.as_str() == input_id)
+        {
+            return self
+                .settle_committed_mention(session, record, input_id)
+                .await;
+        }
+        let outcome = if resuming {
+            match tokio::time::timeout(RESUMED_TURN_WAIT, handle.outcome()).await {
+                Ok(outcome) => outcome,
+                Err(_) => return Ok(Self::defer_unsettled_turn(record)),
             }
-            QueuedTurnDrain::Empty(reason) => {
-                return self
-                    .settle_empty_drain(session, record, input_id, reason)
-                    .await;
+        } else {
+            handle.outcome().await
+        }
+        .context("run channel mention turn")?;
+        let output = match (outcome.status, outcome.output) {
+            (TurnStatus::Parked(_), _) | (_, None) => {
+                return Ok(Self::defer_unsettled_turn(record));
             }
+            (_, Some(output)) => output,
         };
 
         if record.thread_ts.is_none() {
@@ -841,55 +859,15 @@ impl ChannelBot {
         self.owe_and_post(record, reply, ReplySource::Turn).await
     }
 
-    /// Decide what an empty queued drain means from the reason Lash reports.
-    ///
-    /// An empty drain means one of two unrelated things, and reading one as the
-    /// other is how a mention gets abandoned:
-    ///
-    /// * **The queue held nothing for this drain.** A committed turn already
-    ///   consumed the input, so the answer exists (or provably does not) in the
-    ///   transcript. Terminal either way. Only
-    ///   [`QueuedWorkClaimRefusal::Empty`] proves it.
-    /// * **This drain never reached the input.** The lane was busy, the row is
-    ///   not available yet, the head was withheld, another writer won the row,
-    ///   or the host policy admitted none. Nothing was consumed, so the work is
-    ///   **retryable and never terminal**.
-    ///
-    /// The match is deliberately exhaustive: a new refusal variant is a new
-    /// decision for this bot to make, not something a catch-all should swallow.
-    async fn settle_empty_drain(
+    /// Settle a mention whose input a committed turn already answered: the
+    /// answer is in the transcript, so recovery reads it back instead of
+    /// running the model again.
+    async fn settle_committed_mention(
         &self,
         session: &LashSession,
         record: &EventRecord,
         input_id: &str,
-        reason: EmptyQueuedDrainReason,
     ) -> Result<Disposition> {
-        let queue_was_exhausted = match reason {
-            EmptyQueuedDrainReason::ClaimRefused(refusal) => match refusal {
-                QueuedWorkClaimRefusal::Empty => true,
-                QueuedWorkClaimRefusal::ZeroLimit
-                | QueuedWorkClaimRefusal::NotYetAvailable
-                | QueuedWorkClaimRefusal::CommandAtHead
-                | QueuedWorkClaimRefusal::DeliveryBoundaryBlocked
-                | QueuedWorkClaimRefusal::HeadWithheld
-                | QueuedWorkClaimRefusal::FollowOnPending
-                | QueuedWorkClaimRefusal::ClaimRaceLost => false,
-            },
-            EmptyQueuedDrainReason::ExecutionLaneBusy | EmptyQueuedDrainReason::NoDurableQueue => {
-                false
-            }
-        };
-        if !queue_was_exhausted {
-            // The ledger row is deliberately left at its current non-terminal stage:
-            // terminalizing here is what made an interrupted mention permanently unanswered,
-            // because no redelivery and no later boot ever revisits a terminal row.
-            Self::log_drain_deferral(record, reason);
-            return Ok(Disposition::Deferred {
-                event_id: record.event_id.clone(),
-                channel: record.channel_id.clone(),
-                reason: "drain_did_not_reach_admission",
-            });
-        }
         if record.thread_ts.is_none() {
             threads::retain_applied_turn_boundary(&self.core, &self.ledger, session, input_id)
                 .await?;
@@ -917,13 +895,21 @@ impl ChannelBot {
         }
     }
 
-    fn log_drain_deferral(record: &EventRecord, reason: EmptyQueuedDrainReason) {
-        log_err!(
-            "slack-clone-bot deferring event {}: the drain never reached its \
-             admission ({})",
-            record.event_id,
-            reason.as_str()
-        );
+    /// A mention whose turn has not settled yet stays at its non-terminal
+    /// stage: terminalizing it is what made an interrupted mention permanently
+    /// unanswered, because no redelivery and no later boot revisits a terminal
+    /// row.
+    fn defer_unsettled_turn(record: &EventRecord) -> Disposition {
+        Self::log_turn_deferral(record, "its turn has not settled");
+        Disposition::Deferred {
+            event_id: record.event_id.clone(),
+            channel: record.channel_id.clone(),
+            reason: "turn_not_settled",
+        }
+    }
+
+    fn log_turn_deferral(record: &EventRecord, why: &str) {
+        log_err!("slack-clone-bot deferring event {}: {why}", record.event_id);
     }
 
     async fn owe_and_post(
@@ -1231,8 +1217,8 @@ impl Drop for SessionLockLease {
     }
 }
 
-/// Used when a queued drain returns nothing because a previous process already
-/// ran the turn and died before its reply was recorded. Correlation is by the
+/// Used when a resumed mention's input was already answered by a committed
+/// turn: a previous process ran it and died before its reply was recorded. Correlation is by the
 /// typed provenance Lash publishes on committed messages
 /// ([`MessageOrigin::TurnInput`]) — not by parsing id strings:
 ///

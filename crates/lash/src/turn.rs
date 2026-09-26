@@ -1,22 +1,12 @@
 use lash_sansio::TurnId;
 use lash_sansio::sync::MutexExt;
-use std::pin::Pin;
-use std::task::{Context, Poll};
 
 use crate::support::{
-    Arc, AssembledTurn, BTreeMap, CancellationToken, EffectHost, EmbedError, EventSink, JoinHandle,
-    LlmCallRecord, LocalTurnStop, Message, MessageRole, PromptContribution, PromptLayer,
-    PromptSlot, PromptTemplate, ProtocolTurnOptions, Result, RuntimeEffectController,
-    RuntimeErrorCode, RuntimeHandle, ScopedEffectController, SessionSnapshot, StdMutex, TokenUsage,
-    ToolCallRecord, TurnActivity, TurnActivitySink, TurnExecutionMetrics, TurnInput, TurnOutcome,
-    async_trait, mpsc,
+    Arc, BTreeMap, LlmCallRecord, LocalTurnStop, Message, MessageRole, RuntimeHandle,
+    ScopedEffectController, SessionSnapshot, StdMutex, TokenUsage, ToolCallRecord, TurnActivity,
+    TurnActivitySink, TurnExecutionMetrics, TurnOutcome, async_trait,
 };
-use futures_util::Stream;
-use lash_core::facade_support::{
-    QueuedEffectSource, QueuedTurnOptions,
-    SelectedQueuedWorkDrainError as CoreSelectedQueuedWorkDrainError, TurnCancelMode,
-    TurnContextFacadeOps,
-};
+use lash_core::facade_support::TurnCancelMode;
 
 pub use lash_core::facade_support::{AssistantOutput, TurnIssue, TurnIssueSeverity};
 /// Typed turn-failure vocabulary carried on [`TurnIssue`] and on session error
@@ -24,47 +14,6 @@ pub use lash_core::facade_support::{AssistantOutput, TurnIssue, TurnIssueSeverit
 /// The namespaced [`FailureCode`](crate::provider::FailureCode) on `code`
 /// fields lives in [`crate::provider`].
 pub use lash_core::{TurnFailureCode, TurnFailureKind};
-
-pub(crate) mod queued_drain;
-
-use lash_core::facade_support::SelectedQueuedWorkDrainOutcome;
-pub(crate) use queued_drain::QueuedTurnDrain;
-
-/// The two internal event sinks threaded through the turn-execution helpers.
-///
-/// `events` is the raw lower-level runtime event stream, reachable from app
-/// code only via [`TurnBuilder::advanced`]; `turn_events` is the semantic
-/// [`TurnActivity`] stream used by the primary builder API.
-/// Bundling them keeps the internal turn fns to a single sink parameter.
-#[derive(Clone, Copy, Default)]
-pub(crate) struct TurnSinks<'a> {
-    events: Option<&'a dyn EventSink>,
-    turn_events: Option<&'a dyn TurnActivitySink>,
-}
-
-impl<'a> TurnSinks<'a> {
-    pub(crate) fn turn(events: &'a dyn TurnActivitySink) -> Self {
-        Self {
-            events: None,
-            turn_events: Some(events),
-        }
-    }
-
-    pub(crate) fn session(events: &'a dyn EventSink) -> Self {
-        Self {
-            events: Some(events),
-            turn_events: None,
-        }
-    }
-
-    fn events(&self) -> Option<&'a dyn EventSink> {
-        self.events
-    }
-
-    fn turn_events(&self) -> Option<&'a dyn TurnActivitySink> {
-        self.turn_events
-    }
-}
 
 /// Host-local stops of the turns currently executing through one opened
 /// [`LashSession`](crate::LashSession) (shared by its clones).
@@ -82,37 +31,25 @@ struct TurnCancelRegistryInner {
     active: BTreeMap<u64, RegisteredTurn>,
 }
 
-/// One turn the registry can stop.
-enum RegisteredTurn {
-    /// A turn running inline in its caller's future (the non-adapted
-    /// `advanced()` and queued paths, until S5d).
-    Inline(LocalTurnStop),
-    /// A sent input the engine drives: stopped by cancelling the input.
-    Sent {
-        parts: crate::send::SendParts,
-        input: lash_core::InputId,
-    },
+/// One turn the registry can stop: a sent input the engine drives, stopped
+/// by cancelling the input.
+struct RegisteredTurn {
+    parts: crate::send::SendParts,
+    input: lash_core::InputId,
 }
 
 impl TurnCancelRegistry {
-    /// The guard removes the entry when the turn finishes, however it finishes.
-    fn register(&self, stop: LocalTurnStop) -> TurnCancelGuard {
-        self.insert(RegisteredTurn::Inline(stop))
-    }
-
     /// Register a sent input until its handle is dropped (FIG-3600, D1 §2.3).
+    /// The guard removes the entry however the handle ends.
     pub(crate) fn register_send(
         &self,
         parts: &crate::send::SendParts,
         input: &lash_core::InputId,
     ) -> TurnCancelGuard {
-        self.insert(RegisteredTurn::Sent {
+        let turn = RegisteredTurn {
             parts: parts.clone(),
             input: input.clone(),
-        })
-    }
-
-    fn insert(&self, turn: RegisteredTurn) -> TurnCancelGuard {
+        };
         let mut inner = self.inner.lock_recover();
         let id = inner.next_id;
         inner.next_id += 1;
@@ -136,15 +73,12 @@ impl TurnCancelRegistry {
     ) -> usize {
         let inner = self.inner.lock_recover();
         for turn in inner.active.values() {
-            match turn {
-                RegisteredTurn::Inline(stop) => stop.request(mode, origin.clone()),
-                RegisteredTurn::Sent { parts, input } => crate::send::spawn_registry_cancel(
-                    parts.clone(),
-                    input.clone(),
-                    origin.clone(),
-                    mode,
-                ),
-            }
+            crate::send::spawn_registry_cancel(
+                turn.parts.clone(),
+                turn.input.clone(),
+                origin.clone(),
+                mode,
+            );
         }
         inner.active.len()
     }
@@ -161,859 +95,6 @@ impl Drop for TurnCancelGuard {
     }
 }
 
-enum EffectBinding<'run> {
-    Host(&'run dyn EffectHost),
-    Borrowed(&'run dyn RuntimeEffectController),
-}
-
-impl<'run> EffectBinding<'run> {
-    fn queued(self, identity: Option<lash_core::ExecutionScope>) -> QueuedEffectSource<'run> {
-        match self {
-            Self::Host(host) => QueuedEffectSource::Host { host, identity },
-            Self::Borrowed(controller) => QueuedEffectSource::Controller {
-                controller,
-                identity,
-            },
-        }
-    }
-    fn scoped(self, admitted: lash_core::AdmittedScope) -> Result<ScopedEffectController<'run>> {
-        match self {
-            Self::Host(host) => Ok(host.scoped(admitted)?),
-            Self::Borrowed(controller) => {
-                Ok(ScopedEffectController::borrowed(controller, admitted)?)
-            }
-        }
-    }
-}
-
-/// Builder for configuring turn.
-///
-/// `run`, `stream_to` and `stream` are adapted over
-/// [`LashSession::send`](crate::LashSession::send) (FIG-3600 S5b): the input
-/// is accepted durably and the session's engine drives it. The `advanced()`
-/// and `*_with_effects` entries keep their inline drive until S5d deletes
-/// this builder.
-pub struct TurnBuilder {
-    pub(crate) session: crate::LashSession,
-    pub(crate) cancel_token: Option<HostCancel>,
-    pub(crate) runtime: RuntimeHandle,
-    pub(crate) input: TurnInput,
-    pub(crate) stop: LocalTurnStop,
-    pub(crate) cancels: TurnCancelRegistry,
-    pub(crate) protocol_turn_options: Option<ProtocolTurnOptions>,
-    pub(crate) turn_id: Option<TurnId>,
-}
-
-impl TurnBuilder {
-    /// This low-level hook remains for provider plumbing, shutdown, and tests.
-    /// Firing the token asks the running turn to stop now; the stop is
-    /// delivered as a durable request on the turn's cancellation gate, with
-    /// lash's internal evidence. Host-facing stop controls should use
-    /// `TurnWorkDriver::request_cancel` with an exact session/turn address. If
-    /// this token fires, cancellation evidence records no origin; call
-    /// [`cancel_with_origin`](Self::cancel_with_origin) when the origin is
-    /// known.
-    pub fn cancel(mut self, cancel: CancellationToken) -> Self {
-        self.stop = LocalTurnStop::from_token(cancel.clone(), None);
-        self.cancel_token = Some((cancel, None));
-        self
-    }
-
-    /// Lash records the value without interpreting it.
-    pub fn cancel_with_origin(mut self, cancel: CancellationToken, origin: Option<String>) -> Self {
-        self.stop = LocalTurnStop::from_token(cancel.clone(), origin.clone());
-        self.cancel_token = Some((cancel, origin));
-        self
-    }
-
-    pub fn protocol_turn_options(mut self, options: ProtocolTurnOptions) -> Self {
-        self.protocol_turn_options = Some(options);
-        self
-    }
-
-    /// Hosts must keep this id unique within the session. Reusing it addresses
-    /// the same trace, effects, and cancellation promises as the earlier turn;
-    /// Lash does not mint or check uniqueness for host-supplied ids.
-    pub fn turn_id(mut self, id: impl Into<TurnId>) -> Self {
-        self.turn_id = Some(id.into());
-        self
-    }
-
-    pub fn prompt_template(mut self, template: PromptTemplate) -> Self {
-        self.input.turn_context.set_prompt_template(template);
-        self
-    }
-
-    pub fn prompt_contribution(mut self, contribution: PromptContribution) -> Self {
-        self.input
-            .turn_context
-            .add_prompt_contribution(contribution);
-        self
-    }
-
-    /// Replaces prompt slot.
-    pub fn replace_prompt_slot(
-        mut self,
-        slot: PromptSlot,
-        contributions: impl IntoIterator<Item = PromptContribution>,
-    ) -> Self {
-        self.input
-            .turn_context
-            .replace_prompt_slot(slot, contributions);
-        self
-    }
-
-    pub fn clear_prompt_slot(mut self, slot: PromptSlot) -> Self {
-        self.input.turn_context.clear_prompt_slot(slot);
-        self
-    }
-
-    pub fn prompt_layer(mut self, layer: PromptLayer) -> Self {
-        self.input.turn_context.set_prompt_layer(layer);
-        self
-    }
-
-    /// Accept this turn's input durably and wait for its settled turn:
-    /// [`send(input).output()`](crate::SendBuilder::output).
-    pub async fn run(self) -> Result<TurnOutput> {
-        let (send, cancel) = self.into_send()?;
-        Box::pin(run_adapted(send, cancel, None)).await
-    }
-
-    /// The send this builder adapts to, and the host cancel token it races.
-    /// A per-turn prompt cannot cross durable acceptance, so the send refuses
-    /// it before accepting anything.
-    fn into_send(self) -> Result<(crate::SendBuilder, Option<HostCancel>)> {
-        let mut send = self.session.send(self.input);
-        if let Some(id) = self.turn_id {
-            send = send.id(id);
-        }
-        if let Some(options) = self.protocol_turn_options {
-            send = send.protocol_turn_options(options);
-        }
-        Ok((send, self.cancel_token))
-    }
-
-    pub async fn run_with_effects(
-        self,
-        controller: &dyn RuntimeEffectController,
-    ) -> Result<TurnOutput> {
-        let collector = RunActivityCollector::default();
-        let result = self.stream_to_with_effects(&collector, controller).await?;
-        Ok(TurnOutput {
-            result,
-            activities: collector.into_activities(),
-        })
-    }
-
-    /// Accept this turn's input durably, drive it, and stream its activity.
-    ///
-    /// One acceptance commit then one drive (ADR 0069). For a host that means:
-    ///
-    /// * **A persistent session pays one extra store commit per turn** — the
-    ///   same Pending Turn Input commit queued ingress has always paid.
-    /// * **Dropping the returned future does not stop the turn.** The caller is
-    ///   the first driver, not the owner, so a caller that goes away has handed
-    ///   the turn to whoever drains next. Abandon a turn by cancelling its
-    ///   accepted input, or with
-    ///   [`LashSession::request_turn_cancel`](crate::LashSession::request_turn_cancel).
-    /// * **Input already queued for this session joins this turn**, because a
-    ///   direct turn claims the head of the same pending queue a drain does.
-    /// * **A retry after an unacknowledged crash is a new turn.** Lash mints no
-    ///   idempotency key for a direct turn; a host needing at-most-once
-    ///   submission supplies its own with
-    ///   [`EnqueueTurnBuilder::id`](crate::EnqueueTurnBuilder::id).
-    pub async fn stream_to(self, events: &dyn TurnActivitySink) -> Result<TurnReport> {
-        let (send, cancel) = self.into_send()?;
-        Ok(Box::pin(run_adapted(send, cancel, Some(events)))
-            .await?
-            .result)
-    }
-
-    /// Accept the input and stream its activity; the turn is driven as soon
-    /// as the stream is made, and [`TurnStream::finish`] answers its report.
-    /// An acceptance refusal surfaces from `finish`.
-    pub fn stream(self) -> Result<TurnStream> {
-        let (tx, rx) = mpsc::channel(64);
-        let adapted = self.into_send();
-        let completion = tokio::spawn(async move {
-            let (send, cancel) = adapted?;
-            let sink = ChannelTurnActivitySink { tx };
-            Ok(Box::pin(run_adapted(send, cancel, Some(&sink)))
-                .await?
-                .result)
-        });
-        Ok(TurnStream {
-            activities: rx,
-            completion,
-        })
-    }
-
-    /// Access lower-level turn execution that bypasses the semantic
-    /// [`TurnActivity`] tier.
-    pub fn advanced(self) -> AdvancedTurn {
-        AdvancedTurn { builder: self }
-    }
-
-    fn resolved_turn_id(
-        &self,
-        scoped_effect_controller: Option<&ScopedEffectController<'_>>,
-    ) -> Option<TurnId> {
-        self.turn_id.clone().or_else(|| {
-            scoped_effect_controller
-                .filter(|controller| controller.execution_scope().validates_turn_trace_id())
-                .map(|controller| TurnId::from(controller.scope_id()))
-        })
-    }
-
-    fn turn_scope(&self, turn_id: &TurnId) -> lash_core::ExecutionScope {
-        let observation = self.runtime.observe();
-        observation.turn_scope(turn_id)
-    }
-
-    pub(crate) fn prepare(
-        mut self,
-        turn_id: Option<TurnId>,
-    ) -> Result<(RuntimeHandle, TurnInput, LocalTurnStop, TurnCancelGuard)> {
-        if let Some(options) = self.protocol_turn_options {
-            self.input.protocol_turn_options = Some(options);
-        }
-        if let Some(turn_id) = turn_id {
-            self.input.trace_turn_id = Some(turn_id);
-        }
-        let cancel_guard = self.cancels.register(self.stop.clone());
-        Ok((self.runtime, self.input, self.stop, cancel_guard))
-    }
-
-    pub async fn stream_to_with_effects(
-        self,
-        events: &dyn TurnActivitySink,
-        controller: &dyn RuntimeEffectController,
-    ) -> Result<TurnReport> {
-        self.stream_to_with_binding(events, EffectBinding::Borrowed(controller))
-            .await
-    }
-
-    async fn stream_to_with_binding(
-        self,
-        events: &dyn TurnActivitySink,
-        binding: EffectBinding<'_>,
-    ) -> Result<TurnReport> {
-        let turn_id = self.resolved_turn_id(None).unwrap_or_else(fresh_turn_id);
-        let scoped_effect_controller =
-            binding.scoped(lash_core::AdmittedScope::new(self.turn_scope(&turn_id)))?;
-        self.stream_to_with_scope(events, scoped_effect_controller, Some(turn_id))
-            .await
-    }
-
-    async fn stream_to_with_scope(
-        self,
-        events: &dyn TurnActivitySink,
-        scoped_effect_controller: ScopedEffectController<'_>,
-        turn_id: Option<TurnId>,
-    ) -> Result<TurnReport> {
-        let (runtime, input, stop, _cancel_guard) = self.prepare(turn_id)?;
-        stream_prepared_turn(
-            &runtime,
-            input,
-            TurnSinks::turn(events),
-            scoped_effect_controller,
-            stop,
-        )
-        .await
-    }
-
-    fn stream_with_scope(
-        self,
-        scoped_effect_controller: ScopedEffectController<'static>,
-        turn_id: Option<TurnId>,
-    ) -> Result<TurnStream> {
-        let (runtime, input, stop, cancel_guard) = self.prepare(turn_id)?;
-        let (tx, rx) = mpsc::channel(64);
-        let sink = ChannelTurnActivitySink { tx };
-        let completion = tokio::spawn(async move {
-            let _cancel_guard = cancel_guard;
-            stream_prepared_turn(
-                &runtime,
-                input,
-                TurnSinks::turn(&sink),
-                scoped_effect_controller,
-                stop,
-            )
-            .await
-        });
-        Ok(TurnStream {
-            activities: rx,
-            completion,
-        })
-    }
-}
-
-/// A host's cancel token for an adapted turn, and the origin it records.
-type HostCancel = (CancellationToken, Option<String>);
-
-/// Drive an adapted turn over its send: accept, then settle, racing the
-/// host's cancel token when it has one. A fired token asks once for the
-/// input's cancel and keeps waiting: the turn answers Cancelled, as the
-/// inline turn did.
-async fn run_adapted(
-    send: crate::SendBuilder,
-    cancel: Option<HostCancel>,
-    sink: Option<&dyn TurnActivitySink>,
-) -> Result<TurnOutput> {
-    let handle = send.await?;
-    let canceller = handle.cancel();
-    let settle = async move {
-        match sink {
-            Some(sink) => {
-                let input_id = handle.input_id().clone();
-                crate::send::settled_output(input_id, handle.outcome_into(sink).await?)
-            }
-            None => handle.output().await,
-        }
-    };
-    let Some((token, origin)) = cancel else {
-        return settle.await;
-    };
-    tokio::pin!(settle);
-    tokio::select! {
-        output = &mut settle => return output,
-        () = token.cancelled() => {}
-    }
-    let canceller = match origin {
-        Some(origin) => canceller.origin(origin),
-        None => canceller,
-    };
-    canceller.await?;
-    settle.await
-}
-
-/// Lower-level turn execution that exposes the raw runtime event stream.
-///
-/// Reachable via [`TurnBuilder::advanced`]. Most applications should use
-/// [`TurnBuilder::stream_to`] for semantic turn activity; benchmarks and
-/// diagnostics use this when they need the same low-level event stream as the
-/// runtime trace.
-pub struct AdvancedTurn {
-    builder: TurnBuilder,
-}
-
-impl AdvancedTurn {
-    /// Runs the turn with an explicit replay-aware effect scope.
-    pub async fn run_with_scope(
-        self,
-        scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<TurnOutput> {
-        let collector = RunActivityCollector::default();
-        let result = self
-            .stream_to_with_scope(&collector, scoped_effect_controller)
-            .await?;
-        Ok(TurnOutput {
-            result,
-            activities: collector.into_activities(),
-        })
-    }
-
-    pub async fn collect_with_scope(
-        self,
-        events: &dyn TurnActivitySink,
-        scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<TurnOutput> {
-        let collector = RunActivityCollector::default();
-        let fanout = BorrowedTurnActivityFanout {
-            live: events,
-            collector: &collector,
-        };
-        let result = self
-            .stream_to_with_scope(&fanout, scoped_effect_controller)
-            .await?;
-        Ok(TurnOutput {
-            result,
-            activities: collector.into_activities(),
-        })
-    }
-
-    pub async fn stream_to_with_scope(
-        self,
-        events: &dyn TurnActivitySink,
-        scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<TurnReport> {
-        let turn_id = self
-            .builder
-            .resolved_turn_id(Some(&scoped_effect_controller));
-        self.builder
-            .stream_to_with_scope(events, scoped_effect_controller, turn_id)
-            .await
-    }
-
-    pub fn stream_with_scope(
-        self,
-        scoped_effect_controller: ScopedEffectController<'static>,
-    ) -> Result<TurnStream> {
-        let turn_id = self
-            .builder
-            .resolved_turn_id(Some(&scoped_effect_controller));
-        self.builder
-            .stream_with_scope(scoped_effect_controller, turn_id)
-    }
-
-    pub async fn collect_session_events_with_scope(
-        self,
-        events: &dyn EventSink,
-        scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<TurnReport> {
-        let turn_id = self
-            .builder
-            .resolved_turn_id(Some(&scoped_effect_controller));
-        let (runtime, input, stop, _cancel_guard) = self.builder.prepare(turn_id)?;
-        stream_prepared_turn(
-            &runtime,
-            input,
-            TurnSinks::session(events),
-            scoped_effect_controller,
-            stop,
-        )
-        .await
-    }
-}
-
-/// Stream of turn activity.
-pub struct TurnStream {
-    activities: mpsc::Receiver<Result<TurnActivity>>,
-    completion: JoinHandle<Result<TurnReport>>,
-}
-
-impl TurnStream {
-    pub async fn next_activity(&mut self) -> Option<Result<TurnActivity>> {
-        self.activities.recv().await
-    }
-
-    /// Consumes the stream and waits for its final turn output.
-    pub async fn finish(self) -> Result<TurnReport> {
-        match self.completion.await {
-            Ok(result) => result,
-            Err(err) if err.is_panic() => {
-                let payload = err.into_panic();
-                let message = if let Some(message) = payload.downcast_ref::<&str>() {
-                    (*message).to_string()
-                } else if let Some(message) = payload.downcast_ref::<String>() {
-                    message.clone()
-                } else {
-                    "non-string panic payload".to_string()
-                };
-                let failure = EmbedError::Runtime(lash_core::RuntimeError::new(
-                    RuntimeErrorCode::TurnStreamJoin,
-                    format!("turn_panicked: {message}"),
-                ));
-                if lash_core::panic_containment::is_loud() {
-                    std::panic::resume_unwind(payload);
-                }
-                Err(failure)
-            }
-            Err(err) => Err(EmbedError::Runtime(lash_core::RuntimeError::new(
-                RuntimeErrorCode::TurnStreamJoin,
-                format!("turn stream task failed: {err}"),
-            ))),
-        }
-    }
-}
-
-impl Stream for TurnStream {
-    type Item = Result<TurnActivity>;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.activities.poll_recv(cx)
-    }
-}
-
-/// Builder for configuring queued turn.
-pub struct QueuedTurnBuilder {
-    pub(crate) runtime: RuntimeHandle,
-    pub(crate) effect_host: Arc<dyn EffectHost>,
-    pub(crate) stop: LocalTurnStop,
-    pub(crate) cancels: TurnCancelRegistry,
-    pub(crate) turn_id: Option<TurnId>,
-    pub(crate) drain_id: Option<String>,
-}
-
-impl QueuedTurnBuilder {
-    pub fn cancel(mut self, cancel: CancellationToken) -> Self {
-        self.stop = LocalTurnStop::from_token(cancel, None);
-        self
-    }
-
-    /// Lash records the value without interpreting it.
-    pub fn cancel_with_origin(mut self, cancel: CancellationToken, origin: Option<String>) -> Self {
-        self.stop = LocalTurnStop::from_token(cancel, origin);
-        self
-    }
-
-    /// Sets the queued-run identity and its first physical turn ID. Reusing
-    /// this identity resumes unfinished work or returns its terminal receipt.
-    /// Do not combine this with [`Self::drain_id`].
-    pub fn turn_id(mut self, id: impl Into<TurnId>) -> Self {
-        self.turn_id = Some(id.into());
-        self
-    }
-
-    /// Replaces automatic queue selection with one exact, idempotent batch-ID set.
-    ///
-    /// Duplicate IDs are coalesced by first occurrence. Missing durable rows
-    /// count as already satisfied; all still-present rows must be claimable as
-    /// one composition or Lash refuses the drain before executing a turn.
-    pub fn batch_ids(
-        self,
-        batch_ids: impl IntoIterator<Item = impl Into<lash_core::BatchId>>,
-    ) -> SelectedQueuedTurnBuilder {
-        SelectedQueuedTurnBuilder {
-            builder: self,
-            batch_ids: batch_ids.into_iter().map(Into::into).collect(),
-        }
-    }
-
-    /// Sets the durable idempotency key for a retried queued-work drain.
-    ///
-    /// Persistence selects an identity when omitted. Explicit identities return
-    /// their terminal receipt on later retries and never consume new arrivals.
-    ///
-    /// The drain is the durable owner of the children it starts, and its end
-    /// is its own write (ADR 0094, FIG-3419): the drain-end receipt and the
-    /// parent-end ledger row are keyed on this identity, so a retry under the
-    /// same `drain_id` is what completes an interrupted drain's end.
-    ///
-    /// Do not combine this with [`Self::turn_id`].
-    pub fn drain_id(mut self, drain_id: impl Into<String>) -> Self {
-        self.drain_id = Some(drain_id.into());
-        self
-    }
-
-    /// Drains the next claimable queued work and runs it as one turn.
-    ///
-    /// A drain that runs no turn returns [`QueuedTurnDrain::Empty`] carrying the
-    /// reason, which the host must interpret rather than guess at.
-    pub async fn run(self) -> Result<QueuedTurnDrain<TurnOutput>> {
-        let collector = RunActivityCollector::default();
-        Ok(self.stream_to(&collector).await?.map(|result| TurnOutput {
-            result,
-            activities: collector.into_activities(),
-        }))
-    }
-
-    pub async fn run_with_effects(
-        self,
-        controller: &dyn RuntimeEffectController,
-    ) -> Result<QueuedTurnDrain<TurnOutput>> {
-        let collector = RunActivityCollector::default();
-        Ok(self
-            .stream_to_with_effects(&collector, controller)
-            .await?
-            .map(|result| TurnOutput {
-                result,
-                activities: collector.into_activities(),
-            }))
-    }
-
-    /// Drains queued work while sending semantic activity to the supplied sink.
-    pub async fn stream_to(
-        self,
-        events: &dyn TurnActivitySink,
-    ) -> Result<QueuedTurnDrain<TurnReport>> {
-        let effect_host = Arc::clone(&self.effect_host);
-        self.stream_to_with_binding(events, EffectBinding::Host(effect_host.as_ref()))
-            .await
-    }
-
-    pub fn advanced(self) -> AdvancedQueuedTurn {
-        AdvancedQueuedTurn { builder: self }
-    }
-
-    fn validate_scope_identity_configuration(&self) -> Result<()> {
-        if self.drain_id.is_some() && self.turn_id.is_some() {
-            return Err(EmbedError::Runtime(lash_core::RuntimeError::new(
-                RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
-                "`drain_id(...)` and `turn_id(...)` are mutually exclusive; keep `drain_id(...)` as the durable idempotency key for retried drains, or keep `turn_id(...)` as the host-minted physical turn identity",
-            )));
-        }
-        Ok(())
-    }
-
-    fn validate_queued_scope(&self, controller: &ScopedEffectController<'_>) -> Result<()> {
-        self.validate_scope_identity_configuration()?;
-        let scope = controller.execution_scope();
-        let explicit_id = self.drain_id.as_deref().or(self.turn_id.as_deref());
-        if !matches!(scope, lash_core::ExecutionScope::QueueDrain { .. })
-            || explicit_id.is_some_and(|id| id != scope.id())
-        {
-            return Err(EmbedError::Runtime(lash_core::RuntimeError::new(
-                RuntimeErrorCode::ExecutionScopeTurnIdMismatch,
-                "queued execution requires its admitted queue-drain scope",
-            )));
-        }
-        Ok(())
-    }
-
-    pub async fn stream_to_with_effects(
-        self,
-        events: &dyn TurnActivitySink,
-        controller: &dyn RuntimeEffectController,
-    ) -> Result<QueuedTurnDrain<TurnReport>> {
-        self.stream_to_with_binding(events, EffectBinding::Borrowed(controller))
-            .await
-    }
-
-    async fn stream_to_with_binding(
-        self,
-        events: &dyn TurnActivitySink,
-        binding: EffectBinding<'_>,
-    ) -> Result<QueuedTurnDrain<TurnReport>> {
-        self.validate_scope_identity_configuration()?;
-        let identity = self
-            .drain_id
-            .clone()
-            .or_else(|| self.turn_id.as_ref().map(ToString::to_string))
-            .map(|id| self.runtime.observe().queue_drain_scope(id));
-        let _cancel_guard = self.cancels.register(self.stop.clone());
-        stream_next_queued_prepared_turn(
-            &self.runtime,
-            TurnSinks::turn(events),
-            binding.queued(identity),
-            self.stop,
-        )
-        .await
-    }
-
-    async fn stream_to_with_scope(
-        self,
-        events: &dyn TurnActivitySink,
-        scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<QueuedTurnDrain<TurnReport>> {
-        self.validate_queued_scope(&scoped_effect_controller)?;
-        self.stream_to_with_resolved_scope(events, scoped_effect_controller)
-            .await
-    }
-
-    async fn stream_to_with_resolved_scope(
-        self,
-        events: &dyn TurnActivitySink,
-        scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<QueuedTurnDrain<TurnReport>> {
-        let Self {
-            runtime,
-            effect_host: _,
-            stop,
-            cancels,
-            turn_id: _,
-            drain_id: _,
-        } = self;
-        let _cancel_guard = cancels.register(stop.clone());
-        stream_next_queued_prepared_turn(
-            &runtime,
-            TurnSinks::turn(events),
-            QueuedEffectSource::Scoped(scoped_effect_controller),
-            stop,
-        )
-        .await
-    }
-}
-
-/// Builder for one exact, idempotent queued-work drain.
-///
-/// Repeated IDs are coalesced by first occurrence. Missing rows are satisfied;
-/// present rows must form one claim or Lash refuses before selected execution.
-pub struct SelectedQueuedTurnBuilder {
-    builder: QueuedTurnBuilder,
-    batch_ids: Vec<lash_core::BatchId>,
-}
-
-impl SelectedQueuedTurnBuilder {
-    /// Installs a process-local cancellation token for any selected turn.
-    /// A fully satisfied drain starts no turn for the token to cancel.
-    pub fn cancel(mut self, cancel: CancellationToken) -> Self {
-        self.builder = self.builder.cancel(cancel);
-        self
-    }
-
-    /// Installs a cancellation token and opaque host origin for any selected
-    /// turn. Lash does not interpret the origin.
-    pub fn cancel_with_origin(mut self, cancel: CancellationToken, origin: Option<String>) -> Self {
-        self.builder = self.builder.cancel_with_origin(cancel, origin);
-        self
-    }
-
-    /// Mutually exclusive with [`Self::drain_id`]. See
-    /// [`QueuedTurnBuilder::turn_id`] for the identity contracts.
-    pub fn turn_id(mut self, id: impl Into<TurnId>) -> Self {
-        self.builder = self.builder.turn_id(id);
-        self
-    }
-
-    /// By default persistence admits a fresh identity or resumes the matching pending run.
-    ///
-    /// Mutually exclusive with [`Self::turn_id`]. See
-    /// [`QueuedTurnBuilder::drain_id`] for the identity contracts.
-    pub fn drain_id(mut self, drain_id: impl Into<String>) -> Self {
-        self.builder = self.builder.drain_id(drain_id);
-        self
-    }
-
-    /// Drains exactly and collects any turn activity. Fully satisfied means
-    /// [`SelectedQueuedWorkDrainOutcome::settled_without_selected_turn`] is `true`; unclaimable means
-    /// a typed refusal before provider or tool execution.
-    pub async fn run(self) -> Result<SelectedQueuedWorkDrainOutcome<TurnOutput>> {
-        let collector = RunActivityCollector::default();
-        let outcome = self.stream_to(&collector).await?;
-        Ok(SelectedQueuedWorkDrainOutcome {
-            turn: outcome.turn.map(|result| TurnOutput {
-                result,
-                activities: collector.into_activities(),
-            }),
-            receipt: outcome.receipt,
-            satisfied: outcome.satisfied,
-        })
-    }
-
-    pub async fn run_with_effects(
-        self,
-        controller: &dyn RuntimeEffectController,
-    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnOutput>> {
-        let collector = RunActivityCollector::default();
-        let outcome = self.stream_to_with_effects(&collector, controller).await?;
-        Ok(SelectedQueuedWorkDrainOutcome {
-            turn: outcome.turn.map(|result| TurnOutput {
-                result,
-                activities: collector.into_activities(),
-            }),
-            receipt: outcome.receipt,
-            satisfied: outcome.satisfied,
-        })
-    }
-
-    /// Drains exactly and sends any selected turn activity to `events`.
-    /// Missing IDs succeed; present IDs must be claimable together.
-    pub async fn stream_to(
-        self,
-        events: &dyn TurnActivitySink,
-    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
-        let effect_host = Arc::clone(&self.builder.effect_host);
-        self.stream_to_with_binding(events, EffectBinding::Host(effect_host.as_ref()))
-            .await
-    }
-
-    /// Exposes the scoped-effect entry point for hosts that already own a
-    /// [`ScopedEffectController`].
-    pub fn advanced(self) -> AdvancedSelectedQueuedTurn {
-        AdvancedSelectedQueuedTurn { builder: self }
-    }
-
-    pub async fn stream_to_with_effects(
-        self,
-        events: &dyn TurnActivitySink,
-        controller: &dyn RuntimeEffectController,
-    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
-        self.stream_to_with_binding(events, EffectBinding::Borrowed(controller))
-            .await
-    }
-
-    async fn stream_to_with_binding(
-        self,
-        events: &dyn TurnActivitySink,
-        binding: EffectBinding<'_>,
-    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
-        self.builder.validate_scope_identity_configuration()?;
-        let identity = self
-            .builder
-            .drain_id
-            .clone()
-            .or_else(|| self.builder.turn_id.as_ref().map(ToString::to_string))
-            .map(|id| self.builder.runtime.observe().queue_drain_scope(id));
-        let _cancel_guard = self.builder.cancels.register(self.builder.stop.clone());
-        stream_selected_queued_prepared_turn(
-            &self.builder.runtime,
-            TurnSinks::turn(events),
-            binding.queued(identity),
-            self.builder.stop,
-            &self.batch_ids,
-        )
-        .await
-    }
-
-    async fn stream_to_with_scope(
-        self,
-        events: &dyn TurnActivitySink,
-        scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
-        self.builder
-            .validate_queued_scope(&scoped_effect_controller)?;
-        self.stream_to_with_resolved_scope(events, scoped_effect_controller)
-            .await
-    }
-
-    async fn stream_to_with_resolved_scope(
-        self,
-        events: &dyn TurnActivitySink,
-        scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
-        let Self { builder, batch_ids } = self;
-        let QueuedTurnBuilder {
-            runtime,
-            effect_host: _,
-            stop,
-            cancels,
-            turn_id: _,
-            drain_id: _,
-        } = builder;
-        let _cancel_guard = cancels.register(stop.clone());
-        stream_selected_queued_prepared_turn(
-            &runtime,
-            TurnSinks::turn(events),
-            QueuedEffectSource::Scoped(scoped_effect_controller),
-            stop,
-            &batch_ids,
-        )
-        .await
-    }
-}
-
-pub struct AdvancedQueuedTurn {
-    builder: QueuedTurnBuilder,
-}
-
-/// Advanced selected-drain entry point for an already scoped effect controller.
-///
-/// The caller supplies replay scope; exact satisfaction/refusal is unchanged.
-pub struct AdvancedSelectedQueuedTurn {
-    builder: SelectedQueuedTurnBuilder,
-}
-
-impl AdvancedSelectedQueuedTurn {
-    /// Drains exactly, using `scoped_effect_controller` for any selected turn.
-    ///
-    /// A successful outcome without a turn means the selection was fully
-    /// satisfied; a present but unclaimable selection is returned as an error.
-    pub async fn stream_to_with_scope(
-        self,
-        events: &dyn TurnActivitySink,
-        scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
-        self.builder
-            .stream_to_with_scope(events, scoped_effect_controller)
-            .await
-    }
-}
-
-impl AdvancedQueuedTurn {
-    /// Drains queued work in an explicit effect scope while streaming activity.
-    pub async fn stream_to_with_scope(
-        self,
-        events: &dyn TurnActivitySink,
-        scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<QueuedTurnDrain<TurnReport>> {
-        self.builder
-            .stream_to_with_scope(events, scoped_effect_controller)
-            .await
-    }
-}
-
 pub(crate) fn fresh_turn_id() -> TurnId {
     TurnId::from(
         lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string())
@@ -1022,44 +103,11 @@ pub(crate) fn fresh_turn_id() -> TurnId {
     )
 }
 
-pub(crate) async fn stream_next_queued_prepared_turn(
-    runtime: &RuntimeHandle,
-    sinks: TurnSinks<'_>,
-    source: QueuedEffectSource<'_>,
-    stop: LocalTurnStop,
-) -> Result<QueuedTurnDrain<TurnReport>> {
-    let drain = Box::pin(stream_next_queued_prepared_assembled(
-        runtime, sinks, source, stop,
-    ))
-    .await?;
-    Ok(drain.map(TurnReport::from_assembled))
-}
-
-pub(crate) async fn stream_next_queued_prepared_assembled(
-    runtime: &RuntimeHandle,
-    sinks: TurnSinks<'_>,
-    source: QueuedEffectSource<'_>,
-    stop: LocalTurnStop,
-) -> Result<QueuedTurnDrain<AssembledTurn>> {
-    let writer_handle = runtime.writer();
-    let mut writer = writer_handle.lock().await;
-    let observation_sink =
-        SessionObservationTurnActivitySink::new(runtime.clone(), sinks.turn_events());
-    let mut opts = QueuedTurnOptions::new(CancellationToken::new(), source)
-        .with_turn_events(&observation_sink)
-        .with_local_stop(stop);
-    if let Some(events) = sinks.events() {
-        opts = opts.with_events(events);
-    }
-    let drain = writer.stream_next_queued_work(opts).await?;
-    runtime.publish_from(&writer);
-    Ok(drain)
-}
-
 /// Drive `request` on `runtime`'s session to a stop through the session drive
 /// (FIG-3600), recording every turn activity on the session's observation.
 pub(crate) async fn drive_session_observed(
     runtime: &RuntimeHandle,
+    binding: &lash_core::StoreBindingId,
     controller: &ScopedEffectController<'_>,
     request: &lash_core::engine::DriveRequest,
 ) -> std::result::Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
@@ -1076,7 +124,7 @@ pub(crate) async fn drive_session_observed(
     runtime.publish_from(&writer);
     let (outcome, roots) = outcome?;
     for root in roots {
-        crate::send::deposit_settled_root(&request.session, root);
+        crate::send::deposit_settled_root(binding, &request.session, root);
     }
     Ok(outcome)
 }
@@ -1099,6 +147,7 @@ pub(crate) async fn admit_drive_observed(
 /// turn activity on the session's observation.
 pub(crate) async fn run_admitted_root_observed(
     runtime: &RuntimeHandle,
+    binding: &lash_core::StoreBindingId,
     controller: &ScopedEffectController<'_>,
     admitted: lash_core::engine::Admitted,
 ) -> std::result::Result<lash_core::engine::RootOutcome, lash_core::engine::DriveAbort> {
@@ -1117,95 +166,22 @@ pub(crate) async fn run_admitted_root_observed(
     runtime.publish_from(&writer);
     let report = report?;
     let outcome = report.outcome.clone();
-    crate::send::deposit_settled_root(&session, report);
+    crate::send::deposit_settled_root(binding, &session, report);
     Ok(outcome)
-}
-
-pub(crate) async fn stream_selected_queued_prepared_turn(
-    runtime: &RuntimeHandle,
-    sinks: TurnSinks<'_>,
-    source: QueuedEffectSource<'_>,
-    stop: LocalTurnStop,
-    batch_ids: &[lash_core::BatchId],
-) -> Result<SelectedQueuedWorkDrainOutcome<TurnReport>> {
-    let outcome = Box::pin(stream_selected_queued_prepared_assembled(
-        runtime, sinks, source, stop, batch_ids,
-    ))
-    .await?;
-    Ok(SelectedQueuedWorkDrainOutcome {
-        turn: outcome.turn.map(TurnReport::from_assembled),
-        satisfied: outcome.satisfied,
-        receipt: outcome.receipt,
-    })
-}
-
-pub(crate) async fn stream_selected_queued_prepared_assembled(
-    runtime: &RuntimeHandle,
-    sinks: TurnSinks<'_>,
-    source: QueuedEffectSource<'_>,
-    stop: LocalTurnStop,
-    batch_ids: &[lash_core::BatchId],
-) -> Result<SelectedQueuedWorkDrainOutcome<AssembledTurn>> {
-    let writer_handle = runtime.writer();
-    let mut writer = writer_handle.lock().await;
-    let observation_sink =
-        SessionObservationTurnActivitySink::new(runtime.clone(), sinks.turn_events());
-    let mut opts = QueuedTurnOptions::new(CancellationToken::new(), source)
-        .with_turn_events(&observation_sink)
-        .with_local_stop(stop);
-    if let Some(events) = sinks.events() {
-        opts = opts.with_events(events);
-    }
-    let outcome = match writer.stream_selected_queued_work(opts, batch_ids).await {
-        Ok(outcome) => outcome,
-        Err(CoreSelectedQueuedWorkDrainError::Runtime(error)) => {
-            return Err(error.into());
-        }
-        Err(CoreSelectedQueuedWorkDrainError::Refused { cause }) => {
-            return Err(EmbedError::SelectedQueuedWorkDrainRefused { cause });
-        }
-        // Future drain errors still fail the turn without claiming a known refusal cause.
-        Err(error) => {
-            return Err(lash_core::RuntimeError::new(
-                lash_core::RuntimeErrorCode::QueuedWork,
-                error.to_string(),
-            )
-            .into());
-        }
-    };
-    runtime.publish_from(&writer);
-    Ok(outcome)
-}
-
-fn turn_options<'a>(
-    events: Option<&'a dyn EventSink>,
-    turn_events: &'a dyn TurnActivitySink,
-    scoped_effect_controller: ScopedEffectController<'a>,
-    stop: LocalTurnStop,
-) -> lash_core::facade_support::TurnOptions<'a> {
-    let mut opts = lash_core::facade_support::TurnOptions::new(
-        CancellationToken::new(),
-        scoped_effect_controller,
-    )
-    .with_local_stop(stop);
-    if let Some(events) = events {
-        opts = opts.with_events(events);
-    }
-    opts.with_turn_events(turn_events)
 }
 
 /// Records every turn activity on the session's observation, addressed to
 /// the physical turn that produced it, so a send handle can adopt the
 /// activity of its input's root (FIG-3600 S5b). An activity published
 /// without a turn is addressed to the last turn this sink saw.
-struct SessionObservationTurnActivitySink<'a> {
+pub(crate) struct SessionObservationTurnActivitySink<'a> {
     runtime: RuntimeHandle,
     live: Option<&'a dyn TurnActivitySink>,
     current_turn: StdMutex<Option<TurnId>>,
 }
 
 impl<'a> SessionObservationTurnActivitySink<'a> {
-    fn new(runtime: RuntimeHandle, live: Option<&'a dyn TurnActivitySink>) -> Self {
+    pub(crate) fn new(runtime: RuntimeHandle, live: Option<&'a dyn TurnActivitySink>) -> Self {
         Self {
             runtime,
             live,
@@ -1237,88 +213,6 @@ impl TurnActivitySink for SessionObservationTurnActivitySink<'_> {
             live.emit_for_turn(turn_id, activity).await;
         }
     }
-}
-
-struct ChannelTurnActivitySink {
-    tx: mpsc::Sender<Result<TurnActivity>>,
-}
-
-#[async_trait]
-impl TurnActivitySink for ChannelTurnActivitySink {
-    async fn emit(&self, activity: TurnActivity) {
-        let _ = self.tx.send(Ok(activity)).await;
-    }
-}
-pub(crate) async fn stream_prepared_turn(
-    runtime: &RuntimeHandle,
-    input: TurnInput,
-    sinks: TurnSinks<'_>,
-    scoped_effect_controller: ScopedEffectController<'_>,
-    stop: LocalTurnStop,
-) -> Result<TurnReport> {
-    let turn = Box::pin(stream_prepared_assembled(
-        runtime,
-        input,
-        sinks,
-        scoped_effect_controller,
-        stop,
-    ))
-    .await?;
-    Ok(TurnReport::from_assembled(turn))
-}
-
-pub(crate) async fn stream_prepared_assembled(
-    runtime: &RuntimeHandle,
-    input: TurnInput,
-    sinks: TurnSinks<'_>,
-    scoped_effect_controller: ScopedEffectController<'_>,
-    stop: LocalTurnStop,
-) -> Result<AssembledTurn> {
-    let turn = Box::pin(stream_prepared_agent_frame_run(
-        runtime,
-        input,
-        sinks,
-        scoped_effect_controller,
-        stop,
-    ))
-    .await?;
-    turn.into_final_turn().ok_or_else(|| {
-        EmbedError::Runtime(lash_core::RuntimeError::new(
-            RuntimeErrorCode::EmptyAgentFrameRun,
-            "runtime completed without an assembled turn",
-        ))
-    })
-}
-
-pub(crate) async fn stream_prepared_agent_frame_run(
-    runtime: &RuntimeHandle,
-    input: TurnInput,
-    sinks: TurnSinks<'_>,
-    scoped_effect_controller: ScopedEffectController<'_>,
-    stop: LocalTurnStop,
-) -> Result<lash_core::facade_support::AgentFrameRun> {
-    let writer_handle = runtime.writer();
-    let mut writer = writer_handle.lock().await;
-    if let Some(extension) = input.protocol_extension.as_ref() {
-        writer
-            .validate_protocol_turn_extension(extension)
-            .await
-            .map_err(EmbedError::Session)?;
-    }
-    let observation_sink =
-        SessionObservationTurnActivitySink::new(runtime.clone(), sinks.turn_events());
-    let turn = Box::pin(writer.stream_turn_with_agent_frames(
-        input,
-        turn_options(
-            sinks.events(),
-            &observation_sink,
-            scoped_effect_controller,
-            stop,
-        ),
-    ))
-    .await?;
-    runtime.publish_from(&writer);
-    Ok(turn)
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -1587,35 +481,20 @@ impl TurnOutput {
     }
 }
 
-struct BorrowedTurnActivityFanout<'a> {
-    live: &'a dyn TurnActivitySink,
-    collector: &'a RunActivityCollector,
-}
-
-#[async_trait]
-impl TurnActivitySink for BorrowedTurnActivityFanout<'_> {
-    async fn emit(&self, activity: TurnActivity) {
-        self.live.emit(activity.clone()).await;
-        self.collector.emit(activity).await;
-    }
-}
-
+#[cfg(test)]
 #[derive(Default)]
 pub(crate) struct RunActivityCollector {
     activities: Arc<StdMutex<Vec<TurnActivity>>>,
 }
 
+#[cfg(test)]
 impl RunActivityCollector {
-    fn into_activities(self) -> Vec<TurnActivity> {
-        self.activities.lock_recover().clone()
-    }
-
-    #[cfg(test)]
     pub(crate) fn snapshot(&self) -> Vec<TurnActivity> {
         self.activities.lock_recover().clone()
     }
 }
 
+#[cfg(test)]
 #[async_trait]
 impl TurnActivitySink for RunActivityCollector {
     async fn emit(&self, activity: TurnActivity) {

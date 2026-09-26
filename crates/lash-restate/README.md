@@ -1,42 +1,30 @@
 # lash-restate
 
-`lash-restate` adapts Lash's scoped effect-controller boundary to Restate
-handlers. Use it inside a Restate service, object, or workflow handler and pass
-the resulting `RestateRuntimeEffectController` (a `RuntimeEffectController`)
-into Lash turn execution.
+`lash-restate` is Lash's Restate engine. A deployment starts its endpoint from
+`RestateEngine::endpoint_builder`, which binds Lash's own services beside the
+host's: the `LashSession` virtual object drives each session and the `LashTurn`
+workflow runs each root it admits, through a `RestateRuntimeEffectController`
+(a `RuntimeEffectController`). A host handler never runs a turn (FIG-3600). It
+sends and, where it waits, waits durably:
 
-```rust,no_run
-use lash_restate::RestateRuntimeEffectController;
-use restate_sdk::prelude::*;
-
-#[restate_sdk::workflow]
-pub trait AgentTurnWorkflow {
-    async fn run(req: Json<TurnRequest>) -> HandlerResult<Json<TurnResponse>>;
-}
-
-pub struct AgentTurnWorkflowImpl;
-
-impl AgentTurnWorkflow for AgentTurnWorkflowImpl {
-    async fn run(
-        &self,
-        ctx: WorkflowContext<'_>,
-        Json(req): Json<TurnRequest>,
-    ) -> HandlerResult<Json<TurnResponse>> {
-        let effect_controller = RestateRuntimeEffectController::new(ctx, authority_id());
-        let response = run_lash_turn(&effect_controller, req)
-            .await
-            .map_err(TerminalError::from_error)?;
-        Ok(Json(response))
-    }
-}
+```rust,ignore
+// Inside a service, workflow, or shared handler: `ctx` holds no exclusive lock.
+let handle = session
+    .send(lash::TurnInput::text(request.text))
+    .id(request.turn_id)
+    .accept_restate(&ctx)
+    .await?;
+let outcome = handle
+    .outcome_restate(&ctx, lash::restate::RestateWait::new())
+    .await?;
 ```
 
-The application owns `authority_id` (its `RestateEffectHost`'s authority id)
-and `run_lash_turn`: open the `LashSession` from stable
-request data and call
-`session.turn(input).turn_id(turn_id).run_with_effects(&controller)`
-for the Restate-backed turn. Restate recovery is handler replay with the same turn id
-and request data, not a Lash-owned in-flight checkpoint reload.
+`accept_restate` journals the input id before it accepts, so every replay of the
+handler submits under the same id; `outcome_restate` follows the root in bounded,
+journaled probes, so the wait survives suspension, replay, and a turn longer than
+the invocation's timers. An exclusive object handler cannot wait for a root its
+own object may serve: it accepts, returns the receipt, and a shared handler or
+the caller waits.
 
 The adapter records atomic Lash LLM calls, tool attempts, independent direct
 completions, checkpoints, and execution-surface syncs with Restate

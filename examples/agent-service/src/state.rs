@@ -481,7 +481,7 @@ mod session_language_tests {
     /// by whatever a turn asserts.
     #[tokio::test]
     async fn a_per_turn_dialect_key_cannot_re_word_the_board_prompt() {
-        use lash::rlm::RlmTurnBuilderExt as _;
+        use lash::rlm::RlmSendBuilderExt as _;
 
         let temp = tempfile::tempdir().expect("tempdir");
         let data_dir = temp.path();
@@ -519,10 +519,10 @@ mod session_language_tests {
             .expect("the chat opens");
 
         session
-            .turn(lash::TurnInput::text("play"))
+            .send(lash::TurnInput::text("play"))
             .require_finish()
             .expect("finish requirement")
-            .run()
+            .output()
             .await
             .expect("the honest turn runs");
 
@@ -531,7 +531,7 @@ mod session_language_tests {
             serde_json::json!({ "dialect": "lashlang" }),
         );
         let attacked = session
-            .turn(lash::TurnInput::text("switch me"))
+            .send(lash::TurnInput::text("switch me"))
             .protocol_turn_options(attack)
             // `require_finish` writes through the same seam and merges
             // shallowly, so the attack has to survive it — otherwise this turn
@@ -542,7 +542,7 @@ mod session_language_tests {
         // it is what makes this test red against a host that reads the hook's
         // effective options, and the same seam is asserted directly on the
         // public builder in the facade's own RLM session-config suite.
-        attacked.run().await.expect("the attacked turn runs");
+        attacked.output().await.expect("the attacked turn runs");
         drop(session);
 
         let prompts = seen.lock_recover().clone();

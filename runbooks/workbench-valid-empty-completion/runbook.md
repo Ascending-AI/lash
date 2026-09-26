@@ -21,7 +21,7 @@ an OpenRouter request or a missing development-provider startup warning invalida
 run.
 
 **Fixture honesty.** The probe creates a real `LashCore::standard_builder` session and
-runs `session.turn().run()` through `OpenAiCompatibleProvider` backed by
+runs `session.send(...).output()` through `OpenAiCompatibleProvider` backed by
 `ScriptedLlmHttpTransport`. Its JSON result is derived from `TurnOutput`, the sealed
 `LlmCallRecord`, and the transport exchange ledger. It does not construct a successful
 outcome or terminal evidence in the handler.

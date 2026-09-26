@@ -549,8 +549,8 @@ async fn server_death_is_a_typed_failure_and_the_next_turn_uses_a_respawned_serv
         let session = session.clone();
         async move {
             session
-                .turn(TurnInput::text("@lashbot count the workspace"))
-                .run()
+                .send(TurnInput::text("@lashbot count the workspace"))
+                .output()
                 .await
         }
     });

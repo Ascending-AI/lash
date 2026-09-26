@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use anyhow::{Context, Result};
 use lash::provider::{ProviderHandle, ProviderOptions};
-use lash::rlm::RlmTurnBuilderExt as _;
+use lash::rlm::RlmSendBuilderExt as _;
 use lash::{LashCore, TurnEvent, TurnInput};
 use lash_provider_openai::{OpenAiCompat, OpenAiCompatibleProvider};
 
@@ -276,7 +276,7 @@ async fn run_turn(
         .open()
         .await
         .context("open toolbench session")?;
-    let turn = session.turn(TurnInput::text(
+    let turn = session.send(TurnInput::text(
         task.prompt_for(channel == crate::ChannelSelection::Standard),
     ));
     let turn = if channel == crate::ChannelSelection::Standard {
@@ -285,7 +285,7 @@ async fn run_turn(
         turn.require_finish().context("require RLM finish value")?
     };
     let result = turn
-        .stream_to(telemetry.as_ref())
+        .output_into(telemetry.as_ref())
         .await
         .context("run toolbench turn")?;
     let decisions = session
@@ -390,7 +390,6 @@ async fn build_turn_core(
         .trace_sink(Arc::new(telemetry.capture.clone()))
         .trace_level(lash::tracing::TraceLevel::Extended)
         .no_progress_budget(lash::NoProgressBudget::Unbounded)
-        .without_queued_work()
         .plugins(lash::plugins::runtime_plugin_stack().configure(|stack| {
             stack.push(telemetry.plugin());
             if let Some(marker) = shutdown_marker {

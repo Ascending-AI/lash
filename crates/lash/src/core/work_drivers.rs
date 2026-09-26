@@ -99,6 +99,8 @@ pub(super) struct NativeSubstrateSetup {
     pub(super) process: ProcessPortSetup,
     pub(super) queued: QueuedPortSetup,
     pub(super) wake: WakeDeliveryDriverSetup,
+    /// The backend's store binding: the settled-root mailbox keys by it.
+    pub(super) store_binding: lash_core::StoreBindingId,
 }
 
 #[derive(Clone)]
@@ -175,15 +177,28 @@ pub(crate) struct ResolvedQueuedWork {
     wake: std::sync::Mutex<Option<facade_support::WakeDeliveryDriver>>,
     /// No engine would drive an accepted input (FIG-3600 S5b).
     refuses_sends: bool,
+    /// The store binding the core's sessions live in.
+    store_binding: lash_core::StoreBindingId,
 }
 
 impl ResolvedQueuedWork {
-    fn new(port: Arc<dyn SessionWorkEngine>, refuses_sends: bool) -> Self {
+    fn new(
+        port: Arc<dyn SessionWorkEngine>,
+        refuses_sends: bool,
+        store_binding: lash_core::StoreBindingId,
+    ) -> Self {
         Self {
             port,
             wake: std::sync::Mutex::new(None),
             refuses_sends,
+            store_binding,
         }
+    }
+
+    /// The store binding the core's sessions live in: with the session and
+    /// the input, what names one input across the stores of one process.
+    pub(crate) fn store_binding(&self) -> &lash_core::StoreBindingId {
+        &self.store_binding
     }
 
     /// Whether a send must be refused before acceptance: no engine and no
@@ -358,7 +373,11 @@ impl NativeSubstrateSlot {
                         (wiring, true)
                     }
                 };
-                let queued = Arc::new(ResolvedQueuedWork::new(queued_port, refuses_sends));
+                let queued = Arc::new(ResolvedQueuedWork::new(
+                    queued_port,
+                    refuses_sends,
+                    self.setup.store_binding.clone(),
+                ));
                 let setup = &self.setup.wake;
                 let queued_for_wake: Arc<dyn SessionWorkEngine> = queued.clone();
                 let wake = facade_support::wake_delivery_driver_with_work_cadence(

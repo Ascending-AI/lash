@@ -132,7 +132,7 @@ async fn cache_dialect_rlm_prompt_prefix_is_byte_stable_across_iterations() {
                 "prefix-stability-turn",
                 Arc::new(super::runtime_proofs::RuntimeProofRecordingEvents::default()),
                 Arc::new(|session: &lash::LashSession| {
-                    Ok(session.turn(lash::TurnInput::text("inspect")))
+                    Ok(session.send(lash::TurnInput::text("inspect")))
                 }),
             )
             .await
@@ -1007,7 +1007,7 @@ async fn final_value_semantic_channel_proof_uses_runtime_outcome_and_event() {
 
 #[tokio::test]
 async fn live_provider_failure_oracle_bites_on_a_committing_turn() {
-    // END-TO-END NEGATIVE: drive a REAL `session.turn().run()` against a VALID
+    // END-TO-END NEGATIVE: drive a REAL `session.send().output()` against a VALID
     // success script that streams AND COMMITS the leak prose (the same prose a
     // failure turn must NOT commit). The live-failure oracle MUST fail on it —
     // proving the "no committed output" assertion bites end-to-end, not just on

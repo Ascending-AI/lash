@@ -285,20 +285,13 @@ async fn race_recovery_worker() -> Result<()> {
     };
     if crash {
         session
-            .durable()
-            .enqueue(TurnInput::text("race, then wait"))
+            .send(TurnInput::text("race, then wait"))
             .id("race-input")
-            .send()
+            .output()
             .await?;
-        session.queued_turn().run().await?;
         panic!("the parent must kill the worker parked at the gate");
     }
-    let report = session
-        .queued_turn()
-        .run()
-        .await?
-        .ran()
-        .expect("the recovered worker resumes the pending run");
+    let report = session.attach_id("race-input").output().await?.result;
     assert_eq!(
         report.final_value(),
         Some(&serde_json::json!("done")),

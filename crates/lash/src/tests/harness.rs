@@ -103,24 +103,6 @@ fn core_rows<T>(
         .expect("decode the catalog rows")
 }
 
-/// Every queued-run receipt the catalog retains.
-pub(crate) fn sqlite_queued_run_count(backend: &lash_sqlite_store::SqliteBackend) -> usize {
-    core_rows(backend, "SELECT count(*) FROM queued_runs", |row| {
-        row.get::<_, i64>(0)
-    })[0] as usize
-}
-
-/// Every queued-work batch in enqueue order, with the claim that holds it.
-pub(crate) fn sqlite_queued_work_claims(
-    backend: &lash_sqlite_store::SqliteBackend,
-) -> Vec<(String, Option<String>)> {
-    core_rows(
-        backend,
-        "SELECT batch_id, claim_id FROM queued_work_batches ORDER BY enqueue_seq",
-        |row| Ok((row.get(0)?, row.get(1)?)),
-    )
-}
-
 /// Every turn input the catalog retains, with its lifecycle state.
 pub(crate) fn sqlite_turn_input_states(
     backend: &lash_sqlite_store::SqliteBackend,
@@ -321,4 +303,71 @@ where
         .expect("spawn stack-budget test thread")
         .join()
         .expect("stack-budget test thread")
+}
+
+/// `send`'s settled report streamed into `sink`, the way a host with a
+/// cancel token of its own waits: when `cancel` fires, the input is
+/// cancelled once, recording `origin`, and the wait goes on to the answer
+/// the cancel produced.
+pub(crate) async fn output_into_cancelled_by(
+    send: crate::SendBuilder,
+    sink: &dyn TurnActivitySink,
+    cancel: CancellationToken,
+    origin: Option<String>,
+) -> Result<TurnReport> {
+    let handle = send.await?;
+    let canceller = handle.cancel();
+    let settle = handle.output_into(sink);
+    tokio::pin!(settle);
+    tokio::select! {
+        report = &mut settle => return report,
+        () = cancel.cancelled() => {}
+    }
+    let canceller = match origin {
+        Some(origin) => canceller.origin(origin),
+        None => canceller,
+    };
+    canceller.await?;
+    settle.await
+}
+
+/// Drain `session`'s next claimable queued work in the caller's task, as one
+/// turn, through lash-core's queued-run wrapper.
+///
+/// Hosts no longer drain (D5): the engine's session drive is the only
+/// executor, and `send()` is the only way in. These laws pin lash-core's
+/// queued-run settlement (a pending run kept for a redrive, a deterministic
+/// failure settled once, a drain resumed after a crash), which only this
+/// wrapper exercises until FIG-3668 retires it with the in-process engine.
+/// `drain_id` (or `turn_id`) names the drain scope; a retry under the same
+/// name resumes or answers that run.
+pub(crate) async fn drain_queued(
+    session: &crate::LashSession,
+    drain_id: Option<&str>,
+) -> Result<lash_core::facade_support::QueuedTurnDrain<crate::TurnOutput>> {
+    let runtime = session.runtime.clone();
+    let host = session.effect_host();
+    let identity = drain_id.map(|id| runtime.observe().queue_drain_scope(id));
+    let collector = RunActivityCollector::default();
+    let observation =
+        crate::turn::SessionObservationTurnActivitySink::new(runtime.clone(), Some(&collector));
+    let drain = {
+        let writer_handle = runtime.writer();
+        let mut writer = writer_handle.lock().await;
+        let opts = lash_core::facade_support::QueuedTurnOptions::new(
+            CancellationToken::new(),
+            lash_core::facade_support::QueuedEffectSource::Host {
+                host: host.as_ref(),
+                identity,
+            },
+        )
+        .with_turn_events(&observation);
+        let drain = writer.stream_next_queued_work(opts).await?;
+        runtime.publish_from(&writer);
+        drain
+    };
+    Ok(drain.map(|turn| crate::TurnOutput {
+        result: TurnReport::from_assembled(turn),
+        activities: collector.snapshot(),
+    }))
 }

@@ -164,15 +164,26 @@ pub(super) fn run_serial_lane(
         runtime.block_on(async move {
             let mut world = GeneratedRuntimeWorld::serial(workload.seed).await?;
             let (events, summary) = drive_generated_workload(&mut world, &workload).await?;
-            let server = world.engine().restate().server();
+            // Every server double of the world, in a fixed order: one trace
+            // per server, concatenated.
+            let servers = world
+                .engines()
+                .map(|engine| engine.restate().server().clone())
+                .collect::<Vec<_>>();
             Ok(SerialLaneRun {
                 delivered: events
                     .iter()
                     .map(|event| (event.boundary_id.clone(), event.kind))
                     .collect(),
                 summary,
-                schedule_trace: server.schedule_trace(),
-                stall_preemptions: server.stats().stall_preemptions,
+                schedule_trace: servers
+                    .iter()
+                    .flat_map(lash_restate_test::RestateTestServer::schedule_trace)
+                    .collect(),
+                stall_preemptions: servers
+                    .iter()
+                    .map(|server| server.stats().stall_preemptions)
+                    .sum(),
             })
         })
     })
@@ -243,16 +254,14 @@ pub(super) async fn run_generated_workload(
     let expectations = workload.expectations();
     let (events, final_summary) = drive_generated_workload(&mut world, &workload).await?;
     let durable_writes = world.checkpoint_write_events();
-    // Per-seed live provider FAILURE turns: real `session.turn().run()`s that
+    // Per-seed live provider FAILURE turns: real `session.send().output()`s that
     // stream valid prose then a non-retryable malformed chunk, released through a
     // real BoundaryScheduler, across >1 provider kind and >1 fault position.
     let live_failure_facts = drive_live_provider_failure_turns(workload.seed).await?;
     // Content evidence is read back through fresh store handles after the run
     // and carries provider-emitted wire content, so it is evaluated here, not
     // from the serialized trace (see `RUN_ONLY_ORACLES`).
-    let mut content = world
-        .content_evidence(world.reopen_factory().as_ref())
-        .await?;
+    let mut content = world.content_evidence().await?;
     content.extend(drive_attempt_usage_probe(workload.seed).await?);
     let mut oracles = vec![
         live_provider_failure_coverage(&live_failure_facts),

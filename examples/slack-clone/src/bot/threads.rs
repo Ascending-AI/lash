@@ -1,17 +1,22 @@
 //! Thread-session lifecycle: a Slack thread is a forked Lash session.
 //!
-//! A fork happens lazily on the first reply in a thread (mention or ambient).
-//! That makes pre-mention replies durable directly in the child session and
-//! avoids a second buffer state. The source boundary is recorded when channel
-//! inputs commit: turn-input application provenance correlates the Slack
-//! admission to the turn, and the turn's retained leaf is the forkable boundary.
+//! A fork happens lazily on the first reply in a thread (mention or ambient),
+//! at the channel boundary that precedes the thread root: the boundary a
+//! committed turn that carried the root retained, or the channel head recorded
+//! when an ambient root was folded. Turn-input application provenance
+//! correlates a Slack message to the turn that committed it.
+//!
+//! The thread starts with its parent's folded context: the channel messages up
+//! to the root that the fork boundary does not carry, with the root labelled,
+//! lead the thread's first send, ahead of the thread's own folded ambient
+//! replies and its first mention.
 
 use std::collections::HashSet;
 use std::time::Duration;
 
 use anyhow::{Context as _, Result, bail};
 use lash::persistence::{ChronologicalPayload, StoreError};
-use lash::{LashCore, LashSession, TurnInput};
+use lash::{LashCore, LashSession};
 
 use super::ledger::{EventLedger, EventReason, EventRecord};
 use super::runtime::{session_id, thread_session_id};
@@ -78,7 +83,11 @@ impl RootWaitObserver {
 
 /// Result of opening the deterministic child behind a Slack thread.
 pub enum ThreadSessionOpen {
-    Ready(LashSession),
+    /// The thread's session, and the parent context its first send carries.
+    Ready {
+        session: LashSession,
+        inherited_context: String,
+    },
     /// Another runtime owns the lane, so lease-fenced admission must retry.
     AdmissionContended,
     /// Deterministic child ids are single-use; a deleted child stays retired.
@@ -231,8 +240,12 @@ pub async fn open_thread_session(
         }
         Err(error) => return Err(error).context("open thread session"),
     };
-    seed_thread_root_and_uncommitted_context(ledger, &channel, &session, record, thread_ts).await?;
-    Ok(ThreadSessionOpen::Ready(session))
+    let inherited_context =
+        inherited_thread_context(ledger, &channel, &session, record, thread_ts).await?;
+    Ok(ThreadSessionOpen::Ready {
+        session,
+        inherited_context,
+    })
 }
 
 pub(crate) fn session_admission_contended(error: &lash::EmbedError) -> bool {
@@ -294,15 +307,11 @@ async fn root_route(
             .context("reload repaired thread-root admission")?;
     }
     if let Some(root) = root {
-        // A durable enqueue plus its retained pre-admission boundary is already
-        // valid fork evidence even if the process died before advancing the
-        // ledger row from Accepted to Folded.
-        if let Some(node_id) = root.fork_node_id.or_else(|| {
-            root.input_id
-                .is_some()
-                .then_some(root.admission_node_id)
-                .flatten()
-        }) {
+        // A folded root's retained pre-admission boundary is valid fork
+        // evidence until a committed turn carries the root; the ledger row is
+        // the root's durability, even if the process died before advancing it
+        // from Accepted to Folded.
+        if let Some(node_id) = root.fork_node_id.or(root.admission_node_id) {
             return Ok(RootRoute::Ready(node_id));
         }
         return Ok(RootRoute::Pending);
@@ -553,39 +562,35 @@ pub async fn retain_admission_boundary(
         .context("record channel admission boundary")
 }
 
-/// Seed the thread root into the child, and copy the channel context the fork
-/// boundary did not already carry.
+/// The parent context a thread's first send carries: the thread root, labelled,
+/// and the channel context the fork boundary did not already carry.
 ///
 /// Two problems, one pass over the same ledger rows.
 ///
 /// **A thread root is a host concept.** Lash forks at a committed graph boundary;
 /// it cannot know which of the messages inside that boundary the thread hangs
 /// from, and it must not guess. The inherited prefix normally extends *past* the
-/// root — an ambient root only commits when a later mention drains the channel
-/// queue, and that same turn commits the mention and the bot's answer too — so a
-/// child asked "what did the root say?" has nothing distinguishing the root from
-/// the traffic that followed it, and answers about the wrong message. The host
-/// owns the distinction, so the host writes it down: one labelled admission that
-/// names the root message, seeded before the child's first turn runs.
+/// root — a mention that folded the root committed the traffic after it and the
+/// bot's answer too — so a child asked "what did the root say?" has nothing
+/// distinguishing the root from the traffic that followed it, and answers about
+/// the wrong message. The host owns the distinction, so the host writes it
+/// down: one labelled line that names the root message.
 ///
 /// **The root may not be in the prefix at all.** When the fork boundary is the
-/// retained pre-admission node of a still-queued root, every channel message up
+/// retained pre-admission node of a still-folded root, every channel message up
 /// to and including the root is absent from the forked graph. Those are copied
-/// here; the root among them arrives as the same labelled seed.
+/// here; the root among them arrives as the same labelled line.
 ///
-/// Both writes are ordinary queued inputs under deterministic source keys, so a
-/// redelivery, a second open, or a boot recovery resolves to the admission Lash
-/// already holds instead of duplicating a context line. That guard is the stored
-/// `(session_id, source_key)` row, which a store vacuum tombstones — a host that
-/// vacuums live sessions would re-seed on the next redelivery. This bot never
-/// vacuums, so the guard holds for its lifetime.
-async fn seed_thread_root_and_uncommitted_context(
+/// The text is a pure function of the ledger and the two graphs, and the
+/// ledger stores the first send's composed text, so a redelivery, a second
+/// open, or a boot recovery sends the same bytes.
+async fn inherited_thread_context(
     ledger: &EventLedger,
     channel: &LashSession,
     thread: &LashSession,
     record: &EventRecord,
     thread_ts: &str,
-) -> Result<()> {
+) -> Result<String> {
     let committed_in_thread: HashSet<String> = thread
         .read_view()
         .chronological_projection()
@@ -605,32 +610,19 @@ async fn seed_thread_root_and_uncommitted_context(
         .channel_context_through(record.channel_id.clone(), thread_ts.to_string())
         .await
         .context("read channel context through thread root")?;
-    for context in inherited {
-        let Some(text) = context.input_text else {
+    let mut context = String::new();
+    for row in inherited {
+        let Some(text) = row.input_text else {
             continue;
         };
-        // The root is seeded whether or not the prefix already carries it: the
-        // point of the seed is the label, not the text. Both newlines are the
-        // host's own doing — queued text inputs concatenate into one user message
-        // with no separator, so without them the label runs out of the copied
-        // line ahead of it and into the reply behind it, and a label that starts
-        // mid-line labels nothing.
-        if context.message_ts == thread_ts {
-            thread
-                .durable()
-                .enqueue(TurnInput::text(format!(
-                    "\n{THREAD_ROOT_SEED_PREFIX}{text}\n"
-                )))
-                .id(format!(
-                    "thread-root:{}:{}",
-                    context.channel_id, context.message_ts
-                ))
-                .send()
-                .await
-                .context("seed the thread root into the fork")?;
+        // The root is labelled whether or not the prefix already carries it:
+        // the point of the line is the label, not the text. It starts and ends
+        // its own line so the label names the root and nothing else.
+        if row.message_ts == thread_ts {
+            context.push_str(&format!("\n{THREAD_ROOT_SEED_PREFIX}{text}\n"));
             continue;
         }
-        let already_in_graph = context.input_id.as_deref().is_some_and(|input_id| {
+        let already_in_graph = row.input_id.as_deref().is_some_and(|input_id| {
             applications.iter().any(|application| {
                 application.input_id == input_id
                     && committed_in_thread.contains(&application.committed_message_id)
@@ -639,16 +631,8 @@ async fn seed_thread_root_and_uncommitted_context(
         if already_in_graph {
             continue;
         }
-        thread
-            .durable()
-            .enqueue(TurnInput::text(text))
-            .id(format!(
-                "thread-inherited:{}:{}",
-                context.channel_id, context.message_ts
-            ))
-            .send()
-            .await
-            .context("enqueue not-yet-committed channel context in thread fork")?;
+        context.push_str(&text);
+        context.push('\n');
     }
-    Ok(())
+    Ok(context)
 }

@@ -1,33 +1,9 @@
-error[E0061]: this method takes 0 arguments but 2 arguments were supplied
- --> tests/ui/session_turn_stream_requires_scope.rs:8:10
+error[E0599]: no method named `turn` found for struct `LashSession` in the current scope
+ --> tests/ui/session_turn_stream_requires_scope.rs:7:10
   |
-8 |         .stream(events, scope)
-  |          ^^^^^^ ------  ----- unexpected argument #2 of type `ScopedEffectController<'_>`
-  |                 |
-  |                 unexpected argument #1 of type `&dyn TurnActivitySink`
-  |
-note: method defined here
- --> src/turn.rs
-  |
-  |     pub fn stream(self) -> Result<TurnStream> {
-  |            ^^^^^^
-help: remove the extra arguments
-  |
-8 -         .stream(events, scope)
-8 +         .stream()
-  |
-
-error[E0277]: `Result<TurnStream, EmbedError>` is not a future
- --> tests/ui/session_turn_stream_requires_scope.rs:9:10
-  |
-9 |         .await;
-  |          ^^^^^ `Result<TurnStream, EmbedError>` is not a future
-  |
-  = help: the trait `Future` is not implemented for `Result<TurnStream, EmbedError>`
-  = note: Result<TurnStream, EmbedError> must be a future or must implement `IntoFuture` to be awaited
-  = note: required for `Result<TurnStream, EmbedError>` to implement `IntoFuture`
-help: remove the `.await`
-  |
-9 -         .await;
-9 +         ;
+6 |       let _ = session
+  |  _____________-
+7 | |         .turn(lash::TurnInput::text("hello"))
+  | |         -^^^^ method not found in `LashSession`
+  | |_________|
   |

@@ -8,13 +8,14 @@ fn bid() -> lash_core::llm::types::StreamBlockIdentity {
 pub(super) async fn turn_builder_stream_emits_activities_and_finishes() -> Result<()> {
     let core = standard_core().await;
     let session = core.session("turn-stream").open().await?;
-    let mut stream = session.turn(TurnInput::text("stream me")).stream()?;
+    let handle = session.send(TurnInput::text("stream me")).await?;
+    let mut stream = handle.events();
 
     let mut activities = Vec::new();
     while let Some(activity) = stream.next().await {
         activities.push(activity?);
     }
-    let result = stream.finish().await?;
+    let result = handle.output().await?.result;
 
     assert!(matches!(
         result.outcome,
@@ -102,8 +103,8 @@ async fn completed_reasoning_part_does_not_republish_streamed_summary() -> Resul
     let session = core.session("reasoning-single-publication").open().await?;
 
     let output = session
-        .turn(TurnInput::text("run one command"))
-        .run()
+        .send(TurnInput::text("run one command"))
+        .output()
         .await?;
 
     let reasoning = output
@@ -232,8 +233,8 @@ async fn semantic_publication_reasoning_then_tool_does_not_repeat_reasoning() ->
     let session = core.session("reasoning-tool-publication").open().await?;
 
     let output = session
-        .turn(TurnInput::text("inspect with a tool"))
-        .run()
+        .send(TurnInput::text("inspect with a tool"))
+        .output()
         .await?;
 
     assert_eq!(reasoning_activities(&output), vec!["inspect once"]);
@@ -283,8 +284,8 @@ async fn semantic_publication_streamed_reasoning_keeps_distinct_completed_reason
     let session = core.session("mixed-reasoning-publication").open().await?;
 
     let output = session
-        .turn(TurnInput::text("keep every distinct reasoning item"))
-        .run()
+        .send(TurnInput::text("keep every distinct reasoning item"))
+        .output()
         .await?;
 
     assert_eq!(
@@ -338,8 +339,8 @@ async fn semantic_publication_streamed_reasoning_keeps_nonstreamed_text() -> Res
     let session = core.session("reasoning-buffered-text").open().await?;
 
     let output = session
-        .turn(TurnInput::text("answer after reasoning"))
-        .run()
+        .send(TurnInput::text("answer after reasoning"))
+        .output()
         .await?;
 
     assert_eq!(reasoning_activities(&output), vec!["reasoning once"]);
@@ -386,7 +387,7 @@ async fn semantic_publication_preserves_identical_completed_reasoning_parts_and_
         .await?;
 
     for prompt in ["first turn", "second turn"] {
-        let output = session.turn(TurnInput::text(prompt)).run().await?;
+        let output = session.send(TurnInput::text(prompt)).output().await?;
         assert_eq!(
             reasoning_activities(&output),
             vec!["repeat legitimately", "repeat legitimately"]
@@ -402,7 +403,7 @@ pub(super) async fn session_observation_replays_live_activity_and_commit() -> Re
     let session = core.session("session-observation-replay").open().await?;
     let cursor = session.observe().current_observation().cursor;
 
-    let output = session.turn(TurnInput::text("observe me")).run().await?;
+    let output = session.send(TurnInput::text("observe me")).output().await?;
     assert_eq!(assistant_prose(&output.activities), "echo: observe me");
 
     let replay = session.observe().resume_from_cursor(&cursor)?;
@@ -615,8 +616,8 @@ pub(super) fn rlm_provider_failure_after_prose_is_not_retried_or_committed() -> 
         let session = core.session("rlm-provider-retry-prose").open().await?;
 
         let first = session
-            .turn(TurnInput::text("trigger deterministic rate limit retry"))
-            .run()
+            .send(TurnInput::text("trigger deterministic rate limit retry"))
+            .output()
             .await?;
 
         assert_eq!(
@@ -745,8 +746,8 @@ pub(super) fn rlm_natural_prose_completion_is_single_copy_in_next_request() -> R
         let session = core.session("rlm-natural-prose-single-copy").open().await?;
 
         let first = session
-            .turn(TurnInput::text("answer naturally"))
-            .run()
+            .send(TurnInput::text("answer naturally"))
+            .output()
             .await?;
         assert_eq!(first.assistant_message(), Some(MARKER));
         Box::pin(session.admin().state().append_messages(vec![
@@ -756,8 +757,8 @@ pub(super) fn rlm_natural_prose_completion_is_single_copy_in_next_request() -> R
         .await?;
 
         session
-            .turn(TurnInput::text("check natural completion history"))
-            .run()
+            .send(TurnInput::text("check natural completion history"))
+            .output()
             .await?;
 
         let requests = requests.lock_recover();
@@ -839,9 +840,9 @@ pub(super) async fn session_observation_envelopes_scope_activity_and_commit_to_t
     let cursor = session.observe().current_observation().cursor;
 
     session
-        .turn(TurnInput::text("identify this turn"))
-        .turn_id("observation-turn")
-        .run()
+        .send(TurnInput::text("identify this turn"))
+        .id("observation-turn")
+        .output()
         .await?;
 
     let lash_core::facade_support::SessionResume::Replayed { events } =
@@ -932,8 +933,8 @@ pub(super) async fn session_observation_retracts_two_retried_visible_attempts_li
     });
 
     let output = session
-        .turn(TurnInput::text("retry twice after visible output"))
-        .run()
+        .send(TurnInput::text("retry twice after visible output"))
+        .output()
         .await?;
     assert_eq!(output.assistant_message(), Some("prose-3"));
     let live_events = live_collector.await.expect("live collector task");
@@ -988,8 +989,8 @@ pub(super) async fn session_observation_subscription_replays_buffered_events_bef
     let cursor = session.observe().current_observation().cursor;
 
     session
-        .turn(TurnInput::text("first observed"))
-        .run()
+        .send(TurnInput::text("first observed"))
+        .output()
         .await?;
     let SessionObservationSubscription::Subscribed(mut subscription) =
         session.observe().subscribe_from_cursor(&cursor)?
@@ -1012,8 +1013,8 @@ pub(super) async fn session_observation_subscription_replays_buffered_events_bef
     }
 
     session
-        .turn(TurnInput::text("second observed"))
-        .run()
+        .send(TurnInput::text("second observed"))
+        .output()
         .await?;
     loop {
         let event = tokio::time::timeout(
@@ -1042,8 +1043,8 @@ pub(super) async fn session_observation_recovery_stream_replays_buffered_events_
     let cursor = session.observe().current_observation().cursor;
 
     session
-        .turn(TurnInput::text("first recovered"))
-        .run()
+        .send(TurnInput::text("first recovered"))
+        .output()
         .await?;
     let mut stream = session.observe().subscribe_and_recover(cursor);
 
@@ -1060,8 +1061,8 @@ pub(super) async fn session_observation_recovery_stream_replays_buffered_events_
     }
 
     session
-        .turn(TurnInput::text("second recovered"))
-        .run()
+        .send(TurnInput::text("second recovered"))
+        .output()
         .await?;
     loop {
         let item = tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
@@ -1091,8 +1092,8 @@ pub(super) async fn session_observation_remote_subscription_replays_dto_events()
     );
 
     session
-        .turn(TurnInput::text("remote observed"))
-        .run()
+        .send(TurnInput::text("remote observed"))
+        .output()
         .await?;
     let crate::observe::RemoteSessionObservationSubscription::Subscribed(mut subscription) =
         session.observe().subscribe_from_remote_cursor(
@@ -1140,8 +1141,8 @@ pub(super) async fn session_observation_remote_recovery_stream_yields_dto_gap() 
     let observation = session.observe().current_remote_observation();
 
     session
-        .turn(TurnInput::text("trimmed before remote subscribe"))
-        .run()
+        .send(TurnInput::text("trimmed before remote subscribe"))
+        .output()
         .await?;
     let mut stream = session.observe().subscribe_and_recover_remote(
         crate::remote::observations::RemoteSessionCursor::new(observation.cursor),
@@ -1188,8 +1189,8 @@ pub(super) async fn capacity_and_age_trim_force_snapshot_with_matching_observati
     let cursor = session.observe().current_observation().cursor;
 
     session
-        .turn(TurnInput::text("trimmed before subscribe"))
-        .run()
+        .send(TurnInput::text("trimmed before subscribe"))
+        .output()
         .await?;
     let mut stream = session.observe().subscribe_and_recover(cursor);
     let item = tokio::time::timeout(std::time::Duration::from_secs(2), stream.next())
@@ -1230,8 +1231,8 @@ pub(super) async fn trimmed_gap_replacement_cursor_preserves_unseen_auxiliary_ev
     let stale_cursor = session.observe().current_observation().cursor;
 
     session
-        .turn(TurnInput::text("install replacement projection"))
-        .run()
+        .send(TurnInput::text("install replacement projection"))
+        .output()
         .await?;
     let installed_projection = session.observe().current_observation();
     session.observe().runtime.record_queue_changed(
@@ -1276,9 +1277,9 @@ pub(super) async fn recoverable_chat_conformance_snapshot_subscription_and_termi
         .subscribe_recoverable_chat(snapshot.cursor);
 
     session
-        .turn(TurnInput::text("terminal replacement"))
-        .turn_id("recoverable-terminal-turn")
-        .run()
+        .send(TurnInput::text("terminal replacement"))
+        .id("recoverable-terminal-turn")
+        .output()
         .await?;
 
     let terminal = loop {
@@ -1424,8 +1425,8 @@ pub(super) async fn durable_revision_requires_replacement_evidence() -> Result<(
     let before = session.observe().current_observation();
 
     let output = session
-        .turn(TurnInput::text("commit despite replay failure"))
-        .run()
+        .send(TurnInput::text("commit despite replay failure"))
+        .output()
         .await?;
     assert_eq!(
         output.assistant_message(),
@@ -1481,8 +1482,8 @@ pub(super) async fn idle_session_reconnect_after_failed_append_yields_gap_withou
     let cursor = session.observe().current_observation().cursor;
 
     session
-        .turn(TurnInput::text("commit before becoming idle"))
-        .run()
+        .send(TurnInput::text("commit before becoming idle"))
+        .output()
         .await?;
 
     let mut reconnect = session.observe().subscribe_and_recover(cursor);
@@ -1526,8 +1527,8 @@ pub(super) async fn snapshot_subscribe_has_only_two_histories() -> Result<()> {
         let turn_session = session.clone();
         let turn = tokio::spawn(async move {
             turn_session
-                .turn(TurnInput::text("exactly once across the cut"))
-                .run()
+                .send(TurnInput::text("exactly once across the cut"))
+                .output()
                 .await
         });
 
@@ -1641,8 +1642,8 @@ pub(super) async fn notification_observes_installed_projection() -> Result<()> {
     let turn_session = session.clone();
     let turn = tokio::spawn(async move {
         turn_session
-            .turn(TurnInput::text("projection before notification"))
-            .run()
+            .send(TurnInput::text("projection before notification"))
+            .output()
             .await
     });
     replay_store.wait_for_commit_append().await;
@@ -1757,8 +1758,8 @@ pub(super) async fn payload_authority_matches_revision_transition() -> Result<()
     let initial = session.observe().current_observation();
 
     session
-        .turn(TurnInput::text("durable transition"))
-        .run()
+        .send(TurnInput::text("durable transition"))
+        .output()
         .await?;
     let committed = session.observe().resume_from_cursor(&initial.cursor)?;
     let SessionResume::Replayed { events } = committed else {
@@ -1980,9 +1981,9 @@ pub(super) async fn recoverable_chat_conformance_deduplicates_redelivery_identit
     let session = core.session("recoverable-chat-redelivery").open().await?;
     let cursor = session.observe().recoverable_chat_snapshot().cursor;
     session
-        .turn(TurnInput::text("redelivery identity"))
-        .turn_id("recoverable-redelivery-turn")
-        .run()
+        .send(TurnInput::text("redelivery identity"))
+        .id("recoverable-redelivery-turn")
+        .output()
         .await?;
 
     let mut first_delivery = session.observe().subscribe_recoverable_chat(cursor.clone());
@@ -2160,8 +2161,8 @@ pub(super) async fn gap_replacement_then_continuation_after_trimmed_history() ->
     let session = core.session("recoverable-chat-gap").open().await?;
     let cursor = session.observe().recoverable_chat_snapshot().cursor;
     session
-        .turn(TurnInput::text("trim the initial cursor"))
-        .run()
+        .send(TurnInput::text("trim the initial cursor"))
+        .output()
         .await?;
     let mut stream = session.observe().subscribe_recoverable_chat(cursor);
     let update = stream.next().await.expect("gap update")?;
@@ -2172,8 +2173,8 @@ pub(super) async fn gap_replacement_then_continuation_after_trimmed_history() ->
     assert_eq!(gap.latest_cursor, snapshot.cursor);
 
     session
-        .turn(TurnInput::text("live after gap"))
-        .run()
+        .send(TurnInput::text("live after gap"))
+        .output()
         .await?;
     let read_view = tokio::time::timeout(std::time::Duration::from_secs(2), async {
         loop {
@@ -2319,9 +2320,9 @@ pub(super) async fn recoverable_chat_conformance_disconnect_does_not_cancel_serv
     let run_session = session.clone();
     let mut turn = tokio::spawn(async move {
         run_session
-            .turn(TurnInput::text("keep running"))
-            .turn_id("disconnect-is-not-cancel")
-            .run()
+            .send(TurnInput::text("keep running"))
+            .id("disconnect-is-not-cancel")
+            .output()
             .await
     });
     entered_rx.await.expect("provider entered");

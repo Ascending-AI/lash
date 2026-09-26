@@ -161,131 +161,7 @@ fn workbench_lists_and_controls_individual_queued_batches() {
 }
 
 #[test]
-fn workbench_handles_typed_selected_drain_refusal_and_reselects() {
-    run_async_test_on_stack_budget("workbench-selected-drain-refusal", || async {
-        let data_dir = std::env::temp_dir().join(format!(
-            "agent-workbench-selected-drain-refusal-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&data_dir).expect("create selected-drain refusal dir");
-        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
-            crate::tests::memory_session_store_factory();
-        let state = recoverable_chat_test_state_with_dependencies_and_context(
-            &data_dir,
-            16,
-            lash::testing::TestProvider::builder()
-                .kind("workbench-selected-drain-refusal-test")
-                .complete(|_| async {
-                    Ok(text_response(
-                        "<typescript>\nfinish(\"processed selected row\");\n</typescript>",
-                    ))
-                })
-                .build()
-                .into_handle(),
-            detached_trigger_store(),
-            Arc::clone(&store_factory),
-            Some(inert_queued_work_port()),
-            // FIG-1313 regression witness: a small model window that the old
-            // hardwired projected-request guard wedged, refusing every selected
-            // drain. It must now drain one row per wake.
-            4_096,
-        )
-        .await;
-        let session_id = state.current_session_id();
-        let session = state
-            .core
-            .session(session_id.clone())
-            .open()
-            .await
-            .expect("open selected-drain refusal session");
-        let store = store_factory
-            .create_store(&lash::persistence::SessionStoreCreateRequest {
-                owning_process_id: None,
-                pending_observer_intents: Vec::new(),
-                session_id: session_id.clone(),
-                relation: lash::persistence::SessionRelation::Root,
-                policy: session.policy_snapshot(),
-            })
-            .await
-            .expect("open selected-drain refusal store");
-        let mut batch_ids = Vec::new();
-        for (source_key, merge_key) in [
-            ("workbench-selected-a1", "a"),
-            ("workbench-selected-b1", "b"),
-            ("workbench-selected-a2", "a"),
-        ] {
-            let batch = store
-                .enqueue_queued_work(
-                    queued_work_test_draft(&session_id, source_key).with_merge_key(merge_key),
-                )
-                .await
-                .expect("enqueue selected-drain refusal row");
-            batch_ids.push(batch.batch_id.as_str().to_string());
-        }
-        let [a1, b1, a2] = <[String; 3]>::try_from(batch_ids).expect("three enqueued rows");
-
-        let error = session
-            .queued_turn()
-            .batch_ids([a1.as_str(), a2.as_str()])
-            .run()
-            .await
-            .expect_err("a key break refuses the original selected set");
-        match error {
-            lash::EmbedError::SelectedQueuedWorkDrainRefused { cause } => match cause {
-                lash::SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
-                    unclaimed_batch_ids,
-                } => assert_eq!(unclaimed_batch_ids, vec![a2.clone()]),
-                lash::SelectedQueuedWorkDrainRefusalCause::
-                    InterruptedBatchRequiresFullComposition { required_batch_ids } => panic!(
-                    "key-break example did not create interrupted composition {required_batch_ids:?}"
-                ),
-                lash::SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy => {
-                    panic!("key-break example does not hold the execution lane")
-                }
-                lash::SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow {
-                    batch_id,
-                    ..
-                } => panic!("key-break example rows fit the window: {batch_id}"),
-            },
-            other => panic!("expected typed unclaimable-together refusal, got {other:?}"),
-        }
-
-        let output = session
-            .queued_turn()
-            .batch_ids([a1.as_str()])
-            .run()
-            .await
-            .expect("re-select the claimable prefix")
-            .expect("the re-selected row executes");
-        assert_eq!(
-            output
-                .activities
-                .iter()
-                .find_map(|activity| match &activity.event {
-                    lash::TurnEvent::QueuedWorkStarted { batch_ids, .. } => {
-                        Some(batch_ids.clone())
-                    }
-                    _ => None,
-                }),
-            Some(vec![a1.clone()])
-        );
-        assert_eq!(
-            session
-                .durable()
-                .queued_work()
-                .await
-                .expect("list after selected-drain re-selection")
-                .iter()
-                .map(|batch| batch.batch_id.as_str())
-                .collect::<Vec<_>>(),
-            vec![b1.as_str(), a2.as_str()]
-        );
-        let _ = std::fs::remove_dir_all(data_dir);
-    });
-}
-
-#[test]
-fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery() {
+fn workbench_wake_redelivery_absorbs_into_the_live_receiver_row() {
     run_async_test_on_stack_budget("workbench-targeted-wake-drain", || async {
         let data_dir = std::env::temp_dir().join(format!(
             "agent-workbench-targeted-wake-{}",
@@ -311,8 +187,8 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             Arc::clone(&store_factory),
             Some(inert_queued_work_port()),
             // FIG-1313 regression witness: a small model window that the old
-            // hardwired projected-request guard wedged, refusing every selected
-            // drain. It must now drain one row per wake.
+            // hardwired projected-request guard wedged. It must still run one
+            // row per wake.
             4_096,
         )
         .await;
@@ -419,41 +295,6 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             .await
             .expect("enqueue later receiver wake");
 
-        let later_output = session
-            .queued_turn()
-            .batch_ids([later.batch_id.to_string()])
-            .drain_id("workbench-targeted-later-drain")
-            .run()
-            .await
-            .expect("run only later workbench batch")
-            .expect("later workbench batch produced a turn");
-        let started_batch_ids = later_output
-            .activities
-            .iter()
-            .filter_map(|activity| match &activity.event {
-                lash::TurnEvent::QueuedWorkStarted { batch_ids, .. } => Some(batch_ids),
-                _ => None,
-            })
-            .flatten()
-            .map(String::as_str)
-            .collect::<Vec<_>>();
-        assert_eq!(
-            started_batch_ids,
-            vec![later.batch_id.as_str()],
-            "a targeted workbench run must not checkpoint-claim another queued batch"
-        );
-        assert_eq!(
-            target
-                .list_queued_work(&session_id)
-                .await
-                .expect("list after targeted later drain")
-                .iter()
-                .map(|batch| batch.batch_id.as_str())
-                .collect::<Vec<_>>(),
-            vec![earlier.batch_id.as_str()],
-            "removing selected-drain settlement must leave the wrong receiver evidence"
-        );
-
         clock.advance(24);
         let before_stale_boundary = lash::process::WakeDeliveryDriver::drive_pending_once(
             Arc::clone(&registry),
@@ -492,8 +333,8 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
                 .iter()
                 .map(|batch| batch.batch_id.as_str())
                 .collect::<Vec<_>>(),
-            vec![earlier.batch_id.as_str()],
-            "live-row absorption must preserve the skipped earlier wake"
+            vec![earlier.batch_id.as_str(), later.batch_id.as_str()],
+            "live-row absorption must keep the earlier wake's receiver row"
         );
 
         let expiry_clock = Arc::new(lash::testing::TestClock::new(1_900_000_000_000));
@@ -658,120 +499,6 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         assert_eq!(target_gone.discarded_expired, 0);
         assert_eq!(target_gone.discarded_target_gone, 1);
 
-        // The operator's queue view is a snapshot. "Run this one" can arrive
-        // after something else already drained that batch, so a selection can
-        // name a batch that is no longer claimable. It must then claim
-        // *nothing*: the earlier ready wake the operator did not select stays
-        // queued. Widening an unmatched selection into an ordinary
-        // drain-everything would run work nobody asked for, and the operator
-        // would see it as the one batch they clicked.
-        assert!(
-            session
-                .queued_turn()
-                .batch_ids([later.batch_id.to_string()])
-                .drain_id("workbench-stale-selection-drain")
-                .run()
-                .await
-                .expect("a selection naming an already-drained batch is a no-op, not an error")
-                .settled_without_selected_turn(),
-            "a selection with no claimable batch must not produce a turn"
-        );
-        let Json(still_queued) =
-            list_queued_work(State(state.clone()), Query(SessionQuery::default()))
-                .await
-                .expect("workbench queue projection after the stale selection");
-        assert_eq!(
-            still_queued
-                .iter()
-                .map(|batch| batch.batch_id.as_str())
-                .collect::<Vec<_>>(),
-            vec![earlier.batch_id.as_str()],
-            "an unmatched batch selection must not fall back to draining the \
-             ready work the operator did not select"
-        );
-
-        assert!(
-            session
-                .queued_turn()
-                .batch_ids([earlier.batch_id.to_string()])
-                .drain_id("workbench-targeted-earlier-drain")
-                .run()
-                .await
-                .expect("run earlier workbench batch after later")
-                .executed_selected_turn()
-        );
-        assert!(
-            target
-                .list_queued_work(&session_id)
-                .await
-                .expect("list after earlier drain")
-                .is_empty(),
-            "the skipped earlier wake must still fire afterwards"
-        );
-
-        let third_wake = registry
-            .append_event(
-                &process_id,
-                lash::process::ProcessEventAppendRequest::new(
-                    "producer.wake",
-                    json!({"wake_input": "ordinary drain first"}),
-                ),
-            )
-            .await
-            .expect("append ordinary-drain first wake")
-            .wake_delivery
-            .expect("ordinary-drain first wake delivery");
-        let fourth_wake = registry
-            .append_event(
-                &process_id,
-                lash::process::ProcessEventAppendRequest::new(
-                    "producer.wake",
-                    json!({"wake_input": "ordinary drain second"}),
-                ),
-            )
-            .await
-            .expect("append ordinary-drain second wake")
-            .wake_delivery
-            .expect("ordinary-drain second wake delivery");
-        let third = target
-            .enqueue_queued_work(workbench_process_wake_draft(third_wake))
-            .await
-            .expect("enqueue ordinary-drain first wake");
-        let fourth = target
-            .enqueue_queued_work(workbench_process_wake_draft(fourth_wake))
-            .await
-            .expect("enqueue ordinary-drain second wake");
-        let drain_all_output = session
-            .queued_turn()
-            .drain_id("workbench-drain-all-idempotency".to_string())
-            .run()
-            .await
-            .expect("run ordinary workbench drain")
-            .expect("ordinary workbench drain produced a turn");
-        let drain_all_started = drain_all_output
-            .activities
-            .iter()
-            .filter_map(|activity| match &activity.event {
-                lash::TurnEvent::QueuedWorkStarted { batch_ids, .. } => Some(batch_ids),
-                _ => None,
-            })
-            .flatten()
-            .map(String::as_str)
-            .collect::<Vec<_>>();
-        assert_eq!(
-            drain_all_started,
-            vec![third.batch_id.as_str(), fourth.batch_id.as_str()],
-            "the selected-drain guard must not disable ordinary checkpoint draining"
-        );
-        assert!(
-            target
-                .list_queued_work(&session_id)
-                .await
-                .expect("list after ordinary drain")
-                .is_empty(),
-            "ordinary drain-everything behavior must remain intact"
-        );
-
         let _ = std::fs::remove_dir_all(data_dir);
     });
 }
@@ -809,36 +536,17 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
                 .into_handle(),
             detached_trigger_store(),
             Arc::clone(&store_factory),
-            Some(inert_queued_work_port()),
+            // The engine drives the wake's session in the background, as a
+            // deployment's does; the workbench follows the root it starts.
+            None,
             // FIG-1313 regression witness: a small model window that the old
-            // hardwired projected-request guard wedged, refusing every selected
-            // drain. It must now drain one row per wake.
+            // hardwired projected-request guard wedged. It must still run one
+            // row per wake.
             4_096,
         )
         .await;
         let session_id = state.current_session_id();
-        let session = state
-            .core
-            .session(session_id.clone())
-            .open()
-            .await
-            .expect("open wake single-reply session");
-        let target = store_factory
-            .create_store(&lash::persistence::SessionStoreCreateRequest {
-                owning_process_id: None,
-                pending_observer_intents: Vec::new(),
-                session_id: session_id.clone(),
-                relation: lash::persistence::SessionRelation::Root,
-                policy: session.policy_snapshot(),
-            })
-            .await
-            .expect("open wake single-reply receiver");
-        let registry = crate::tests::standalone_process_registry(
-            &data_dir,
-            Arc::new(lash::runtime::SystemClock),
-            None,
-        )
-        .await;
+        let registry = state.core.process_registry();
         let process_id = registry
             .register_process(
                 lash::process::ProcessRegistration::new(
@@ -869,7 +577,7 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             .await
             .expect("register wake single-reply producer")
             .id;
-        let wake = registry
+        registry
             .append_event(
                 &process_id,
                 lash::process::ProcessEventAppendRequest::new(
@@ -881,46 +589,30 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             .expect("append wake single-reply event")
             .wake_delivery
             .expect("wake single-reply delivery");
-        target
-            .enqueue_queued_work(workbench_process_wake_draft(wake))
-            .await
-            .expect("enqueue wake single-reply batch");
 
-        let turn_id = "workbench-queued-wake-single-reply";
-        state.track_turn(&session_id, &TurnId::from(turn_id));
-        let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
-        let output = session
-            .queued_turn()
-            .drain_id(format!("{turn_id}-drain"))
-            .stream_to(&ChannelTurnEvents {
-                turn_state: Arc::clone(&turn_state),
-            })
+        // The workbench follows every root the engine starts on this session;
+        // delivering the wake asks the engine to drive it.
+        crate::restate::watch_session_roots(&state, &session_id);
+        state
+            .core
+            .processes()
+            .drive_wake_deliveries()
             .await
-            .expect("run wake single-reply turn")
-            .expect("the wake batch produced a turn");
-        assert!(
-            matches!(
-                &output.outcome,
-                lash::TurnOutcome::Finished(lash::TurnFinish::AssistantMessage { text })
-                    if text == WAKE_REPLY
-            ),
-            "a wake turn's prose reply must terminate naturally as an assistant \
-             message, which is the outcome the runtime materializes: {:?}",
-            output.outcome
-        );
-        crate::restate::record_turn_output_with_durable_turn_id(
-            &state,
-            &session,
-            &TurnId::from(turn_id),
-            &TurnId::from(format!("{turn_id}-drain")),
-            output,
-            turn_state,
-            "test.wake_single_reply.completed",
-        )
-        .await
-        .expect("record wake single-reply turn output");
-        let committed_agent_replies = session
-            .read_view()
+            .expect("deliver the wake to its session");
+        await_rendered_assistant_text(&state, WAKE_REPLY).await;
+
+        // A lease-free read: the engine's drive may still hold the session.
+        let committed = state
+            .core
+            .session(session_id.clone())
+            .durable()
+            .await
+            .expect("bind the durable session")
+            .read()
+            .await
+            .expect("read the committed session")
+            .expect("the session has committed state");
+        let committed_agent_replies = committed
             .messages()
             .iter()
             .filter(|message| {
@@ -935,37 +627,6 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             "a completed wake turn must commit the agent reply exactly once, \
             got {committed_agent_replies:?}"
         );
-        let Json(live_snapshot) = app_state(State(state.clone()), Query(SessionQuery::default()))
-            .await
-            .expect("read live wake single-reply snapshot");
-        let live_rendered_agent_rows = live_snapshot
-            .transcript
-            .iter()
-            .filter_map(|row| match row {
-                TranscriptRow::Message { message }
-                    if message.role == "assistant" && message.text.contains(WAKE_REPLY) =>
-                {
-                    Some(message.id.clone())
-                }
-                TranscriptRow::Message { .. }
-                | TranscriptRow::Reasoning { .. }
-                | TranscriptRow::CodeBlock { .. }
-                | TranscriptRow::Note { .. } => None,
-            })
-            .collect::<Vec<_>>();
-        assert_eq!(
-            live_rendered_agent_rows.len(),
-            1,
-            "the live snapshot must render the agent reply exactly once, \
-             got {live_rendered_agent_rows:?}"
-        );
-        crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from(turn_id))
-            .await
-            .expect("settle wake single-reply turn");
-        session
-            .close()
-            .await
-            .expect("close wake single-reply session");
 
         let Json(snapshot) = app_state(State(state.clone()), Query(SessionQuery::default()))
             .await
@@ -995,93 +656,6 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             rendered_agent_rows, committed_agent_replies,
             "the rendered agent row must be the committed transcript copy"
         );
-        let _ = std::fs::remove_dir_all(data_dir);
-    });
-}
-
-#[test]
-fn selected_drain_reports_claimed_and_already_satisfied_batches() {
-    run_async_test_on_stack_budget("workbench-selected-drain-outcome", || async {
-        let data_dir = std::env::temp_dir().join(format!(
-            "agent-workbench-selected-drain-outcome-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&data_dir).expect("create selected-drain outcome dir");
-        let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> =
-            crate::tests::memory_session_store_factory();
-        let state = recoverable_chat_test_state_with_dependencies_and_context(
-            &data_dir,
-            16,
-            lash::testing::TestProvider::builder()
-                .kind("workbench-selected-drain-outcome-test")
-                .complete(|_| async {
-                    Ok(text_response(
-                        "<typescript>\nfinish(\"processed selected row\");\n</typescript>",
-                    ))
-                })
-                .build()
-                .into_handle(),
-            detached_trigger_store(),
-            Arc::clone(&store_factory),
-            Some(inert_queued_work_port()),
-            // FIG-1313 regression witness: a small model window that the old
-            // hardwired projected-request guard wedged, refusing every selected
-            // drain. It must now drain one row per wake.
-            4_096,
-        )
-        .await;
-        let session_id = state.current_session_id();
-        let session = state
-            .core
-            .session(session_id.clone())
-            .open()
-            .await
-            .expect("open selected-drain outcome session");
-        let store = store_factory
-            .create_store(&lash::persistence::SessionStoreCreateRequest {
-                owning_process_id: None,
-                pending_observer_intents: Vec::new(),
-                session_id: session_id.clone(),
-                relation: lash::persistence::SessionRelation::Root,
-                policy: session.policy_snapshot(),
-            })
-            .await
-            .expect("open selected-drain outcome store");
-        let batch = store
-            .enqueue_queued_work(queued_work_test_draft(
-                &session_id,
-                "workbench-selected-drain-outcome",
-            ))
-            .await
-            .expect("enqueue selected-drain outcome row");
-
-        let claimed = session
-            .queued_turn()
-            .batch_ids([batch.batch_id.clone()])
-            .run()
-            .await
-            .expect("run selected-drain outcome row");
-        let claimed_satisfaction = vec![lash::SelectedQueuedWorkBatchSatisfaction::ClaimedNow {
-            batch_id: batch.batch_id.clone(),
-        }];
-        assert!(claimed.turn.is_some());
-        assert!(claimed.executed_selected_turn());
-        assert_eq!(claimed.satisfied, claimed_satisfaction);
-
-        let replay = session
-            .queued_turn()
-            .batch_ids([batch.batch_id.clone()])
-            .run()
-            .await
-            .expect("replay selected-drain outcome row");
-        let replay_satisfaction = vec![
-            lash::SelectedQueuedWorkBatchSatisfaction::AlreadySatisfied {
-                batch_id: batch.batch_id,
-            },
-        ];
-        assert!(replay.turn.is_none());
-        assert!(replay.settled_without_selected_turn());
-        assert_eq!(replay.satisfied, replay_satisfaction);
         let _ = std::fs::remove_dir_all(data_dir);
     });
 }
@@ -1138,10 +712,12 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
                 .into_handle(),
             detached_trigger_store(),
             Arc::clone(&store_factory),
-            Some(inert_queued_work_port()),
+            // The engine drives the wake's session in the background, as a
+            // deployment's does; the workbench follows the root it starts.
+            None,
             // FIG-1313 regression witness: a small model window that the old
-            // hardwired projected-request guard wedged, refusing every selected
-            // drain. It must now drain one row per wake.
+            // hardwired projected-request guard wedged. It must still run one
+            // row per wake.
             4_096,
         )
         .await;
@@ -1157,9 +733,9 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
         state.track_turn(&session_id, &TurnId::from(send_turn_id));
         let send_turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
         let send_output = session
-            .turn(lash::TurnInput::text("answer with reasoning"))
-            .turn_id(send_turn_id)
-            .stream_to(&ChannelTurnEvents {
+            .send(lash::TurnInput::text("answer with reasoning"))
+            .id(send_turn_id)
+            .output_into(&ChannelTurnEvents {
                 turn_state: Arc::clone(&send_turn_state),
             })
             .await
@@ -1195,22 +771,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
             .await
             .expect("settle reasoned send turn");
 
-        let target = store_factory
-            .create_store(&lash::persistence::SessionStoreCreateRequest {
-                owning_process_id: None,
-                pending_observer_intents: Vec::new(),
-                session_id: session_id.clone(),
-                relation: lash::persistence::SessionRelation::Root,
-                policy: session.policy_snapshot(),
-            })
-            .await
-            .expect("open wake keeps-previous receiver");
-        let registry = crate::tests::standalone_process_registry(
-            &data_dir,
-            Arc::new(lash::runtime::SystemClock),
-            None,
-        )
-        .await;
+        let registry = state.core.process_registry();
         let process_id = registry
             .register_process(
                 lash::process::ProcessRegistration::new(
@@ -1241,7 +802,7 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
             .await
             .expect("register wake keeps-previous producer")
             .id;
-        let wake = registry
+        registry
             .append_event(
                 &process_id,
                 lash::process::ProcessEventAppendRequest::new(
@@ -1253,46 +814,34 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
             .expect("append wake keeps-previous event")
             .wake_delivery
             .expect("wake keeps-previous delivery");
-        target
-            .enqueue_queued_work(workbench_process_wake_draft(wake))
-            .await
-            .expect("enqueue wake keeps-previous batch");
 
-        let wake_turn_id = "workbench-queued-wake-keeps-previous";
-        state.track_turn(&session_id, &TurnId::from(wake_turn_id));
-        let wake_turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
-        let wake_output = session
-            .queued_turn()
-            .drain_id(format!("{wake_turn_id}-drain"))
-            .stream_to(&ChannelTurnEvents {
-                turn_state: Arc::clone(&wake_turn_state),
-            })
+        crate::restate::watch_session_roots(&state, &session_id);
+        state
+            .core
+            .processes()
+            .drive_wake_deliveries()
             .await
-            .expect("run wake keeps-previous turn")
-            .expect("the wake batch produced a turn");
-        crate::restate::record_turn_output_with_durable_turn_id(
-            &state,
-            &session,
-            &TurnId::from(wake_turn_id),
-            &TurnId::from(format!("{wake_turn_id}-drain")),
-            wake_output,
-            wake_turn_state,
-            "test.wake_keeps_previous.wake",
-        )
-        .await
-        .expect("record wake keeps-previous output");
+            .expect("deliver the wake to its session");
+        await_rendered_assistant_text(&state, WAKE_REPLY).await;
+        // A lease-free read: the engine's drive may still hold the session.
+        let committed = state
+            .core
+            .session(session_id.clone())
+            .durable()
+            .await
+            .expect("bind the durable session")
+            .read()
+            .await
+            .expect("read the committed session")
+            .expect("the session has committed state");
         assert!(
-            session
-                .read_view()
+            committed
                 .messages()
                 .iter()
                 .any(|message| lash::message_role(message) == "event"),
             "the wake turn must commit its cause as an event message, which is \
              the only boundary this projection can read"
         );
-        crate::restate::settle_workbench_turn(&state, &session_id, &TurnId::from(wake_turn_id))
-            .await
-            .expect("settle wake keeps-previous turn");
         session
             .close()
             .await
@@ -1315,4 +864,27 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
         );
         let _ = std::fs::remove_dir_all(data_dir);
     });
+}
+
+/// Wait until the workbench's follower has rendered an assistant row with
+/// `text`: the engine ran the root, and the follower recorded and settled it.
+async fn await_rendered_assistant_text(state: &AppState, text: &str) {
+    tokio::time::timeout(Duration::from_secs(10), async {
+        loop {
+            let Json(snapshot) = app_state(State(state.clone()), Query(SessionQuery::default()))
+                .await
+                .expect("read the workbench snapshot");
+            if snapshot
+                .state
+                .messages
+                .iter()
+                .any(|message| message.role == "assistant" && message.text.contains(text))
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("the followed root's reply is rendered");
 }

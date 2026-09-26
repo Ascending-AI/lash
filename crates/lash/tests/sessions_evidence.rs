@@ -1927,16 +1927,6 @@ fn drain_area_witnesses() {
     });
     // W0482: lash::runtime::LashRuntime::from_environment_with_plugin_options [function]
     let _ = lash::runtime::LashRuntime::from_environment_with_plugin_options;
-    // W0483: lash::SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow::batch_enqueue_seq [field]
-    field_witness(|value: &lash::SelectedQueuedWorkDrainRefusalCause| {
-        if let lash::SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow {
-            batch_enqueue_seq,
-            ..
-        } = value
-        {
-            let _ = batch_enqueue_seq;
-        }
-    });
     // W0484: lash::runtime::RuntimeErrorCode::RuntimeEffectGroupDrainDeferred [variant]
     variant_witness(|value: &lash::runtime::RuntimeErrorCode| {
         matches!(
@@ -2014,8 +2004,6 @@ fn drain_area_witnesses() {
     });
     // W0506: lash::durability::CanonicalRuntimeEffectEnvelope::json [function]
     let _ = lash::durability::CanonicalRuntimeEffectEnvelope::json;
-    // W0508: lash::QueuedTurnDrain::expect [function]
-    let _ = lash::QueuedTurnDrain::<()>::expect;
     // W0509: lash::QueuedWorkClaimRefusal::as_str [function]
     let _ = lash::QueuedWorkClaimRefusal::as_str;
     // W0510: lash::runtime::AssembledTurn::turn_cancel_input_outcome [field]

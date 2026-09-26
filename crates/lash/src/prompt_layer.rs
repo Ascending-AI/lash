@@ -11,9 +11,6 @@ use lash_core::{PromptContribution, PromptLayer, PromptSlot, PromptTemplate};
 /// template/contribution/slot operations are then defined here exactly once,
 /// instead of being copy-pasted per builder.
 ///
-/// (The per-turn `TurnBuilder` does not implement this trait: its prompt
-/// operations forward to the turn context, which owns that logic, so there is
-/// nothing to share.)
 pub trait PromptLayerSink: Sized {
     /// Mutable access to the builder's prompt layer, created on first use.
     fn prompt_layer_mut(&mut self) -> &mut PromptLayer;

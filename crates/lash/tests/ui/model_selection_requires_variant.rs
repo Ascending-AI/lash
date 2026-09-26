@@ -5,7 +5,7 @@ fn model_selection_requires_variant(backend: lash::Backend) {
         .model_variant("low");
 }
 
-fn turn_builder_has_no_model_overlay(builder: lash::TurnBuilder) {
+fn send_builder_has_no_model_overlay(builder: lash::SendBuilder) {
     let _ = builder.model("model-only");
 }
 

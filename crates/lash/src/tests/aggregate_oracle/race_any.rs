@@ -506,11 +506,13 @@ async fn a_turn_cancelled_while_parked_on_rank_n_ends_cancelled(
     let streamed = Arc::clone(&theatre);
     let turn_cancel = cancel.clone();
     let turn = tokio::spawn(async move {
-        session
-            .turn(TurnInput::text("settle the aggregate"))
-            .cancel(turn_cancel)
-            .stream_to(streamed.as_ref())
-            .await
+        output_into_cancelled_by(
+            session.send(TurnInput::text("settle the aggregate")),
+            streamed.as_ref(),
+            turn_cancel,
+            None,
+        )
+        .await
     });
 
     theatre.await_started("held").await;

@@ -1,31 +1,11 @@
 use super::*;
 #[cfg(feature = "rlm")]
-use crate::rlm::{RlmSendBuilderExt as _, RlmTurnBuilderExt as _};
+use crate::rlm::RlmSendBuilderExt as _;
 use futures_util::StreamExt as _;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use lash_sansio::sync::{LockResultExt, MutexExt};
 use std::collections::BTreeSet;
-
-#[derive(Default)]
-struct RecordingTurnIds {
-    turn_ids: TokioMutex<Vec<String>>,
-}
-
-impl RecordingTurnIds {
-    async fn snapshot(&self) -> Vec<String> {
-        self.turn_ids.lock().await.clone()
-    }
-}
-
-#[async_trait]
-impl TurnActivitySink for RecordingTurnIds {
-    async fn emit(&self, _activity: TurnActivity) {}
-
-    async fn emit_for_turn(&self, turn_id: &TurnId, _activity: TurnActivity) {
-        self.turn_ids.lock().await.push(turn_id.to_string());
-    }
-}
 
 struct QueuedWorkHydrationProbeFactory {
     builds: Arc<AtomicUsize>,
@@ -486,25 +466,6 @@ impl lash_core::testing::EffectLayer for EffectRecorder {
 }
 
 impl EffectRecorder {
-    /// A controller over `core`'s own effect host, scoped to `scope`, with
-    /// this recorder layered over it: the controller an explicit-effects entry
-    /// point runs under, whose scope is the one that entry point admits.
-    fn controller_for(
-        &self,
-        core: &LashCore,
-        scope: lash_core::ExecutionScope,
-    ) -> Arc<dyn lash_core::RuntimeEffectController> {
-        let host = lash_core::testing::LayeredEffectHost::new(
-            core.backend().effect_host(),
-            Arc::new(self.clone()),
-        );
-        lash_core::EffectHost::scoped_static(&host, lash_core::AdmittedScope::new(scope))
-            .expect("scope the recorded controller")
-            .expect("the backend host lends a static controller")
-            .owned_controller()
-            .expect("a static controller is shared")
-    }
-
     /// The scopes this recorder's effects ran under, in first-seen order.
     fn scopes(&self) -> Vec<lash_core::ExecutionScope> {
         let mut scopes = Vec::new();
@@ -852,5 +813,3 @@ mod control_and_cancel;
 mod observations;
 mod rlm_processes;
 mod rlm_streaming;
-
-use control_and_cancel::*;

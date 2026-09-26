@@ -176,9 +176,9 @@ async fn an_aborted_turn_leaves_its_groups_live_for_the_redrive() -> Result<()> 
 
     let session = core.session(SESSION).open().await?;
     let aborted = session
-        .turn(TurnInput::text("call the probe"))
-        .turn_id(TURN)
-        .run()
+        .send(TurnInput::text("call the probe"))
+        .id(TURN)
+        .output()
         .await
         .expect_err("a store fault in the tool child aborts the turn");
     let EmbedError::Runtime(runtime_error) = &aborted else {

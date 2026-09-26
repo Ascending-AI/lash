@@ -463,22 +463,19 @@ async fn run_high_traffic_operation(
     let operation_started = Instant::now();
     let mut durable_queue_depth = 0;
     let turn_usage = if kind == HighTrafficOperationKind::Queued {
-        session
-            .durable()
-            .enqueue(TurnInput::text(format!(
+        let handle = session
+            .send(TurnInput::text(format!(
                 "load-kind:{kind} operation:{ordinal}"
             )))
             .id(format!("runtime-perf-load-{ordinal}"))
-            .send()
             .await?;
         durable_queue_depth = session.durable().pending_turn_inputs().await?.len() as u64;
-        let drain = session
-            .queued_turn()
-            .drain_id(format!("runtime-perf-load-drain-{ordinal}"))
-            .run()
-            .await?;
-        if drain.ran().is_none() {
-            anyhow::bail!("queued high-traffic operation {ordinal} did not run a turn");
+        let report = handle.output().await?.result;
+        if !matches!(report.outcome, lash::TurnOutcome::Finished(_)) {
+            anyhow::bail!(
+                "queued high-traffic operation {ordinal} did not finish: {:?}",
+                report.outcome
+            );
         }
         TokenUsage::default()
     } else {
@@ -559,12 +556,12 @@ async fn run_high_traffic_direct_turn(
     kind: HighTrafficOperationKind,
 ) -> anyhow::Result<TokenUsage> {
     let report = session
-        .turn(TurnInput::text(format!(
+        .send(TurnInput::text(format!(
             "load-kind:{kind} operation:{ordinal} session:{}",
             session.session_id()
         )))
-        .turn_id(format!("runtime-perf-load-turn-{ordinal}"))
-        .run()
+        .id(format!("runtime-perf-load-turn-{ordinal}"))
+        .output()
         .await?
         .result;
     if !matches!(report.outcome, lash::TurnOutcome::Finished(_)) {

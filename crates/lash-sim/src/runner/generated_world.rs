@@ -15,15 +15,20 @@ pub(super) struct GeneratedRuntimeWorld {
     backend_faults: GeneratedBackendFaultHarness,
     provider_mutations: SimProviderMutationHarness,
     trigger_harness: SimTriggerHarness,
-    /// The engine every turn of the world runs in: lash-restate on the
-    /// in-process Restate server double under the workload's seed.
+    /// The workload's seed: every engine of the world derives its own from
+    /// it.
+    seed: u64,
+    /// Whether the world's server doubles run their attempts concurrently
+    /// (the search lane) or one at a time (the serial lane).
+    concurrent: bool,
+    /// The world's own engine, under the workload's seed: effect boundaries
+    /// run in its handlers and triggers land in its store. No core runs on it.
     engine: crate::backend::SimEngine,
-    /// The engine's backend with its session factory under the commit
-    /// observer; every runtime core of the world runs on it.
-    backend: lash::Backend,
-    /// The engine's own session factory, underneath the commit observer, for
-    /// reading the world back through a fresh handle once the run is over.
-    reopen_factory: Arc<dyn SessionStoreFactory>,
+    /// Each session's engine, by session alias. An engine runs every drive
+    /// of the one core built over it (FIG-3600: one driver per engine), so
+    /// each session, with its own provider and tools, runs on its own
+    /// server double.
+    session_engines: BTreeMap<String, crate::backend::SimEngine>,
     durable_writes: CheckpointWriteCollector,
     runtime_boundaries: RuntimeBoundaryHarness,
     suspending_turns: BTreeMap<String, SuspendingTurn>,
@@ -98,6 +103,10 @@ struct FinishedSuspend {
 
 struct GeneratedRuntimeSession {
     _core: lash::LashCore,
+    /// The session's own engine: its core's drive runs every turn of it.
+    engine: crate::backend::SimEngine,
+    /// The engine's session factory, for reading the session back.
+    reopen_factory: Arc<dyn SessionStoreFactory>,
     session: lash::LashSession,
     transport: Arc<ScriptedLlmHttpTransport>,
     provider_schedule: ScriptedTransportSchedule,
@@ -105,6 +114,13 @@ struct GeneratedRuntimeSession {
     provider_kind: String,
     active_provider_turns: BTreeMap<String, ActiveProviderTurn>,
     finished_provider_turns: BTreeMap<String, Value>,
+    /// The engine's drive of the session, held from a queued ingress until
+    /// its paired cancellation (or the next modeled provider turn): the
+    /// engine drives an input as soon as it is accepted, and each modeled
+    /// provider turn owns exactly one scripted exchange, so an input the
+    /// model queues must stay pending on the held engine until the model
+    /// withdraws it or a provider turn's root takes it with its own input.
+    drive_hold: Option<lash_restate_test::Hold>,
 }
 
 struct ActiveProviderTurn {
@@ -122,6 +138,8 @@ impl GeneratedRuntimeWorld {
     pub(super) async fn new(seed: u64) -> Result<Self, FixedScriptRunnerError> {
         Ok(Self::over_engine(
             crate::backend::SimEngine::concurrent(seed).await?,
+            seed,
+            true,
             false,
         ))
     }
@@ -132,28 +150,32 @@ impl GeneratedRuntimeWorld {
     pub(super) async fn serial(seed: u64) -> Result<Self, FixedScriptRunnerError> {
         Ok(Self::over_engine(
             crate::backend::SimEngine::new(seed).await?,
+            seed,
+            false,
             true,
         ))
     }
 
-    fn over_engine(engine: crate::backend::SimEngine, serialize_provider_turns: bool) -> Self {
+    fn over_engine(
+        engine: crate::backend::SimEngine,
+        seed: u64,
+        concurrent: bool,
+        serialize_provider_turns: bool,
+    ) -> Self {
         let clock = SimClock::new();
         let durable_writes = CheckpointWriteCollector::default();
-        let reopen_factory = lash::Backend::session_store_factory(&engine.backend());
-        let backend: lash::Backend = crate::backend::DecoratedBackend::over_engine(&engine)
-            .observing(durable_writes.clone())
-            .into();
         Self {
             clock,
             sessions: BTreeMap::new(),
             queued_inputs: BTreeMap::new(),
             backend_faults: GeneratedBackendFaultHarness::default(),
             provider_mutations: SimProviderMutationHarness::default(),
-            trigger_harness: SimTriggerHarness::over(backend.trigger_store()),
+            trigger_harness: SimTriggerHarness::over(engine.backend().trigger_store()),
             runtime_boundaries: RuntimeBoundaryHarness::new(engine.clone()),
+            seed,
+            concurrent,
             engine,
-            backend,
-            reopen_factory,
+            session_engines: BTreeMap::new(),
             durable_writes,
             suspending_turns: BTreeMap::new(),
             staged_admissions: BTreeMap::new(),
@@ -163,9 +185,44 @@ impl GeneratedRuntimeWorld {
         }
     }
 
-    /// The server double the world's turns run on.
-    pub(super) fn engine(&self) -> &crate::backend::SimEngine {
-        &self.engine
+    /// Every server double of the world, in a fixed order: the world's own,
+    /// then each session's by alias.
+    pub(super) fn engines(&self) -> impl Iterator<Item = &crate::backend::SimEngine> {
+        std::iter::once(&self.engine).chain(self.session_engines.values())
+    }
+
+    /// A fresh engine for `alias`'s session, under a seed derived from the
+    /// workload's and the alias, so one workload builds the same engines on
+    /// every run: its backend (session factory under the world's commit
+    /// observer) and its own session factory for reading back.
+    async fn session_engine(
+        &mut self,
+        alias: &str,
+    ) -> Result<
+        (
+            crate::backend::SimEngine,
+            lash::Backend,
+            Arc<dyn SessionStoreFactory>,
+        ),
+        FixedScriptRunnerError,
+    > {
+        let seed = alias
+            .bytes()
+            .fold(self.seed ^ 0xcbf2_9ce4_8422_2325, |hash, byte| {
+                (hash ^ u64::from(byte)).wrapping_mul(0x0100_0000_01b3)
+            });
+        let engine = if self.concurrent {
+            crate::backend::SimEngine::concurrent(seed).await?
+        } else {
+            crate::backend::SimEngine::new(seed).await?
+        };
+        let reopen_factory = lash::Backend::session_store_factory(&engine.backend());
+        let backend: lash::Backend = crate::backend::DecoratedBackend::over_engine(&engine)
+            .observing(self.durable_writes.clone())
+            .into();
+        self.session_engines
+            .insert(alias.to_string(), engine.clone());
+        Ok((engine, backend, reopen_factory))
     }
 
     pub(super) fn checkpoint_write_events(&self) -> Vec<CheckpointWriteEvent> {
@@ -176,16 +233,10 @@ impl GeneratedRuntimeWorld {
         self.durable_writes.clone()
     }
 
-    pub(super) fn reopen_factory(&self) -> Arc<dyn SessionStoreFactory> {
-        Arc::clone(&self.reopen_factory)
-    }
-
     /// Emitted, committed and reopened content for every runtime and suspend
-    /// session. Runtime sessions are read back through `reopen`; suspend
-    /// sessions through the engine's own session factory.
+    /// session, each read back through its own engine's session factory.
     pub(super) async fn content_evidence(
         &self,
-        reopen: &dyn SessionStoreFactory,
     ) -> Result<Vec<crate::content_oracle::SessionContent>, FixedScriptRunnerError> {
         let writes = self.checkpoint_write_events();
         let mut sessions = Vec::new();
@@ -197,7 +248,7 @@ impl GeneratedRuntimeWorld {
                     &session.provider_scripts,
                     Vec::new(),
                     &writes,
-                    reopen,
+                    session.reopen_factory.as_ref(),
                 )
                 .await?,
             );
@@ -288,23 +339,11 @@ impl GeneratedRuntimeWorld {
         let scripts = runtime_scripts_for_turns(provider_kind, &provider_turns)
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
         let provider_scripts = scripts.clone();
+        let (engine, backend, reopen_factory) = self.session_engine(&event.actor_alias).await?;
         let provider_schedule = ScriptedTransportSchedule::new();
-        provider_schedule.declare_gates_to(self.engine.restate().server().outside_gates());
-        let (core, transport, provider_kind) = runtime_core_for_scripts(
-            scripts,
-            self.backend.clone(),
-            Some(provider_schedule.clone()),
-            // The generated harness owns provider execution through explicit
-            // `Provider` boundaries. Each modeled success turn gets one scripted
-            // exchange slot and one scheduler-owned release sequence. The runtime
-            // queued-work driver would run next-turn inputs autonomously against the
-            // same scripted transport, consuming exchange slots and shifting later
-            // modeled turns onto unreleased gates. Queued-work behavior is exercised
-            // by dedicated runtime boundary facts; this scripted provider core keeps
-            // queued work inert so modeled provider boundaries remain the only
-            // provider exchanges in the session.
-            true,
-        )?;
+        provider_schedule.declare_gates_to(engine.restate().server().outside_gates());
+        let (core, transport, provider_kind) =
+            runtime_core_for_scripts(scripts, backend, Some(provider_schedule.clone()))?;
         let session = core
             .session(event.actor_alias.clone())
             .open()
@@ -321,6 +360,8 @@ impl GeneratedRuntimeWorld {
             event.actor_alias.clone(),
             GeneratedRuntimeSession {
                 _core: core,
+                engine,
+                reopen_factory,
                 session,
                 transport,
                 provider_schedule,
@@ -328,6 +369,7 @@ impl GeneratedRuntimeWorld {
                 provider_kind,
                 active_provider_turns: BTreeMap::new(),
                 finished_provider_turns: BTreeMap::new(),
+                drive_hold: None,
             },
         );
         Ok(json!({
@@ -341,7 +383,7 @@ impl GeneratedRuntimeWorld {
         &mut self,
         event: &BoundaryEvent,
     ) -> Result<Value, FixedScriptRunnerError> {
-        let runtime_session = self.sessions.get(&event.actor_alias).ok_or_else(|| {
+        let runtime_session = self.sessions.get_mut(&event.actor_alias).ok_or_else(|| {
             FixedScriptRunnerError::Assertion(format!(
                 "queued ingress boundary `{}` ran before ingress for `{}`",
                 event.boundary_id, event.actor_alias
@@ -357,10 +399,26 @@ impl GeneratedRuntimeWorld {
             .get("source_key")
             .and_then(Value::as_str)
             .unwrap_or(&event.boundary_id);
-        let mut enqueue = runtime_session
+        if runtime_session.drive_hold.is_none() {
+            // A drive running a modeled provider turn stops at the call it
+            // awaits; with none running, the last drive settles first, so the
+            // hold always meets the drive at the same point.
+            if runtime_session.active_provider_turns.is_empty() {
+                runtime_session
+                    .engine
+                    .settle_session_drive(&runtime_session.session)
+                    .await;
+            }
+            runtime_session.drive_hold = Some(
+                runtime_session
+                    .engine
+                    .hold_session_drive(&runtime_session.session)
+                    .await,
+            );
+        }
+        let mut send = runtime_session
             .session
-            .durable()
-            .enqueue(lash::TurnInput::text(text.to_string()))
+            .send(lash::TurnInput::text(text.to_string()))
             .id(source_key);
         let observed_active_turn_id = event
             .payload
@@ -374,15 +432,16 @@ impl GeneratedRuntimeWorld {
             let active_turn_id = observed_active_turn_id
                 .as_deref()
                 .unwrap_or(&event.boundary_id);
-            enqueue = enqueue.ingress(lash_core::TurnInputIngress::active_turn(
+            send = send.ingress(lash_core::TurnInputIngress::active_turn(
                 active_turn_id,
                 lash_core::TurnInputCheckpointBoundary::AfterWork,
             ));
         }
-        let acceptance = enqueue
-            .send()
+        let acceptance = send
             .await
-            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?
+            .receipt()
+            .clone();
         self.queued_inputs
             .insert(event.boundary_id.clone(), acceptance.input_id.to_string());
         let input_state = lash_core::TurnInputState::open(acceptance.ingress.clone());
@@ -465,13 +524,32 @@ impl GeneratedRuntimeWorld {
         completion_event.at = final_ready_at;
         set_runtime_completion_ready_at(&mut completion_event, final_ready_at);
 
-        let engine = self.engine.clone();
+        let engine = runtime_session.engine.clone();
         let session = runtime_session.session.clone();
         let transport = Arc::clone(&runtime_session.transport);
         let provider_kind = runtime_session.provider_kind.clone();
         let task_event = event.clone();
+        // A queued input the model still holds pending is admitted with this
+        // turn's input: the hold ends once this input is accepted. With no
+        // hold, the input goes to a settled session, so the drive that admits
+        // it is the one its own acceptance schedules.
+        let drive_hold = runtime_session.drive_hold.take();
+        if drive_hold.is_none() {
+            runtime_session
+                .engine
+                .settle_session_drive(&runtime_session.session)
+                .await;
+        }
         let mut handle = tokio::spawn(async move {
-            run_provider_turn_task(engine, session, transport, provider_kind, task_event).await
+            run_provider_turn_task(
+                engine,
+                session,
+                transport,
+                provider_kind,
+                task_event,
+                drive_hold,
+            )
+            .await
         });
         tokio::select! {
             ready = async {
@@ -849,7 +927,7 @@ impl GeneratedRuntimeWorld {
         &mut self,
         event: &BoundaryEvent,
     ) -> Result<Value, FixedScriptRunnerError> {
-        let runtime_session = self.sessions.get(&event.actor_alias).ok_or_else(|| {
+        let runtime_session = self.sessions.get_mut(&event.actor_alias).ok_or_else(|| {
             FixedScriptRunnerError::Assertion(format!(
                 "cancellation boundary `{}` ran before ingress for `{}`",
                 event.boundary_id, event.actor_alias
@@ -877,6 +955,9 @@ impl GeneratedRuntimeWorld {
             .cancel_pending_turn_input(&lash_core::InputId::from(input_id.as_str()))
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        // The model's queue-then-withdraw pair is over: the engine may drive
+        // the session again.
+        drop(runtime_session.drive_hold.take());
         let (cancelled, cancel_outcome) = match &outcome {
             lash::PendingTurnInputCancelOutcome::Cancelled(_) => (true, "cancelled"),
             lash::PendingTurnInputCancelOutcome::AlreadyClaimed { .. } => {
@@ -950,11 +1031,11 @@ impl GeneratedRuntimeWorld {
         let transport = Arc::new(ScriptedLlmHttpTransport::from_scripts(
             suspend_scripts.clone(),
         )?);
-        let suspend_store_factory = Arc::clone(&self.reopen_factory);
+        let (turn_engine, backend, suspend_store_factory) =
+            self.session_engine(&session_alias).await?;
         let (provider_handle, model, _provider_kind) =
             runtime_provider_components(OPENAI_COMPATIBLE, &transport)
                 .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        let backend = self.backend.clone();
         let core = lash::LashCore::standard_builder(backend, lash::TurnBudget::Unbounded)
             .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
             .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -972,7 +1053,6 @@ impl GeneratedRuntimeWorld {
             .open()
             .await
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
-        let turn_engine = self.engine.clone();
         let turn_session = session.clone();
         let turn_events: Arc<dyn lash::TurnActivitySink> = events.clone();
         let prompt = format!("await {suspend_kind_label} completion");
@@ -984,7 +1064,7 @@ impl GeneratedRuntimeWorld {
                     turn_id,
                     turn_events,
                     Arc::new(move |session: &lash::LashSession| {
-                        Ok(session.turn(lash::TurnInput::text(prompt.clone())))
+                        Ok(session.send(lash::TurnInput::text(prompt.clone())))
                     }),
                 )
                 .await?
@@ -1301,6 +1381,7 @@ async fn run_provider_turn_task(
     transport: Arc<ScriptedLlmHttpTransport>,
     provider_kind: String,
     event: BoundaryEvent,
+    drive_hold: Option<lash_restate_test::Hold>,
 ) -> Result<Value, FixedScriptRunnerError> {
     let expected_text = event
         .payload
@@ -1314,7 +1395,15 @@ async fn run_provider_turn_task(
         .unwrap_or(1) as usize;
     let prompt = format!("Run generated provider turn {}.", event.boundary_id);
     let output = engine
-        .run_text_turn(&session, event.boundary_id.clone(), prompt)
+        .run_turn_releasing(
+            &session,
+            event.boundary_id.clone(),
+            Arc::new(crate::backend::DiscardedTurnActivity),
+            Arc::new(move |session: &lash::LashSession| {
+                Ok(session.send(lash::TurnInput::text(prompt.clone())))
+            }),
+            drive_hold,
+        )
         .await?
         .map_err(|err| {
             FixedScriptRunnerError::Runtime(format!(

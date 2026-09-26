@@ -8,12 +8,11 @@ use crate::session_binding::BoundSession;
 use crate::support::{
     Arc, EffectHost, EmbedError, LashCore, LashRuntime, PluginBinding, PluginFactory,
     PluginOperations, PluginOptions, ProcessHandleView, PromptLayer, PromptLayerSink,
-    ProviderHandle, QueuedTurnBuilder, Result, RuntimeErrorCode, RuntimeHandle, RuntimeObservation,
+    ProviderHandle, Result, RuntimeErrorCode, RuntimeHandle, RuntimeObservation,
     RuntimePersistence, RuntimeSessionState, SessionAdmin, SessionCursor, SessionError,
     SessionObservation, SessionObservationSubscription, SessionPolicy, SessionReadView,
     SessionResume, SessionScope, SessionSpec, SessionStoreCreateRequest, SessionUsageReport,
-    ToolManifest, ToolState, TurnBuilder, TurnInput, build_plugin_host,
-    refuse_foreign_backend_factories,
+    ToolManifest, ToolState, TurnInput, build_plugin_host, refuse_foreign_backend_factories,
 };
 use futures_util::Stream;
 use lash_core::facade_support::ToolStateFacadeOps;
@@ -852,19 +851,6 @@ impl LashSession {
         self.binding.effect_host()
     }
 
-    pub fn turn(&self, input: TurnInput) -> TurnBuilder {
-        TurnBuilder {
-            session: self.clone(),
-            cancel_token: None,
-            runtime: self.runtime.clone(),
-            input,
-            stop: lash_core::LocalTurnStop::default(),
-            cancels: self.turn_cancels.clone(),
-            protocol_turn_options: None,
-            turn_id: None,
-        }
-    }
-
     /// Accept `input` durably and ask the engine to drive the session: the
     /// one way a turn starts (FIG-3600).
     ///
@@ -900,17 +886,6 @@ impl LashSession {
     /// (ADR 0039).
     pub fn cancel(&self, target: crate::CancelTarget) -> crate::CancelBuilder {
         crate::CancelBuilder::new(crate::send::SendTarget::Live(self.clone()), target)
-    }
-
-    pub fn queued_turn(&self) -> QueuedTurnBuilder {
-        QueuedTurnBuilder {
-            runtime: self.runtime.clone(),
-            effect_host: self.binding.effect_host(),
-            stop: lash_core::LocalTurnStop::default(),
-            cancels: self.turn_cancels.clone(),
-            turn_id: None,
-            drain_id: None,
-        }
     }
 
     /// Abandon this session's unfinished queued run: settle it durably

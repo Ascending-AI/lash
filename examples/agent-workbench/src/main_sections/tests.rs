@@ -6,7 +6,7 @@ use lash::TurnId;
 #[cfg(test)]
 #[path = "tests/support.rs"]
 mod support;
-use lash::rlm::RlmTurnBuilderExt;
+use lash::rlm::RlmSendBuilderExt;
 #[path = "tests/restate_endpoint.rs"]
 mod restate_endpoint;
 use lash::tracing::{
@@ -356,7 +356,6 @@ finish("observed through live replay");
     let core = explicit_durable_test_facets(&data_dir)
         .provider(provider)
         .model(model.clone())
-        .without_queued_work()
         .build(crate::test_core_owner())
         .expect("build core");
     let session = core
@@ -369,10 +368,10 @@ finish("observed through live replay");
     let forwarder = tokio::spawn(forward_session_observations(session.clone(), cursor, tx));
 
     session
-        .turn(lash::TurnInput::text("exercise observation stream"))
+        .send(lash::TurnInput::text("exercise observation stream"))
         .require_finish()
         .expect("require finish")
-        .run()
+        .output()
         .await
         .expect("turn");
 
@@ -462,10 +461,10 @@ finish("gap source");
     let requested_cursor = cursor.to_string();
 
     session
-        .turn(lash::TurnInput::text("trim cursor"))
+        .send(lash::TurnInput::text("trim cursor"))
         .require_finish()
         .expect("require finish")
-        .run()
+        .output()
         .await
         .expect("turn");
 
@@ -578,10 +577,10 @@ finish("snapshot cursor");
         .await
         .expect("open session");
     session
-        .turn(lash::TurnInput::text("fill the live replay buffer"))
+        .send(lash::TurnInput::text("fill the live replay buffer"))
         .require_finish()
         .expect("require finish")
-        .run()
+        .output()
         .await
         .expect("turn");
 
@@ -738,9 +737,9 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
             );
             assert_eq!(recorded.request.mode, lash::TurnCancelMode::Immediate);
             session
-                .turn(lash::TurnInput::text("already cancelled"))
-                .turn_id("turn-cancel")
-                .run()
+                .send(lash::TurnInput::text("already cancelled"))
+                .id("turn-cancel")
+                .output()
                 .await
         },
     );
@@ -892,9 +891,9 @@ finish({ test: boxes[0], test2: boxes[1] });
     let output = tokio::time::timeout(
         Duration::from_secs(5),
         session
-            .turn(lash::TurnInput::text("list both inboxes"))
-            .turn_id(format!("workbench-test-turn:{}", uuid::Uuid::new_v4()))
-            .run(),
+            .send(lash::TurnInput::text("list both inboxes"))
+            .id(format!("workbench-test-turn:{}", uuid::Uuid::new_v4()))
+            .output(),
     )
     .await
     .expect("parallel inbox list turn must not hang")
@@ -1985,24 +1984,28 @@ async fn persisted_trigger_route_fires_after_reopening_sqlite_artifact_store_inn
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
-/// Drains an enqueued command batch in-process. The test cores' effect host
-/// permits foreground drains; in production the session's engine drives the
-/// same batch inside its `LashSession` handler.
+/// Waits for the session's engine to apply an enqueued command batch: the
+/// submission asked its drive, which drains the command lane first.
 async fn drain_refresh_batch(state: &AppState, receipt: &lash::SessionCommandReceipt) {
-    let session = state
+    let durable = state
         .core
         .session(receipt.session_id.clone())
-        .open()
+        .durable()
         .await
-        .expect("open session to drain refresh batch");
-    let _ = session
-        .queued_turn()
-        .batch_ids([receipt.batch_id.clone()])
-        .drain_id(receipt.batch_id.clone())
-        .run()
-        .await
-        .expect("drain refresh batch");
-    session.close().await.expect("close drain session");
+        .expect("bind the durable session");
+    tokio::time::timeout(Duration::from_secs(10), async {
+        while durable
+            .queued_work()
+            .await
+            .expect("read the session's queued work")
+            .iter()
+            .any(|batch| batch.batch_id == receipt.batch_id)
+        {
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("the refresh batch settles through the session drive");
 }
 
 #[cfg(test)]
@@ -2058,9 +2061,9 @@ fn trigger_registration_response() -> lash::provider::LlmResponse {
 
 async fn register_test_trigger(session: &lash::LashSession) {
     let output = session
-        .turn(lash::TurnInput::text("register trigger"))
-        .turn_id(format!("workbench-test-register:{}", uuid::Uuid::new_v4()))
-        .run()
+        .send(lash::TurnInput::text("register trigger"))
+        .id(format!("workbench-test-register:{}", uuid::Uuid::new_v4()))
+        .output()
         .await
         .expect("register trigger route");
     assert_eq!(output.final_value(), Some(&serde_json::json!("registered")));

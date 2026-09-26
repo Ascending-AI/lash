@@ -7,7 +7,7 @@ pub(super) const RUNTIME_PROOF_SEED: u64 = 0x5eed_7001;
 
 /// A turn build that submits `prompt` as text.
 fn text_turn(prompt: &'static str) -> crate::backend::SimTurnBuild {
-    Arc::new(move |session: &lash::LashSession| Ok(session.turn(lash::TurnInput::text(prompt))))
+    Arc::new(move |session: &lash::LashSession| Ok(session.send(lash::TurnInput::text(prompt))))
 }
 
 pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, FixedScriptRunnerError>
@@ -20,7 +20,6 @@ pub(super) async fn prove_runtime_facade_turn() -> Result<RuntimeFacadeProof, Fi
             .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
     let engine = crate::backend::SimEngine::new(RUNTIME_PROOF_SEED).await?;
     let core = lash::LashCore::standard_builder(engine.backend(), lash::TurnBudget::Unbounded)
-        .without_queued_work()
         .lease_timings(crate::lease::sim_runtime_lease_timings())
         .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
         .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
@@ -112,7 +111,7 @@ pub(super) async fn drive_live_provider_failure_turns(
     Ok(facts)
 }
 
-/// Run a real `session.turn().run()` against `script`, releasing its
+/// Run a real `session.send().output()` against `script`, releasing its
 /// scripted-transport SSE events through a REAL `BoundaryScheduler` (the same
 /// provider-event release path generated turns use — NOT an ad-hoc index loop),
 /// and record whether the turn terminalized without committing any output.
@@ -565,7 +564,7 @@ pub(super) async fn prove_final_value_semantic_channel()
             events.clone(),
             Arc::new(|session: &lash::LashSession| {
                 session
-                    .turn(lash::TurnInput::text("produce a semantic final value"))
+                    .send(lash::TurnInput::text("produce a semantic final value"))
                     .require_finish()
             }),
         )

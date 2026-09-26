@@ -395,7 +395,7 @@ async fn cold_queued_child_process() -> Result<()> {
             .send()
             .await?;
         let running_session = session.clone();
-        let running = tokio::spawn(async move { running_session.queued_turn().run().await });
+        let running = tokio::spawn(async move { drain_queued(&running_session, None).await });
         tokio::time::timeout(
             std::time::Duration::from_secs(30),
             probe.hook_entered.notified(),
@@ -452,13 +452,9 @@ async fn cold_queued_child_process() -> Result<()> {
     );
     if boundary == "terminal" {
         assert!(session.durable().pending_queued_run().await?.is_none());
-        let replay = session
-            .queued_turn()
-            .drain_id(recorded.scope.id())
-            .run()
-            .await?;
+        let replay = drain_queued(&session, Some(recorded.scope.id())).await?;
         assert!(
-            matches!(replay, crate::QueuedTurnDrain::Replayed(ref receipt) if receipt.scope == recorded.scope && receipt.terminal.is_some())
+            matches!(replay, lash_core::facade_support::QueuedTurnDrain::Replayed(ref receipt) if receipt.scope == recorded.scope && receipt.terminal.is_some())
         );
     } else {
         let before = session
@@ -469,9 +465,7 @@ async fn cold_queued_child_process() -> Result<()> {
         assert_eq!(before.scope, recorded.scope);
         assert_eq!(before.origin, recorded.origin);
         assert_eq!(before.position, recorded.position);
-        session
-            .queued_turn()
-            .run()
+        drain_queued(&session, None)
             .await?
             .expect("cold drain resumes");
     }
@@ -703,9 +697,9 @@ async fn exhausted_input_root_resumes_or_is_withdrawn_without_new_input() -> Res
         let mut attempts = 0;
         loop {
             match session
-                .turn(TurnInput::text("direct work after disposition"))
-                .turn_id("direct-after-disposition")
-                .run()
+                .send(TurnInput::text("direct work after disposition"))
+                .id("direct-after-disposition")
+                .output()
                 .await
             {
                 Ok(_) => break,
@@ -993,10 +987,7 @@ async fn stopped_queued_turn_runs_withheld_input_in_a_follow_on() -> Result<()> 
         .enqueue(TurnInput::text("start tool stop"))
         .send()
         .await?;
-    let output = session
-        .queued_turn()
-        .drain_id("stopped-withheld")
-        .run()
+    let output = drain_queued(&session, Some("stopped-withheld"))
         .await?
         .expect("queued run executes");
     assert_eq!(

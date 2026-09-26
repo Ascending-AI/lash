@@ -220,8 +220,8 @@ Then open `http://127.0.0.1:3000`.
 
 The model and reasoning variant are also editable in the browser. The
 environment values are just the defaults for new chats; each chat persists its
-own OpenRouter model id and variant, and each turn applies that selection with
-the public `TurnBuilder::model(...)` API.
+own OpenRouter model id and variant, and the chat's session is opened on that
+selection (`SessionSpec::model`).
 
 The example opts into provider-level thinking exposure for demonstration,
 attaches a trace sink to `LashCore`, and writes JSONL trace records to stderr

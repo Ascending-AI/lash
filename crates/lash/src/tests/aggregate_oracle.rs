@@ -618,8 +618,8 @@ async fn drive_cells(
     let streamed = Arc::clone(&theatre);
     let turn = tokio::spawn(async move {
         session
-            .turn(TurnInput::text("settle the aggregate"))
-            .stream_to(streamed.as_ref())
+            .send(TurnInput::text("settle the aggregate"))
+            .output_into(streamed.as_ref())
             .await
     });
     Ok(DrivenOracle {

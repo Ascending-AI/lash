@@ -135,13 +135,13 @@ screenshot, and DOM dump. Set
 | Session per durable conversation | `bot/runtime.rs::session_id`, `bot/channel.rs` |
 | Thread as a forked child session | `bot/threads.rs`, `bot/runtime.rs::thread_session_id` |
 | Bounded thread-root admission deferral | `bot/threads.rs::open_thread_session` |
-| Ambient context as queued turn input, with no turn | `bot/channel.rs::ingest` |
-| Mention-triggered turn that drains the queue | `bot/channel.rs::run_mention_turn` |
+| Ambient context folded in the ledger, with no turn | `bot/channel.rs::ingest`, `bot/ledger.rs::bind_mention_send` |
+| One send per mention, carrying the folded context | `bot/channel.rs::run_mention_turn` |
 | Standard-mode native tool loop | `bot/tools.rs` |
 | MCP tools in that same standard tool loop | `mcp_server.rs`, `bot/runtime.rs` |
 | Idempotent event consumption | `bot/ledger.rs` |
 | Restart recovery, stage by stage | `bot/channel.rs::recover` |
-| Acting on the typed reason an empty drain reports | `bot/channel.rs::settle_empty_drain` |
+| Re-attaching a resumed mention to its send | `bot/channel.rs::run_mention_turn` |
 | Bounded retry of fenced work and delayed thread roots | `bot/channel.rs::retry_deferred` |
 | Reading a lost reply back out of the transcript | `bot/channel.rs::reply_from_transcript` |
 | Transactional outbox | `platform/state.rs::post_message` |
@@ -378,28 +378,34 @@ anything shorter-lived throws the room's memory away:
 Because the session id is derived from platform data and the stores are SQLite,
 nothing needs to be handed from one boot to the next.
 
-### Ambient traffic is queued input, not a turn
+### Ambient traffic is context, not a turn
 
 Most messages in a channel are not for the bot. It still needs to have heard
 them, or its first answer of the day is context-free.
 
-- **Ambient** (`message` events with no mention) →
-  `session.enqueue(TurnInput::text(...)).id(...).send()`. Durable, ordered,
-  model-visible admission. **No turn runs, no token is spent, nothing is posted.**
-- **Mention** (`app_mention`) → the mention text is enqueued the same way, then
-  `session.queued_turn().drain_id(...).run()` folds *every* queued input —
-  accumulated room context and the mention — into **one** turn.
+- **Ambient** (`message` events with no mention) → recorded in the event ledger
+  with the text the model will see. **No turn runs, no token is spent, nothing is
+  posted**, and nothing is sent to Lash.
+- **Mention** (`app_mention`) → the ledger binds every ambient line still waiting
+  on the mention's route to it and composes one text — the folded room context,
+  then the mention — and the bot sends that with
+  `session.send(TurnInput::text(...)).id(...)`. The session's engine runs the turn
+  as soon as the send is accepted; the bot waits on the handle's outcome and posts
+  the answer.
 
 So a room can be busy for an hour and cost nothing, and the answer when it comes
-has the hour in it. The queued-work driver is deliberately switched off
-(`disable_queued_work_driver()`) so that nothing but a mention can ever cause the
-bot to speak.
+has the hour in it. A host never runs a turn itself (FIG-3600): every Lash input
+starts a turn on the engine, which is why ambient traffic is folded by the host
+rather than sent. Once RunSpec (FIG-3838) lands, the folded block moves into the
+send's `RunSpec.context`.
 
-Every enqueue carries a source key derived from the message's `ts`
-(`ambient:<channel>:<ts>`), and `ts` *is* message identity. A redelivered event
-therefore resolves to the admission record Lash already holds instead of adding a
-duplicate context line — idempotence at the runtime layer, independent of the
-bot's own ledger.
+The composed text is stored with the mention the first time it is bound, and the
+send's id is derived from the mention's `ts` (`mention:<channel>:<ts>`), and `ts`
+*is* message identity. A redelivered or recovered mention therefore sends the same
+bytes under the same id and resolves to the admission Lash already holds instead
+of running a second turn — idempotence at the runtime layer, independent of the
+bot's own stages. An ambient line that arrives after a mention was bound waits for
+the route's next mention.
 
 ## Threads
 
@@ -411,41 +417,39 @@ channel graph through its source boundary and owns a new branch after it.
 
 The lazy trigger is the **first reply in the thread**, whether ambient or a
 mention. This is slightly more eager than waiting for the first mention, but it
-has one durable state instead of a separate pre-engagement buffer: ambient
-replies enqueue directly on the child, cost no model call, and the first mention
-drains them there. No thread event is ever admitted to `channel:<C…>`.
+has one fork instead of a separate pre-engagement state: ambient replies are
+folded on the thread's route in the ledger, cost no model call, and the thread's
+first mention sends them to the child. No thread event is ever sent to
+`channel:<C…>`.
 
-### Seeding the thread root
+The thread starts with its parent's folded context: its first send leads with the
+channel messages up to the root that the fork boundary does not carry, the root
+among them labelled, then the thread's own folded replies and the mention.
+
+### Labelling the thread root
 
 Inheriting the prefix is not the same as knowing the root. Lash forks at a
 committed graph boundary and has no concept of a "thread root", so it cannot
-mark one — and the inherited prefix normally extends *past* the root, because an
-ambient root only commits when a later mention drains the channel queue and that
-same turn commits the mention and the bot's answer too. A child asked "what did
-the root say?" would then have three equally-committed candidates and answer
-about the wrong one.
+mark one — and the inherited prefix normally extends *past* the root, because a
+mention that folded an ambient root committed the traffic after it and the bot's
+answer too. A child asked "what did the root say?" would then have three
+equally-committed candidates and answer about the wrong one.
 
-The distinction is host domain knowledge, so the host writes it down: at fork
-time the bot seeds one labelled admission naming the root message
-(`THREAD_ROOT_SEED_PREFIX` in `bot/threads.rs`), under a deterministic source
-key, before the child's first turn runs. Every forking host with a similar
-notion of an anchor message pays the same few lines — the price of hosts, not
-the substrate, owning their own semantics.
-
-The seed carries its own newlines on both sides, and that is not cosmetic:
-queued text inputs concatenate into a single user message with no separator, so
-a seed enqueued behind copied pre-root context would begin in the middle of that
-line and read as its tail rather than as a label. The deterministic source key
-makes re-seeding a no-op, resolved against the `(session_id, source_key)` row
-Lash already holds; a host that vacuums live sessions tombstones that row and
-would re-seed on a later redelivery, which this bot never does.
+The distinction is host domain knowledge, so the host writes it down: the
+thread's first send carries one labelled line naming the root message
+(`THREAD_ROOT_SEED_PREFIX` in `bot/threads.rs`). Every forking host with a
+similar notion of an anchor message pays the same few lines — the price of hosts,
+not the substrate, owning their own semantics. The label starts and ends its own
+line, so it names the root and not the copied line ahead of it. The composed
+first send is stored in the ledger, so a redelivery or a second open sends the
+same bytes.
 
 ### Locating the fork boundary
 
 The ledger records two different boundaries because they mean different things.
 A folded top-level message records and retains the exact channel graph boundary
-observed while its admission held the channel lock; the queued root is copied
-into a child forked there. After a channel turn commits, the bot instead reads
+observed while it held the channel lock; the folded root is copied into the
+first send of a child forked there. After a channel turn commits, the bot instead reads
 `turn_input_applications`, finds the application for the root's `input_id`, groups
 every application with the same typed `turn_id`, pins the committed leaf, and
 records that later boundary. If a crash lands after the pin but before that
@@ -459,8 +463,7 @@ Thread-open chooses only from evidence durably tied to the root:
 | --- | --- |
 | Recorded `fork_node_id` | Fork at that retained turn boundary. |
 | `input_id` with a committed application, but no `fork_node_id` | Re-derive the applied turn boundary, repair the ledger row, then fork there. |
-| Folded root with a recorded admission boundary | Fork at that retained pre-root boundary and copy the pre-root top-level admissions that are not already in the child graph; the root itself arrives as the seed. |
-| Accepted root with `input_id` and an admission boundary | Treat the durable enqueue as valid immediately, even if the process died before advancing the ledger to Folded. |
+| Folded root with a recorded admission boundary | Fork at that retained pre-root boundary; the thread's first send copies the pre-root top-level messages that are not already in the child graph, with the root labelled. The ledger row is the root's durability, even if the process died before advancing it to Folded. |
 | Non-terminal root without an authoritative boundary yet | Poll from 250ms with exponential backoff capped at 8s, for at most 45s. |
 | Terminal ignored root with no admission evidence | Fail immediately; this ledger state proves the bot will never route it. |
 | No root row | Keep the bounded wait because delivery may be racing; record `thread_root_not_available` on exhaustion. |
@@ -472,11 +475,11 @@ remains at the non-terminal FIG-1008 state. The bot continues under the remainin
 75s of one 120s in-process deadline, so a root that commits after the foreground
 wait can recover without a new mention or restart. The error notification has its
 own metadata identity, preventing it from being mistaken for the eventual answer
-or posted twice. Copied admissions remain queued and are folded by the thread's
-first mention.
+or posted twice. The copied context waits in the ledger and leads the thread's
+first send.
 
 A no-row exhaustion is distinct from a known, still-processing root. Boot recovery
-handles `thread_root_not_available` with one zero-budget probe and does not enqueue
+handles `thread_root_not_available` with one zero-budget probe and does not start
 another long poll, avoiding a repeated 45s serial stall on every boot. Top-level
 unfinished rows are recovered before thread rows, so a root that was accepted
 before a crash gets its admission boundary before its replies are re-driven.
@@ -484,9 +487,9 @@ before a crash gets its admission boundary before its replies are re-driven.
 Fork isolation is directional in both cases and is asserted against the real
 store semantics:
 
-- thread nodes and pending inputs never appear in the channel session;
-- channel nodes and pending inputs added after the fork never appear in the
-  thread session;
+- thread nodes and folded thread context never appear in the channel session;
+- channel nodes and folded channel context added after the fork never appear in
+  the thread session;
 - the ancestry present at the retained boundary is shared, not copied.
 
 The staged event ledger carries `thread_ts`, so recovery opens the same child
@@ -577,10 +580,11 @@ Two ignore rules are worth calling out, because both are real production bugs:
 What the bot uses today:
 
 - **One SQLite file backend** (`SqliteBackend::open` on the sessions root).
-  Committed transcripts, undrained queued input and the effect journal share that
+  Committed transcripts, accepted inputs and the effect journal share that
   root and survive a restart together. This is the load-bearing choice.
-- **A durable event ledger** (its own SQLite database), recording both the text
-  admitted to the session and the reply owed, so a new boot can replay either.
+- **A durable event ledger** (its own SQLite database), recording the folded
+  ambient text, the text each mention sent, and the reply owed, so a new boot can
+  replay any of them.
 - **A durable, transactional outbox on the platform side** — the message and the
   events it implies commit together, so the retries the bot's design assumes
   actually happen, and no event is lost to a crash between two commits.
@@ -590,53 +594,39 @@ What the bot uses today:
 
 ### What a crash costs, stage by stage
 
-Every stage is resumable because every step is idempotent: the admission by its
-Lash source key, the drain by its `drain_id`, and the post by the `event_id` its
-`metadata` carries. `ChannelBot::recover` walks the unfinished rows at boot and
+Every stage is resumable because every step is idempotent: the fold by the
+ledger's stored send text, the send and its turn by the send's id, and the post by
+the `event_id` its `metadata` carries. `ChannelBot::recover` walks the unfinished rows at boot and
 finishes each one:
 
 | Crash point | Ledger stage | What recovery does |
 | --- | --- | --- |
-| Before any work | `accepted` | Re-admits the message; for a mention, runs the turn and posts. |
-| **Mid-turn, inside the dead boot's lease TTL** | `accepted` | **Defers.** The dead turn claimed the input and the claim is fenced to a lease this boot cannot take yet. Retried until the lease lapses; never terminalized. |
-| Mid-turn, after the dead boot's lease lapsed | `accepted` | Steals the stale claim and runs the turn (`ReplySource::Turn`). |
-| After the turn committed, before the reply text was recorded | `accepted` | Reads the answer back out of the committed transcript and posts it (`ReplySource::Transcript`). |
+| Before any work | `accepted` | Folds an ambient message; for a mention, sends it and waits on its turn, then posts. |
+| **Mid-turn, inside the dead boot's lease TTL** | `accepted` | **Defers.** The dead boot's lease still fences the session, so this boot cannot open it or its turn cannot settle yet. Retried until the lease lapses; never terminalized. |
+| Mid-turn, after the dead boot's lease lapsed | `accepted` | Re-sends the stored text under the same id; this boot's engine takes the lane over and runs the turn (`ReplySource::Turn`, or `Transcript` if the turn committed before the retry looked). |
+| After the turn committed, before the reply text was recorded | `accepted` | Finds the input's committed application and reads the answer back out of the transcript (`ReplySource::Transcript`). |
 | After the text was recorded, before the post | `reply_pending` | Posts the recorded text without asking the model again (`ReplySource::Ledger`). |
 | After the post, before recording it | `reply_pending` | Finds its own reply by the `event_id` in the reply's `metadata` and records it. **No second post.** |
 
-#### An empty drain names why it ran no turn
+#### A resumed mention re-attaches to its send
 
-`queued_turn().run()` answers with `QueuedTurnDrain::Ran(output)` or
-`QueuedTurnDrain::Empty(reason)`, and acting on that reason is the single most
-important thing to get right in a host that recovers queued work. The two
-outcomes it separates are opposite:
+A resumed mention never guesses whether its turn ran. It re-sends the stored text
+under the same id, which answers with the admission Lash already holds, and asks
+the durable record:
 
-- **The queue held nothing for this drain.** The durable queue holds no pending
-  work for this lane: a committed turn already consumed the input, so the answer
-  is in the transcript, or provably nowhere. Terminal. Only
-  `EmptyQueuedDrainReason::ClaimRefused(QueuedWorkClaimRefusal::Empty)` proves
-  it.
-- **This drain never reached the input.** Every other reason. The lane was busy —
-  a boot that restarts inside the previous boot's lease TTL gets
-  `ExecutionLaneBusy`, because
-  `try_claim_session_execution_lease_with_token` returns `Busy` for a live lease
-  held by a *different* incarnation — or the work exists but is not claimable
-  yet (`NotYetAvailable`, a row whose `available_at_ms` has not arrived), or the
-  head was withheld, another writer won the row, or the host policy admitted
-  none. Nothing was consumed, so the work is **retryable**, and the bot re-polls
-  on its own cadence: no reason carries a timestamp.
-
-`settle_empty_drain` matches the reason **exhaustively**, with no catch-all arm:
-a refusal variant added later is a new decision for this bot to make, and the
-compiler makes it say so rather than defaulting it into the terminal branch.
+- **The input has a committed application.** A turn answered it, so the answer is
+  in the transcript, or provably nowhere. Terminal.
+- **It has none yet.** The turn may be held by a previous boot's live lease, or
+  still running. The bot waits a bounded time on the handle's outcome and
+  otherwise defers: nothing was consumed, so the work is **retryable**, and the
+  bot re-attaches on its own cadence.
 
 Getting this wrong is not hypothetical — it was FIG-1008, found by the judged
-runbook. Reading an ambiguous `None` as "committed" terminalized the row as
+runbook. Reading an ambiguous "no turn ran" as "committed" terminalized the row as
 `ignored` / `reply_lost_after_commit`, and because a terminal row is never
 revisited by a redelivery or a later boot, the mention was **permanently**
-unanswered. FIG-1575 removed the ambiguity at the source: the reason the claim
-state machine already computed now reaches the host instead of being logged and
-dropped.
+unanswered. The typed application record removes the ambiguity: only a committed
+application makes the transcript authoritative.
 
 #### Why the deferral has to wait, and for how long
 
@@ -663,9 +653,8 @@ untouched by a failed attempt, so only the deadline ends the loop.
 
 **The residual gap** is now narrow and specific:
 
-> If the queue is provably exhausted for this drain — the claim was refused as
-> `Empty` — and neither the ledger nor the committed transcript holds any
-> assistant text, there is nothing to post and nothing to recover. The bot reports
+> If the mention's input has a committed application and neither the ledger nor
+> the committed transcript holds any assistant text, there is nothing to post and nothing to recover. The bot reports
 > `Disposition::ReplyLost` and marks the event `ignored` with
 > `reply_lost_after_commit` rather than silently dropping it. This is now the
 > *only* route to `ReplyLost`.
@@ -675,16 +664,16 @@ untouched by a failed attempt, so only the deadline ends the loop.
 Replacing the SQLite backend with a `RestateEngine` over the same SQLite
 store set is **half** the change, and it is worth being exact about which half:
 
-- **`bot/runtime.rs::build_core` — the drain.** The queued drain becomes a
-  journalled, replayable effect: after a restart, re-running with the same
-  `drain_id` replays the recorded result instead of re-executing. This is what
-  removes the "turn committed but its result is gone" case entirely, rather than
-  recovering from it after the fact.
+- **`bot/runtime.rs::build_core` — the turn.** The engine's session drive becomes
+  journalled and replayable: after a restart, the root a send started resumes
+  from its recorded steps instead of re-executing. This is what removes the "turn
+  committed but its result is gone" case entirely, rather than recovering from it
+  after the fact.
 - **`bot/channel.rs::post_reply` — the post.** This is *not* covered by the
   backend swap. `chat_post_message` is a plain HTTP call outside any effect scope,
   so the effect host cannot see it or replay it. Closing the
   crash-between-post-and-record window durably means wrapping the post as a
-  journaled effect inside the same scope as the drain, so the journal records
+  journaled effect inside the same scope as the turn, so the journal records
   "posted, ts=…" and a replay returns it instead of posting again.
 
 Until the second half is done, the metadata lookup described above is what keeps

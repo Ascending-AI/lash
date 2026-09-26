@@ -159,11 +159,11 @@ async fn idle_send_is_claimed_at_once() {
     let session = world.core.session("idle-send").open().await.expect("open");
     let session_id = SessionId::from("idle-send");
     let receipt = session
-        .durable()
-        .enqueue(lash::TurnInput::text("hello"))
-        .send()
+        .send(lash::TurnInput::text("hello"))
         .await
-        .expect("accept");
+        .expect("accept")
+        .receipt()
+        .clone();
     let outcome = attach(&world.backend, &session_id, request_of(&receipt.input_id)).await;
     assert_eq!(answers(&outcome), ["answer 1"]);
     assert_eq!(outcome.stop, DriveStop::Idle);
@@ -196,26 +196,26 @@ async fn busy_sends_answer_in_arrival_order() {
     let session = world.core.session("busy-send").open().await.expect("open");
     let session_id = SessionId::from("busy-send");
     let first = session
-        .durable()
-        .enqueue(lash::TurnInput::text("first question"))
-        .send()
+        .send(lash::TurnInput::text("first question"))
         .await
-        .expect("accept the first");
+        .expect("accept the first")
+        .receipt()
+        .clone();
     tokio::time::timeout(Duration::from_secs(20), world.gate.reached.notified())
         .await
         .expect("the first turn is running");
     let second = session
-        .durable()
-        .enqueue(lash::TurnInput::text("second question"))
-        .send()
+        .send(lash::TurnInput::text("second question"))
         .await
-        .expect("accept the second");
+        .expect("accept the second")
+        .receipt()
+        .clone();
     let third = session
-        .durable()
-        .enqueue(lash::TurnInput::text("third question"))
-        .send()
+        .send(lash::TurnInput::text("third question"))
         .await
-        .expect("accept the third");
+        .expect("accept the third")
+        .receipt()
+        .clone();
     world.gate.release.notify_one();
     for receipt in [&first, &second, &third] {
         attach(&world.backend, &session_id, request_of(&receipt.input_id)).await;
@@ -257,6 +257,75 @@ async fn busy_sends_answer_in_arrival_order() {
     assert!(at("second question") < at("third question"));
 }
 
+/// The double's drive hold: while a test holds the engine's drive of a
+/// session, an input accepted there stays pending — no admission takes it —
+/// and a root admitted before the hold still runs to its answer. Releasing
+/// the hold lets the drive admit the input. This is how a law asserts what
+/// is still pending without driving anything itself.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_held_drive_admits_nothing_until_released() {
+    let world = world(0x5507).await;
+    world.gate.armed.store(true, Ordering::SeqCst);
+    let session = world.core.session("held-drive").open().await.expect("open");
+    let session_id = SessionId::from("held-drive");
+    let running = session
+        .send(lash::TurnInput::text("first question"))
+        .await
+        .expect("accept the first");
+    tokio::time::timeout(Duration::from_secs(20), world.gate.reached.notified())
+        .await
+        .expect("the first turn is running");
+    let hold = world.backend.hold_session_drive(&session_id).await;
+    let held = session
+        .send(lash::TurnInput::text("held question"))
+        .await
+        .expect("accept the held input");
+    world.gate.release.notify_one();
+    let first = tokio::time::timeout(Duration::from_secs(20), running.outcome())
+        .await
+        .expect("the first root answers under the hold")
+        .expect("the first outcome");
+    assert!(
+        matches!(first.status, lash::TurnStatus::Answered),
+        "the admitted root runs on: {:?}",
+        first.status
+    );
+    world.backend.server().settle().await;
+    let pending = session
+        .durable()
+        .pending_turn_inputs()
+        .await
+        .expect("pending");
+    assert!(
+        pending.iter().any(|read| {
+            read.input.input_id == held.receipt().input_id
+                && matches!(read.status, lash::PendingTurnInputReadStatus::Pending)
+        }),
+        "the held drive admitted nothing: {pending:?}"
+    );
+    assert_eq!(world.calls.load(Ordering::SeqCst), 1);
+
+    hold.release();
+    let second = tokio::time::timeout(Duration::from_secs(20), held.outcome())
+        .await
+        .expect("the released drive answers the held input")
+        .expect("the held outcome");
+    assert!(
+        matches!(second.status, lash::TurnStatus::Answered),
+        "{:?}",
+        second.status
+    );
+    assert_eq!(world.calls.load(Ordering::SeqCst), 2);
+    assert!(
+        session
+            .durable()
+            .pending_turn_inputs()
+            .await
+            .expect("pending after release")
+            .is_empty()
+    );
+}
+
 /// An input withdrawn while it is still queued never runs; a turn cancelled
 /// while it runs stops, cancelled, and commits that stop.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -271,20 +340,20 @@ async fn withdraw_while_queued_vs_cancel_while_running() {
         .expect("open");
     let session_id = SessionId::from("withdraw-cancel");
     let running = session
-        .durable()
-        .enqueue(lash::TurnInput::text("keep me running"))
-        .send()
+        .send(lash::TurnInput::text("keep me running"))
         .await
-        .expect("accept the running input");
+        .expect("accept the running input")
+        .receipt()
+        .clone();
     tokio::time::timeout(Duration::from_secs(20), world.gate.reached.notified())
         .await
         .expect("the first turn is running");
     let queued = session
-        .durable()
-        .enqueue(lash::TurnInput::text("withdraw me"))
-        .send()
+        .send(lash::TurnInput::text("withdraw me"))
         .await
-        .expect("accept the queued input");
+        .expect("accept the queued input")
+        .receipt()
+        .clone();
 
     let withdrawn = session
         .durable()
@@ -373,11 +442,11 @@ async fn dropping_the_handle_stops_nothing() {
             .await
             .expect("open");
         let receipt = session
-            .durable()
-            .enqueue(lash::TurnInput::text("finish without me"))
-            .send()
+            .send(lash::TurnInput::text("finish without me"))
             .await
-            .expect("accept");
+            .expect("accept")
+            .receipt()
+            .clone();
         receipt.input_id
     };
     let outcome = attach(&world.backend, &session_id, request_of(&input_id)).await;

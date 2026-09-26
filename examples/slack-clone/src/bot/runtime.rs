@@ -180,8 +180,9 @@ pub(crate) async fn open_backend(data_dir: &Path) -> Result<lash_sqlite_store::S
 ///   the committed transcript, any queued turn input not yet drained, and the
 ///   effect journal all survive a restart. This is the load-bearing one. The
 ///   README documents the Restate upgrade.
-/// * **No queued-work driver** — see [`LashCore::disable_queued_work_driver`]
-///   below; the bot alone decides when a turn runs.
+/// * **The engine runs every turn** — each sent message is driven by the
+///   session's engine as soon as it is accepted; the bot waits only on a
+///   mention's turn.
 pub async fn build_core(
     config: &RuntimeConfig,
     provider: ProviderHandle,
@@ -246,12 +247,6 @@ pub async fn build_core(
         builder = builder.lease_timings(lease_timings);
     }
     let core = builder
-        // Ambient channel traffic is admitted as queued turn input but must NOT
-        // provoke a reply. The default inline queued-work driver would drain that
-        // input on its own schedule and run a turn nobody asked for, so the bot
-        // takes the decision back: every turn in this host starts because a human
-        // mentioned the bot.
-        .without_queued_work()
         .build(session_owner(&config.incarnation))
         .context("build slack-clone bot Lash core")?;
     Ok(BotRuntime { core, mcp, roots })

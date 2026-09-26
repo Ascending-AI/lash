@@ -7,7 +7,7 @@
 //! applied frames in — the same total order `restate-server` imposes by
 //! appending to its partition log.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -169,6 +169,13 @@ pub struct State {
     pub frame_received_us: u128,
     /// The last handle is gone: nothing starts, and ingress answers 503.
     pub shut: bool,
+    /// `(service, key)` targets a test holds
+    /// ([`RestateTestServer::hold`](super::RestateTestServer::hold)): no
+    /// attempt of an invocation on one starts while it is held.
+    pub held: BTreeSet<(String, String)>,
+    /// Invocations whose attempt a hold kept from starting, in the order it
+    /// did; a release starts them.
+    pub deferred: Vec<InvKey>,
 }
 
 impl State {
@@ -185,6 +192,8 @@ impl State {
             anchor: (start_ms, std::time::Instant::now()),
             frame_received_us: 0,
             shut: false,
+            held: BTreeSet::new(),
+            deferred: Vec::new(),
             now_ms: start_ms,
             ids: SeededIds::new(seed),
             seq: 0,
@@ -440,6 +449,14 @@ impl State {
         if self.shut {
             return;
         }
+        if self.is_held(key) {
+            // The invocation keeps the status it had (inboxed on its lock,
+            // suspended, backing off); the release starts it.
+            if !self.deferred.contains(&key) {
+                self.deferred.push(key);
+            }
+            return;
+        }
         let protocol = sh.config.protocol;
         let always_replay = sh.config.always_replay;
         let now_ms = self.now_ms;
@@ -514,6 +531,64 @@ impl State {
         }
         self.touch(key);
         sh.activity.notify_waiters();
+    }
+
+    // ---------------------------------------------------------------------
+    // Holds
+    // ---------------------------------------------------------------------
+
+    /// Whether `key` targets a held `(service, key)`.
+    fn is_held(&self, key: InvKey) -> bool {
+        self.invocations[key.0]
+            .target
+            .service_key()
+            .is_some_and(|target| self.held.contains(&target))
+    }
+
+    /// Hold `target`: no attempt of an invocation on it starts until
+    /// [`release_hold`](Self::release_hold), and every running one has its
+    /// input closed, so its handler suspends at its next await the journal
+    /// cannot resolve.
+    pub(super) fn hold(&mut self, target: (String, String)) {
+        self.held.insert(target.clone());
+        let running = (0..self.invocations.len())
+            .map(InvKey)
+            .filter(|key| {
+                self.invocations[key.0].target.service_key().as_ref() == Some(&target)
+                    && matches!(self.invocations[key.0].status, Status::Running(_))
+            })
+            .collect::<Vec<_>>();
+        for key in running {
+            self.close_input(key);
+        }
+    }
+
+    /// Whether an attempt of an invocation on `target` still runs.
+    pub(super) fn runs_on(&self, target: &(String, String)) -> bool {
+        self.invocations.iter().any(|invocation| {
+            invocation.target.service_key().as_ref() == Some(target)
+                && matches!(invocation.status, Status::Running(_))
+        })
+    }
+
+    /// Release `target`'s hold and start, in the order they were kept
+    /// back, the attempts it kept from starting.
+    pub(super) fn release_hold(&mut self, sh: &Arc<Shared>, target: &(String, String)) {
+        if !self.held.remove(target) {
+            return;
+        }
+        let (released, kept): (Vec<_>, Vec<_>) = std::mem::take(&mut self.deferred)
+            .into_iter()
+            .partition(|key| self.invocations[key.0].target.service_key().as_ref() == Some(target));
+        self.deferred = kept;
+        for key in released {
+            if !matches!(
+                self.invocations[key.0].status,
+                Status::Running(_) | Status::Completed(_)
+            ) {
+                self.start_attempt(sh, key);
+            }
+        }
     }
 
     /// The eager state an attempt of `key` starts with: its key's whole

@@ -704,11 +704,12 @@ async fn per_turn_prompt_layer_applies_only_to_its_root() -> Result<()> {
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("per-turn-prompt").open().await?;
-    session
-        .turn(TurnInput::text("first"))
-        .prompt_contribution(PromptContribution::guidance("Turn", "turn guidance"))
-        .run()
-        .await?;
+    let mut first = TurnInput::text("first");
+    lash_core::facade_support::TurnContextFacadeOps::add_prompt_contribution(
+        &mut first.turn_context,
+        PromptContribution::guidance("Turn", "turn guidance"),
+    );
+    session.send(first).output().await?;
     session.send(TurnInput::text("second")).output().await?;
     let prompts = seen.lock_recover();
     assert_eq!(prompts.len(), 2);

@@ -48,7 +48,6 @@ async fn approval_test_core(
         .plugin(Arc::new(
             WorkbenchPluginFactory::new().with_approvals(approvals),
         ))
-        .without_queued_work()
         .build(crate::test_core_owner())
         .expect("build approval test core")
 }
@@ -79,7 +78,6 @@ fn approval_approve_resumes_parked_lashlang_instruction_with_success() {
         let approvals = approvals::WorkbenchApprovals::open(directory.path().join("approvals.db"))
             .expect("open approval ledger");
         let backend = approval_backend(directory.path(), None).await;
-        let effect_host = backend.effect_host();
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-approval-approve")
             .complete(|_| async {
@@ -98,20 +96,13 @@ finish(result);
             .open()
             .await
             .expect("open approval session");
-        let turn_scope = lash::durability::EffectHost::scoped_static(
-            effect_host.as_ref(),
-            lash::runtime::AdmittedScope::turn("approval-approve", "approval-approve-turn"),
-        )
-        .expect("scope approval turn")
-        .expect("durable approval scope");
         let mut turn = tokio::spawn(async move {
             session
-                .turn(lash::TurnInput::text("Apply the demo change."))
-                .turn_id("approval-approve-turn")
+                .send(lash::TurnInput::text("Apply the demo change."))
+                .id("approval-approve-turn")
                 .require_finish()
                 .expect("require approval finish")
-                .advanced()
-                .run_with_scope(turn_scope)
+                .output()
                 .await
         });
         let approval = wait_for_approval(&approvals, &mut turn).await;
@@ -211,7 +202,6 @@ fn a_decided_but_unresolved_approval_repairs_on_retry() {
         let approvals = approvals::WorkbenchApprovals::open(directory.path().join("approvals.db"))
             .expect("open approval ledger");
         let backend = approval_backend(directory.path(), None).await;
-        let effect_host = backend.effect_host();
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-approval-repair")
             .complete(|_| async {
@@ -230,20 +220,13 @@ finish(result);
             .open()
             .await
             .expect("open approval session");
-        let turn_scope = lash::durability::EffectHost::scoped_static(
-            effect_host.as_ref(),
-            lash::runtime::AdmittedScope::turn("approval-repair", "approval-repair-turn"),
-        )
-        .expect("scope approval turn")
-        .expect("durable approval scope");
         let mut turn = tokio::spawn(async move {
             session
-                .turn(lash::TurnInput::text("Apply the demo change."))
-                .turn_id("approval-repair-turn")
+                .send(lash::TurnInput::text("Apply the demo change."))
+                .id("approval-repair-turn")
                 .require_finish()
                 .expect("require approval finish")
-                .advanced()
-                .run_with_scope(turn_scope)
+                .output()
                 .await
         });
         let approval = wait_for_approval(&approvals, &mut turn).await;
@@ -325,7 +308,6 @@ fn approval_denial_preserves_typed_failure_fields_through_lashlang_bridge() {
         let approvals = approvals::WorkbenchApprovals::open(directory.path().join("approvals.db"))
             .expect("open approval ledger");
         let backend = approval_backend(directory.path(), None).await;
-        let effect_host = backend.effect_host();
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-approval-deny")
             .complete(|_| async {
@@ -348,20 +330,13 @@ try {
             .open()
             .await
             .expect("open denial session");
-        let turn_scope = lash::durability::EffectHost::scoped_static(
-            effect_host.as_ref(),
-            lash::runtime::AdmittedScope::turn("approval-deny", "approval-deny-turn"),
-        )
-        .expect("scope denial turn")
-        .expect("durable denial scope");
         let mut turn = tokio::spawn(async move {
             session
-                .turn(lash::TurnInput::text("Apply the demo change."))
-                .turn_id("approval-deny-turn")
+                .send(lash::TurnInput::text("Apply the demo change."))
+                .id("approval-deny-turn")
                 .require_finish()
                 .expect("require denial finish")
-                .advanced()
-                .run_with_scope(turn_scope)
+                .output()
                 .await
         });
         let approval = wait_for_approval(&approvals, &mut turn).await;
@@ -409,7 +384,6 @@ fn approval_restart_reopens_the_ledger_and_durable_effect_host() {
         let approvals =
             approvals::WorkbenchApprovals::open(&approval_path).expect("open approval ledger");
         let backend = approval_backend(directory.path(), None).await;
-        let effect_host = backend.effect_host();
         let provider = lash::testing::TestProvider::builder()
             .kind("workbench-approval-restart")
             .complete(|_| async {
@@ -428,20 +402,13 @@ finish(result.status);
             .open()
             .await
             .expect("open restart session");
-        let turn_scope = lash::durability::EffectHost::scoped_static(
-            effect_host.as_ref(),
-            lash::runtime::AdmittedScope::turn("approval-restart", "approval-restart-turn"),
-        )
-        .expect("scope restart turn")
-        .expect("durable restart scope");
         let mut turn = tokio::spawn(async move {
             session
-                .turn(lash::TurnInput::text("Apply the restart demo change."))
-                .turn_id("approval-restart-turn")
+                .send(lash::TurnInput::text("Apply the restart demo change."))
+                .id("approval-restart-turn")
                 .require_finish()
                 .expect("require restart finish")
-                .advanced()
-                .run_with_scope(turn_scope)
+                .output()
                 .await
         });
         let before_restart = wait_for_approval(&approvals, &mut turn).await;
@@ -518,20 +485,13 @@ try {
     let core = approval_test_core(&backend, provider.clone(), approvals.clone()).await;
     let session_id = format!("async-completion-{slug}");
     let session = core.session(&session_id).open().await.unwrap();
-    let scope = lash::durability::EffectHost::scoped_static(
-        effect_host.as_ref(),
-        lash::runtime::AdmittedScope::new(session.turn_scope("async-turn")),
-    )
-    .unwrap()
-    .unwrap();
     let mut turn = tokio::spawn(async move {
         session
-            .turn(lash::TurnInput::text("Apply async change"))
-            .turn_id("async-turn")
+            .send(lash::TurnInput::text("Apply async change"))
+            .id("async-turn")
             .require_finish()
             .unwrap()
-            .advanced()
-            .run_with_scope(scope)
+            .output()
             .await
     });
     let pending = wait_for_approval(&approvals, &mut turn).await;
@@ -545,7 +505,6 @@ try {
     clock.advance(60_000);
     let approvals = approvals::WorkbenchApprovals::open(&approval_path).unwrap();
     let backend = approval_backend(directory.path(), Some(clock.clone())).await;
-    let effect_host = backend.effect_host();
     let core = approval_test_core(&backend, provider, approvals.clone()).await;
     let session = core.session(&session_id).open().await.unwrap();
     let key = approvals.completion_key(&pending.key).unwrap();
@@ -556,19 +515,12 @@ try {
             .unwrap(),
         lash::ResolveOutcome::Accepted
     );
-    let scope = lash::durability::EffectHost::scoped_static(
-        effect_host.as_ref(),
-        lash::runtime::AdmittedScope::new(session.turn_scope("async-turn")),
-    )
-    .unwrap()
-    .unwrap();
     let output = session
-        .turn(lash::TurnInput::text("Apply async change"))
-        .turn_id("async-turn")
+        .send(lash::TurnInput::text("Apply async change"))
+        .id("async-turn")
         .require_finish()
         .unwrap()
-        .advanced()
-        .run_with_scope(scope)
+        .output()
         .await
         .unwrap();
     assert_eq!(

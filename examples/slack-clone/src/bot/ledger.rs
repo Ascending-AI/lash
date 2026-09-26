@@ -67,6 +67,21 @@ CREATE TABLE IF NOT EXISTS event_admission_boundaries (
     node_id  TEXT NOT NULL
 );
 
+-- Ambient messages are context, not turn inputs: a folded message waits here
+-- until a mention on its route binds it, and the mention's send carries it.
+CREATE TABLE IF NOT EXISTS event_folds (
+    event_id         TEXT PRIMARY KEY REFERENCES handled_events(event_id) ON DELETE CASCADE,
+    mention_event_id TEXT NOT NULL REFERENCES handled_events(event_id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_event_folds_mention ON event_folds(mention_event_id);
+
+-- The exact text a mention sent: its folded context and the mention. Stored
+-- on first use so a retry sends the same bytes under the same Lash id.
+CREATE TABLE IF NOT EXISTS mention_sends (
+    event_id  TEXT PRIMARY KEY REFERENCES handled_events(event_id) ON DELETE CASCADE,
+    send_text TEXT NOT NULL
+);
+
 -- Provider failures are terminal operator evidence, not free-form ledger detail.
 -- Keep them in an additive companion table so existing FIG-1008 rows upgrade
 -- without rewriting their settled state.
@@ -243,12 +258,13 @@ pub struct EventRecord {
     pub deliveries: u32,
     /// Thread parent, or `None` for top-level channel traffic.
     pub thread_ts: Option<String>,
-    /// Durable Lash admission identity returned by `enqueue`.
+    /// Durable Lash admission identity of the send that carried this event:
+    /// a mention's own, or the mention an ambient message was folded into.
     pub input_id: Option<String>,
     /// Retained turn boundary that includes this input, when it has committed.
     pub fork_node_id: Option<String>,
-    /// Retained channel boundary captured while a folded top-level admission held
-    /// the channel lock. Used only while the root is still queued.
+    /// Retained channel boundary captured while a folded top-level message held
+    /// the channel lock. Used while no committed turn carries the message yet.
     pub admission_node_id: Option<String>,
     /// Typed provider failure that terminalized this event, when any.
     pub provider_failure: Option<ProviderFailure>,
@@ -360,14 +376,146 @@ impl EventLedger {
         })
     }
 
-    /// Record the exact Lash admission identity after an idempotent enqueue.
-    pub async fn record_input_id(&self, event_id: String, input_id: String) -> Result<()> {
+    /// Bind the mention's route's unbound ambient rows to it and compose the
+    /// text its send carries: `inherited` (a thread's parent context, used
+    /// only by the route's first mention), the bound ambient lines oldest
+    /// first, then `mention_text`.
+    ///
+    /// The first call stores the composed text and every later call returns
+    /// it unchanged, so a retry sends the same bytes: an ambient message that
+    /// arrives after the binding waits for the route's next mention.
+    pub async fn bind_mention_send(
+        &self,
+        mention_event_id: String,
+        mention_text: String,
+        inherited: String,
+    ) -> Result<String> {
+        self.database
+            .call(move |connection| {
+                let transaction = connection.transaction()?;
+                if let Some(text) = transaction
+                    .query_row(
+                        "SELECT send_text FROM mention_sends WHERE event_id = ?1",
+                        params![mention_event_id],
+                        |row| row.get::<_, String>(0),
+                    )
+                    .optional()?
+                {
+                    return Ok(text);
+                }
+                let (channel_id, message_ts, thread_ts): (String, String, Option<String>) =
+                    transaction.query_row(
+                        "SELECT handled_events.channel_id, handled_events.message_ts,
+                                event_routes.thread_ts
+                         FROM handled_events LEFT JOIN event_routes USING(event_id)
+                         WHERE handled_events.event_id = ?1",
+                        params![mention_event_id],
+                        |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+                    )?;
+                let first_on_route: bool = transaction.query_row(
+                    "SELECT NOT EXISTS (
+                         SELECT 1 FROM mention_sends
+                         JOIN handled_events USING(event_id)
+                         LEFT JOIN event_routes USING(event_id)
+                         WHERE handled_events.channel_id = ?1
+                           AND event_routes.thread_ts IS ?2)",
+                    params![channel_id, thread_ts],
+                    |row| row.get(0),
+                )?;
+                let ambient = {
+                    let mut statement = transaction.prepare(
+                        "SELECT handled_events.event_id, handled_events.input_text
+                         FROM handled_events LEFT JOIN event_routes USING(event_id)
+                         WHERE handled_events.channel_id = ?1
+                           AND event_routes.thread_ts IS ?2
+                           AND handled_events.kind = ?3
+                           AND handled_events.stage = ?4
+                           AND handled_events.input_text IS NOT NULL
+                           AND handled_events.message_ts < ?5
+                           AND handled_events.event_id NOT IN (SELECT event_id FROM event_folds)
+                         ORDER BY handled_events.message_ts, handled_events.first_seen_at",
+                    )?;
+                    statement
+                        .query_map(
+                            params![
+                                channel_id,
+                                thread_ts,
+                                KIND_MESSAGE,
+                                Stage::Folded.as_str(),
+                                message_ts
+                            ],
+                            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                        )?
+                        .collect::<rusqlite::Result<Vec<_>>>()?
+                };
+                let mut text = String::new();
+                if first_on_route {
+                    text.push_str(&inherited);
+                }
+                for (event_id, line) in &ambient {
+                    transaction.execute(
+                        "INSERT INTO event_folds (event_id, mention_event_id) VALUES (?1, ?2)",
+                        params![event_id, mention_event_id],
+                    )?;
+                    text.push_str(line);
+                    text.push('\n');
+                }
+                text.push_str(&mention_text);
+                transaction.execute(
+                    "INSERT INTO mention_sends (event_id, send_text) VALUES (?1, ?2)",
+                    params![mention_event_id, text],
+                )?;
+                transaction.commit()?;
+                Ok(text)
+            })
+            .await
+    }
+
+    /// The route's ambient text still waiting for a mention, oldest first.
+    pub async fn unfolded_context(
+        &self,
+        channel_id: String,
+        thread_ts: Option<String>,
+    ) -> Result<Vec<String>> {
+        self.database
+            .call(move |connection| {
+                let mut statement = connection.prepare(
+                    "SELECT handled_events.input_text
+                     FROM handled_events LEFT JOIN event_routes USING(event_id)
+                     WHERE handled_events.channel_id = ?1
+                       AND event_routes.thread_ts IS ?2
+                       AND handled_events.kind = ?3
+                       AND handled_events.stage = ?4
+                       AND handled_events.input_text IS NOT NULL
+                       AND handled_events.event_id NOT IN (SELECT event_id FROM event_folds)
+                     ORDER BY handled_events.message_ts, handled_events.first_seen_at",
+                )?;
+                Ok(statement
+                    .query_map(
+                        params![channel_id, thread_ts, KIND_MESSAGE, Stage::Folded.as_str()],
+                        |row| row.get::<_, String>(0),
+                    )?
+                    .collect::<rusqlite::Result<Vec<_>>>()?)
+            })
+            .await
+    }
+
+    /// Record the Lash admission identity of a mention's send on the mention
+    /// and on every ambient row folded into it: the turn that commits the
+    /// send commits them too.
+    pub async fn record_mention_input_id(
+        &self,
+        mention_event_id: String,
+        input_id: String,
+    ) -> Result<()> {
         self.database
             .call(move |connection| {
                 connection.execute(
                     "UPDATE event_routes SET input_id = COALESCE(input_id, ?2)
-                     WHERE event_id = ?1",
-                    params![event_id, input_id],
+                     WHERE event_id = ?1
+                        OR event_id IN (SELECT event_id FROM event_folds
+                                        WHERE mention_event_id = ?1)",
+                    params![mention_event_id, input_id],
                 )?;
                 Ok(())
             })

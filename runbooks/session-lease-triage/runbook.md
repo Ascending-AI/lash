@@ -73,8 +73,8 @@ the case that used to go unreported.
    or kill anything. If a step needs the lease to decide behavior, the step is wrong.
 6. **A killed worker's turn is recoverable only if it was accepted first.** The direct-turn
    phase must find the request durable while its provider is still parked, and an unrelated
-   worker must drive it to a commit through the ordinary queued drain. A run in which the
-   drain finds nothing has not proved recovery; it has proved the request was never admitted.
+   worker's engine must drive it to a commit. A run in which the successor finds nothing
+   pending has not proved recovery; it has proved the request was never admitted.
 7. **Every claim needs observed evidence.** Each triage conclusion is scored against an
    artifact. A conclusion with no evidence behind it is a finding, not a pass by default.
 
@@ -186,7 +186,7 @@ commit CAS fails, `lane_held` is truthfully `true`.
 livelock), a rejection reports `lease_lost = true` or `lane_held = false`, the head revisions
 do not show the head moving on, or a handoff event appears alongside.
 
-## Phase 3b — Direct-turn recovery: a killed worker's `run()` finishes anyway
+## Phase 3b — Direct-turn recovery: a killed worker's sent turn finishes anyway
 
 **Setup.** `08-direct-turn-recovery.jsonl`. One committed direct turn materializes the
 session and reports the acceptance identity it was admitted under. A second direct turn is
@@ -197,8 +197,9 @@ best-effort lane release, which a killed worker would never have managed, so the
 re-staged afterwards in the Phase 2 shape — a TTL-zero claim made straight through the store
 for the dead worker's identity, no guard and no renewal task behind it. The successor
 therefore has to take a held, lapsed lane over rather than walk into an empty one. A separate
-core under a different owner then drains the session, told nothing about the abandoned
-request.
+core, a fresh incarnation, then reads the session's pending inputs and attaches to the one it
+finds, which asks its own engine to drive the session; it is told nothing else about the
+abandoned request.
 
 **Action.** Read `seed_acceptance_input_id`/`seed_acceptance_source_key` and
 `seed_acceptance_settled`, the `pending_reads_while_parked` envelope, then `drain_ran`,
@@ -208,25 +209,25 @@ request.
 dead holder rather than a free lane.
 
 **Expected observable evidence.** The seeded direct turn reports an acceptance whose
-`input_id` is what settled, and no `source_key`: direct ingress admits, it does not
-deduplicate. While the second turn's provider is parked, the session offers *nothing*
+`input_id` is what settled, keyed by the send's id (`source_key` equals the seed turn id). While the second turn's provider is parked, the session offers *nothing*
 claimable: the pending listing exposes exactly one envelope whose nested input preserves the
 accepted `ti:` identity and session, and whose status is `held` with the matching lease's
 exact `lease_expires_at_ms`. This is a factual lease projection, not evidence that the holder
 process is alive. The row's durability is proved by what happens after the kill — the peer's
-ordinary queued drain, told nothing about the request, runs a turn, commits it, and settles
-that same input identity under a turn id that is *not* the abandoned driver's; no pending row
-survives. That drain is a takeover: `taken_over_from_dead_worker` is emitted by the
+engine, told nothing about the request, runs the turn, commits it, and settles that same input
+identity under the root id the send named, so a host re-awaiting that id finds the recovered
+answer; no pending row survives. That recovery is a takeover: `taken_over_from_dead_worker` is emitted by the
 successor, names the dead worker as `displaced_owner_id` at the staged
 `displaced_fencing_token`, and carries a strictly higher `fencing_token` of its own, while
 `abandoned_lane_released_before_takeover` is `false` — no release for that owner at that token
 precedes the successor's `session_execution_lease.acquired`.
 
-**Judgment — FAIL if:** the drain finds nothing claimable after the kill (then the turn was
-driven before it was admitted, or post-acceptance recovery is not unified and direct turns
+**Judgment — FAIL if:** the successor finds nothing pending after the kill (then the turn was
+driven before it was admitted, or post-acceptance recovery is not unified and sent turns
 need a repair path of their own), the parked read is absent, duplicated, loses the nested
 input identity/session, is not `held`, or lacks an exact lease expiry, the successor settles
-a different input or re-commits under the abandoned turn id, a `source_key` appears, the
+a different input or commits under a root other than the one the send named, the
+`source_key` is not the seed turn id, the
 row is still pending after a committed recovery, no takeover from the dead worker appears, it
 names the wrong displaced holder or token, or the abandoned lane was released before the
 successor acquired it — a recovery that walked into a free lane never tested a dead worker.
@@ -309,8 +310,9 @@ would the request it had accepted have been finished by its peer rather than los
   correctly refuses a new turn while the lane is held, while the persistence-seam fixture
   continues to prove the authoritative CAS and borrowed-fence diagnostics directly.
 - **FIG-1671**: Added Phase 3b, extending the killed-worker recovery case to a turn that
-  entered through `TurnBuilder::run`. Direct ingress accepts before it drives (ADR 0069), so
-  the abandoned request is a pending input the ordinary queued drain recovers.
+  a host sent and waited on. A send accepts before the engine drives it (ADR 0069), so the
+  abandoned request is a pending input the successor's engine recovers (FIG-3600: the successor
+  is a fresh incarnation, and the recovered root keeps the id the send named).
 - **FIG-1402**: Fixed Phase 3 livelock answer key and golden rule to expect `lane_held = true`
   on `commit_cas_rejected`, matching the truthful semantics where the rejection is emitted by
   the lease-holding parked executor when raced by the lane-less busy claimant.

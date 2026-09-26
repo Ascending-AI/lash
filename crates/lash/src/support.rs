@@ -3,9 +3,7 @@ pub(crate) use std::sync::{Arc, Mutex as StdMutex};
 
 pub(crate) use async_trait::async_trait;
 pub(crate) use lash_core::plugin::StaticPluginFactory;
-pub(crate) use lash_core::runtime::{
-    EffectHost, RuntimeEffectController, RuntimeSessionState, ScopedEffectController,
-};
+pub(crate) use lash_core::runtime::{EffectHost, RuntimeSessionState, ScopedEffectController};
 pub(crate) use lash_core::{
     LiveReplayStore, MessageRole, NativeProcessWork, NativeQueuedWork, NativeSubstrateConfig,
     NoSessionWork, ProcessHandleView, ProcessWorkSubstrate, ProcessWorkWiring, SessionListFilter,
@@ -20,8 +18,6 @@ pub(crate) use lash_core::{
 #[cfg(test)]
 pub(crate) use lash_core_worker::DurableProcessWorkerConfig;
 pub(crate) use lash_core_worker::{DurableProcessWorker, WorkerProcessWork};
-pub(crate) use tokio::sync::mpsc;
-pub(crate) use tokio::task::JoinHandle;
 pub(crate) use tokio_util::sync::CancellationToken;
 
 pub(crate) use lash_core::plugin::runtime_host::SessionStateService;
@@ -30,13 +26,13 @@ pub(crate) use lash_core::{
     LlmCallRecord, LocalTurnStop, Message, PluginMessage, PluginOptions, ProcessRegistry,
     ProtocolTurnOptions, RuntimeErrorCode, RuntimePersistence, SessionCursor, SessionError,
     SessionReadView, SessionScope, SessionSnapshot, SessionStoreFactory, SessionToolAccess,
-    ToolCallRecord, ToolManifest, ToolProvider, ToolState, facade_support::AssembledTurn,
-    facade_support::EventSink, facade_support::PluginFactory, facade_support::ProviderHandle,
-    facade_support::SessionObservation, facade_support::SessionObservationSubscription,
-    facade_support::SessionResume, facade_support::SessionUsageReport,
-    facade_support::TerminationPolicy, facade_support::ToolRestoreReport,
-    facade_support::ToolSourceHandle, facade_support::TurnActivitySink,
-    facade_support::TurnExecutionMetrics, facade_support::TurnOutcome,
+    ToolCallRecord, ToolManifest, ToolProvider, ToolState, facade_support::PluginFactory,
+    facade_support::ProviderHandle, facade_support::SessionObservation,
+    facade_support::SessionObservationSubscription, facade_support::SessionResume,
+    facade_support::SessionUsageReport, facade_support::TerminationPolicy,
+    facade_support::ToolRestoreReport, facade_support::ToolSourceHandle,
+    facade_support::TurnActivitySink, facade_support::TurnExecutionMetrics,
+    facade_support::TurnOutcome,
 };
 pub(crate) use lash_core::{PromptContribution, PromptLayer, PromptSlot, PromptTemplate};
 pub(crate) use lash_core::{TurnActivity, TurnInput};
@@ -45,12 +41,9 @@ pub(crate) use lash_core::{TurnActivityId, TurnEvent};
 
 pub(crate) use crate::admin::{PluginOperations, SessionAdmin};
 pub(crate) use crate::core::{LashCore, build_plugin_host, refuse_foreign_backend_factories};
-#[cfg(test)]
-pub(crate) use crate::error::SelectedQueuedWorkDrainRefusalCause;
 pub(crate) use crate::error::{EmbedError, Result};
 pub(crate) use crate::plugin_binding::PluginBinding;
 pub(crate) use crate::prompt_layer::PromptLayerSink;
 pub(crate) use crate::session::{LashSession, ParkedSession, SessionBuilder};
-pub(crate) use crate::turn::{QueuedTurnBuilder, TurnBuilder};
 #[cfg(test)]
 pub(crate) use crate::turn::{RunActivityCollector, TurnReport, message_text};

@@ -3,7 +3,7 @@ use super::*;
 pub const LIVE_PROVIDER_FAILURE_ORACLE: &str = "sim.oracle.live-provider-failure-terminalizes.v1";
 
 /// Observed facts from driving a non-retryable provider failure through a LIVE
-/// runtime turn (a real `session.turn().run()` whose scripted-transport events
+/// runtime turn (a real `session.send().output()` whose scripted-transport events
 /// are released by a real `BoundaryScheduler`, not an isolated
 /// `provider.complete()`). The fault arrives AFTER one or more valid prose
 /// deltas, so "no committed output" is a non-vacuous assertion that can fail.

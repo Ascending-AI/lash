@@ -1,16 +1,5 @@
-error[E0061]: this method takes 0 arguments but 1 argument was supplied
- --> tests/ui/session_turn_run_requires_scope.rs:5:58
+error[E0599]: no method named `turn` found for struct `LashSession` in the current scope
+ --> tests/ui/session_turn_run_requires_scope.rs:5:21
   |
 5 |     let _ = session.turn(lash::TurnInput::text("hello")).run(scope).await;
-  |                                                          ^^^ ----- unexpected argument of type `ScopedEffectController<'_>`
-  |
-note: method defined here
- --> src/turn.rs
-  |
-  |     pub async fn run(self) -> Result<TurnOutput> {
-  |                  ^^^
-help: remove the extra argument
-  |
-5 -     let _ = session.turn(lash::TurnInput::text("hello")).run(scope).await;
-5 +     let _ = session.turn(lash::TurnInput::text("hello")).run().await;
-  |
+  |                     ^^^^ method not found in `LashSession`

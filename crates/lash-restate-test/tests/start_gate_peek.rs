@@ -3,28 +3,30 @@
 //! The turn observes its cancellation gate once, before its first model call.
 //! Here the session's await events are revoked before the turn runs, so the
 //! start-gate peek fails with the typed unknown-or-revoked refusal. The turn
-//! must fail on that one observation: the handler's journal records a single
+//! is sent to the session and the engine drives it: the root's `LashTurn`
+//! workflow must fail on that one observation, its journal recording a single
 //! revocation read for the gate, and no model call follows. Then, for every
-//! journal point of the turn's handler, a fresh backend under the same seed
+//! journal point of the root's workflow, a fresh backend under the same seed
 //! drops the handler just before the server stores that frame and replays the
 //! invocation: the replay must fail the same way, with the same recorded reads
 //! and no model call.
 
 #![expect(
-    clippy::unwrap_used,
     clippy::expect_used,
-    reason = "test assertions; a failed unwrap is the test failure"
+    reason = "test assertions; a failed expect is the test failure"
 )]
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
+use lash_core::engine::DriveRequestId;
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_restate_test::protocol::MessageType;
-use lash_restate_test::{CrashPoint, CrashRule, RestateTestBackend, ServerConfig};
+use lash_restate_test::{
+    CrashPoint, CrashRule, RestateTestBackend, ServerConfig, TURN_DRIVER_SERVICE,
+};
 
-const TURN_HOST: &str = "LashTestHandlerHost";
 const SESSION: &str = "start-gate-peek";
 
 /// What one run of the turn observed.
@@ -33,12 +35,12 @@ struct Run {
     outcome: String,
     llm_calls: usize,
     crashes: u64,
-    /// The turn handler's journal, in order.
+    /// The root workflow's journal, in order.
     journal: Vec<(MessageType, Option<String>, bytes::Bytes)>,
 }
 
 impl Run {
-    /// How many times the turn's handler read the session's revocation, the
+    /// How many times the root's workflow read the session's revocation, the
     /// read the start-gate peek fails on.
     fn revocation_reads(&self) -> usize {
         self.journal
@@ -111,55 +113,33 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
     if let Some(rule) = crash {
         backend.server().crash_on(rule);
     }
-    let turn_id = lash::TurnId::from("turn-1");
-    let admitted = lash_core::AdmittedScope::new(session.turn_scope(turn_id.clone()));
-    let outcome = Arc::new(Mutex::new(None));
-    let attempt: lash_restate_test::HandlerAttempt = {
-        let outcome = Arc::clone(&outcome);
-        Arc::new(move |scoped| {
-            let session = session.clone();
-            let turn_id = turn_id.clone();
-            let outcome = Arc::clone(&outcome);
-            Box::pin(async move {
-                let output = session
-                    .turn(lash::TurnInput::text("answer once"))
-                    .turn_id(turn_id)
-                    .advanced()
-                    .run_with_scope(scoped)
-                    .await;
-                *outcome.lock().unwrap() = Some(match output {
-                    Ok(output) => format!("completed: {:?}", output.result.outcome),
-                    Err(error) => format!("error: {error}"),
-                });
-            })
-        })
-    };
+    let handle = session
+        .send(lash::TurnInput::text("answer once"))
+        .id("turn-1")
+        .await
+        .expect("accept the turn input");
+    let request = DriveRequestId::new(handle.input_id().to_string());
     let server = backend.server();
-    let completed = tokio::time::timeout(
+    let drive = tokio::time::timeout(
         std::time::Duration::from_secs(8),
-        backend.run_in_handler(admitted, attempt),
+        backend.attach_drive(&lash_core::SessionId::from(SESSION), request),
     )
     .await;
-    match completed {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => *outcome.lock().unwrap() = Some(format!("stuck: {error}")),
-        Err(_) => *outcome.lock().unwrap() = Some("stuck: timed out".to_string()),
-    }
+    let outcome = match drive {
+        Ok(Ok(outcome)) => format!("drive ran {:?}, stopped {:?}", outcome.ran, outcome.stop),
+        Ok(Err(error)) => format!("error: {error}"),
+        Err(_) => "stuck: timed out".to_string(),
+    };
     server.settle().await;
     let journal = server
         .invocations()
         .into_iter()
-        .find(|view| view.target.split('/').next() == Some(TURN_HOST))
+        .find(|view| view.target.split('/').next() == Some(TURN_DRIVER_SERVICE))
         .and_then(|view| server.journal(&view.id))
         .unwrap_or_default()
         .into_iter()
         .map(|entry| (entry.ty, entry.name, entry.payload))
         .collect();
-    let outcome = outcome
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("the turn recorded an outcome");
     Run {
         outcome,
         llm_calls: llm_calls.load(Ordering::SeqCst),
@@ -173,8 +153,9 @@ async fn a_failed_start_gate_peek_fails_the_turn_once_and_replays_identically() 
     let seed = 0x3647;
     let reference = run_turn(seed, None).await;
     assert!(
-        reference.outcome.starts_with("error: "),
-        "a revoked start gate fails the turn: {reference:?}"
+        reference.outcome
+            == r#"drive ran [Released { root: TurnId("turn-1") }], stopped RootAborted { root: TurnId("turn-1") }"#,
+        "a revoked start gate fails the root, and the drive stops on it: {reference:?}"
     );
     assert_eq!(
         reference.llm_calls, 0,
@@ -199,7 +180,7 @@ async fn a_failed_start_gate_peek_fails_the_turn_once_and_replays_identically() 
     let mut violations = Vec::new();
     for index in 1..commands {
         let rule = CrashRule::new(CrashPoint::BeforeCommand { index })
-            .service(TURN_HOST)
+            .service(TURN_DRIVER_SERVICE)
             .within_attempts(1);
         let run = run_turn(seed, Some(rule)).await;
         if run.crashes != 1
@@ -216,25 +197,8 @@ async fn a_failed_start_gate_peek_fails_the_turn_once_and_replays_identically() 
             ));
         }
     }
-    // Crash points where lash itself does not recover yet (FIG-3678), pinned
-    // so the fix flips this test, as turn_crash_replay's KNOWN_DIVERGENCES do:
-    //
-    // * when the turn-input claim's run (command 2) re-executes after a crash,
-    //   the claim the lost attempt already made can still hold the input, and
-    //   the turn cedes with `accepted_turn_input_ceded` before it ever reaches
-    //   the start-gate peek — a race, on some runs. FIG-3600 S5 removes the
-    //   re-execution; remove this pin when S5 lands.
-    const KNOWN_DIVERGENCES: &[&str] = &["BeforeCommand { index: 2 }"];
-    let unexplained: Vec<_> = violations
-        .iter()
-        .filter(|violation| {
-            !KNOWN_DIVERGENCES
-                .iter()
-                .any(|known| violation.starts_with(known))
-        })
-        .collect();
     assert!(
-        unexplained.is_empty(),
-        "crash points whose replay diverged from the failed start gate:\n{unexplained:#?}"
+        violations.is_empty(),
+        "crash points whose replay diverged from the failed start gate:\n{violations:#?}"
     );
 }

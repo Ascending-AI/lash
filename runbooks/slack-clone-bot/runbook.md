@@ -50,10 +50,10 @@ behaviours on purpose, and each is a bot-side hazard rather than a platform bug:
   whose meaning is ambiguous;
 - delivery is genuinely at-least-once, with three retries carrying `x-slack-retry-num`.
 
-Ambient traffic is admitted as **queued turn input with no turn**
-(`session.enqueue(...).id(...)`), and only a mention drains it
-(`session.queued_turn().drain_id(...)`), with the queued-work driver deliberately switched
-off so nothing but a mention can make the bot speak. That is the property phase 2 exists to
+Ambient traffic is **folded context with no turn**: the bot records it in its event ledger
+and sends nothing to Lash, and only a mention sends it — one
+`session.send(...).id(...)` carrying the route's folded ambient lines and the mention — so
+nothing but a mention can make the bot speak or spend a token. That is the property phase 2 exists to
 prove, and it is invisible to any single layer: "no reply" is not evidence of "heard and
 remembered", and "remembered" is not evidence of "cost nothing".
 
@@ -196,9 +196,9 @@ Gate, in order, and require **all** of:
   stream), and **no** `.msg.is-bot` row appears.
 - **Layer 2:** two `messages` rows, both with `author_user_id` set and `bot_id` NULL; the
   `event_outbox` rows for them reach `delivered_at IS NOT NULL`.
-- **Layer 3:** the bot's `handled_events` has one row per delivered event at stage `folded`,
-  and the bot's session store holds a `pending_turn_inputs` row per ambient line — the context
-  is durably queued, undrained.
+- **Layer 3:** the bot's `handled_events` has one row per delivered event at stage `folded`
+  with its `input_text`, no `event_folds` row binds them yet, and the bot's session store holds
+  **no** `pending_turn_inputs` row — the context is durably folded in the ledger, unsent.
 - **Layer 4:** one `Folded` disposition per ambient event, and **zero** new `turn_completed`
   records for the channel session.
 
@@ -206,7 +206,7 @@ The twin rule already applies: an ambient `message` produces exactly one event, 
 `handled_events` must not contain an `app_mention` row yet. Screenshot `02-ambient-both-tabs.png`.
 
 **This phase fails if the bot replies, and equally if nothing reaches layer 3.** Silence with
-an empty queue is a bot that is not listening.
+an empty ledger is a bot that is not listening.
 
 ## Phase 3 — Human B mentions the bot: one reply, folding the ambient context, through a tool
 
@@ -223,15 +223,17 @@ Gate the mention's `app_mention` event through to a settled reply, then require:
   `conversations.history` with `include_all_metadata=true` — the wire, not just the table.
 - **Layer 3:** `handled_events` shows the `app_mention` row at `replied` with a `reply_ts`
   equal to the bot row's `ts`, **and** the `message` twin at `ignored` with reason
-  `superseded_by_app_mention`. In the session graph, the drained turn's committed messages
-  include the ambient markers, each carrying `MessageOrigin::TurnInput` — this is the proof
-  the fold happened, and it must be read from provenance, not from the reply's prose.
+  `superseded_by_app_mention`. The ledger's `event_folds` binds each ambient row to the
+  mention, and in the session graph the mention turn's committed user message — carrying
+  `MessageOrigin::TurnInput` for the mention's send — contains the ambient markers ahead of
+  the mention. That is the proof the fold happened, and it must be read from the ledger and
+  provenance, not from the reply's prose.
 - **Layer 4:** exactly **one** new `turn_completed`; `Replied { source: Turn }`; a
   `tool_call_started` / `tool_call_completed` pair for `list_channels` or `channel_history`;
   and a usage total that increased.
 
 The reply's *wording* is not gated. That it names A's fact and a real channel is judged
-behaviour; that exactly one turn ran and folded the queued input is the objective gate.
+behaviour; that exactly one turn ran and carried the folded context is the objective gate.
 Screenshot `03-mention-both-tabs.png`.
 
 ## Phase 3M — MCP client depth: the host answers, over a real provider
@@ -341,9 +343,9 @@ the root's unique ambient marker. Open the same parent in **A's** tab. Gate all 
 - **Layer 1, root recall:** ask the thread mention *which message this thread started from*
   and require the answer to name the root's own marker and **not** the phase-3 room mention.
   Inheriting the prefix is not the same property: the child forks at the boundary of the turn
-  that drained the room, so the root, the room mention and the bot's own reply are all in the
+  that folded the room, so the root, the room mention and the bot's own reply are all in the
   prefix, and nothing in Lash says which of them the thread hangs from. That is host domain
-  knowledge, and the host supplies it by seeding the root into the child at fork time
+  knowledge, and the host supplies it as a labelled root line leading the thread's first send
   (`THREAD_ROOT_SEED_PREFIX`, `examples/slack-clone/src/bot/threads.rs`). A child that answers
   with the room mention is the FIG-1403 defect, not a model wobble; a child whose prompt has
   no seed line fails this gate on layer 3 as well.
@@ -354,8 +356,8 @@ the root's unique ambient marker. Open the same parent in **A's** tab. Gate all 
 - **Layer 3:** a session named `thread:<C…>:<root-ts>` exists as a fork of the channel's
   retained boundary. Its **committed transcript** contains the pre-fork ambient marker, the
   host's thread-root seed line naming the root exactly once — **on a line of its own**, since
-  queued text inputs concatenate with no separator and a label that starts mid-line labels the
-  tail of the message copied ahead of it — and the thread mention. Match the seed line on
+  a label that starts mid-line labels the tail of the message copied ahead of it — and the
+  thread mention. Match the seed line on
   `THREAD_ROOT_SEED_PREFIX` plus a *containment* check for the root's marker, not on
   prefix-plus-root-text equality: the seeded copy is the committed message, which carries its
   author prefix (`Thread root (…): ada: <marker>…`). Committed mention text is author-prefixed
@@ -445,8 +447,10 @@ lease TTL is **15 s** (`examples/slack-clone/src/bot.rs`). Two recovery paths ar
 correct:
 
 - **Fast path** (restart inside the dead boot's TTL): recovery cannot take the lease, logs
-  `Deferred { reason: "drain_did_not_reach_admission" }` / `execution_lane_busy`, leaves the
-  ledger row non-terminal, then a retry settles `settled deferred event … Replied { source: Turn }`.
+  `Deferred { reason: "session_admission_contended" }` or `Deferred { reason: "turn_not_settled" }`,
+  leaves the ledger row non-terminal, then a retry settles
+  `settled deferred event … Replied { source: Turn }` (or `Transcript`, when this boot's engine
+  committed the turn before the retry looked).
 - **Slow path** (restart after the 15 s TTL): the lease has lapsed, so the new boot replies
   directly (`handled … Replied`). The ledger `reply_ts` is at or after the captured
   `lease_expires_at_ms`.
@@ -463,8 +467,8 @@ for an event that was in fact answered, which reads as a failure of the very pro
 phase exists to prove. Require:
 
 - the **final** disposition for that event is `Replied` — **record which `source`** resolved it
-  (`Turn` if the queued input was still undrained or was re-drained after the lease lapsed,
-  `Transcript` if the pre-kill turn had committed, `Ledger` if the text had been recorded) and
+  (`Turn` if this boot's engine ran the turn while the retry waited on it, `Transcript` if a
+  turn had committed before the retry looked, `Ledger` if the text had been recorded) and
   state why that is consistent with the kill point;
 - record **which path ran** in the extract (`recovery_path`: `fast` or `slow`) and the
   matching log evidence (deferral then settle-from-Turn, or direct handled-Replied after
@@ -486,17 +490,17 @@ no redelivery and no later boot ever revisits. `Deferred` on its own is not a fa
 extract the mention's `pending_turn_inputs` row from the bot's session store and record `state`
 *and* `claim_owner_incarnation_id`:
 
-- killed **before** the drain claimed the input → the row is unclaimed and still pending, the
-  restarted bot's drain finds it immediately, and the outcome is `Replied { source: Turn }`
-  with no deferral;
-- killed **after** the drain claimed it but **before** the turn committed → the row is still
+- killed **before** the dead boot's engine claimed the input → the row is unclaimed and still
+  pending, the restarted bot's re-send finds it immediately, and the outcome is
+  `Replied { source: Turn }` with no deferral;
+- killed **after** the engine claimed it but **before** the turn committed → the row is still
   `deferred_next_turn` yet carries a `claim_id` owned by the **dead boot's** incarnation, and
   there are **no** graph nodes for that turn. This is the half that defers, and it is the
   common one, because the claim is taken at the start of the turn.
 
-In the second half, a `queued_turn().run()` that returns nothing does **not** mean "a previous
-process already answered this" — nothing was committed. The bot must discriminate on committed
-evidence (a turn-input application record) rather than on the ambiguous empty drain:
+In the second half, a turn that has not settled does **not** mean "a previous process already
+answered this" — nothing was committed. The bot must discriminate on committed evidence (a
+turn-input application record) rather than on an unsettled handle:
 `reply_lost_after_commit` is only an honest label when a turn provably consumed the admission.
 Report the incarnation ids, the graph-node count for the turn, and the lease generation the
 claim is pinned to; a stranded claim terminalized as `ReplyLost` is the FIG-1008 regression.
@@ -508,7 +512,7 @@ mention, correlate its `app_mention` by `thread_ts = <root-ts>`, poll its ledger
 `accepted`, and kill the bot. Reuse every phase-5 lease/deferral gate, with these additional
 thread requirements:
 
-- every drain, lease diagnostic, turn-input application, trace, and final turn is scoped to
+- every send, lease diagnostic, turn-input application, trace, and final turn is scoped to
   `thread:<C…>:<root-ts>`; the channel session's head, graph, pending rows and turn count are
   unchanged by the thread mention and its recovery;
 - the final reply appears exactly once in each open `#threadStream`, exactly once in
@@ -576,7 +580,7 @@ gone — platform, bot, and HTTP MCP server.
 | Ambient free | zero new `turn_completed`; usage unchanged | | layer-4 extract |
 | One mention, one reply | one `.msg.is-bot` row per tab = one `messages` bot row = one `Replied` | | `03-mention-both-tabs.png` |
 | Reply is attributable | reply `metadata` carries the `event_id`, on the wire and in the table | | layer-2 extract |
-| Fold is provable | ambient markers committed in the drained turn with `TurnInput` provenance | | layer-3 extract |
+| Fold is provable | ambient rows bound in `event_folds` and their markers committed in the mention turn with `TurnInput` provenance | | layer-3 extract |
 | Twin dropped | the `message` twin `ignored` as `superseded_by_app_mention` | | layer-3 extract |
 | Tool loop ran | `tool_call_started`/`completed` pair; exactly one `turn_completed` | | layer-4 extract |
 | MCP client depth | four host-owned results committed; four exact tool names, `batch` envelope unwrapped; one `turn_completed` | | `03M-session-tool-results.json`, `03M-url-completion.txt` |

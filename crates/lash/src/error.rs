@@ -1,11 +1,6 @@
 use crate::support::SessionError;
 use lash_sansio::SessionId;
 
-// The refusal vocabulary is core's own type, re-exported so a host never
-// reaches into `lash_core` — the same shape ADR 0079 sanctions for the rest
-// of the queue types at the crate root.
-pub use lash_core::facade_support::SelectedQueuedWorkDrainRefusalCause;
-
 #[derive(Debug, thiserror::Error)]
 /// Errors returned while configuring or operating the embedded Lash runtime.
 #[non_exhaustive]
@@ -109,19 +104,8 @@ pub enum EmbedError {
     #[error("failed to flush trace sink: {0}")]
     /// Wraps the trace flush failure.
     TraceFlush(#[from] lash_trace::TraceSinkError),
-    #[error(
-        "pull-style turn streams require an effect host that can create a static scoped controller; use stream_to_with_effects(..., &controller) inside the handler context"
-    )]
-    /// Returned when a pull-style turn stream cannot obtain a static effect host.
-    StaticTurnStreamRequiresStaticEffectHost,
     #[error("runtime session error: {0}")]
     Session(#[from] SessionError),
-    #[error("selected queued-work drain refused: {cause:?}")]
-    /// Wraps the selected queued work drain refused failure.
-    SelectedQueuedWorkDrainRefused {
-        /// Reason the selected queued-work drain was refused.
-        cause: SelectedQueuedWorkDrainRefusalCause,
-    },
     #[error("runtime turn error: {0}")]
     Runtime(#[from] lash_core::RuntimeError),
     #[error("runtime plugin/control error: {0}")]
@@ -293,10 +277,6 @@ impl EmbedError {
     /// conflicts, so there is no typed signal that a retry is safe.
     /// Direct and session-wrapped [`StoreError::Contended`](lash_core::StoreError::Contended)
     /// are retryable for the same reason as the corresponding runtime code.
-    /// A selected queued-work drain refused by
-    /// [`SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy`] is likewise
-    /// safe to retry unchanged; the other refusal causes require the host to
-    /// reconsider the selection or input and remain unclassified.
     ///
     /// Provider failures never surface as `EmbedError` — a failed LLM call
     /// finishes the turn with `TurnOutcome::Stopped(ProviderError)` — so
@@ -310,19 +290,8 @@ impl EmbedError {
             | Self::Session(SessionError::Store {
                 source: lash_core::StoreError::Contended,
                 ..
-            })
-            | Self::SelectedQueuedWorkDrainRefused {
-                cause: SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy,
-            } => true,
-            Self::SelectedQueuedWorkDrainRefused {
-                cause:
-                    SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether { .. }
-                    | SelectedQueuedWorkDrainRefusalCause::InterruptedBatchRequiresFullComposition {
-                        ..
-                    }
-                    | SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow { .. },
-            }
-            | Self::MissingProtocolPlugin
+            }) => true,
+            Self::MissingProtocolPlugin
             | Self::PluginBackendMismatch { .. }
             | Self::UnknownSession { .. }
             | Self::MissingModelSpec
@@ -339,7 +308,6 @@ impl EmbedError {
             | Self::SessionDeleteProcess { .. }
             | Self::SessionStillInUse
             | Self::TraceFlush(_)
-            | Self::StaticTurnStreamRequiresStaticEffectHost
             | Self::Session(_)
             | Self::RemoteProtocol(_)
             | Self::ProtocolTurnOptions(_)
@@ -388,8 +356,7 @@ impl EmbedError {
             | Self::StoreSessionMismatch { .. }
             | Self::ProcessExecutionConcurrency(_)
             | Self::QueuedWorkExecutionConcurrency(_)
-            | Self::UnknownSession { .. }
-            | Self::StaticTurnStreamRequiresStaticEffectHost => true,
+            | Self::UnknownSession { .. } => true,
             Self::Send(error) => matches!(
                 **error,
                 SendError::NoSessionWork | SendError::LiveTurnContext { .. }
@@ -407,15 +374,6 @@ impl EmbedError {
             | Self::SessionDeleteProcess { .. }
             | Self::SessionStillInUse
             | Self::TraceFlush(_)
-            | Self::SelectedQueuedWorkDrainRefused {
-                cause:
-                    SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether { .. }
-                    | SelectedQueuedWorkDrainRefusalCause::InterruptedBatchRequiresFullComposition {
-                        ..
-                    }
-                    | SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy
-                    | SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow { .. },
-            }
             | Self::RemoteProtocol(_)
             | Self::ProtocolTurnOptions(_)
             | Self::DecodeProtocolTurnOptions(_)
@@ -443,7 +401,7 @@ pub type Result<T> = std::result::Result<T, EmbedError>;
 
 #[cfg(test)]
 mod tests {
-    use super::{EmbedError, SelectedQueuedWorkDrainRefusalCause};
+    use super::EmbedError;
     use lash_core::{
         PluginError, RuntimeEffectControllerError, RuntimeError, RuntimeErrorCause,
         RuntimeErrorCode, SessionError, StoreError,
@@ -667,47 +625,6 @@ mod tests {
         {
             assert!(error.is_terminal(), "{error}");
             assert!(!error.is_retryable(), "{error}");
-        }
-    }
-
-    #[test]
-    fn selected_queued_work_drain_refusals_are_classified_per_cause() {
-        let cases = [
-            (
-                SelectedQueuedWorkDrainRefusalCause::UnclaimableTogether {
-                    unclaimed_batch_ids: vec!["unclaimable".to_string().into()],
-                },
-                false,
-                false,
-            ),
-            (
-                SelectedQueuedWorkDrainRefusalCause::InterruptedBatchRequiresFullComposition {
-                    required_batch_ids: vec!["interrupted".to_string().into()],
-                },
-                false,
-                false,
-            ),
-            (
-                SelectedQueuedWorkDrainRefusalCause::ExecutionLaneBusy,
-                true,
-                false,
-            ),
-            (
-                SelectedQueuedWorkDrainRefusalCause::QueuedItemExceedsContextWindow {
-                    batch_id: "oversized".to_string().into(),
-                    batch_enqueue_seq: 7,
-                    required_context_tokens: 9,
-                    max_context_tokens: 8,
-                },
-                false,
-                false,
-            ),
-        ];
-
-        for (cause, retryable, terminal) in cases {
-            let error = EmbedError::SelectedQueuedWorkDrainRefused { cause };
-            assert_eq!(error.is_retryable(), retryable, "{error}");
-            assert_eq!(error.is_terminal(), terminal, "{error}");
         }
     }
 

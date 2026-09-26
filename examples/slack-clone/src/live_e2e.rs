@@ -663,7 +663,7 @@ async fn finish_smoke_stream_with_timeout(
             stream_session.cancel_running_turns_with_origin(Some(
                 "slack-clone-live-e2e smoke stream timeout".to_string(),
             ));
-            // TurnStream's activity channel is bounded. Keep receiving after
+            // The handle's activity channel is bounded. Keep receiving after
             // cancellation so a producer blocked in emit can reach its owned
             // completion JoinHandle before factory shutdown.
             while let Some(activity) = live_stream.next().await {
@@ -746,8 +746,8 @@ async fn run_smoke_probes(
         tokio::time::timeout(
             TURN_TIMEOUT,
             tool_session
-                .turn(TurnInput::text("Perform the required probe."))
-                .run(),
+                .send(TurnInput::text("Perform the required probe."))
+                .output(),
         )
         .await
         .map_err(|_| FailureReason::TurnTimedOut {
@@ -1292,7 +1292,7 @@ async fn run_agent_turn(
     agent: &str,
     prompt: String,
 ) -> std::result::Result<(), FailureReason> {
-    let turn = tokio::time::timeout(TURN_TIMEOUT, session.turn(TurnInput::text(prompt)).run())
+    let turn = tokio::time::timeout(TURN_TIMEOUT, session.send(TurnInput::text(prompt)).output())
         .await
         .map_err(|_| FailureReason::TurnTimedOut {
             agent: agent.to_string(),

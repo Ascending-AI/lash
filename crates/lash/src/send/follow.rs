@@ -358,8 +358,11 @@ pub(super) async fn follow(
             // for every input it drove: the report as it ran, and the
             // evidence that the input settled.
             if let Subject::Input(receipt) = subject
-                && let Some((root, turn)) =
-                    mailbox::take_settled_root(&ctx.parts.session_id, &receipt.input_id)
+                && let Some((root, turn)) = mailbox::take_settled_root(
+                    ctx.parts.work.store_binding(),
+                    &ctx.parts.session_id,
+                    &receipt.input_id,
+                )
             {
                 adoption.adopt(root.clone(), tap).await;
                 drain(ctx, &mut adoption, &mut observation, tap).await;
@@ -590,7 +593,12 @@ async fn live_report(
         Subject::Root(_) => resolve::inputs_of_root(&ctx.parts, root).await?,
     };
     Ok(inputs.into_iter().find_map(|input| {
-        mailbox::take_settled_root(&ctx.parts.session_id, &input).map(|(_, turn)| turn)
+        mailbox::take_settled_root(
+            ctx.parts.work.store_binding(),
+            &ctx.parts.session_id,
+            &input,
+        )
+        .map(|(_, turn)| turn)
     }))
 }
 

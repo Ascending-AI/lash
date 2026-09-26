@@ -356,7 +356,13 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
                 &request.request,
             ))
             .map_err(lash_core::engine::DriveAbort::Refused)?;
-        crate::turn::drive_session_observed(runtime.handle(), &controller, &request).await
+        crate::turn::drive_session_observed(
+            runtime.handle(),
+            &self.config.env.core.backend().binding_identity(),
+            &controller,
+            &request,
+        )
+        .await
     }
 
     async fn admit(
@@ -381,7 +387,13 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
             .open_runtime(admitted.session())
             .await
             .map_err(OpenFailure::into_abort)?;
-        crate::turn::run_admitted_root_observed(runtime.handle(), &controller, admitted).await
+        crate::turn::run_admitted_root_observed(
+            runtime.handle(),
+            &self.config.env.core.backend().binding_identity(),
+            &controller,
+            admitted,
+        )
+        .await
     }
 }
 

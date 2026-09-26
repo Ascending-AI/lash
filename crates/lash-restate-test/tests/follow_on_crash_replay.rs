@@ -1,33 +1,36 @@
 //! A frame switch's follow-on under crashes on Restate (ADR 0101 §3,
 //! FIG-3542).
 //!
-//! A real lash turn runs in a handler on the server double: its model calls a
-//! tool that switches agent frame, the switch commit leaves the follow-on owed
-//! on the session head, and the follow-on answers in the switched frame. A
-//! clean run fixes the reference. Then, for every journal point of the turn's
-//! handler — among them the gap between the switch commit and the follow-on —
-//! a fresh backend under the same seed drops the handler just before the
-//! server stores that frame and replays the invocation. The drive owns its
-//! chain, so the replay continues it in order: every crash reaches the
-//! reference answer, the follow-on commits exactly once, and the head owes
+//! A real lash turn is sent to the session and the engine drives it: the
+//! session's `LashSession` drive admits the input and runs its root in a
+//! `LashTurn` workflow on the server double. Its model calls a tool that
+//! switches agent frame, the switch commit leaves the follow-on owed on the
+//! session head, and the follow-on answers in the switched frame, in the same
+//! root. A clean run fixes the reference. Then, for every journal point of the
+//! root's workflow — among them the gap between the switch commit and the
+//! follow-on — a fresh backend under the same seed drops the handler just
+//! before the server stores that frame and replays the invocation. The root
+//! owns its chain, so the replay continues it in order: every crash reaches
+//! the reference answer, the follow-on commits exactly once, and the head owes
 //! nothing afterwards.
 
 #![expect(
-    clippy::unwrap_used,
     clippy::expect_used,
-    reason = "test assertions; a failed unwrap is the test failure"
+    reason = "test assertions; a failed expect is the test failure"
 )]
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
 
+use lash_core::engine::{DriveRequestId, RootOutcome};
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmOutputPart, LlmRequest, LlmResponse};
 use lash_restate_test::protocol::MessageType;
-use lash_restate_test::{CrashPoint, CrashRule, RestateTestBackend, ServerConfig};
+use lash_restate_test::{
+    CrashPoint, CrashRule, RestateTestBackend, ServerConfig, TURN_DRIVER_SERVICE,
+};
 use serde_json::json;
 
-const TURN_HOST: &str = "LashTestHandlerHost";
 const SESSION: &str = "follow-on-crash";
 const TURN: &str = "turn-1";
 const FOLLOW_ON: &str = "turn-1:agent-frame:1";
@@ -159,48 +162,47 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
         .open()
         .await
         .expect("open the session");
-    let turn_id = lash::TurnId::from(TURN);
-    let admitted = lash_core::AdmittedScope::new(session.turn_scope(turn_id.clone()));
-    let answer = Arc::new(Mutex::new(None));
-    let attempt: lash_restate_test::HandlerAttempt = {
-        let answer = Arc::clone(&answer);
-        Arc::new(move |scoped| {
-            let session = session.clone();
-            let turn_id = turn_id.clone();
-            let answer = Arc::clone(&answer);
-            Box::pin(async move {
-                let output = session
-                    .turn(lash::TurnInput::text("hand this off"))
-                    .turn_id(turn_id)
-                    .advanced()
-                    .run_with_scope(scoped)
-                    .await;
-                *answer.lock().unwrap() = Some(match output {
-                    Ok(output) => match output.result.assistant_message() {
-                        Some(message) => message.to_owned(),
-                        None => format!("no message: {:?}", output.result.outcome),
-                    },
-                    Err(error) => format!("error: {error}"),
-                });
-            })
-        })
-    };
+    let handle = session
+        .send(lash::TurnInput::text("hand this off"))
+        .id(TURN)
+        .await
+        .expect("accept the turn input");
+    // The acceptance scheduled the drive under the input's own request; the
+    // attach names the same request, so it waits on that one drive.
+    let request = DriveRequestId::new(handle.input_id().to_string());
     let server = backend.server();
-    let completed = tokio::time::timeout(
+    let drive = tokio::time::timeout(
         std::time::Duration::from_secs(8),
-        backend.run_in_handler(admitted, attempt),
+        backend.attach_drive(&lash_core::SessionId::from(SESSION), request),
     )
     .await;
-    match completed {
-        Ok(Ok(())) => {}
-        Ok(Err(error)) => *answer.lock().unwrap() = Some(format!("stuck: {error}")),
-        Err(_) => *answer.lock().unwrap() = Some("stuck: timed out".to_string()),
-    }
+    // A drive bounded per invocation may cede the root and yield (FIG-3600):
+    // a later drive finishes it. The root's answer is its handle's.
+    let answer = match drive {
+        Ok(Ok(outcome)) => match outcome.ran.as_slice() {
+            [RootOutcome::Committed { outcome, .. }] => committed_text(outcome),
+            _ => match tokio::time::timeout(std::time::Duration::from_secs(8), handle.output())
+                .await
+            {
+                Ok(Ok(output)) => committed_text(&output.result.outcome),
+                Ok(Err(error)) => format!(
+                    "drive ran {:?}, stopped {:?}; then {error}",
+                    outcome.ran, outcome.stop
+                ),
+                Err(_) => format!(
+                    "drive ran {:?}, stopped {:?}; then timed out",
+                    outcome.ran, outcome.stop
+                ),
+            },
+        },
+        Ok(Err(error)) => format!("stuck: {error}"),
+        Err(_) => "stuck: timed out".to_string(),
+    };
     server.settle().await;
     let journal = server
         .invocations()
         .into_iter()
-        .find(|view| view.target.starts_with(TURN_HOST))
+        .find(|view| view.target.starts_with(TURN_DRIVER_SERVICE))
         .map(|view| {
             server
                 .journal(&view.id)
@@ -227,11 +229,6 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
         .await
         .expect("load the head")
         .and_then(|head| head.pending_follow_on);
-    let answer = answer
-        .lock()
-        .unwrap()
-        .clone()
-        .expect("the turn recorded an answer");
     Run {
         answer,
         llm_calls: llm_calls.load(Ordering::SeqCst),
@@ -243,8 +240,9 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
     }
 }
 
-/// Every crash point the turn handler's journal offers: each command it
-/// stored and each `ctx.run` result, named.
+/// Every crash point the root workflow's journal offers: each command it
+/// stored and each `ctx.run` result, by position (a root's step names embed
+/// the accepted input's id).
 fn crash_points(reference: &Run) -> Vec<(CrashRule, Option<String>)> {
     let mut points = Vec::new();
     let commands = reference.journal.iter().filter(|(ty, _)| ty.is_command());
@@ -257,14 +255,14 @@ fn crash_points(reference: &Run) -> Vec<(CrashRule, Option<String>)> {
             .flatten();
         points.push((
             CrashRule::new(CrashPoint::BeforeCommand { index })
-                .service(TURN_HOST)
+                .service(TURN_DRIVER_SERVICE)
                 .within_attempts(1),
             lost_on_command,
         ));
         if *ty == MessageType::RunCommand {
             points.push((
-                CrashRule::new(CrashPoint::BeforeRunResult { name: name.clone() })
-                    .service(TURN_HOST)
+                CrashRule::new(CrashPoint::BeforeRunResultAt { index })
+                    .service(TURN_DRIVER_SERVICE)
                     .within_attempts(1),
                 name.clone(),
             ));
@@ -272,14 +270,6 @@ fn crash_points(reference: &Run) -> Vec<(CrashRule, Option<String>)> {
     }
     points
 }
-
-/// Crash points where lash itself does not recover yet, shared with the tool
-/// turn's crash matrix (FIG-3678): a re-executed turn-input claim run can find
-/// its lost attempt's claim still holding the input, on some runs.
-const KNOWN_DIVERGENCES: &[&str] = &[
-    "BeforeCommand { index: 2 }",
-    "BeforeRunResult { name: Some(\"lash:follow-on-crash:turn-1:accept_turn_input:claim_accepted_turn_input\") }",
-];
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_crash_anywhere_in_a_switching_turn_runs_its_follow_on_exactly_once() {
@@ -319,16 +309,17 @@ async fn a_crash_anywhere_in_a_switching_turn_runs_its_follow_on_exactly_once() 
             ));
         }
     }
-    let unexplained: Vec<_> = violations
-        .iter()
-        .filter(|violation| {
-            !KNOWN_DIVERGENCES
-                .iter()
-                .any(|known| violation.starts_with(known))
-        })
-        .collect();
     assert!(
-        unexplained.is_empty(),
-        "crash points that did not run the follow-on exactly once:\n{unexplained:#?}"
+        violations.is_empty(),
+        "crash points that did not run the follow-on exactly once:\n{violations:#?}"
     );
+}
+
+fn committed_text(outcome: &lash_core::facade_support::TurnOutcome) -> String {
+    match outcome {
+        lash_core::facade_support::TurnOutcome::Finished(
+            lash_core::facade_support::TurnFinish::AssistantMessage { text },
+        ) => text.clone(),
+        other => format!("no message: {other:?}"),
+    }
 }

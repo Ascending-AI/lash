@@ -26,7 +26,7 @@ use serde::Serialize;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 
-use lash::rlm::RlmTurnBuilderExt as _;
+use lash::rlm::RlmSendBuilderExt as _;
 use lash_lashlang_runtime::ToolDefinitionBindingExt as _;
 
 use crate::artifacts::*;

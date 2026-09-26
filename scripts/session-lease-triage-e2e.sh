@@ -294,10 +294,10 @@ for backend, record in livelock_records.items():
         fail(f"{backend}: livelock must be distinguishable from a handoff: {record}")
 
 
-# Phase 4: the killed-worker recovery, run against a turn that entered through
-# `TurnBuilder::run`. Acceptance-before-drive is what makes it recoverable: the
-# request is a visible held row while the provider is still parked, and the peer that
-# takes the lane finds it through the ordinary queued drain.
+# Phase 4: the killed-worker recovery, run against a turn a host sent and waited on.
+# Acceptance-before-drive is what makes it recoverable: the request is a visible held
+# row while the provider is still parked, and the peer that takes the lane drives it
+# through its own engine.
 direct_turn_records = checkpoints("direct_turn_recovery", "08-direct-turn-recovery.jsonl")
 for backend, record in direct_turn_records.items():
     if not record["seed_acceptance_input_id"]:
@@ -343,10 +343,12 @@ for backend, record in direct_turn_records.items():
         fail(f"{backend}: the recovered row is not a pending turn input: {record}")
     if record["recovered_input_id"] != parked_input_id:
         fail(f"{backend}: recovery settled a different input than the parked held row: {record}")
-    if record["recovered_application_turn_id"] == record["abandoned_turn_id"]:
+    # The send's id names the root (FIG-3600): the successor continues the logical
+    # root the host named, so a host re-awaiting that id finds the recovered answer.
+    if record["recovered_application_turn_id"] != record["abandoned_turn_id"]:
         fail(
-            f"{backend}: the successor must commit its own turn, not the abandoned driver's: "
-            f"{record}"
+            f"{backend}: the successor must commit the root the host's send named, not a "
+            f"root of its own: {record}"
         )
     if record["pending_after_recovery"]:
         fail(f"{backend}: recovery must settle the row rather than leave it claimable: {record}")
