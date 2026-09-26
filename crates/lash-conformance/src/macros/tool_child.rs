@@ -84,6 +84,28 @@ macro_rules! admitted_head_redrive_tests {
     };
 }
 
+/// Register the turn-config laws (FIG-3600 S6, D3 §5.2): a root resolves its
+/// session config once, as a recorded step, and every replay of the root
+/// runs under that record. The fixture is the admitted-head one: a guard, a
+/// prefix, the tier's effect host, the store set under test and its
+/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner).
+#[macro_export]
+macro_rules! turn_config_tests {
+    ($(#[$attr:meta])* $fixture:block) => {
+        $crate::turn_config_tests!(@law [$(#[$attr])*] $fixture;
+            (a_committed_root_redriven_after_a_model_change_replays_its_recorded_config, "turn-config-recorded-replay"));
+    };
+    (@law [$($attr:tt)*] $fixture:block; ($law:ident, $label:literal)) => {
+        $($attr)*
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, prefix, host, stores, runner) = $fixture;
+            $crate::registration_macro_support::$law(prefix, host, stores, runner).await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
+    };
+}
+
 /// Register the session drive's admission laws (FIG-3600, ADR 0105 §2): a
 /// drive admits and seals every root before its first effect, one admission
 /// at a time holds the session, and a replay mints no ownership. The fixture

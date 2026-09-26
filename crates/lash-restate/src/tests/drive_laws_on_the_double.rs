@@ -19,6 +19,19 @@ lash_conformance::drive_admission_tests!({
     (harness, prefix, effect_host, stores, turn_runner)
 });
 
+// The session config a root runs under is a recorded step (FIG-3600 S6):
+// a redelivered handler replays the root under the config it recorded.
+lash_conformance::turn_config_tests!({
+    let harness =
+        LiveConformanceHarness::start_for_tool_children_on(HarnessServer::in_process()).await;
+    let effect_host = harness.endpoint_host();
+    let turn_runner = harness.turn_runner();
+    let stores = harness.law_stores();
+    let prefix: &'static str =
+        Box::leak(format!("restate-turn-config-{}", harness.run_nonce()).into_boxed_str());
+    (harness, prefix, effect_host, stores, turn_runner)
+});
+
 // L-S8: a fresh execution of a started root is SubstrateLost. Every run
 // of the probe runner is a fresh invocation, so its second run of the
 // same admission is the fresh execution.
