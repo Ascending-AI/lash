@@ -39,26 +39,19 @@ name: CI
 # Manual-only gates run on `workflow_dispatch` alone, the full profile
 # release.yml certifies against, and why each stays there:
 #
-# * Test heavy suites, Test S3 store against Garage, every Functional E2E
-#   leg, the stack budget and the PostgreSQL pool-wait,
-#   simulator-backend-fault and cross-backend-differential steps of Test
-#   Postgres store: deferred by the 2026-08-25 CI-scope ruling for their
-#   runner cost, until the FIG-2169 test-prune sweep reassesses them. The
-#   live Restate legs a pull request used to run are folded back into the
-#   dispatch: the fast board runs no E2E at all, and the affected Bazel
-#   labels cover the code paths those suites exercise.
+# * Test heavy suites, Test S3 store against Garage, the non-host Functional
+#   E2E legs, the stack budget and the PostgreSQL pool-wait and simulator
+#   backend-fault steps: deferred for their runner cost. Store PRs also run
+#   the PG16 cross-backend differential; host PRs run three live Restate legs.
 # * Fuzz smoke: a bounded libFuzzer run on the nightly toolchain, kept off
 #   the pull-request critical path by design (FIG-878).
 # * Test deferred Unicode suites: slow regress suites, excluded from the PR
 #   Bazel partition.
 # * Lashlang Git consumer: a compile configuration no other job resolves,
 #   carried by the release dispatch (FIG-2854).
-# * Worker release artifacts and the Restate + Postgres + S3 workers E2E:
-#   release builds and multi-service harnesses. The `ci:workers` pull-request
-#   opt-in is retired with the rest of the PR board's breadth.
-# * Test Postgres store on a pull request: the merge group and the dispatch
-#   run every selected `lash-postgres-store` suite; a pull request covers a
-#   store diff through its affected Bazel labels instead.
+# * Worker release artifacts and the full Restate + Postgres + S3 workers E2E:
+#   release builds and multi-service harnesses. Host PRs run the turn-control
+#   workers E2E with binaries from the shared build pool.
 # * The PG14/PG18 compatibility legs on a non-schema diff: they compare
 #   catalog rendering, which only a schema diff can move.
 
@@ -155,6 +148,8 @@ jobs:
     outputs:
       rust: ${{ steps.classify.outputs.rust }}
       stores: ${{ steps.classify.outputs.stores }}
+      pr_pg_store: ${{ steps.classify.outputs.pr_pg_store }}
+      pr_host_restate: ${{ steps.classify.outputs.pr_host_restate }}
       functional_e2e: ${{ steps.classify.outputs.functional_e2e }}
       workers_e2e: ${{ steps.classify.outputs.workers_e2e }}
       restate_suites: ${{ steps.classify.outputs.restate_suites }}
@@ -253,8 +248,7 @@ jobs:
             --event "${GITHUB_EVENT_NAME}" \
             --paths-file "${RUNNER_TEMP}/changed-paths" >> "${GITHUB_OUTPUT}"
 
-      # The pull-request board runs no `postgres-store` leg at all; PG16 is
-      # the primary major everywhere the job runs. PG14/PG18 run on a merge
+      # PG16 is the primary major everywhere the job runs. PG14/PG18 run on a merge
       # group whose diff touches a durable schema crate, and on
       # workflow_dispatch. scripts/ci_plan.py owns the rule.
       - name: Resolve PostgreSQL matrix
@@ -1566,19 +1560,11 @@ jobs:
       BAZEL_TRUSTED: ${{ needs.plan.outputs.bazel_trusted }}
       LASH_REQUIRE_POSTGRES: "1"
       POSTGRES_PRIMARY: ${{ needs.plan.outputs.postgres_primary }}
-    # The stores family follows the first-party closure of
-    # `lash-postgres-store` (scripts/ci_plan.py `_is_stores_path`): a diff
-    # to any package its test binaries compile, to the root `fixtures/` they
-    # read, or to a SQL script selects it; a package outside that closure
-    # (an example host, lash-sim, lash-perf) does not. The hand list of store
-    # crates it replaced hid FIG-3595 and FIG-3550, which were runtime
-    # changes. The fast pull-request board runs no live-service suite at all:
-    # a store diff's proof there is the affected Bazel labels (`bazel-tests`
-    # compiles the package and runs its service-free tests), and the merge
-    # group runs every selected suite before anything lands. The simulator,
-    # pool-wait and cross-backend steps remain deferred to the manual
-    # full-profile dispatch, which runs the full matrix.
-    if: needs.plan.outputs.stores == 'true' && github.event_name != 'pull_request'
+    # PRs run PG16 for store crates, lash-sim and migrations. The broader
+    # dependency closure still selects merge-group and full-profile work.
+    if: >-
+      (github.event_name == 'pull_request' && needs.plan.outputs.pr_pg_store == 'true')
+      || (github.event_name != 'pull_request' && needs.plan.outputs.stores == 'true')
 
     # The structural schema check at open (`SchemaProvisioning`/`SchemaCheck`)
     # compares the live catalog against a generated expectation artifact, so a
@@ -1646,7 +1632,7 @@ jobs:
       # process-per-test model would race the suites against each other.
       # Keep this package-wide: the integration and schema binaries are part of
       # this gate; narrowing to --test conformance would silently drop them.
-      # It runs on the merge group and the dispatch (FIG-3572): FIG-3595 and
+      # It runs on selected PRs, merge groups and dispatches. FIG-3595 and
       # FIG-3550 broke these suites while they were dispatch-only.
       # `integration__test` is one of
       # its binaries, so it also covers the parent-end recovery and automatic
@@ -1678,7 +1664,7 @@ jobs:
       # The full differential compares backend semantics, not catalog rendering,
       # so it runs once on the primary major instead of three times.
       - name: Test cross-backend store differential
-        if: github.event_name != 'pull_request' && github.event_name != 'merge_group'
+        if: github.event_name != 'merge_group'
         run: |
           bash scripts/ci/with-service.sh "pg${POSTGRES_PRIMARY}" -- \
             bash scripts/ci/store-tests.sh pg-cross-backend
@@ -1874,6 +1860,46 @@ jobs:
       - name: Enforce stack budget
         run: bash scripts/ci-stack-budget.sh
 
+  pr-host-workers:
+    name: Host workers Restate E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    needs: plan
+    if: >-
+      github.event_name == 'pull_request'
+      && needs.plan.outputs.pr_host_restate == 'true'
+      && needs.plan.outputs.bazel_trusted == 'true'
+    environment: build-cache
+    steps:
+      - *checkout
+
+      - name: Reclaim runner disk
+        run: bash scripts/ci-reclaim-disk.sh
+
+      - name: Configure shared build cache
+        uses: ./.github/actions/bazel-shared-cache
+        env:
+          CACHE_ENDPOINT: ${{ secrets.CACHE_ENDPOINT }}
+          CACHE_INSTANCE: ${{ secrets.CACHE_INSTANCE }}
+          KILN_EXECUTOR_RUNTIME: ${{ secrets.KILN_EXECUTOR_RUNTIME }}
+          CACHE_CA: ${{ secrets.CACHE_CA }}
+          CACHE_CERT: ${{ secrets.CACHE_CERT }}
+          CACHE_KEY: ${{ secrets.CACHE_KEY }}
+
+      - name: Run workers turn-control E2E
+        env:
+          LASH_E2E_TURN_CONTROL_ONLY: '1'
+        run: |
+          python3 scripts/ci/restate_suite.py stage-binaries \
+            //runbooks/restate-postgres-workers "${RUNNER_TEMP}/worker-binaries"
+          LASH_E2E_PREBUILT_BIN_DIR="${RUNNER_TEMP}/worker-binaries" \
+            bash scripts/restate-postgres-workers-e2e.sh
+
+      - name: Remove client credentials
+        if: always()
+        shell: bash
+        run: rm -rf -- "$RUNNER_TEMP/build-cache"
+
   worker-artifacts:
     name: Build worker release artifacts
     runs-on: ubuntu-24.04
@@ -2021,22 +2047,22 @@ jobs:
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 40
     needs: plan
-    # Every leg is deferred to the manual full-profile dispatch per the
-    # 2026-08-25 CI-scope ruling; reassess after the FIG-2169
-    # test-prune sweep. The live Restate legs a trusted pull request used to
-    # run on a `restate_suites` diff (#2106, #2148 and #2085 all reached main
-    # past a dispatch-only suite) are folded back into this dispatch-only
-    # board: the pull request's proof is the affected Bazel labels, which
-    # compile the same execution path without a live service.
-    if: github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true'
+    # PRs run the two host legs on drive, handler or example changes. The
+    # other matrix legs remain full-profile work.
+    if: >-
+      (github.event_name == 'pull_request' && needs.plan.outputs.pr_host_restate == 'true'
+      && needs.plan.outputs.bazel_trusted == 'true')
+      || (github.event_name == 'workflow_dispatch' && needs.plan.outputs.functional_e2e == 'true')
     # The live Restate suites (`restate: true`) build their test binaries from
     # the shared cache and run them here, beside pinned restate-servers that
     # scripts/ci/restate_suite.py starts (FIG-3666). A dispatch is always a
     # trusted event, so every leg may read the build-cache credentials.
     environment: build-cache
     env:
-      # A dispatch runs every leg.
-      RUN_FUNCTIONAL_E2E: 'true'
+      RUN_FUNCTIONAL_E2E: >-
+        ${{ github.event_name == 'workflow_dispatch'
+        || (github.event_name == 'pull_request'
+        && (matrix.name == 'agent-service' || matrix.name == 'agent-workbench')) }}
 
     strategy:
       fail-fast: false
@@ -2871,6 +2897,7 @@ jobs:
       - stack-budget
       - functional-e2e
       - functional-e2e-process-operations
+      - pr-host-workers
       - worker-artifacts
       - restate-postgres-workers
       - restate-postgres-workers-summary
