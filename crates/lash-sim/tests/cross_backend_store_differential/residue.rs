@@ -48,6 +48,9 @@ impl ResidueDigest {
 }
 
 /// Session-scoped SQLite reads, by logical table name. `?1` is the session id.
+/// A store-wide singleton table carries no session id, so its query binds no
+/// parameter at all — the digest binds the session id only to a statement that
+/// declares a parameter.
 const SQLITE_RESIDUE_QUERIES: &[(&str, &str)] = &[
     (
         "session_head",
@@ -148,6 +151,9 @@ const SQLITE_RESIDUE_QUERIES: &[(&str, &str)] = &[
                 WHERE checkpoint_ref IN
                     (SELECT checkpoint_ref FROM session_head WHERE session_id = ?1))",
     ),
+    // `fleet_format` is a store-wide singleton (durable-format generation),
+    // not session state: it carries no session id, so this read binds none.
+    ("fleet_format", "SELECT * FROM fleet_format"),
 ];
 
 /// The same reads on PostgreSQL. `to_jsonb(row)` renders every column without
@@ -248,6 +254,12 @@ const POSTGRES_RESIDUE_QUERIES: &[(&str, &str)] = &[
                 WHERE checkpoint_ref IN
                     (SELECT checkpoint_ref FROM lash_sessions WHERE session_id = $1))",
     ),
+    // `lash_fleet_format` is the store-wide singleton SQLite carries as
+    // `fleet_format`: no session id, so this read binds none.
+    (
+        "fleet_format",
+        "SELECT to_jsonb(t)::text FROM lash_fleet_format t",
+    ),
 ];
 
 #[expect(
@@ -265,18 +277,22 @@ pub(super) fn sqlite_residue_digest(path: &Path, session_id: &SessionId) -> Resi
             .prepare(sql)
             .unwrap_or_else(|error| panic!("prepare SQLite residue read for `{table}`: {error}"));
         let column_count = statement.column_count();
-        let mut rows: Vec<String> = statement
-            .query_map([session_id.as_str()], |row| {
-                let mut rendered = String::new();
-                for column in 0..column_count {
-                    let value: rusqlite::types::Value = row.get(column)?;
-                    let _ = write!(rendered, "{value:?}|");
-                }
-                Ok(rendered)
-            })
-            .unwrap_or_else(|error| panic!("read SQLite residue rows for `{table}`: {error}"))
-            .collect::<Result<Vec<_>, _>>()
-            .unwrap_or_else(|error| panic!("collect SQLite residue rows for `{table}`: {error}"));
+        let render = |row: &rusqlite::Row| -> rusqlite::Result<String> {
+            let mut rendered = String::new();
+            for column in 0..column_count {
+                let value: rusqlite::types::Value = row.get(column)?;
+                let _ = write!(rendered, "{value:?}|");
+            }
+            Ok(rendered)
+        };
+        let mut rows: Vec<String> = if statement.parameter_count() == 0 {
+            statement.query_map([], render)
+        } else {
+            statement.query_map([session_id.as_str()], render)
+        }
+        .unwrap_or_else(|error| panic!("read SQLite residue rows for `{table}`: {error}"))
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap_or_else(|error| panic!("collect SQLite residue rows for `{table}`: {error}"));
         rows.sort();
         tables.insert(*table, rows);
     }
@@ -289,8 +305,15 @@ pub(super) async fn postgres_residue_digest(
 ) -> ResidueDigest {
     let mut tables = BTreeMap::new();
     for (table, sql) in POSTGRES_RESIDUE_QUERIES {
-        let mut rows: Vec<String> = sqlx::query_scalar(sql)
-            .bind(session_id.as_str())
+        // `$1` is the session id; a store-wide singleton query declares no
+        // parameter, and Postgres refuses a bind it does not declare.
+        let query = sqlx::query_scalar::<_, String>(sql);
+        let query = if sql.contains("$1") {
+            query.bind(session_id.as_str())
+        } else {
+            query
+        };
+        let mut rows: Vec<String> = query
             .fetch_all(pool)
             .await
             .unwrap_or_else(|error| panic!("read Postgres residue rows for `{table}`: {error}"));

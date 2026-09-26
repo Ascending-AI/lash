@@ -48,10 +48,16 @@ impl crate::AwaitEventResolver for RecordingEffectHostController {
 
 #[async_trait::async_trait]
 impl RuntimeEffectController for RecordingEffectHostController {
+    /// The host records every envelope it is handed and synthesizes only
+    /// `Sleep`. A process command is different in kind: the caller hands a
+    /// local executor built on this backend's real process registry (session
+    /// deletion's `DeleteSession` is the standing example), and a host that
+    /// executes its scoped effects runs it through that executor rather than
+    /// inventing an outcome.
     async fn execute_effect(
         &self,
         envelope: RuntimeEffectEnvelope,
-        _local_executor: RuntimeEffectLocalExecutor<'_>,
+        local_executor: RuntimeEffectLocalExecutor<'_>,
     ) -> Result<RuntimeEffectOutcome, RuntimeEffectControllerError> {
         let envelope_hash = envelope.stable_hash()?;
         self.records.lock_recover().push(RecordingEffectHostRecord {
@@ -62,6 +68,9 @@ impl RuntimeEffectController for RecordingEffectHostController {
             replay_key: Some(envelope.invocation.replay_key().to_owned()),
             envelope_hash,
         });
+        if matches!(envelope.command, RuntimeEffectCommand::Process { .. }) {
+            return crate::testing::execute_effect_locally(envelope, local_executor).await;
+        }
         match envelope.command {
             RuntimeEffectCommand::Sleep { .. } => Ok(RuntimeEffectOutcome::Sleep),
             command => Err(RuntimeEffectControllerError::foreign(
