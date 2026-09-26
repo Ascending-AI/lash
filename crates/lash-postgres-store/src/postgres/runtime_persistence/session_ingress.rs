@@ -670,6 +670,17 @@ impl PostgresSessionStore {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = self.begin_ingress_tx(&mut connection, &session_id).await?;
         require_fence_tx(&mut tx, &session_id, fence).await?;
+        if lane == IngressLane::Turn && matches!(mode, ClaimMode::Idle) {
+            let commands: bool = sqlx::query_scalar(ingress_sql().shared.has_commands.sql())
+                .bind(session_id.as_str())
+                .fetch_one(&mut *tx)
+                .await
+                .map_err(store_sqlx_error)?;
+            if commands {
+                tx.commit().await.map_err(store_sqlx_error)?;
+                return Ok(None);
+            }
+        }
         let candidates = lane_candidates_tx(&mut tx, &session_id, lane).await?;
         let attempt = IngressClaimAttempt {
             fence,
@@ -776,11 +787,7 @@ impl SessionIngressStore for PostgresSessionStore {
                 IngressEnqueueOutcome::Conflict { existing_item_id }
             }
             SessionIngressAdmission::Insert => {
-                let enqueue_seq: i64 =
-                    sqlx::query_scalar(ingress_sql().postgres.select_next_enqueue_seq.sql())
-                        .fetch_one(&mut *tx)
-                        .await
-                        .map_err(store_sqlx_error)?;
+                let enqueue_seq = super::allocate_ingress_sequence_tx(&mut tx, &session_id).await?;
                 let nonce = u64_from_sql("SessionIngressItem", "enqueue_seq", enqueue_seq)?;
                 let item_id = draft.admitted_item_id(now, nonce);
                 let insert = SessionIngressInsert::of(&draft, digest)?;

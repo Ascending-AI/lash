@@ -653,9 +653,9 @@ async fn one_id_selected_drain_touches_at_most_four_queue_rows() {
     let source_prefix = format!("selected-plan-source:{nonce}:");
     sqlx::query(
         "INSERT INTO lash_queued_work_batches
-         (batch_id, session_id, source_key, delivery_policy, work_kind,
+         (enqueue_seq, batch_id, session_id, source_key, delivery_policy, work_kind,
           authority_json, merge_key, available_at_ms, enqueued_at_ms)
-         SELECT $1 || value::text, $2, $3 || value::text,
+         SELECT value, $1 || value::text, $2, $3 || value::text,
                 'earliest_safe_boundary', 'turn', '{}', NULL, 0, 1
          FROM generate_series(1, 10000) AS value",
     )
@@ -945,13 +945,13 @@ async fn postgres_claim_completion_is_locked_and_zero_rows_roll_back_the_head() 
     .await
     .expect("insert claim-fence session head");
     sqlx::query(
-        "INSERT INTO lash_pending_turn_inputs (
+        "INSERT INTO lash_pending_turn_inputs (enqueue_seq,
             input_id, session_id, ingress_json, state, input_json, submitted_ingress_json,
             submission_digest, enqueued_at_ms, claim_id, claim_owner_id,
             claim_owner_incarnation_id, claim_token, claim_fencing_token,
             claim_session_lease_generation
          )
-         VALUES ($1, $2, '{}', $3, '{}', '{}', 'digest', 1, $4, 'owner-a', 'incarnation-a', $5, 1, 1)",
+         VALUES (1, $1, $2, '{}', $3, '{}', '{}', 'digest', 1, $4, 'owner-a', 'incarnation-a', $5, 1, 1)",
     )
     .bind(&input_id)
     .bind(session_id.as_str())
@@ -1521,13 +1521,13 @@ async fn postgres_settlement_verdict_decides_before_the_settlement_write() {
         },
     };
     sqlx::query(
-        "INSERT INTO lash_pending_turn_inputs (
+        "INSERT INTO lash_pending_turn_inputs (enqueue_seq,
             input_id, session_id, ingress_json, state, input_json, submitted_ingress_json,
             submission_digest, enqueued_at_ms, claim_id, claim_owner_id,
             claim_owner_incarnation_id, claim_token, claim_fencing_token,
             claim_session_lease_generation
          )
-         VALUES ($1, $2, '{}', $3, '{}', '{}', 'digest', 1, 'claim-b', 'owner-b', 'incarnation-b', 'token-b', 2, 9)",
+         VALUES (1, $1, $2, '{}', $3, '{}', '{}', 'digest', 1, 'claim-b', 'owner-b', 'incarnation-b', 'token-b', 2, 9)",
     )
     .bind(&input_id)
     .bind(session_id.as_str())

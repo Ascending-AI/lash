@@ -101,10 +101,10 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     // semantics; serde cannot emit it, so both backends behave identically.
     assert_check_rejects(
         &mut connection,
-        "INSERT INTO lash_pending_turn_inputs (
+        "INSERT INTO lash_pending_turn_inputs (enqueue_seq,
              input_id, session_id, ingress_json, state, input_json,
              submitted_ingress_json, submission_digest, enqueued_at_ms
-         ) VALUES (
+         ) VALUES (1,
              'bad-turn-input-state', 'session',
              '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
              'waiting', '{}', '{}', 'digest', 0
@@ -114,10 +114,10 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     .await;
     assert_check_rejects(
         &mut connection,
-        "INSERT INTO lash_pending_turn_inputs (
+        "INSERT INTO lash_pending_turn_inputs (enqueue_seq,
              input_id, session_id, ingress_json, state, input_json,
              submitted_ingress_json, submission_digest, enqueued_at_ms
-         ) VALUES (
+         ) VALUES (1,
              'bad-turn-input-pair', 'session', '{\"scope\":\"next_turn\"}',
              'pending_active', '{}', '{}', 'digest', 0
          )",
@@ -126,10 +126,10 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     .await;
     assert_check_rejects(
         &mut connection,
-        "INSERT INTO lash_pending_turn_inputs (
+        "INSERT INTO lash_pending_turn_inputs (enqueue_seq,
              input_id, session_id, ingress_json, state, input_json,
              submitted_ingress_json, submission_digest, enqueued_at_ms
-         ) VALUES (
+         ) VALUES (1,
              'bad-turn-input-accepted-pair', 'session', '{\"scope\":\"next_turn\"}',
              'accepted', '{}', '{}', 'digest', 0
          )",
@@ -138,10 +138,10 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     .await;
     assert_check_rejects(
         &mut connection,
-        "INSERT INTO lash_pending_turn_inputs (
+        "INSERT INTO lash_pending_turn_inputs (enqueue_seq,
              input_id, session_id, ingress_json, state, input_json,
              submitted_ingress_json, submission_digest, enqueued_at_ms
-         ) VALUES (
+         ) VALUES (1,
              'bad-turn-input-deferred-pair', 'session',
              '{\"scope\":\"active_turn\",\"turn_id\":\"turn\"}',
              'deferred_next_turn', '{}', '{}', 'digest', 0
@@ -177,10 +177,10 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
         assert_check_rejects(
             &mut connection,
             &format!(
-                "INSERT INTO lash_pending_turn_inputs (
+                "INSERT INTO lash_pending_turn_inputs (enqueue_seq,
                      input_id, session_id, ingress_json, state, input_json,
                      submitted_ingress_json, submission_digest, enqueued_at_ms, {fields}
-                 ) VALUES ('pending', 'session', '{{\"scope\":\"next_turn\"}}',
+                 ) VALUES (1, 'pending', 'session', '{{\"scope\":\"next_turn\"}}',
                            'deferred_next_turn', '{{}}', '{{}}', 'digest', 0, {values})"
             ),
             "ck_pending_turn_inputs_claim_identity_all_or_none",
@@ -190,10 +190,10 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
 
     assert_check_rejects(
         &mut connection,
-        "INSERT INTO lash_queued_work_batches (
+        "INSERT INTO lash_queued_work_batches (enqueue_seq,
              batch_id, session_id, delivery_policy, work_kind, authority_json,
              available_at_ms, enqueued_at_ms
-         ) VALUES (
+         ) VALUES (1,
              'bad-kind', 'session', 'earliest_safe_boundary', 'cancel', '{}', 0, 0
          )",
         "ck_queued_work_batches_work_kind",
@@ -201,19 +201,19 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     .await;
     assert_check_rejects(
         &mut connection,
-        "INSERT INTO lash_queued_work_batches (
+        "INSERT INTO lash_queued_work_batches (enqueue_seq,
              batch_id, session_id, delivery_policy, work_kind, authority_json,
              available_at_ms, enqueued_at_ms
-         ) VALUES ('bad-policy', 'session', 'eventually', 'turn', '{}', 0, 0)",
+         ) VALUES (1, 'bad-policy', 'session', 'eventually', 'turn', '{}', 0, 0)",
         "ck_queued_work_batches_delivery_policy",
     )
     .await;
     assert_check_rejects(
         &mut connection,
-        "INSERT INTO lash_queued_work_batches (
+        "INSERT INTO lash_queued_work_batches (enqueue_seq,
              batch_id, session_id, delivery_policy, work_kind, authority_json,
              available_at_ms, enqueued_at_ms, claim_id
-         ) VALUES (
+         ) VALUES (1,
              'claim-id-only', 'session', 'earliest_safe_boundary', 'turn', '{}', 0, 0,
              'claim'
          )",
@@ -222,10 +222,10 @@ async fn postgres_checks_reject_every_registered_illegal_vocabulary_cluster_when
     .await;
     assert_check_rejects(
         &mut connection,
-        "INSERT INTO lash_queued_work_batches (
+        "INSERT INTO lash_queued_work_batches (enqueue_seq,
              batch_id, session_id, delivery_policy, work_kind, authority_json,
              available_at_ms, enqueued_at_ms, claim_token
-         ) VALUES (
+         ) VALUES (1,
              'claim-token-only', 'session', 'earliest_safe_boundary', 'turn', '{}', 0, 0,
              'token'
          )",

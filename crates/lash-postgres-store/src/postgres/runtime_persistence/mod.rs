@@ -4,6 +4,23 @@ use lash_core_execution::store::queued_work::{TurnWorkClaimPrefix, TurnWorkEmpty
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
+pub(crate) async fn allocate_ingress_sequence_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+) -> Result<i64, StoreError> {
+    lock_session_history_mutation_tx(tx, session_id).await?;
+    sqlx::query_scalar(
+        crate::session_ingress::session_ingress_sql()
+            .shared
+            .allocate_sequence
+            .sql(),
+    )
+    .bind(session_id.as_str())
+    .fetch_one(&mut **tx)
+    .await
+    .map_err(store_sqlx_error)
+}
+
 pub(crate) async fn lock_session_history_mutation_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
@@ -185,15 +202,7 @@ async fn enqueue_queued_work_with_outcome_tx(
     } else {
         None
     };
-    let enqueue_seq: i64 = sqlx::query_scalar(
-        crate::turn_ingress::turn_ingress_sql()
-            .queued_batches_postgres
-            .select_next_enqueue_seq
-            .sql(),
-    )
-    .fetch_one(&mut **tx)
-    .await
-    .map_err(store_sqlx_error)?;
+    let enqueue_seq = allocate_ingress_sequence_tx(tx, &batch.session_id).await?;
     let enqueue_seq_u64 = u64_from_sql("QueuedWorkBatch", "enqueue_seq", enqueue_seq)?;
     let batch_id = derive_batch_id(
         &batch.session_id,

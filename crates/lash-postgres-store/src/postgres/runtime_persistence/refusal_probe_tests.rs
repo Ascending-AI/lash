@@ -118,3 +118,83 @@ async fn postgres_empty_scan_refusal_probe_can_observe_concurrent_enqueue() {
             .is_some()
     );
 }
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn ingress_allocations_are_session_local_and_transaction_contiguous() {
+    let Some(url) = crate::postgres_test_support::database_url() else {
+        return;
+    };
+    let database = crate::testing::IsolatedDatabase::create(&url).await;
+    let storage = crate::PostgresStorage::connect(database.url())
+        .await
+        .unwrap();
+    let session = SessionId::from("allocation");
+    let mut first = storage.pool().begin().await.unwrap();
+    assert_eq!(
+        allocate_ingress_sequence_tx(&mut first, &session)
+            .await
+            .unwrap(),
+        1
+    );
+
+    let pool = storage.pool().clone();
+    let (started, ready) = tokio::sync::oneshot::channel();
+    let competing = tokio::spawn(async move {
+        let mut tx = pool.begin().await.unwrap();
+        started.send(()).unwrap();
+        let mut range = Vec::new();
+        for _ in 0..3 {
+            range.push(
+                allocate_ingress_sequence_tx(&mut tx, &SessionId::from("allocation"))
+                    .await
+                    .unwrap(),
+            );
+        }
+        tx.commit().await.unwrap();
+        range
+    });
+    ready.await.unwrap();
+    let mut unrelated = storage.pool().begin().await.unwrap();
+    for expected in 1..=3 {
+        assert_eq!(
+            allocate_ingress_sequence_tx(&mut unrelated, &SessionId::from("unrelated"))
+                .await
+                .unwrap(),
+            expected
+        );
+    }
+    unrelated.commit().await.unwrap();
+    assert!(
+        !competing.is_finished(),
+        "a producer cannot pass an uncommitted allocation"
+    );
+    for expected in 2..=3 {
+        assert_eq!(
+            allocate_ingress_sequence_tx(&mut first, &session)
+                .await
+                .unwrap(),
+            expected
+        );
+    }
+    first.commit().await.unwrap();
+    assert_eq!(competing.await.unwrap(), vec![4, 5, 6]);
+
+    let mut rolled_back = storage.pool().begin().await.unwrap();
+    assert_eq!(
+        allocate_ingress_sequence_tx(&mut rolled_back, &session)
+            .await
+            .unwrap(),
+        7
+    );
+    rolled_back.rollback().await.unwrap();
+    let mut retry = storage.pool().begin().await.unwrap();
+    assert_eq!(
+        allocate_ingress_sequence_tx(&mut retry, &session)
+            .await
+            .unwrap(),
+        7
+    );
+    retry.commit().await.unwrap();
+    storage.pool().close().await;
+    drop(database);
+}

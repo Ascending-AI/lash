@@ -53,6 +53,10 @@ impl ResidueDigest {
 /// declares a parameter.
 const SQLITE_RESIDUE_QUERIES: &[(&str, &str)] = &[
     (
+        "session_ingress_sequence",
+        "SELECT * FROM session_ingress_sequence WHERE session_id = ?1",
+    ),
+    (
         "session_head",
         "SELECT * FROM session_head WHERE session_id = ?1",
     ),
@@ -173,6 +177,10 @@ const SQLITE_RESIDUE_QUERIES: &[(&str, &str)] = &[
 /// The same reads on PostgreSQL. `to_jsonb(row)` renders every column without
 /// this harness naming them, so a new column is compared the day it lands.
 const POSTGRES_RESIDUE_QUERIES: &[(&str, &str)] = &[
+    (
+        "session_ingress_sequence",
+        "SELECT row_to_json(t)::text FROM lash_session_ingress_sequence t WHERE session_id = $1",
+    ),
     (
         "session_head",
         "SELECT to_jsonb(t)::text FROM lash_sessions t WHERE session_id = $1",

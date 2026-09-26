@@ -24,7 +24,7 @@ lash_store_sql::statements! {
                         delivery_policy AS head_delivery_policy,
                         claim_id AS head_claim_id
                  FROM queued_work_batches
-                 WHERE session_id = ?1
+                 WHERE session_id = ?1 AND work_kind = 'turn'
                    AND available_at_ms <= COALESCE(
                         ?4, FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) * 1000))
                    AND (
@@ -43,7 +43,7 @@ lash_store_sql::statements! {
                             candidate.claim_id AS head_claim_id
                      FROM queued_work_batches AS candidate
                      CROSS JOIN queued_work_unfiltered_head AS unfiltered
-                     WHERE candidate.session_id = ?1
+                     WHERE candidate.session_id = ?1 AND candidate.work_kind = 'turn'
                        AND candidate.available_at_ms <= COALESCE(
                             ?4, FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) * 1000))
                        AND (
@@ -99,7 +99,7 @@ lash_store_sql::statements! {
                         delivery_policy AS head_delivery_policy,
                         claim_id AS head_claim_id
                  FROM queued_work_batches
-                 WHERE session_id = ?1
+                 WHERE session_id = ?1 AND work_kind = 'turn'
                    AND available_at_ms <= COALESCE(
                         ?4, FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) * 1000))
                    AND (
@@ -118,7 +118,7 @@ lash_store_sql::statements! {
                             candidate.claim_id AS head_claim_id
                      FROM queued_work_batches AS candidate
                      CROSS JOIN queued_work_unfiltered_head AS unfiltered
-                     WHERE candidate.session_id = ?1
+                     WHERE candidate.session_id = ?1 AND candidate.work_kind = 'turn'
                        AND candidate.available_at_ms <= COALESCE(
                             ?4, FLOOR(EXTRACT(EPOCH FROM transaction_timestamp()) * 1000))
                        AND (

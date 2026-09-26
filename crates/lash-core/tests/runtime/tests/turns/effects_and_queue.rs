@@ -1975,7 +1975,7 @@ pub(super) async fn idle_ordering_read_is_independent_of_pending_command_depth()
 }
 
 #[tokio::test]
-pub(super) async fn later_session_command_does_not_jump_earlier_queued_turn() {
+pub(super) async fn later_session_command_drains_before_earlier_queued_turn() {
     let backend = memory_backend().await;
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
@@ -1999,7 +1999,7 @@ pub(super) async fn later_session_command_does_not_jump_earlier_queued_turn() {
     let command = enqueue_session_command(
         store.as_ref(),
         &SessionId::from("root"),
-        "refresh after turn",
+        "refresh admitted after input",
     )
     .await;
 
@@ -2009,7 +2009,7 @@ pub(super) async fn later_session_command_does_not_jump_earlier_queued_turn() {
             backend_queued_scope(
                 &backend,
                 &SessionId::from("root"),
-                &TurnId::from("turn-before-command-drain"),
+                &TurnId::from("later-command-before-turn-drain"),
             ),
         ))
         .await
@@ -2018,18 +2018,16 @@ pub(super) async fn later_session_command_does_not_jump_earlier_queued_turn() {
         .expect("first queued turn runs");
 
     assert_eq!(drained.assistant_output.safe_text, "first turn answer");
-    assert_eq!(
+    assert!(
         lash_core::store::QueuedWorkStore::list_queued_work(
             store.as_ref(),
             &SessionId::from("root")
         )
         .await
         .expect("list queue after first turn")
-        .iter()
-        .map(|batch| batch.batch_id.as_str())
-        .collect::<Vec<_>>(),
-        vec![command.batch_id.as_str()],
-        "later command should remain after turn `{}` runs",
+        .is_empty(),
+        "later command `{}` must drain before turn `{}` runs",
+        command.batch_id,
         turn.input_id
     );
 

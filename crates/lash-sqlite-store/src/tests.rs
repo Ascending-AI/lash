@@ -368,36 +368,36 @@ fn queued_work_checks_reject_illegal_vocabulary_and_mixed_claim_correlation() {
     };
 
     assert_rejected(
-        "INSERT INTO queued_work_batches (
+        "INSERT INTO queued_work_batches (enqueue_seq,
              batch_id, session_id, delivery_policy, work_kind, authority_json,
              available_at_ms, enqueued_at_ms
-         ) VALUES (
+         ) VALUES (1,
              'bad-kind', 'session', 'earliest_safe_boundary', 'cancel', '{}', 0, 0
          )",
         "ck_queued_work_batches_work_kind",
     );
     assert_rejected(
-        "INSERT INTO queued_work_batches (
+        "INSERT INTO queued_work_batches (enqueue_seq,
              batch_id, session_id, delivery_policy, work_kind, authority_json,
              available_at_ms, enqueued_at_ms
-         ) VALUES ('bad-policy', 'session', 'eventually', 'turn', '{}', 0, 0)",
+         ) VALUES (1, 'bad-policy', 'session', 'eventually', 'turn', '{}', 0, 0)",
         "ck_queued_work_batches_delivery_policy",
     );
     assert_rejected(
-        "INSERT INTO queued_work_batches (
+        "INSERT INTO queued_work_batches (enqueue_seq,
              batch_id, session_id, delivery_policy, work_kind, authority_json,
              available_at_ms, enqueued_at_ms, claim_id
-         ) VALUES (
+         ) VALUES (1,
              'claim-id-only', 'session', 'earliest_safe_boundary', 'turn', '{}', 0, 0,
              'claim'
          )",
         "ck_queued_work_batches_claim_id_token_all_or_none",
     );
     assert_rejected(
-        "INSERT INTO queued_work_batches (
+        "INSERT INTO queued_work_batches (enqueue_seq,
              batch_id, session_id, delivery_policy, work_kind, authority_json,
              available_at_ms, enqueued_at_ms, claim_token
-         ) VALUES (
+         ) VALUES (1,
              'claim-token-only', 'session', 'earliest_safe_boundary', 'turn', '{}', 0, 0,
              'token'
          )",
@@ -431,10 +431,10 @@ fn pending_turn_input_claim_identity_must_be_all_or_none() {
         let error = connection
             .execute(
                 &format!(
-                    "INSERT INTO pending_turn_inputs (
+                    "INSERT INTO pending_turn_inputs (enqueue_seq,
                          input_id, session_id, ingress_json, state, input_json,
                          submitted_ingress_json, submission_digest, enqueued_at_ms, {fields}
-                     ) VALUES ('input', 'session', '{{\"scope\":\"next_turn\"}}',
+                     ) VALUES (1, 'input', 'session', '{{\"scope\":\"next_turn\"}}',
                                'deferred_next_turn', '{{}}', '{{}}', 'digest', 0, {values})"
                 ),
                 [],

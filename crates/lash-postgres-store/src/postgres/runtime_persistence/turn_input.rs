@@ -494,15 +494,7 @@ impl TurnInputStore for PostgresSessionStore {
         ensure_session_not_deleted_tx(&mut tx, &draft.session_id).await?;
         ensure_session_not_closing_tx(&mut tx, &draft.session_id).await?;
         let now = self.clock.timestamp_ms();
-        let enqueue_seq: i64 = sqlx::query_scalar(
-            crate::turn_ingress::turn_ingress_sql()
-                .pending_inputs_postgres
-                .select_next_enqueue_seq
-                .sql(),
-        )
-        .fetch_one(&mut *tx)
-        .await
-        .map_err(store_sqlx_error)?;
+        let enqueue_seq = super::allocate_ingress_sequence_tx(&mut tx, &draft.session_id).await?;
         let enqueue_seq_u64 = u64_from_sql("PendingTurnInput", "enqueue_seq", enqueue_seq)?;
         let input_id = draft.input_id.clone().unwrap_or_else(|| {
             lash_core_execution::store_backend_support::derive_pending_turn_input_id(

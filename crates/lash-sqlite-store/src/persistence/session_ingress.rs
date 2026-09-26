@@ -691,6 +691,18 @@ impl Store {
                     let session_id = fence.session().clone();
                     ensure_session_not_deleted_conn(tx, &session_id)?;
                     require_fence_conn(tx, &session_id, &fence)?;
+                    if lane == IngressLane::Turn && matches!(mode, ClaimMode::Idle) {
+                        let commands: bool = tx
+                            .query_row(
+                                ingress_sql().shared.has_commands.sql(),
+                                params![session_id.as_str()],
+                                |row| row.get(0),
+                            )
+                            .map_err(sqlite_error)?;
+                        if commands {
+                            return Ok(None);
+                        }
+                    }
                     let candidates = lane_candidates_conn(tx, &session_id, lane)?;
                     let attempt = IngressClaimAttempt {
                         fence: &fence,
@@ -803,6 +815,7 @@ impl SessionIngressStore for Store {
                                         ))
                                         .transpose()?,
                                     sql_counter_value("session_ingress_enqueued_at_ms", now)?,
+                                    crate::session_ingress::allocate_sequence(tx, &session_id)?,
                                 ],
                                 |row| row.get::<_, i64>(0),
                             )

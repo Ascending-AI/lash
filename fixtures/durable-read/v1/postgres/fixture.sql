@@ -295,25 +295,6 @@ CREATE TABLE lash_durable_read_fixture.lash_pending_turn_inputs (
 
 
 --
--- Name: lash_pending_turn_inputs_enqueue_seq_seq; Type: SEQUENCE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE SEQUENCE lash_durable_read_fixture.lash_pending_turn_inputs_enqueue_seq_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: lash_pending_turn_inputs_enqueue_seq_seq; Type: SEQUENCE OWNED BY; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER SEQUENCE lash_durable_read_fixture.lash_pending_turn_inputs_enqueue_seq_seq OWNED BY lash_durable_read_fixture.lash_pending_turn_inputs.enqueue_seq;
-
-
---
 -- Name: lash_process_artifact_cleanup; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -558,25 +539,6 @@ CREATE TABLE lash_durable_read_fixture.lash_queued_work_batches (
 
 
 --
--- Name: lash_queued_work_batches_enqueue_seq_seq; Type: SEQUENCE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE SEQUENCE lash_durable_read_fixture.lash_queued_work_batches_enqueue_seq_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: lash_queued_work_batches_enqueue_seq_seq; Type: SEQUENCE OWNED BY; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER SEQUENCE lash_durable_read_fixture.lash_queued_work_batches_enqueue_seq_seq OWNED BY lash_durable_read_fixture.lash_queued_work_batches.enqueue_seq;
-
-
---
 -- Name: lash_queued_work_items; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -688,22 +650,14 @@ CREATE TABLE lash_durable_read_fixture.lash_session_ingress (
 
 
 --
--- Name: lash_session_ingress_enqueue_seq_seq; Type: SEQUENCE; Schema: lash_durable_read_fixture; Owner: -
+-- Name: lash_session_ingress_sequence; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
-CREATE SEQUENCE lash_durable_read_fixture.lash_session_ingress_enqueue_seq_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: lash_session_ingress_enqueue_seq_seq; Type: SEQUENCE OWNED BY; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER SEQUENCE lash_durable_read_fixture.lash_session_ingress_enqueue_seq_seq OWNED BY lash_durable_read_fixture.lash_session_ingress.enqueue_seq;
+CREATE TABLE lash_durable_read_fixture.lash_session_ingress_sequence (
+    session_id text NOT NULL,
+    enqueue_seq bigint NOT NULL,
+    CONSTRAINT ck_session_ingress_sequence_positive CHECK ((enqueue_seq > 0))
+);
 
 
 --
@@ -1064,27 +1018,6 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_control_intents ALTER COLUMN int
 
 
 --
--- Name: lash_pending_turn_inputs enqueue_seq; Type: DEFAULT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_pending_turn_inputs ALTER COLUMN enqueue_seq SET DEFAULT nextval('lash_durable_read_fixture.lash_pending_turn_inputs_enqueue_seq_seq'::regclass);
-
-
---
--- Name: lash_queued_work_batches enqueue_seq; Type: DEFAULT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_work_batches ALTER COLUMN enqueue_seq SET DEFAULT nextval('lash_durable_read_fixture.lash_queued_work_batches_enqueue_seq_seq'::regclass);
-
-
---
--- Name: lash_session_ingress enqueue_seq; Type: DEFAULT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_session_ingress ALTER COLUMN enqueue_seq SET DEFAULT nextval('lash_durable_read_fixture.lash_session_ingress_enqueue_seq_seq'::regclass);
-
-
---
 -- Name: lash_usage_deltas seq; Type: DEFAULT; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1210,7 +1143,7 @@ INSERT INTO lash_durable_read_fixture.lash_parent_end_plans VALUES ('process', '
 -- Data for Name: lash_pending_turn_inputs; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_pending_turn_inputs VALUES (1, 'durable-read-pending-input', 'durable-read-fixture', 'durable-read-input-source', '{"scope":"next_turn"}', 'deferred_next_turn', '{"items":[{"type":"text","text":"durable read pending input"}]}', '{"scope":"next_turn"}', 'turn-input-submission:v1:blake3:cfa33cf885994ad5ebc91e08f8f36422a792cda3baab46dff1f6f4433e6bc20a', 1700000000000, NULL, NULL, NULL, NULL, 0, 0, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_pending_turn_inputs VALUES (2, 'durable-read-pending-input', 'durable-read-fixture', 'durable-read-input-source', '{"scope":"next_turn"}', 'deferred_next_turn', '{"items":[{"type":"text","text":"durable read pending input"}]}', '{"scope":"next_turn"}', 'turn-input-submission:v1:blake3:cfa33cf885994ad5ebc91e08f8f36422a792cda3baab46dff1f6f4433e6bc20a', 1700000000000, NULL, NULL, NULL, NULL, 0, 0, NULL, NULL);
 
 
 --
@@ -1330,7 +1263,7 @@ INSERT INTO lash_durable_read_fixture.lash_queued_work_items VALUES ('qwb:bfc05c
 -- Data for Name: lash_release_stamp; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=140', 1700000000000);
+INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-dev', 'lash-postgres-store=141', 1700000000000);
 
 
 --
@@ -1340,14 +1273,14 @@ INSERT INTO lash_durable_read_fixture.lash_release_stamp VALUES (true, '0.0.0-de
 INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"append-session-nodes","scope":{"operation_id":"session:durable-read-fixture:boundary:durable-read-current-append","type":"runtime_operation"}}', '9e9a441ea3cfee8cd11d9bc6ec13ff8fd8fe471bdece7dcf5dda8a5a23ec4be6', '{"schema_version":2,"head_revision":1,"checkpoint_ref":"210ae4978f17c413088878b1bd7c77d4cc5037fbf99030bc96176da68601bacb","manifest":{"schema_version":4,"turn_state":{"turn_index":0,"token_usage":{"input_tokens":0,"output_tokens":0,"cache_read_input_tokens":0,"cache_write_input_tokens":0,"reasoning_output_tokens":0},"protocol_turn_options":{"schema_version":1,"payload":{}}}},"committed_leaf_node_id":"n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a","realized_node_timestamps":[{"node_id":"frame-node/v3/1eea72aaea89086d6bc4149c359256b8e3a459bbafee748808da3e69e7888940","timestamp":"2023-11-14T22:13:20+00:00"},{"node_id":"n_3246dccf4a810defd9cc125efda53f1ac7be7acd0a13c98aa3b3e4d1c7f4bb08","timestamp":"2023-11-14T22:13:20+00:00"},{"node_id":"n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a","timestamp":"2023-11-14T22:13:20+00:00"}]}', 1700000000000, '3e8aeb1a0000dd8ff135743a2ef9b7d7b35ab31afba21c26692ac2f7bae54f48', 2, 7);
 INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"commit","scope":{"operation_id":"durable-read-legacy-commit","type":"runtime_operation"}}', 'a8e546ba83930b0a8a3a8baaf8925bd8689762ef2b0720df07e83d6d256a5f11', '{"schema_version":2,"head_revision":2,"checkpoint_ref":"92171b9c5f5a51fe643c34750d2fd654a6d73af6a28ead15125fec2326f0be1d","manifest":{"schema_version":4,"turn_state":{"turn_index":7,"token_usage":{"input_tokens":13,"output_tokens":8,"cache_read_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2},"protocol_turn_options":{"schema_version":1,"payload":{}}},"components":{"execution_state":{"blob_ref":"76a31ea97e133ae7ed233e34355d8eb5308dea8ab031b1b39a67936fb8bc99c8","encoding_version":2},"plugin_state":{"blob_ref":"c6155fdf1d371a10a71a007337606ed5e5aa78bbe6f4f673c02d52460e20b249","encoding_version":2},"tool_state":{"blob_ref":"9b32938f19d00ce8e3cc0116769a86590e9a8b9635bda84ab5627671ca62a51d","encoding_version":2}}},"committed_leaf_node_id":"n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a","realized_node_timestamps":[],"committed_usage_delta_identities":[{"operation_storage_key":"{\"key\":\"commit\",\"scope\":{\"operation_id\":\"durable-read-legacy-commit\",\"type\":\"runtime_operation\"}}","entry_ordinal":0,"payload_encoding_version":4,"payload_hash":"0885a585f704e9086220f97cad28cd83905497f1ad2484f2fd1d1895945e5dba"}]}', 1700000000000, NULL, NULL, NULL);
 INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"record-config","scope":{"operation_id":"session:durable-read-fixture:boundary:protocol-materialization","type":"runtime_operation"}}', '77e7dd1001ceb1041bd7a5661e7e1c699bdcc927b4c60b24ff12a91c954bcc46', '{"schema_version":2,"head_revision":3,"checkpoint_ref":"92171b9c5f5a51fe643c34750d2fd654a6d73af6a28ead15125fec2326f0be1d","manifest":{"schema_version":4,"turn_state":{"turn_index":7,"token_usage":{"input_tokens":13,"output_tokens":8,"cache_read_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2},"protocol_turn_options":{"schema_version":1,"payload":{}}},"components":{"execution_state":{"blob_ref":"76a31ea97e133ae7ed233e34355d8eb5308dea8ab031b1b39a67936fb8bc99c8","encoding_version":2},"plugin_state":{"blob_ref":"c6155fdf1d371a10a71a007337606ed5e5aa78bbe6f4f673c02d52460e20b249","encoding_version":2},"tool_state":{"blob_ref":"9b32938f19d00ce8e3cc0116769a86590e9a8b9635bda84ab5627671ca62a51d","encoding_version":2}}},"committed_leaf_node_id":"n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a","realized_node_timestamps":[]}', 1700000000000, 'bc65c05bb2e993f4c118602bdc825c96ed78aa1d7762118c841a3f9bd98aea6e', NULL, 3);
-INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"commit","scope":{"operation_id":"durable-read-wake-settlement","type":"runtime_operation"}}', '5613e1dae07a11096c50f55af04381ee9adef203addebc0c17748264e7099da0', '{"schema_version":2,"head_revision":4,"checkpoint_ref":"92171b9c5f5a51fe643c34750d2fd654a6d73af6a28ead15125fec2326f0be1d","manifest":{"schema_version":4,"turn_state":{"turn_index":7,"token_usage":{"input_tokens":13,"output_tokens":8,"cache_read_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2},"protocol_turn_options":{"schema_version":1,"payload":{}}},"components":{"execution_state":{"blob_ref":"76a31ea97e133ae7ed233e34355d8eb5308dea8ab031b1b39a67936fb8bc99c8","encoding_version":2},"plugin_state":{"blob_ref":"c6155fdf1d371a10a71a007337606ed5e5aa78bbe6f4f673c02d52460e20b249","encoding_version":2},"tool_state":{"blob_ref":"9b32938f19d00ce8e3cc0116769a86590e9a8b9635bda84ab5627671ca62a51d","encoding_version":2}}},"committed_leaf_node_id":"n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a","realized_node_timestamps":[]}', 1700000000000, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable-read-fixture', '{"key":"commit","scope":{"operation_id":"durable-read-wake-settlement","type":"runtime_operation"}}', '7d1a81af7200c71d51ff92138efc3c540ceb2e9fe950a4397c552fd59b1d6d74', '{"schema_version":2,"head_revision":4,"checkpoint_ref":"92171b9c5f5a51fe643c34750d2fd654a6d73af6a28ead15125fec2326f0be1d","manifest":{"schema_version":4,"turn_state":{"turn_index":7,"token_usage":{"input_tokens":13,"output_tokens":8,"cache_read_input_tokens":5,"cache_write_input_tokens":3,"reasoning_output_tokens":2},"protocol_turn_options":{"schema_version":1,"payload":{}}},"components":{"execution_state":{"blob_ref":"76a31ea97e133ae7ed233e34355d8eb5308dea8ab031b1b39a67936fb8bc99c8","encoding_version":2},"plugin_state":{"blob_ref":"c6155fdf1d371a10a71a007337606ed5e5aa78bbe6f4f673c02d52460e20b249","encoding_version":2},"tool_state":{"blob_ref":"9b32938f19d00ce8e3cc0116769a86590e9a8b9635bda84ab5627671ca62a51d","encoding_version":2}}},"committed_leaf_node_id":"n_03531bbc4371c54580f1b7874194d0d85964dba1d26654a91b77dc19b6b1c19a","realized_node_timestamps":[]}', 1700000000000, NULL, NULL, NULL);
 
 
 --
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 140);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 141);
 
 
 --
@@ -1361,6 +1294,13 @@ INSERT INTO lash_durable_read_fixture.lash_session_execution_leases VALUES ('dur
 -- Data for Name: lash_session_ingress; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
+
+
+--
+-- Data for Name: lash_session_ingress_sequence; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+INSERT INTO lash_durable_read_fixture.lash_session_ingress_sequence VALUES ('durable-read-fixture', 3);
 
 
 --
@@ -1504,27 +1444,6 @@ INSERT INTO lash_durable_read_fixture.lash_wake_redelivery_fences VALUES ('durab
 --
 
 SELECT pg_catalog.setval('lash_durable_read_fixture.lash_control_intents_intent_id_seq', 1, false);
-
-
---
--- Name: lash_pending_turn_inputs_enqueue_seq_seq; Type: SEQUENCE SET; Schema: lash_durable_read_fixture; Owner: -
---
-
-SELECT pg_catalog.setval('lash_durable_read_fixture.lash_pending_turn_inputs_enqueue_seq_seq', 1, true);
-
-
---
--- Name: lash_queued_work_batches_enqueue_seq_seq; Type: SEQUENCE SET; Schema: lash_durable_read_fixture; Owner: -
---
-
-SELECT pg_catalog.setval('lash_durable_read_fixture.lash_queued_work_batches_enqueue_seq_seq', 2, true);
-
-
---
--- Name: lash_session_ingress_enqueue_seq_seq; Type: SEQUENCE SET; Schema: lash_durable_read_fixture; Owner: -
---
-
-SELECT pg_catalog.setval('lash_durable_read_fixture.lash_session_ingress_enqueue_seq_seq', 1, false);
 
 
 --
@@ -1683,7 +1602,7 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_pending_turn_inputs
 --
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_pending_turn_inputs
-    ADD CONSTRAINT lash_pending_turn_inputs_pkey PRIMARY KEY (enqueue_seq);
+    ADD CONSTRAINT lash_pending_turn_inputs_pkey PRIMARY KEY (session_id, enqueue_seq);
 
 
 --
@@ -1835,7 +1754,7 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_work_batches
 --
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_work_batches
-    ADD CONSTRAINT lash_queued_work_batches_pkey PRIMARY KEY (enqueue_seq);
+    ADD CONSTRAINT lash_queued_work_batches_pkey PRIMARY KEY (session_id, enqueue_seq);
 
 
 --
@@ -1899,7 +1818,15 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_session_ingress
 --
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_session_ingress
-    ADD CONSTRAINT lash_session_ingress_pkey PRIMARY KEY (enqueue_seq);
+    ADD CONSTRAINT lash_session_ingress_pkey PRIMARY KEY (session_id, enqueue_seq);
+
+
+--
+-- Name: lash_session_ingress_sequence lash_session_ingress_sequence_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_session_ingress_sequence
+    ADD CONSTRAINT lash_session_ingress_sequence_pkey PRIMARY KEY (session_id);
 
 
 --

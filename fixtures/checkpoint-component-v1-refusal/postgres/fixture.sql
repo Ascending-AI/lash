@@ -119,6 +119,45 @@ CREATE TABLE lash_durable_read_fixture.lash_checkpoint_blob_refs (
 
 
 --
+-- Name: lash_control_intents; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_control_intents (
+    intent_id bigint NOT NULL,
+    session_id text NOT NULL,
+    format bigint NOT NULL,
+    kind text NOT NULL,
+    kind_json text NOT NULL,
+    state text NOT NULL,
+    state_json text NOT NULL,
+    attempts bigint NOT NULL,
+    created_at_ms bigint NOT NULL,
+    engine_ref text,
+    CONSTRAINT ck_control_intents_kind CHECK ((kind = ANY (ARRAY['redrive'::text, 'cancel'::text, 'fork'::text, 'close_session'::text]))),
+    CONSTRAINT ck_control_intents_state CHECK ((state = ANY (ARRAY['pending'::text, 'acknowledged'::text, 'superseded'::text, 'failed_retryable'::text, 'failed'::text])))
+);
+
+
+--
+-- Name: lash_control_intents_intent_id_seq; Type: SEQUENCE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE SEQUENCE lash_durable_read_fixture.lash_control_intents_intent_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: lash_control_intents_intent_id_seq; Type: SEQUENCE OWNED BY; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER SEQUENCE lash_durable_read_fixture.lash_control_intents_intent_id_seq OWNED BY lash_durable_read_fixture.lash_control_intents.intent_id;
+
+
+--
 -- Name: lash_deleted_sessions; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -238,6 +277,8 @@ CREATE TABLE lash_durable_read_fixture.lash_pending_turn_inputs (
     ingress_json text NOT NULL,
     state text NOT NULL,
     input_json text NOT NULL,
+    submitted_ingress_json text NOT NULL,
+    submission_digest text NOT NULL,
     enqueued_at_ms bigint NOT NULL,
     claim_id text,
     claim_owner_id text,
@@ -245,8 +286,6 @@ CREATE TABLE lash_durable_read_fixture.lash_pending_turn_inputs (
     claim_token text,
     claim_fencing_token bigint DEFAULT 0 NOT NULL,
     claim_session_lease_generation bigint DEFAULT 0 NOT NULL,
-    submitted_ingress_json text NOT NULL,
-    submission_digest text NOT NULL,
     claim_bound_turn_id text,
     claim_bound_receipt_input_id text,
     CONSTRAINT ck_pending_turn_inputs_bound_claim_is_next_turn CHECK ((((claim_bound_turn_id IS NULL) AND (claim_bound_receipt_input_id IS NULL)) OR ((claim_bound_turn_id IS NOT NULL) AND (claim_bound_receipt_input_id IS NOT NULL) AND (claim_token IS NOT NULL) AND (state = 'deferred_next_turn'::text)))),
@@ -254,25 +293,6 @@ CREATE TABLE lash_durable_read_fixture.lash_pending_turn_inputs (
     CONSTRAINT ck_pending_turn_inputs_state CHECK ((state = ANY (ARRAY['pending_active'::text, 'deferred_next_turn'::text, 'accepted'::text, 'cancelled'::text, 'completed'::text]))),
     CONSTRAINT ck_pending_turn_inputs_state_ingress CHECK ((((((ingress_json)::jsonb ->> 'scope'::text) = 'active_turn'::text) AND (state = ANY (ARRAY['pending_active'::text, 'accepted'::text, 'cancelled'::text, 'completed'::text]))) OR ((((ingress_json)::jsonb ->> 'scope'::text) = 'next_turn'::text) AND (state = ANY (ARRAY['deferred_next_turn'::text, 'cancelled'::text, 'completed'::text])))))
 );
-
-
---
--- Name: lash_pending_turn_inputs_enqueue_seq_seq; Type: SEQUENCE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE SEQUENCE lash_durable_read_fixture.lash_pending_turn_inputs_enqueue_seq_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: lash_pending_turn_inputs_enqueue_seq_seq; Type: SEQUENCE OWNED BY; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER SEQUENCE lash_durable_read_fixture.lash_pending_turn_inputs_enqueue_seq_seq OWNED BY lash_durable_read_fixture.lash_pending_turn_inputs.enqueue_seq;
 
 
 --
@@ -520,25 +540,6 @@ CREATE TABLE lash_durable_read_fixture.lash_queued_work_batches (
 
 
 --
--- Name: lash_queued_work_batches_enqueue_seq_seq; Type: SEQUENCE; Schema: lash_durable_read_fixture; Owner: -
---
-
-CREATE SEQUENCE lash_durable_read_fixture.lash_queued_work_batches_enqueue_seq_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: lash_queued_work_batches_enqueue_seq_seq; Type: SEQUENCE OWNED BY; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER SEQUENCE lash_durable_read_fixture.lash_queued_work_batches_enqueue_seq_seq OWNED BY lash_durable_read_fixture.lash_queued_work_batches.enqueue_seq;
-
-
---
 -- Name: lash_queued_work_items; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -651,22 +652,14 @@ CREATE TABLE lash_durable_read_fixture.lash_session_ingress (
 
 
 --
--- Name: lash_session_ingress_enqueue_seq_seq; Type: SEQUENCE; Schema: lash_durable_read_fixture; Owner: -
+-- Name: lash_session_ingress_sequence; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
 --
 
-CREATE SEQUENCE lash_durable_read_fixture.lash_session_ingress_enqueue_seq_seq
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: lash_session_ingress_enqueue_seq_seq; Type: SEQUENCE OWNED BY; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER SEQUENCE lash_durable_read_fixture.lash_session_ingress_enqueue_seq_seq OWNED BY lash_durable_read_fixture.lash_session_ingress.enqueue_seq;
+CREATE TABLE lash_durable_read_fixture.lash_session_ingress_sequence (
+    session_id text NOT NULL,
+    enqueue_seq bigint NOT NULL,
+    CONSTRAINT ck_session_ingress_sequence_positive CHECK ((enqueue_seq > 0))
+);
 
 
 --
@@ -698,6 +691,7 @@ CREATE TABLE lash_durable_read_fixture.lash_session_meta (
     drive_admission_id text,
     admission_base_checkpoint_ref text,
     drive_root_start text,
+    closing_intent bigint,
     CONSTRAINT ck_session_meta_caused_by_family CHECK ((((caused_by_kind IS NULL) AND (caused_by_session_id IS NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_process_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'turn'::text) AND (caused_by_session_id IS NOT NULL) AND (caused_by_turn_id IS NOT NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_process_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'effect_address'::text) AND (caused_by_effect_id IS NOT NULL) AND (caused_by_session_id IS NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_process_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'tool_call'::text) AND (caused_by_session_id IS NOT NULL) AND (caused_by_call_id IS NOT NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_process_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'process'::text) AND (caused_by_process_id IS NOT NULL) AND (caused_by_session_id IS NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'process_event'::text) AND (caused_by_process_id IS NOT NULL) AND (caused_by_process_event_sequence IS NOT NULL) AND (caused_by_session_id IS NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'trigger_occurrence'::text) AND (caused_by_occurrence_id IS NOT NULL) AND (caused_by_session_id IS NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_process_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'session_node'::text) AND (caused_by_session_id IS NOT NULL) AND (caused_by_node_id IS NOT NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_process_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL)) OR ((caused_by_kind IS NOT NULL) AND (NOT (caused_by_kind = ANY (ARRAY['turn'::text, 'effect_address'::text, 'tool_call'::text, 'process'::text, 'process_event'::text, 'trigger_occurrence'::text, 'session_node'::text])))))),
     CONSTRAINT ck_session_meta_caused_by_kind CHECK ((caused_by_kind = ANY (ARRAY['turn'::text, 'effect_address'::text, 'tool_call'::text, 'process'::text, 'process_event'::text, 'trigger_occurrence'::text, 'session_node'::text]))),
     CONSTRAINT ck_session_meta_relation_family CHECK ((((relation_kind = 'root'::text) AND (parent_session_id IS NULL) AND (caused_by_kind IS NULL) AND (source_session_id IS NULL) AND (source_node_id IS NULL)) OR ((relation_kind = 'child'::text) AND (parent_session_id IS NOT NULL) AND (source_session_id IS NULL) AND (source_node_id IS NULL)) OR ((relation_kind = 'fork'::text) AND (parent_session_id IS NULL) AND (caused_by_kind IS NULL) AND (source_session_id IS NOT NULL) AND (source_node_id IS NOT NULL)) OR ((relation_kind IS NOT NULL) AND (NOT (relation_kind = ANY (ARRAY['root'::text, 'child'::text, 'fork'::text])))))),
@@ -713,6 +707,32 @@ CREATE TABLE lash_durable_read_fixture.lash_session_meta_pending_observer_intent
     session_id text NOT NULL,
     process_index bigint NOT NULL,
     process_id text NOT NULL
+);
+
+
+--
+-- Name: lash_session_root_inputs; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_session_root_inputs (
+    session_id text NOT NULL,
+    input_id text NOT NULL,
+    root text NOT NULL
+);
+
+
+--
+-- Name: lash_session_roots; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_session_roots (
+    session_id text NOT NULL,
+    root text NOT NULL,
+    terminal_kind text,
+    terminal_cause_json text,
+    terminal_head_revision bigint,
+    terminal_at_ms bigint,
+    CONSTRAINT ck_session_roots_terminal CHECK ((((terminal_kind IS NULL) AND (terminal_cause_json IS NULL) AND (terminal_head_revision IS NULL) AND (terminal_at_ms IS NULL)) OR ((terminal_kind = ANY (ARRAY['answered'::text, 'failed'::text, 'cancelled'::text])) AND (terminal_cause_json IS NOT NULL) AND (terminal_at_ms IS NOT NULL))))
 );
 
 
@@ -903,7 +923,7 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_park_events (
     cause text,
     reason_json text,
     at_ms bigint NOT NULL,
-    CONSTRAINT ck_turn_park_events_kind CHECK ((kind = ANY (ARRAY['parked'::text, 'unparked'::text, 'cancelled'::text]))),
+    CONSTRAINT ck_turn_park_events_kind CHECK ((kind = ANY (ARRAY['parked'::text, 'unparked'::text, 'cancelled'::text, 'redrive_requested'::text]))),
     CONSTRAINT ck_turn_park_events_parked_reason CHECK ((((kind = 'parked'::text) AND (reason_json IS NOT NULL) AND (cause IS NULL)) OR ((kind <> 'parked'::text) AND (reason_json IS NULL) AND (cause IS NOT NULL))))
 );
 
@@ -922,6 +942,8 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_parks (
     last_refused_ms bigint NOT NULL,
     attempts bigint NOT NULL,
     park_executable_generation text,
+    engine_ref text,
+    resume_intent bigint,
     CONSTRAINT ck_turn_parks_attempts CHECK ((attempts >= 1))
 );
 
@@ -990,24 +1012,10 @@ CREATE TABLE lash_durable_read_fixture.lash_wake_redelivery_fences (
 
 
 --
--- Name: lash_pending_turn_inputs enqueue_seq; Type: DEFAULT; Schema: lash_durable_read_fixture; Owner: -
+-- Name: lash_control_intents intent_id; Type: DEFAULT; Schema: lash_durable_read_fixture; Owner: -
 --
 
-ALTER TABLE ONLY lash_durable_read_fixture.lash_pending_turn_inputs ALTER COLUMN enqueue_seq SET DEFAULT nextval('lash_durable_read_fixture.lash_pending_turn_inputs_enqueue_seq_seq'::regclass);
-
-
---
--- Name: lash_queued_work_batches enqueue_seq; Type: DEFAULT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_work_batches ALTER COLUMN enqueue_seq SET DEFAULT nextval('lash_durable_read_fixture.lash_queued_work_batches_enqueue_seq_seq'::regclass);
-
-
---
--- Name: lash_session_ingress enqueue_seq; Type: DEFAULT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_session_ingress ALTER COLUMN enqueue_seq SET DEFAULT nextval('lash_durable_read_fixture.lash_session_ingress_enqueue_seq_seq'::regclass);
+ALTER TABLE ONLY lash_durable_read_fixture.lash_control_intents ALTER COLUMN intent_id SET DEFAULT nextval('lash_durable_read_fixture.lash_control_intents_intent_id_seq'::regclass);
 
 
 --
@@ -1077,6 +1085,12 @@ INSERT INTO lash_durable_read_fixture.lash_checkpoint_blob_refs VALUES ('0b89f04
 
 
 --
+-- Data for Name: lash_control_intents; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
 -- Data for Name: lash_deleted_sessions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1135,7 +1149,6 @@ INSERT INTO lash_durable_read_fixture.lash_node_anchors VALUES ('n_f6cedd50c7134
 -- Data for Name: lash_pending_turn_inputs; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_pending_turn_inputs VALUES (1, 'durable-read-pending-input', 'durable-read-fixture', 'durable-read-input-source', '{"scope":"next_turn"}', 'deferred_next_turn', '{"items":[{"type":"text","text":"durable read pending input"}]}', 1700000000000, NULL, NULL, NULL, NULL, 0, 0, '{"scope":"next_turn"}', 'turn-input-submission:v1:blake3:cfa33cf885994ad5ebc91e08f8f36422a792cda3baab46dff1f6f4433e6bc20a', NULL, NULL);
 
 
 --
@@ -1228,14 +1241,12 @@ INSERT INTO lash_durable_read_fixture.lash_process_park_clock VALUES (true, 0, 0
 -- Data for Name: lash_queued_work_batches; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_queued_work_batches VALUES (1, 'qwb:e0ebf551aa55f4bd6f675e408989489cf0a1de244951ae78c18d851b96bf1317', 'durable-read-fixture', 'durable-read-queue-source', 'earliest_safe_boundary', 'turn', '{}', NULL, 0, 1700000000000, NULL, NULL, 0, 0);
 
 
 --
 -- Data for Name: lash_queued_work_items; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_queued_work_items VALUES ('qwb:e0ebf551aa55f4bd6f675e408989489cf0a1de244951ae78c18d851b96bf1317', 0, 'qwb:e0ebf551aa55f4bd6f675e408989489cf0a1de244951ae78c18d851b96bf1317:item:0', '{"type":"agent_frame_task","frame_id":"durable-read-frame","task":"durable read queued task"}');
 
 
 --
@@ -1258,7 +1269,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 139);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 141);
 
 
 --
@@ -1275,14 +1286,32 @@ INSERT INTO lash_durable_read_fixture.lash_session_execution_leases VALUES ('dur
 
 
 --
+-- Data for Name: lash_session_ingress_sequence; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
 -- Data for Name: lash_session_meta; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fixture', 3, 1700000000000, 1700000000000, 'root', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fixture', 3, 1700000000000, 1700000000000, 'root', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL, NULL);
 
 
 --
 -- Data for Name: lash_session_meta_pending_observer_intents; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
+-- Data for Name: lash_session_root_inputs; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+
+
+--
+-- Data for Name: lash_session_roots; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
 
@@ -1396,24 +1425,10 @@ INSERT INTO lash_durable_read_fixture.lash_wake_redelivery_fences VALUES ('durab
 
 
 --
--- Name: lash_pending_turn_inputs_enqueue_seq_seq; Type: SEQUENCE SET; Schema: lash_durable_read_fixture; Owner: -
+-- Name: lash_control_intents_intent_id_seq; Type: SEQUENCE SET; Schema: lash_durable_read_fixture; Owner: -
 --
 
-SELECT pg_catalog.setval('lash_durable_read_fixture.lash_pending_turn_inputs_enqueue_seq_seq', 1, true);
-
-
---
--- Name: lash_queued_work_batches_enqueue_seq_seq; Type: SEQUENCE SET; Schema: lash_durable_read_fixture; Owner: -
---
-
-SELECT pg_catalog.setval('lash_durable_read_fixture.lash_queued_work_batches_enqueue_seq_seq', 2, true);
-
-
---
--- Name: lash_session_ingress_enqueue_seq_seq; Type: SEQUENCE SET; Schema: lash_durable_read_fixture; Owner: -
---
-
-SELECT pg_catalog.setval('lash_durable_read_fixture.lash_session_ingress_enqueue_seq_seq', 1, false);
+SELECT pg_catalog.setval('lash_durable_read_fixture.lash_control_intents_intent_id_seq', 1, false);
 
 
 --
@@ -1477,6 +1492,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_catalog_identity
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_checkpoint_blob_refs
     ADD CONSTRAINT lash_checkpoint_blob_refs_pkey PRIMARY KEY (checkpoint_ref, blob_ref);
+
+
+--
+-- Name: lash_control_intents lash_control_intents_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_control_intents
+    ADD CONSTRAINT lash_control_intents_pkey PRIMARY KEY (intent_id);
 
 
 --
@@ -1564,7 +1587,7 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_pending_turn_inputs
 --
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_pending_turn_inputs
-    ADD CONSTRAINT lash_pending_turn_inputs_pkey PRIMARY KEY (enqueue_seq);
+    ADD CONSTRAINT lash_pending_turn_inputs_pkey PRIMARY KEY (session_id, enqueue_seq);
 
 
 --
@@ -1716,7 +1739,7 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_work_batches
 --
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_queued_work_batches
-    ADD CONSTRAINT lash_queued_work_batches_pkey PRIMARY KEY (enqueue_seq);
+    ADD CONSTRAINT lash_queued_work_batches_pkey PRIMARY KEY (session_id, enqueue_seq);
 
 
 --
@@ -1780,7 +1803,15 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_session_ingress
 --
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_session_ingress
-    ADD CONSTRAINT lash_session_ingress_pkey PRIMARY KEY (enqueue_seq);
+    ADD CONSTRAINT lash_session_ingress_pkey PRIMARY KEY (session_id, enqueue_seq);
+
+
+--
+-- Name: lash_session_ingress_sequence lash_session_ingress_sequence_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_session_ingress_sequence
+    ADD CONSTRAINT lash_session_ingress_sequence_pkey PRIMARY KEY (session_id);
 
 
 --
@@ -1813,6 +1844,22 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_session_meta_pending_observer_in
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_session_meta
     ADD CONSTRAINT lash_session_meta_pkey PRIMARY KEY (session_id);
+
+
+--
+-- Name: lash_session_root_inputs lash_session_root_inputs_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_session_root_inputs
+    ADD CONSTRAINT lash_session_root_inputs_pkey PRIMARY KEY (session_id, input_id);
+
+
+--
+-- Name: lash_session_roots lash_session_roots_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_session_roots
+    ADD CONSTRAINT lash_session_roots_pkey PRIMARY KEY (session_id, root);
 
 
 --
@@ -2016,6 +2063,20 @@ CREATE INDEX idx_lash_attachment_manifest_written ON lash_durable_read_fixture.l
 --
 
 CREATE INDEX idx_lash_checkpoint_blob_refs_blob_ref ON lash_durable_read_fixture.lash_checkpoint_blob_refs USING btree (blob_ref, checkpoint_ref);
+
+
+--
+-- Name: idx_lash_control_intents_open; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_control_intents_open ON lash_durable_read_fixture.lash_control_intents USING btree (intent_id) WHERE (state = ANY (ARRAY['pending'::text, 'failed_retryable'::text]));
+
+
+--
+-- Name: idx_lash_control_intents_session; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_control_intents_session ON lash_durable_read_fixture.lash_control_intents USING btree (session_id, kind);
 
 
 --

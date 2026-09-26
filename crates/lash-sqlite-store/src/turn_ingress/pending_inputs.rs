@@ -10,18 +10,16 @@
 lash_store_sql::statements! {
     /// `pending_turn_inputs` statements only SQLite issues.
     pub(crate) struct PendingInputSqliteStatements @ "pending_turn_input" {
-        /// `enqueue_seq` is this table's `INTEGER PRIMARY KEY AUTOINCREMENT` on
-        /// SQLite and is never bound; PostgreSQL draws it from the column's
-        /// sequence first so its upsert path knows the value.
+        /// `?9` is allocated from the shared session counter under the write lock.
         ///
         /// `?4` is written to both `ingress_json` (the mutable current scope)
         /// and `submitted_ingress_json` (immutable); `?7` is the submission
         /// digest.
-        insert_new = "INSERT INTO pending_turn_inputs (
+        insert_new = "INSERT INTO pending_turn_inputs (enqueue_seq,
                  input_id, session_id, source_key, ingress_json, state,
                  input_json, submitted_ingress_json, submission_digest, enqueued_at_ms
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?4, ?7, ?8)";
+             VALUES (?9, ?1, ?2, ?3, ?4, ?5, ?6, ?4, ?7, ?8)";
 
         /// The id and admission-time submission digest session `?1` already
         /// filed under source key `?2`.
@@ -100,13 +98,13 @@ lash_store_sql::statements! {
         /// The generation half of the predicate is the read side of the claim
         /// fence and cannot move into shared code: it is also the `ORDER BY …
         /// LIMIT` filter, so dropping it selects the wrong rows. PostgreSQL
-        /// takes `FOR UPDATE SKIP LOCKED` here; SQLite is already the only
+        /// takes `FOR UPDATE` here; SQLite is already the only
         /// writer.
         claim_candidates_next_turn = "SELECT enqueue_seq, input_id, session_id, source_key,
                     ingress_json, state, input_json, enqueued_at_ms, claim_id,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
                     claim_token, claim_session_lease_generation
-             FROM pending_turn_inputs
+             FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_session
              WHERE session_id = ?1
                AND {{deferred_next_turn_turn_input_state(state)}}
                AND (
@@ -114,6 +112,10 @@ lash_store_sql::statements! {
                     OR claim_session_lease_generation <> ?2
                )
                AND claim_bound_turn_id IS NULL
+               AND NOT EXISTS (
+                    SELECT 1 FROM queued_work_batches AS commands
+                    WHERE commands.session_id = ?1 AND commands.work_kind = 'control'
+               )
              ORDER BY enqueue_seq ASC
              LIMIT ?3";
 
@@ -129,7 +131,7 @@ lash_store_sql::statements! {
                     source_key, ingress_json, state, input_json, enqueued_at_ms, claim_id,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
                     claim_token, claim_session_lease_generation
-             FROM pending_turn_inputs
+             FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_session
              WHERE session_id = ?1
                AND {{active_turn_input_state(state)}}
                AND (
@@ -150,7 +152,7 @@ lash_store_sql::statements! {
                     source_key, ingress_json, state, input_json, enqueued_at_ms, claim_id,
                     claim_fencing_token, claim_owner_id, claim_owner_incarnation_id,
                     claim_token, claim_session_lease_generation
-             FROM pending_turn_inputs
+             FROM pending_turn_inputs INDEXED BY idx_pending_turn_inputs_session
              WHERE session_id = ?1
                AND {{active_turn_input_state(state)}}
                AND (

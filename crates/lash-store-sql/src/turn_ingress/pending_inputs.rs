@@ -13,17 +13,12 @@ pub const COLUMNS: &str = "enqueue_seq, input_id, session_id, source_key, ingres
      claim_owner_id, claim_owner_incarnation_id,
      claim_token, claim_session_lease_generation";
 
-/// The columns an enqueue writes on SQLite, where `enqueue_seq` is the table's
-/// `INTEGER PRIMARY KEY AUTOINCREMENT` and is never bound.
-pub const INSERT_COLUMNS: &str = "input_id, session_id, source_key, ingress_json, state,
+/// The columns written after allocation under the session lock.
+pub const INSERT_COLUMNS: &str =
+    "enqueue_seq, input_id, session_id, source_key, ingress_json, state,
      input_json, submitted_ingress_json, submission_digest, enqueued_at_ms";
 
-/// The columns an enqueue writes on PostgreSQL.
-///
-/// PostgreSQL draws `enqueue_seq` from the column's sequence with an explicit
-/// `nextval` before the insert, because the upsert path has to know the value
-/// it is about to write; SQLite lets the row allocate its own. The durable
-/// column is identical, only who allocates it forks.
+/// The columns written by the PostgreSQL insert.
 pub const INSERT_COLUMNS_WITH_SEQ: &str = "enqueue_seq, input_id, session_id, source_key,
      ingress_json, state, input_json, submitted_ingress_json, submission_digest,
      enqueued_at_ms";

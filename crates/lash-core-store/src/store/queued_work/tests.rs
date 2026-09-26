@@ -914,7 +914,7 @@ fn batch_id_includes_optional_nonce() {
 }
 
 #[test]
-fn pending_session_ordering_compares_timestamps_only() {
+fn pending_session_ordering_drains_commands_first() {
     let key = |enqueued_at_ms, enqueue_seq| PendingWorkOrderingKey {
         enqueued_at_ms,
         enqueue_seq,
@@ -928,12 +928,11 @@ fn pending_session_ordering_compares_timestamps_only() {
     };
 
     assert!(precedes(Some(key(10, 9)), Some(key(11, 1))));
-    assert!(!precedes(Some(key(11, 1)), Some(key(10, 9))));
-    // A timestamp tie resolves to the turn input whichever way the two
-    // families' independent sequences happen to fall.
-    assert!(!precedes(Some(key(10, 1)), Some(key(10, 2))));
-    assert!(!precedes(Some(key(10, 2)), Some(key(10, 1))));
-    assert!(!precedes(Some(key(10, 1)), Some(key(10, 1))));
+    assert!(precedes(Some(key(11, 1)), Some(key(10, 9))));
+    // Commands precede inputs regardless of timestamps or sequence.
+    assert!(precedes(Some(key(10, 1)), Some(key(10, 2))));
+    assert!(precedes(Some(key(10, 2)), Some(key(10, 1))));
+    assert!(precedes(Some(key(10, 1)), Some(key(10, 1))));
     assert!(precedes(Some(key(10, 1)), None));
     assert!(!precedes(None, Some(key(10, 1))));
 }

@@ -594,6 +594,7 @@ impl TurnInputStore for Store {
                             encode_json(&draft.input)?,
                             submission_digest.as_str(),
                             now as i64,
+                            crate::session_ingress::allocate_sequence(tx, &draft.session_id)?,
                         ],
                     )
                     .map_err(|err| {
