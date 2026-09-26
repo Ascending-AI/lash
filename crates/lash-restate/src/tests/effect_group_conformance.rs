@@ -2090,7 +2090,15 @@ fn witness_shape(group_key: &str, children: &[RuntimeEffectEnvelope]) -> EffectG
             .iter()
             .map(|child| serde_json::to_string(child).expect("witness child serializes"))
             .collect(),
-        opener: lash_core::AdmittedScope::turn("session", "turn"),
+        // The opener is the admission the wait and timer children's
+        // envelopes are scope-checked against inside
+        // `EffectGroupDispatch::child`: production's
+        // `RuntimeEffectGroup::validate_execution_scope` refuses a group
+        // whose children do not carry it, so a hand-built shape that
+        // admitted anything else would settle every dispatched wait child
+        // `Failed` with a scope mismatch — before it ever parked on its
+        // wait, racing any close that was meant to release it.
+        opener: lash_core::AdmittedScope::runtime_operation(group_key),
     }
 }
 
