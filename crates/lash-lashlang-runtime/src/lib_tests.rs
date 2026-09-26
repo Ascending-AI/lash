@@ -27,6 +27,25 @@ pub(crate) async fn memory_artifact_store() -> LashlangArtifacts {
     ))
 }
 
+thread_local! {
+    /// The store sets the running test opened, held as its backends are.
+    static HELD_STORE_SETS: std::cell::RefCell<Vec<Arc<lash_sqlite_store::SqliteStoreSet>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A fresh SQLite memory store set, storage only (no engine), held for the
+/// rest of the running test: the twin of `memory_backend` for a test that
+/// reaches only store ports.
+pub(crate) async fn memory_store_set() -> Arc<lash_sqlite_store::SqliteStoreSet> {
+    let stores = Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("open a SQLite memory store set"),
+    );
+    HELD_STORE_SETS.with(|held| held.borrow_mut().push(Arc::clone(&stores)));
+    stores
+}
+
 #[test]
 fn effect_group_wait_identity_uses_the_durable_group_contract() {
     let invocation = |replay_key: &str| {
