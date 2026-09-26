@@ -9,6 +9,8 @@ use lash_core::SessionCommitStore as _;
 use lash_core::facade_support::RuntimeSessionStateFacadeOps;
 use lash_sansio::core_support::*;
 
+const SEED: u64 = 0x5_f505;
+
 struct AppendRollbackProtocolFactory {
     store: Arc<RecordingStore>,
     protocol_dirty: Arc<AtomicBool>,
@@ -122,9 +124,10 @@ impl lash_core::plugin::ProtocolDriverPlugin for UnusedAppendRollbackProtocolDri
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn presentation_step_only_changes_model_observation() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let committed_results = Arc::new(tokio::sync::Mutex::new(Vec::<serde_json::Value>::new()));
     let committed_results_hook = Arc::clone(&committed_results);
     let plugin = Arc::new(RuntimeTestPluginFactory {
@@ -197,6 +200,13 @@ async fn presentation_step_only_changes_model_observation() {
     let mut runtime =
         runtime_with_plugins_and_tools(&backend, vec![plugin], tools, transport).await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("projection-tool-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -209,14 +219,11 @@ async fn presentation_step_only_changes_model_observation() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            host_turn_scope(
-                &runtime.host.core,
-                &SessionId::from("root"),
-                &TurnId::from("projection-tool-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(
         active_conversation_messages(&turn.state)
@@ -241,9 +248,10 @@ async fn presentation_step_only_changes_model_observation() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn completed_turns_are_persisted_for_custom_runtime_store() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![LlmStreamEvent::Delta {
             block: lash_core::llm::types::StreamBlockIdentity::new("text:0", 0),
@@ -266,7 +274,7 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
         }),
     }]);
 
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let plugins = plugin_session_with_tools(&SessionId::from("root"), Arc::new(EmptyTools));
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
@@ -298,6 +306,13 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
     );
     set_runtime_provider(&mut runtime, transport.clone().into_handle());
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("custom-store-projection-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let _turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -310,14 +325,11 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("custom-store-projection-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     let read_model = lash_core::store::SessionCommitStore::load_session(store.as_ref())
         .await
@@ -334,10 +346,11 @@ async fn completed_turns_are_persisted_for_custom_runtime_store() {
     assert_eq!(messages[1].parts[0].content(), "Stored answer");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn preopened_store_binds_without_remapping_initial_frame() {
-    let backend = memory_backend().await;
-    let store = unbound_recording_store(&backend).await;
+    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let store = double_unbound_recording_store(&double).await;
     let policy = standard_test_policy();
     store
         .admit_and_bind_session(&lash_core::SessionBinding::root("preopened-session"))
@@ -399,10 +412,11 @@ async fn preopened_store_binds_without_remapping_initial_frame() {
     ));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn park_returns_error_when_final_commit_fails() {
-    let backend = memory_backend().await;
-    let store = unbound_recording_store(&backend).await;
+    let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let store = double_unbound_recording_store(&double).await;
     let plugins = plugin_session_with_tools(&SessionId::from("park-session"), Arc::new(EmptyTools));
     let runtime_host = test_host_config(&backend);
     let runtime_services = lash_core::facade_support::PersistentRuntimeServices::new(
@@ -441,10 +455,11 @@ async fn park_returns_error_when_final_commit_fails() {
     assert!(message.contains("park-session final commit refused"));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn failed_append_restores_runtime_and_protocol_session_state() {
-    let backend = memory_backend().await;
-    let store = unbound_recording_store(&backend).await;
+    let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let store = double_unbound_recording_store(&double).await;
     let protocol_dirty = Arc::new(AtomicBool::new(false));
     let restore_called = Arc::new(AtomicBool::new(false));
     let plugin_host =
@@ -506,10 +521,11 @@ async fn failed_append_restores_runtime_and_protocol_session_state() {
     ));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn storeless_append_rejects_inactive_ancestor_before_mutation() {
-    let backend = memory_backend().await;
-    let store = unbound_recording_store(&backend).await;
+    let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let store = double_unbound_recording_store(&double).await;
     let protocol_dirty = Arc::new(AtomicBool::new(false));
     let restore_called = Arc::new(AtomicBool::new(false));
     let plugin_host =
@@ -588,8 +604,9 @@ fn append_session_nodes_lost_response_retry_replays_and_refreshes_resident_state
 }
 
 async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
-    let backend = memory_backend().await;
-    let store = unbound_recording_store(&backend).await;
+    let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let store = double_unbound_recording_store(&double).await;
     let protocol_dirty = Arc::new(AtomicBool::new(false));
     let restore_called = Arc::new(AtomicBool::new(false));
     let plugin_host =
@@ -711,10 +728,11 @@ async fn append_session_nodes_retry_after_head_advance_is_typed_scenario() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn replay_refresh_failure_restores_pre_append_runtime_and_protocol_state() {
-    let backend = memory_backend().await;
-    let store = unbound_recording_store(&backend).await;
+    let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
+    let store = double_unbound_recording_store(&double).await;
     let protocol_dirty = Arc::new(AtomicBool::new(false));
     let restore_called = Arc::new(AtomicBool::new(false));
     let plugin_host =
@@ -782,11 +800,12 @@ async fn replay_refresh_failure_restores_pre_append_runtime_and_protocol_state()
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn failed_append_rollback_preserves_a_deleted_session_cause() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 8, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = "deleted-during-append-rollback";
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let protocol_dirty = Arc::new(AtomicBool::new(false));
     let restore_called = Arc::new(AtomicBool::new(false));
     let fail_restore = Arc::new(AtomicBool::new(false));
@@ -864,9 +883,10 @@ async fn failed_append_rollback_preserves_a_deleted_session_cause() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn completed_turns_are_persisted_in_session_graph() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 9, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
             LlmStreamEvent::Delta {
@@ -899,7 +919,7 @@ async fn completed_turns_are_persisted_in_session_graph() {
         }),
     }]);
 
-    let store = unbound_recording_store(&backend).await;
+    let store = double_unbound_recording_store(&double).await;
     let base_provider: Arc<dyn lash_core::ToolProvider> = Arc::new(EmptyTools);
     let base_provider_factory = Arc::clone(&base_provider);
     let plugin_host =
@@ -929,6 +949,13 @@ async fn completed_turns_are_persisted_in_session_graph() {
     .expect("runtime");
     set_runtime_provider(&mut runtime, transport.clone().into_handle());
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("parked-custom-store-projection-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let _turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -941,14 +968,11 @@ async fn completed_turns_are_persisted_in_session_graph() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("parked-custom-store-projection-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     let read = lash_core::store::SessionCommitStore::load_session(store.as_ref())
         .await

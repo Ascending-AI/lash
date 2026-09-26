@@ -11,6 +11,8 @@ use tracing_subscriber::layer::{Context, SubscriberExt};
 use tracing_subscriber::registry::LookupSpan;
 use tracing_subscriber::{Layer, Registry};
 
+const SEED: u64 = 0x5_f50a;
+
 fn composition_change_entries(path: &std::path::Path) -> Vec<serde_json::Value> {
     lash_trace::parse_jsonl_records::<serde_json::Value>(
         &std::fs::read_to_string(path).expect("read composition trace"),
@@ -49,23 +51,32 @@ fn completed_text_call(text: &str) -> MockCall {
 }
 
 async fn run_composition_probe_turn(
-    backend: &lash_core::Backend,
+    double: &lash_restate_test::RestateTestBackend,
     runtime: &mut LashRuntime,
     turn_id: &TurnId,
 ) {
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            turn_id.clone(),
+        ))
+        .await
+        .expect("open the turn's handler");
     runtime
         .run_turn_assembled(
             TurnInput::text(turn_id),
             CancellationToken::new(),
-            backend_turn_scope(backend, &SessionId::from("root"), turn_id),
+            handler.scoped(),
         )
         .await
         .expect("composition probe turn");
+    handler.close().await.expect("close the turn's handler");
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_noise() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![
         completed_text_call("first"),
         completed_text_call("unchanged"),
@@ -87,13 +98,13 @@ async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_nois
     .await;
 
     let serializations_before = lash_core::trace::composition_schema_serialization_count();
-    run_composition_probe_turn(&backend, &mut runtime, &TurnId::from("first-composition")).await;
+    run_composition_probe_turn(&double, &mut runtime, &TurnId::from("first-composition")).await;
     let serializations_after_first = lash_core::trace::composition_schema_serialization_count();
     assert!(
         serializations_after_first > serializations_before,
         "the first composition fingerprints and materializes its tool contracts"
     );
-    run_composition_probe_turn(&backend, &mut runtime, &TurnId::from("same-composition")).await;
+    run_composition_probe_turn(&double, &mut runtime, &TurnId::from("same-composition")).await;
     assert_eq!(
         lash_core::trace::composition_schema_serialization_count(),
         serializations_after_first,
@@ -111,12 +122,7 @@ async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_nois
         })
         .await
         .expect("apply route-noise model");
-    run_composition_probe_turn(
-        &backend,
-        &mut runtime,
-        &TurnId::from("route-capacity-noise"),
-    )
-    .await;
+    run_composition_probe_turn(&double, &mut runtime, &TurnId::from("route-capacity-noise")).await;
     runtime
         .add_prompt_contribution(lash_core::PromptContribution::guidance(
             "Changed policy",
@@ -124,7 +130,7 @@ async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_nois
         ))
         .await
         .expect("change session prompt layer");
-    run_composition_probe_turn(&backend, &mut runtime, &TurnId::from("changed-prompt")).await;
+    run_composition_probe_turn(&double, &mut runtime, &TurnId::from("changed-prompt")).await;
 
     let entries = composition_change_entries(&trace_path);
     assert_eq!(
@@ -146,9 +152,10 @@ async fn composition_trace_is_snapshot_on_change_and_ignores_route_capacity_nois
     let _ = std::fs::remove_file(trace_path);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn composition_trace_fires_once_when_tool_membership_changes_with_full_ordered_schemas() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![
         completed_text_call("tool present"),
         completed_text_call("tool absent"),
@@ -170,7 +177,7 @@ async fn composition_trace_fires_once_when_tool_membership_changes_with_full_ord
     )
     .await;
 
-    run_composition_probe_turn(&backend, &mut runtime, &TurnId::from("tool-member")).await;
+    run_composition_probe_turn(&double, &mut runtime, &TurnId::from("tool-member")).await;
     let mut tool_state = runtime.tool_state().expect("live tool state");
     tool_state
         .set_membership(&lash_core::ToolId::from("tool:echo_tool"), false)
@@ -179,8 +186,8 @@ async fn composition_trace_fires_once_when_tool_membership_changes_with_full_ord
         .apply_tool_state(tool_state)
         .await
         .expect("apply tool membership change");
-    run_composition_probe_turn(&backend, &mut runtime, &TurnId::from("tool-removed")).await;
-    run_composition_probe_turn(&backend, &mut runtime, &TurnId::from("tool-still-removed")).await;
+    run_composition_probe_turn(&double, &mut runtime, &TurnId::from("tool-removed")).await;
+    run_composition_probe_turn(&double, &mut runtime, &TurnId::from("tool-still-removed")).await;
 
     let entries = composition_change_entries(&trace_path);
     assert_eq!(
@@ -251,9 +258,10 @@ impl lash_core::ToolProvider for SchemaChangingTool {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn composition_trace_fires_once_when_same_member_tool_schema_changes() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![
         completed_text_call("first schema"),
         completed_text_call("second schema"),
@@ -278,19 +286,14 @@ async fn composition_trace_fires_once_when_same_member_tool_schema_changes() {
     )
     .await;
 
-    run_composition_probe_turn(&backend, &mut runtime, &TurnId::from("schema-one")).await;
+    run_composition_probe_turn(&double, &mut runtime, &TurnId::from("schema-one")).await;
     *tool.revision.lock_recover() = 2;
     runtime
         .refresh_session_tool_catalog()
         .await
         .expect("refresh changed tool schema");
-    run_composition_probe_turn(&backend, &mut runtime, &TurnId::from("schema-two")).await;
-    run_composition_probe_turn(
-        &backend,
-        &mut runtime,
-        &TurnId::from("schema-two-unchanged"),
-    )
-    .await;
+    run_composition_probe_turn(&double, &mut runtime, &TurnId::from("schema-two")).await;
+    run_composition_probe_turn(&double, &mut runtime, &TurnId::from("schema-two-unchanged")).await;
 
     let entries = composition_change_entries(&trace_path);
     assert_eq!(entries.len(), 2, "one schema change emits exactly once");
@@ -347,9 +350,10 @@ where
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn runtime_session_graph_service_routes_standard_compaction_event_to_real_sink() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let trace_path = std::env::temp_dir().join(format!(
         "lash-runtime-plugin-trace-{}-{}.jsonl",
         std::process::id(),
@@ -389,9 +393,10 @@ async fn runtime_session_graph_service_routes_standard_compaction_event_to_real_
     let _ = std::fs::remove_file(trace_path);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn provider_spans_are_children_of_the_turn_span() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 14, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let provider = TestProvider::builder()
         .kind("mock")
         .requires_streaming(true)
@@ -412,6 +417,13 @@ async fn provider_spans_are_children_of_the_turn_span() {
     let subscriber = Registry::default().with(capture.clone());
     ::tracing::subscriber::set_global_default(subscriber).expect("install capture subscriber");
     let turn_span = ::tracing::info_span!("runtime.turn");
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("provider-span-parentage"),
+        ))
+        .await
+        .expect("open the turn's handler");
 
     runtime
         .run_turn_assembled(
@@ -425,15 +437,12 @@ async fn provider_spans_are_children_of_the_turn_span() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("provider-span-parentage"),
-            ),
+            handler.scoped(),
         )
         .instrument(turn_span)
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     let spans = capture.snapshot();
     assert_eq!(
@@ -447,13 +456,14 @@ async fn provider_spans_are_children_of_the_turn_span() {
 }
 
 async fn assert_standard_tool_lifecycle(
-    backend: &lash_core::Backend,
+    double: &lash_restate_test::RestateTestBackend,
     call_id: &str,
     tool_name: &str,
     input_json: &str,
     expected_success: bool,
     plugins: Vec<Arc<dyn lash_core::facade_support::PluginFactory>>,
 ) {
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![
         MockCall {
             stream_events: Vec::new(),
@@ -493,11 +503,18 @@ async fn assert_standard_tool_lifecycle(
         plugins,
         Arc::new(EchoTool),
         transport,
-        test_host_config_with_trace_path(backend, trace_path.clone()),
+        test_host_config_with_trace_path(&backend, trace_path.clone()),
     )
     .await;
     let turn_events = RecordingTurnEvents::default();
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("trace-standard-tool-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .stream_turn(
             TurnInput {
@@ -509,18 +526,12 @@ async fn assert_standard_tool_lifecycle(
                 protocol_extension: None,
                 turn_context: lash_core::TurnContext::default(),
             },
-            TurnOptions::new(
-                CancellationToken::new(),
-                host_turn_scope(
-                    &runtime.host.core,
-                    &SessionId::from("root"),
-                    &TurnId::from("trace-standard-tool-turn"),
-                ),
-            )
-            .with_turn_events(&turn_events),
+            TurnOptions::new(CancellationToken::new(), handler.scoped())
+                .with_turn_events(&turn_events),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(matches!(
         &turn.outcome,
@@ -629,13 +640,13 @@ async fn assert_standard_tool_lifecycle(
     let _ = std::fs::remove_file(&trace_path);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn standard_runtime_emits_single_tool_call_trace_pair_per_call() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
     // Successful prepared calls keep the one-pair contract: the reporting
     // repair must not duplicate the start already emitted by batch execution.
     Box::pin(assert_standard_tool_lifecycle(
-        &backend,
+        &double,
         "call-success",
         "echo_tool",
         r#"{"value":"sample"}"#,
@@ -739,9 +750,10 @@ fn pending_echo_tool_definition() -> lash_core::ToolDefinition {
     )
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let call_id = "call-pending";
     let transport = mock_provider(vec![
         MockCall {
@@ -777,11 +789,18 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
     config.tracing.trace_sink = Some(Arc::new(lash_trace::JsonlTraceSink::new(
         trace_path.clone(),
     )));
-    let scope = host_turn_scope(
-        &config,
-        &SessionId::from("root"),
-        &TurnId::from("pending-tool-turn"),
-    );
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("pending-tool-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
+    let scope = lash_core::testing::LayeredEffectHost::layer_scoped(
+        handler.scoped(),
+        Arc::new(PendingToolResolutionController),
+    )
+    .expect("layer the lent controller with the resolution layer");
     let mut runtime = runtime_with_plugins_and_tools_and_host(
         Vec::new(),
         tools,
@@ -798,6 +817,7 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert_eq!(turn.tool_calls.len(), 1);
     assert_eq!(turn.tool_calls[0].call_id.as_deref(), Some(call_id));
@@ -840,11 +860,11 @@ async fn pending_then_resolved_tool_call_emits_one_completion_per_channel() {
     let _ = std::fs::remove_file(trace_path);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn unavailable_tool_name_emits_an_ordered_lifecycle_pair() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
     Box::pin(assert_standard_tool_lifecycle(
-        &backend,
+        &double,
         "call-missing-name",
         "missing_tool",
         r#"{"value":1}"#,
@@ -854,11 +874,11 @@ async fn unavailable_tool_name_emits_an_ordered_lifecycle_pair() {
     .await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn invalid_tool_arguments_emit_an_ordered_lifecycle_pair() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
     Box::pin(assert_standard_tool_lifecycle(
-        &backend,
+        &double,
         "call-invalid-args",
         "echo_tool",
         r#"{"other":true}"#,
@@ -868,9 +888,9 @@ async fn invalid_tool_arguments_emit_an_ordered_lifecycle_pair() {
     .await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn before_tool_hook_refusal_emits_an_ordered_lifecycle_pair() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 8, lash_restate_test::ServerConfig::default()).await;
     let refusal = Arc::new(lash_core::plugin::StaticPluginFactory::new(
         "tool-refusal",
         lash_core::facade_support::PluginSpec::new().with_before_tool_call(Arc::new(|_ctx| {
@@ -884,7 +904,7 @@ async fn before_tool_hook_refusal_emits_an_ordered_lifecycle_pair() {
         })),
     ));
     Box::pin(assert_standard_tool_lifecycle(
-        &backend,
+        &double,
         "call-hook-refusal",
         "echo_tool",
         r#"{"value":"blocked"}"#,
@@ -894,9 +914,10 @@ async fn before_tool_hook_refusal_emits_an_ordered_lifecycle_pair() {
     .await;
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn standard_runtime_trace_records_stream_event_entries() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 9, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
             LlmStreamEvent::Delta {
@@ -949,6 +970,13 @@ async fn standard_runtime_trace_records_stream_event_entries() {
     )
     .await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("trace-stream-events-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -961,14 +989,11 @@ async fn standard_runtime_trace_records_stream_event_entries() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("trace-stream-events-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(matches!(
         &turn.outcome,
@@ -1088,9 +1113,10 @@ async fn standard_runtime_trace_records_stream_event_entries() {
     let _ = std::fs::remove_file(&trace_path);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn extended_runtime_trace_records_provider_request_and_stream_events() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 10, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = TestProvider::builder()
         .kind("mock")
         .requires_streaming(true)
@@ -1160,6 +1186,13 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() {
     )
     .await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("trace-provider-stream-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -1172,14 +1205,11 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("trace-provider-stream-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(matches!(
         &turn.outcome,
@@ -1263,11 +1293,12 @@ async fn extended_runtime_trace_records_provider_request_and_stream_events() {
     let _ = std::fs::remove_file(&trace_path);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn provider_request_trace_sender_requires_extended_level_and_sink() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 11, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     async fn assert_sender_absent(
-        backend: &lash_core::Backend,
+        double: &lash_restate_test::RestateTestBackend,
         host: EmbeddedRuntimeHost,
         turn_id: &TurnId,
     ) {
@@ -1286,6 +1317,13 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() {
             })
             .build();
         let mut runtime = standard_runtime_with_transport_and_host(transport, host).await;
+        let handler = double
+            .open_handler(AdmittedScope::turn(
+                SessionId::from("root"),
+                turn_id.clone(),
+            ))
+            .await
+            .expect("open the turn's handler");
         runtime
             .run_turn_assembled(
                 TurnInput {
@@ -1298,10 +1336,11 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() {
                     turn_context: lash_core::TurnContext::default(),
                 },
                 CancellationToken::new(),
-                backend_turn_scope(backend, &SessionId::from("root"), turn_id),
+                handler.scoped(),
             )
             .await
             .expect("turn");
+        handler.close().await.expect("close the turn's handler");
     }
 
     let trace_path = std::env::temp_dir().join(format!(
@@ -1313,7 +1352,7 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() {
             .as_nanos()
     ));
     Box::pin(assert_sender_absent(
-        &backend,
+        &double,
         test_host_config_with_trace_path(&backend, trace_path.clone()),
         &TurnId::from("standard-trace-level"),
     ))
@@ -1322,7 +1361,7 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() {
     let mut no_sink = test_host_config(&backend);
     no_sink.core.tracing.trace_level = lash_trace::TraceLevel::Extended;
     Box::pin(assert_sender_absent(
-        &backend,
+        &double,
         no_sink,
         &TurnId::from("extended-without-sink"),
     ))
@@ -1331,9 +1370,10 @@ async fn provider_request_trace_sender_requires_extended_level_and_sink() {
     let _ = std::fs::remove_file(trace_path);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn standard_runtime_trace_omits_stream_event_entries_by_default() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 12, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![MockCall {
         stream_events: vec![
             LlmStreamEvent::Delta {
@@ -1368,6 +1408,13 @@ async fn standard_runtime_trace_omits_stream_event_entries_by_default() {
     )
     .await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("trace-standard-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -1380,14 +1427,11 @@ async fn standard_runtime_trace_omits_stream_event_entries_by_default() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("trace-standard-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(matches!(
         &turn.outcome,
@@ -1418,9 +1462,10 @@ async fn standard_runtime_trace_omits_stream_event_entries_by_default() {
     let _ = std::fs::remove_file(&trace_path);
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn standard_runtime_trace_records_failed_llm_calls() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 13, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let transport = mock_provider(vec![MockCall {
         stream_events: Vec::new(),
         response: Err(lash_core::llm::transport::LlmTransportError::new(
@@ -1444,6 +1489,13 @@ async fn standard_runtime_trace_records_failed_llm_calls() {
     )
     .await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("trace-failed-llm-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -1456,14 +1508,11 @@ async fn standard_runtime_trace_records_failed_llm_calls() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("trace-failed-llm-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(matches!(&turn.outcome, TurnOutcome::Stopped(_)));
     assert_eq!(turn.errors.len(), 1);

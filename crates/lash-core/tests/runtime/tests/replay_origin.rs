@@ -6,6 +6,8 @@
 use super::*;
 use lash_core::plugin::AssistantStreamTransform;
 
+const SEED: u64 = 0x5_f504;
+
 fn unique_trace_path(prefix: &str) -> std::path::PathBuf {
     std::env::temp_dir().join(format!(
         "lash-{prefix}-{}-{}.jsonl",
@@ -78,24 +80,30 @@ async fn runtime_with_foreign_replay(
 }
 
 async fn run(
-    backend: &lash_core::Backend,
+    double: &lash_restate_test::RestateTestBackend,
     runtime: &mut LashRuntime,
     token: CancellationToken,
     turn_id: &TurnId,
 ) -> AssembledTurn {
-    runtime
-        .run_turn_assembled(
-            TurnInput::text("continue"),
-            token,
-            backend_turn_scope(backend, &SessionId::from("root"), turn_id),
-        )
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            turn_id.clone(),
+        ))
         .await
-        .expect("real runtime driver returns an assembled turn")
+        .expect("open the turn's handler");
+    let turn = runtime
+        .run_turn_assembled(TurnInput::text("continue"), token, handler.scoped())
+        .await
+        .expect("real runtime driver returns an assembled turn");
+    handler.close().await.expect("close the turn's handler");
+    turn
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn caller_shaped_completion_preserves_drop_sideband_without_provider_trace() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let trace_path = unique_trace_path("replay-sideband-completion");
     let provider = TestProvider::builder()
         .kind("mock")
@@ -116,7 +124,7 @@ async fn caller_shaped_completion_preserves_drop_sideband_without_provider_trace
         runtime_with_foreign_replay(&backend, provider, Vec::new(), &trace_path).await;
 
     let turn = run(
-        &backend,
+        &double,
         &mut runtime,
         CancellationToken::new(),
         &TurnId::from("replay-completion"),
@@ -131,9 +139,10 @@ async fn caller_shaped_completion_preserves_drop_sideband_without_provider_trace
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn caller_shaped_failure_preserves_drop_sideband_and_original_error() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let trace_path = unique_trace_path("replay-sideband-failure");
     let provider = TestProvider::builder()
         .kind("mock")
@@ -149,7 +158,7 @@ async fn caller_shaped_failure_preserves_drop_sideband_and_original_error() {
         runtime_with_foreign_replay(&backend, provider, Vec::new(), &trace_path).await;
 
     let turn = run(
-        &backend,
+        &double,
         &mut runtime,
         CancellationToken::new(),
         &TurnId::from("replay-failure"),
@@ -170,9 +179,10 @@ async fn caller_shaped_failure_preserves_drop_sideband_and_original_error() {
     )));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn caller_shaped_protocol_abort_rejects_foreign_stream_and_emits_drop() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let trace_path = unique_trace_path("replay-sideband-protocol-abort");
     let provider = TestProvider::builder()
         .kind("mock")
@@ -218,7 +228,7 @@ async fn caller_shaped_protocol_abort_rejects_foreign_stream_and_emits_drop() {
         runtime_with_foreign_replay(&backend, provider, vec![abort_plugin], &trace_path).await;
 
     let turn = run(
-        &backend,
+        &double,
         &mut runtime,
         CancellationToken::new(),
         &TurnId::from("replay-protocol-abort"),
@@ -243,9 +253,10 @@ async fn caller_shaped_protocol_abort_rejects_foreign_stream_and_emits_drop() {
     );
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn caller_shaped_cancellation_preserves_drop_sideband_without_provider_trace() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let trace_path = unique_trace_path("replay-sideband-cancellation");
     let started = Arc::new(tokio::sync::Notify::new());
     let provider_started = Arc::clone(&started);
@@ -279,7 +290,7 @@ async fn caller_shaped_cancellation_preserves_drop_sideband_without_provider_tra
     });
 
     let turn = run(
-        &backend,
+        &double,
         &mut runtime,
         cancellation,
         &TurnId::from("replay-cancellation"),
@@ -309,9 +320,10 @@ async fn caller_shaped_cancellation_preserves_drop_sideband_without_provider_tra
     )));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let trace_path = unique_trace_path("confirm2-abort-conflict-provider-failure");
     let provider = TestProvider::builder()
         .kind("mock")
@@ -364,7 +376,7 @@ async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() {
         runtime_with_foreign_replay(&backend, provider, vec![abort_plugin], &trace_path).await;
 
     let turn = run(
-        &backend,
+        &double,
         &mut runtime,
         CancellationToken::new(),
         &TurnId::from("confirm2-abort-conflict-provider-failure"),
@@ -418,9 +430,10 @@ async fn confirm2_protocol_abort_conflict_retains_a_racing_provider_failure() {
     )));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn protocol_abort_commits_a_complete_cell_despite_a_conflict_free_tail_failure() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let trace_path = unique_trace_path("abort-tail-provider-failure");
     let provider = TestProvider::builder()
         .kind("mock")
@@ -465,7 +478,7 @@ async fn protocol_abort_commits_a_complete_cell_despite_a_conflict_free_tail_fai
     .await;
 
     let turn = run(
-        &backend,
+        &double,
         &mut runtime,
         CancellationToken::new(),
         &TurnId::from("abort-tail-provider-failure"),

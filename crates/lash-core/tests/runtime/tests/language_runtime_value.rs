@@ -5,17 +5,26 @@ use lash_core::{
     RuntimeEffectKind, RuntimeEffectLocalExecutor,
 };
 
-use super::effect::{RecordingEffectController, layered_controller};
+use super::effect::RecordingEffectController;
 
-#[tokio::test]
+const SEED: u64 = 0x5_f509;
+
+#[tokio::test(flavor = "multi_thread")]
 async fn values_are_sampled_once_and_replayed_by_effect_id() {
-    let backend = super::memory_backend().await;
+    let double = super::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
     let recorder = RecordingEffectController::default().with_replay_by_key();
-    let controller = layered_controller(
-        &backend,
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::runtime_operation(
+            "typescript-runtime-test",
+        ))
+        .await
+        .expect("open the operation's handler");
+    let scoped = lash_core::testing::LayeredEffectHost::layer_scoped(
+        handler.scoped(),
         Arc::new(recorder.clone()),
-        lash_core::AdmittedScope::runtime_operation("typescript-runtime-test"),
-    );
+    )
+    .expect("layer the lent controller with the recorder");
+    let controller = scoped.controller();
     let clock = Arc::new(lash_core::testing::TestClock::new(1_234));
     let invocation = RuntimeEffectInvocation::new(
         lash_core::EffectAddress::new(
@@ -49,6 +58,11 @@ async fn values_are_sampled_once_and_replayed_by_effect_id() {
         .expect("replay")
         .into_language_runtime_value()
         .expect("language runtime outcome");
+    drop(scoped);
+    handler
+        .close()
+        .await
+        .expect("close the operation's handler");
 
     assert_eq!(first, serde_json::json!(1_234));
     assert_eq!(replay, first);

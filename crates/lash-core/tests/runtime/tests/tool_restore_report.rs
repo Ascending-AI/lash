@@ -7,6 +7,8 @@ use lash_core::facade_support::ToolStateFacadeOps;
 use lash_core::plugin::StaticPluginFactory;
 use lash_sansio::core_support::MessageSequenceCoreSupport;
 
+const SEED: u64 = 0x5_f506;
+
 const ALPHA_ID: &str = "tool:fig3367_alpha";
 const ALPHA_NAME: &str = "fig3367_alpha";
 const BETA_ID: &str = "tool:fig3367_beta";
@@ -195,11 +197,12 @@ fn both_tools() -> Arc<dyn lash_core::ToolProvider> {
 ///
 /// Between the grantless commit and the final reopen the durable snapshot is read *without a
 /// runtime*, because that is the only reading that shows what was actually written.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn fig3353_sequence_keeps_curation_across_an_orphaned_commit() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = SessionId::from("fig3367-sequence");
-    let store = unbound_store(&backend).await;
+    let store = double_unbound_store(&double).await;
 
     // Step 1: open with the source and record a deliberate opt-out of beta.
     let mut granted = open_runtime(
@@ -435,11 +438,12 @@ async fn assert_persisted_surface_unchanged(
 /// produces no report and no orphaning; the commit it takes carries the
 /// persisted snapshot forward untouched; the tools are catalog members on the
 /// third open.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn preserve_persisted_append_commit_carries_tool_snapshot_forward() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = SessionId::from("fig3353-preserve");
-    let store = unbound_store(&backend).await;
+    let store = double_unbound_store(&double).await;
 
     // Step 1: open with the source, opt out of beta, park.
     let mut granted = open_runtime(
@@ -562,11 +566,12 @@ async fn preserve_persisted_append_commit_carries_tool_snapshot_forward() {
 ///
 /// The pending row is durable, the catalog generation and curation never moved, and both tools
 /// are catalog members on the third open.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn preserve_persisted_enqueue_pending_input_keeps_tool_state() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = SessionId::from("fig3353-enqueue");
-    let store = unbound_store(&backend).await;
+    let store = double_unbound_store(&double).await;
     let persisted_generation = seed_opted_out_session(&backend, &session_id, &store).await;
 
     // The enqueue-only open on a core without the sources.
@@ -638,11 +643,12 @@ async fn preserve_persisted_enqueue_pending_input_keeps_tool_state() {
 /// head must keep the preservation claim: the reload replaces the whole
 /// `RuntimeSessionState`, so the marker is reasserted from the open's own
 /// configuration rather than carried by the replaced value.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn preserve_persisted_open_survives_resident_reload() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = SessionId::from("fig3353-reload");
-    let store = unbound_store(&backend).await;
+    let store = double_unbound_store(&double).await;
     let persisted_generation = seed_opted_out_session(&backend, &session_id, &store).await;
 
     let preserve_env =
@@ -679,11 +685,12 @@ async fn preserve_persisted_open_survives_resident_reload() {
 /// A replayed append receipt drives `restore_protocol_session_from_state` —
 /// another wholesale `self.state` replacement followed by
 /// `stamp_live_plugin_state`. The preservation claim must survive it too.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn preserve_persisted_open_survives_append_receipt_replay() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = SessionId::from("fig3353-replay");
-    let store = unbound_store(&backend).await;
+    let store = double_unbound_store(&double).await;
     let persisted_generation = seed_opted_out_session(&backend, &session_id, &store).await;
 
     let preserve_env =
@@ -736,11 +743,12 @@ async fn preserve_persisted_open_survives_append_receipt_replay() {
 /// a direct turn and the prepared/queued drive a worker would take — refuses
 /// before admission, so the unreconciled surface is never executed against
 /// and `ToolSourcePolicy::Require` cannot be bypassed by opening enqueue-only.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = SessionId::from("fig3353-refused");
-    let store = unbound_store(&backend).await;
+    let store = double_unbound_store(&double).await;
     let persisted_generation = seed_opted_out_session(&backend, &session_id, &store).await;
 
     // Require here is the interesting half: the preserve open succeeds because
@@ -762,18 +770,25 @@ async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
         .await
         .expect("enqueue pending input");
 
+    let direct_handler = double
+        .open_handler(AdmittedScope::turn(
+            session_id.clone(),
+            lash_core::TurnId::from("fig3353-direct"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let direct = enqueue_only
         .run_turn_assembled(
             lash_core::TurnInput::text("run me anyway"),
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &session_id,
-                &lash_core::TurnId::from("fig3353-direct"),
-            ),
+            direct_handler.scoped(),
         )
         .await
         .expect_err("a direct turn on a preserve open is refused");
+    direct_handler
+        .close()
+        .await
+        .expect("close the turn's handler");
     assert_eq!(
         direct.code,
         lash_core::RuntimeErrorCode::TurnExecutionRequiresReconciledToolSurface,
@@ -791,6 +806,13 @@ async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
         .into(),
         origin: None,
     }]);
+    let queued_handler = double
+        .open_handler(AdmittedScope::turn(
+            session_id.clone(),
+            lash_core::TurnId::from("fig3353-queued"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let queued = enqueue_only
         .stream_prepared_turn(
             messages,
@@ -803,17 +825,17 @@ async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
             1,
             &NoopEventSink,
             &NoopTurnActivitySink,
-            backend_turn_scope(
-                &backend,
-                &session_id,
-                &lash_core::TurnId::from("fig3353-queued"),
-            ),
+            queued_handler.scoped(),
             CancellationToken::new(),
             None,
             None,
         )
         .await
         .expect_err("the queued/prepared drive is refused the same way");
+    queued_handler
+        .close()
+        .await
+        .expect("close the turn's handler");
     assert_eq!(
         queued.code,
         lash_core::RuntimeErrorCode::TurnExecutionRequiresReconciledToolSurface,
@@ -837,11 +859,12 @@ async fn preserve_persisted_open_refuses_direct_and_queued_turns() {
 
 /// A provider that replaced a tool with a new id under the same model-facing
 /// name is a superseded identity, not a loss — and Require does not refuse it.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn alias_replacement_is_reported_as_superseded_and_never_refuses() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = SessionId::from("fig3367-superseded");
-    let store = unbound_store(&backend).await;
+    let store = double_unbound_store(&double).await;
 
     let granted = open_runtime(
         &backend,
@@ -883,11 +906,12 @@ async fn alias_replacement_is_reported_as_superseded_and_never_refuses() {
 
 /// A session whose only unresolved tools are opt-outs has lost nothing, so
 /// Require opens it.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn an_opt_out_only_snapshot_does_not_refuse_under_require() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = SessionId::from("fig3367-opt-out-only");
-    let store = unbound_store(&backend).await;
+    let store = double_unbound_store(&double).await;
 
     let mut granted = open_runtime(
         &backend,
@@ -929,11 +953,12 @@ async fn an_opt_out_only_snapshot_does_not_refuse_under_require() {
 
 /// Direct construction under Require refuses with the typed error, and the
 /// refusal carries the report.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn require_refuses_a_direct_construction_that_lost_a_member() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 8, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = SessionId::from("fig3367-require-direct");
-    let store = unbound_store(&backend).await;
+    let store = double_unbound_store(&double).await;
 
     let granted = open_runtime(
         &backend,
@@ -995,11 +1020,12 @@ async fn require_refuses_a_direct_construction_that_lost_a_member() {
 
 /// Resume rebuilds a runtime through the same install owner, so it honours the
 /// policy the environment carries.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn require_refuses_a_resume_that_lost_a_member() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 9, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = SessionId::from("fig3367-require-resume");
-    let store = unbound_store(&backend).await;
+    let store = double_unbound_store(&double).await;
 
     let granted = open_runtime(
         &backend,
@@ -1034,9 +1060,10 @@ async fn require_refuses_a_resume_that_lost_a_member() {
 /// The child is the construction the FIG-3367 inventory calls out as inheriting
 /// a snapshot (Current and Existing start points do; Empty does not), so the
 /// policy has to reach it below the facade.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn require_refuses_a_process_child_whose_inherited_snapshot_lost_a_member() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 10, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let surface = MutableTools::new(vec![(ALPHA_ID, ALPHA_NAME)]);
     let tools: Arc<dyn lash_core::ToolProvider> =
         Arc::clone(&surface) as Arc<dyn lash_core::ToolProvider>;
@@ -1181,11 +1208,12 @@ async fn live_require_runtime(
 /// a snapshot. Under Require it still succeeds: the policy governs opening a
 /// session, not a restore onto a live one. Refusing here would leave the
 /// registry reconciled, the catalog stale and the report unretained.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn a_host_restore_on_a_require_core_reports_instead_of_refusing() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 11, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = SessionId::from("fig3367-live-host-restore");
-    let store = unbound_store(&backend).await;
+    let store = double_unbound_store(&double).await;
     let (mut runtime, _surface, snapshot) =
         live_require_runtime(&backend, &session_id, &store).await;
 
@@ -1229,11 +1257,12 @@ async fn a_host_restore_on_a_require_core_reports_instead_of_refusing() {
 /// does not fail the reload. This is exactly the "the MCP server is down" case
 /// Tolerate-by-default exists for, and it must not become reachable on a
 /// Require core at a moment nobody chose to open anything.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn a_resident_resync_on_a_require_core_reloads_and_reports() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 12, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = SessionId::from("fig3367-live-resync");
-    let store = unbound_store(&backend).await;
+    let store = double_unbound_store(&double).await;
     let (mut runtime, _surface, _snapshot) =
         live_require_runtime(&backend, &session_id, &store).await;
     // The durable head names the tool; the live surface no longer does.
@@ -1268,11 +1297,12 @@ async fn a_resident_resync_on_a_require_core_reloads_and_reports() {
 
 /// Installing a persisted state envelope onto a live runtime is the same
 /// reading: tolerate, retain, report.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn a_persisted_state_install_on_a_require_core_reports_instead_of_refusing() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 13, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let session_id = SessionId::from("fig3367-live-state-install");
-    let store = unbound_store(&backend).await;
+    let store = double_unbound_store(&double).await;
     let (mut runtime, _surface, _snapshot) =
         live_require_runtime(&backend, &session_id, &store).await;
 
