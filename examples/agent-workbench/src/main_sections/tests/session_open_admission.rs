@@ -407,6 +407,51 @@ impl lash::persistence::SessionStoreFactory for GatedSessionStoreFactory {
 }
 
 #[async_trait::async_trait]
+impl lash::persistence::ControlIntentStore for GatedSessionStoreFactory {
+    async fn begin_session_close(
+        &self,
+        session_id: &SessionId,
+        at_ms: u64,
+    ) -> Result<Option<lash::persistence::ControlIntent>, lash::persistence::StoreError> {
+        self.inner.begin_session_close(session_id, at_ms).await
+    }
+
+    async fn claim_intent_application(
+        &self,
+        id: lash::persistence::ControlIntentId,
+    ) -> Result<lash::persistence::IntentApplication, lash::persistence::StoreError> {
+        self.inner.claim_intent_application(id).await
+    }
+
+    async fn acknowledge_intent(
+        &self,
+        id: lash::persistence::ControlIntentId,
+        at_ms: u64,
+    ) -> Result<(), lash::persistence::StoreError> {
+        self.inner.acknowledge_intent(id, at_ms).await
+    }
+
+    async fn record_intent_failure(
+        &self,
+        id: lash::persistence::ControlIntentId,
+        error: &str,
+        retryable: bool,
+        at_ms: u64,
+    ) -> Result<lash::persistence::ControlIntent, lash::persistence::StoreError> {
+        self.inner
+            .record_intent_failure(id, error, retryable, at_ms)
+            .await
+    }
+
+    async fn load_intent(
+        &self,
+        id: lash::persistence::ControlIntentId,
+    ) -> Result<Option<lash::persistence::ControlIntent>, lash::persistence::StoreError> {
+        self.inner.load_intent(id).await
+    }
+}
+
+#[async_trait::async_trait]
 impl lash::persistence::AttachmentRootSet for GatedSessionStoreFactory {
     async fn live_attachment_refs(
         &self,

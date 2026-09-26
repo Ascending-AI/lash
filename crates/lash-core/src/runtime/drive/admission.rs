@@ -98,6 +98,19 @@ impl AdmitDriveRunner {
         // belongs here, after the generation gate and before the parked-root
         // check, and nowhere else.
 
+        // A closing session admits nothing (FIG-3600 S7): its close ended
+        // every root and raised the epoch past every admission. A store with
+        // no drive epoch holds no close; the admission below still needs one.
+        let stored_epoch = match self.store.drive_epoch(session_id).await {
+            Ok(epoch) if epoch.closing.is_some() => return Ok(AdmitVerdict::Idle),
+            Ok(epoch) => Ok(epoch),
+            Err(
+                error @ (StoreError::DriveEpochUnavailable { .. }
+                | StoreError::UnsupportedStoreOperation { .. }),
+            ) => Err(error),
+            Err(error) => return Err(store_fault("session close check", error)),
+        };
+
         // A parked root blocks the session until it is resolved (FIG-3659).
         // A store with no park ledger holds no park.
         let park = match self.store.load_turn_park(session_id).await {
@@ -132,11 +145,7 @@ impl AdmitDriveRunner {
                 root,
             });
         }
-        let epoch = self
-            .store
-            .drive_epoch(session_id)
-            .await
-            .map_err(|error| store_fault("drive epoch read", error))?;
+        let epoch = stored_epoch.map_err(|error| store_fault("drive epoch read", error))?;
         Ok(AdmitVerdict::Admit(
             crate::engine::admission_body::admitted(
                 session_id.clone(),

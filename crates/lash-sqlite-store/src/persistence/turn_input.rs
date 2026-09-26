@@ -507,6 +507,7 @@ impl TurnInputStore for Store {
             .write_flow(move |tx| {
                 let outcome: Result<lash_core_execution::PendingTurnInput, StoreError> = (|| {
                     ensure_session_not_deleted_conn(tx, &draft.session_id)?;
+                    ensure_session_not_closing_conn(tx, &draft.session_id)?;
                     let submission_digest = draft.submission_digest().map_err(|err| {
                         StoreError::Backend(format!(
                             "failed to digest pending turn input submission: {err}"

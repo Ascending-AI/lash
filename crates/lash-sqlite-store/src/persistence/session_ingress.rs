@@ -157,6 +157,7 @@ pub(crate) fn drive_epoch_conn(
                     row.get::<_, i64>(0)?,
                     row.get::<_, Option<String>>(1)?,
                     row.get::<_, Option<String>>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
                 ))
             },
         )
@@ -170,6 +171,15 @@ pub(crate) fn drive_epoch_conn(
             .map_err(|_| stored_data_corrupt("SessionMeta", "drive_epoch must be non-negative"))?,
         admission: row.1.map(AdmissionId::new),
         root_start: row.2.map(RootStartNonce::new),
+        closing: row
+            .3
+            .map(|intent| {
+                u64::try_from(intent).map_err(|_| {
+                    stored_data_corrupt("SessionMeta", "closing_intent must be non-negative")
+                })
+            })
+            .transpose()?
+            .map(lash_core_execution::store::ControlIntentId::from_sequence),
     })
 }
 
@@ -715,6 +725,7 @@ impl SessionIngressStore for Store {
                 commit((|| {
                     let session_id = draft.session_id().clone();
                     ensure_session_not_deleted_conn(tx, &session_id)?;
+                    super::ensure_session_not_closing_conn(tx, &session_id)?;
                     let digest = draft.submission_digest().map_err(|error| {
                         StoreError::RecordEncodingFailed {
                             record_kind: "SessionIngressSubmission".to_string(),

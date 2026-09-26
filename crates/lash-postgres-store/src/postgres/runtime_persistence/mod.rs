@@ -44,6 +44,31 @@ pub(crate) async fn lock_session_history_mutations_tx(
     Ok(())
 }
 
+/// Refuse a write into session `session_id` once its close began: the
+/// `CloseSession` intent is the point of no return of its deletion, so it
+/// accepts nothing more (FIG-3600 S7). The caller holds the session's
+/// history-mutation lock, which the close takes too.
+pub(crate) async fn ensure_session_not_closing_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+) -> Result<(), StoreError> {
+    let closing: Option<Option<i64>> =
+        sqlx::query_scalar(session_sql().meta.select_closing_intent.sql())
+            .bind(session_id.as_str())
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    match closing.flatten() {
+        None => Ok(()),
+        Some(intent) => Err(StoreError::SessionClosing {
+            session_id: session_id.clone(),
+            intent: lash_core_execution::store::ControlIntentId::from_sequence(
+                crate::support::u64_from_sql("SessionMeta", "closing_intent", intent)?,
+            ),
+        }),
+    }
+}
+
 pub(crate) async fn ensure_session_not_deleted_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     session_id: &SessionId,
@@ -355,6 +380,7 @@ mod queued_run;
 mod queued_run_assignment;
 mod queued_run_selection;
 mod queued_work;
+pub(crate) use queued_run::pending_queued_root_tx;
 use queued_run::*;
 use queued_run_selection::*;
 #[cfg(test)]

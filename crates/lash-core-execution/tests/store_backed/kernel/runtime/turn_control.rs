@@ -190,6 +190,59 @@ mod tests {
         }
     }
 
+    #[async_trait::async_trait]
+    impl crate::store::ControlIntentStore for CatalogProbeFactory {
+        async fn begin_session_close(
+            &self,
+            _session_id: &crate::SessionId,
+            _at_ms: u64,
+        ) -> std::result::Result<Option<crate::store::ControlIntent>, crate::StoreError> {
+            Err(crate::StoreError::UnsupportedStoreOperation {
+                operation: "ControlIntentStore::begin_session_close",
+            })
+        }
+
+        async fn claim_intent_application(
+            &self,
+            _id: crate::store::ControlIntentId,
+        ) -> std::result::Result<crate::store::IntentApplication, crate::StoreError> {
+            Err(crate::StoreError::UnsupportedStoreOperation {
+                operation: "ControlIntentStore::claim_intent_application",
+            })
+        }
+
+        async fn acknowledge_intent(
+            &self,
+            _id: crate::store::ControlIntentId,
+            _at_ms: u64,
+        ) -> std::result::Result<(), crate::StoreError> {
+            Err(crate::StoreError::UnsupportedStoreOperation {
+                operation: "ControlIntentStore::acknowledge_intent",
+            })
+        }
+
+        async fn record_intent_failure(
+            &self,
+            _id: crate::store::ControlIntentId,
+            _error: &str,
+            _retryable: bool,
+            _at_ms: u64,
+        ) -> std::result::Result<crate::store::ControlIntent, crate::StoreError> {
+            Err(crate::StoreError::UnsupportedStoreOperation {
+                operation: "ControlIntentStore::record_intent_failure",
+            })
+        }
+
+        async fn load_intent(
+            &self,
+            _id: crate::store::ControlIntentId,
+        ) -> std::result::Result<Option<crate::store::ControlIntent>, crate::StoreError> {
+            Err(crate::StoreError::UnsupportedStoreOperation {
+                operation: "ControlIntentStore::load_intent",
+            })
+        }
+    }
+
     fn address(label: &str) -> TurnAddress {
         TurnAddress::new(
             format!("turn-control-{label}-{}", uuid::Uuid::new_v4()),

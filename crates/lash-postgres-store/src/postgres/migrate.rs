@@ -130,7 +130,8 @@ struct ExpandMigration {
 /// Component 139 (FIG-3607) re-keys the process relations, which is no
 /// expand step, so nothing chains from 138: a 133–138 catalog plans to the
 /// typed recreate refusal. The sixth step adds the logical-root family and
-/// carries 139 to 140 (FIG-3600).
+/// carries 139 to 140 (FIG-3600); the seventh restamps 140 to 141 when the
+/// journaled effect envelope gains the session close (FIG-3600).
 static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
     ExpandMigration {
         id: "0134-migrations-ledger",
@@ -167,6 +168,12 @@ static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
         from_version: 139,
         to_version: 140,
         statements: LOGICAL_ROOT_FAMILY_DDL,
+    },
+    ExpandMigration {
+        id: "0141-begin-session-close",
+        from_version: 140,
+        to_version: 141,
+        statements: "-- component 141 (FIG-3600): envelope-vocabulary-only change; nothing to apply.",
     },
 ];
 

@@ -118,7 +118,7 @@ async fn sqlite_refuses_pre_sleep_spec_effect_journal_at_open() {
     };
     assert_eq!(
         error.to_string(),
-        "Error(\"Unsupported lash effect replay schema: this binary supports schema version 35, but the database reports version 21. There is no migration chain — drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/adr/0049-session-ids-are-used-once.md.\")"
+        "Error(\"Unsupported lash effect replay schema: this binary supports schema version 36, but the database reports version 21. There is no migration chain — drain affected sessions and recreate the whole Lash trust domain with this version. Reset the tombstones, await-event revocation ledger, effect journal, and Restate state together; see docs/adr/0049-session-ids-are-used-once.md.\")"
     );
 }
 

@@ -15,6 +15,10 @@ const SESSION_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/st
 const ATTACHMENT_STORE_SOURCE: &str = include_str!("../../../lash-core-store/src/attachments.rs");
 const ATTACHMENT_MANIFEST_SOURCE: &str =
     include_str!("../../../lash-core-store/src/store/attachment_manifest.rs");
+/// The factory's control-intent ledger (FIG-3600 S7): every method is driven,
+/// none is excluded.
+const CONTROL_INTENT_SOURCE: &str =
+    include_str!("../../../lash-core-store/src/store/control_intent.rs");
 
 /// Every source file that makes up this test binary. A method counts as
 /// covered when the harness calls it from one of these.
@@ -313,6 +317,14 @@ fn store_trait_surface_is_fully_gated() {
             }
             (true, Some(_)) => stale_exclusions.push(format!("AttachmentManifest::{method}")),
             (false, None) => missing.push(format!("AttachmentManifest::{method}")),
+        }
+    }
+
+    for method in fallible_trait_methods(CONTROL_INTENT_SOURCE, "ControlIntentStore") {
+        if harness_drives(&method) {
+            covered += 1;
+        } else {
+            missing.push(format!("ControlIntentStore::{method}"));
         }
     }
 

@@ -106,4 +106,47 @@ impl SessionStoreFactory for SilentByIdFactory {
     }
 }
 
+#[async_trait::async_trait]
+impl lash::persistence::ControlIntentStore for SilentByIdFactory {
+    async fn begin_session_close(
+        &self,
+        session_id: &SessionId,
+        at_ms: u64,
+    ) -> std::result::Result<Option<lash::persistence::ControlIntent>, StoreError> {
+        self.inner.begin_session_close(session_id, at_ms).await
+    }
+
+    async fn claim_intent_application(
+        &self,
+        id: lash::persistence::ControlIntentId,
+    ) -> std::result::Result<lash::persistence::IntentApplication, StoreError> {
+        self.inner.claim_intent_application(id).await
+    }
+
+    async fn acknowledge_intent(
+        &self,
+        id: lash::persistence::ControlIntentId,
+        at_ms: u64,
+    ) -> std::result::Result<(), StoreError> {
+        self.inner.acknowledge_intent(id, at_ms).await
+    }
+
+    async fn record_intent_failure(
+        &self,
+        id: lash::persistence::ControlIntentId,
+        error: &str,
+        retryable: bool,
+        at_ms: u64,
+    ) -> std::result::Result<lash::persistence::ControlIntent, StoreError> {
+        self.inner.record_intent_failure(id, error, retryable, at_ms).await
+    }
+
+    async fn load_intent(
+        &self,
+        id: lash::persistence::ControlIntentId,
+    ) -> std::result::Result<Option<lash::persistence::ControlIntent>, StoreError> {
+        self.inner.load_intent(id).await
+    }
+}
+
 fn main() {}

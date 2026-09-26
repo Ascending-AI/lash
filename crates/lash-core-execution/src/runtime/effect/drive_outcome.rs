@@ -1,6 +1,6 @@
 //! The recorded outcomes of a session drive's steps (FIG-3600): its
 //! admission, root start and seal, a root's input claim, its turn-config
-//! resolution (S6) and its scope close (S7).
+//! resolution (S6), its scope close (S7) and a session's close.
 
 use super::{RuntimeEffectControllerError, RuntimeEffectOutcome};
 use crate::RuntimeEffectKind;
@@ -61,6 +61,18 @@ impl RuntimeEffectOutcome {
             Self::CloseRootScope { terminal } => Ok(*terminal),
             other => Err(RuntimeEffectControllerError::wrong_outcome(
                 RuntimeEffectKind::CloseRootScope,
+                other.kind(),
+            )),
+        }
+    }
+
+    pub fn into_begin_session_close(
+        self,
+    ) -> Result<Option<crate::store::ControlIntent>, RuntimeEffectControllerError> {
+        match self {
+            Self::BeginSessionClose { intent } => Ok(intent.map(|intent| *intent)),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::BeginSessionClose,
                 other.kind(),
             )),
         }

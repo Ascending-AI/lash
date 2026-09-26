@@ -86,11 +86,13 @@ pub use commit_identity::{
 pub use config_command_plan::{ConfigCommandPlan, plan_config_commands};
 pub use control_intent::{
     CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
+    ControlIntentStore, IntentApplication, decide_intent_acknowledgement,
+    decide_intent_application, decide_intent_failure, stored_intent_kind, stored_intent_state,
 };
 pub use drive_fence::{
     AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence,
-    InMemoryDriveEpochs, RootStartNonce, SessionHeadRef, StoredDriveEpoch, decide_drive_epoch_seal,
-    require_current_drive_fence,
+    InMemoryDriveEpochs, RootStartNonce, SessionHeadRef, StoredDriveEpoch, close_admission,
+    decide_drive_epoch_seal, require_current_drive_fence,
 };
 pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};
 pub use fencing::{

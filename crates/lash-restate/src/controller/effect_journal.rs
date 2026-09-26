@@ -80,7 +80,10 @@ use serde::{Deserialize, Serialize};
 /// 14: a logical root whose final commit wrote its terminal evidence journals
 /// its scope close as a recorded `drive-close:{root}` step
 /// (`CloseRootScope`), whose outcome is the evidence it closed (FIG-3600 S7).
-pub const EFFECT_JOURNAL_VERSION: u32 = 14;
+/// 15: a session's deletion journals the start of its close as a recorded
+/// `{session}:begin-close` step (`BeginSessionClose`), whose outcome is the
+/// session's `CloseSession` control intent (FIG-3600 S7).
+pub const EFFECT_JOURNAL_VERSION: u32 = 15;
 
 /// The entry field the generation is stamped under.
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";

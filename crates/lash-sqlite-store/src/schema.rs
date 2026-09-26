@@ -1672,7 +1672,12 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 /// it, and a process scope names the minted id. A pre-35 journal would decode
 /// its process scopes to no process and its process commands to a replay
 /// mismatch, so it is rejected at open and recreated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 35;
+/// Version 36 (FIG-3600 S7) moves the envelope vocabulary a journal holds: a
+/// session's deletion records the start of its close as a `BeginSessionClose`
+/// command whose outcome is the session's `CloseSession` control intent. No
+/// DDL changes; a pre-36 build cannot decode that entry, so a pre-36 journal
+/// is rejected at open and recreated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 36;
 
 pub(crate) async fn apply_pragmas(conn: &SqliteConnection) -> rusqlite::Result<()> {
     // WAL + busy_timeout are already applied in `SqliteConnection::open`. The
