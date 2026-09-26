@@ -79,7 +79,6 @@ impl lash::persistence::ControlIntentStore for UncountedFactory {
         session_id: &SessionId,
         at_ms: u64,
     ) -> std::result::Result<Option<lash::persistence::ControlIntent>, StoreError> {
-        use lash::persistence::ControlIntentStore as _;
         self.inner.begin_session_close(session_id, at_ms).await
     }
 
@@ -87,7 +86,6 @@ impl lash::persistence::ControlIntentStore for UncountedFactory {
         &self,
         id: lash::persistence::ControlIntentId,
     ) -> std::result::Result<lash::persistence::IntentApplication, StoreError> {
-        use lash::persistence::ControlIntentStore as _;
         self.inner.claim_intent_application(id).await
     }
 
@@ -96,7 +94,6 @@ impl lash::persistence::ControlIntentStore for UncountedFactory {
         id: lash::persistence::ControlIntentId,
         at_ms: u64,
     ) -> std::result::Result<(), StoreError> {
-        use lash::persistence::ControlIntentStore as _;
         self.inner.acknowledge_intent(id, at_ms).await
     }
 
@@ -107,7 +104,6 @@ impl lash::persistence::ControlIntentStore for UncountedFactory {
         retryable: bool,
         at_ms: u64,
     ) -> std::result::Result<lash::persistence::ControlIntent, StoreError> {
-        use lash::persistence::ControlIntentStore as _;
         self.inner.record_intent_failure(id, error, retryable, at_ms).await
     }
 
@@ -115,7 +111,6 @@ impl lash::persistence::ControlIntentStore for UncountedFactory {
         &self,
         id: lash::persistence::ControlIntentId,
     ) -> std::result::Result<Option<lash::persistence::ControlIntent>, StoreError> {
-        use lash::persistence::ControlIntentStore as _;
         self.inner.load_intent(id).await
     }
 }
