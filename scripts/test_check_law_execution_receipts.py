@@ -321,6 +321,48 @@ mod sqlite {
         self.assertEqual(once, twice)
         self.assertEqual(twice, {"laws": Counter(PLAIN_SUITE_ROWS)})
 
+    def test_a_direct_arm_invocation_owes_only_its_row_list(self) -> None:
+        """``X_tests!(@arm fixture; [rows])`` expands that one arm, so the
+        claimant owes exactly the listed rows -- never the suite's other
+        arms (``completion_routing_on_the_double`` invokes only ``@foreign``
+        of ``effect_host_await_event_tests!``).  ``(ident, "…")`` tuples in
+        the fixture block are not catalogue rows."""
+        text = """\
+plain_suite_tests!(@extra {
+    let pair = (fixture_value, "not-a-catalogue-row");
+    pair
+}; [(extra_law, "extra")]);
+"""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "laws.rs"
+            root.write_text(text, encoding="utf-8")
+            invocations = MODULE.invocations_in_root(root, "laws")
+            expected = MODULE.expected_from_invocations(invocations, self.macros)
+            covered = MODULE.census_compare(
+                expected, {"laws": Counter({("extra_law", "extra"): 1})}, ""
+            )
+            overpaid = MODULE.census_compare(expected, full_receipts("laws"), "")
+        self.assertEqual(expected, {"laws": Counter({("extra_law", "extra"): 1})})
+        self.assertEqual(covered, [])
+        self.assertTrue(
+            any("does not owe" in error for error in overpaid),
+            f"the suite's other rows must be rejected for this claimant: {overpaid}",
+        )
+
+    def test_a_direct_arm_invocation_owes_the_arms_own_rows(self) -> None:
+        """An ``@arm`` call with no row list still owes the rows the arm's
+        body registers outright."""
+        text = "plain_suite_tests!(@catalogue { fixture });\n"
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp) / "laws.rs"
+            root.write_text(text, encoding="utf-8")
+            invocations = MODULE.invocations_in_root(root, "laws")
+            expected = MODULE.expected_from_invocations(invocations, self.macros)
+        self.assertEqual(
+            expected,
+            {"laws": Counter({("shared_law", "shared"): 1, ("timed_law", "timed"): 1})},
+        )
+
 
 class AutodiscoveryTests(unittest.TestCase):
     """``autotests``/``autobins`` decide which files are compilation roots.
