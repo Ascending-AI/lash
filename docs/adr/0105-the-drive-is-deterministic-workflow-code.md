@@ -117,6 +117,20 @@ pub trait DriveAdmission: EngineContext {
   child or child execution **never mints an epoch**; it answers `Valid`,
   `Stale` or `GenerationRefused`.
 
+- **Implemented (FIG-3815): the root's start marker.** Before its seal, an
+  admitted root's execution records a `DrawRootStart` step in its own journal
+  (`drive-root-start:{admission}` under the root's scope), whose body draws a
+  random nonce. A retry of that execution replays the nonce; an execution that
+  cannot read the journal (purged, or past retention) draws another. The seal
+  stores the nonce with the admission on the session's `session_meta` row
+  (`drive_root_start`). A later seal of the same admission under the same
+  nonce is a retry and answers the stored fence; under another nonce it is a
+  fresh execution of a root that already started, and the store answers
+  `ExecutionLost`, which the seal records as `SubstrateLost` without running
+  anything (L-S8). A seal stored before markers existed is answered as a
+  retry. `admit` does not read the marker yet: a fresh execution is refused
+  at its seal, not at admission.
+
 - **Implemented (FIG-3682, FIG-3600 S5a): the root's claim records its base.**
   `Admitted` records no head. The root's recorded claim step
   (`ClaimAcceptedTurnInput`, keyed by the root as `drive-claim:{root}`) takes

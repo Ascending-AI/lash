@@ -6,6 +6,13 @@
 //! session's `session_meta` row, next to the id of the admission that last
 //! raised it. Only [`DriveEpochStore::seal_drive_epoch`] raises it, with a
 //! compare-and-set, so replay cannot mint ownership and nothing expires it.
+//!
+//! The same row keeps the admitted root's start marker (ADR 0105 §2, L-S8):
+//! the [`RootStartNonce`] the execution that sealed the admission drew in its
+//! own journal. A retry of that execution replays the same nonce and finds
+//! its own seal; a fresh execution of the same admission (its journal gone)
+//! draws another, and the seal answers it `ExecutionLost` instead of letting
+//! the root run twice.
 
 use serde::{Deserialize, Serialize};
 
@@ -73,6 +80,28 @@ impl AdmissionId {
     }
 }
 
+/// The start marker of one execution of an admitted root (ADR 0105 §2,
+/// L-S8, FIG-3815).
+///
+/// The root draws it as its first recorded step, in its own journal, before
+/// it seals its admission. Every retry of that execution replays the same
+/// nonce; an execution that cannot read that journal draws a new one. The
+/// seal sets it with the admission and compares it on every later seal of
+/// the same admission.
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+#[serde(transparent)]
+pub struct RootStartNonce(String);
+
+impl RootStartNonce {
+    pub fn new(nonce: impl Into<String>) -> Self {
+        Self(nonce.into())
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
 /// A session head a drive names: the state generation, the head revision, the
 /// leaf of its graph and its checkpoint (ADR 0105 §2, §9).
 ///
@@ -109,6 +138,10 @@ pub enum DriveEpochSeal {
     Sealed(DriveFence),
     /// Another admission raised the epoch past the observed one.
     Superseded { epoch: u64 },
+    /// This admission was sealed by another execution of its root, which
+    /// drew another start marker: this execution cannot read what that one
+    /// did, so it must not run the root (L-S8).
+    ExecutionLost,
 }
 
 /// The durable drive epoch of a session as its `session_meta` row stores it.
@@ -117,24 +150,39 @@ pub struct StoredDriveEpoch {
     pub epoch: u64,
     /// The admission that last raised the epoch; `None` before the first seal.
     pub admission: Option<AdmissionId>,
+    /// The start marker of the execution that sealed `admission`; `None`
+    /// before the first seal, and for a seal written before markers existed.
+    pub root_start: Option<RootStartNonce>,
 }
 
 /// Decide one seal from the stored epoch (ADR 0105 §2).
 ///
 /// The stored admission is checked first: when this admission is the one
-/// that last raised the epoch, the seal already happened — a retry after a
-/// lost reply, whatever epoch the retried body observed — and it answers the
-/// stored fence without writing, so one admission makes exactly one epoch
-/// transition (ADR 0105 L-S3, L-S4). Otherwise a seal observed at the stored
-/// epoch raises it by one, and anything else was superseded.
+/// that last raised the epoch, the seal already happened, and one admission
+/// makes exactly one epoch transition (ADR 0105 L-S3, L-S4). Its start marker
+/// then says by whom: the same marker is a retry of the execution that sealed
+/// it (a lost reply, whatever epoch the retried body observed) and answers
+/// the stored fence without writing; another marker is a fresh execution of
+/// a root that already started, which is `ExecutionLost` (L-S8). A seal
+/// stored without a marker predates markers and is answered as a retry.
+/// Otherwise a seal observed at the stored epoch raises it by one and stores
+/// its marker, and anything else was superseded.
 #[must_use]
 pub fn decide_drive_epoch_seal(
     session_id: &SessionId,
     stored: &StoredDriveEpoch,
     admission: &AdmissionId,
     observed_epoch: u64,
+    root_start: &RootStartNonce,
 ) -> DriveEpochSealDecision {
     if stored.admission.as_ref() == Some(admission) {
+        if stored
+            .root_start
+            .as_ref()
+            .is_some_and(|sealed_by| sealed_by != root_start)
+        {
+            return DriveEpochSealDecision::Answer(DriveEpochSeal::ExecutionLost);
+        }
         return DriveEpochSealDecision::Answer(DriveEpochSeal::Sealed(
             DriveFence::sealed_by_store(session_id.clone(), stored.epoch, admission.clone()),
         ));
@@ -188,12 +236,14 @@ pub fn require_current_drive_fence(
 #[async_trait::async_trait]
 pub trait DriveEpochStore: Send + Sync {
     /// Compare-and-set the session's drive epoch from `observed_epoch` to the
-    /// next value under `admission`, idempotently per admission.
+    /// next value under `admission`, storing `root_start` with it; idempotent
+    /// per admission and start marker ([`decide_drive_epoch_seal`]).
     async fn seal_drive_epoch(
         &self,
         session_id: &SessionId,
         admission: &AdmissionId,
         observed_epoch: u64,
+        root_start: &RootStartNonce,
     ) -> Result<DriveEpochSeal, StoreError>;
 
     /// The session's stored drive epoch.
@@ -216,6 +266,7 @@ impl InMemoryDriveEpochs {
         session_id: &SessionId,
         admission: &AdmissionId,
         observed_epoch: u64,
+        root_start: &RootStartNonce,
     ) -> DriveEpochSeal {
         let mut epochs = self
             .epochs
@@ -226,13 +277,15 @@ impl InMemoryDriveEpochs {
             .or_insert(StoredDriveEpoch {
                 epoch: 0,
                 admission: None,
+                root_start: None,
             });
-        match decide_drive_epoch_seal(session_id, stored, admission, observed_epoch) {
+        match decide_drive_epoch_seal(session_id, stored, admission, observed_epoch, root_start) {
             DriveEpochSealDecision::Answer(seal) => seal,
             DriveEpochSealDecision::Raise { next } => {
                 *stored = StoredDriveEpoch {
                     epoch: next,
                     admission: Some(admission.clone()),
+                    root_start: Some(root_start.clone()),
                 };
                 DriveEpochSeal::Sealed(DriveFence::sealed_by_store(
                     session_id.clone(),
@@ -253,6 +306,7 @@ impl InMemoryDriveEpochs {
             .unwrap_or(StoredDriveEpoch {
                 epoch: 0,
                 admission: None,
+                root_start: None,
             })
     }
 }
@@ -265,7 +319,12 @@ mod tests {
         StoredDriveEpoch {
             epoch,
             admission: admission.map(AdmissionId::new),
+            root_start: admission.map(|_| RootStartNonce::new("n")),
         }
+    }
+
+    fn nonce() -> RootStartNonce {
+        RootStartNonce::new("n")
     }
 
     #[test]
@@ -273,11 +332,11 @@ mod tests {
         let session = SessionId::from("s");
         let admission = AdmissionId::new("a");
         assert_eq!(
-            decide_drive_epoch_seal(&session, &stored(3, None), &admission, 3),
+            decide_drive_epoch_seal(&session, &stored(3, None), &admission, 3, &nonce()),
             DriveEpochSealDecision::Raise { next: 4 }
         );
         assert_eq!(
-            decide_drive_epoch_seal(&session, &stored(4, Some("a")), &admission, 3),
+            decide_drive_epoch_seal(&session, &stored(4, Some("a")), &admission, 3, &nonce()),
             DriveEpochSealDecision::Answer(DriveEpochSeal::Sealed(DriveFence::sealed_by_store(
                 session.clone(),
                 4,
@@ -285,7 +344,7 @@ mod tests {
             )))
         );
         assert_eq!(
-            decide_drive_epoch_seal(&session, &stored(4, Some("a")), &admission, 4),
+            decide_drive_epoch_seal(&session, &stored(4, Some("a")), &admission, 4, &nonce()),
             DriveEpochSealDecision::Answer(DriveEpochSeal::Sealed(DriveFence::sealed_by_store(
                 session.clone(),
                 4,
@@ -294,7 +353,36 @@ mod tests {
             "a retry that re-read the epoch it raised does not raise again"
         );
         assert_eq!(
-            decide_drive_epoch_seal(&session, &stored(4, Some("b")), &admission, 3),
+            decide_drive_epoch_seal(
+                &session,
+                &stored(4, Some("a")),
+                &admission,
+                3,
+                &RootStartNonce::new("another execution")
+            ),
+            DriveEpochSealDecision::Answer(DriveEpochSeal::ExecutionLost),
+            "a fresh execution of the sealed admission is lost, whatever it observed"
+        );
+        assert_eq!(
+            decide_drive_epoch_seal(
+                &session,
+                &StoredDriveEpoch {
+                    root_start: None,
+                    ..stored(4, Some("a"))
+                },
+                &admission,
+                3,
+                &nonce()
+            ),
+            DriveEpochSealDecision::Answer(DriveEpochSeal::Sealed(DriveFence::sealed_by_store(
+                session.clone(),
+                4,
+                admission.clone()
+            ))),
+            "a seal stored before markers is answered as a retry"
+        );
+        assert_eq!(
+            decide_drive_epoch_seal(&session, &stored(4, Some("b")), &admission, 3, &nonce()),
             DriveEpochSealDecision::Answer(DriveEpochSeal::Superseded { epoch: 4 })
         );
     }

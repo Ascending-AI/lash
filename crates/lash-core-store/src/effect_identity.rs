@@ -60,6 +60,9 @@ pub enum RuntimeEffectKind {
     /// A session drive's recorded admission (ADR 0105 §2, FIG-3600): the root
     /// it admitted, with its base and turn index, or why it admitted none.
     AdmitDrive,
+    /// The start marker an execution of an admitted root drew in its own
+    /// journal before its seal (ADR 0105 L-S8).
+    DrawRootStart,
     /// The recorded seal of a drive admission: the drive-epoch
     /// compare-and-set whose fence the admitted root's commits present.
     SealDriveAdmission,
@@ -96,6 +99,7 @@ impl RuntimeEffectKind {
             Self::AcceptTurnInput => "accept_turn_input",
             Self::ClaimAcceptedTurnInput => "claim_accepted_turn_input",
             Self::AdmitDrive => "admit_drive",
+            Self::DrawRootStart => "draw_root_start",
             Self::SealDriveAdmission => "seal_drive_admission",
             Self::ResolveTurnConfig => "resolve_turn_config",
             Self::Checkpoint => "checkpoint",

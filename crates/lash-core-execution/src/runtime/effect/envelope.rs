@@ -443,6 +443,13 @@ pub enum RuntimeEffectCommand {
     AdmitDrive {
         request: Box<crate::engine::AdmitRequest>,
     },
+    /// Draw the start marker of this execution of an admitted root (ADR 0105
+    /// §2, L-S8): the root's first recorded step, in its own journal, before
+    /// its seal. A retry of the execution replays the marker; an execution
+    /// that cannot read the journal draws a new one, which the seal refuses.
+    DrawRootStart {
+        root: crate::TurnId,
+    },
     /// Seal an admission: the drive-epoch compare-and-set keyed by its nonce.
     /// The fence rides the outcome, never this envelope (L-S12).
     SealDriveAdmission {
@@ -549,6 +556,7 @@ impl RuntimeEffectCommand {
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::ClaimAcceptedTurnInput { .. } => RuntimeEffectKind::ClaimAcceptedTurnInput,
             Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
+            Self::DrawRootStart { .. } => RuntimeEffectKind::DrawRootStart,
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
@@ -1195,6 +1203,10 @@ pub enum RuntimeEffectOutcome {
     AdmitDrive {
         verdict: Box<crate::engine::AdmitVerdict>,
     },
+    /// The start marker this execution of a root drew.
+    DrawRootStart {
+        root_start: crate::engine::RootStartNonce,
+    },
     /// The seal's recorded verdict, with the fence when `Sealed`.
     SealDriveAdmission {
         verdict: Box<crate::engine::SealVerdict>,
@@ -1669,6 +1681,7 @@ impl RuntimeEffectOutcome {
             Self::AcceptTurnInput { .. } => RuntimeEffectKind::AcceptTurnInput,
             Self::ClaimAcceptedTurnInput { .. } => RuntimeEffectKind::ClaimAcceptedTurnInput,
             Self::AdmitDrive { .. } => RuntimeEffectKind::AdmitDrive,
+            Self::DrawRootStart { .. } => RuntimeEffectKind::DrawRootStart,
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,

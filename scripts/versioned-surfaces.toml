@@ -105,7 +105,7 @@ symbols = ["COMPLETE_STEP", "BOUNDARY_STEP", "HANDOVER_STEP", "CANCEL_FORWARD_ST
 constant = "LASH_SESSION_DRIVE_VERSION"
 constant_path = "crates/lash-restate/src/session_driver.rs"
 upgrade = "drain"
-description = "leading journaled commands of the Restate session driver: both handlers' generation sentinel, LashSession's admission steps and LashTurn calls, and LashTurn's seal (the input stamp of both handlers' requests)"
+description = "leading journaled commands of the Restate session driver: both handlers' generation sentinel, LashSession's admission steps and LashTurn calls, and LashTurn's root start marker and seal (the input stamp of both handlers' requests)"
 manifest = "engine:restate.session_drive"
 
 # ADR 0105 section 12 (FIG-3600 S5). Both handlers' requests carry the

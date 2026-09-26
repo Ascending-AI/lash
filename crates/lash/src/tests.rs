@@ -636,10 +636,11 @@ impl lash_core::store::DriveEpochStore for SnapshotStore {
         session_id: &SessionId,
         admission: &lash_core::store::AdmissionId,
         observed_epoch: u64,
+        root_start: &lash_core::store::RootStartNonce,
     ) -> std::result::Result<lash_core::store::DriveEpochSeal, lash_core::StoreError> {
         Ok(self
             .drive_epochs
-            .seal(session_id, admission, observed_epoch))
+            .seal(session_id, admission, observed_epoch, root_start))
     }
 
     async fn drive_epoch(
@@ -1117,10 +1118,11 @@ impl lash_core::store::DriveEpochStore for BoundSessionStore {
         session_id: &SessionId,
         admission: &lash_core::store::AdmissionId,
         observed_epoch: u64,
+        root_start: &lash_core::store::RootStartNonce,
     ) -> std::result::Result<lash_core::store::DriveEpochSeal, lash_core::StoreError> {
         Ok(self
             .drive_epochs
-            .seal(session_id, admission, observed_epoch))
+            .seal(session_id, admission, observed_epoch, root_start))
     }
 
     async fn drive_epoch(

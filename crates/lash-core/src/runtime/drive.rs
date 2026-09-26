@@ -51,7 +51,7 @@ use std::sync::Arc;
 use crate::engine::{
     AdmitRequest, AdmitVerdict, Admitted, DriveAbort, DriveOutcome, DriveRequest, DriveStop,
     RootOutcome, drive_admission_replay_key, drive_admission_scope, drive_root_scope,
-    drive_seal_replay_key,
+    drive_root_start_replay_key, drive_seal_replay_key,
 };
 use crate::runtime::LashRuntime;
 use crate::{
@@ -407,32 +407,35 @@ impl LashRuntime {
         let host = Arc::clone(&self.host.core.control.effect_host);
         let root_controller = step_controller(controller, host.as_ref(), scope.clone())
             .map_err(DriveAbort::Refused)?;
-        let invocation = RuntimeEffectInvocation::new(
-            EffectAddress::new(scope.scope().clone(), drive_seal_replay_key(&admitted))
-                .map_err(|error| DriveAbort::Refused(RuntimeError::from(error)))?,
-            RuntimeAttribution::for_turn_admission(admitted.session().clone(), root.clone()),
-            format!("{root}.drive-seal"),
-        );
-        let verdict = root_controller
-            .execute_effect(
-                RuntimeEffectEnvelope::new(
-                    invocation,
-                    RuntimeEffectCommand::SealDriveAdmission {
-                        admitted: Box::new(admitted.clone()),
-                    },
-                ),
-                RuntimeEffectLocalExecutor::owned_runner(
-                    Box::new(admission::SealDriveRunner {
-                        store,
-                        admitted: admitted.clone(),
-                    }),
-                    None,
-                ),
-            )
-            .await
-            .and_then(crate::RuntimeEffectOutcome::into_seal_drive_admission)
-            .map_err(|error| controller_abort(Some(&root), error))?;
+        // An input root takes the session's lane before it marks itself
+        // started: an execution the lane turns away has run nothing, so it
+        // must not leave a start marker that refuses the execution that runs
+        // the root after it (L-S8).
+        let input_lease = match admitted.work() {
+            crate::engine::AdmittedWork::Input { .. } => Some(
+                self.claim_session_execution_lease()
+                    .await
+                    .map_err(|error| drive_abort(Some(&root), error))?,
+            ),
+            crate::engine::AdmittedWork::Queued | crate::engine::AdmittedWork::FollowOn { .. } => {
+                None
+            }
+        };
+        let marked =
+            Box::pin(self.mark_and_seal_root(&root_controller, &scope, &admitted, store)).await;
+        let verdict = match marked {
+            Ok(verdict) => verdict,
+            Err(abort) => {
+                if let Some(lease) = input_lease.as_ref() {
+                    self.release_root_lease(lease.as_ref()).await;
+                }
+                return Err(abort);
+            }
+        };
         if !matches!(verdict, crate::engine::SealVerdict::Sealed(_)) {
+            if let Some(lease) = input_lease.as_ref() {
+                self.release_root_lease(lease.as_ref()).await;
+            }
             return Ok(RootRun {
                 outcome: RootOutcome::Refused { root, verdict },
                 run: None,
@@ -442,7 +445,15 @@ impl LashRuntime {
         }
         match admitted.work().clone() {
             crate::engine::AdmittedWork::Input { head } => {
-                Box::pin(self.run_input_root(&root_controller, &admitted, &head, sinks, live)).await
+                Box::pin(self.run_input_root(
+                    &root_controller,
+                    &admitted,
+                    &head,
+                    sinks,
+                    live,
+                    input_lease.flatten(),
+                ))
+                .await
             }
             crate::engine::AdmittedWork::Queued => {
                 Box::pin(self.run_queued_root(&root_controller, &admitted, sinks)).await
@@ -461,6 +472,70 @@ impl LashRuntime {
                 .await
             }
         }
+    }
+
+    /// Draw this execution's start marker in the root's own journal, then seal
+    /// the admission with it (ADR 0105 §2, L-S8).
+    async fn mark_and_seal_root(
+        &mut self,
+        root_controller: &ScopedEffectController<'_>,
+        scope: &crate::AdmittedScope,
+        admitted: &Admitted,
+        store: Arc<dyn crate::store::RuntimePersistence>,
+    ) -> Result<crate::engine::SealVerdict, DriveAbort> {
+        let root = admitted.root().clone();
+        // The execution's start marker, drawn in the root's own journal before
+        // the seal: a retry replays it, an execution that cannot read the
+        // journal draws another, and the seal refuses that one (L-S8).
+        let start = RuntimeEffectInvocation::new(
+            EffectAddress::new(scope.scope().clone(), drive_root_start_replay_key(admitted))
+                .map_err(|error| DriveAbort::Refused(RuntimeError::from(error)))?,
+            RuntimeAttribution::for_turn_admission(admitted.session().clone(), root.clone()),
+            format!("{root}.drive-root-start"),
+        );
+        let root_start = root_controller
+            .execute_effect(
+                RuntimeEffectEnvelope::new(
+                    start,
+                    RuntimeEffectCommand::DrawRootStart { root: root.clone() },
+                ),
+                RuntimeEffectLocalExecutor::owned_runner(
+                    Box::new(crate::runtime::root_start::DrawRootStartRunner {
+                        root: root.clone(),
+                    }),
+                    None,
+                ),
+            )
+            .await
+            .and_then(crate::RuntimeEffectOutcome::into_draw_root_start)
+            .map_err(|error| controller_abort(Some(&root), error))?;
+        let invocation = RuntimeEffectInvocation::new(
+            EffectAddress::new(scope.scope().clone(), drive_seal_replay_key(admitted))
+                .map_err(|error| DriveAbort::Refused(RuntimeError::from(error)))?,
+            RuntimeAttribution::for_turn_admission(admitted.session().clone(), root.clone()),
+            format!("{root}.drive-seal"),
+        );
+        let verdict = root_controller
+            .execute_effect(
+                RuntimeEffectEnvelope::new(
+                    invocation,
+                    RuntimeEffectCommand::SealDriveAdmission {
+                        admitted: Box::new(admitted.clone()),
+                    },
+                ),
+                RuntimeEffectLocalExecutor::owned_runner(
+                    Box::new(admission::SealDriveRunner {
+                        store,
+                        admitted: admitted.clone(),
+                        root_start,
+                    }),
+                    None,
+                ),
+            )
+            .await
+            .and_then(crate::RuntimeEffectOutcome::into_seal_drive_admission)
+            .map_err(|error| controller_abort(Some(&root), error))?;
+        Ok(verdict)
     }
 
     fn drive_store(&self) -> Result<Arc<dyn crate::store::RuntimePersistence>, DriveAbort> {

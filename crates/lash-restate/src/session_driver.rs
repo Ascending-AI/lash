@@ -90,11 +90,15 @@ use crate::{
 ///
 /// It owns what the two handlers journal ahead of the kernel's own recorded
 /// effects: `LashSession`'s admission steps and its `LashTurn` calls, and the
-/// seal `LashTurn` records first. Any change to those commands, their order,
-/// or what they key on bumps it. The scheduler stamps it on every request, and
-/// each handler refuses any other generation before it journals anything. An
-/// unstamped request is generation 0, which no build drives.
-pub const LASH_SESSION_DRIVE_VERSION: u32 = 1;
+/// root start marker and seal `LashTurn` records first. Any change to those
+/// commands, their order, or what they key on bumps it. The scheduler stamps
+/// it on every request, and each handler refuses any other generation before
+/// it journals anything. An unstamped request is generation 0, which no build
+/// drives.
+///
+/// Generation 2 (FIG-3815): `LashTurn` records the root's start marker
+/// (`drive-root-start:{admission}`) before its seal.
+pub const LASH_SESSION_DRIVE_VERSION: u32 = 2;
 
 /// The drive handler's name on `LashSession`.
 const DRIVE_HANDLER: &str = "drive";

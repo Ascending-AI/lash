@@ -134,9 +134,10 @@ impl lash_core::store::DriveEpochStore for CommitRetryStore {
         session_id: &SessionId,
         admission: &lash_core::store::AdmissionId,
         observed_epoch: u64,
+        root_start: &lash_core::store::RootStartNonce,
     ) -> Result<lash_core::store::DriveEpochSeal, lash_core::StoreError> {
         self.inner
-            .seal_drive_epoch(session_id, admission, observed_epoch)
+            .seal_drive_epoch(session_id, admission, observed_epoch, root_start)
             .await
     }
 

@@ -230,19 +230,16 @@ pub async fn fresh_execution_of_started_root_is_substrate_lost(
 #[macro_export]
 macro_rules! root_start_marker_tests {
     ($(#[$attr:meta])* $fixture:block) => {
+        $crate::root_start_marker_tests!(@law [$(#[$attr])*] $fixture;
+            (fresh_execution_of_started_root_is_substrate_lost, "root-start-marker"));
+    };
+    (@law [$(#[$attr:meta])*] $fixture:block; ($law:ident, $label:literal)) => {
         $(#[$attr])*
         #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-        async fn fresh_execution_of_started_root_is_substrate_lost() {
+        async fn $law() {
             let (_guard, prefix, host, stores, runner) = $fixture;
-            $crate::registration_macro_support::fresh_execution_of_started_root_is_substrate_lost(
-                prefix, host, stores, runner,
-            )
-            .await;
-            $crate::law_receipt::record(
-                module_path!(),
-                "fresh_execution_of_started_root_is_substrate_lost",
-                "root-start-marker",
-            );
+            $crate::registration_macro_support::$law(prefix, host, stores, runner).await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
         }
     };
 }

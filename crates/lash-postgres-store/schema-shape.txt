@@ -25,7 +25,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 137
+version 138
 table lash_artifact_owner_retirements
   column owner_id text not-null
   column owner_kind text not-null
@@ -1115,6 +1115,7 @@ table lash_session_meta
   column created_at_ms bigint nullable
   column drive_admission_id text nullable
   column drive_epoch bigint not-null default
+  column drive_root_start text nullable
   column last_commit_at_ms bigint nullable
   column parent_session_id text nullable
   column relation_kind text not-null

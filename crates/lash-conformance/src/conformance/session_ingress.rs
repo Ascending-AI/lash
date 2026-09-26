@@ -183,6 +183,12 @@ pub(crate) async fn runtime_lease(
     claim_session_execution_lease_for_test(&handles.runtime, &session(), owner).await
 }
 
+/// The start marker the store-level laws seal under: one execution per
+/// admission (ADR 0105 L-S8).
+fn root_start() -> lash_core::store::RootStartNonce {
+    lash_core::store::RootStartNonce::new("conformance-root-start")
+}
+
 /// Seal the next drive epoch under a fresh admission and return its fence,
 /// as the engine's admission seal would.
 #[expect(
@@ -198,7 +204,12 @@ pub(crate) async fn seal(handles: &SessionIngressHandles, admission: &str) -> Dr
         .epoch;
     match handles
         .ingress
-        .seal_drive_epoch(&session(), &AdmissionId::new(admission), observed)
+        .seal_drive_epoch(
+            &session(),
+            &AdmissionId::new(admission),
+            observed,
+            &root_start(),
+        )
         .await
         .expect("seal a drive epoch")
     {
@@ -1352,7 +1363,12 @@ pub async fn concurrent_seals_serialize(handles: SessionIngressHandles) {
         tokio::spawn(async move {
             handles
                 .ingress
-                .seal_drive_epoch(&session(), &AdmissionId::new(admission), observed)
+                .seal_drive_epoch(
+                    &session(),
+                    &AdmissionId::new(admission),
+                    observed,
+                    &root_start(),
+                )
                 .await
                 .expect("seal a drive epoch")
         })
@@ -1366,7 +1382,7 @@ pub async fn concurrent_seals_serialize(handles: SessionIngressHandles) {
         .iter()
         .filter_map(|outcome| match outcome {
             DriveEpochSeal::Sealed(fence) => Some(fence.clone()),
-            DriveEpochSeal::Superseded { .. } => None,
+            DriveEpochSeal::Superseded { .. } | DriveEpochSeal::ExecutionLost => None,
         })
         .collect::<Vec<_>>();
     assert_eq!(winners.len(), 1, "exactly one seal wins: {outcomes:?}");
@@ -1606,6 +1622,9 @@ pub async fn a_reclaimed_row_supersedes_the_old_claim(handles: SessionIngressHan
 /// The drive-epoch seal is a compare-and-set on the session's `session_meta`
 /// row, idempotent per admission: a retried seal answers the fence it already
 /// raised, and a seal from a stale observation is superseded without writing.
+/// The seal stores the start marker of the execution that sealed it: the same
+/// admission sealed under another marker, a fresh execution of a root that
+/// already started, is `ExecutionLost` and writes nothing (L-S8).
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -1616,7 +1635,12 @@ pub async fn the_drive_epoch_seal_is_idempotent_per_admission(handles: SessionIn
         async move {
             handles
                 .ingress
-                .seal_drive_epoch(&session(), &AdmissionId::new(admission), observed)
+                .seal_drive_epoch(
+                    &session(),
+                    &AdmissionId::new(admission),
+                    observed,
+                    &root_start(),
+                )
                 .await
                 .expect("seal a drive epoch")
         }
@@ -1637,6 +1661,31 @@ pub async fn the_drive_epoch_seal_is_idempotent_per_admission(handles: SessionIn
         DriveEpochSeal::Sealed(first.clone()),
         "a retried seal answers the same fence"
     );
+    assert_eq!(
+        handles
+            .ingress
+            .seal_drive_epoch(
+                &session(),
+                &AdmissionId::new("seal-a"),
+                observed,
+                &lash_core::store::RootStartNonce::new("another execution"),
+            )
+            .await
+            .expect("seal a drive epoch"),
+        DriveEpochSeal::ExecutionLost,
+        "the sealed admission under another start marker is a lost execution"
+    );
+    let sealed = handles
+        .ingress
+        .drive_epoch(&session())
+        .await
+        .expect("read the drive epoch");
+    assert_eq!(
+        sealed.epoch,
+        first.epoch(),
+        "a lost execution writes nothing"
+    );
+    assert_eq!(sealed.root_start, Some(root_start()));
     assert_eq!(
         seal_at("seal-b", observed).await,
         DriveEpochSeal::Superseded {

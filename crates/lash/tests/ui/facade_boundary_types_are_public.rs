@@ -297,6 +297,7 @@ impl DriveEpochStore for FacadeStore {
         _session_id: &SessionId,
         _admission: &AdmissionId,
         _observed_epoch: u64,
+        _root_start: &lash::persistence::RootStartNonce,
     ) -> Result<DriveEpochSeal, StoreError> {
         unreachable!("fixture runs no session drive")
     }

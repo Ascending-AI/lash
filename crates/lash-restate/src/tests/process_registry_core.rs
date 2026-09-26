@@ -212,6 +212,11 @@ pub(super) async fn restate_replay_lease_acquisition_takes_recorded_branch() {
             .is_cancelled()
     );
 
+    // The fresh worker is the dropped handler's retry: Restate replays the
+    // journal the first attempt recorded, and the provider call it never
+    // recorded runs live. A worker that cannot read that journal is a fresh
+    // execution of a started root, which is SubstrateLost (ADR 0105 L-S8).
+    context.start_replay_allowing_journal_extension();
     let mut fresh_worker = replay_test_runtime(
         &SessionId::from(session_id),
         policy,

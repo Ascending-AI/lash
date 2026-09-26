@@ -60,6 +60,7 @@ pub(crate) use process_permit::DEFAULT_PROCESS_EXECUTION_CONCURRENCY;
 pub use process_permit::{
     release_process_execution_permit_while, trigger_delivery_reconcile_scope,
 };
+mod root_start;
 pub mod scenario_contracts;
 mod session_administration;
 mod session_api;

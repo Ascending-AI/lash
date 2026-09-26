@@ -103,7 +103,7 @@ macro_rules! persistence_operations {
                 fn list_pending_queued_work(&self, session_id: &SessionId) -> Result<Vec<crate::QueuedWorkBatch>, StoreError>;
             }
             DriveEpochStore {
-                fn seal_drive_epoch(&self, session_id: &SessionId, admission: &AdmissionId, observed_epoch: u64) -> Result<DriveEpochSeal, StoreError>;
+                fn seal_drive_epoch(&self, session_id: &SessionId, admission: &AdmissionId, observed_epoch: u64, root_start: &RootStartNonce) -> Result<DriveEpochSeal, StoreError>;
                 fn drive_epoch(&self, session_id: &SessionId) -> Result<StoredDriveEpoch, StoreError>;
             }
             StoreMaintenance {
