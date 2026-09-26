@@ -920,21 +920,21 @@ impl crate::ToolProvider for EmptyToolProvider {
     }
 }
 
-pub fn code_execution_context_with_tool_catalog(
-    ports: impl Into<TestExecutionPorts>,
+pub fn code_execution_context_with_tool_catalog<'run>(
+    ports: impl Into<TestExecutionPorts<'run>>,
     tool_catalog: crate::ToolCatalog,
-) -> crate::RuntimeExecutionContext<'static> {
+) -> crate::RuntimeExecutionContext<'run> {
     TestExecutionContextBuilder::new(ports.into())
         .tool_catalog(tool_catalog)
         .build()
         .into_runtime()
 }
 
-pub fn code_execution_context_with_tool_provider_and_catalog(
-    ports: impl Into<TestExecutionPorts>,
+pub fn code_execution_context_with_tool_provider_and_catalog<'run>(
+    ports: impl Into<TestExecutionPorts<'run>>,
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
-) -> crate::RuntimeExecutionContext<'static> {
+) -> crate::RuntimeExecutionContext<'run> {
     TestExecutionContextBuilder::new(ports.into())
         .provider(provider)
         .tool_catalog(tool_catalog)
@@ -942,14 +942,14 @@ pub fn code_execution_context_with_tool_provider_and_catalog(
         .into_runtime()
 }
 
-pub fn code_execution_context_with_process_dependencies(
-    ports: impl Into<TestExecutionPorts>,
+pub fn code_execution_context_with_process_dependencies<'run>(
+    ports: impl Into<TestExecutionPorts<'run>>,
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
     trigger_router: Option<crate::TriggerRouter>,
     processes: Arc<dyn crate::ProcessService>,
     execution_env_spec: crate::ProcessExecutionEnvSpec,
-) -> crate::RuntimeExecutionContext<'static> {
+) -> crate::RuntimeExecutionContext<'run> {
     TestExecutionContextBuilder::new(ports.into())
         .provider(provider)
         .tool_catalog(tool_catalog)
@@ -960,9 +960,9 @@ pub fn code_execution_context_with_process_dependencies(
         .into_runtime()
 }
 
-pub fn code_execution_context(
-    ports: impl Into<TestExecutionPorts>,
-) -> crate::RuntimeExecutionContext<'static> {
+pub fn code_execution_context<'run>(
+    ports: impl Into<TestExecutionPorts<'run>>,
+) -> crate::RuntimeExecutionContext<'run> {
     TestExecutionContextBuilder::new(ports.into())
         .build()
         .into_runtime()
@@ -984,10 +984,10 @@ pub fn with_engine_child_max_attempts(
 
 /// Build an empty code-execution context for a specific durable process.
 #[cfg(any(test, feature = "testing"))]
-pub fn code_execution_context_for_process(
-    ports: impl Into<TestExecutionPorts>,
+pub fn code_execution_context_for_process<'run>(
+    ports: impl Into<TestExecutionPorts<'run>>,
     registration: &crate::ProcessRegistration,
-) -> crate::RuntimeExecutionContext<'static> {
+) -> crate::RuntimeExecutionContext<'run> {
     TestExecutionContextBuilder::new(ports.into())
         .build()
         .into_runtime()
@@ -995,9 +995,9 @@ pub fn code_execution_context_for_process(
 }
 
 /// Build an empty code-execution context whose cancellation is already visible.
-pub fn cancelled_code_execution_context(
-    ports: impl Into<TestExecutionPorts>,
-) -> crate::RuntimeExecutionContext<'static> {
+pub fn cancelled_code_execution_context<'run>(
+    ports: impl Into<TestExecutionPorts<'run>>,
+) -> crate::RuntimeExecutionContext<'run> {
     let cancellation = tokio_util::sync::CancellationToken::new();
     cancellation.cancel();
     TestExecutionContextBuilder::new(ports.into())
@@ -1007,9 +1007,9 @@ pub fn cancelled_code_execution_context(
 }
 
 /// Build an empty code-execution context cancelled after its runtime yields.
-pub async fn code_execution_context_cancelling_after_yield(
-    ports: impl Into<TestExecutionPorts>,
-) -> crate::RuntimeExecutionContext<'static> {
+pub async fn code_execution_context_cancelling_after_yield<'run>(
+    ports: impl Into<TestExecutionPorts<'run>>,
+) -> crate::RuntimeExecutionContext<'run> {
     let ports = ports.into();
     let host = Arc::clone(&ports.effect_host);
     let context = TestExecutionContextBuilder::new(ports)
@@ -1050,10 +1050,10 @@ pub async fn code_execution_context_cancelling_after_yield(
 /// The gate is the one the context's turn-observing waits race: the turn is
 /// keyed from the scope those waits observe, so an engine that races a wait
 /// against it (a SQL timer, FIG-3672 P9) sees the stop.
-pub async fn code_execution_context_stopped_on(
-    ports: impl Into<TestExecutionPorts>,
+pub async fn code_execution_context_stopped_on<'run>(
+    ports: impl Into<TestExecutionPorts<'run>>,
     stop: tokio_util::sync::CancellationToken,
-) -> crate::RuntimeExecutionContext<'static> {
+) -> crate::RuntimeExecutionContext<'run> {
     let ports = ports.into();
     let host = Arc::clone(&ports.effect_host);
     let context = TestExecutionContextBuilder::new(ports)
@@ -1097,10 +1097,10 @@ pub async fn code_execution_context_stopped_on(
 
 /// Build an empty code-execution context carrying the stable parent invocation
 /// that production installs around an `ExecCode` effect.
-pub fn code_execution_context_with_invocation(
-    ports: impl Into<TestExecutionPorts>,
+pub fn code_execution_context_with_invocation<'run>(
+    ports: impl Into<TestExecutionPorts<'run>>,
     invocation: crate::RuntimeInvocation,
-) -> crate::RuntimeExecutionContext<'static> {
+) -> crate::RuntimeExecutionContext<'run> {
     TestExecutionContextBuilder::new(ports.into())
         .runtime_parent_invocation(invocation)
         .build()
@@ -1109,12 +1109,12 @@ pub fn code_execution_context_with_invocation(
 
 /// Build a code-execution context with a concrete tool surface and the stable
 /// parent invocation production installs around an `ExecCode` effect.
-pub fn code_execution_context_with_tool_provider_catalog_and_invocation(
-    ports: impl Into<TestExecutionPorts>,
+pub fn code_execution_context_with_tool_provider_catalog_and_invocation<'run>(
+    ports: impl Into<TestExecutionPorts<'run>>,
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
     invocation: crate::RuntimeInvocation,
-) -> crate::RuntimeExecutionContext<'static> {
+) -> crate::RuntimeExecutionContext<'run> {
     TestExecutionContextBuilder::new(ports.into())
         .provider(provider)
         .tool_catalog(tool_catalog)
@@ -1127,13 +1127,15 @@ pub fn code_execution_context_with_tool_provider_catalog_and_invocation(
 /// scope. Durable-controller tests use this instead of the shared-controller
 /// shortcut, whose intentionally synthetic runtime-operation scope is suitable
 /// only for scope-agnostic fakes.
-pub fn code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation(
-    ports: impl Into<TestExecutionPorts>,
+pub fn code_execution_context_with_tool_provider_catalog_scoped_effect_controller_and_invocation<
+    'run,
+>(
+    ports: impl Into<TestExecutionPorts<'run>>,
     provider: Arc<dyn crate::ToolProvider>,
     tool_catalog: crate::ToolCatalog,
-    effect_controller: crate::ScopedEffectController<'static>,
+    effect_controller: crate::ScopedEffectController<'run>,
     invocation: crate::RuntimeInvocation,
-) -> crate::RuntimeExecutionContext<'static> {
+) -> crate::RuntimeExecutionContext<'run> {
     TestExecutionContextBuilder::new(ports.into())
         .provider(provider)
         .tool_catalog(tool_catalog)

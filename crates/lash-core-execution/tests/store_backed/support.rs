@@ -157,3 +157,35 @@ pub async fn dispatch_ports() -> DispatchPorts {
         )),
     }
 }
+
+/// The runtime-operation scope [`dispatch_ports`] admits its controller for,
+/// which a hand-built dispatch context's attempts run under. Open the
+/// handler [`double_dispatch_ports`] lends for it.
+pub fn dispatch_scope() -> crate::AdmittedScope {
+    crate::AdmittedScope::runtime_operation("test-runtime-effect-controller")
+}
+
+/// The ports a hand-built dispatch context runs over on the server double:
+/// the controller one handler execution lent, and an ephemeral facade over
+/// the double's attachment port. The context serves its effects through
+/// `RuntimeEffectControllerHandle::borrowed(ports.controller)`, and it
+/// cannot outlive the handler.
+pub struct DoubleDispatchPorts<'h> {
+    pub controller: crate::ScopedEffectController<'h>,
+    pub attachment_store: std::sync::Arc<crate::SessionAttachmentStore>,
+}
+
+/// The twin of [`dispatch_ports`] on the server double: `handler`, opened on
+/// `double` for [`dispatch_scope`], lends the controller. Drop the context,
+/// then close the handler.
+pub fn double_dispatch_ports<'h>(
+    double: &lash_restate_test::RestateTestBackend,
+    handler: &'h lash_restate_test::OpenHandler,
+) -> DoubleDispatchPorts<'h> {
+    DoubleDispatchPorts {
+        controller: handler.scoped(),
+        attachment_store: std::sync::Arc::new(crate::SessionAttachmentStore::ephemeral(
+            double.lash_backend().attachment_store(),
+        )),
+    }
+}

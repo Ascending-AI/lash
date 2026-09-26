@@ -11,6 +11,9 @@ pub enum TestSessionHostMode {
 pub enum TestEffectController<'run> {
     Shared(Arc<dyn crate::RuntimeEffectController>),
     Borrowed(crate::ScopedEffectController<'run>),
+    /// The controller the ports' host lent one execution: it must admit the
+    /// scope the context claims.
+    Lent(crate::ScopedEffectController<'run>),
 }
 
 impl From<Arc<dyn crate::RuntimeEffectController>> for TestEffectController<'_> {
@@ -27,24 +30,48 @@ impl<'run> From<crate::ScopedEffectController<'run>> for TestEffectController<'r
 
 /// The ports an execution context runs over: the effect host that journals
 /// its effects, the store its process executions publish environments to, the
-/// attachment backend its tool bodies write through, and the clock it stamps
-/// from.
+/// attachment backend its tool bodies write through, the clock it stamps
+/// from, and the controller one execution was lent, when the host lends one.
 ///
 /// There is no in-memory default (ADR 0102). A fixture that has a backend
 /// takes [`TestExecutionPorts::of`]; a conformance tier that proves a host
 /// without one names each port it runs the law over.
 #[derive(Clone)]
-pub struct TestExecutionPorts {
+pub struct TestExecutionPorts<'run> {
     pub effect_host: Arc<dyn crate::EffectHost>,
     pub process_env_store: Arc<dyn crate::ProcessExecutionEnvStore>,
     pub attachment_store: Arc<dyn crate::AttachmentStore>,
     pub clock: Arc<dyn crate::Clock>,
+    /// The controller the host lent one execution, which serves the context's
+    /// effects in place of the host's own `scoped_static` controller.
+    ///
+    /// A host whose effects run only inside one execution of its engine (a
+    /// handler) serves nothing from a `'static` controller, so a fixture on
+    /// it opens that execution, lends its controller here, and closes it once
+    /// the context is gone: the borrow keeps the context from outliving it.
+    /// The host still routes the context's group children, as a turn's host
+    /// does beside the controller its handler lent the turn. `None` takes
+    /// the host's own controller.
+    pub lent_controller: Option<crate::ScopedEffectController<'run>>,
 }
 
-impl TestExecutionPorts {
+impl<'run> TestExecutionPorts<'run> {
     /// Every port from one backend, on its clock.
     pub fn of(backend: &crate::Backend) -> Self {
         Self::from(backend)
+    }
+
+    /// Every port from one backend, on its clock, with `controller`, which
+    /// the backend's host lent one execution, serving the context's effects.
+    ///
+    /// The controller's admitted scope is the scope the context claims: the
+    /// default test turn of the builder's session, or the scope of the parent
+    /// invocation the fixture installs. The build refuses a disagreement.
+    pub fn lent(backend: &crate::Backend, controller: crate::ScopedEffectController<'run>) -> Self {
+        Self {
+            lent_controller: Some(controller),
+            ..Self::from(backend)
+        }
     }
 
     /// Ports over a tier's bare host, for a conformance law that proves a
@@ -60,17 +87,19 @@ impl TestExecutionPorts {
             process_env_store,
             attachment_store: Arc::new(crate::attachments::UnavailableAttachmentStore),
             clock: Arc::new(crate::SystemClock),
+            lent_controller: None,
         }
     }
 }
 
-impl From<&crate::Backend> for TestExecutionPorts {
+impl From<&crate::Backend> for TestExecutionPorts<'_> {
     fn from(backend: &crate::Backend) -> Self {
         Self {
             effect_host: backend.effect_host(),
             process_env_store: backend.process_env_store(),
             attachment_store: backend.attachment_store(),
             clock: backend.clock(),
+            lent_controller: None,
         }
     }
 }
@@ -144,18 +173,20 @@ pub struct BuiltTestExecutionContext<'run> {
 }
 
 impl<'run> TestExecutionContextBuilder<'run> {
-    /// A builder over `ports`: the host's own controller serves the context's
-    /// effects and its tool-child host routes the context's group children.
-    pub fn new(ports: TestExecutionPorts) -> Self {
+    /// A builder over `ports`: the controller the host lent them, else the
+    /// host's own, serves the context's effects, and the host's tool-child
+    /// host routes the context's group children.
+    pub fn new(ports: TestExecutionPorts<'run>) -> Self {
         let TestExecutionPorts {
             effect_host,
             process_env_store,
             attachment_store,
             clock,
+            lent_controller,
         } = ports;
         Self::assemble(
             Some(effect_host),
-            None,
+            lent_controller.map(TestEffectController::Lent),
             process_env_store,
             attachment_store,
             clock,
@@ -476,6 +507,16 @@ impl<'run> TestExecutionContextBuilder<'run> {
                 }
             }
             Some(TestEffectController::Borrowed(effect_controller)) => {
+                crate::runtime::RuntimeEffectControllerHandle::borrowed(effect_controller)
+            }
+            Some(TestEffectController::Lent(effect_controller)) => {
+                let claimed = default_admitted();
+                assert_eq!(
+                    effect_controller.admitted_scope().scope(),
+                    claimed.scope(),
+                    "the lent controller admits a scope the context does not claim: open the \
+                     execution for the context's scope"
+                );
                 crate::runtime::RuntimeEffectControllerHandle::borrowed(effect_controller)
             }
         };
