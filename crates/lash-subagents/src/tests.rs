@@ -31,6 +31,11 @@ use serde_json::json;
 
 const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
 
+/// The Restate double's seeded `SeedFact` for the seed probe below (D1 F2):
+/// lash-restate's engine over a SQLite memory store set on an in-process
+/// server double.
+const SEED: u64 = 0xf10_a06;
+
 fn model_spec(
     model: impl Into<String>,
     variant: Option<String>,
@@ -996,7 +1001,7 @@ async fn run_seed_probe_inner_dispatch_with_options(
                 graph_store,
                 capability,
             ));
-            let result = tokio::runtime::Builder::new_current_thread()
+            let result = tokio::runtime::Builder::new_multi_thread()
                 .enable_all()
                 .build()
                 .expect("tokio runtime")
@@ -1028,23 +1033,18 @@ async fn run_seed_probe_inner(
         .map(|store| Arc::clone(store) as Arc<dyn lash_core::facade_support::TraceSink>);
     let trace_context = lash_core::TraceContext::default();
     let language_features = LashlangLanguageFeatures::default().with_label_annotations();
-    // One SQLite memory backend (ADR 0102) holds every port of the probe; the
-    // handle lives for the whole probe, and with it the databases.
-    let backend: lash_core::Backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("open a SQLite memory backend"),
-    )
-    .into();
+    // The probe's every port lives on the Restate double (D1 F2): the engine
+    // drives the spawned SessionTurn processes through the worker installed
+    // below, and the test holds the double to the end.
+    let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("build the Restate server double");
+    let backend: lash_core::Backend = double.lash_backend();
     // The RLM protocol plugin (which compiles + stores the parent turn's process
     // artifacts) and the process engine that the worker runs those artifacts
     // through must share ONE artifact store; otherwise the worker cannot load the
-    // module the parent wrote. Both take it from one memory backend.
-    let artifact_backend = lash_sqlite_store::SqliteBackend::memory()
-        .await
-        .expect("open the artifact backend");
-    let artifact_store =
-        lash_lashlang_runtime::LashlangArtifacts::of_backend(&artifact_backend.clone().into());
+    // module the parent wrote. Both take it from the engine's store set.
+    let artifact_store = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend);
 
     let factories: Vec<Arc<dyn PluginFactory>> = vec![
         Arc::new(
@@ -1055,7 +1055,7 @@ async fn run_seed_probe_inner(
                     .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                     .build()
                     .with_lashlang_language_features(language_features),
-                &artifact_backend.clone().into(),
+                &backend,
             )
             .with_lashlang_execution_trace(execution_sink.clone(), trace_context.clone())
             // This harness assembles the plugin host and process engine by hand
@@ -1121,13 +1121,13 @@ async fn run_seed_probe_inner(
         ..SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     // `agents.spawn(...)` starts a SessionTurn (subagent) process that the
-    // lease-protected worker executes — not directly. A SINGLE native runner over
-    // the same registry + an explicit in-memory store factory runs it (and
-    // provider re-supply reaches the child). One runner suffices even for the
-    // nested case here (`handle = start spawn_child` then `await handle`) because
-    // the worker runs each process on its own task, so the parent's await never
-    // parks the runner away from the child.
-    let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&registry));
+    // engine drives through the worker installed on the double below — not
+    // directly. The engine's own process-work wiring is the runtime's port and
+    // the worker's nested port alike, so the nested case (`handle = start
+    // spawn_child` then `await handle`) reaches a serving worker too.
+    let process_wiring = backend
+        .process_work()
+        .expect("the Restate engine supplies process work");
     let worker = lash_core_worker::DurableProcessWorker::new(
         lash_core_worker::DurableProcessWorkerConfig::from_plugin_factories(
             factories,
@@ -1144,18 +1144,17 @@ async fn run_seed_probe_inner(
                     lash_core::ProcessEngineRegistration::accepting(process_engine),
                 )
             },
-            lash_core_worker::WorkerProcessWork::SelfNative(watched.clone()),
+            lash_core_worker::WorkerProcessWork::External(process_wiring.clone()),
             Arc::new(lash_core::NoSessionWork::new()),
             lash_core::testing::runtime_lease_owner(),
         )
         .with_session_policy(policy.clone()),
     )
-    .expect("valid test native substrate config");
-    let process_port: Arc<dyn lash_core::ProcessWorkSubstrate> =
-        Arc::new(lash_core::NativeProcessWork::new(&watched, worker));
+    .expect("valid test worker config");
+    double.install_process_worker(worker);
     let host = ProcessRuntimeHost::with_ports(
         embedded,
-        lash_core::ProcessWorkWiring::new(watched, process_port),
+        process_wiring,
         Arc::new(lash_core::NoSessionWork::new()),
     );
     let runtime_host = host;
@@ -1184,18 +1183,20 @@ async fn run_seed_probe_inner(
     .await
     .expect("runtime");
 
-    let scoped_effect_controller = backend
-        .effect_host()
-        .scoped_static(lash_core::AdmittedScope::turn("root", "subagent-test-turn"))
-        .expect("test execution scope")
-        .expect("the backend host lends a static controller");
+    // The parent turn's scope is lent by a workflow handler on the double
+    // (D1 F2): its effects journal on the engine the spawned processes run on.
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::turn("root", "subagent-test-turn"))
+        .await
+        .expect("open the turn's handler");
     let turn = Box::pin(runtime.run_turn_assembled(
         input,
         tokio_util::sync::CancellationToken::new(),
-        scoped_effect_controller,
+        handler.scoped(),
     ))
     .await
     .expect("turn");
+    handler.close().await.expect("close the turn's handler");
 
     let prompt = captured_child_prompt.lock_recover().clone();
     SeedProbe {
@@ -1203,7 +1204,7 @@ async fn run_seed_probe_inner(
         child_prompt: prompt,
         child_execution_count,
         process_registry: registry,
-        _backend: backend,
+        _double: double,
     }
 }
 
@@ -1214,8 +1215,9 @@ struct SeedProbe {
     child_prompt: Option<String>,
     child_execution_count: Arc<AtomicUsize>,
     process_registry: Arc<dyn lash_core::ProcessRegistry>,
-    /// Holds the probe's memory backend, whose databases the registry reads.
-    _backend: lash_core::Backend,
+    /// Holds the probe's Restate double, whose engine and stores the
+    /// spawned processes ran on.
+    _double: lash_restate_test::RestateTestBackend,
 }
 
 impl SeedProbe {

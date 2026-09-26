@@ -7,6 +7,10 @@ use serde_json::{Value, json};
 
 use crate::{GoogleOAuthClient, GoogleOAuthProvider};
 
+/// The Restate double's seeded `SeedFact` (D1 F1): lash-restate's engine over a
+/// SQLite memory store set on an in-process server double.
+const SEED: u64 = 0xf10_a03;
+
 #[derive(Debug)]
 struct ScriptedSseTransport {
     bodies: std::sync::Mutex<VecDeque<String>>,
@@ -115,13 +119,10 @@ async fn google_streaming_runtime_preserves_tool_interleaved_reasoning_boundarie
     })
     .with_stream_termination(StreamTermination::RequireTerminalEvidence)
     .with_transport(transport);
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("memory backend"),
-    );
-    let core = lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
-        .without_queued_work()
+    let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("build the Restate server double");
+    let core = lash::LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
         .provider(ProviderHandle::new(provider.into_components()))
         .model(
             lash::ModelSpec::builder("gemini-test")
@@ -209,13 +210,10 @@ async fn google_streaming_runtime_does_not_republish_reasoning_after_signature_o
     })
     .with_stream_termination(StreamTermination::RequireTerminalEvidence)
     .with_transport(transport);
-    let backend = Arc::new(
-        lash_sqlite_store::SqliteBackend::memory()
-            .await
-            .expect("memory backend"),
-    );
-    let core = lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)
-        .without_queued_work()
+    let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("build the Restate server double");
+    let core = lash::LashCore::standard_builder(double.lash_backend(), lash::TurnBudget::Unbounded)
         .provider(ProviderHandle::new(provider.into_components()))
         .model(
             lash::ModelSpec::builder("gemini-test")

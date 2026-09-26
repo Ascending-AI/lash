@@ -20,6 +20,11 @@ use lash_protocol_standard::StandardDriver;
 /// this actor.
 const STANDARD_TRANSCRIPT_ACTOR: &str = "standard";
 
+/// The Restate double's seeded `SeedFact` for the runtime-level scenario
+/// below (D1 F2): lash-restate's engine over a SQLite memory store set on an
+/// in-process server double.
+const SEED: u64 = 0xf10_a05;
+
 #[derive(Clone, Copy, Debug)]
 struct StandardProtocolScenarioCoverage {
     test_name: &'static str,
@@ -848,12 +853,16 @@ impl lash_core::ToolProvider for StandardIntentProvider {
     }
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_feedback() {
-    let backend = lash_sqlite_store::SqliteBackend::memory()
+    // The turn's effects run on the Restate double (D1 F2): the intents the
+    // tool returns dispatch through the engine's process work wiring, and the
+    // scope is lent by a workflow handler on the server double.
+    let double = lash_restate_test::backend(SEED, lash_restate_test::ServerConfig::default())
         .await
-        .expect("open a SQLite memory backend");
-    let registry = lash_core::Backend::from(backend.clone()).process_registry();
+        .expect("build the Restate server double");
+    let backend = double.lash_backend();
+    let registry = backend.process_registry();
     let standard_intent_target_id = registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(
@@ -944,12 +953,32 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
             .expect("Standard scenario model"),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
-    let watched = lash_core::facade_support::watch_process_registry(registry);
-    let registry = Arc::clone(watched.registry());
+    // The cancel intent executes inside the engine's process workflow, which
+    // reaches the deployment's process-worker slot: install a durable worker
+    // over this backend so the cancellation has a serving worker.
+    let process_wiring = backend
+        .process_work()
+        .expect("the Restate engine supplies process work");
+    let worker = lash_core_worker::DurableProcessWorker::new(
+        lash_core_worker::DurableProcessWorkerConfig::from_plugin_factories(
+            factories.clone(),
+            lash_core::facade_support::RuntimeHostConfig::new(
+                backend.clone(),
+                lash_core::CommitBudget::bounded(1024 * 1024, 512),
+                lash_core::QueuedWorkBatchingConfig::new(1),
+            ),
+            lash_core_worker::WorkerProcessWork::External(process_wiring.clone()),
+            Arc::new(lash_core::NoSessionWork::new()),
+            lash_core::testing::runtime_lease_owner(),
+        )
+        .with_session_policy(policy.clone()),
+    )
+    .expect("valid test worker config");
+    double.install_process_worker(worker);
     let mut runtime = Box::pin(
         lash_core::facade_support::LashRuntime::builder(
             lash_core::facade_support::RuntimeHostConfig::new(
-                Arc::new(backend).into(),
+                backend.clone(),
                 lash_core::CommitBudget::bounded(1024 * 1024, 512),
                 lash_core::QueuedWorkBatchingConfig::new(1),
             ),
@@ -961,31 +990,32 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
         .with_provider_resolver(Arc::new(
             lash_core::facade_support::SingleProviderResolver::new(provider.into_handle()),
         ))
-        .with_process_work(lash_core::ProcessWorkWiring::new(
-            watched,
-            Arc::new(lash_core::NativeProcessWork::for_registry(registry)),
-        ))
+        .with_process_work(process_wiring)
         .with_queued_work(Arc::new(lash_core::NoSessionWork::new()))
         .build(),
     )
     .await
     .expect("build Standard intent runtime");
+    // ADR 0099: the turn's scope must come from the runtime's own effect
+    // host — the driver publishes the live opener and the child resolver
+    // there, so a foreign controller leaves group children unroutable. On the
+    // double that scope is lent by a workflow handler.
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::turn(
+            SessionId::from("standard-protocol-scenario"),
+            TurnId::from("standard-protocol-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             lash_core::TurnInput::text("run durable follow-on work"),
             tokio_util::sync::CancellationToken::new(),
-            // ADR 0099: the turn's scope must come from the runtime's own
-            // effect host — the driver publishes the live opener and the
-            // child resolver there, so a foreign controller leaves group
-            // children unroutable.
-            lash_core::testing::runtime_helpers::host_turn_scope(
-                &runtime.host.core,
-                &SessionId::from("standard-protocol-scenario"),
-                &TurnId::from("standard-protocol-turn"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("run Standard intent turn");
+    handler.close().await.expect("close the turn's handler");
     assert_eq!(turn.assistant_output.safe_text, "intent feedback observed");
     let requests = requests.lock().expect("read Standard requests");
     assert_eq!(requests.len(), 2);

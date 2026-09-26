@@ -9369,7 +9369,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-provider-google:block_identity__test__fv_7f5e0378",
+      "label": "//crates/lash-provider-google:block_identity__test__fv_e9111ead",
       "package": "lash-internal-provider-google"
     },
     {
@@ -9378,7 +9378,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-provider-google:charge_safety__test__fv_7f5e0378",
+      "label": "//crates/lash-provider-google:charge_safety__test__fv_e9111ead",
       "package": "lash-internal-provider-google"
     },
     {
@@ -9434,7 +9434,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-provider-google:lash-provider-google__unit_test__fv_7f5e0378",
+      "label": "//crates/lash-provider-google:lash-provider-google__unit_test__fv_e9111ead",
       "package": "lash-internal-provider-google"
     },
     {
@@ -9443,7 +9443,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-provider-google:property__test__fv_7f5e0378",
+      "label": "//crates/lash-provider-google:property__test__fv_e9111ead",
       "package": "lash-internal-provider-google"
     },
     {
@@ -9452,7 +9452,7 @@
         "testing"
       ],
       "kind": "test",
-      "label": "//crates/lash-provider-openai:codex_websocket_runtime__test__fv_f7da9c6d",
+      "label": "//crates/lash-provider-openai:codex_websocket_runtime__test__fv_5c48083e",
       "package": "lash-internal-provider-openai"
     },
     {
@@ -9566,7 +9566,7 @@
         "testing"
       ],
       "kind": "unit-test",
-      "label": "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_f7da9c6d",
+      "label": "//crates/lash-provider-openai:lash-provider-openai__unit_test__fv_5c48083e",
       "package": "lash-internal-provider-openai"
     },
     {
@@ -10697,6 +10697,18 @@
     {
       "features": [],
       "kind": "lib",
+      "label": "//crates/lash-restate-test:lash-restate-test__fv_fd9ff782",
+      "package": "lash-internal-restate-test"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-restate-test:lash-restate-test__fv_fe3c2baf",
+      "package": "lash-internal-restate-test"
+    },
+    {
+      "features": [],
+      "kind": "lib",
       "label": "//crates/lash-restate:lash-restate",
       "package": "lash-internal-restate"
     },
@@ -10818,6 +10830,18 @@
       "features": [],
       "kind": "lib",
       "label": "//crates/lash-restate:lash-restate__fv_85e93001",
+      "package": "lash-internal-restate"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-restate:lash-restate__fv_ec2d4413",
+      "package": "lash-internal-restate"
+    },
+    {
+      "features": [],
+      "kind": "lib",
+      "label": "//crates/lash-restate:lash-restate__fv_ec2d4413",
       "package": "lash-internal-restate"
     },
     {
@@ -17822,8 +17846,11 @@
       "dependencies": [
         "async-trait",
         "insta",
+        "lash-internal-conformance",
         "lash-internal-core",
+        "lash-internal-core-worker",
         "lash-internal-plugin-process-controls",
+        "lash-internal-restate-test",
         "lash-internal-sansio",
         "lash-internal-sqlite-store",
         "lash-internal-tool-support",
@@ -17987,6 +18014,7 @@
         "lash-internal-llm-transport",
         "lash-internal-provider-auth",
         "lash-internal-provider-google",
+        "lash-internal-restate-test",
         "lash-internal-sansio",
         "lash-internal-sqlite-store",
         "lash-runtime",
@@ -18060,6 +18088,7 @@
         "lash-internal-protocol-rlm",
         "lash-internal-provider-auth",
         "lash-internal-provider-openai",
+        "lash-internal-restate-test",
         "lash-internal-sansio",
         "lash-internal-sqlite-store",
         "lash-internal-tool-support",
@@ -18829,6 +18858,7 @@
         "lash-internal-lashlang-runtime",
         "lash-internal-plugin-process-controls",
         "lash-internal-protocol-rlm",
+        "lash-internal-restate-test",
         "lash-internal-rlm-types",
         "lash-internal-sansio",
         "lash-internal-sqlite-store",

@@ -5,7 +5,7 @@ use lash_core::{
     Message, MessageRole, ModelSpec, Part, RuntimeCommit, RuntimePersistence, RuntimeSessionState,
     SessionCommitStore, SessionPolicy, TokenUsage, facade_support::LashRuntime,
 };
-use lash_sqlite_store::SqliteBackend;
+use lash_sqlite_store::SqliteStoreSet;
 
 #[expect(
     clippy::expect_used,
@@ -29,8 +29,10 @@ fn text_message(id: &str, role: MessageRole, content: &str) -> Message {
 
 #[tokio::test]
 async fn embedded_runtime_builder_loads_state_from_store() {
-    let backend = SqliteBackend::memory().await.expect("memory backend");
-    let store = Arc::new(backend.open_store().await.expect("store"));
+    // Storage only (D1 F3): the test reaches the store port directly and the
+    // runtime's backend is the recording double over the same store set.
+    let stores = Arc::new(SqliteStoreSet::memory().await.expect("memory store set"));
+    let store = Arc::new(stores.open_store().await.expect("store"));
     let mut state = RuntimeSessionState {
         session_id: SessionId::from("stored-session"),
         policy: SessionPolicy {
@@ -64,7 +66,7 @@ async fn embedded_runtime_builder_loads_state_from_store() {
     let runtime = Box::pin(
         LashRuntime::builder(
             lash_core::facade_support::RuntimeHostConfig::new(
-                Arc::new(backend).into(),
+                lash_conformance::recording_backend_over(stores.clone()),
                 lash_core::CommitBudget::bounded(1024 * 1024, 512),
                 lash_core::QueuedWorkBatchingConfig::new(1),
             ),
@@ -94,8 +96,10 @@ async fn embedded_runtime_builder_loads_state_from_store() {
 
 #[tokio::test]
 async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() {
-    let backend = SqliteBackend::memory().await.expect("memory backend");
-    let store = Arc::new(backend.open_store().await.expect("store"));
+    // Storage only (D1 F3): the test reaches the store port directly and the
+    // runtime's backend is the recording double over the same store set.
+    let stores = Arc::new(SqliteStoreSet::memory().await.expect("memory store set"));
+    let store = Arc::new(stores.open_store().await.expect("store"));
     let state = RuntimeSessionState {
         session_id: SessionId::from("alpha"),
         policy: SessionPolicy {
@@ -119,7 +123,7 @@ async fn embedded_runtime_builder_rejects_store_bound_to_different_session_id() 
     let err = match Box::pin(
         LashRuntime::builder(
             lash_core::facade_support::RuntimeHostConfig::new(
-                Arc::new(backend).into(),
+                lash_conformance::recording_backend_over(stores.clone()),
                 lash_core::CommitBudget::bounded(1024 * 1024, 512),
                 lash_core::QueuedWorkBatchingConfig::new(1),
             ),

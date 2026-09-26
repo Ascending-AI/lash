@@ -117,11 +117,10 @@ async fn persisted_provider_response(
     let provider_handle = lash_core::facade_support::ProviderHandle::new(
         lash_core::facade_support::ProviderComponents::new(Box::new(provider)),
     );
-    // The turn's scope comes from the runtime's own effect host: group opens
-    // issued by the turn and the tool-child resolver `RuntimeHostConfig::new`
-    // installs meet on that host.
-    let (backend, mut host) =
-        super::tests::layered_test_host(Arc::new(CountingEffectController::default())).await;
+    // The turn's scope is lent by a handler on the Restate double (D1 F2):
+    // group opens issued by the turn and the tool-child resolver
+    // `RuntimeHostConfig::new` installs meet on that scope.
+    let (double, mut host) = super::tests::test_host().await;
     host.providers.provider_resolver = Arc::new(
         lash_core::facade_support::SingleProviderResolver::new(provider_handle),
     );
@@ -137,7 +136,9 @@ async fn persisted_provider_response(
         // failing. The budget is well above the iterations the scenario needs.
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::bounded(8))
     };
-    let scoped_controller = super::tests::test_turn_scope(&backend, session_id);
+    let handler = super::tests::open_turn_handler(&double, session_id).await;
+    let scoped_controller =
+        super::tests::layered_scope(&handler, Arc::new(CountingEffectController::default()));
     let factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![
         Arc::new(StandardProtocolPluginFactory::new()),
         Arc::new(lash_core::plugin::StaticPluginFactory::new(
@@ -171,6 +172,7 @@ async fn persisted_provider_response(
         )
         .await
         .expect("turn");
+    handler.close().await.expect("close the turn's handler");
     let read_view = turn.state.read_view().expect("turn read view");
     let parts = read_view
         .messages()
