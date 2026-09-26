@@ -15,5 +15,5 @@
 # (`Call[14]`: `x-lash-replay-key` differs between executions), so the child
 # is refused on replay and its rank's settlement never arrives.
 "tests::conformance_and_poison::the_oracle_and_the_budget_plugin_coexist" = "the child's follow-on call replay key diverges on replay; rank 0 never settles (FIG-3672)"
-"tests::conformance_and_poison::a_same_name_process_incarnation_is_not_the_recorded_opener" = "the child's follow-on call replay key diverges on replay; rank 3 never settles (FIG-3672)"
+"tests::conformance_and_poison::another_process_is_not_the_recorded_opener" = "the child's follow-on call replay key diverges on replay; rank 3 never settles (FIG-3672)"
 "tests::conformance_and_poison::tool_children_run_through_the_invocation_driver" = "the child's follow-on call replay key diverges on replay; rank 1 never settles (FIG-3672)"

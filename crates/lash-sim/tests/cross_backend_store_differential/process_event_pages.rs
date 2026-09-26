@@ -209,19 +209,19 @@ pub(super) async fn compare_bounded_process_event_pages(
             ),
         ))
     };
-    sqlite
+    let sqlite_effect_record = sqlite
         .register_process(effect_registration())
         .await
         .expect("register SQLite effect process");
-    postgres_registry
+    let postgres_effect_record = postgres_registry
         .register_process(effect_registration())
         .await
         .expect("register PostgreSQL effect process");
     assert_eq!(
-        sqlite_record.id, postgres_record.id,
+        sqlite_effect_record.id, postgres_effect_record.id,
         "the paired mints name both effect rows alike"
     );
-    let effect_id = sqlite_record.id.clone();
+    let effect_id = sqlite_effect_record.id.clone();
     let owner =
         lash_core::LeaseOwnerIdentity::opaque("effect-differential", "effect-differential:1");
     let sqlite_lease = sqlite
