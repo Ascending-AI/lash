@@ -618,7 +618,7 @@ class BazelTestContractTests(unittest.TestCase):
         for line in (
             "build --grpc_keepalive_time=30s",
             "build --remote_timeout=600",
-            "startup --max_idle_secs=600",
+            "startup --max_idle_secs=180",
             "startup --host_jvm_args=-XX:G1PeriodicGCInterval=60000",
             "build:shared --remote_download_outputs=minimal",
             "test:shared --remote_download_regex=.*/testlogs/.*/"
