@@ -78,7 +78,9 @@ struct ExpandMigration {
 /// session head carries, and becomes 135 (FIG-3542); the third adds
 /// `lash_fleet_format`, the deployment's fleet-format row, and becomes 136
 /// (FIG-3796); the fourth restamps 136 to 137 on a vocabulary-only change
-/// (FIG-3814). Newer schema generations append to this list; steps are never
+/// (FIG-3814); the fifth adds `lash_session_meta.drive_root_start`, the
+/// admitted root's start marker, and becomes 138 (FIG-3815). Newer schema
+/// generations append to this list; steps are never
 /// removed or edited — the ledger names them permanently.
 static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
     ExpandMigration {
@@ -104,6 +106,12 @@ static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
         from_version: 136,
         to_version: 137,
         statements: "-- component 137 (FIG-3814): vocabulary-only change; nothing to apply.",
+    },
+    ExpandMigration {
+        id: "0138-drive-root-start",
+        from_version: 137,
+        to_version: 138,
+        statements: "ALTER TABLE lash_session_meta ADD COLUMN IF NOT EXISTS drive_root_start TEXT",
     },
 ];
 

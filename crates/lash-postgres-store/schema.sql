@@ -1,4 +1,4 @@
--- lash-postgres-store schema, component version 137.
+-- lash-postgres-store schema, component version 138.
 --
 -- Generated artifact. These bytes are exactly the DDL `lash migrate`
 -- executes to provision a database; `PostgresStorage::schema_ddl()` returns
@@ -175,6 +175,7 @@ CREATE TABLE IF NOT EXISTS lash_session_meta (
     source_node_id TEXT,
     drive_epoch BIGINT NOT NULL DEFAULT 0,
     drive_admission_id TEXT,
+    drive_root_start TEXT,
     admission_base_checkpoint_ref TEXT,
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
     CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
@@ -860,7 +861,7 @@ CREATE TABLE IF NOT EXISTS lash_catalog_identity (
 -- transactional clock rows, and the catalog identity. `gen_random_uuid()` is
 -- core PostgreSQL, so the identity needs no extension.
 INSERT INTO lash_schema_versions (component, version)
-VALUES ('lash-postgres-store', 137)
+VALUES ('lash-postgres-store', 138)
 ON CONFLICT (component) DO NOTHING;
 
 INSERT INTO lash_process_change_clock (

@@ -15,7 +15,7 @@ use crate::{
     AwaitEventKey, ExecutionScope, Resolution, SessionId, SessionStateVersionRefusal,
     TurnCancellationEvidence, TurnId,
 };
-pub use lash_core_store::store::{AdmissionId, DriveFence};
+pub use lash_core_store::store::{AdmissionId, DriveFence, RootStartNonce};
 
 /// Unfenced admission. Each operation is a recorded step.
 pub trait DriveAdmission: EngineContext {

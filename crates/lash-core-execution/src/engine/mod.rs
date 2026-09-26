@@ -36,7 +36,7 @@ pub mod testing;
 pub use admission::{
     AdmissionId, AdmitRequest, AdmitVerdict, Admitted, AdmittedWork, CancelGate, ChildOutcome,
     ChildStart, DriveAdmission, DriveContext, DriveFence, DriveRequestId, FenceSource, Fenced,
-    InheritVerdict, InheritedAuthority, ParkRef, SealVerdict, TurnCancelSignal,
+    InheritVerdict, InheritedAuthority, ParkRef, RootStartNonce, SealVerdict, TurnCancelSignal,
 };
 pub use commands::{
     AdmissionCommand, AdmissionExecutors, AdmissionResult, AdmissionStepContext, CooperativeCancel,
@@ -60,7 +60,7 @@ pub use contracts::{
 };
 pub use drive::{
     DriveAbort, DriveOutcome, DriveStop, RootOutcome, admission_body, drive_admission_replay_key,
-    drive_admission_scope, drive_root_scope, drive_seal_replay_key,
+    drive_admission_scope, drive_root_scope, drive_root_start_replay_key, drive_seal_replay_key,
 };
 pub use groups::{DriveGroups, GroupClosed, GroupKey};
 

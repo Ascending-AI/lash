@@ -364,7 +364,9 @@ pub mod persistence {
     }
     /// The drive epoch a session drive's seal raises (FIG-3600): one segment
     /// of [`RuntimePersistence`], implemented by every store a runtime drives.
-    pub use lash_core::store::{AdmissionId, DriveEpochSeal, DriveEpochStore, StoredDriveEpoch};
+    pub use lash_core::store::{
+        AdmissionId, DriveEpochSeal, DriveEpochStore, RootStartNonce, StoredDriveEpoch,
+    };
     pub use lash_core::store::{
         AppendRequestIdentity, BeginQueuedRun, CheckpointComponentDescriptor, GraphAppend,
         HydratedCheckpointComponent, HydratedSessionCheckpoint, OperationId,

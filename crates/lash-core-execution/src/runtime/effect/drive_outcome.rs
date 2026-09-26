@@ -17,6 +17,18 @@ impl RuntimeEffectOutcome {
         }
     }
 
+    pub fn into_draw_root_start(
+        self,
+    ) -> Result<crate::engine::RootStartNonce, RuntimeEffectControllerError> {
+        match self {
+            Self::DrawRootStart { root_start } => Ok(root_start),
+            other => Err(RuntimeEffectControllerError::wrong_outcome(
+                RuntimeEffectKind::DrawRootStart,
+                other.kind(),
+            )),
+        }
+    }
+
     pub fn into_seal_drive_admission(
         self,
     ) -> Result<crate::engine::SealVerdict, RuntimeEffectControllerError> {

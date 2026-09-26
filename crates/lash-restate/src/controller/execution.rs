@@ -165,6 +165,7 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::Trigger { .. }
         | RuntimeEffectCommand::LanguageRuntimeValue { .. }
         | RuntimeEffectCommand::AcceptTurnInput { .. }
+        | RuntimeEffectCommand::DrawRootStart { .. }
         // A root's session config: the resident config it runs under,
         // captured at the funnel; nothing it does can fault (FIG-3600 S6).
         | RuntimeEffectCommand::ResolveTurnConfig { .. }

@@ -253,10 +253,13 @@ fn queued_root(admission: &AdmissionId) -> TurnId {
 
 /// The first execution of one `SealDriveAdmission` step: the drive-epoch
 /// compare-and-set, keyed by the admission nonce, so a retried body answers
-/// the fence it already raised (ADR 0105 L-S3, L-S4).
+/// the fence it already raised (ADR 0105 L-S3, L-S4). It stores the start
+/// marker the root's execution drew, so another execution of the same
+/// admission is answered `SubstrateLost` (L-S8).
 pub(in crate::runtime) struct SealDriveRunner {
     pub(in crate::runtime) store: Arc<dyn crate::store::RuntimePersistence>,
     pub(in crate::runtime) admitted: Admitted,
+    pub(in crate::runtime) root_start: crate::engine::RootStartNonce,
 }
 
 #[async_trait::async_trait]
@@ -280,12 +283,16 @@ impl RuntimeEffectLocalRunner for SealDriveRunner {
                 self.admitted.session(),
                 self.admitted.admission(),
                 self.admitted.observed_epoch(),
+                &self.root_start,
             )
             .await
             .map_err(|error| store_fault("drive epoch seal", error))?;
         let verdict = match seal {
             DriveEpochSeal::Sealed(fence) => SealVerdict::Sealed(fence),
             DriveEpochSeal::Superseded { epoch } => SealVerdict::Superseded { epoch },
+            DriveEpochSeal::ExecutionLost => SealVerdict::SubstrateLost {
+                root: self.admitted.root().clone(),
+            },
         };
         Ok(RuntimeEffectOutcome::SealDriveAdmission {
             verdict: Box::new(verdict),

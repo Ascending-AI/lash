@@ -29,8 +29,8 @@ use lash_core_execution::store::{
     IngressClaim, IngressClaimPolicy, IngressEnqueueOutcome, IngressItemDraft, IngressItemRead,
     IngressLane, IngressReadStatus, IngressReclaimOutcome, IngressSuffixWithdrawOutcome,
     IngressTerminalCause, IngressWithdrawOutcome, IngressWithdrawReceipt, IngressWithdrawSelector,
-    IngressWithdrawTarget, SessionIngressStore, StoredDriveEpoch, decide_drive_epoch_seal,
-    require_current_drive_fence,
+    IngressWithdrawTarget, RootStartNonce, SessionIngressStore, StoredDriveEpoch,
+    decide_drive_epoch_seal, require_current_drive_fence,
 };
 #[cfg(any(test, feature = "testing"))]
 use lash_core_execution::store::{
@@ -187,9 +187,11 @@ async fn drive_epoch_tx(
         })?;
     let epoch: i64 = row.try_get(0).map_err(store_sqlx_error)?;
     let admission: Option<String> = row.try_get(1).map_err(store_sqlx_error)?;
+    let root_start: Option<String> = row.try_get(2).map_err(store_sqlx_error)?;
     Ok(StoredDriveEpoch {
         epoch: u64_from_sql("SessionMeta", "drive_epoch", epoch)?,
         admission: admission.map(AdmissionId::new),
+        root_start: root_start.map(RootStartNonce::new),
     })
 }
 
@@ -1021,11 +1023,18 @@ impl DriveEpochStore for PostgresSessionStore {
         session_id: &SessionId,
         admission: &AdmissionId,
         observed_epoch: u64,
+        root_start: &RootStartNonce,
     ) -> Result<DriveEpochSeal, StoreError> {
         let mut connection = acquire_runtime_connection(&self.pool).await?;
         let mut tx = self.begin_ingress_tx(&mut connection, session_id).await?;
         let stored = drive_epoch_tx(&mut tx, session_id).await?;
-        let seal = match decide_drive_epoch_seal(session_id, &stored, admission, observed_epoch) {
+        let seal = match decide_drive_epoch_seal(
+            session_id,
+            &stored,
+            admission,
+            observed_epoch,
+            root_start,
+        ) {
             DriveEpochSealDecision::Answer(seal) => seal,
             DriveEpochSealDecision::Raise { next } => {
                 let changed = sqlx::query(session_sql().meta.seal_drive_epoch.sql())
@@ -1033,6 +1042,7 @@ impl DriveEpochStore for PostgresSessionStore {
                     .bind(sql_counter_value("drive_epoch", observed_epoch)?)
                     .bind(sql_counter_value("drive_epoch", next)?)
                     .bind(admission.as_str())
+                    .bind(root_start.as_str())
                     .execute(&mut *tx)
                     .await
                     .map_err(store_sqlx_error)?

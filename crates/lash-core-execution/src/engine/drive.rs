@@ -47,6 +47,13 @@ pub fn drive_admission_replay_key(request: &DriveRequestId, ordinal: u32) -> Str
     format!("drive-admission:{}#{ordinal}", request.as_str())
 }
 
+/// The replay key of the start marker an execution of an admitted root draws
+/// before its seal, inside [`drive_root_scope`] (ADR 0105 L-S8).
+#[must_use]
+pub fn drive_root_start_replay_key(admitted: &Admitted) -> String {
+    format!("drive-root-start:{}", admitted.admission().as_str())
+}
+
 /// The replay key of an admitted root's seal, inside [`drive_root_scope`].
 #[must_use]
 pub fn drive_seal_replay_key(admitted: &Admitted) -> String {

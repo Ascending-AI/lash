@@ -85,7 +85,7 @@ pub use commit_identity::{
 pub use config_command_plan::{ConfigCommandPlan, plan_config_commands};
 pub use drive_fence::{
     AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence,
-    InMemoryDriveEpochs, SessionHeadRef, StoredDriveEpoch, decide_drive_epoch_seal,
+    InMemoryDriveEpochs, RootStartNonce, SessionHeadRef, StoredDriveEpoch, decide_drive_epoch_seal,
     require_current_drive_fence,
 };
 pub use error::{SessionExecutionLeaseRenewalInstallMismatch, StoreError};

@@ -23,7 +23,7 @@ use crate::{
 
 impl LashRuntime {
     /// Claim the input prefix `admitted` names and drive it as the root's
-    /// logical turn.
+    /// logical turn, holding the session lane the root took before its seal.
     pub(super) async fn run_input_root(
         &mut self,
         root_controller: &ScopedEffectController<'_>,
@@ -31,15 +31,12 @@ impl LashRuntime {
         head: &crate::InputId,
         sinks: &DriveSinks<'_>,
         live: Option<(&crate::InputId, &TurnInput)>,
+        lease: Option<crate::runtime::SessionExecutionLeaseGuard>,
     ) -> Result<RootRun, DriveAbort> {
         use futures_util::FutureExt;
 
-        let root = admitted.root().clone();
         let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
-        let mut lease = self
-            .claim_session_execution_lease()
-            .await
-            .map_err(|error| drive_abort(Some(&root), error))?;
+        let mut lease = lease;
         // Keep the guard outside the unwinding body: a panicking root
         // releases its lane before the panic resumes, so an immediate
         // successor is not refused as busy.
@@ -363,7 +360,10 @@ impl LashRuntime {
         })
     }
 
-    async fn release_root_lease(&self, lease: Option<&crate::runtime::SessionExecutionLeaseGuard>) {
+    pub(super) async fn release_root_lease(
+        &self,
+        lease: Option<&crate::runtime::SessionExecutionLeaseGuard>,
+    ) {
         if let Some(lease) = lease
             && let Err(error) = lease.release_if_live().await
         {

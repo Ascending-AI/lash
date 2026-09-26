@@ -265,6 +265,7 @@ CREATE TABLE IF NOT EXISTS session_meta (
     source_node_id                    TEXT,
     drive_epoch                       INTEGER NOT NULL DEFAULT 0,
     drive_admission_id                TEXT,
+    drive_root_start                  TEXT,
     admission_base_checkpoint_ref     TEXT,
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
     CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
@@ -956,7 +957,12 @@ CREATE TABLE IF NOT EXISTS fleet_format (
 /// `engine_object_state_format_unsupported`, with the effect-group protocol's
 /// exact-version refusal. No relation changes; a pre-96 database is rejected at
 /// open and recreated; it is not migrated.
-pub(crate) const SCHEMA_VERSION: i32 = 96;
+/// Bumped to 97 for FIG-3815: `session_meta` gains `drive_root_start`, the
+/// start marker of the execution of an admitted root that sealed the
+/// session's current admission (ADR 0105 L-S8); a later seal of the same
+/// admission by another execution is refused. A pre-97 database is rejected
+/// at open and recreated; it is not migrated.
+pub(crate) const SCHEMA_VERSION: i32 = 97;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

@@ -563,7 +563,13 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // vocabulary with the effect-group protocol's exact-version refusal. No
 // relation changes: `lash migrate` restamps a component-136 catalog through
 // the expand step of the same name.
-const SCHEMA_VERSION: i32 = 137;
+//
+// Version 138 (FIG-3815) adds `lash_session_meta.drive_root_start`, the start
+// marker of the execution of an admitted root that sealed the session's
+// current admission (ADR 0105 L-S8): a later seal of the same admission by
+// another execution is refused. `lash migrate` carries a component-137
+// catalog forward by adding the nullable column and restamping.
+const SCHEMA_VERSION: i32 = 138;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
 ///

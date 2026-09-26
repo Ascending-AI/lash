@@ -111,19 +111,22 @@ pub const BATCH_DELETED_EVIDENCE_COLUMNS: &str =
                 COALESCE(meta.relation_kind, 'root'), meta.parent_session_id";
 
 /// A session's drive epoch and the admission that last raised it (ADR 0105
-/// §2, B3): the fence every claim, reclaim and settlement checks.
-pub const DRIVE_EPOCH_COLUMNS: &str = "drive_epoch, drive_admission_id";
+/// §2, B3): the fence every claim, reclaim and settlement checks. The start
+/// marker of the execution that sealed the admission rides with it (L-S8).
+pub const DRIVE_EPOCH_COLUMNS: &str = "drive_epoch, drive_admission_id, drive_root_start";
 
 crate::statements! {
     /// `session_meta` statements both backends issue verbatim.
     pub struct SessionMetaStatements @ "session_meta" {
-        /// Session `?1`'s drive epoch and the admission that last raised it.
-        select_drive_epoch = "SELECT drive_epoch, drive_admission_id FROM session_meta WHERE session_id = ?1";
+        /// Session `?1`'s drive epoch, the admission that last raised it, and
+        /// the start marker of the execution that sealed that admission.
+        select_drive_epoch = "SELECT drive_epoch, drive_admission_id, drive_root_start FROM session_meta WHERE session_id = ?1";
 
         /// The seal's compare-and-set: raise session `?1`'s drive epoch from
-        /// `?2` to `?3` under admission `?4`. Zero rows means the epoch moved.
+        /// `?2` to `?3` under admission `?4`, sealed by the execution whose
+        /// start marker is `?5`. Zero rows means the epoch moved.
         seal_drive_epoch = "UPDATE session_meta
-             SET drive_epoch = ?3, drive_admission_id = ?4
+             SET drive_epoch = ?3, drive_admission_id = ?4, drive_root_start = ?5
              WHERE session_id = ?1 AND drive_epoch = ?2";
 
         /// Retain checkpoint `?2` (or nothing) as the base session `?1`'s

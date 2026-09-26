@@ -648,6 +648,7 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             | RuntimeEffectCommand::AcceptTurnInput { .. }
             | RuntimeEffectCommand::ClaimAcceptedTurnInput { .. }
             | RuntimeEffectCommand::AdmitDrive { .. }
+            | RuntimeEffectCommand::DrawRootStart { .. }
             | RuntimeEffectCommand::SealDriveAdmission { .. }
             | RuntimeEffectCommand::ResolveTurnConfig { .. }) => {
                 local_executor

@@ -26,8 +26,8 @@ use lash_core_execution::store::{
     IngressClaim, IngressClaimPolicy, IngressEnqueueOutcome, IngressItemDraft, IngressItemRead,
     IngressLane, IngressReadStatus, IngressReclaimOutcome, IngressState,
     IngressSuffixWithdrawOutcome, IngressTerminalCause, IngressWithdrawOutcome,
-    IngressWithdrawReceipt, IngressWithdrawSelector, IngressWithdrawTarget, SessionIngressStore,
-    StoredDriveEpoch, decide_drive_epoch_seal, require_current_drive_fence,
+    IngressWithdrawReceipt, IngressWithdrawSelector, IngressWithdrawTarget, RootStartNonce,
+    SessionIngressStore, StoredDriveEpoch, decide_drive_epoch_seal, require_current_drive_fence,
 };
 #[cfg(any(test, feature = "testing"))]
 use lash_core_execution::store::{
@@ -152,7 +152,13 @@ pub(crate) fn drive_epoch_conn(
         .query_row(
             session_sql().meta.select_drive_epoch.sql(),
             params![session_id.as_str()],
-            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, Option<String>>(1)?)),
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, Option<String>>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            },
         )
         .optional()
         .map_err(sqlite_error)?
@@ -163,6 +169,7 @@ pub(crate) fn drive_epoch_conn(
         epoch: u64::try_from(row.0)
             .map_err(|_| stored_data_corrupt("SessionMeta", "drive_epoch must be non-negative"))?,
         admission: row.1.map(AdmissionId::new),
+        root_start: row.2.map(RootStartNonce::new),
     })
 }
 
@@ -1015,16 +1022,23 @@ impl DriveEpochStore for Store {
         session_id: &SessionId,
         admission: &AdmissionId,
         observed_epoch: u64,
+        root_start: &RootStartNonce,
     ) -> Result<DriveEpochSeal, StoreError> {
         let session_id = session_id.clone();
         let admission = admission.clone();
+        let root_start = root_start.clone();
         self.conn
             .write_flow(move |tx| {
                 commit((|| {
                     ensure_session_not_deleted_conn(tx, &session_id)?;
                     let stored = drive_epoch_conn(tx, &session_id)?;
-                    match decide_drive_epoch_seal(&session_id, &stored, &admission, observed_epoch)
-                    {
+                    match decide_drive_epoch_seal(
+                        &session_id,
+                        &stored,
+                        &admission,
+                        observed_epoch,
+                        &root_start,
+                    ) {
                         DriveEpochSealDecision::Answer(seal) => Ok(seal),
                         DriveEpochSealDecision::Raise { next } => {
                             let changed = tx
@@ -1034,7 +1048,8 @@ impl DriveEpochStore for Store {
                                         session_id.as_str(),
                                         sql_counter_value("drive_epoch", observed_epoch)?,
                                         sql_counter_value("drive_epoch", next)?,
-                                        admission.as_str()
+                                        admission.as_str(),
+                                        root_start.as_str()
                                     ],
                                 )
                                 .map_err(sqlite_error)?;
