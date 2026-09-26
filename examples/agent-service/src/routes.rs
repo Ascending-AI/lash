@@ -1416,14 +1416,16 @@ finish("done through route");
             })
             .build()
             .into_handle();
-        let backend = crate::state::test_support::test_backend(data_dir).await;
+        let backend: lash::Backend = crate::state::test_support::test_backend(data_dir)
+            .await
+            .into();
         let factory = lash_protocol_rlm::RlmProtocolPluginFactory::new(
             lash_protocol_rlm::RlmProtocolPluginConfig::builder()
                 .channel(lash::rlm::RlmChannel::Cell)
                 .instruction_limit(lash_protocol_rlm::InstructionBound::instructions(1_000_000))
                 .memory_limit(lash_protocol_rlm::MemoryBound::mebibytes(64))
                 .build(),
-            backend.as_ref(),
+            &backend,
         );
         let core = LashCore::rlm_builder(backend, lash::TurnBudget::Unbounded, factory)
             .provider(provider)

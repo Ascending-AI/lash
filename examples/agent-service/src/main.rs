@@ -83,7 +83,7 @@ use crate::state::{AgentServiceDurability, AppStateData, anyhow_like};
 #[cfg(feature = "restate")]
 use lash::durability::DurableProcessWorker;
 #[cfg(feature = "restate")]
-use lash_restate::RestateEngine;
+use lash_restate::{RestateConfig, RestateEngine};
 
 const DEFAULT_TOKIO_THREAD_STACK_BYTES: usize = 2 * 1024 * 1024;
 
@@ -320,7 +320,7 @@ async fn async_main() -> anyhow_like::Result<()> {
                     .map_err(|err| err.to_string())?;
                 restate_backend = Some(Arc::clone(&backend));
                 ServiceBackend {
-                    backend,
+                    backend: backend.into(),
                     store_factory,
                     attachment_store,
                 }

@@ -67,12 +67,13 @@ async fn run_fixture() -> Result<ValidEmptyReport, String> {
             .await
             .map_err(|error| error.to_string())?,
     );
-    let mut builder = lash::LashCore::standard_builder(backend, lash::TurnBudget::bounded(1))
-        .without_queued_work()
-        .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
-        .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-        .provider(provider)
-        .model(model);
+    let mut builder =
+        lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::bounded(1))
+            .without_queued_work()
+            .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
+            .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
+            .provider(provider)
+            .model(model);
     if let Some(marker) = crate::shutdown_marker::factory_from_env("agent-workbench-valid-empty")? {
         builder = builder.plugin(marker);
     }
