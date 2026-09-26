@@ -46,6 +46,10 @@ readonly PROGRAM="scripts/ci/with-service.sh"
 # which the runbooks and gates share.
 # shellcheck source=scripts/ci/s3-service.sh
 source "$(dirname "${BASH_SOURCE[0]}")/s3-service.sh"
+# The Postgres readiness probe: TCP only, so it answers against the image's
+# final server, never its socket-only temporary init server.
+# shellcheck source=scripts/ci/pg-service.sh
+source "$(dirname "${BASH_SOURCE[0]}")/pg-service.sh"
 readonly SERVICES=(pg14 pg16 pg18 s3 restate)
 # The services `all` expands to: the store containers. A store suite has
 # nothing to run against a Restate server.
@@ -153,12 +157,15 @@ service_ready_interval() {
   esac
 }
 
-# One readiness attempt. Exit status 0 means the service is up.
+# One readiness attempt. Exit status 0 means the service is up. For
+# PostgreSQL that means the final server: the image's temporary init server
+# answers the unix socket while it is up and while it shuts down, so only a
+# TCP answer counts (scripts/ci/pg-service.sh).
 service_ready_probe() {
   local name="$1" container="$2" port="$3"
   case "$name" in
     pg*)
-      docker exec "$container" pg_isready -U lash -d lash >/dev/null 2>&1
+      lash_pg_ready docker exec "$container"
       ;;
     s3)
       lash_s3_ready "$container"

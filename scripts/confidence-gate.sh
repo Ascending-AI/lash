@@ -5,6 +5,8 @@ repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
 # shellcheck source=scripts/worktree-gate-env.sh
 source "$repo/scripts/worktree-gate-env.sh"
+# shellcheck source=scripts/ci/pg-service.sh
+source "$repo/scripts/ci/pg-service.sh"
 
 export PATH="$HOME/.cargo/bin:$PATH"
 
@@ -923,7 +925,7 @@ start_mutation_postgres() {
       "$mutation_postgres_container"
   )"
   deadline=$((SECONDS + 60))
-  until docker exec "$mutation_postgres_container" pg_isready -U lash -d lash >/dev/null 2>&1; do
+  until lash_pg_ready docker exec "$mutation_postgres_container"; do
     if (( SECONDS >= deadline )); then
       docker logs "$mutation_postgres_container" >&2 || true
       echo "Mutation Postgres did not become ready on port ${port}" >&2
@@ -1797,7 +1799,7 @@ EOF
   start_gate_postgres "$container" "$port"
 
   local deadline=$((SECONDS + 60))
-  until docker exec "$container" pg_isready -U lash -d lash >/dev/null 2>&1; do
+  until lash_pg_ready docker exec "$container"; do
     if (( SECONDS >= deadline )); then
       docker logs "$container" >&2 || true
       echo "Postgres did not become ready on port ${port}" >&2
@@ -1945,7 +1947,7 @@ EOF
   start_gate_postgres "$container" "$port"
 
   local deadline=$((SECONDS + 60))
-  until docker exec "$container" pg_isready -U lash -d lash >/dev/null 2>&1; do
+  until lash_pg_ready docker exec "$container"; do
     if (( SECONDS >= deadline )); then
       docker logs "$container" >&2 || true
       echo "Postgres did not become ready on port ${port}" >&2
@@ -2018,7 +2020,7 @@ EOF
   start_gate_postgres "$container" "$port"
 
   local deadline=$((SECONDS + 60))
-  until docker exec "$container" pg_isready -U lash -d lash >/dev/null 2>&1; do
+  until lash_pg_ready docker exec "$container"; do
     if (( SECONDS >= deadline )); then
       docker logs "$container" >&2 || true
       echo "Postgres did not become ready on port ${port}" >&2

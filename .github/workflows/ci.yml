@@ -462,6 +462,7 @@ jobs:
           bash scripts/test-dev-script-process-identity.sh
           bash scripts/test-ci-reclaim-disk.sh
           python3 scripts/test_with_service.py
+          python3 scripts/test_pg_service.py
           python3 scripts/test_check_feature_coverage.py
           python3 scripts/test_fast_test.py
           python3 scripts/test_bazel_test_contract.py

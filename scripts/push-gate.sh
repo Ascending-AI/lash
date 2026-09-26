@@ -8,6 +8,8 @@ source "$repo/scripts/worktree-gate-env.sh"
 lash_gate_acquire push-gate
 # shellcheck source=scripts/ci/s3-service.sh
 source "$repo/scripts/ci/s3-service.sh"
+# shellcheck source=scripts/ci/pg-service.sh
+source "$repo/scripts/ci/pg-service.sh"
 
 ci_features="${LASH_CI_FEATURES:-}"
 port_base="${LASH_PUSH_GATE_PORT_BASE:-$LASH_E2E_PORT_BASE}"
@@ -332,7 +334,7 @@ run_postgres_conformance() {
     postgres:16-alpine -c shared_preload_libraries=pg_stat_statements >/dev/null
 
   local deadline=$((SECONDS + 60))
-  until docker exec "$postgres_container" pg_isready -U lash -d lash >/dev/null 2>&1; do
+  until lash_pg_ready docker exec "$postgres_container"; do
     if (( SECONDS >= deadline )); then
       docker logs "$postgres_container" >&2 || true
       echo "Postgres did not become ready on port ${port}" >&2

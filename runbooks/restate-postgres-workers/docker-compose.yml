@@ -18,8 +18,11 @@ services:
       POSTGRES_USER: lash
       POSTGRES_PASSWORD: lash
       POSTGRES_DB: lash
+    # TCP only: the image's temporary init server answers the unix socket
+    # alone, so a TCP answer can only come from the final server — the same
+    # probe scripts/ci/pg-service.sh runs.
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U lash -d lash"]
+      test: ["CMD-SHELL", 'pg_isready -h 127.0.0.1 -p 5432 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" && PGPASSWORD=$$POSTGRES_PASSWORD psql -h 127.0.0.1 -p 5432 -U "$$POSTGRES_USER" -d "$$POSTGRES_DB" -Atqc "SELECT 1"']
       interval: 2s
       timeout: 2s
       retries: 30

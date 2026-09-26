@@ -140,6 +140,7 @@ filegroup(
     name = "confidence_gate_scripts",
     srcs = [
         "scripts/ci/confidence-stage.sh",
+        "scripts/ci/pg-service.sh",
         "scripts/confidence-gate.sh",
         "scripts/worktree-gate-env.sh",
     ],

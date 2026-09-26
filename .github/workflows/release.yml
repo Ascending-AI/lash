@@ -196,8 +196,11 @@ jobs:
           POSTGRES_DB: lash
         ports:
           - 5432:5432
+        # TCP only: the image's temporary init server answers the unix socket
+        # alone, so a TCP answer can only come from the final server — the
+        # same probe scripts/ci/pg-service.sh runs.
         options: >-
-          --health-cmd "pg_isready -U lash -d lash"
+          --health-cmd 'pg_isready -h 127.0.0.1 -p 5432 -U "$POSTGRES_USER" -d "$POSTGRES_DB" && PGPASSWORD=$POSTGRES_PASSWORD psql -h 127.0.0.1 -p 5432 -U "$POSTGRES_USER" -d "$POSTGRES_DB" -Atqc "SELECT 1"'
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
