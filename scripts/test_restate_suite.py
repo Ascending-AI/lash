@@ -9,6 +9,7 @@ import importlib.util
 import io
 import os
 import pathlib
+import socket
 import stat
 import sys
 import tempfile
@@ -184,6 +185,37 @@ class StageBinariesTests(unittest.TestCase):
         labels = MODULE.package_binaries("//runbooks/restate-postgres-workers")
         staged = {label.rpartition(":")[2].removesuffix("__bin") for label in labels}
         self.assertEqual(cargo_bins, staged)
+
+
+class ReservationTests(unittest.TestCase):
+    """A reserved port stays bound -- unbindable by anyone else -- until claimed."""
+
+    def test_a_held_reservation_refuses_a_second_bind(self) -> None:
+        reservation = MODULE.ReservedPort()
+        try:
+            with (
+                self.assertRaises(OSError),
+                socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe,
+            ):
+                probe.bind(("127.0.0.1", reservation.port))
+        finally:
+            reservation.close()
+
+    def test_reservations_never_hand_out_a_port_another_holds(self) -> None:
+        held = [MODULE.ReservedPort() for _ in range(16)]
+        try:
+            self.assertEqual(len({reservation.port for reservation in held}), len(held))
+        finally:
+            for reservation in held:
+                reservation.close()
+
+    def test_a_claimed_port_binds_again_and_claims_once(self) -> None:
+        reservation = MODULE.ReservedPort()
+        port = reservation.claim()
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+            probe.bind(("127.0.0.1", port))
+        with self.assertRaises(RuntimeError):
+            reservation.claim()
 
 
 class RunnerTests(unittest.TestCase):

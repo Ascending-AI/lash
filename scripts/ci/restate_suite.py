@@ -10,6 +10,9 @@ tests are driven. It follows the recipe Restate's own SDK test suites use
   about 0.3 s, so a job runs several side by side.
 * Isolation by unique keys, never by resetting the server. Every suite names
   its sessions, groups and workflows per run.
+* Every port a run binds is a `ReservedPort`: reserved bound at plan time
+  and claimed only when its consumer binds, so a port is never free between
+  being chosen and being served.
 * Two legs per suite. `live` runs Restate's defaults. `replay` sets the
   invoker's inactivity timeout to zero, so an invocation suspends at every
   await and every resumption replays its journal from the start: the leg that
@@ -65,7 +68,7 @@ import threading
 import time
 import tomllib
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Sequence
 
@@ -188,10 +191,36 @@ def server_path() -> Path:
 # ---------------------------------------------------------------------------
 # A running server.
 # ---------------------------------------------------------------------------
-def free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.bind(("127.0.0.1", 0))
-        return probe.getsockname()[1]
+class ReservedPort:
+    """A loopback port held bound until its consumer claims it.
+
+    Probing a port and releasing it only proves the port was free *then*: a
+    sibling shard's server still booting, another probe, or a listener the
+    server opens internally can take it before the consumer binds -- which
+    is how one shard's endpoint port was once stolen by a sibling's
+    restate-server mid-boot and that shard's every test failed
+    EADDRINUSE. A reservation keeps its socket bound, so the port cannot be
+    issued to any bind until `claim` releases it.
+    """
+
+    def __init__(self) -> None:
+        self._socket: socket.socket | None = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self._socket.bind(("127.0.0.1", 0))
+        self.port = self._socket.getsockname()[1]
+
+    def claim(self) -> int:
+        """Release the reservation and return the port for the consumer to bind."""
+        if self._socket is None:
+            raise RuntimeError("a reserved port is claimed once")
+        port = self.port
+        self._socket.close()
+        self._socket = None
+        return port
+
+    def close(self) -> None:
+        if self._socket is not None:
+            self._socket.close()
+            self._socket = None
 
 
 def http_ok(url: str) -> bool:
@@ -216,6 +245,9 @@ class RestateServer:
         self.name = name
         self.workdir = workdir
         self.config = config
+        # Reserved at construction so a suite can hold every shard's ports
+        # before the first server starts binding them.
+        self.reserved = {role: ReservedPort() for role in ("ingress", "admin", "node")}
         self.ingress_port = 0
         self.admin_port = 0
         self.process: subprocess.Popen[bytes] | None = None
@@ -238,8 +270,11 @@ class RestateServer:
         self.workdir.mkdir(parents=True, exist_ok=True)
         # A short scratch path of its own, kept out of the artifact tree.
         self.data_dir = tempfile.mkdtemp(prefix="lash-restate-")
-        self.ingress_port = free_port()
-        self.admin_port = free_port()
+        # Claim at the last moment the runner controls: the reservations
+        # stayed bound while every sibling reserved its own, so nothing in
+        # the run could have taken them.
+        self.ingress_port = self.reserved["ingress"].claim()
+        self.admin_port = self.reserved["admin"].claim()
         env = {key: value for key, value in os.environ.items() if key not in PROXY_VARIABLES}
         env.update(BASE_SERVER_ENV)
         env.update(self.config)
@@ -248,7 +283,7 @@ class RestateServer:
                 "RESTATE_BASE_DIR": self.data_dir,
                 "RESTATE_NODE_NAME": "n1",
                 "RESTATE_CLUSTER_NAME": f"lash-{self.name}",
-                "RESTATE_BIND_PORT": str(free_port()),
+                "RESTATE_BIND_PORT": str(self.reserved["node"].claim()),
                 "RESTATE_INGRESS__BIND_ADDRESS": f"127.0.0.1:{self.ingress_port}",
                 "RESTATE_ADMIN__BIND_ADDRESS": f"127.0.0.1:{self.admin_port}",
             }
@@ -284,6 +319,8 @@ class RestateServer:
                     os.killpg(self.process.pid, signal.SIGKILL)
                     self.process.wait()
         finally:
+            for reservation in self.reserved.values():
+                reservation.close()
             if self.data_dir:
                 shutil.rmtree(self.data_dir, ignore_errors=True)
 
@@ -496,6 +533,8 @@ class ShardPlan:
     name: str
     config: dict[str, str]
     tests: "queue.Queue[str]"
+    server: "RestateServer | None" = None
+    endpoints: "dict[str, ReservedPort]" = field(default_factory=dict)
 
 
 def run_one(
@@ -568,6 +607,15 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
             own.put(name)
         shards.append(ShardPlan(f"{leg}-redelivery", {**leg_config, **RETRIES_BOUNDED, **overrides}, own))
 
+    # Reserve every port the suite binds before the first consumer starts:
+    # reservations stay bound until claimed, so no allocation of this run --
+    # a server's listeners, another shard's endpoints -- can be handed a port
+    # a sibling already claimed.
+    for plan in shards:
+        plan.server = RestateServer(name=f"{suite.name}-{plan.name}", workdir=artifacts, config=plan.config)
+        plan.endpoints = {endpoint: ReservedPort() for endpoint in suite.endpoints}
+    servers = [plan.server for plan in shards if plan.server is not None]
+
     timeout = args.timeout or suite.timeout_seconds
     log(
         f"{suite.name} {leg}: {len(to_run)} tests over {len(shards)} server(s) "
@@ -579,12 +627,10 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
     outcomes: list[Outcome] = []
     failures: list[str] = []
     lock = threading.Lock()
-    servers: list[RestateServer] = []
 
     def shard_main(index: int, plan: ShardPlan) -> None:
-        server = RestateServer(name=f"{suite.name}-{plan.name}", workdir=artifacts, config=plan.config)
-        with lock:
-            servers.append(server)
+        assert plan.server is not None
+        server = plan.server
         server.start()
         env = dict(os.environ)
         # Registry env values may name the shard and any variable the caller
@@ -592,9 +638,10 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
         env.update({key: value.format(shard=index, **os.environ) for key, value in suite.env.items()})
         env.update(server.env())
         env["LASH_RESTATE_SUITE_LEG"] = leg
-        # Each shard's endpoints bind loopback ports of their own.
-        for endpoint in suite.endpoints:
-            port = free_port()
+        # Each shard's endpoints bind loopback ports of their own, reserved
+        # before any server started so no other bind of this run holds them.
+        for endpoint, reservation in plan.endpoints.items():
+            port = reservation.claim()
             env[f"{endpoint}_BIND"] = f"127.0.0.1:{port}"
             env[f"{endpoint}_URL"] = f"http://127.0.0.1:{port}"
         while True:
@@ -629,6 +676,9 @@ def run_suite(suite: Suite, leg: str, args: argparse.Namespace) -> int:
     finally:
         for server in servers:
             server.stop()
+        for plan in shards:
+            for reservation in plan.endpoints.values():
+                reservation.close()
     wall = time.monotonic() - started
 
     bad = [outcome for outcome in outcomes if outcome.status != "ok"]
