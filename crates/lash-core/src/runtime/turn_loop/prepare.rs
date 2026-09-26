@@ -219,6 +219,21 @@ impl LashRuntime {
                 "input_item_count".to_string(),
                 serde_json::json!(normalized.len()),
             );
+            // The config this physical turn runs under (FIG-3600 S6): the
+            // root's recorded config, adopted on resident state at the
+            // funnel's `ResolveTurnConfig` step.
+            trace_metadata.insert(
+                "provider_id".to_string(),
+                serde_json::json!(self.state.policy.provider_id),
+            );
+            trace_metadata.insert(
+                "model".to_string(),
+                serde_json::json!(self.state.policy.model.id),
+            );
+            trace_metadata.insert(
+                "config_revision".to_string(),
+                serde_json::json!(self.state.config_revision),
+            );
             crate::trace::emit_trace(
                 &self.host.core.tracing.trace_sink,
                 &self.host.core.tracing.trace_context,

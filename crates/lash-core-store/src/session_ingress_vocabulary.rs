@@ -629,14 +629,11 @@ pub enum IngressCancelReason {
 /// provider/model route it would move the head to is not usable. The code is
 /// recorded verbatim on the refused command's tombstone, on the turn-lane
 /// rows its window turns back, and surfaces on the command's settlement.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum ConfigRefusalCode {
-    /// No provider binding answers the patch's route.
-    ProviderRouteUnknown,
-    /// The route exists but carries no usable credentials.
-    ProviderCredentialsMissing,
-}
+///
+/// The provider resolver owns the definition: the code it returns is the code
+/// the tombstone records, so a refused route names the same fact at send, at
+/// apply and on the row.
+pub use lash_core_llm::provider::ConfigRefusalCode;
 
 /// The closed cause every tombstone carries (ADR 0101 §8).
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
