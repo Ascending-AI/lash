@@ -1082,6 +1082,7 @@ mod tests {
             )),
             RestateSessionDriverSlot::new(),
             BuildGeneration::for_test("t0"),
+            Arc::new(lash_core::engine::NoEngineControl),
         );
 
         let answer = work
