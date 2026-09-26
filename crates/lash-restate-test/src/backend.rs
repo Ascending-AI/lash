@@ -18,7 +18,7 @@ use lash_core::{AdmittedScope, ScopedEffectController, StoreSet};
 use lash_core_worker::DurableProcessWorker;
 use lash_restate::{
     RestateAuthorityId, RestateConfig, RestateConnection, RestateEngine, RestateHttpError,
-    RestateIngressClient, RestateProcessServing, RestateProcessWorkerSlot,
+    RestateIngressClient, RestateProcessServing, RestateProcessWorkerSlot, turn_workflow_key,
 };
 use restate_sdk::context::WorkflowContext;
 use restate_sdk::errors::{HandlerError, HandlerResult, TerminalError};
@@ -501,7 +501,16 @@ struct ParkedJobs {
 
 impl ParkedJobs {
     fn park(&self, admitted: AdmittedScope, parked: Parked) -> String {
-        let key = format!("job-{}", self.next.fetch_add(1, Ordering::SeqCst));
+        let ordinal = self.next.fetch_add(1, Ordering::SeqCst);
+        // A session-scoped job carries the session in its key exactly as a
+        // `LashTurn` key does: the engine's live-work read parses the owner
+        // back out and leaves a suspended job's session ingress to it.
+        let key = match admitted.scope().session_id() {
+            Some(session) => {
+                turn_workflow_key(session, &lash_core::TurnId::from(format!("job-{ordinal}")))
+            }
+            None => format!("job-{ordinal}"),
+        };
         self.jobs
             .lock()
             .unwrap_or_else(PoisonError::into_inner)

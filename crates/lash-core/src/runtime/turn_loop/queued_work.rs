@@ -251,7 +251,10 @@ impl LashRuntime {
             &request,
             &sinks,
             None,
-            crate::runtime::drive::FollowOnRecovery::Recover,
+            crate::runtime::drive::DriveLimits {
+                follow_on: crate::runtime::drive::FollowOnRecovery::Recover,
+                max_roots: None,
+            },
             |_| true,
         ))
         .await;

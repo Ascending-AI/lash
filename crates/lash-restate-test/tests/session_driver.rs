@@ -427,6 +427,34 @@ async fn a_scheduled_drive_runs_every_open_item_in_arrival_order() {
     );
 }
 
+/// A busy session yields after a bounded number of roots and schedules the
+/// rest under a fresh request. The first invocation cannot grow forever.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_busy_session_drive_hands_off_before_its_journal_grows_without_bound() {
+    let (backend, driver) = fixture(0x517).await;
+    let session = SessionId::from("drive-bounded");
+    for index in 0..65 {
+        driver.accept(&session, &format!("item-{index}"));
+    }
+    backend
+        .restate()
+        .session_work_engine()
+        .schedule_drive(&session, request("bounded"));
+    let first = attach(&backend, &session, "bounded").await;
+    assert!(
+        matches!(first.stop, DriveStop::Yielded { .. }),
+        "the first invocation hands off at a boundary: {first:?}"
+    );
+    assert_eq!(
+        first.ran.len(),
+        lash_core::engine::MAX_ROOTS_PER_DRIVE,
+        "one invocation stops exactly at the root bound"
+    );
+    settle(&backend).await;
+    assert_eq!(driver.ledger(&session).consumed.len(), 65);
+    no_drive_failed(&backend);
+}
+
 /// A row committed while a drive runs, after that drive's last admission
 /// read the ledger, is admitted by the next invocation: its schedule names
 /// its own request, so the engine queues it behind the running drive instead

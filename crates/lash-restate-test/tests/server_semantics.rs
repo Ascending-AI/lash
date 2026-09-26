@@ -1119,6 +1119,14 @@ async fn a_new_build_serves_new_invocations_while_pinned_ones_finish_on_theirs()
                 .await
         }
     });
+    // A session-scoped job key is a turn-workflow key: the session length,
+    // a colon, the session, then the job's ordinal.
+    let job_key = |ordinal: u64| {
+        lash_restate::turn_workflow_key(
+            &lash_core::SessionId::from("upgrade-e2e"),
+            &lash_core::TurnId::from(format!("job-{ordinal}")),
+        )
+    };
     // Wait for its first attempt to be served by build N.
     let pinned_id = loop {
         let found = served
@@ -1126,7 +1134,7 @@ async fn a_new_build_serves_new_invocations_while_pinned_ones_finish_on_theirs()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .find(|(deployment, _, key, _)| {
-                deployment == build_n.as_str() && key.as_deref() == Some("job-0")
+                deployment == build_n.as_str() && key.as_deref() == Some(job_key(0).as_str())
             })
             .map(|(_, id, _, _)| id.clone());
         if let Some(id) = found {
@@ -1171,7 +1179,7 @@ async fn a_new_build_serves_new_invocations_while_pinned_ones_finish_on_theirs()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .iter()
             .any(|(deployment, _, key, _)| {
-                deployment == build_n1.as_str() && key.as_deref() == Some("job-1")
+                deployment == build_n1.as_str() && key.as_deref() == Some(job_key(1).as_str())
             }),
         "job two was served by build N+1"
     );
@@ -1193,7 +1201,7 @@ async fn a_new_build_serves_new_invocations_while_pinned_ones_finish_on_theirs()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
         .iter()
         .filter(|(deployment, _, key, _)| {
-            key.as_deref() == Some("job-0") && deployment == build_n.as_str()
+            key.as_deref() == Some(job_key(0).as_str()) && deployment == build_n.as_str()
         })
         .map(|(_, _, _, attempt)| *attempt)
         .collect();

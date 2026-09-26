@@ -1177,7 +1177,7 @@ impl LashCoreBuilder {
             native_substrate.clone(),
         )?;
         let residents = Arc::new(residents::ResidentSessions::default());
-        let (queued_port, session_driver) = Self::resolve_queued_work(
+        let (queued_port, session_driver, installed_driver) = Self::resolve_queued_work(
             Arc::clone(&residents),
             self.queued_work_source,
             backend.session_work(),
@@ -1192,6 +1192,7 @@ impl LashCoreBuilder {
             worker_slot_supplier.clone(),
             queued_work_execution_concurrency,
         );
+        let native_queued = matches!(&queued_port, QueuedPortSetup::Native { .. });
         let substrate = NativeSubstrateSetup {
             config: native_substrate,
             process: process_port,
@@ -1206,6 +1207,20 @@ impl LashCoreBuilder {
 
         let drive_lifetime = DriveLifetime::new();
         let substrate_slot = Arc::new(NativeSubstrateSlot::new(substrate, &drive_lifetime));
+        // The driver is built before the slot it reconciles through, so the
+        // binding lands here: its recovery pass asks the resolved work port.
+        session_driver.bind_substrate_slot(Arc::downgrade(&substrate_slot));
+        if native_queued {
+            // The native engine is built with the resolved ports; resolving
+            // them at boot installs the driver so its reconcile tick exists
+            // before the first open and lost asks heal without one.
+            let slot = Arc::clone(&substrate_slot);
+            if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+                runtime.spawn(async move {
+                    slot.ports().await;
+                });
+            }
+        }
         let plugin_factories = Arc::new(plugin_factories);
         let tool_child_context_source = tool_child_context::CoreToolChildContextSource::install(
             &env,
@@ -1246,7 +1261,7 @@ impl LashCoreBuilder {
             worker_slot_supplier,
             substrate_slot,
             drive_lifetime,
-            _session_driver: session_driver,
+            _session_driver: installed_driver,
             residents,
             process_event_sink,
             tool_intent_submission_gates: Default::default(),
@@ -1321,7 +1336,11 @@ impl LashCoreBuilder {
         process_lifecycle_available: bool,
         worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
         queued_work_execution_concurrency: usize,
-    ) -> (QueuedPortSetup, Arc<dyn lash_core::SessionDriver>) {
+    ) -> (
+        QueuedPortSetup,
+        Arc<NativeQueuedWorkRunHandle>,
+        Arc<dyn lash_core::SessionDriver>,
+    ) {
         let owner = session_execution_owner.clone();
         let build_generation = env.core.backend().build_generation().clone();
         let driver = Arc::new(NativeQueuedWorkRunHandle::new(Arc::new(
@@ -1340,19 +1359,21 @@ impl LashCoreBuilder {
         match (queued_work_source, backend_engine) {
             // The host turned the backend's own engine off: a send is
             // refused, since nothing would drive what it accepted.
-            (QueuedWorkSource::Disabled, Some(_)) => (QueuedPortSetup::Disabled, driver),
+            (QueuedWorkSource::Disabled, Some(_)) => {
+                (QueuedPortSetup::Disabled, driver.clone(), driver)
+            }
             // No engine on the backend and the host drains queued work itself:
             // a waiting send drives its session in the caller's task (D1 §2.4;
             // S5d deletes `without_queued_work` and this arm together).
             (QueuedWorkSource::Disabled, None) => {
                 let port: Arc<dyn lash_core::SessionWorkEngine> =
                     Arc::new(lash_core::runtime::InlineSessionWork::new(build_generation));
-                let installed = install_session_driver(&port, driver, &owner);
-                (QueuedPortSetup::External { port }, installed)
+                let installed = install_session_driver(&port, driver.clone(), &owner);
+                (QueuedPortSetup::External { port }, driver, installed)
             }
             (QueuedWorkSource::Backend, Some(port)) => {
-                let installed = install_session_driver(&port, driver, &owner);
-                (QueuedPortSetup::External { port }, installed)
+                let installed = install_session_driver(&port, driver.clone(), &owner);
+                (QueuedPortSetup::External { port }, driver, installed)
             }
             (QueuedWorkSource::Backend, None) => (
                 QueuedPortSetup::Native {
@@ -1360,6 +1381,7 @@ impl LashCoreBuilder {
                     slot_supplier: worker_slot_supplier,
                     execution_concurrency: queued_work_execution_concurrency,
                 },
+                driver.clone(),
                 driver,
             ),
         }

@@ -69,9 +69,10 @@ pub use control::{
     SessionControlEngine, begin_session_close_replay_key,
 };
 pub use drive::{
-    DriveAbort, DriveLoop, DriveOutcome, DriveStop, RootOutcome, admission_body,
-    drive_admission_replay_key, drive_admission_scope, drive_close_root_replay_key,
-    drive_root_scope, drive_root_start_replay_key, drive_seal_replay_key,
+    DRIVE_CONTINUATION_PREFIX, DriveAbort, DriveLoop, DriveOutcome, DriveStop, MAX_ROOTS_PER_DRIVE,
+    RootOutcome, admission_body, drive_admission_replay_key, drive_admission_scope,
+    drive_close_root_replay_key, drive_continuation_request, drive_root_scope,
+    drive_root_start_replay_key, drive_seal_replay_key,
 };
 pub use groups::{DriveGroups, GroupClosed, GroupKey};
 pub use reconcile::{

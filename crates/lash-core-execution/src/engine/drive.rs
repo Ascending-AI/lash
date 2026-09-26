@@ -9,17 +9,41 @@
 //! root in a per-root one), and both reach the same kernel bodies.
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use std::collections::BTreeSet;
 
 use super::admission::{Admitted, AdmittedWork, DriveRequestId, ParkRef, SealVerdict};
 use super::commit::TurnCommitId;
+use super::contracts::DriveRequest;
 use crate::{AdmittedScope, RuntimeError, SessionId, TurnId, TurnOutcome};
 
 /// The prefix of the queue-drain id a drive's admission steps are recorded
 /// under. A drive is never a queue drain; the scope only gives its admission
 /// journal a session-bearing address.
 const DRIVE_ADMISSION_SCOPE_PREFIX: &str = "drive:";
+
+/// Maximum roots admitted by one engine drive invocation before it hands
+/// remaining work to a new request.
+pub const MAX_ROOTS_PER_DRIVE: usize = 64;
+
+/// The request-id prefix of a drive's continuation invocations: every leg a
+/// yielded drive hands off to is named under it, so a walk of a session's
+/// drive requests can tell chain legs from new chain roots.
+pub const DRIVE_CONTINUATION_PREFIX: &str = "drive-next:";
+
+/// The stable, fixed-size request id of a drive's next invocation.
+#[must_use]
+pub fn drive_continuation_request(request: &DriveRequest) -> DriveRequestId {
+    let mut digest = Sha256::new();
+    digest.update((request.session.as_str().len() as u64).to_be_bytes());
+    digest.update(request.session.as_str().as_bytes());
+    digest.update(request.request.as_str().as_bytes());
+    DriveRequestId::new(format!(
+        "{DRIVE_CONTINUATION_PREFIX}{:x}",
+        digest.finalize()
+    ))
+}
 
 /// The scope a drive's `AdmitDrive` steps are recorded under: one per drive
 /// request, so a redrive of the same request replays its admissions and a new

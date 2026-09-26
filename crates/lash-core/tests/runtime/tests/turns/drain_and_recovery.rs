@@ -1,5 +1,163 @@
 use super::*;
 
+struct OneHeldClaimStore {
+    inner: Arc<RecordingStore>,
+    held_once: AtomicBool,
+}
+
+#[async_trait::async_trait]
+impl lash_core::store::RuntimePersistenceDecorator for OneHeldClaimStore {
+    fn inner(&self) -> &(dyn lash_core::RuntimePersistence + '_) {
+        self.inner.as_ref()
+    }
+
+    async fn claim_next_turn_inputs(
+        &self,
+        session_id: &SessionId,
+        lease: &lash_core::SessionExecutionLeaseAuthority,
+        owner: &lash_core::LeaseOwnerIdentity,
+        max_inputs: usize,
+    ) -> Result<Option<lash_core::TurnInputClaim>, lash_core::StoreError> {
+        if !self.held_once.swap(true, Ordering::SeqCst) {
+            return Ok(None);
+        }
+        lash_core::store::TurnInputStore::claim_next_turn_inputs(
+            self.inner.as_ref(),
+            session_id,
+            lease,
+            owner,
+            max_inputs,
+        )
+        .await
+    }
+}
+
+#[tokio::test]
+pub(super) async fn a_later_admission_redecides_a_temporarily_held_root_claim() {
+    let backend = memory_backend().await;
+    let store = unbound_recording_store(&backend).await;
+    let wrapped: Arc<dyn lash_core::RuntimePersistence> = Arc::new(OneHeldClaimStore {
+        inner: Arc::clone(&store),
+        held_once: AtomicBool::new(false),
+    });
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        mock_provider(vec![MockCall {
+            stream_events: Vec::new(),
+            response: Ok(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: "answered after hold".to_string(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            }),
+        }]),
+        test_host_config(&backend),
+        wrapped,
+    )
+    .await;
+    let session = SessionId::from("root");
+    enqueue_idle_turn_input(store.as_ref(), &session, "wait for claim").await;
+    let drain = |id: &str| {
+        TurnOptions::new(
+            CancellationToken::new(),
+            backend_queued_scope(&backend, &session, &TurnId::from(id)),
+        )
+    };
+
+    let first = runtime
+        .drive_next_queued_root(drain("held-first"))
+        .await
+        .expect("a held claim defers");
+    assert!(
+        matches!(
+            first,
+            lash_core::facade_support::QueuedTurnDrain::Empty(
+                lash_core::facade_support::EmptyQueuedDrainReason::ExecutionLaneBusy
+            )
+        ),
+        "the temporary hold remains retryable: {first:?}"
+    );
+    let second = runtime
+        .drive_next_queued_root(drain("held-second"))
+        .await
+        .expect("a later admission can retry the root")
+        .expect("the released input runs");
+    assert_eq!(second.assistant_output.safe_text, "answered after hold");
+}
+
+#[tokio::test]
+pub(super) async fn an_in_process_drive_hands_off_after_a_bounded_number_of_roots() {
+    let backend = memory_backend().await;
+    let store = unbound_recording_store(&backend).await;
+    let transport = TestProvider::builder()
+        .kind("bounded-drive")
+        .complete(|_request| async {
+            Ok::<_, LlmTransportError>(LlmResponse {
+                parts: vec![LlmOutputPart::Text {
+                    text: "answer".to_string(),
+                    response_meta: None,
+                }],
+                response_metadata: Default::default(),
+                ..LlmResponse::default()
+            })
+        })
+        .build();
+    let mut config = lash_core::facade_support::RuntimeHostConfig::new(
+        backend.clone(),
+        lash_core::CommitBudget::bounded(1024 * 1024, 512),
+        lash_core::QueuedWorkBatchingConfig::new(1024).with_max_turn_input_claim(1),
+    );
+    config.providers.provider_resolver = Arc::new(
+        lash_core::facade_support::SingleProviderResolver::new(transport.clone().into_handle()),
+    );
+    let mut runtime = runtime_with_plugins_and_tools_and_host_and_store(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        transport,
+        EmbeddedRuntimeHost::new(config),
+        store.clone(),
+    )
+    .await;
+    let session = SessionId::from("root");
+    for index in 0..65 {
+        enqueue_idle_turn_input(store.as_ref(), &session, &format!("question {index}")).await;
+    }
+    let request = lash_core::engine::DriveRequest {
+        session: session.clone(),
+        request: lash_core::engine::DriveRequestId::new("bounded-first"),
+        build_generation: runtime.host.core.backend().build_generation().clone(),
+    };
+    let scope = |name: &str| backend_queued_scope(&backend, &session, &TurnId::from(name));
+    let first = Box::pin(lash_core::drive::drive_session(
+        &mut runtime,
+        &scope("bounded-first"),
+        &request,
+    ))
+    .await
+    .expect("first drive runs to its bound");
+    assert_eq!(first.ran.len(), lash_core::engine::MAX_ROOTS_PER_DRIVE);
+    assert!(matches!(
+        first.stop,
+        lash_core::engine::DriveStop::Yielded { .. }
+    ));
+    let next = lash_core::engine::DriveRequest {
+        request: lash_core::engine::drive_continuation_request(&request),
+        ..request
+    };
+    let last = Box::pin(lash_core::drive::drive_session(
+        &mut runtime,
+        &scope("bounded-next"),
+        &next,
+    ))
+    .await
+    .expect("continuation runs the remaining root");
+    assert_eq!(last.ran.len(), 1);
+    assert_eq!(last.stop, lash_core::engine::DriveStop::Idle);
+}
+
 #[tokio::test]
 pub(super) async fn renewal_failure_mid_turn_does_not_select_a_durable_branch() {
     Box::pin(renewal_failure_mid_turn(false)).await;

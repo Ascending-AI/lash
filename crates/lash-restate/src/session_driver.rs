@@ -70,7 +70,8 @@ use std::sync::{Arc, Mutex, Weak};
 
 use lash_core::engine::{
     AdmitVerdict, Admitted, BuildGeneration, DriveAbort, DriveLoop, DriveOutcome, DriveRequest,
-    DriveRequestId, DriveStop, RootOutcome, drive_admission_scope, drive_root_scope,
+    DriveRequestId, DriveStop, MAX_ROOTS_PER_DRIVE, RootOutcome, drive_admission_scope,
+    drive_continuation_request, drive_root_scope,
 };
 use lash_core::{SessionDriver, SessionId, SessionWorkEngine};
 use restate_sdk::context::{
@@ -82,8 +83,8 @@ use restate_sdk::serde::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    LashService, RestateAuthorityId, RestateIngressClient, RestateRuntimeEffectController,
-    parked_turn_failure,
+    LashService, RestateAdminClient, RestateAuthorityId, RestateIngressClient,
+    RestateRuntimeEffectController, parked_turn_failure,
 };
 
 /// The generation of the session driver's journaled command prefix: the
@@ -298,6 +299,7 @@ impl std::fmt::Debug for RestateSessionDriverSlot {
 #[derive(Clone)]
 pub struct RestateSessionWork {
     ingress: RestateIngressClient,
+    admin: RestateAdminClient,
     slot: RestateSessionDriverSlot,
     /// The drain generation of the build scheduling drives: every drive
     /// request it sends is stamped with it.
@@ -312,12 +314,14 @@ pub struct RestateSessionWork {
 impl RestateSessionWork {
     pub(crate) fn new(
         ingress: RestateIngressClient,
+        admin: RestateAdminClient,
         slot: RestateSessionDriverSlot,
         build_generation: BuildGeneration,
         control: Arc<dyn lash_core::engine::SessionControlEngine>,
     ) -> Self {
         Self {
             ingress,
+            admin,
             slot,
             build_generation,
             control,
@@ -331,8 +335,10 @@ impl RestateSessionWork {
 
     /// Send `request`'s drive to `LashSession/{session}`, keyed by the
     /// request id: a repeated send of one request attaches to its first
-    /// invocation instead of driving twice. Resolves once Restate accepted
-    /// the send, not once the drive ran.
+    /// invocation instead of driving twice. A transient send failure retries
+    /// under the same idempotency key before the ask is given up to the
+    /// reconcile sweep. Resolves once Restate accepted the send, not once
+    /// the drive ran.
     pub async fn send_drive(
         &self,
         session: &SessionId,
@@ -347,7 +353,7 @@ impl RestateSessionWork {
             },
         };
         self.ingress
-            .send_object_json_idempotent(
+            .send_object_json_idempotent_bounded(
                 LashService::SessionDriver.name(),
                 session.as_str(),
                 DRIVE_HANDLER,
@@ -403,6 +409,40 @@ impl RestateSessionWork {
             Err(crate::RestateHttpError::Status { body, .. }) => decode_drive_refusal(&body),
             _ => None,
         }
+    }
+
+    /// One leg of `SessionWorkEngine::await_drive`: the attach, the
+    /// released-root refusal read-back and the refusal decode.
+    async fn attach_drive_leg(
+        &self,
+        session: &SessionId,
+        request: &DriveRequestId,
+    ) -> Result<DriveOutcome, DriveAbort> {
+        let error = match self.attach_drive(session, request.clone()).await {
+            Ok(outcome) => {
+                for ran in &outcome.ran {
+                    if let lash_core::engine::RootOutcome::Released { root } = ran
+                        && let Some(refusal) = self.released_root_refusal(session, root).await
+                    {
+                        return Err(classify_refusal(refusal));
+                    }
+                }
+                return Ok(outcome);
+            }
+            Err(error) => error,
+        };
+        if let crate::RestateHttpError::Status { body, .. } = &error
+            && let Some(refusal) = decode_drive_refusal(body)
+        {
+            return Err(classify_refusal(refusal));
+        }
+        Err(DriveAbort::Retry(lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::EngineTurnTerminalAttach,
+            format!(
+                "attach to drive `{}` of session `{session}`: {error}",
+                request.as_str()
+            ),
+        )))
     }
 }
 
@@ -463,6 +503,10 @@ impl SessionWorkEngine for RestateSessionWork {
     /// back to the kernel's refusal; any other failure to attach (transport,
     /// the attach ceiling) is a retry under the same key.
     ///
+    /// A drive that spent its per-invocation root budget yields and continues
+    /// on the derived continuation request: the waiter attaches to each leg
+    /// in turn and answers only once the chain ends, with every leg's roots.
+    ///
     /// A root the drive consumed as released answers the refusal its
     /// `LashTurn` ended with, as the in-process drive answers a root's
     /// terminal refusal: the drive goes on past it, but a waiter on that root
@@ -472,31 +516,56 @@ impl SessionWorkEngine for RestateSessionWork {
         session: &SessionId,
         request: &DriveRequestId,
     ) -> Result<DriveOutcome, DriveAbort> {
-        let error = match self.attach_drive(session, request.clone()).await {
-            Ok(outcome) => {
-                for ran in &outcome.ran {
-                    if let lash_core::engine::RootOutcome::Released { root } = ran
-                        && let Some(refusal) = self.released_root_refusal(session, root).await
-                    {
-                        return Err(classify_refusal(refusal));
-                    }
-                }
-                return Ok(outcome);
+        let mut leg = request.clone();
+        let mut ran = Vec::new();
+        loop {
+            let outcome = self.attach_drive_leg(session, &leg).await?;
+            let handed_off = matches!(outcome.stop, DriveStop::Yielded { .. })
+                && outcome.ran.len() == MAX_ROOTS_PER_DRIVE;
+            ran.extend(outcome.ran);
+            if !handed_off {
+                return Ok(DriveOutcome {
+                    ran,
+                    stop: outcome.stop,
+                });
             }
-            Err(error) => error,
-        };
-        if let crate::RestateHttpError::Status { body, .. } = &error
-            && let Some(refusal) = decode_drive_refusal(body)
-        {
-            return Err(classify_refusal(refusal));
+            leg = drive_continuation_request(&DriveRequest {
+                session: session.clone(),
+                request: leg,
+                build_generation: self.build_generation.clone(),
+            });
         }
-        Err(DriveAbort::Retry(lash_core::RuntimeError::new(
-            lash_core::RuntimeErrorCode::EngineTurnTerminalAttach,
-            format!(
-                "attach to drive `{}` of session `{session}`: {error}",
-                request.as_str()
-            ),
-        )))
+    }
+
+    /// A session has live engine work while any lash invocation scoped to it
+    /// is not at a terminal status: a `LashSession` handler keyed by the
+    /// session itself, or a `LashTurn`/handler workflow whose key carries
+    /// the session through [`turn_workflow_key`]. Its resumption re-decides
+    /// the session's open ingress, so the reconcile sweep leaves it alone.
+    /// An admin read that fails answers `false`: a re-ask the live owner
+    /// then absorbs is the cheaper failure than a lost one.
+    async fn session_work_in_flight(&self, session: &SessionId) -> bool {
+        #[derive(serde::Deserialize)]
+        struct Target {
+            target_service_key: Option<String>,
+        }
+        let Ok(rows) = self
+            .admin
+            .query_json::<Target>(
+                "SELECT target_service_key FROM sys_invocation \
+                 WHERE status IN ('pending', 'scheduled', 'running', 'backing-off', 'suspended', 'paused') \
+                 AND target_service_name LIKE 'Lash%'",
+            )
+            .await
+        else {
+            return false;
+        };
+        rows.iter().any(|row| {
+            row.target_service_key.as_deref().is_some_and(|key| {
+                key == session.as_str()
+                    || parse_turn_workflow_key(key).is_some_and(|(owner, _)| owner == *session)
+            })
+        })
     }
 }
 
@@ -806,9 +875,38 @@ async fn drive_session_journal(
                     }
                 };
                 let stop = rules.after(&work, &outcome);
+                let yielded_root = outcome.root().clone();
                 ran.push(outcome);
                 if let Some(stop) = stop {
                     return Ok(DriveOutcome { ran, stop });
+                }
+                if ran.len() == MAX_ROOTS_PER_DRIVE {
+                    // The send is a journaled Restate command. Its request is
+                    // distinct from this invocation and queues behind this
+                    // object's exclusive handler before we return. The
+                    // request id is the send's idempotency key, so a waiter
+                    // that attaches under it joins this invocation rather
+                    // than starting a second one.
+                    let continuation = DriveRequest {
+                        session: request.session.clone(),
+                        request: drive_continuation_request(&request),
+                        build_generation: request.build_generation.clone(),
+                    };
+                    let continuation_id = continuation.request.as_str().to_owned();
+                    controller
+                        .context()
+                        .object_client::<LashSessionClient>(request.session.as_str().to_owned())
+                        .drive(Json(RestateSessionDriveRequest {
+                            drive_version: LASH_SESSION_DRIVE_VERSION,
+                            request: continuation,
+                        }))
+                        .idempotency_key(continuation_id)
+                        .send()
+                        .await?;
+                    return Ok(DriveOutcome {
+                        ran,
+                        stop: DriveStop::Yielded { root: yielded_root },
+                    });
                 }
                 ordinal = ordinal.checked_add(1).ok_or_else(|| {
                     misaddressed(format!(
@@ -1043,6 +1141,123 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn a_transient_schedule_failure_retries_the_same_drive_request() {
+        let transport = Arc::new(Scripted {
+            requests: std::sync::Mutex::default(),
+            responses: std::sync::Mutex::new(
+                [
+                    scripted_response(503, "temporary outage".to_string()),
+                    scripted_response(
+                        202,
+                        serde_json::json!({
+                            "invocationId": "accepted-drive",
+                            "status": "Accepted"
+                        })
+                        .to_string(),
+                    ),
+                ]
+                .into(),
+            ),
+        });
+        let work = RestateSessionWork::new(
+            crate::RestateIngressClient::new(crate::RestateConnection::with_transport(
+                "https://cloud.example",
+                transport.clone(),
+            )),
+            crate::RestateAdminClient::new(crate::RestateConnection::with_transport(
+                "https://cloud.example",
+                transport.clone(),
+            )),
+            RestateSessionDriverSlot::new(),
+            BuildGeneration::for_test("t0"),
+            Arc::new(lash_core::engine::NoEngineControl),
+        );
+        work.schedule_drive(
+            &SessionId::from("retry-session"),
+            DriveRequestId::new("retry"),
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if transport
+                    .requests
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .len()
+                    == 2
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("the send retries after 503");
+        let requests = transport
+            .requests
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert_eq!(requests[0].url, requests[1].url);
+        assert_eq!(requests[0].body, requests[1].body);
+        assert_eq!(requests[0].headers, requests[1].headers);
+    }
+
+    #[tokio::test]
+    async fn a_persistent_schedule_failure_stops_after_three_attempts() {
+        let transport = Arc::new(Scripted {
+            requests: std::sync::Mutex::default(),
+            responses: std::sync::Mutex::new(
+                (0..3)
+                    .map(|_| scripted_response(503, "temporary outage".to_string()))
+                    .collect(),
+            ),
+        });
+        let work = RestateSessionWork::new(
+            crate::RestateIngressClient::new(crate::RestateConnection::with_transport(
+                "https://cloud.example",
+                transport.clone(),
+            )),
+            crate::RestateAdminClient::new(crate::RestateConnection::with_transport(
+                "https://cloud.example",
+                transport.clone(),
+            )),
+            RestateSessionDriverSlot::new(),
+            BuildGeneration::for_test("t0"),
+            Arc::new(lash_core::engine::NoEngineControl),
+        );
+        work.schedule_drive(
+            &SessionId::from("retry-session"),
+            DriveRequestId::new("retry"),
+        );
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            loop {
+                if transport
+                    .requests
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner)
+                    .len()
+                    >= 3
+                {
+                    break;
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("three attempts occur");
+        tokio::time::sleep(std::time::Duration::from_millis(150)).await;
+        assert_eq!(
+            transport
+                .requests
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .len(),
+            3,
+            "the scheduler stops retrying after the bounded attempt count"
+        );
+    }
+
     /// A root the drive consumed as released answers a waiter with the
     /// refusal its `LashTurn` run ended with, as the in-process drive answers
     /// a root's terminal refusal, rather than a stop that says nothing of why.
@@ -1076,6 +1291,10 @@ mod tests {
         });
         let work = RestateSessionWork::new(
             crate::RestateIngressClient::new(crate::RestateConnection::with_transport(
+                "https://cloud.example",
+                transport.clone(),
+            )),
+            crate::RestateAdminClient::new(crate::RestateConnection::with_transport(
                 "https://cloud.example",
                 transport.clone(),
             )),
@@ -1137,6 +1356,10 @@ mod tests {
         });
         let work = RestateSessionWork::new(
             crate::RestateIngressClient::new(crate::RestateConnection::with_transport(
+                "https://cloud.example",
+                transport.clone(),
+            )),
+            crate::RestateAdminClient::new(crate::RestateConnection::with_transport(
                 "https://cloud.example",
                 transport.clone(),
             )),
