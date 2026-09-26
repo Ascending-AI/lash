@@ -167,10 +167,6 @@ ALLOWED = {
         "decodes the perf harness's own tool-name scheme"
     ),
     "examples/toolbench/src/runtime.rs": "classifies the toolbench's own task ids",
-    "crates/lash-sim/src/oracles/agent_contracts.rs": (
-        "phase 2 of FIG-3571: FIG-3573 rewrites this runner, and the oracle "
-        "then reads the lifted origin instead of the name"
-    ),
 }
 
 
