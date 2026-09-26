@@ -1125,6 +1125,76 @@ impl lash::persistence::SessionStoreFactory for ContendedSessionStoreFactory {
     }
 }
 
+#[async_trait::async_trait]
+impl lash::persistence::ControlIntentStore for ContendedSessionStoreFactory {
+    async fn begin_session_close(
+        &self,
+        session_id: &SessionId,
+        at_ms: u64,
+    ) -> std::result::Result<Option<lash::persistence::ControlIntent>, lash::persistence::StoreError>
+    {
+        lash::persistence::ControlIntentStore::begin_session_close(
+            self.inner.as_ref(),
+            session_id,
+            at_ms,
+        )
+        .await
+    }
+
+    async fn claim_intent_application(
+        &self,
+        id: lash::persistence::ControlIntentId,
+    ) -> std::result::Result<lash::persistence::IntentApplication, lash::persistence::StoreError>
+    {
+        lash::persistence::ControlIntentStore::claim_intent_application(self.inner.as_ref(), id)
+            .await
+    }
+
+    async fn acknowledge_intent(
+        &self,
+        id: lash::persistence::ControlIntentId,
+        at_ms: u64,
+    ) -> std::result::Result<(), lash::persistence::StoreError> {
+        lash::persistence::ControlIntentStore::acknowledge_intent(self.inner.as_ref(), id, at_ms)
+            .await
+    }
+
+    async fn record_intent_failure(
+        &self,
+        id: lash::persistence::ControlIntentId,
+        error: &str,
+        retryable: bool,
+        at_ms: u64,
+    ) -> std::result::Result<lash::persistence::ControlIntent, lash::persistence::StoreError> {
+        lash::persistence::ControlIntentStore::record_intent_failure(
+            self.inner.as_ref(),
+            id,
+            error,
+            retryable,
+            at_ms,
+        )
+        .await
+    }
+
+    async fn load_intent(
+        &self,
+        id: lash::persistence::ControlIntentId,
+    ) -> std::result::Result<Option<lash::persistence::ControlIntent>, lash::persistence::StoreError>
+    {
+        lash::persistence::ControlIntentStore::load_intent(self.inner.as_ref(), id).await
+    }
+
+    async fn open_root_intent(
+        &self,
+        request: &lash::persistence::RootIntentRequest,
+        at_ms: u64,
+    ) -> std::result::Result<lash::persistence::ControlIntent, lash::persistence::RootIntentRefused>
+    {
+        lash::persistence::ControlIntentStore::open_root_intent(self.inner.as_ref(), request, at_ms)
+            .await
+    }
+}
+
 impl MetaLossSessionStoreFactory {
     pub(crate) fn new() -> Self {
         Self {
@@ -1282,6 +1352,76 @@ impl lash::persistence::SessionStoreFactory for MetaLossSessionStoreFactory {
         through: lash::persistence::ParkFeedCursor,
     ) -> Result<(), lash::persistence::StoreError> {
         lash::persistence::SessionStoreFactory::compact_turn_park_feed(self.inner.as_ref(), through)
+            .await
+    }
+}
+
+#[async_trait::async_trait]
+impl lash::persistence::ControlIntentStore for MetaLossSessionStoreFactory {
+    async fn begin_session_close(
+        &self,
+        session_id: &SessionId,
+        at_ms: u64,
+    ) -> std::result::Result<Option<lash::persistence::ControlIntent>, lash::persistence::StoreError>
+    {
+        lash::persistence::ControlIntentStore::begin_session_close(
+            self.inner.as_ref(),
+            session_id,
+            at_ms,
+        )
+        .await
+    }
+
+    async fn claim_intent_application(
+        &self,
+        id: lash::persistence::ControlIntentId,
+    ) -> std::result::Result<lash::persistence::IntentApplication, lash::persistence::StoreError>
+    {
+        lash::persistence::ControlIntentStore::claim_intent_application(self.inner.as_ref(), id)
+            .await
+    }
+
+    async fn acknowledge_intent(
+        &self,
+        id: lash::persistence::ControlIntentId,
+        at_ms: u64,
+    ) -> std::result::Result<(), lash::persistence::StoreError> {
+        lash::persistence::ControlIntentStore::acknowledge_intent(self.inner.as_ref(), id, at_ms)
+            .await
+    }
+
+    async fn record_intent_failure(
+        &self,
+        id: lash::persistence::ControlIntentId,
+        error: &str,
+        retryable: bool,
+        at_ms: u64,
+    ) -> std::result::Result<lash::persistence::ControlIntent, lash::persistence::StoreError> {
+        lash::persistence::ControlIntentStore::record_intent_failure(
+            self.inner.as_ref(),
+            id,
+            error,
+            retryable,
+            at_ms,
+        )
+        .await
+    }
+
+    async fn load_intent(
+        &self,
+        id: lash::persistence::ControlIntentId,
+    ) -> std::result::Result<Option<lash::persistence::ControlIntent>, lash::persistence::StoreError>
+    {
+        lash::persistence::ControlIntentStore::load_intent(self.inner.as_ref(), id).await
+    }
+
+    async fn open_root_intent(
+        &self,
+        request: &lash::persistence::RootIntentRequest,
+        at_ms: u64,
+    ) -> std::result::Result<lash::persistence::ControlIntent, lash::persistence::RootIntentRefused>
+    {
+        lash::persistence::ControlIntentStore::open_root_intent(self.inner.as_ref(), request, at_ms)
             .await
     }
 }
