@@ -124,7 +124,7 @@ pub(super) async fn process_park_feed(
         page.events.push(ParkFeedEvent {
             seq,
             at_ms,
-            target: ProcessParkKey::from(process_id),
+            target: crate::stored_process_id(&process_id)?,
             park_id: ParkId::from_feed_sequence(park_id),
             kind: ParkEventKind::decode_columns(&kind, cause.as_deref(), reason_json.as_deref())
                 .map_err(|error| PluginError::StoredDataCorrupt {

@@ -973,9 +973,8 @@ fn foreground_lashlang_execution_trace(
     let effect_id = invocation.effect_id()?;
     let address = invocation.effect_address()?.clone();
     let generation = match ctx.admitted_process() {
-        Some(process) => Some(TraceLanguageExecutionGeneration::new(
+        Some(_) => Some(TraceLanguageExecutionGeneration::new(
             ctx.admitted_process_attempt()?,
-            process.incarnation.registration_sequence(),
         )),
         None => None,
     };

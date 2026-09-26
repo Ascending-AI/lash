@@ -124,12 +124,11 @@ async fn turn_control_default_binding_external_cancel_stops_local_turn() {
     let address = lash_core::facade_support::TurnAddress::new("root", "external-local-cancel");
     let scope = host_admitted_scope(
         &host_config,
-        lash_core::AdmittedScope::unpinned(
+        lash_core::AdmittedScope::new(
             runtime
                 .export_persistence_state()
                 .turn_scope(&address.turn_id),
-        )
-        .expect("turn scope"),
+        ),
     );
     let turn = lash_core::task::spawn(async move {
         runtime
@@ -171,7 +170,7 @@ async fn turn_control_default_binding_active_gate_recognizes_host_cancel() {
     let address = lash_core::facade_support::TurnAddress::new("active-session", "active-turn");
     let scoped = backend_admitted_scope(
         &backend,
-        lash_core::AdmittedScope::unpinned(address.execution_scope()).unwrap(),
+        lash_core::AdmittedScope::new(address.execution_scope()),
     );
     let binding = host.turn_control_binding(&scoped).await.unwrap();
     let resolver = binding.resolver();

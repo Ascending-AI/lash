@@ -15,7 +15,7 @@ pub(crate) async fn list_sessions(
     .map_err(store_sqlx_error)?;
     let mut summaries = Vec::with_capacity(rows.len());
     for row in rows {
-        let stored = crate::session_meta::stored_relation_from_row(&row);
+        let stored = crate::session_meta::stored_relation_from_row(&row)?;
         let relation_label = stored.relation_kind.clone();
         let relation = match relation_label.as_str() {
             "root" => SessionRelationKind::Root,

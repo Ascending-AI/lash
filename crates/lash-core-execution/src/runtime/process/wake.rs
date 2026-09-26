@@ -2,7 +2,7 @@ use crate::plugin::PluginError;
 pub use lash_core_store::process_identity::{process_wake_turn_cause, process_wake_turn_text};
 
 use super::events::{PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessWake, ProcessWakeDelivery};
-use super::model::{ProcessId, ProcessIncarnation, SessionId};
+use super::model::{ProcessId, SessionId};
 
 const PROCESS_WAKE_FAMILY_VERSION: u8 = 1;
 
@@ -61,7 +61,6 @@ pub fn process_wake_input_from_event_payload(payload: &serde_json::Value) -> Str
 pub struct ProcessWakeDeliveryRequest {
     pub target_session_id: SessionId,
     pub process_id: ProcessId,
-    pub process_incarnation: ProcessIncarnation,
     pub sequence: u64,
     pub event_type: String,
     pub event_invocation: crate::RuntimeInvocation,
@@ -77,7 +76,6 @@ pub fn process_wake_delivery(
     let ProcessWakeDeliveryRequest {
         target_session_id,
         process_id,
-        process_incarnation,
         sequence,
         event_type,
         event_invocation,
@@ -92,7 +90,6 @@ pub fn process_wake_delivery(
         wake_id,
         target_session_id,
         process_id,
-        process_incarnation,
         sequence,
         event_type,
         event_invocation,
@@ -115,20 +112,20 @@ mod identity_tests {
     fn process_wake_v1_identity_golden() {
         let preimage = process_wake_identity_preimage(
             &SessionId::from("session\0x"),
-            &ProcessId::from("process:λ"),
+            &crate::process_id_for_test("process:λ"),
             42,
         );
         assert_eq!(
             hex(&preimage),
-            "6c6173682d737461626c652d6964656e74697479020100000000000000116c6173682e70726f636573732d77616b65000000000000000973657373696f6e0078000000000000000a70726f636573733acebb000000000000002a"
+            "6c6173682d737461626c652d6964656e74697479020100000000000000116c6173682e70726f636573732d77616b65000000000000000973657373696f6e00780000000000000022705f3732383666323863306130393737653138633335666635643130373538363633000000000000002a"
         );
         assert_eq!(
             process_wake_id(
                 &SessionId::from("session\0x"),
-                &ProcessId::from("process:λ"),
+                &crate::process_id_for_test("process:λ"),
                 42
             ),
-            "wake:v1:blake3:81131142482e7a7371fbfa4ca163e15ad0f4e0b1eae3436b475176426ec223d1"
+            "wake:v1:blake3:7fe5d63df8c2f43b4c31274fc065b7dd306e42e69abfdb821b9bc73915dac87a"
         );
     }
 }

@@ -173,7 +173,7 @@ impl ProcessRecoveryAttemptOutcome {
             | Self::ExternallyOwned => None,
             Self::BackendError { operation, error } => {
                 Some(ProcessWorkerFault::RecoveryBackendError {
-                    process_id: ProcessId::from(process_id.to_string()),
+                    process_id: process_id.clone(),
                     operation,
                     error,
                 })
@@ -277,7 +277,7 @@ mod tests {
 
     #[test]
     fn recovery_fault_projection_distinguishes_all_existing_dispositions() {
-        let process_id = ProcessId::from("projection");
+        let process_id = crate::process_id_for_test("projection");
         for disposition in [
             ProcessRecoveryAttemptOutcome::Busy,
             ProcessRecoveryAttemptOutcome::Absent,
@@ -310,7 +310,7 @@ mod tests {
 
     #[test]
     fn sinkless_fault_traces_preserve_fields_and_target() {
-        let id = ProcessId::from("trace-process");
+        let id = crate::process_id_for_test("trace-process");
         let cases = [
             (
                 ProcessWorkerFault::RecoveryBackendError {
@@ -354,7 +354,10 @@ mod tests {
             assert_eq!(event.contains_field("process_id"), has_process);
             assert_eq!(event.contains_field("operation"), has_operation);
             if has_process {
-                assert_eq!(event.field("process_id"), "trace-process");
+                assert_eq!(
+                    event.field("process_id"),
+                    crate::process_id_for_test("trace-process").as_str()
+                );
             }
             if has_operation {
                 assert_eq!(event.field("operation"), "read_process");

@@ -167,8 +167,12 @@ fn register_fence_opener(
         definitions: process_definitions,
     } = processes;
     let installed = install_child_host(host, &process_env_store);
-    let admitted = crate::AdmittedScope::new(scope.clone(), opener.process_ref().cloned())
-        .expect("the opener's scope and incarnation agree");
+    let admitted = crate::AdmittedScope::new(scope.clone());
+    assert_eq!(
+        opener.process_id(),
+        admitted.process_id(),
+        "an opener registers at its own scope"
+    );
     let controller = host
         .scoped_static(admitted.clone())
         .expect("the host lends a scoped controller")
@@ -311,8 +315,7 @@ pub async fn a_cancel_decided_before_a_nested_sink_is_refused_at_the_sink(
         .expect("a turn scope derives an opener");
     let group_key = format!("{prefix}-fence-group");
     let owner_scope = crate::TriggerOwnerScope::session(session_id.clone());
-    let child_admitted =
-        crate::AdmittedScope::unpinned(scope.clone()).expect("a turn scope admits unpinned");
+    let child_admitted = crate::AdmittedScope::new(scope.clone());
 
     let world = (fixture.make_world)(ToolChildWorldSpec {
         lease_ttl_ms: LIVE_LEASE_MS,

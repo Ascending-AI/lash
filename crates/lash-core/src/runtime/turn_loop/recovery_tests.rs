@@ -85,7 +85,7 @@ fn recovered_commit_adopts_the_exact_predecessor_authorization() {
 
 #[test]
 fn recovered_commit_rejects_changed_admission_scope() {
-    let original_scope = ExecutionScope::process("original-process");
+    let original_scope = ExecutionScope::process(crate::ProcessId::fixture("original-process"));
     let binding_id = crate::turn_control_binding_id_for_scope("binding", &original_scope)
         .expect("physical binding id");
     let preserved = closure_authorization("root-turn", &binding_id, original_scope, 7);
@@ -93,7 +93,7 @@ fn recovered_commit_rejects_changed_admission_scope() {
         vec![preserved],
         &TurnAddress::new("recovery-session", "root-turn"),
         &binding_id,
-        &ExecutionScope::process("successor-process"),
+        &ExecutionScope::process(crate::ProcessId::fixture("successor-process")),
     )
     .expect_err("scope drift must fail closed");
 

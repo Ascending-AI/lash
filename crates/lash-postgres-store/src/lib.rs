@@ -36,7 +36,6 @@
 
 use lash_sansio::SessionId;
 mod namespace;
-mod process_key;
 mod turn_cancel_closure;
 
 use std::sync::Arc;
@@ -64,10 +63,10 @@ use lash_core_execution::{
     AttachmentOwnerKind, BlobRef, DeliveryPolicy, ExecutionScope, GcReport, LeaseOwnerIdentity,
     PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
     ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessIncarnation, ProcessLease,
-    ProcessLeaseCompletion, ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport,
-    ProcessRecord, ProcessRef, ProcessRegistration, ProcessRegistry, ProcessStartOutcome,
-    ProcessStarted, QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease, ProcessLeaseCompletion,
+    ProcessLiveReferenceView, ProcessObserverBy, ProcessPruneReport, ProcessRecord,
+    ProcessRegistration, ProcessRegistry, ProcessStartOutcome, ProcessStarted, QueuedWorkStore,
+    RuntimePersistence, SessionCommitStore, SessionExecutionLease,
     SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
     SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionListFilter, SessionMeta,
     SessionNodeRecord, SessionRelationKind, SessionStoreCreateRequest, SessionStoreFactory,
@@ -91,6 +90,16 @@ const SCHEMA_COMPONENT: &str = "lash-postgres-store";
 /// [`StoreError::FencedWriteVerdictDisagreed`](lash_core_execution::StoreError::FencedWriteVerdictDisagreed)
 /// says which store's locked read and backstop predicate disagreed.
 pub(crate) const POSTGRES_BACKEND: &str = "postgres";
+
+/// Parse a stored process id: a column this store only ever wrote from a
+/// minted id, so any other spelling is corrupt stored data.
+pub(crate) fn stored_process_id(
+    value: &str,
+) -> Result<lash_sansio::ProcessId, lash_core_execution::PluginError> {
+    lash_sansio::ProcessId::parse(value).map_err(|error| {
+        lash_core_execution::PluginError::Session(format!("corrupt stored process id: {error}"))
+    })
+}
 
 async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Postgres>, StoreError> {
     #[cfg(feature = "perf-witness")]
@@ -569,7 +578,18 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // current admission (ADR 0105 L-S8): a later seal of the same admission by
 // another execution is refused. `lash migrate` carries a component-137
 // catalog forward by adding the nullable column and restamping.
-const SCHEMA_VERSION: i32 = 138;
+//
+// Version 139 (FIG-3607) names every process by its minted id alone:
+// `lash_processes` drops `incarnation` and `registration_fingerprint` and
+// gains the nullable `start_key` with its partial unique index; the event,
+// wake-delivery, observer, tombstone and artifact-cleanup tables key by
+// `process_id` alone; `lash_attachment_manifest` drops `owner_incarnation`,
+// `lash_session_meta_pending_observer_intents` drops `process_incarnation`,
+// and `lash_trigger_deliveries.process_id` becomes nullable until the
+// delivery's start binds it. None of that is an expand step, so the migrate
+// catalog carries no 138→139 step: component-138 and older catalogs are
+// rejected and recreated.
+const SCHEMA_VERSION: i32 = 139;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
 ///
@@ -644,11 +664,24 @@ pub struct PostgresProcessRegistry {
     /// PostgreSQL journal's own fence rows share the pool and are cleared in
     /// the registration transaction itself.
     scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts,
+    /// Where registration mints process ids (ADR 0107).
+    process_id_mint: lash_core_execution::ProcessIdMint,
 }
 
 impl PostgresProcessRegistry {
     pub fn with_clock(mut self, clock: Arc<dyn lash_core_execution::Clock>) -> Self {
         self.clock = clock;
+        self
+    }
+
+    /// Mint registered process ids from `mint` instead of at random: a fixture
+    /// generator's artifacts regenerate byte-identically only when its ids do.
+    #[doc(hidden)]
+    pub fn with_process_id_mint_for_testing(
+        mut self,
+        mint: lash_core_execution::ProcessIdMint,
+    ) -> Self {
+        self.process_id_mint = mint;
         self
     }
 }
@@ -1182,6 +1215,7 @@ impl PostgresStorage {
             wake_delivery_config: lash_core_execution::WakeDeliveryConfig::default(),
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
+            process_id_mint: lash_core_execution::ProcessIdMint::default(),
         }
     }
 
@@ -1194,6 +1228,7 @@ impl PostgresStorage {
             wake_delivery_config,
             clock: Arc::new(lash_core_execution::facade_support::SystemClock),
             scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
+            process_id_mint: lash_core_execution::ProcessIdMint::default(),
         }
     }
 

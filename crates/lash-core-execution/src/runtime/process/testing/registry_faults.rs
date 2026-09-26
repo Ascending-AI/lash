@@ -34,6 +34,10 @@ pub struct ProcessRegistryFaults {
     lease_batch_reads: Arc<AtomicUsize>,
 }
 
+/// What a held external-reference write runs before it stops for good.
+type ExternalRefWriteHold =
+    Box<dyn FnOnce() -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send>;
+
 #[derive(Default)]
 struct ReadFaultPlan {
     error: Option<crate::PluginError>,
@@ -48,7 +52,9 @@ struct ReadFaultPlan {
     terminal_write_error: Option<crate::PluginError>,
     terminal_write_outcome: Option<crate::ProcessCompletionOutcome>,
     external_ref_write_error: Option<crate::PluginError>,
+    external_ref_write_hold: Option<ExternalRefWriteHold>,
     cancel_request_write_error: Option<crate::PluginError>,
+    event_append_error: Option<crate::PluginError>,
     worklist_page_reads: Vec<WorklistPageRead>,
     worklist_page_errors: Option<(usize, std::collections::VecDeque<crate::PluginError>)>,
     worklist_page_pause: Option<WorklistPagePause>,
@@ -191,10 +197,28 @@ impl ProcessRegistryFaults {
         self.faults.lock_recover().external_ref_write_error = Some(error);
     }
 
+    /// The next external-reference write awaits `reached` and never returns,
+    /// once, without reaching the wrapped registry: the execution that issued
+    /// it dies there, after the start registered and scheduled its process
+    /// and before the start answered.
+    pub fn hold_next_external_ref_write<F>(&self, reached: F)
+    where
+        F: std::future::Future<Output = ()> + Send + 'static,
+    {
+        self.faults.lock_recover().external_ref_write_hold =
+            Some(Box::new(move || Box::pin(reached)));
+    }
+
     /// The next cancellation request fails with `error`, once, without
     /// reaching the wrapped registry.
     pub fn fail_next_cancel_request(&self, error: crate::PluginError) {
         self.faults.lock_recover().cancel_request_write_error = Some(error);
+    }
+
+    /// The next plain event append fails with `error`, once, without reaching
+    /// the wrapped registry.
+    pub fn fail_next_event_append(&self, error: crate::PluginError) {
+        self.faults.lock_recover().event_append_error = Some(error);
     }
 
     /// After `successful_reads` more worklist-page reads pass, the following
@@ -320,6 +344,13 @@ impl ProcessRegistryFaults {
 /// incarnation read sees the same faults a point read does.
 #[async_trait::async_trait]
 impl super::super::registry_concerns::ProcessQuery for ProcessRegistryFaults {
+    async fn get_process_by_start_key(
+        &self,
+        start_key: &crate::StartKey,
+    ) -> Result<Option<crate::ProcessRecord>, crate::PluginError> {
+        self.inner.get_process_by_start_key(start_key).await
+    }
+
     async fn get_process(
         &self,
         process_id: &ProcessId,
@@ -416,7 +447,6 @@ delegate_process_registrar!(
     ProcessRegistryFaults,
     inner,
     registration | faults,
-    _process_id,
     forwarded | {
         let hold = faults.faults.lock_recover().registration_hold.take();
         match hold {
@@ -435,6 +465,12 @@ delegate_process_registrar!(
     event | faults,
     _process_id,
     forwarded | {
+        let hold = faults.faults.lock_recover().external_ref_write_hold.take();
+        if let Some(reached) = hold {
+            drop(forwarded);
+            reached().await;
+            return std::future::pending().await;
+        }
         let injected = faults.faults.lock_recover().external_ref_write_error.take();
         match injected {
             Some(error) => Err(error),
@@ -452,15 +488,11 @@ impl super::super::registry_concerns::ProcessEventLog for ProcessRegistryFaults 
         process_id: &ProcessId,
         request: crate::ProcessEventAppendRequest,
     ) -> Result<crate::ProcessEventAppendReceipt, crate::PluginError> {
+        let injected = self.faults.lock_recover().event_append_error.take();
+        if let Some(error) = injected {
+            return Err(error);
+        }
         self.inner.append_event(process_id, request).await
-    }
-
-    async fn append_event_ref(
-        &self,
-        process_ref: &crate::ProcessRef,
-        request: crate::ProcessEventAppendRequest,
-    ) -> Result<crate::ProcessEventAppendReceipt, crate::PluginError> {
-        self.inner.append_event_ref(process_ref, request).await
     }
 
     async fn append_event_with_authority(
@@ -475,17 +507,17 @@ impl super::super::registry_concerns::ProcessEventLog for ProcessRegistryFaults 
     }
 
     // `event_page` keeps the trait's provided body, which reads through
-    // `event_page_ref`: a by-id read sees the same fault.
-    async fn event_page_ref(
+    // `event_page_after`: a by-id read sees the same fault.
+    async fn event_page_after(
         &self,
-        process_ref: &crate::ProcessRef,
+        process_id: &crate::ProcessId,
         after_sequence: u64,
         limit: std::num::NonZeroUsize,
         mode: crate::ProcessEventQueryMode,
     ) -> Result<crate::ProcessEventReadOutcome<crate::ProcessEventPage>, crate::PluginError> {
         self.take_events_read_fault()?;
         self.inner
-            .event_page_ref(process_ref, after_sequence, limit, mode)
+            .event_page_after(process_id, after_sequence, limit, mode)
             .await
     }
 
@@ -495,20 +527,9 @@ impl super::super::registry_concerns::ProcessEventLog for ProcessRegistryFaults 
         event_type: &str,
         up_to_sequence: u64,
     ) -> Result<u64, crate::PluginError> {
-        self.inner
-            .count_events_through(process_id, event_type, up_to_sequence)
-            .await
-    }
-
-    async fn count_events_through_ref(
-        &self,
-        process_ref: &crate::ProcessRef,
-        event_type: &str,
-        up_to_sequence: u64,
-    ) -> Result<u64, crate::PluginError> {
         self.take_events_read_fault()?;
         self.inner
-            .count_events_through_ref(process_ref, event_type, up_to_sequence)
+            .count_events_through(process_id, event_type, up_to_sequence)
             .await
     }
 
@@ -616,13 +637,13 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
 
     async fn request_process_cancel(
         &self,
-        process_ref: &crate::ProcessRef,
+        process_id: &crate::ProcessId,
         origin: crate::CancelOrigin,
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
         self.request_process_cancel_reporting_realization(
-            process_ref,
+            process_id,
             origin,
             requester,
             attribution,
@@ -633,7 +654,7 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
 
     async fn request_process_cancel_reporting_realization(
         &self,
-        process_ref: &crate::ProcessRef,
+        process_id: &crate::ProcessId,
         origin: crate::CancelOrigin,
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
@@ -644,7 +665,7 @@ impl super::super::registry_concerns::ProcessLifecycle for ProcessRegistryFaults
         }
         self.inner
             .request_process_cancel_reporting_realization(
-                process_ref,
+                process_id,
                 origin,
                 requester,
                 attribution,

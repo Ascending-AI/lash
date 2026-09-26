@@ -111,7 +111,7 @@ impl ExecutionScope {
                 session_id: wire.session_id?,
             },
             "process" => Self::Process {
-                process_id: ProcessId::from(wire.execution_id?),
+                process_id: ProcessId::parse(&wire.execution_id?).ok()?,
             },
             "op" => Self::RuntimeOperation {
                 operation_id: wire.execution_id?,
@@ -305,8 +305,10 @@ mod tests {
                 r#"{"version":2,"kind":"delete","session_id":"session"}"#,
             ),
             (
-                ExecutionScope::process("process"),
-                r#"{"version":2,"kind":"process","execution_id":"process"}"#,
+                ExecutionScope::process(ProcessId::from_minted(
+                    0x0000_0000_0000_7000_8000_0000_0000_0000 | 7,
+                )),
+                r#"{"version":2,"kind":"process","execution_id":"p_00000000000070008000000000000007"}"#,
             ),
             (
                 ExecutionScope::runtime_operation("operation"),
@@ -322,7 +324,13 @@ mod tests {
     #[test]
     fn same_replay_key_in_distinct_scopes_has_distinct_graph_identity() {
         let turn = EffectAddress::new(ExecutionScope::turn("session", "turn"), "same").unwrap();
-        let process = EffectAddress::new(ExecutionScope::process("process"), "same").unwrap();
+        let process = EffectAddress::new(
+            ExecutionScope::process(ProcessId::from_minted(
+                0x0000_0000_0000_7000_8000_0000_0000_0000 | 7,
+            )),
+            "same",
+        )
+        .unwrap();
         assert_ne!(turn, process);
         assert_ne!(turn.graph_key(), process.graph_key());
     }

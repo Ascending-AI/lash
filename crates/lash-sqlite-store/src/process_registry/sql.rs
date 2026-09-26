@@ -147,23 +147,14 @@ lash_store_sql::statements! {
         /// constraint error is the right report. PostgreSQL cannot hold that
         /// read across statements and swallows the race instead.
         insert_registration = "INSERT INTO processes (
-                            process_id, incarnation, registration_fingerprint, originator_id, wake_session_id,
+                            process_id, start_key, originator_id, wake_session_id,
                             identity_kind, identity_label,
                             created_at_ms, updated_at_ms, last_event_sequence,
                             change_seq, status,
                             parent_scope_kind, parent_scope_id, on_parent_end, cancel_requested_at_ms,
                             record_json
                          )
-                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)";
-
-        /// The live incarnation of `?1`, for the artifact-cleanup
-        /// acknowledgement that has to tell a stale incarnation from an
-        /// unknown one.
-        ///
-        /// A standalone read on SQLite, where the whole acknowledgement runs
-        /// under one write lock; PostgreSQL folds the same question into the
-        /// CTE that deletes the cleanup row.
-        select_incarnation = "SELECT incarnation FROM processes WHERE process_id = ?1";
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)";
 
         /// SQLite spells a bound id list `json_each`; PostgreSQL deletes these
         /// rows inside its one-statement prune instead.
@@ -256,7 +247,6 @@ lash_store_sql::statements! {
                  SELECT pruned_change_seq, 'deleted' AS kind,
                         json_object(
                             'process_id', process_id,
-                            'incarnation', incarnation,
                             'terminal_label', terminal_label,
                             'pruned_at_ms', pruned_at_ms,
                             'pruned_change_seq', pruned_change_seq
@@ -568,7 +558,6 @@ lash_store_sql::statements! {
         list_observed = "SELECT p.record_json
                      FROM process_observers o
                      JOIN processes p ON p.process_id = o.process_id
-                                     AND p.incarnation = o.process_incarnation
                      WHERE o.session_id = ?1
                        AND (?2 IS NULL OR p.status IN (SELECT value FROM json_each(?2)))
                        AND (?3 IS NULL OR {{live_process_status(p.status)}}
@@ -586,15 +575,13 @@ lash_store_sql::statements! {
          WHERE {{live_process_status(p.status)}}
            AND (?2 IS NULL OR p.status IN (SELECT value FROM json_each(?2)))
            AND EXISTS (SELECT 1 FROM process_observers o
-                       WHERE o.session_id = ?1 AND o.process_id = p.process_id
-                         AND o.process_incarnation = p.incarnation)
+                       WHERE o.session_id = ?1 AND o.process_id = p.process_id)
          UNION ALL
          SELECT process_id, record_json FROM processes p
          WHERE {{retired_process_status(p.status)}} AND p.updated_at_ms >= ?3
            AND (?2 IS NULL OR p.status IN (SELECT value FROM json_each(?2)))
            AND EXISTS (SELECT 1 FROM process_observers o
-                       WHERE o.session_id = ?1 AND o.process_id = p.process_id
-                         AND o.process_incarnation = p.incarnation)
+                       WHERE o.session_id = ?1 AND o.process_id = p.process_id)
      ) ORDER BY process_id";
     }
 }
@@ -603,8 +590,8 @@ lash_store_sql::statements! {
     /// `process_observers` statements only SQLite issues.
     pub(crate) struct ObserverSqliteStatements @ "process_observer" {
         /// `INSERT OR IGNORE` is SQLite's spelling of PostgreSQL's `ON CONFLICT DO NOTHING`.
-        insert_if_absent = "INSERT OR IGNORE INTO process_observers (session_id, process_id, process_incarnation)
-                             VALUES (?1, ?2, ?3)";
+        insert_if_absent = "INSERT OR IGNORE INTO process_observers (session_id, process_id)
+                             VALUES (?1, ?2)";
 
         /// A standalone read on SQLite, where the caller's other half of the
         /// question runs under the same lock; PostgreSQL asks both halves in
@@ -613,14 +600,6 @@ lash_store_sql::statements! {
                          SELECT 1 FROM process_observers
                          WHERE session_id = ?1 AND process_id = ?2
                      )";
-
-        /// The sessions observing incarnation `?1` / `?2`.
-        ///
-        /// Narrowed to the incarnation the caller read; PostgreSQL's twin
-        /// reports every incarnation's observers.
-        list_sessions_for_incarnation = "SELECT session_id FROM process_observers
-                             WHERE process_id = ?1 AND process_incarnation = ?2
-                             ORDER BY session_id";
 
         /// SQLite deletes the dependent rows itself; PostgreSQL's prune
         /// statement lets the foreign key cascade do it.
@@ -749,10 +728,9 @@ lash_store_sql::statements! {
         /// the tombstones' change sequences retain process-id ordering without
         /// one clock update per process.
         insert_from_pruned = "INSERT INTO process_tombstones (
-             process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq
+             process_id, terminal_label, pruned_at_ms, pruned_change_seq
          )
          SELECT process.process_id,
-                process.incarnation,
                 process.status,
                 ?2,
                 ?3 + CAST(candidate.key AS INTEGER)
@@ -770,7 +748,6 @@ lash_store_sql::statements! {
                AND NOT EXISTS (
                    SELECT 1 FROM process_artifact_cleanup AS cleanup
                    WHERE cleanup.process_id = process_tombstones.process_id
-                     AND cleanup.incarnation = process_tombstones.incarnation
                )";
 
         /// Delete exactly the rows
@@ -783,7 +760,6 @@ lash_store_sql::statements! {
            AND NOT EXISTS (
                SELECT 1 FROM process_artifact_cleanup AS cleanup
                WHERE cleanup.process_id = process_tombstones.process_id
-                 AND cleanup.incarnation = process_tombstones.incarnation
            )";
     }
 }
@@ -791,16 +767,12 @@ lash_store_sql::statements! {
 lash_store_sql::statements! {
     /// `process_artifact_cleanup` statements only SQLite issues.
     pub(crate) struct ArtifactCleanupSqliteStatements @ "process_artifact_cleanup" {
-        /// Record the artifact release owed for pruned incarnation `?1` / `?2`.
+        /// Record the artifact release owed for pruned process `?1`.
         ///
         /// A plain insert per candidate here; PostgreSQL writes the same rows
         /// from the one statement that performs its whole prune.
-        insert = "INSERT INTO process_artifact_cleanup (process_id, incarnation, cleanup_json)
-             VALUES (?1, ?2, ?3)";
-
-        /// Acknowledge the release owed for `?1` / `?2`.
-        delete_for_incarnation = "DELETE FROM process_artifact_cleanup
-                     WHERE process_id = ?1 AND incarnation = ?2";
+        insert = "INSERT INTO process_artifact_cleanup (process_id, cleanup_json)
+             VALUES (?1, ?2)";
     }
 }
 
@@ -859,10 +831,10 @@ lash_store_sql::statements! {
         /// `INSERT OR IGNORE` is SQLite's spelling of PostgreSQL's
         /// `ON CONFLICT (delivery_id) DO NOTHING`.
         insert_pending = "INSERT OR IGNORE INTO process_wake_deliveries (
-                delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
+                delivery_id, process_id, target_session_id, sequence, state,
                 claim_token, attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
                 discard_reason, delivery_json
-             ) VALUES (?1, ?2, ?3, ?4, ?5, {{pending_wake_delivery_state_value(state)}}, NULL, 0, NULL, ?6, ?7, NULL, ?8)";
+             ) VALUES (?1, ?2, ?3, ?4, {{pending_wake_delivery_state_value(state)}}, NULL, 0, NULL, ?5, ?6, NULL, ?7)";
 
         /// The next `?3` claimable wakes at `?1`, skipping any whose ordering
         /// group still holds an earlier delivery that blocks it. `?2` is the

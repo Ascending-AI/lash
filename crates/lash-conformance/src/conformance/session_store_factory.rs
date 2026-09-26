@@ -9,7 +9,6 @@ use super::session_store_factory_vacuum::{
     session_store_factory_vacuums_organic_retained_tombstone,
 };
 use super::*;
-use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
@@ -796,10 +795,8 @@ pub async fn process_prune_deletes_owned_session_stores(
     registry: Arc<dyn crate::ProcessRegistry>,
     effect_host: Arc<dyn crate::EffectHost>,
 ) {
-    const PROCESS_ID: &str = "process-prune-owned-session-stores";
     let process = registry
         .register_process(crate::ProcessRegistration::new(
-            PROCESS_ID,
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -812,9 +809,10 @@ pub async fn process_prune_deletes_owned_session_stores(
         ))
         .await
         .expect("register process with owned stores");
+    let process_id = process.id.clone();
 
     let mut requests = Vec::new();
-    for (index, session_id) in crate::process_runtime_session_ids(&ProcessId::from(PROCESS_ID))
+    for (index, session_id) in crate::process_runtime_session_ids(&process_id)
         .into_iter()
         .enumerate()
     {
@@ -839,8 +837,7 @@ pub async fn process_prune_deletes_owned_session_stores(
                 canonical_uri: format!("lash-attachment://process-owned-{index}"),
                 intent_at_epoch_ms: 1,
                 owner: Some(crate::AttachmentOwner::Process {
-                    id: PROCESS_ID.to_string(),
-                    incarnation: process.incarnation,
+                    process_id: process_id.clone(),
                 }),
             },
         )
@@ -874,7 +871,7 @@ pub async fn process_prune_deletes_owned_session_stores(
         effect_host.turn_control_binding_id(),
         Arc::clone(&effect_host) as Arc<dyn crate::AwaitEventResolver>,
     );
-    let physical_scope = crate::ExecutionScope::process(PROCESS_ID);
+    let physical_scope = crate::ExecutionScope::process(process_id.clone());
     let binding_id =
         crate::turn_control_binding_id_for_scope(authority.binding_id(), &physical_scope)
             .expect("bind process cancellation scope");
@@ -929,7 +926,7 @@ pub async fn process_prune_deletes_owned_session_stores(
 
     let terminal = registry
         .complete_process(
-            &ProcessId::from(PROCESS_ID),
+            &process_id,
             crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
@@ -953,7 +950,7 @@ pub async fn process_prune_deletes_owned_session_stores(
     ));
     assert!(
         registry
-            .get_process(&ProcessId::from(PROCESS_ID))
+            .get_process(&process_id)
             .await
             .expect("read process after refused prune")
             .is_some(),
@@ -1015,6 +1012,36 @@ pub async fn process_prune_deletes_owned_session_stores(
             Err(error) => error,
         };
         assert_session_id_was_used_and_deleted(reuse_error, &request.session_id);
+    }
+
+    // FIG-3611 L4: the pruned sessions stay unbindable, and that never blocks
+    // the next process: a minted id is never reused, so the process started
+    // after the prune derives sessions of its own and creates them.
+    let next = registry
+        .register_process(crate::ProcessRegistration::new(
+            crate::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            crate::RecoveryContract::ExternallyOwned,
+            crate::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
+        ))
+        .await
+        .expect("register the next process");
+    assert_ne!(next.id, process_id, "a minted id is never reused");
+    for session_id in crate::process_runtime_session_ids(&next.id) {
+        factory
+            .create_store(&crate::SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
+                session_id,
+                relation: crate::SessionRelation::default(),
+                policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            })
+            .await
+            .expect("the next process creates its own sessions");
     }
 }
 
@@ -1500,7 +1527,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
             "child-effect-process",
             child(Some(crate::CausalRef::Effect {
                 address: EffectAddress::new(
-                    ExecutionScope::process("cause-process"),
+                    ExecutionScope::process(crate::ProcessId::fixture("cause-process")),
                     "cause-effect",
                 )
                 .expect("valid process effect cause"),
@@ -1536,13 +1563,13 @@ async fn session_store_factory_round_trips_every_relation_shape(
         (
             "child-process",
             child(Some(crate::CausalRef::Process {
-                process_id: ProcessId::from("cause-process"),
+                process_id: crate::ProcessId::fixture("cause-process"),
             })),
         ),
         (
             "child-process-event",
             child(Some(crate::CausalRef::ProcessEvent {
-                process_id: ProcessId::from("cause-process"),
+                process_id: crate::ProcessId::fixture("cause-process"),
                 sequence: u64::MAX,
             })),
         ),
@@ -1596,8 +1623,12 @@ async fn session_store_factory_round_trips_every_relation_shape(
             .unwrap_or_else(|error| panic!("create {label} relation store: {error}"));
         let expected = SessionMeta {
             pending_observer_intents: vec![
-                crate::SessionObserverIntent::host_requested("observer-a"),
-                crate::SessionObserverIntent::host_requested("observer-b"),
+                crate::SessionObserverIntent::host_requested(crate::ProcessId::fixture(
+                    "observer-a",
+                )),
+                crate::SessionObserverIntent::host_requested(crate::ProcessId::fixture(
+                    "observer-b",
+                )),
             ],
             session_id: session_id.clone(),
             relation,

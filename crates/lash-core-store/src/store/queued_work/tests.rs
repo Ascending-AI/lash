@@ -1,5 +1,5 @@
 use super::*;
-use crate::{ProcessId, TurnId};
+use crate::TurnId;
 use proptest::{
     collection::vec,
     prelude::*,
@@ -85,14 +85,15 @@ fn candidate(enqueue_seq: u64, merge_key: Option<&str>) -> ClaimCandidate {
 
 /// The turn cause a durable process wake renders into the claim's
 /// model-visible prompt, the only queued work the token bound measures.
-/// Identifiers stay short so one default row renders under the tiny windows
-/// some claim laws below use, while several rows together do not.
+/// Identifiers stay short (the process id is a minted-form fixture id, the
+/// rest single words) so one default row renders under the tiny windows some
+/// claim laws below use, while several rows together do not.
 fn wake_cause(sequence: u64, text: &str) -> TurnCause {
     TurnCause {
         id: format!("w{sequence}"),
         event_type: "wake".to_string(),
         origin: crate::MessageOrigin::Process {
-            process_id: ProcessId::from("p"),
+            process_id: crate::ProcessId::fixture("p"),
             event_type: "wake".to_string(),
             sequence,
             wake_id: Some(format!("w{sequence}")),
@@ -131,7 +132,7 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
                         transient: index % 2 == 0,
                     },
                     1 => crate::MessageOrigin::Process {
-                        process_id: ProcessId::from(format!("process-{index}")),
+                        process_id: crate::process_id_for_test(&format!("process-{index}")),
                         event_type: "wake".to_string(),
                         sequence: index as u64,
                         wake_id: Some(format!("wake-{index}")),
@@ -468,12 +469,24 @@ fn all_mode_claims_the_whole_compatible_prefix_without_token_arithmetic() {
         candidate(2, Some("wake")),
         candidate(3, Some("wake")),
     ];
-    let mut claim_policy = policy(101, 30);
+    // One row fits this deliberately tiny window; the three together do not,
+    // as the default token-bounded drain shows.
+    let mut claim_policy = policy(131, 30);
+    assert_ne!(
+        select_turn_work_claim_indices(
+            &candidates,
+            QueuedWorkClaimBoundary::Idle,
+            &claim_policy,
+            1_000,
+        )
+        .unwrap(),
+        vec![0, 1, 2],
+        "the three rows must render past the window"
+    );
     claim_policy.drain_policy =
         std::sync::Arc::new(crate::DrainModePolicy::new(crate::DrainMode::All));
-    // The three rows render past this deliberately tiny window. `All` is a
-    // host statement that the provider is the authority on what fits, so
-    // Lash coalesces every compatible row anyway.
+    // `All` is a host statement that the provider is the authority on what
+    // fits, so Lash coalesces every compatible row anyway.
     assert_eq!(
         select_turn_work_claim_indices(
             &candidates,

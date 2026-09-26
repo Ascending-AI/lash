@@ -834,13 +834,9 @@ fn trigger_journal_completion(
 /// every later replay reproduces.
 #[tokio::test]
 pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellation() {
-    let process_id = "fig779-durable-cancel-redrive";
     let registry = process_registry();
-    let registration = rerunnable_registration(process_id);
-    registry
-        .register_process(registration.clone())
-        .await
-        .expect("register redrive process");
+    let registration = rerunnable_registration();
+    let process_id = registered(registry.as_ref(), &registration).await;
     let endpoint = Endpoint::builder()
         .bind(
             LashProcessWorkflowImpl::new_for_test(
@@ -852,22 +848,20 @@ pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellati
         )
         .build();
     let input = RestateProcessWorkflowInput {
+        process_id: process_id.clone(),
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
         journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
     };
 
-    let parked = park_process_on_its_timer(&endpoint, &ProcessId::from(process_id), &input).await;
+    let parked = park_process_on_its_timer(&endpoint, &process_id, &input).await;
 
     registry
         .append_event(
-            &ProcessId::from(process_id),
+            &process_id,
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                &registry
-                    .resolve_process_ref(&ProcessId::from(process_id))
-                    .await
-                    .expect("retained cancellation target"),
+                &process_id,
                 &lash_core::CancelRequest::new(
                     lash_core::CancelOrigin::OperatorRequested,
                     "actor:fixture:fig779_suspended_process_redrive_observes_durable_cancellation",
@@ -878,7 +872,7 @@ pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellati
         .await
         .expect("record durable process cancellation");
     let replay = encode_recorded_commands_replay(
-        process_id,
+        process_id.as_str(),
         &input,
         &[&parked],
         process_journal_completion_with_cancel(false, true),
@@ -903,7 +897,7 @@ pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellati
     );
     assert!(matches!(
         registry
-            .get_process(&ProcessId::from(process_id))
+            .get_process(&process_id)
             .await
             .expect("read process")
             .expect("read redriven process")
@@ -914,13 +908,9 @@ pub(super) async fn fig779_suspended_process_redrive_observes_durable_cancellati
 
 #[tokio::test]
 pub(super) async fn fig788_terminal_outcome_landing_preserves_the_suspended_command_prefix() {
-    let process_id = "fig788-terminal-outcome-redrive";
     let registry = process_registry();
-    let registration = rerunnable_registration(process_id);
-    registry
-        .register_process(registration.clone())
-        .await
-        .expect("register FIG-788 process");
+    let registration = rerunnable_registration();
+    let process_id = registered(registry.as_ref(), &registration).await;
     let endpoint = Endpoint::builder()
         .bind(
             LashProcessWorkflowImpl::new_for_test(
@@ -932,25 +922,26 @@ pub(super) async fn fig788_terminal_outcome_landing_preserves_the_suspended_comm
         )
         .build();
     let input = RestateProcessWorkflowInput {
+        process_id: process_id.clone(),
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
         journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
     };
 
-    let parked = park_process_on_its_timer(&endpoint, &ProcessId::from(process_id), &input).await;
+    let parked = park_process_on_its_timer(&endpoint, &process_id, &input).await;
 
     let stored = process_cancellation("terminal outcome landed between attempts", None);
     registry
         .complete_process(
-            &ProcessId::from(process_id),
+            &process_id,
             stored.clone(),
-            workflow_key_authority(&ProcessId::from(process_id)),
+            workflow_key_authority(&process_id),
         )
         .await
         .expect("store terminal outcome between attempts");
     let replay = encode_recorded_commands_replay(
-        process_id,
+        process_id.as_str(),
         &input,
         &[&parked],
         process_journal_completion(true),
@@ -976,24 +967,13 @@ pub(super) async fn fig788_terminal_outcome_landing_preserves_the_suspended_comm
 
 #[tokio::test]
 pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_handover() {
-    let process_id = "fig788-ordinal-one-terminal-redrive";
     let (registry, continuations) = process_stores();
-    let registration = rerunnable_registration(process_id);
+    let registration = rerunnable_registration();
+    let process_id = registered(registry.as_ref(), &registration).await;
+    let (execution_authority, started) =
+        invocation_started(&process_id, "fig788-ordinal-one-execution", 1);
     registry
-        .register_process(registration.clone())
-        .await
-        .expect("register ordinal-one process");
-    let (execution_authority, started) = invocation_started(
-        &ProcessId::from(process_id),
-        "fig788-ordinal-one-execution",
-        1,
-    );
-    registry
-        .record_first_started_with_authority(
-            &ProcessId::from(process_id),
-            started,
-            &execution_authority,
-        )
+        .record_first_started_with_authority(&process_id, started, &execution_authority)
         .await
         .expect("record retained Restate execution start");
     let persisted = lash_core::PersistedSegmentHandover {
@@ -1006,7 +986,7 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
         },
     };
     continuations
-        .put_segment_handover(&ProcessId::from(process_id), persisted.clone())
+        .put_segment_handover(&process_id, persisted.clone())
         .await
         .expect("persist ordinal-one handover");
     let endpoint = Endpoint::builder()
@@ -1020,20 +1000,22 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
         )
         .build();
     let input = RestateProcessWorkflowInput {
+        process_id: process_id.clone(),
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 1,
         journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
     };
 
-    let admission = admission_journal(&endpoint, process_id, &input)
+    let admission = admission_journal(&endpoint, process_id.as_str(), &input)
         .await
         .expect("the first attempt admits its segment");
     let terminal_delivery_suspension = invoke_endpoint_body_with_json_call_responses_then_suspend(
         &endpoint,
         "LashProcessWorkflow",
         "run",
-        admitted_invocation_body(process_id, &input, &admission).expect("splice the admission"),
+        admitted_invocation_body(process_id.as_str(), &input, &admission)
+            .expect("splice the admission"),
         Vec::new(),
     )
     .await
@@ -1053,22 +1035,25 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
     );
     assert_eq!(
         continuations
-            .get_segment_handover(&ProcessId::from(process_id), 1)
+            .get_segment_handover(&process_id, 1)
             .await
             .expect("read handover during terminal delivery"),
         Some(persisted.clone()),
         "redrive input must survive until the journaled terminal delivery resolves"
     );
 
-    let replay =
-        encode_process_terminal_delivery_replay(process_id, &input, &terminal_delivery_suspension)
-            .and_then(|replay| with_admission(&replay, &admission))
-            .expect("splice deployed ordinal-one terminal journal");
+    let replay = encode_process_terminal_delivery_replay(
+        process_id.as_str(),
+        &input,
+        &terminal_delivery_suspension,
+    )
+    .and_then(|replay| with_admission(&replay, &admission))
+    .expect("splice deployed ordinal-one terminal journal");
     let output = invoke_endpoint_body_open(&endpoint, "LashProcessWorkflow", "run", replay)
         .await
         .expect("ordinal-one redrive must reconstruct and resolve the terminal prefix");
     let stored = registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await
         .expect("read terminal process")
         .expect("terminal process record")
@@ -1082,7 +1067,7 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
     );
     assert_eq!(
         continuations
-            .get_segment_handover(&ProcessId::from(process_id), 1)
+            .get_segment_handover(&process_id, 1)
             .await
             .expect("read handover after terminal delivery"),
         Some(persisted),
@@ -1099,29 +1084,18 @@ pub(super) async fn fig788_ordinal_one_terminal_delivery_redrive_retains_its_han
 #[tokio::test]
 pub(super) async fn fig2083_a_terminal_segment_whose_handover_is_gone_replays_its_journaled_handover()
  {
-    let process_id = "fig2083-missing-terminal-handover";
     let (registry, continuations) = process_stores();
-    let registration = rerunnable_registration(process_id);
+    let registration = rerunnable_registration();
+    let process_id = registered(registry.as_ref(), &registration).await;
+    let (execution_authority, started) =
+        invocation_started(&process_id, "fig2083-missing-terminal-execution", 1);
     registry
-        .register_process(registration.clone())
-        .await
-        .expect("register FIG-2083 segmented process");
-    let (execution_authority, started) = invocation_started(
-        &ProcessId::from(process_id),
-        "fig2083-missing-terminal-execution",
-        1,
-    );
-    registry
-        .record_first_started_with_authority(
-            &ProcessId::from(process_id),
-            started,
-            &execution_authority,
-        )
+        .record_first_started_with_authority(&process_id, started, &execution_authority)
         .await
         .expect("record retained Restate execution start");
     continuations
         .put_segment_handover(
-            &ProcessId::from(process_id),
+            &process_id,
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 1,
@@ -1145,20 +1119,22 @@ pub(super) async fn fig2083_a_terminal_segment_whose_handover_is_gone_replays_it
         )
         .build();
     let input = RestateProcessWorkflowInput {
+        process_id: process_id.clone(),
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 1,
         journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
     };
 
-    let admission = admission_journal(&endpoint, process_id, &input)
+    let admission = admission_journal(&endpoint, process_id.as_str(), &input)
         .await
         .expect("the first attempt admits its segment");
     let suspended = invoke_endpoint_body_with_json_call_responses_then_suspend(
         &endpoint,
         "LashProcessWorkflow",
         "run",
-        admitted_invocation_body(process_id, &input, &admission).expect("splice the admission"),
+        admitted_invocation_body(process_id.as_str(), &input, &admission)
+            .expect("splice the admission"),
         Vec::new(),
     )
     .await
@@ -1175,7 +1151,7 @@ pub(super) async fn fig2083_a_terminal_segment_whose_handover_is_gone_replays_it
     );
     assert!(
         registry
-            .get_process(&ProcessId::from(process_id))
+            .get_process(&process_id)
             .await
             .expect("read terminal process")
             .expect("terminal process record")
@@ -1184,19 +1160,19 @@ pub(super) async fn fig2083_a_terminal_segment_whose_handover_is_gone_replays_it
         "the attempt commits a durable terminal outcome before its root delivery suspends"
     );
     let stored = registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await
         .expect("read terminal process")
         .expect("terminal process record")
         .outcome;
     continuations
-        .delete_segment_handovers(&ProcessId::from(process_id))
+        .delete_segment_handovers(&process_id)
         .await
         .expect("model a terminal segment whose handover is no longer durable");
 
     // Redriving the deployed terminal-delivery journal replays the runner
     // from the journaled handover: no mismatch, the stored terminal.
-    let replay = encode_process_terminal_delivery_replay(process_id, &input, &suspended)
+    let replay = encode_process_terminal_delivery_replay(process_id.as_str(), &input, &suspended)
         .and_then(|replay| with_admission(&replay, &admission))
         .expect("splice the deployed terminal delivery");
     let redriven = invoke_endpoint_body_open(&endpoint, "LashProcessWorkflow", "run", replay)
@@ -1222,7 +1198,7 @@ pub(super) async fn fig2083_a_terminal_segment_whose_handover_is_gone_replays_it
         &endpoint,
         "LashProcessWorkflow",
         "run",
-        endpoint_protocol::encode_invocation_body(process_id, &input)
+        endpoint_protocol::encode_invocation_body(process_id.as_str(), &input)
             .expect("encode the fresh attempt"),
         Vec::new(),
     )
@@ -1246,7 +1222,7 @@ pub(super) async fn fig2083_a_terminal_segment_whose_handover_is_gone_replays_it
     );
     assert_eq!(
         registry
-            .get_process(&ProcessId::from(process_id))
+            .get_process(&process_id)
             .await
             .expect("read terminal process")
             .expect("terminal process record")
@@ -1258,29 +1234,18 @@ pub(super) async fn fig2083_a_terminal_segment_whose_handover_is_gone_replays_it
 
 #[tokio::test]
 pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_prefix() {
-    let process_id = "fig811-effectful-post-terminal-redrive";
     let (registry, continuations) = process_stores();
-    let registration = rerunnable_registration(process_id);
+    let registration = rerunnable_registration();
+    let process_id = registered(registry.as_ref(), &registration).await;
+    let (execution_authority, started) =
+        invocation_started(&process_id, "fig811-effectful-terminal-execution", 1);
     registry
-        .register_process(registration.clone())
-        .await
-        .expect("register effectful FIG-811 process");
-    let (execution_authority, started) = invocation_started(
-        &ProcessId::from(process_id),
-        "fig811-effectful-terminal-execution",
-        1,
-    );
-    registry
-        .record_first_started_with_authority(
-            &ProcessId::from(process_id),
-            started,
-            &execution_authority,
-        )
+        .record_first_started_with_authority(&process_id, started, &execution_authority)
         .await
         .expect("record retained effectful Restate execution start");
     continuations
         .put_segment_handover(
-            &ProcessId::from(process_id),
+            &process_id,
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 1,
@@ -1313,14 +1278,14 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
         )
         .build();
     let input = RestateProcessWorkflowInput {
+        process_id: process_id.clone(),
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 1,
         journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
     };
 
-    let effect_suspension =
-        park_process_on_its_timer(&endpoint, &ProcessId::from(process_id), &input).await;
+    let effect_suspension = park_process_on_its_timer(&endpoint, &process_id, &input).await;
     assert!(trace_sink.records.lock_recover().iter().any(|record| {
         record.event.kind() == "durable_timer_started"
             && record.context.run_id.as_deref() == Some("fig811-workflow-trace")
@@ -1331,7 +1296,7 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
     // effect goes straight on to clearing itself from the scope's index
     // (FIG-3673; the FIG-3149 wake peek is subsumed by the race).
     let completed_effect = encode_recorded_commands_replay(
-        process_id,
+        process_id.as_str(),
         &input,
         &[&effect_suspension],
         process_journal_completion(true),
@@ -1358,7 +1323,7 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
         ]
     );
     let cleared_replay = encode_recorded_commands_replay(
-        process_id,
+        process_id.as_str(),
         &input,
         &[&effect_suspension, &effect_cleared],
         process_journal_completion(true),
@@ -1386,7 +1351,7 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
     );
 
     let complete_replay = encode_recorded_commands_replay(
-        process_id,
+        process_id.as_str(),
         &input,
         &[
             &effect_suspension,
@@ -1405,7 +1370,7 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
     .await
     .expect("terminal delivery should complete before the modeled crash");
     let stored = registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await
         .expect("read effectful terminal process")
         .expect("effectful terminal process record")
@@ -1434,13 +1399,9 @@ pub(super) async fn fig811_effectful_post_terminal_redrive_replays_the_complete_
 
 #[tokio::test]
 pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deployed_prefix() {
-    let process_id = "fig788-segment-cancel-redrive";
     let (registry, continuations) = process_stores();
-    let registration = rerunnable_registration(process_id);
-    registry
-        .register_process(registration.clone())
-        .await
-        .expect("register FIG-788 segmented process");
+    let registration = rerunnable_registration();
+    let process_id = registered(registry.as_ref(), &registration).await;
     let endpoint = Endpoint::builder()
         .bind(
             LashProcessWorkflowImpl::new_for_test(
@@ -1452,20 +1413,22 @@ pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deplo
         )
         .build();
     let input = RestateProcessWorkflowInput {
+        process_id: process_id.clone(),
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
         journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
     };
 
-    let admission = admission_journal(&endpoint, process_id, &input)
+    let admission = admission_journal(&endpoint, process_id.as_str(), &input)
         .await
         .expect("the first attempt admits its segment");
     let segment_finish_suspension = invoke_endpoint_body_with_json_call_responses_then_suspend(
         &endpoint,
         "LashProcessWorkflow",
         "run",
-        admitted_invocation_body(process_id, &input, &admission).expect("splice the admission"),
+        admitted_invocation_body(process_id.as_str(), &input, &admission)
+            .expect("splice the admission"),
         Vec::new(),
     )
     .await
@@ -1488,15 +1451,16 @@ pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deplo
 
     registry
         .append_event(
-            &ProcessId::from(process_id),
-            lash_core::ProcessEventAppendRequest::cancel_requested(&registry.resolve_process_ref(&ProcessId::from(process_id)).await.expect("retained cancellation target"),
+            &process_id,
+            lash_core::ProcessEventAppendRequest::cancel_requested(&process_id,
 &lash_core::CancelRequest::new(lash_core::CancelOrigin::OperatorRequested, "actor:fixture:fig788_cancel_landing_after_segment_send_preserves_the_deployed_prefix", 11)),
         )
         .await
         .expect("record between-attempt cancellation");
-    let replay = encode_process_segment_send_replay(process_id, &input, &segment_finish_suspension)
-        .and_then(|replay| with_admission(&replay, &admission))
-        .expect("splice deployed segment-send journal");
+    let replay =
+        encode_process_segment_send_replay(process_id.as_str(), &input, &segment_finish_suspension)
+            .and_then(|replay| with_admission(&replay, &admission))
+            .expect("splice deployed segment-send journal");
     let output = invoke_endpoint_body_with_json_call_responses(
         &endpoint,
         "LashProcessWorkflow",
@@ -1511,9 +1475,9 @@ pub(super) async fn fig788_cancel_landing_after_segment_send_preserves_the_deplo
         restate_call_frames(&output)
             .expect("decode appended cancellation forwarding")
             .iter()
-            .map(|call| (call.key.as_str(), call.handler.as_str()))
+            .map(|call| (call.key.clone(), call.handler.clone()))
             .collect::<Vec<_>>(),
-        vec![("fig788-segment-cancel-redrive#1", "deliver_cancel")]
+        vec![(format!("{process_id}#1"), "deliver_cancel".to_string())]
     );
     assert_eq!(
         restate_output_json::<RestateProcessWorkflowOutput>(&output),
@@ -1603,7 +1567,13 @@ pub(super) async fn fig806_reserved_trigger_redrive_replays_the_process_start_pr
             // The start's frontier marker (FIG-3779), acknowledged.
             RESTATE_RUN_COMMAND_MESSAGE_TYPE,
             RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            // The start's journaled registration (ADR 0107).
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             0x040E,
+            // The start's journaled external reference.
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_SUSPENSION_MESSAGE_TYPE
@@ -1783,15 +1753,24 @@ pub(super) async fn fig811_two_subscription_sqlite_redrive_preserves_canonical_s
         restate_message_types(&suspended).expect("decode multi-subscription suspension"),
         vec![
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
-            // Each start journals its frontier marker first (FIG-3779).
+            // Each start journals its frontier marker first (FIG-3779), then
+            // its registration, its send and its external reference (ADR 0107).
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             RESTATE_RUN_COMMAND_MESSAGE_TYPE,
             RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             0x040E,
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_RUN_COMMAND_MESSAGE_TYPE,
             RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             0x040E,
+            RESTATE_RUN_COMMAND_MESSAGE_TYPE,
+            RESTATE_PROPOSE_RUN_COMPLETION_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_CALL_COMMAND_MESSAGE_TYPE,
             RESTATE_SUSPENSION_MESSAGE_TYPE
@@ -2298,22 +2277,17 @@ pub(super) async fn fig779_completed_durable_timer_replay_does_not_enter_guard_p
 /// in production. The reference is written before the handover (FIG-3588), so
 /// no live boundary leaves a handover visible without its successor's
 /// reference.
-pub(super) async fn drive_to_live_segment_boundary(
-    process_id: &str,
-) -> (
+pub(super) async fn drive_to_live_segment_boundary() -> (
     Arc<dyn lash_core::ProcessRegistry>,
     Arc<dyn lash_core::ProcessContinuationStore>,
     LiveSegmentBoundary,
 ) {
     let (registry, continuations) = process_stores();
-    let registration = rerunnable_registration(process_id);
-    registry
-        .register_process(registration.clone())
-        .await
-        .expect("register segmented process");
+    let registration = rerunnable_registration();
+    let process_id = registered(registry.as_ref(), &registration).await;
     registry
         .set_external_ref(
-            &ProcessId::from(process_id),
+            &process_id,
             lash_core::ProcessExternalRef {
                 backend: "restate".to_string(),
                 id: format!("LashProcessWorkflow/{process_id}"),
@@ -2335,6 +2309,7 @@ pub(super) async fn drive_to_live_segment_boundary(
         )
         .build();
     let input = RestateProcessWorkflowInput {
+        process_id: process_id.clone(),
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
@@ -2342,14 +2317,15 @@ pub(super) async fn drive_to_live_segment_boundary(
     };
     // The first attempt suspends after scheduling its successor, exactly as
     // FIG-788 pins.
-    let admission = admission_journal(&endpoint, process_id, &input)
+    let admission = admission_journal(&endpoint, process_id.as_str(), &input)
         .await
         .expect("the first attempt admits its segment");
     let suspension = invoke_endpoint_body_with_json_call_responses_then_suspend(
         &endpoint,
         "LashProcessWorkflow",
         "run",
-        admitted_invocation_body(process_id, &input, &admission).expect("splice the admission"),
+        admitted_invocation_body(process_id.as_str(), &input, &admission)
+            .expect("splice the admission"),
         Vec::new(),
     )
     .await
@@ -2378,10 +2354,14 @@ pub(super) struct LiveSegmentBoundary {
 impl LiveSegmentBoundary {
     /// Replays the deployed prefix so the handler runs past the successor send
     /// and completes the handover, writing the successor's reference.
-    pub(super) async fn complete_handover(&self, process_id: &str) {
-        let replay = encode_process_segment_send_replay(process_id, &self.input, &self.suspension)
-            .and_then(|replay| with_admission(&replay, &self.admission))
-            .expect("splice deployed segment-send journal");
+    pub(super) async fn complete_handover(&self) {
+        let replay = encode_process_segment_send_replay(
+            self.input.process_id.as_str(),
+            &self.input,
+            &self.suspension,
+        )
+        .and_then(|replay| with_admission(&replay, &self.admission))
+        .expect("splice deployed segment-send journal");
         let output = invoke_endpoint_body_with_json_call_responses(
             &self.endpoint,
             "LashProcessWorkflow",
@@ -2409,13 +2389,13 @@ impl LiveSegmentBoundary {
 /// against: every handed-over row would read as "already submitted" forever.
 #[tokio::test]
 pub(super) async fn segment_handover_records_the_successor_external_reference() {
-    let process_id = "fig2964-handover-external-ref";
-    let (registry, continuations, boundary) = drive_to_live_segment_boundary(process_id).await;
+    let (registry, continuations, boundary) = drive_to_live_segment_boundary().await;
+    let process_id = boundary.input.process_id.clone();
 
     // Suspended on the successor send, the row already names segment 1: the
     // reference is written before the handover it guards (FIG-3588).
     let before = registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await
         .expect("read process")
         .expect("the row stands");
@@ -2428,17 +2408,17 @@ pub(super) async fn segment_handover_records_the_successor_external_reference() 
         "the boundary names its successor before the handover and the send"
     );
 
-    boundary.complete_handover(process_id).await;
+    boundary.complete_handover().await;
 
     let handover = continuations
-        .latest_segment_handover(&ProcessId::from(process_id))
+        .latest_segment_handover(&process_id)
         .await
         .expect("read handover")
         .expect("the boundary persisted a handover");
     assert_eq!(handover.segment_ordinal, 1);
 
     let record = registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await
         .expect("read process")
         .expect("the row stands");
@@ -2600,4 +2580,16 @@ fn accepted_turn_input_drive_envelope_hash_is_independent_of_lease_generation() 
             "the drive envelope must not carry `{lease_field}`: {encoded}"
         );
     }
+}
+
+/// Registers `registration` and answers the id its registrar minted.
+async fn registered(
+    registry: &dyn ProcessRegistry,
+    registration: &ProcessRegistration,
+) -> ProcessId {
+    registry
+        .register_process(registration.clone())
+        .await
+        .expect("register the process")
+        .id
 }

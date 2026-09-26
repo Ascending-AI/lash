@@ -408,10 +408,9 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
             CancellationToken::new(),
             host_admitted_scope(
                 &runtime.host.core,
-                lash_core::AdmittedScope::unpinned(
+                lash_core::AdmittedScope::new(
                     runtime.export_persistence_state().turn_scope("array-turn"),
-                )
-                .expect("turn scope"),
+                ),
             ),
         )
         .await
@@ -441,8 +440,7 @@ async fn attachment_in_array_tool_value_then_immediate_cancel_loses_nothing() {
     let persisted_state = runtime.export_persistence_state();
     let turn_scope = host_admitted_scope(
         &runtime.host.core,
-        lash_core::AdmittedScope::unpinned(persisted_state.turn_scope(turn_id))
-            .expect("turn scope"),
+        lash_core::AdmittedScope::new(persisted_state.turn_scope(turn_id)),
     );
     let turn_address =
         lash_core::facade_support::TurnAddress::new(&persisted_state.session_id, turn_id);

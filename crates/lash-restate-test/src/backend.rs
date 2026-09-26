@@ -172,9 +172,16 @@ impl RestateTestBackend {
         let server = RestateTestServer::new(config)?;
         let follower = Arc::clone(&clock);
         server.on_time_moved(Arc::new(move |now_ms| follower.set(now_ms)));
+        // The double is deterministic under its seed, so its registrar mints
+        // the sequential test ids: one seed names the same processes on
+        // every run.
         let stores = Arc::new(
-            lash_sqlite_store::SqliteStoreSet::memory_with_clock(
-                Arc::clone(&clock) as Arc<dyn lash_core::Clock>
+            lash_sqlite_store::SqliteStoreSet::memory_with_options_and_clock(
+                lash_sqlite_store::SqliteStoreSetOptions {
+                    process_id_mint: lash_core::ProcessIdMint::sequential_for_testing(),
+                    ..lash_sqlite_store::SqliteStoreSetOptions::memory()
+                },
+                Arc::clone(&clock) as Arc<dyn lash_core::Clock>,
             )
             .await
             .map_err(|error| BackendError::Stores(error.to_string()))?,

@@ -4,11 +4,10 @@ use std::sync::Arc;
 use crate::runtime::process::{
     ArtifactOwner, ProcessArtifactCleanup, ProcessArtifactCleanupAck, ProcessAwaitOutput,
     ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority, ProcessEventAppendRequest,
-    ProcessEventHistoryRetention, ProcessEventQueryMode, ProcessEventReadOutcome,
-    ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-    ProcessIncarnation, ProcessInput, ProcessObserverBy, ProcessProvenance, ProcessRef,
-    ProcessRegistration, ProcessValueSelector, ProcessWakeSpec, ProjectionWatermark,
-    RecoveryContract, artifact_owner_is_permanently_retired,
+    ProcessEventQueryMode, ProcessEventReadOutcome, ProcessEventSemanticsSpec, ProcessEventType,
+    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessInput, ProcessObserverBy,
+    ProcessProvenance, ProcessRegistration, ProcessValueSelector, ProcessWakeSpec,
+    ProjectionWatermark, RecoveryContract, artifact_owner_is_permanently_retired,
     artifact_staging_owner_edge_is_missing,
 };
 use crate::{
@@ -21,9 +20,8 @@ async fn memory_registry() -> Arc<dyn ProcessRegistry> {
     memory_store_set().await.process_registry()
 }
 
-fn registration(id: &str) -> ProcessRegistration {
+fn registration(_id: &str) -> ProcessRegistration {
     ProcessRegistration::new(
-        id,
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
@@ -40,12 +38,13 @@ fn registration(id: &str) -> ProcessRegistration {
 #[tokio::test]
 async fn a_suppressed_append_is_journaled_in_full_and_wakes_nobody() {
     let registry = memory_registry().await;
-    let process_id = ProcessId::from("announcement-suppression");
+    let process_id = crate::ProcessId::fixture("announcement-suppression");
     let target_session_id = SessionId::from("announcing-session");
-    registry
+    let announcement_suppression_record = registry
         .register_process(wake_registration(process_id.as_str(), &target_session_id))
         .await
         .expect("register a process whose wakes have a target session");
+    let process_id = announcement_suppression_record.id.clone();
 
     // (a) The runtime's own announcement of a park. The session it would reach
     // is the session parked on the announced call, so it gets no work.
@@ -138,43 +137,39 @@ fn wake_registration(id: &str, target_session_id: &SessionId) -> ProcessRegistra
         }])
 }
 
-async fn register_successor(
-    registry: &Arc<dyn ProcessRegistry>,
-    process_id: &ProcessId,
-) -> (ProcessRef, ProcessRef) {
+/// Register a process, finish and prune it, then start another: a minted id
+/// is never reused, so the second process has an id of its own.
+async fn register_after_prune(registry: &Arc<dyn ProcessRegistry>) -> (ProcessId, ProcessId) {
     let old = registry
-        .register_process(registration(process_id))
+        .register_process(registration("pruned"))
         .await
-        .expect("register old incarnation");
-    let old_ref = ProcessRef::from_record(&old);
+        .expect("register first process");
     registry
         .complete_process(
-            process_id,
+            &old.id,
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!("old"),
             )),
             ProcessCompletionAuthority::external_owner(),
         )
         .await
-        .expect("complete old incarnation");
+        .expect("complete first process");
     registry
         .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
         .await
-        .expect("prune old incarnation");
+        .expect("prune first process");
     let current = registry
-        .register_process(registration(process_id))
+        .register_process(registration("current"))
         .await
-        .expect("register successor incarnation");
-    let current_ref = ProcessRef::from_record(&current);
-    assert_ne!(old_ref.incarnation, current_ref.incarnation);
-    (old_ref, current_ref)
+        .expect("register second process");
+    assert_ne!(old.id, current.id, "a minted id is never reused");
+    (old.id, current.id)
 }
 
 #[tokio::test]
 async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
     let registry = memory_registry().await;
     let registration = ProcessRegistration::new(
-        "artifact-cleanup-process",
         ProcessInput::Engine {
             kind: "test-engine".to_string(),
             payload: serde_json::json!({"module_ref": "module-1"}),
@@ -222,13 +217,13 @@ async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
     );
 
     let acknowledgement = registry
-        .complete_process_artifact_cleanup(&registered.id, registered.incarnation)
+        .complete_process_artifact_cleanup(&registered.id)
         .await
         .expect("acknowledge artifact cleanup");
     assert_eq!(
         acknowledgement,
         ProcessArtifactCleanupAck::Acknowledged {
-            process_ref: ProcessRef::from_record(&registered),
+            process_id: registered.id.clone(),
         }
     );
     assert!(
@@ -248,80 +243,50 @@ async fn prune_retains_exact_artifact_cleanup_until_acknowledged() {
 }
 
 #[tokio::test]
-async fn superseded_event_cursor_is_refused_instead_of_reading_the_successor() {
+async fn a_pruned_process_event_window_refuses_instead_of_reading_another_process() {
     let registry = memory_registry().await;
-    let (old_ref, _) = register_successor(&registry, &ProcessId::from("reused-event-cursor")).await;
+    let (old, _) = register_after_prune(&registry).await;
 
-    let result = registry.full_event_window_ref(&old_ref, 0).await;
+    let result = registry.full_event_window(&old, 0).await;
 
     assert!(
         matches!(
             result,
-            Err(crate::PluginError::ProcessIncarnationSuperseded { .. })
+            Err(crate::PluginError::ProcessNoLongerRetained { .. })
         ),
-        "old event cursor must refuse the successor, got {result:?}"
+        "a pruned id's event window must refuse, got {result:?}"
     );
 }
 
-/// A page read names one exact process lifetime: a successor incarnation is
-/// a typed retired outcome, never another lifetime's events. The projection
-/// is a request parameter, not part of any continuation.
+/// A page read names one process. The projection is a request parameter,
+/// not part of any continuation.
 #[tokio::test]
-async fn event_pages_bind_the_exact_process_lifetime() {
+async fn event_pages_read_the_named_process() {
     let registry = memory_registry().await;
-    let first_id = ProcessId::from("event-page-lifetime-first");
     let first = registry
-        .register_process(registration(&first_id))
+        .register_process(registration("event-page"))
         .await
-        .expect("register lifetime process");
+        .expect("register process");
     let limit = std::num::NonZeroUsize::new(1).expect("non-zero page size");
 
     for mode in [ProcessEventQueryMode::Full, ProcessEventQueryMode::Lite] {
         let current = registry
-            .event_page_ref(&ProcessRef::from_record(&first), 0, limit, mode)
+            .event_page_after(&first.id, 0, limit, mode)
             .await
-            .expect("current lifetime page");
+            .expect("current page");
         assert!(matches!(current, ProcessEventReadOutcome::Retained(_)));
     }
-
-    let retired = registry
-        .event_page_ref(
-            &ProcessRef::new(
-                first_id.clone(),
-                ProcessIncarnation::from_registration_sequence(
-                    first.incarnation.registration_sequence() + 1,
-                ),
-            ),
-            0,
-            limit,
-            ProcessEventQueryMode::Full,
-        )
-        .await
-        .expect("incarnation mismatch is a typed read outcome");
-    assert!(
-        matches!(
-            retired,
-            ProcessEventReadOutcome::NoLongerRetained(
-                ProcessEventHistoryRetention::Retired {
-                    current_incarnation,
-                    ..
-                }
-            ) if current_incarnation == first.incarnation
-        ),
-        "a read of another incarnation must report retired history, got {retired:?}"
-    );
 }
 
 #[tokio::test]
-async fn superseded_observer_edge_is_refused_instead_of_attaching_to_the_successor() {
+async fn an_observer_edge_to_a_pruned_process_is_refused() {
     let registry = memory_registry().await;
-    let (old_ref, _) =
-        register_successor(&registry, &ProcessId::from("reused-observer-edge")).await;
+    let (old, _) = register_after_prune(&registry).await;
 
     let result = registry
-        .add_observer_ref(
+        .add_observer(
             &SessionId::from("stale-observer"),
-            &old_ref,
+            &old,
             ProcessObserverBy::host("stale-edge"),
         )
         .await;
@@ -329,17 +294,16 @@ async fn superseded_observer_edge_is_refused_instead_of_attaching_to_the_success
     assert!(
         matches!(
             result,
-            Err(crate::PluginError::ProcessIncarnationSuperseded { .. })
+            Err(crate::PluginError::ProcessNoLongerRetained { .. })
         ),
-        "old observer edge must refuse the successor, got {result:?}"
+        "an edge to a pruned process must refuse, got {result:?}"
     );
 }
 
 #[tokio::test]
-async fn reuse_retains_the_old_tombstone_beside_the_new_live_incarnation() {
+async fn a_pruned_process_tombstone_sits_beside_the_next_live_process() {
     let registry = memory_registry().await;
-    let (old_ref, current_ref) =
-        register_successor(&registry, &ProcessId::from("reused-change-feed")).await;
+    let (old, current) = register_after_prune(&registry).await;
 
     let (changes, _) = registry
         .processes_changed_since(ProcessChangeCursor::initial(), 100)
@@ -347,15 +311,11 @@ async fn reuse_retains_the_old_tombstone_beside_the_new_live_incarnation() {
         .expect("read full process change feed");
     assert!(changes.iter().any(|change| matches!(
         change,
-        ProcessChange::Deleted { tombstone }
-            if tombstone.process_id == old_ref.process_id
-                && tombstone.incarnation == old_ref.incarnation
+        ProcessChange::Deleted { tombstone } if tombstone.process_id == old
     )));
     assert!(changes.iter().any(|change| matches!(
         change,
-        ProcessChange::Upsert { record }
-            if record.id == current_ref.process_id
-                && record.incarnation == current_ref.incarnation
+        ProcessChange::Upsert { record } if record.id == current
     )));
 }
 
@@ -364,38 +324,41 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
     let backend = memory_backend().await;
     let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
     let registry_dyn = Arc::clone(&registry);
-    for process_id in ["sole", "shared"] {
-        registry
-            .register_process(registration(process_id))
+    let mut ids = std::collections::BTreeMap::new();
+    for label in ["sole", "shared"] {
+        let process_id = registry
+            .register_process(registration(label))
             .await
-            .expect("register");
+            .expect("register")
+            .id;
         registry
             .add_observer(
                 &SessionId::from("deleted"),
-                &ProcessId::from(process_id),
-                ProcessObserverBy::host(format!("deleted:{process_id}")),
+                &process_id,
+                ProcessObserverBy::host(format!("deleted:{label}")),
             )
             .await
             .expect("observe from deleted");
+        ids.insert(label, process_id);
     }
     registry
         .add_observer(
             &SessionId::from("remaining"),
-            &ProcessId::from("shared"),
+            &ids["shared"],
             ProcessObserverBy::host("remaining:shared"),
         )
         .await
         .expect("observe from remaining");
     let sole_events = serde_json::to_vec(
         &registry
-            .full_event_window(&ProcessId::from("sole"), 0)
+            .full_event_window(&ids["sole"], 0)
             .await
             .expect("sole events before delete"),
     )
     .expect("serialize sole events");
     let shared_events = serde_json::to_vec(
         &registry
-            .full_event_window(&ProcessId::from("shared"), 0)
+            .full_event_window(&ids["shared"], 0)
             .await
             .expect("shared events before delete"),
     )
@@ -440,7 +403,7 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
     assert_eq!(
         serde_json::to_vec(
             &registry
-                .full_event_window(&ProcessId::from("sole"), 0)
+                .full_event_window(&ids["sole"], 0)
                 .await
                 .expect("sole events")
         )
@@ -450,7 +413,7 @@ async fn delete_session_process_command_revokes_only_observer_edges() {
     assert_eq!(
         serde_json::to_vec(
             &registry
-                .full_event_window(&ProcessId::from("shared"), 0)
+                .full_event_window(&ids["shared"], 0)
                 .await
                 .expect("shared events")
         )
@@ -471,9 +434,9 @@ async fn env_store_reports_typed_retirement_and_edge_refusals() {
     );
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");
-    let staged = ArtifactOwner::process_start(&ProcessId::from("env-typed-staged"));
+    let staged = ArtifactOwner::process_start(&crate::ProcessId::fixture("env-typed-staged"));
     let retired_destination =
-        ArtifactOwner::process_start(&ProcessId::from("env-typed-destination"));
+        ArtifactOwner::process_start(&crate::ProcessId::fixture("env-typed-destination"));
 
     store
         .retire_process_execution_env_owner(&retired_destination)
@@ -495,8 +458,8 @@ async fn env_store_reports_typed_retirement_and_edge_refusals() {
 
     let missing_edge = store
         .transfer_process_execution_env(
-            &ArtifactOwner::process_start(&ProcessId::from("env-typed-absent")),
-            &ArtifactOwner::process_start(&ProcessId::from("env-typed-other")),
+            &ArtifactOwner::process_start(&crate::ProcessId::fixture("env-typed-absent")),
+            &ArtifactOwner::process_start(&crate::ProcessId::fixture("env-typed-other")),
             &env_ref,
         )
         .await

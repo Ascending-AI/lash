@@ -19,23 +19,12 @@ use std::collections::BTreeSet;
 #[serde(deny_unknown_fields)]
 pub struct SessionObserverIntent {
     pub process_id: crate::ProcessId,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub process_incarnation: Option<u64>,
 }
 impl SessionObserverIntent {
-    pub fn host_requested(process_id: impl Into<crate::ProcessId>) -> Self {
-        Self {
-            process_id: process_id.into(),
-            process_incarnation: None,
-        }
-    }
-
-    /// Observe the exact run selected by the host, even if its name is later reused.
-    pub fn host_requested_ref(process_ref: crate::ProcessRef) -> Self {
-        Self {
-            process_id: process_ref.process_id,
-            process_incarnation: Some(process_ref.incarnation.registration_sequence()),
-        }
+    /// Observe the process the host selected. Its minted id is never reused,
+    /// so the intent can never bind to a later process.
+    pub fn host_requested(process_id: crate::ProcessId) -> Self {
+        Self { process_id }
     }
 }
 /// Durable identity of a frame-open node in the session graph.
@@ -738,13 +727,7 @@ pub struct SessionObservedProcessReceipt {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum SessionObservedProcessOutcome {
-    Observed {
-        incarnation: crate::ProcessIncarnation,
-    },
-    IncarnationSuperseded {
-        requested_incarnation: crate::ProcessIncarnation,
-        current_incarnation: crate::ProcessIncarnation,
-    },
+    Observed,
     NotFound,
     NoLongerRetained {
         terminal_label: String,

@@ -24,6 +24,13 @@ mod concern_isolation_tests {
 
     #[async_trait::async_trait]
     impl ProcessQuery for ObserverOnly {
+        async fn get_process_by_start_key(
+            &self,
+            start_key: &crate::StartKey,
+        ) -> Result<Option<ProcessRecord>, PluginError> {
+            self.inner.get_process_by_start_key(start_key).await
+        }
+
         async fn get_process(
             &self,
             process_id: &ProcessId,
@@ -142,9 +149,8 @@ mod concern_isolation_tests {
     async fn an_observer_only_wrapper_composes_without_any_other_concern() {
         let backend = memory_store_set().await;
         let inner = backend.process_registry() as Arc<dyn ProcessRegistry>;
-        inner
+        let proc_observer_isolation_record = inner
             .register_process(ProcessRegistration::new(
-                "proc-observer-isolation",
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -164,7 +170,7 @@ mod concern_isolation_tests {
         wrapper
             .add_observer(
                 &SessionId::from("session-a"),
-                &ProcessId::from("proc-observer-isolation"),
+                &proc_observer_isolation_record.id,
                 ProcessObserverBy::host("op-observer-isolation"),
             )
             .await
@@ -173,7 +179,7 @@ mod concern_isolation_tests {
             wrapper
                 .is_observer(
                     &SessionId::from("session-a"),
-                    &ProcessId::from("proc-observer-isolation")
+                    &proc_observer_isolation_record.id
                 )
                 .await
                 .expect("is_observer provided method resolves through ProcessQuery"),
@@ -190,6 +196,6 @@ mod concern_isolation_tests {
             .await
             .expect("list observed");
         assert_eq!(observed.len(), 1);
-        assert_eq!(observed[0].id, "proc-observer-isolation");
+        assert_eq!(observed[0].id, proc_observer_isolation_record.id.clone());
     }
 }

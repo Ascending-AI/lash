@@ -791,10 +791,9 @@ lash_conformance::process_registry_reopenable_tests!({
 async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
     let backend = TestBackend::open(SUBSTRATE).await;
     let registry = backend.process_registry();
-    registry
+    let recent_pushdown_id = registry
         .register_process(
             ProcessRegistration::new(
-                "recent-pushdown",
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -812,10 +811,11 @@ async fn sqlite_recently_retired_filter_uses_the_extracted_updated_at_column() {
             ),
         )
         .await
-        .expect("register recently retired pushdown fixture");
+        .expect("register recently retired pushdown fixture")
+        .id;
     let terminal = registry
         .complete_process(
-            &ProcessId::from("recent-pushdown"),
+            &recent_pushdown_id,
             lash_core_execution::ProcessAwaitOutput::from_tool_output(
                 lash_core_execution::ToolCallOutput::success(serde_json::json!({})),
             ),
@@ -2066,7 +2066,7 @@ async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
                 lash_core_execution::ToolIntent::EmitProcessEvent(
                     lash_core_execution::EmitProcessEventIntent {
                         session_id: SessionId::from("sqlite-intent-session"),
-                        process_id: ProcessId::from("sqlite-intent-target"),
+                        process_id: ProcessId::fixture("sqlite-intent-target"),
                         event_type: "sqlite.intent.recorded".to_string(),
                         payload: serde_json::json!({"literal": true}),
                     },

@@ -156,10 +156,7 @@ pub async fn transfer_is_idempotent(store: Arc<dyn ModuleArtifactStore>) {
     let store = LashlangArtifacts::new(store);
     let artifact = sample_module_artifact("beta");
     let staged = execution_owner("module-transfer");
-    let process = ArtifactOwner::process(lash_core_execution::ProcessRef::new(
-        "process-beta",
-        lash_core_execution::ProcessIncarnation::from_registration_sequence(1),
-    ));
+    let process = ArtifactOwner::process(lash_core_execution::ProcessId::fixture("process-beta"));
     store
         .publish_module_artifact(&staged, &artifact)
         .await

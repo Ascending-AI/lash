@@ -15,7 +15,6 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use lash_sansio::ProcessId;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -72,11 +71,9 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
             .await
             .expect("open competing process registry writer"),
     );
-    let process_id = ProcessId::from("event-page-snapshot");
-    reader
+    let process_id = reader
         .register_process(
             ProcessRegistration::new(
-                process_id.clone(),
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -94,7 +91,8 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
             }]),
         )
         .await
-        .expect("register snapshot process");
+        .expect("register snapshot process")
+        .id;
     for sequence in 0..3 {
         reader
             .append_event(
@@ -131,17 +129,15 @@ async fn process_event_page_identity_and_rows_share_one_read_snapshot() {
     let lash_core_execution::ProcessEventPageMore::More { after_sequence } = first.more else {
         panic!("fixture must leave a nonempty unread tail");
     };
-    let process_ref =
-        lash_core_execution::ProcessRef::new(process_id.clone(), terminal.incarnation);
 
     let pause = injector.pause_process_event_page_after_identity();
     let read_task = tokio::spawn({
         let reader = Arc::clone(&reader);
-        let process_ref = process_ref.clone();
+        let process_id = process_id.clone();
         async move {
             reader
-                .event_page_ref(
-                    &process_ref,
+                .event_page_after(
+                    &process_id,
                     after_sequence,
                     std::num::NonZeroUsize::new(16).expect("non-zero page size"),
                     lash_core_execution::ProcessEventQueryMode::Full,
@@ -203,7 +199,7 @@ async fn sqlite_effect_controller_rejects_pre_intent_journal_schema_before_servi
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 34"));
+    assert!(message.contains("supports schema version 35"));
     assert!(message.contains("database reports version 8"));
     assert!(message.contains(
         "drain affected sessions and recreate the whole Lash trust domain with this version"
@@ -236,7 +232,7 @@ async fn sqlite_effect_controller_rejects_retained_generation_21_schema_before_s
         };
     let message = error.to_string();
     assert!(message.contains("Unsupported lash effect replay schema"));
-    assert!(message.contains("supports schema version 34"));
+    assert!(message.contains("supports schema version 35"));
     assert!(message.contains("database reports version 21"));
 }
 

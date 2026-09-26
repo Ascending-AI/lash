@@ -101,10 +101,9 @@ async fn renewal_failure_mid_turn(through_drive: bool) {
         .cloned()
         .expect("process registry");
     let target_scope = lash_core::SessionScope::new("root");
-    registry
+    let registered = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                "lease-loss-claimed-wake",
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -123,7 +122,7 @@ async fn renewal_failure_mid_turn(through_drive: bool) {
     append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        &ProcessId::from("lease-loss-claimed-wake"),
+        &registered.id,
         lash_core::ProcessEventAppendRequest::new(
             "process.wake",
             json!({
@@ -293,8 +292,7 @@ pub(super) async fn cancellation_sealed_before_renewal_failure_remains_evidence_
     let persisted_state = runtime.export_persistence_state();
     let turn_scope = backend_admitted_scope(
         &backend,
-        lash_core::AdmittedScope::unpinned(persisted_state.turn_scope(turn_id))
-            .expect("turn scope"),
+        lash_core::AdmittedScope::new(persisted_state.turn_scope(turn_id)),
     );
     let turn_address =
         lash_core::facade_support::TurnAddress::new(&persisted_state.session_id, turn_id);
@@ -545,10 +543,9 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
         session_id: SessionId::from("root"),
         node_id: "trigger:button".to_string(),
     };
-    registry
+    let registered = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                "wake-proc",
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -568,7 +565,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
     let wake = append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        &ProcessId::from("wake-proc"),
+        &registered.id,
         lash_core::ProcessEventAppendRequest::new(
             "process.wake",
             json!({
@@ -583,7 +580,8 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
     let expected_wake_id = wake.wake_id.clone();
     let expected_sequence = wake.sequence;
     let expected_text = format!(
-        "Background process wake\nProcess: wake-proc\nEvent: process.wake #{expected_sequence}\nWake input:\ndeploy complete"
+        "Background process wake\nProcess: {}\nEvent: process.wake #{expected_sequence}\nWake input:\ndeploy complete",
+        registered.id
     );
 
     let sink = RecordingSink::default();
@@ -638,7 +636,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
                     sequence,
                     wake_id,
                     caused_by,
-                } if process_id == "wake-proc"
+                } if process_id == registered.id
                     && event_type == "process.wake"
                     && *sequence == expected_sequence
                     && wake_id.as_deref() == Some(expected_wake_id.as_str())
@@ -683,7 +681,7 @@ pub(super) async fn durable_process_wake_drains_as_committed_event_history_and_a
             sequence,
             wake_id,
             caused_by,
-        }) if process_id == "wake-proc"
+        }) if process_id == registered.id
             && event_type == "process.wake"
             && sequence == expected_sequence
             && wake_id.as_deref() == Some(expected_wake_id.as_str())
@@ -770,10 +768,9 @@ pub(super) async fn a_selected_queued_wake_drains_under_a_small_window_with_reta
         .process_registry()
         .cloned()
         .expect("process registry");
-    registry
+    let registered = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                "reserve-proc",
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -792,7 +789,7 @@ pub(super) async fn a_selected_queued_wake_drains_under_a_small_window_with_reta
     append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        &ProcessId::from("reserve-proc"),
+        &registered.id,
         lash_core::ProcessEventAppendRequest::new(
             "process.wake",
             json!({"text": "short wake", "value": {"status": "done"}}),
@@ -889,10 +886,9 @@ pub(super) async fn an_exact_two_row_selection_drains_under_the_one_at_a_time_de
         .process_registry()
         .cloned()
         .expect("process registry");
-    registry
+    let registered = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                "paired-wake-proc",
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -912,7 +908,7 @@ pub(super) async fn an_exact_two_row_selection_drains_under_the_one_at_a_time_de
         append_process_wake_to_queue(
             registry.as_ref(),
             store.as_ref(),
-            &ProcessId::from("paired-wake-proc"),
+            &registered.id,
             lash_core::ProcessEventAppendRequest::new(
                 "process.wake",
                 json!({"text": text, "value": {"status": "done"}}),
@@ -1006,10 +1002,9 @@ pub(super) async fn an_irreducibly_oversized_queued_row_is_refused_by_name() {
         .process_registry()
         .cloned()
         .expect("process registry");
-    registry
+    let registered = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                "oversized-proc",
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -1028,7 +1023,7 @@ pub(super) async fn an_irreducibly_oversized_queued_row_is_refused_by_name() {
     let wake = append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        &ProcessId::from("oversized-proc"),
+        &registered.id,
         lash_core::ProcessEventAppendRequest::new(
             "process.wake",
             json!({"text": "w".repeat(4_000), "value": {"status": "done"}}),

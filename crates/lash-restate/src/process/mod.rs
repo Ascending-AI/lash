@@ -12,11 +12,13 @@ mod admission;
 mod park_reconcile;
 mod workflow;
 
+mod stamped_requests;
 pub use admission::{JOURNAL_LOGIC_EPOCH, RESTATE_PROCESS_JOURNAL_VERSION, SegmentStarted};
 pub(crate) use admission::{SegmentAdmission, admit_segment, handover_digest};
 pub use park_reconcile::{
     ProcessParkReconcileReport, reconcile_process_parks, resume_parked_process,
 };
+pub(crate) use stamped_requests::attach::StampedAttachRequest;
 
 use std::sync::Arc;
 
@@ -154,7 +156,7 @@ pub(crate) fn restate_process_terminal_await_key(
 ) -> Result<AwaitEventKey, RuntimeError> {
     restate_await_event_key_for_authority(
         authority_id,
-        &ExecutionScope::process(process_id.to_string()),
+        &ExecutionScope::process(process_id.clone()),
         AwaitEventWaitIdentity::Custom {
             key: "process_terminal".to_string(),
         },
@@ -251,23 +253,23 @@ where
     Ok(())
 }
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, serde::Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(try_from = "serde_json::Value")]
 pub struct RestateProcessCancelRequest {
-    pub process_ref: lash_core::ProcessRef,
+    pub process_id: ProcessId,
     pub request: lash_core::CancelRequest,
     /// The generation of the `cancel` and `deliver_cancel` handlers' journaled
-    /// commands the sender built this request for (FIG-3673): the handlers
-    /// refuse any other before journaling anything. An unstamped request is
+    /// commands the sender built this request for (FIG-3673): the request is
+    /// refused by any other generation before its shape is decoded, and the
+    /// handlers refuse it before journaling anything. An unstamped request is
     /// generation 1.
-    #[serde(default = "admission::unstamped_journal_version")]
     pub journal_version: u32,
 }
 
 impl RestateProcessCancelRequest {
     /// A request for the handlers of this build's generation.
-    pub fn new(process_ref: lash_core::ProcessRef, request: lash_core::CancelRequest) -> Self {
+    pub fn new(process_id: ProcessId, request: lash_core::CancelRequest) -> Self {
         Self {
-            process_ref,
+            process_id,
             request,
             journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
         }
@@ -280,13 +282,7 @@ impl RestateProcessCancelRequest {
                 record.id
             ))
         })?;
-        Ok(Self::new(
-            lash_core::ProcessRef {
-                process_id: record.id.clone(),
-                incarnation: record.incarnation,
-            },
-            request,
-        ))
+        Ok(Self::new(record.id.clone(), request))
     }
 }
 
@@ -294,9 +290,11 @@ impl RestateProcessCancelRequest {
 pub(crate) trait RestateProcessRunner: Send + Sync + 'static {
     /// Run one admitted segment. `started` is the proof that the segment's
     /// start marker committed (FIG-3588); a runner cannot be driven without it.
+    #[allow(clippy::too_many_arguments)]
     async fn run_process_segment(
         &self,
         started: &SegmentStarted,
+        process_id: ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
         scoped_effect_controller: ScopedEffectController<'_>,
@@ -405,6 +403,7 @@ impl RestateProcessRunner for RestateCoreProcessRunner {
     async fn run_process_segment(
         &self,
         started: &SegmentStarted,
+        process_id: ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
         scoped_effect_controller: ScopedEffectController<'_>,
@@ -414,6 +413,7 @@ impl RestateProcessRunner for RestateCoreProcessRunner {
         let worker = self.worker()?;
         let execution_write_authority = started.write_authority().clone();
         Box::pin(worker.run_process_segment_with_scoped_effect_controller(
+            process_id,
             registration,
             execution_context,
             execution_write_authority,
@@ -485,7 +485,7 @@ impl RestateProcessIngressRunner {
         error: &PluginError,
     ) {
         let fault = ProcessWorkerFault::RecoveryBackendError {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             operation,
             error: error.to_string(),
         };
@@ -550,7 +550,7 @@ impl RestateProcessIngressRunner {
             .map_or(0, |handover| handover.segment_ordinal);
         let workflow_key = process_segment_workflow_key(&process_id, segment_ordinal);
         let registration = ProcessRegistration {
-            id: record.id,
+            start_key: record.start_key,
             input: record.input,
             disposition: record.disposition,
             lifecycle: record.lifecycle,
@@ -569,6 +569,7 @@ impl RestateProcessIngressRunner {
                 &workflow_key,
                 "run",
                 &RestateProcessWorkflowInput {
+                    process_id: process_id.clone(),
                     registration,
                     execution_context,
                     segment_ordinal,
@@ -775,9 +776,9 @@ enum IngressSubmitOutcome {
 impl RestateProcessIngressRunner {
     pub(crate) async fn await_terminal_wait(
         &self,
-        process_ref: &lash_core::ProcessRef,
+        process_id: &ProcessId,
     ) -> Result<ProcessTerminalWait, PluginError> {
-        let record = self.registry.get_process_ref(process_ref).await?;
+        let record = self.registry.get_process(process_id).await?;
         if let Some(output) = record.as_ref().and_then(|record| record.outcome.as_ref()) {
             return Ok(ProcessTerminalWait::Terminal(output.clone()));
         }
@@ -785,10 +786,10 @@ impl RestateProcessIngressRunner {
             .ingress
             .call_workflow_json::<_, ProcessAwaitOutput>(
                 crate::LashService::ProcessWorkflow.name(),
-                &process_ref.process_id,
+                process_id.as_str(),
                 "await_terminal",
                 &RestateProcessAwaitRequest {
-                    process_id: process_ref.process_id.clone(),
+                    process_id: process_id.clone(),
                 },
             )
             .await;
@@ -810,15 +811,12 @@ impl RestateProcessIngressRunner {
             } else {
                 Err(PluginError::Runtime(RuntimeError::new(
                     RuntimeErrorCode::EngineProcessAwait,
-                    format!(
-                        "ingress await for process `{}` failed: {err}",
-                        process_ref.process_id
-                    ),
+                    format!("ingress await for process `{process_id}` failed: {err}"),
                 )))
             }
         })?;
         if matches!(&wait, ProcessTerminalWait::Terminal(_)) {
-            self.registry.get_process_ref(process_ref).await?;
+            self.registry.get_process(process_id).await?;
         }
         Ok(wait)
     }
@@ -835,10 +833,10 @@ impl ProcessWorkSubstrate for RestateProcessIngressRunner {
 
     async fn await_process_terminal(
         &self,
-        process_ref: &lash_core::ProcessRef,
+        process_id: &ProcessId,
     ) -> Result<ProcessTerminalWait, PluginError> {
         lash_core::facade_support::release_process_execution_permit_while(
-            self.await_terminal_wait(process_ref),
+            self.await_terminal_wait(process_id),
         )
         .await
     }
@@ -1110,6 +1108,9 @@ impl std::fmt::Debug for RestateProcessServing {
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub struct RestateProcessWorkflowInput {
+    /// The minted id of the process this workflow runs: the registration
+    /// carries no id of its own (ADR 0107).
+    pub process_id: ProcessId,
     pub registration: ProcessRegistration,
     #[serde(default, skip_serializing_if = "ProcessExecutionContext::is_empty")]
     pub execution_context: ProcessExecutionContext,
@@ -1122,6 +1123,67 @@ pub struct RestateProcessWorkflowInput {
     pub journal_version: u32,
 }
 
+/// What a process workflow invocation was submitted with, read generation
+/// first.
+///
+/// The handler must refuse an input of another journal generation typed, and
+/// it can only do so if the input reaches it: an input of a retired generation
+/// is not decoded against this generation's shape, so its missing or retired
+/// fields cannot fail the invocation before the handler runs.
+#[derive(Clone, Debug)]
+pub enum RestateProcessWorkflowPayload {
+    /// An input of this handler's generation.
+    Current(Box<RestateProcessWorkflowInput>),
+    /// An input stamped with another generation, with the process it names
+    /// when its id is one this build reads.
+    Retired {
+        journal_version: u32,
+        process_id: Option<ProcessId>,
+    },
+}
+
+impl From<RestateProcessWorkflowInput> for RestateProcessWorkflowPayload {
+    fn from(input: RestateProcessWorkflowInput) -> Self {
+        Self::Current(Box::new(input))
+    }
+}
+
+impl Serialize for RestateProcessWorkflowPayload {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Self::Current(input) => input.serialize(serializer),
+            Self::Retired {
+                journal_version,
+                process_id,
+            } => serde_json::json!({
+                "process_id": process_id,
+                "journal_version": journal_version,
+            })
+            .serialize(serializer),
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for RestateProcessWorkflowPayload {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let payload = serde_json::Value::deserialize(deserializer)?;
+        let journal_version = admission::stamped_journal_version(&payload);
+        if journal_version != RESTATE_PROCESS_JOURNAL_VERSION {
+            let process_id = payload
+                .get("process_id")
+                .and_then(serde_json::Value::as_str)
+                .and_then(|process_id| ProcessId::parse(process_id).ok());
+            return Ok(Self::Retired {
+                journal_version,
+                process_id,
+            });
+        }
+        serde_json::from_value(payload)
+            .map(|input| Self::Current(Box::new(input)))
+            .map_err(serde::de::Error::custom)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, serde::Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RestateProcessWorkflowOutput {
@@ -1130,12 +1192,20 @@ pub enum RestateProcessWorkflowOutput {
 }
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
+#[serde(
+    into = "stamped_requests::StampedCompleteRequest",
+    try_from = "serde_json::Value"
+)]
 pub struct RestateProcessCompleteRequest {
     pub process_id: ProcessId,
     pub output: ProcessAwaitOutput,
 }
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
+#[serde(
+    into = "stamped_requests::StampedAwaitRequest",
+    try_from = "serde_json::Value"
+)]
 pub struct RestateProcessAwaitRequest {
     pub process_id: ProcessId,
 }

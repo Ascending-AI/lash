@@ -28,7 +28,45 @@ macro_rules! string_identity {
             pub fn new(value: impl Into<String>) -> Self {
                 Self(value.into())
             }
+        }
 
+        impl From<String> for $name {
+            fn from(value: String) -> Self {
+                Self(value)
+            }
+        }
+
+        impl From<&str> for $name {
+            fn from(value: &str) -> Self {
+                Self(value.to_string())
+            }
+        }
+
+        impl From<&String> for $name {
+            fn from(value: &String) -> Self {
+                Self(value.clone())
+            }
+        }
+
+        impl std::str::FromStr for $name {
+            type Err = std::convert::Infallible;
+
+            fn from_str(value: &str) -> Result<Self, Self::Err> {
+                Ok(Self::from(value))
+            }
+        }
+
+        string_identity_surface!($name);
+    };
+}
+
+/// The read-side surface every identity shares: accessors, borrowing
+/// conversions, comparisons and the inline string schema. Construction is the
+/// caller's: [`string_identity!`] adds free construction from any string, and
+/// [`ProcessId`] adds only its validating parse and the registrar's mint.
+macro_rules! string_identity_surface {
+    ($name:ident) => {
+        impl $name {
             pub fn as_str(&self) -> &str {
                 &self.0
             }
@@ -61,24 +99,6 @@ macro_rules! string_identity {
         impl std::fmt::Display for $name {
             fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 formatter.write_str(self.as_str())
-            }
-        }
-
-        impl From<String> for $name {
-            fn from(value: String) -> Self {
-                Self(value)
-            }
-        }
-
-        impl From<&str> for $name {
-            fn from(value: &str) -> Self {
-                Self(value.to_string())
-            }
-        }
-
-        impl From<&String> for $name {
-            fn from(value: &String) -> Self {
-                Self(value.clone())
             }
         }
 
@@ -153,14 +173,6 @@ macro_rules! string_identity {
             }
         }
 
-        impl std::str::FromStr for $name {
-            type Err = std::convert::Infallible;
-
-            fn from_str(value: &str) -> Result<Self, Self::Err> {
-                Ok(Self::from(value))
-            }
-        }
-
         impl schemars::JsonSchema for $name {
             fn is_referenceable() -> bool {
                 false
@@ -190,14 +202,134 @@ pub fn session_owner_namespace(session_id: impl AsRef<str>) -> String {
     format!("session:{}", session_id.as_ref())
 }
 
-string_identity!(
-    /// Host-supplied name of one reusable process.
+/// The identity of one process: opaque, minted by the process registrar when
+/// the process is first registered, and never reused (ADR 0107).
+///
+/// It is the only identity a process has. A host that wants idempotent starts
+/// supplies a separate start key, and a host that wants a readable name
+/// supplies a label; neither is an identity, so nothing resolves a name to a
+/// process and a pruned process's id can never address a successor.
+///
+/// There is deliberately no construction from an arbitrary string: an id is
+/// either minted ([`ProcessId::from_minted`], called only by the registrar) or
+/// parsed back from bytes a registrar minted ([`ProcessId::parse`], which is
+/// also what deserialization runs), and both enforce the one spelling,
+/// `p_` followed by 32 lowercase hex digits of a UUIDv7.
+#[repr(transparent)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Serialize)]
+#[serde(transparent)]
+pub struct ProcessId(String);
+
+/// The prefix every minted process id carries.
+pub const PROCESS_ID_PREFIX: &str = "p_";
+const PROCESS_ID_HEX_LEN: usize = 32;
+
+/// A string that is not a minted process id.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InvalidProcessId {
+    value: String,
+}
+
+impl std::fmt::Display for InvalidProcessId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "`{}` is not a process id: a process id is `{PROCESS_ID_PREFIX}` followed by {PROCESS_ID_HEX_LEN} lowercase hex digits, minted by the process registrar",
+            self.value.escape_debug()
+        )
+    }
+}
+
+impl std::error::Error for InvalidProcessId {}
+
+impl ProcessId {
+    /// The id for one freshly minted UUIDv7. Only the process registrar calls
+    /// this, inside the transaction that registers the process.
+    pub fn from_minted(uuid_v7: u128) -> Self {
+        Self(format!("{PROCESS_ID_PREFIX}{uuid_v7:032x}"))
+    }
+
+    /// A well-formed id for a test fixture, deterministic in `label`.
     ///
-    /// A bare process identity is only a name; a durable reference to one
-    /// lifetime of it pins a store-minted incarnation alongside this value.
-    ProcessId,
-    "process"
-);
+    /// Fixtures only: it names no registered process, and registration never
+    /// takes one — the registrar mints every registered id. FNV-1a over 128
+    /// bits with the version nibble pinned, so it reads as a UUIDv7 and needs
+    /// no registered hash domain.
+    #[doc(hidden)]
+    pub fn fixture(label: &str) -> Self {
+        let mut value: u128 = 0x6c62_272e_07bb_0142_62b8_2175_6295_c58d;
+        for byte in label.as_bytes() {
+            value ^= u128::from(*byte);
+            value = value.wrapping_mul(0x0000_0000_0100_0000_0000_0000_0000_013b);
+        }
+        value = (value & !(0xf_u128 << 76)) | (0x7_u128 << 76);
+        value = (value & !(0b11_u128 << 62)) | (0b10_u128 << 62);
+        Self::from_minted(value)
+    }
+
+    /// Parse a process id a registrar minted.
+    ///
+    /// # Errors
+    ///
+    /// [`InvalidProcessId`] for any other spelling, including every
+    /// host-chosen process name the pre-minting registry accepted.
+    pub fn parse(value: &str) -> Result<Self, InvalidProcessId> {
+        // A UUIDv7: version 7 in the version nibble (hex digit 12) and the
+        // RFC 9562 variant in the top two bits of hex digit 16.
+        let valid = value.strip_prefix(PROCESS_ID_PREFIX).is_some_and(|hex| {
+            let bytes = hex.as_bytes();
+            hex.len() == PROCESS_ID_HEX_LEN
+                && bytes
+                    .iter()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(byte))
+                && bytes[12] == b'7'
+                && matches!(bytes[16], b'8' | b'9' | b'a' | b'b')
+        });
+        if valid {
+            Ok(Self(value.to_string()))
+        } else {
+            Err(InvalidProcessId {
+                value: value.to_string(),
+            })
+        }
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for ProcessId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = String::deserialize(deserializer)?;
+        Self::parse(&value).map_err(serde::de::Error::custom)
+    }
+}
+
+impl std::str::FromStr for ProcessId {
+    type Err = InvalidProcessId;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        Self::parse(value)
+    }
+}
+
+impl TryFrom<&str> for ProcessId {
+    type Error = InvalidProcessId;
+
+    fn try_from(value: &str) -> Result<Self, Self::Error> {
+        Self::parse(value)
+    }
+}
+
+impl TryFrom<String> for ProcessId {
+    type Error = InvalidProcessId;
+
+    fn try_from(value: String) -> Result<Self, Self::Error> {
+        Self::parse(&value)
+    }
+}
+
+string_identity_surface!(ProcessId);
 
 string_identity!(NodeId, "session-graph node");
 
@@ -233,9 +365,10 @@ mod tests {
             serde_json::to_string(&SessionId::from("session-7")).unwrap(),
             r#""session-7""#
         );
+        let process = ProcessId::from_minted(0x0000_0000_0000_7000_8000_0000_0000_0000 | 7);
         assert_eq!(
-            serde_json::to_string(&ProcessId::from("process-7")).unwrap(),
-            r#""process-7""#
+            serde_json::to_string(&process).unwrap(),
+            r#""p_00000000000070008000000000000007""#
         );
         assert_eq!(
             serde_json::to_string(&NodeId::from("node-7")).unwrap(),
@@ -259,8 +392,8 @@ mod tests {
             SessionId::from("session-7")
         );
         assert_eq!(
-            serde_json::from_str::<ProcessId>(r#""process-7""#).unwrap(),
-            ProcessId::from("process-7")
+            serde_json::from_str::<ProcessId>(r#""p_00000000000070008000000000000007""#).unwrap(),
+            process
         );
         assert_eq!(
             serde_json::from_str::<NodeId>(r#""node-7""#).unwrap(),
@@ -278,6 +411,38 @@ mod tests {
             serde_json::from_str::<TurnId>(r#""turn-7""#).unwrap(),
             TurnId::from("turn-7")
         );
+    }
+
+    /// A process id is only ever a minted spelling: a host-chosen name, an
+    /// uppercase or short digest, and the pre-minting `process:…` derivations
+    /// are all refused, by the parser and by deserialization alike.
+    #[test]
+    fn a_process_id_is_only_a_minted_spelling() {
+        let minted = ProcessId::from_minted(0x0192_0000_0000_7000_8000_0000_0000_0001);
+        assert_eq!(minted.as_str(), "p_01920000000070008000000000000001");
+        assert_eq!(ProcessId::parse(minted.as_str()).unwrap(), minted);
+        for refused in [
+            "process-7",
+            "p-7",
+            "process:subagent:call-1",
+            "p_0192000000007000800000000000001",
+            "p_019200000000700080000000000000011",
+            "p_0192000000007000800000000000000G",
+            "P_01920000000070008000000000000001",
+            "p_01920000000070008000000000000001 ",
+            // Not a UUIDv7: version 4 in the version nibble, and the NCS and
+            // Microsoft variants in the variant bits.
+            "p_01920000000040008000000000000001",
+            "p_01920000000070000000000000000001",
+            "p_0192000000007000c000000000000001",
+            "",
+        ] {
+            assert!(ProcessId::parse(refused).is_err(), "{refused:?}");
+            assert!(
+                serde_json::from_value::<ProcessId>(serde_json::json!(refused)).is_err(),
+                "{refused:?}"
+            );
+        }
     }
 
     #[test]

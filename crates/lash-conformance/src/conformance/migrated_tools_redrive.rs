@@ -198,11 +198,9 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
     let registry = stores.process_registry();
     let session_id = SessionId::from(format!("{prefix}-session"));
     let turn_id = TurnId::from(format!("{prefix}-turn"));
-    let target = ProcessId::from(format!("{prefix}-control-target"));
-    registry
+    let target = registry
         .register_process_with_observers(
             crate::ProcessRegistration::new(
-                target.clone(),
                 crate::ProcessInput::External {
                     metadata: serde_json::json!({ "fixture": "migrated-tools" }),
                 },
@@ -218,7 +216,8 @@ pub async fn public_migrated_tools_redrive_to_literal_outcomes(
             std::slice::from_ref(&session_id),
         )
         .await
-        .expect("register the cancel_process target");
+        .expect("register the cancel_process target")
+        .id;
 
     let (model, model_calls) = migrated_model(prefix, &target);
     let mut host = crate::LawBackend::over_stores(Arc::clone(&stores), Arc::clone(&effect_host))

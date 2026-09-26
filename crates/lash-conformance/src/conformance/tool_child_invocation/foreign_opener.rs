@@ -58,7 +58,7 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
             definitions: leaf_definitions(),
             observation: Arc::clone(&observation),
             session_id: session_id.clone(),
-            intent_target: crate::ProcessId::from("unused-in-mismatch"),
+            intent_target: crate::ProcessId::fixture("unused-in-mismatch"),
             start_metadata: serde_json::Value::Null,
         })
     };
@@ -110,7 +110,7 @@ pub async fn a_foreign_opener_cannot_drive_another_openers_child(
                                 definitions: leaf_definitions(),
                                 observation: Arc::clone(&observation),
                                 session_id: session_id.clone(),
-                                intent_target: crate::ProcessId::from("unused-in-mismatch"),
+                                intent_target: crate::ProcessId::fixture("unused-in-mismatch"),
                                 start_metadata: serde_json::Value::Null,
                             }),
                             fixture_processes().await.process_registry(),

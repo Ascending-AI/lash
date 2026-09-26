@@ -121,14 +121,12 @@ async fn a_wait_write_refused_on_a_terminal_process_is_settled() {
 
 fn process_event(
     process_id: &ProcessId,
-    incarnation: lash_core::ProcessIncarnation,
     sequence: u64,
     event_type: &str,
     payload: serde_json::Value,
 ) -> lash_core::ProcessEvent {
     lash_core::ProcessEvent {
         process_id: process_id.clone(),
-        process_incarnation: incarnation,
         sequence,
         event_type: event_type.to_string(),
         payload,
@@ -153,11 +151,9 @@ fn process_event(
 
 async fn establish_ready_wait(
     processes: &RetainingSignalWaitProcesses,
-    process_id: &ProcessId,
 ) -> Result<(), SignalWaitSetupError> {
     establish_signal_wait(
         processes,
-        process_id,
         "ready".to_string(),
         "signal.ready".to_string(),
         "process:signal-wait:signal.ready:1".to_string(),
@@ -168,7 +164,6 @@ async fn establish_ready_wait(
 
 #[tokio::test]
 async fn retention_before_a_wait_match_returns_the_typed_error_without_writing_a_wait() {
-    let process_id = ProcessId::from("signal-wait-pruned");
     let processes =
         RetainingSignalWaitProcesses::new([lash_core::ProcessEventReadOutcome::NoLongerRetained(
             lash_core::ProcessEventHistoryRetention::Pruned {
@@ -177,7 +172,7 @@ async fn retention_before_a_wait_match_returns_the_typed_error_without_writing_a
             },
         )]);
 
-    let error = establish_ready_wait(&processes, &process_id)
+    let error = establish_ready_wait(&processes)
         .await
         .expect_err("pruned history must refuse signal-wait setup");
     assert!(matches!(
@@ -192,9 +187,7 @@ async fn retention_before_a_wait_match_returns_the_typed_error_without_writing_a
 
 #[tokio::test]
 async fn retention_after_an_earlier_wait_match_discards_the_timestamp_and_writes_no_wait() {
-    let process_id = ProcessId::from("signal-wait-retired");
-    let requested = lash_core::ProcessIncarnation::from_registration_sequence(1);
-    let current = lash_core::ProcessIncarnation::from_registration_sequence(2);
+    let process_id = lash_core::process_id_for_test("signal-wait-pruned-later");
     let key = "process:signal-wait:signal.ready:1";
     let matched_wait = lash_core::WaitState {
         since_ms: 77,
@@ -207,7 +200,6 @@ async fn retention_after_an_earlier_wait_match_discards_the_timestamp_and_writes
     };
     let mut rows = vec![process_event(
         &process_id,
-        requested,
         1,
         "process.waiting",
         serde_json::json!({ "wait": matched_wait }),
@@ -215,7 +207,6 @@ async fn retention_after_an_earlier_wait_match_discards_the_timestamp_and_writes
     rows.extend((2..=129).map(|sequence| {
         process_event(
             &process_id,
-            requested,
             sequence,
             "snapshot.filler",
             serde_json::Value::Null,
@@ -232,25 +223,22 @@ async fn retention_after_an_earlier_wait_match_discards_the_timestamp_and_writes
     let processes = RetainingSignalWaitProcesses::new([
         lash_core::ProcessEventReadOutcome::Retained(first_page),
         lash_core::ProcessEventReadOutcome::NoLongerRetained(
-            lash_core::ProcessEventHistoryRetention::Retired {
-                requested_incarnation: requested,
-                current_incarnation: current,
+            lash_core::ProcessEventHistoryRetention::Pruned {
+                terminal_label: "completed".to_string(),
+                pruned_at_ms: 43,
             },
         ),
     ]);
 
-    let error = establish_ready_wait(&processes, &process_id)
+    let error = establish_ready_wait(&processes)
         .await
-        .expect_err("retired later page must discard an earlier matched timestamp");
+        .expect_err("a pruned later page must discard an earlier matched timestamp");
     assert!(matches!(
         error,
-        SignalWaitSetupError::Read(lash_core::PluginError::ProcessIncarnationSuperseded {
-            process_id: observed,
-            requested_incarnation,
-            current_incarnation,
-        }) if observed == process_id
-            && requested_incarnation == requested
-            && current_incarnation == current
+        SignalWaitSetupError::Read(lash_core::PluginError::ProcessNoLongerRetained {
+            pruned_at_ms: 43,
+            ..
+        })
     ));
     assert!(processes.written_waits().is_empty());
 }

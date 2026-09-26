@@ -1,4 +1,3 @@
-use lash::ProcessId;
 use std::collections::{BTreeMap, BTreeSet};
 
 use lash::rlm::lang::{
@@ -79,7 +78,7 @@ pub(crate) fn document_from_graph(
         let WorkflowDeclaration::Process(process) = declaration else {
             continue;
         };
-        let process_id = ProcessId::from(process.id.to_string());
+        let process_id = process.id.to_string();
         let scope = format!("process:{process_id}");
         let children = node_ids(&process.body);
         roots.processes.push(process_id.to_string());
@@ -233,7 +232,7 @@ pub(crate) fn graph_from_document(
         )?;
         process.body = rebuild_process_body(
             &RebuiltProcess {
-                id: &ProcessId::from(process_id),
+                id: process_id,
                 params: &process.params,
                 is_new,
             },
@@ -331,7 +330,7 @@ fn bind_declared_processes(graph: &mut WorkflowGraph) {
 
 /// The freshly declared process a body is being rebuilt for.
 struct RebuiltProcess<'a> {
-    id: &'a ProcessId,
+    id: &'a str,
     params: &'a [ProcessParam],
     is_new: bool,
 }

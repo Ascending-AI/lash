@@ -8,7 +8,6 @@ mod attach_terminal_tests {
 
     fn registration(process_id: &str) -> crate::ProcessRegistration {
         crate::ProcessRegistration::new(
-            process_id,
             crate::ProcessInput::ToolCall {
                 call: crate::PreparedToolCall::from_parts(
                     process_id,
@@ -35,7 +34,7 @@ mod attach_terminal_tests {
         _backend: lash_sqlite_store::SqliteBackend,
         controller: Arc<dyn RuntimeEffectController>,
         registry: Arc<dyn crate::ProcessRegistry>,
-        process_ref: crate::ProcessRef,
+        process_id: crate::ProcessId,
         key: crate::AwaitEventKey,
         session_id: crate::SessionId,
     }
@@ -65,7 +64,7 @@ mod attach_terminal_tests {
             Self {
                 _backend: backend,
                 controller,
-                process_ref: crate::ProcessRef::from_record(&record),
+                process_id: record.id.clone(),
                 registry,
                 key,
                 session_id,
@@ -85,7 +84,7 @@ mod attach_terminal_tests {
                     effect_id,
                 ),
                 crate::RuntimeEffectCommand::process(ProcessCommand::AttachTerminal {
-                    process_ref: self.process_ref.clone(),
+                    process_id: self.process_id.clone(),
                     key: self.key.clone(),
                 }),
             )
@@ -145,7 +144,7 @@ mod attach_terminal_tests {
         async fn complete(&self, value: serde_json::Value) -> crate::ProcessAwaitOutput {
             let terminal =
                 crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(value));
-            let process_id = self.process_ref.process_id.clone();
+            let process_id = self.process_id.clone();
             let owner = crate::LeaseOwnerIdentity::opaque(
                 "attach-terminal-test-writer",
                 "attach-terminal-test-writer:001",
@@ -244,7 +243,7 @@ mod attach_terminal_tests {
             .await;
         let record = fixture
             .registry
-            .get_process(&fixture.process_ref.process_id)
+            .get_process(&fixture.process_id)
             .await
             .expect("read the awaited process")
             .expect("the cancelled wait must not have removed the process");
@@ -308,7 +307,7 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     use crate::support::prelude::*;
-    use crate::{ProcessEffectOutcome, ProcessId, RuntimeEffectController};
+    use crate::{ProcessEffectOutcome, RuntimeEffectController};
 
     fn runtime_controller(
         backend: &lash_sqlite_store::SqliteBackend,
@@ -319,12 +318,12 @@ mod tests {
         )
     }
 
-    fn tool_registration(process_id: &str, marker: &str) -> crate::ProcessRegistration {
+    /// A start keyed by `key`: a journaled start is addressed by its key.
+    fn tool_registration(key: &str, marker: &str) -> crate::ProcessRegistration {
         crate::ProcessRegistration::new(
-            process_id,
             crate::ProcessInput::ToolCall {
                 call: crate::PreparedToolCall::from_parts(
-                    process_id,
+                    key,
                     crate::ToolId::new("test-tool"),
                     "test_tool",
                     serde_json::json!({"marker": marker}),
@@ -339,6 +338,26 @@ mod tests {
                 crate::OnParentEnd::Abandon,
             ),
         )
+        .with_start_key(Some(crate::StartKey::for_host(
+            crate::StartKeyOwner::HOST,
+            key,
+        )))
+    }
+
+    fn started_record(outcome: crate::RuntimeEffectOutcome) -> crate::ProcessRecord {
+        let crate::RuntimeEffectOutcome::Process {
+            result: ProcessEffectOutcome::Start { record },
+        } = outcome
+        else {
+            panic!("wrong start outcome: {outcome:?}")
+        };
+        *record
+    }
+
+    fn staging_owner(key: &str) -> crate::ArtifactOwner {
+        crate::ArtifactOwner::process_start(&crate::ProcessCommand::start_effect_id(Some(
+            &crate::StartKey::for_host(crate::StartKeyOwner::HOST, key),
+        )))
     }
 
     fn start_envelope(
@@ -367,7 +386,7 @@ mod tests {
 
     #[tokio::test]
     async fn process_start_transfers_environment_and_replays_after_staging_retirement() {
-        let process_id = ProcessId::from("owned-env-start");
+        let key = "owned-env-start";
         let backend = crate::support::memory_backend().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let env_store: Arc<dyn crate::ProcessExecutionEnvStore> = backend.process_env_store();
@@ -378,7 +397,7 @@ mod tests {
         let env_ref = env_spec.stable_ref().expect("stable environment reference");
         let command = start_envelope(
             "owned-env-start",
-            tool_registration(process_id.as_str(), "original"),
+            tool_registration(key, "original"),
             env_spec,
         );
         let executor = || {
@@ -392,29 +411,37 @@ mod tests {
         };
         let controller = runtime_controller(&backend);
 
-        controller
-            .execute_effect(command.clone(), executor())
-            .await
-            .expect("initial process start");
+        let first = started_record(
+            controller
+                .execute_effect(command.clone(), executor())
+                .await
+                .expect("initial process start"),
+        );
         // The second attempt runs the local start again, as the crash after
         // the local start and before its journal commit leaves it: over a
         // fresh journal that holds no record of the first run (a redrive over
         // the same journal would only replay it), against the same registry
         // and environment store.
         let uncommitted = crate::support::memory_backend().await;
-        runtime_controller(&uncommitted)
-            .execute_effect(command, executor())
-            .await
-            .expect("re-run process start after staging retirement");
+        let rerun = started_record(
+            runtime_controller(&uncommitted)
+                .execute_effect(command, executor())
+                .await
+                .expect("re-run process start after staging retirement"),
+        );
+        assert_eq!(
+            rerun.id, first.id,
+            "the start key returns the retained process, never a second one"
+        );
         let record = registry
-            .get_process(&process_id)
+            .get_process(&first.id)
             .await
             .expect("read registered process")
             .expect("registered process remains live");
 
         env_store
             .release_process_execution_env(
-                &crate::ArtifactOwner::process(crate::ProcessRef::from_record(&record)),
+                &crate::ArtifactOwner::process(record.id.clone()),
                 &env_ref,
             )
             .await
@@ -511,7 +538,7 @@ mod tests {
     #[tokio::test]
     async fn a_start_settles_its_environment_after_a_concurrent_attempt_retires_the_staging_owner()
     {
-        let process_id = ProcessId::from("raced-staging-owner-start");
+        let key = "raced-staging-owner-start";
         let backend = crate::support::memory_backend().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let env_spec = crate::ProcessExecutionEnvSpec::new(
@@ -529,7 +556,7 @@ mod tests {
             .expect("publish the subscription environment");
         let env_store = Arc::new(RetireStagingOwnerBeforeFirstTransfer {
             inner: Arc::clone(&inner),
-            staging_owner: crate::ArtifactOwner::process_start(&process_id),
+            staging_owner: staging_owner(key),
             interleavings: AtomicUsize::new(0),
         });
         let envelope = crate::RuntimeEffectEnvelope::new(
@@ -543,7 +570,7 @@ mod tests {
                 "raced-staging-owner-start",
             ),
             crate::RuntimeEffectCommand::process(crate::ProcessCommand::Start {
-                registration: tool_registration(process_id.as_str(), "delivery")
+                registration: tool_registration(key, "delivery")
                     .with_execution_env_ref(Some(env_ref.clone())),
                 observers: Vec::new(),
                 env_spec: None,
@@ -558,10 +585,12 @@ mod tests {
         )
         .with_process_env_store(Arc::clone(&env_store) as Arc<dyn crate::ProcessExecutionEnvStore>);
 
-        runtime_controller(&backend)
-            .execute_effect(envelope, executor)
-            .await
-            .expect("a severed staging edge must not fail the start");
+        let started = started_record(
+            runtime_controller(&backend)
+                .execute_effect(envelope, executor)
+                .await
+                .expect("a severed staging edge must not fail the start"),
+        );
 
         assert_eq!(
             env_store.interleavings.load(Ordering::SeqCst),
@@ -569,11 +598,11 @@ mod tests {
             "the start must still attempt the transfer first"
         );
         let record = registry
-            .get_process(&process_id)
+            .get_process(&started.id)
             .await
             .expect("read registered process")
             .expect("registered process remains live");
-        let process_owner = crate::ArtifactOwner::process(crate::ProcessRef::from_record(&record));
+        let process_owner = crate::ArtifactOwner::process(record.id.clone());
         inner
             .release_process_execution_env(&subscription_owner, &env_ref)
             .await
@@ -600,6 +629,124 @@ mod tests {
         );
     }
 
+    /// ADR 0107: a changed-content retry under a trusted key keeps the
+    /// retained process's environment.
+    ///
+    /// The first attempt staged E1 under the key's staging owner, registered
+    /// the process naming E1, and crashed before settling it: E1 is held by
+    /// the staging owner alone. The retry submits E2, is returned the retained
+    /// process, and must release only its own staging. Retiring the shared
+    /// staging owner outright severed E1's only edge, and the retained process
+    /// later failed with a missing environment.
+    #[tokio::test]
+    async fn a_changed_content_retry_after_a_crash_keeps_the_retained_environment() {
+        let backend = crate::support::memory_backend().await;
+        let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
+        let env_store: Arc<dyn crate::ProcessExecutionEnvStore> = backend.process_env_store();
+        let env = |budget: crate::TurnBudget| {
+            crate::ProcessExecutionEnvSpec::new(
+                crate::PluginOptions::default(),
+                crate::SessionPolicy::new(budget),
+            )
+        };
+        let first_env = env(crate::TurnBudget::Unbounded);
+        let retry_env = env(crate::TurnBudget::Bounded(
+            std::num::NonZeroUsize::new(3).expect("non-zero budget"),
+        ));
+        let first_ref = first_env.stable_ref().expect("first environment reference");
+        let retry_ref = retry_env.stable_ref().expect("retry environment reference");
+        assert_ne!(first_ref, retry_ref, "the retry submits different content");
+        let key = crate::StartKey::for_orchestration_call(
+            &crate::ExecutionScope::runtime_operation("runtime"),
+            "crashed-start",
+            0,
+        );
+        let registration = |marker: &str| {
+            let mut registration = tool_registration("crashed-start", marker);
+            registration.start_key = Some(key.clone());
+            registration
+        };
+        let staging = crate::ArtifactOwner::process_start(&crate::ProcessCommand::start_effect_id(
+            Some(&key),
+        ));
+
+        // The first attempt: staged, registered, crashed before settling.
+        crate::publish_process_execution_env(env_store.as_ref(), &staging, &first_env)
+            .await
+            .expect("stage the first attempt's environment");
+        let retained = registry
+            .register_process(registration("first").with_execution_env_ref(Some(first_ref.clone())))
+            .await
+            .expect("the first attempt registered its process");
+
+        // The retry, over a fresh journal, with changed content.
+        let uncommitted = crate::support::memory_backend().await;
+        let envelope = crate::RuntimeEffectEnvelope::new(
+            crate::RuntimeEffectInvocation::new(
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::runtime_operation("runtime"),
+                    "crashed-start",
+                )
+                .expect("valid process-start test address"),
+                crate::RuntimeAttribution::none(),
+                "crashed-start",
+            ),
+            crate::RuntimeEffectCommand::process(crate::ProcessCommand::Start {
+                registration: registration("retry"),
+                observers: Vec::new(),
+                env_spec: Some(retry_env),
+                execution_context: Box::new(crate::ProcessExecutionContext::default()),
+            }),
+        );
+        let executor = crate::RuntimeEffectLocalExecutor::processes(
+            Arc::clone(&registry),
+            Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+                &registry,
+            ))),
+        )
+        .with_process_env_store(Arc::clone(&env_store));
+        let returned = started_record(
+            runtime_controller(&uncommitted)
+                .execute_effect(envelope, executor)
+                .await
+                .expect("the retry is returned the retained process"),
+        );
+        assert_eq!(returned.id, retained.id);
+        assert_eq!(returned.env_ref.as_ref(), Some(&first_ref));
+
+        assert!(
+            env_store
+                .get_process_execution_env(&first_ref)
+                .await
+                .expect("read the retained environment")
+                .is_some(),
+            "the retained process's environment survives the retry"
+        );
+        assert_eq!(
+            env_store
+                .get_process_execution_env(&retry_ref)
+                .await
+                .expect("read the retry's environment"),
+            None,
+            "the retry's own unadopted staging is released"
+        );
+        env_store
+            .release_process_execution_env(
+                &crate::ArtifactOwner::process(retained.id.clone()),
+                &first_ref,
+            )
+            .await
+            .expect("release the process edge");
+        assert_eq!(
+            env_store
+                .get_process_execution_env(&first_ref)
+                .await
+                .expect("read the reclaimed environment"),
+            None,
+            "the process owner holds the environment, and the staging owner is retired"
+        );
+    }
+
     /// A `ProcessWorkSubstrate` whose advisory poke always fails.
     struct PokeAlwaysFails {
         pokes: AtomicUsize,
@@ -619,7 +766,7 @@ mod tests {
 
         async fn await_process_terminal(
             &self,
-            _process_ref: &crate::ProcessRef,
+            _process_ref: &crate::ProcessId,
         ) -> Result<crate::ProcessTerminalWait, crate::PluginError> {
             unreachable!("poke witness does not await terminals")
         }
@@ -634,7 +781,7 @@ mod tests {
     /// then do the work twice.
     #[tokio::test]
     async fn a_failed_worker_poke_still_returns_the_started_record() {
-        let process_id = ProcessId::from("advisory-poke-start");
+        let key = "advisory-poke-start";
         let backend = crate::support::memory_backend().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let env_spec = crate::ProcessExecutionEnvSpec::new(
@@ -654,7 +801,7 @@ mod tests {
             .execute_effect(
                 start_envelope(
                     "advisory-poke-start",
-                    tool_registration(process_id.as_str(), "advisory"),
+                    tool_registration(key, "advisory"),
                     env_spec,
                 ),
                 executor,
@@ -667,7 +814,6 @@ mod tests {
         else {
             panic!("wrong start outcome")
         };
-        assert_eq!(record.id, process_id);
         assert_eq!(
             process_work.pokes.load(Ordering::SeqCst),
             1,
@@ -675,7 +821,7 @@ mod tests {
         );
 
         let stored = registry
-            .get_process(&process_id)
+            .get_process(&record.id)
             .await
             .expect("read registered process")
             .expect("the registered row stands");
@@ -689,66 +835,159 @@ mod tests {
         );
     }
 
+    /// ADR 0107 (FIG-3607 decision 57): a redrive of a start whose recorded
+    /// result survives returns the recorded id, even after that process was
+    /// pruned. The journal answers the redrive; the registrar is never asked
+    /// again, so no second process is minted under the key.
     #[tokio::test]
-    async fn failed_process_registration_retires_staging_environment_owner() {
-        let process_id = ProcessId::from("failed-owned-env-start");
+    async fn a_redrive_after_prune_returns_the_recorded_id() {
+        let key = "redrive-after-prune";
+        let backend = crate::support::memory_backend().await;
+        let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
+        let env_spec = crate::ProcessExecutionEnvSpec::new(
+            crate::PluginOptions::default(),
+            crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+        );
+        let command = start_envelope(key, tool_registration(key, "recorded"), env_spec);
+        let executor = || {
+            crate::RuntimeEffectLocalExecutor::processes(
+                Arc::clone(&registry),
+                Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
+                    &registry,
+                ))),
+            )
+            .with_process_env_store(backend.process_env_store())
+        };
+        let controller = runtime_controller(&backend);
+
+        let recorded = started_record(
+            controller
+                .execute_effect(command.clone(), executor())
+                .await
+                .expect("the recorded start"),
+        );
+        registry
+            .complete_process(
+                &recorded.id,
+                crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
+                    serde_json::Value::Null,
+                )),
+                crate::ProcessCompletionAuthority::workflow_key(recorded.id.as_str()),
+            )
+            .await
+            .expect("complete the started process");
+        registry
+            .prune_terminal_processes(u64::MAX, None, crate::ProjectionWatermark::NoProjector)
+            .await
+            .expect("prune the started process");
+
+        let redriven = started_record(
+            controller
+                .execute_effect(command, executor())
+                .await
+                .expect("the redrive replays the recorded start"),
+        );
+        assert_eq!(
+            redriven.id, recorded.id,
+            "the redrive returns the recorded id"
+        );
+        assert!(
+            registry
+                .list_processes(&crate::ProcessListFilter {
+                    status: crate::ProcessStatusFilter::Any,
+                    ..crate::ProcessListFilter::default()
+                })
+                .await
+                .expect("list processes")
+                .is_empty(),
+            "the redrive registers nothing: no second process is minted under the key"
+        );
+    }
+
+    /// ADR 0107: a lash-derived start key is trusted. A retry under a
+    /// retained key whose content changed returns the retained process
+    /// untouched, and the environment it staged is released rather than
+    /// attached to a process that never submitted it. (A host key fences its
+    /// content instead; the registry conformance laws cover that.)
+    #[tokio::test]
+    async fn a_changed_content_retry_returns_the_retained_process_and_releases_its_staging() {
+        let key = "changed-content-start";
+        let start_key =
+            crate::StartKey::for_trigger_delivery(key, "subscription", "incarnation", 1);
+        let keyed =
+            |marker: &str| tool_registration(key, marker).with_start_key(Some(start_key.clone()));
         let backend = crate::support::memory_backend().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let env_store: Arc<dyn crate::ProcessExecutionEnvStore> = backend.process_env_store();
+        let retained_env_ref = crate::ProcessExecutionEnvRef::new("process-env:retained");
+        let retained = registry
+            .register_process(
+                keyed("retained").with_execution_env_ref(Some(retained_env_ref.clone())),
+            )
+            .await
+            .expect("register the key's process");
         let env_spec = crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
         );
         let env_ref = env_spec.stable_ref().expect("stable environment reference");
-        registry
-            .register_process(
-                tool_registration(process_id.as_str(), "existing")
-                    .with_execution_env_ref(Some(env_ref.clone())),
-            )
-            .await
-            .expect("register conflicting process");
+        assert_ne!(
+            env_ref, retained_env_ref,
+            "the retry must submit other content"
+        );
         let bytes = env_spec.to_store_bytes().expect("encode environment");
-        let staging_owner = crate::ArtifactOwner::process_start(&process_id);
         let executor = crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&registry),
             Arc::new(crate::NativeProcessWork::for_registry(Arc::clone(
                 &registry,
             ))),
         )
-        .with_process_env_store(Arc::clone(&env_store) as Arc<dyn crate::ProcessExecutionEnvStore>);
+        .with_process_env_store(Arc::clone(&env_store));
 
-        runtime_controller(&backend)
-            .execute_effect(
-                start_envelope(
-                    "failed-owned-env-start",
-                    tool_registration(process_id.as_str(), "conflict"),
-                    env_spec,
-                ),
-                executor,
-            )
-            .await
-            .expect_err("conflicting registration must fail");
+        let returned = started_record(
+            runtime_controller(&backend)
+                .execute_effect(
+                    start_envelope("changed-content-start", keyed("changed"), env_spec),
+                    executor,
+                )
+                .await
+                .expect("a retry under a retained key is not a failure"),
+        );
 
+        assert_eq!(
+            returned.id, retained.id,
+            "the key names the retained process"
+        );
+        assert_eq!(
+            returned.input, retained.input,
+            "the retry's content is not adopted"
+        );
+        assert_eq!(returned.env_ref, Some(retained_env_ref));
         assert_eq!(
             env_store
                 .get_process_execution_env(&env_ref)
                 .await
                 .expect("read reclaimed environment"),
             None,
-            "failed registration must reclaim its staging edge"
+            "the retry's staged environment must not be attached to the retained process"
         );
         assert!(
             env_store
-                .publish_process_execution_env(&staging_owner, &env_ref, &bytes)
+                .publish_process_execution_env(
+                    &crate::ArtifactOwner::process_start(&crate::ProcessCommand::start_effect_id(
+                        Some(&start_key),
+                    )),
+                    &env_ref,
+                    &bytes,
+                )
                 .await
                 .is_err(),
-            "failed registration must fence a late staging publication"
+            "the released staging owner must fence a late staging publication"
         );
     }
 
     #[tokio::test]
     async fn signal_prefers_declared_wait_ordinal_when_event_count_diverges() {
-        let process_id = "declared-signal-ordinal";
         let signal_name = "ready";
         let event_type =
             crate::runtime::process_signal_event_type(signal_name).expect("signal event type");
@@ -757,7 +996,6 @@ mod tests {
         let record = registry
             .register_process(
                 crate::ProcessRegistration::new(
-                    process_id,
                     crate::ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
@@ -776,18 +1014,15 @@ mod tests {
             )
             .await
             .expect("register process");
+        let process_id = record.id.clone();
         registry
             .set_process_wait(
-                &ProcessId::from(process_id),
+                &process_id,
                 crate::WaitState {
                     kind: crate::WaitKind::Signal {
                         name: signal_name.to_string(),
                         event_type: event_type.clone(),
-                        key: crate::runtime::process_signal_wait_key(
-                            &ProcessId::from(process_id),
-                            signal_name,
-                            7,
-                        ),
+                        key: crate::runtime::process_signal_wait_key(&process_id, signal_name, 7),
                         ordinal: 7,
                     },
                     since_ms: 1,
@@ -811,7 +1046,7 @@ mod tests {
                         "signal-divergent-ordinal",
                     ),
                     crate::RuntimeEffectCommand::process(crate::ProcessCommand::Signal {
-                        process_ref: crate::ProcessRef::from_record(&record),
+                        process_id: record.id.clone(),
                         signal_name: signal_name.to_string(),
                         signal_id: "signal-1".to_string(),
                         request: crate::ProcessEventAppendRequest::new(
@@ -841,7 +1076,7 @@ mod tests {
             registry
                 // The SQL registries bind the bound as a signed 64-bit
                 // sequence, so "every event" is `i64::MAX`, not `u64::MAX`.
-                .count_events_through(&ProcessId::from(process_id), &event_type, i64::MAX as u64)
+                .count_events_through(&process_id, &event_type, i64::MAX as u64)
                 .await
                 .expect("count appended signal events"),
             1,
@@ -850,8 +1085,8 @@ mod tests {
 
         let declared_key = controller
             .await_event_key(
-                &crate::ExecutionScope::process(process_id),
-                crate::AwaitEventWaitIdentity::process_signal(process_id, signal_name, 7),
+                &crate::ExecutionScope::process(process_id.clone()),
+                crate::AwaitEventWaitIdentity::process_signal(process_id.clone(), signal_name, 7),
             )
             .await
             .expect("derive declared wait key");
@@ -864,8 +1099,8 @@ mod tests {
         );
         let counted_key = controller
             .await_event_key(
-                &crate::ExecutionScope::process(process_id),
-                crate::AwaitEventWaitIdentity::process_signal(process_id, signal_name, 1),
+                &crate::ExecutionScope::process(process_id.clone()),
+                crate::AwaitEventWaitIdentity::process_signal(process_id.clone(), signal_name, 1),
             )
             .await
             .expect("derive event-count key");

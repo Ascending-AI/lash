@@ -28,11 +28,11 @@
 //!
 //! The key is an [`EffectOpener`], compared as a value. Its own documentation
 //! says why a rendering will not do: a turn's scope identity is free-form text
-//! that can contain exactly the `{process_id}#{incarnation}` a process opener
+//! that can contain exactly the `process:{process_id}` a process opener
 //! renders to, so an untagged string admits two distinct openers that mint one
-//! identity — the aliasing §1 refuses. A process opener therefore carries its
-//! incarnation here as everywhere else, and a process re-registered under the
-//! same name is a *different* key, which is what stops it inheriting its
+//! identity — the aliasing §1 refuses. A process opener carries its minted,
+//! never-reused id, so a process started again under the same key after a
+//! prune is a *different* key, which is what stops it inheriting its
 //! predecessor's children.
 //!
 //! # One owner per opener kind

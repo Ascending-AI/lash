@@ -42,17 +42,19 @@ pub fn is_durable_identity_conflict(error: &PluginError) -> bool {
 pub enum PluginError {
     /// The process already accepted a different cancellation request.
     #[error(
-        "process `{process_ref}` already accepted cancellation {existing:?}; refused {requested:?}"
+        "process `{process_id}` already accepted cancellation {existing:?}; refused {requested:?}"
     )]
     ProcessCancelConflict {
-        process_ref: crate::ProcessRef,
+        process_id: ProcessId,
         existing: Box<crate::CancelRequest>,
         requested: Box<crate::CancelRequest>,
     },
-    /// A child requested cancellation on end of an already-ended parent.
-    #[error("cannot register process `{process_id}`: parent scope {parent:?} has ended")]
+    /// A child requested cancellation on end of an already-ended parent. The
+    /// start is refused before an id is minted, so the refusal names the
+    /// start by its key.
+    #[error("cannot register process start {start_key:?}: parent scope {parent:?} has ended")]
     ParentEnded {
-        process_id: ProcessId,
+        start_key: Option<crate::StartKey>,
         parent: crate::ParentScope,
     },
     /// Discovery must itself be an inline member of the tool catalogue.
@@ -182,16 +184,6 @@ pub enum PluginError {
     /// An operation referenced a process id that the registry never knew.
     #[error("unknown process `{process_id}`")]
     ProcessUnknown { process_id: ProcessId },
-    /// A durable reference names a different lifetime than the currently
-    /// retained process with the same host-facing id.
-    #[error(
-        "process `{process_id}` incarnation {requested_incarnation} was superseded by incarnation {current_incarnation}"
-    )]
-    ProcessIncarnationSuperseded {
-        process_id: ProcessId,
-        requested_incarnation: crate::ProcessIncarnation,
-        current_incarnation: crate::ProcessIncarnation,
-    },
     /// A Process Change Feed cursor predates deletion history removed by
     /// Tombstone Compaction. The consumer must perform a full relist before
     /// resuming from the reported horizon.
@@ -340,7 +332,6 @@ impl PluginError {
             | Self::ClockBeforeUnixEpoch { .. }
             | Self::ProcessNotVisible { .. }
             | Self::ProcessUnknown { .. }
-            | Self::ProcessIncarnationSuperseded { .. }
             | Self::ProcessChangeCursorPruned { .. }
             | Self::ProcessParkFeedCursorCompacted { .. }
             | Self::ProcessAlreadyStarted { .. }
@@ -400,7 +391,6 @@ impl PluginError {
             | Self::UnstagedUsageConfirmation { .. }
             | Self::ClockBeforeUnixEpoch { .. }
             | Self::MonotonicCounterOverflow { .. }
-            | Self::ProcessIncarnationSuperseded { .. }
             | Self::ProcessChangeCursorPruned { .. }
             | Self::ProcessParkFeedCursorCompacted { .. }
             | Self::ProcessNoLongerRetained { .. }

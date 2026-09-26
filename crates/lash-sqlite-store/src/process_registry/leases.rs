@@ -13,7 +13,7 @@ pub(super) async fn claim_process_lease(
     owner: &LeaseOwnerIdentity,
     lease_ttl_ms: u64,
 ) -> Result<ProcessLeaseClaimOutcome, lash_core_execution::PluginError> {
-    let process_id = ProcessId::from(process_id.to_string());
+    let process_id = process_id.clone();
     let owner = owner.clone();
     let now = registry.clock.timestamp_ms();
     registry
@@ -78,7 +78,7 @@ pub(super) async fn reclaim_process_lease(
     _observed_holder: &ProcessLease,
     lease_ttl_ms: u64,
 ) -> Result<ProcessLeaseClaimOutcome, lash_core_execution::PluginError> {
-    let process_id = ProcessId::from(process_id.to_string());
+    let process_id = process_id.clone();
     let owner = owner.clone();
     let now = registry.clock.timestamp_ms();
     registry
@@ -167,7 +167,7 @@ pub(super) async fn get_process_lease(
     registry: &SqliteProcessRegistry,
     process_id: &ProcessId,
 ) -> Result<Option<ProcessLease>, lash_core_execution::PluginError> {
-    let process_id = ProcessId::from(process_id.to_string());
+    let process_id = process_id.clone();
     registry
         .conn
         .call(move |conn| {
@@ -198,7 +198,7 @@ pub(super) async fn get_process_leases(
                     .map_err(process_sqlite_error)?;
                 let rows = stmt
                     .query_map(params![process_ids_json], |row| {
-                        let process_id = ProcessId::from(row.get::<_, String>(0)?);
+                        let process_id = crate::row_process_id(row, 0)?;
                         let lease = registry_transitions::ProcessLeaseRow {
                             owner_id: row.get(1)?,
                             incarnation_id: row.get(6)?,

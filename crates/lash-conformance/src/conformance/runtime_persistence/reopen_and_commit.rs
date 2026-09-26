@@ -21,8 +21,8 @@ use pretty_assertions::assert_eq;
 pub async fn session_metadata_round_trips(store: Arc<dyn RuntimePersistence>) {
     let meta = SessionMeta {
         pending_observer_intents: vec![
-            crate::SessionObserverIntent::host_requested("observer-a"),
-            crate::SessionObserverIntent::host_requested("observer-b"),
+            crate::SessionObserverIntent::host_requested(crate::ProcessId::fixture("observer-a")),
+            crate::SessionObserverIntent::host_requested(crate::ProcessId::fixture("observer-b")),
         ],
         session_id: SessionId::from("root"),
         relation: SessionRelation::Root,
@@ -76,7 +76,9 @@ pub async fn session_metadata_relation_is_write_once(store: Arc<dyn RuntimePersi
     // The round trip the production caller performs: the same relation, with
     // its observer intents settled.
     let settled = SessionMeta {
-        pending_observer_intents: vec![crate::SessionObserverIntent::host_requested("observer-a")],
+        pending_observer_intents: vec![crate::SessionObserverIntent::host_requested(
+            crate::ProcessId::fixture("observer-a"),
+        )],
         ..recorded.clone()
     };
     store
@@ -676,14 +678,13 @@ fn root_process_wake(sequence: u64) -> ProcessWakeDelivery {
         version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("wake-{sequence}"),
         target_session_id: SessionId::from("root"),
-        process_id: ProcessId::from("process-1"),
-        process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
+        process_id: crate::ProcessId::fixture("process-1"),
         sequence,
         event_type: "process.wake".to_string(),
         event_invocation: RuntimeInvocation {
             attribution: RuntimeAttribution::for_session("root"),
             subject: RuntimeSubject::ProcessEvent {
-                process_id: ProcessId::from("process-1"),
+                process_id: crate::ProcessId::fixture("process-1"),
                 sequence,
                 event_type: "process.wake".to_string(),
             },
@@ -731,7 +732,7 @@ pub async fn host_cancelled_wake_is_not_redelivered(store: Arc<dyn RuntimePersis
             allocation_floor,
         } => {
             assert_eq!(refused_session, session_id);
-            assert_eq!(process_id, ProcessId::from("process-1"));
+            assert_eq!(process_id, crate::ProcessId::fixture("process-1"));
             assert_eq!(sequence, 7);
             assert_eq!(allocation_floor, 7);
         }

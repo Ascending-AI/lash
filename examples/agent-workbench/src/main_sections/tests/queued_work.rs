@@ -1,5 +1,4 @@
 use super::*;
-use lash::ProcessId;
 use lash::SessionId;
 use lash::TurnId;
 
@@ -9,13 +8,12 @@ pub(crate) fn queued_work_test_draft(
     session_id: &SessionId,
     source_key: &str,
 ) -> lash::persistence::QueuedWorkBatchDraft {
-    let process_id = || ProcessId::from(source_key);
+    let process_id = || ProcessId::fixture(source_key);
     workbench_process_wake_draft(lash::process::ProcessWakeDelivery {
         version: lash::formats::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("{source_key}-wake-1"),
         target_session_id: session_id.clone(),
         process_id: process_id(),
-        process_incarnation: lash::process::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "process.wake".to_string(),
         event_invocation: lash::runtime::RuntimeInvocation {
@@ -373,11 +371,9 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             Some(wake_delivery_config),
         )
         .await;
-        let process_id = "workbench-targeted-wake-process";
-        registry
+        let process_id = registry
             .register_process(
                 lash::process::ProcessRegistration::new(
-                    process_id,
                     lash::process::ProcessInput::External {
                         metadata: Value::Null,
                     },
@@ -406,10 +402,11 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
                 .with_wake_session_id(Some(session_id.clone())),
             )
             .await
-            .expect("register targeted wake producer");
+            .expect("register targeted wake producer")
+            .id;
         let earlier_wake = registry
             .append_event(
-                &ProcessId::from(process_id),
+                &process_id,
                 lash::process::ProcessEventAppendRequest::new(
                     "producer.wake",
                     json!({"wake_input": "earlier"}),
@@ -421,7 +418,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             .expect("earlier wake delivery");
         let later_wake = registry
             .append_event(
-                &ProcessId::from(process_id),
+                &process_id,
                 lash::process::ProcessEventAppendRequest::new(
                     "producer.wake",
                     json!({"wake_input": "later"}),
@@ -544,10 +541,9 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             Some(expiry_config),
         )
         .await;
-        expiry_registry
+        let workbench_expiring_wake_process_id = expiry_registry
             .register_process(
                 lash::process::ProcessRegistration::new(
-                    "workbench-expiring-wake-process",
                     lash::process::ProcessInput::External {
                         metadata: Value::Null,
                     },
@@ -576,10 +572,11 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
                 .with_wake_session_id(Some(SessionId::from("workbench-never-created-target"))),
             )
             .await
-            .expect("register expiring wake producer");
+            .expect("register expiring wake producer")
+            .id;
         expiry_registry
             .append_event(
-                &ProcessId::from("workbench-expiring-wake-process"),
+                &workbench_expiring_wake_process_id,
                 lash::process::ProcessEventAppendRequest::new(
                     "producer.wake",
                     json!({"wake_input": "expires"}),
@@ -644,10 +641,9 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             Some(wake_delivery_config),
         )
         .await;
-        target_gone_registry
+        let workbench_target_gone_wake_process_id = target_gone_registry
             .register_process(
                 lash::process::ProcessRegistration::new(
-                    "workbench-target-gone-wake-process",
                     lash::process::ProcessInput::External {
                         metadata: Value::Null,
                     },
@@ -676,10 +672,11 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
                 .with_wake_session_id(Some(SessionId::from(deleted_target_id.to_string()))),
             )
             .await
-            .expect("register target-gone wake producer");
+            .expect("register target-gone wake producer")
+            .id;
         target_gone_registry
             .append_event(
-                &ProcessId::from("workbench-target-gone-wake-process"),
+                &workbench_target_gone_wake_process_id,
                 lash::process::ProcessEventAppendRequest::new(
                     "producer.wake",
                     json!({"wake_input": "target gone"}),
@@ -767,7 +764,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
 
         let third_wake = registry
             .append_event(
-                &ProcessId::from(process_id),
+                &process_id,
                 lash::process::ProcessEventAppendRequest::new(
                     "producer.wake",
                     json!({"wake_input": "ordinary drain first"}),
@@ -779,7 +776,7 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             .expect("ordinary-drain first wake delivery");
         let fourth_wake = registry
             .append_event(
-                &ProcessId::from(process_id),
+                &process_id,
                 lash::process::ProcessEventAppendRequest::new(
                     "producer.wake",
                     json!({"wake_input": "ordinary drain second"}),
@@ -899,11 +896,9 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
             None,
         )
         .await;
-        let process_id = "workbench-wake-single-reply-process";
-        registry
+        let process_id = registry
             .register_process(
                 lash::process::ProcessRegistration::new(
-                    process_id,
                     lash::process::ProcessInput::External {
                         metadata: Value::Null,
                     },
@@ -932,10 +927,11 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
                 .with_wake_session_id(Some(session_id.clone())),
             )
             .await
-            .expect("register wake single-reply producer");
+            .expect("register wake single-reply producer")
+            .id;
         let wake = registry
             .append_event(
-                &ProcessId::from(process_id),
+                &process_id,
                 lash::process::ProcessEventAppendRequest::new(
                     "producer.wake",
                     json!({"wake_input": "the user pressed the Red button"}),
@@ -1278,11 +1274,9 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
             None,
         )
         .await;
-        let process_id = "workbench-wake-keeps-previous-process";
-        registry
+        let process_id = registry
             .register_process(
                 lash::process::ProcessRegistration::new(
-                    process_id,
                     lash::process::ProcessInput::External {
                         metadata: Value::Null,
                     },
@@ -1311,10 +1305,11 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
                 .with_wake_session_id(Some(session_id.clone())),
             )
             .await
-            .expect("register wake keeps-previous producer");
+            .expect("register wake keeps-previous producer")
+            .id;
         let wake = registry
             .append_event(
-                &ProcessId::from(process_id),
+                &process_id,
                 lash::process::ProcessEventAppendRequest::new(
                     "producer.wake",
                     json!({"wake_input": "the producer woke this session"}),

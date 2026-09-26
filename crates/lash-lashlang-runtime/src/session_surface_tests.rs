@@ -146,7 +146,6 @@ async fn run_session_surface_case(grant: bool) -> lash_core::ProcessAwaitOutput 
         args: serde_json::Map::new(),
     };
     let process_identity = process_input.process_identity();
-    let process_id = lash_sansio::ProcessId::from("fig3344-session-surface-process");
 
     let sqlite_backend = lash_sqlite_store::SqliteBackend::memory()
         .await
@@ -204,7 +203,6 @@ async fn run_session_surface_case(grant: bool) -> lash_core::ProcessAwaitOutput 
     .expect("valid session surface worker");
 
     let registration = ProcessRegistration::new(
-        process_id.clone(),
         process_input
             .into_process_input()
             .expect("process input encodes"),
@@ -214,10 +212,11 @@ async fn run_session_surface_case(grant: bool) -> lash_core::ProcessAwaitOutput 
     )
     .with_admitted_identity(AdmittedProcessIdentity::for_testing(process_identity))
     .with_execution_env_ref(Some(env_ref));
-    registry
+    let process_id = registry
         .register_process(registration)
         .await
-        .expect("process registers");
+        .expect("process registers")
+        .id;
     let _report = worker
         .drive_pending_processes()
         .await
@@ -393,7 +392,6 @@ async fn fig3463_crashed_worker_retry_keeps_both_telemetry_attempts_but_executes
         args: serde_json::Map::new(),
     };
     let process_identity = process_input.process_identity();
-    let process_id = lash_sansio::ProcessId::from("fig3463-crash-retry");
     let sqlite_backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open a SQLite memory backend");
@@ -459,10 +457,9 @@ async fn fig3463_crashed_worker_retry_keeps_both_telemetry_attempts_but_executes
         )
         .expect("recovery worker")
     };
-    registry
+    let process_id = registry
         .register_process(
             ProcessRegistration::new(
-                process_id.clone(),
                 process_input.into_process_input().expect("process input"),
                 RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
@@ -472,7 +469,8 @@ async fn fig3463_crashed_worker_retry_keeps_both_telemetry_attempts_but_executes
             .with_execution_env_ref(Some(env_ref)),
         )
         .await
-        .expect("register recovery process");
+        .expect("register recovery process")
+        .id;
     let worker_a = worker(crash_sink.clone(), backend.clone());
     let first_report = worker_a
         .drive_pending_processes()
@@ -620,7 +618,6 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
         args: serde_json::Map::new(),
     };
     let process_identity = process_input.process_identity();
-    let process_id = lash_sansio::ProcessId::from("fig3586-diverged-body");
     // A file backend: the law rewrites a row of its effect journal on disk.
     let backend_dir = tempfile::tempdir().expect("backend directory");
     let journal_path = backend_dir
@@ -691,10 +688,9 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
         )
         .expect("recovery worker")
     };
-    registry
+    let process_id = registry
         .register_process(
             ProcessRegistration::new(
-                process_id.clone(),
                 process_input.into_process_input().expect("process input"),
                 RecoveryContract::Rerunnable,
                 ProcessProvenance::host(),
@@ -707,7 +703,8 @@ async fn a_process_body_whose_journal_diverges_is_refused_and_stays_non_terminal
             .with_max_attempts(Some(2)),
         )
         .await
-        .expect("register recovery process");
+        .expect("register recovery process")
+        .id;
     let worker_a = worker(crash_sink.clone(), backend.clone());
     let first_report = worker_a
         .drive_pending_processes()
@@ -899,6 +896,7 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
         .with_session_policy(session_policy()),
     )
     .expect("failure worker");
+    let mut process_ids = std::collections::BTreeMap::new();
     for name in ["scalar", "batch"] {
         let input = LashlangProcessInput {
             module_ref: linked.artifact.module_ref().clone(),
@@ -912,10 +910,9 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
             args: serde_json::Map::new(),
         };
         let identity = input.process_identity();
-        registry
+        let process_id = registry
             .register_process(
                 ProcessRegistration::new(
-                    format!("fig3463-failure-{name}"),
                     input.into_process_input().expect("process input"),
                     RecoveryContract::Rerunnable,
                     ProcessProvenance::host(),
@@ -925,17 +922,19 @@ async fn fig3463_process_scalar_and_batch_failures_keep_the_recorded_effect_prov
                 .with_execution_env_ref(Some(env_ref.clone())),
             )
             .await
-            .expect("register failure process");
+            .expect("register failure process")
+            .id;
+        process_ids.insert(name, process_id);
     }
     let _ = worker
         .drive_pending_processes()
         .await
         .expect("drive failed calls");
     for name in ["scalar", "batch"] {
-        let process_id = lash_sansio::ProcessId::from(format!("fig3463-failure-{name}"));
+        let process_id = &process_ids[name];
         let _ = tokio::time::timeout(
             std::time::Duration::from_secs(5),
-            NativeProcessWork::for_registry(Arc::clone(&registry)).await_terminal(&process_id),
+            NativeProcessWork::for_registry(Arc::clone(&registry)).await_terminal(process_id),
         )
         .await
         .expect("failed process settles")

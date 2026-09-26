@@ -37,9 +37,25 @@ fn registry(storage: &PostgresStorage) -> Arc<dyn lash_core::ProcessRegistry> {
     )
 }
 
+/// The crash-recovery process, found by its label: the registrar mints its
+/// id, and the runbook's later invocations run in fresh processes that were
+/// never handed it.
+async fn crash_recovery_process(registry: &dyn lash_core::ProcessRegistry) -> Result<ProcessId> {
+    registry
+        .list_processes(&lash_core::ProcessListFilter {
+            status: lash_core::ProcessStatusFilter::Any,
+            ..lash_core::ProcessListFilter::default()
+        })
+        .await
+        .context("list runbook processes")?
+        .into_iter()
+        .find(|record| record.identity.label.as_deref() == Some(PROCESS_ID))
+        .map(|record| record.id)
+        .context("the crash-recovery process is not registered")
+}
+
 fn registration() -> ProcessRegistration {
     ProcessRegistration::new(
-        PROCESS_ID,
         ProcessInput::External {
             metadata: json!({"runbook": "process-operations"}),
         },
@@ -78,16 +94,12 @@ async fn process_events(
     process_id: &ProcessId,
 ) -> Result<Vec<lash_core::ProcessEvent>> {
     let limit = std::num::NonZeroUsize::new(256).unwrap_or(std::num::NonZeroUsize::MIN);
-    let process_ref = registry
-        .resolve_process_ref(process_id)
-        .await
-        .context("resolve process lifetime")?;
     let mut after_sequence = 0;
     let mut events = Vec::new();
     loop {
         let outcome = registry
-            .event_page_ref(
-                &process_ref,
+            .event_page_after(
+                process_id,
                 after_sequence,
                 limit,
                 lash_core::ProcessEventQueryMode::Full,
@@ -157,10 +169,9 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
             .with_context(|| format!("create retarget session `{session_id}`"))?;
     }
     let registry = registry(storage);
-    registry
+    let retarget_process = registry
         .register_process(
             ProcessRegistration::new(
-                RETARGET_PROCESS_ID,
                 ProcessInput::External {
                     metadata: json!({"runbook": "process-operations"}),
                 },
@@ -188,10 +199,11 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
             .with_wake_session_id(Some(SessionId::from(OLD_SESSION_ID.to_string()))),
         )
         .await
-        .context("register retarget process")?;
+        .context("register retarget process")?
+        .id;
     let old_wake = registry
         .append_event(
-            &ProcessId::from(RETARGET_PROCESS_ID),
+            &retarget_process,
             ProcessEventAppendRequest::new(EVENT_TYPE, json!({"wake_input": "old target"})),
         )
         .await
@@ -199,7 +211,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
         .wake_delivery
         .context("old-target wake outbox row was not created")?;
     registry
-        .retarget_subscription(&ProcessId::from(RETARGET_PROCESS_ID), Some(NEW_SESSION_ID))
+        .retarget_subscription(&retarget_process, Some(NEW_SESSION_ID))
         .await
         .context("retarget process subscription")?;
     let old_delivery = registry
@@ -208,7 +220,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
         .context("list retargeted sender rows")?
         .into_iter()
         .find(|delivery| {
-            delivery.wake.process_id == RETARGET_PROCESS_ID
+            delivery.wake.process_id == retarget_process
                 && delivery.wake.sequence == old_wake.sequence
         })
         .context("old-target sender row is absent")?;
@@ -220,7 +232,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
 
     let new_wake = registry
         .append_event(
-            &ProcessId::from(RETARGET_PROCESS_ID),
+            &retarget_process,
             ProcessEventAppendRequest::new(EVENT_TYPE, json!({"wake_input": "new target"})),
         )
         .await
@@ -255,7 +267,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
         .list_queued_work(&SessionId::from(NEW_SESSION_ID))
         .await
         .context("list new-target receiver rows")?;
-    let audit_present = process_events(registry.as_ref(), &ProcessId::from(RETARGET_PROCESS_ID))
+    let audit_present = process_events(registry.as_ref(), &retarget_process)
         .await?
         .iter()
         .any(|event| event.event_type == "process.subscription_retargeted");
@@ -297,13 +309,14 @@ async fn prepare(storage: &PostgresStorage) -> Result<()> {
         .await
         .context("create crash-recovery wake target")?;
     let registry = registry(storage);
-    registry
+    let process_id = registry
         .register_process(registration())
         .await
-        .context("register crash-recovery process")?;
+        .context("register crash-recovery process")?
+        .id;
     let append = registry
         .append_event(
-            &ProcessId::from(PROCESS_ID),
+            &process_id,
             ProcessEventAppendRequest::new(
                 EVENT_TYPE,
                 json!({"wake_input": "deliver exactly once after worker restart"}),
@@ -330,13 +343,14 @@ async fn prepare(storage: &PostgresStorage) -> Result<()> {
 
 async fn crash_between_enqueue_and_mark(storage: &PostgresStorage) -> Result<()> {
     let registry = registry(storage);
+    let process_id = crash_recovery_process(registry.as_ref()).await?;
     let claimed = registry
         .claim_pending_wake_deliveries(1)
         .await
         .context("claim crash-window wake")?;
     let delivery = claimed
         .into_iter()
-        .find(|delivery| delivery.wake.process_id == PROCESS_ID)
+        .find(|delivery| delivery.wake.process_id == process_id)
         .context("crash-window wake was not claimable")?;
     anyhow::ensure!(
         delivery.state() == WakeDeliveryState::Enqueuing,
@@ -370,6 +384,7 @@ async fn crash_between_enqueue_and_mark(storage: &PostgresStorage) -> Result<()>
 
 async fn recover_after_worker_restart(storage: &PostgresStorage) -> Result<()> {
     let registry = registry(storage);
+    let process_id = crash_recovery_process(registry.as_ref()).await?;
     let factory = Arc::new(storage.session_store_factory_with_shared_process_registry())
         as Arc<dyn lash_core::SessionStoreFactory>;
     let report = tokio::time::timeout(Duration::from_secs(10), async {
@@ -397,7 +412,7 @@ async fn recover_after_worker_restart(storage: &PostgresStorage) -> Result<()> {
         .await
         .context("list recovered sender rows")?
         .into_iter()
-        .find(|delivery| delivery.wake.process_id == PROCESS_ID)
+        .find(|delivery| delivery.wake.process_id == process_id)
         .context("recovered sender row is absent")?;
     let batches = storage
         .session_store(SESSION_ID)
@@ -407,10 +422,7 @@ async fn recover_after_worker_restart(storage: &PostgresStorage) -> Result<()> {
         .into_iter()
         .filter(|batch| {
             batch.source_key.as_deref()
-                == Some(
-                    process_wake_source_key(&ProcessId::from(PROCESS_ID), delivery.wake.sequence)
-                        .as_str(),
-                )
+                == Some(process_wake_source_key(&process_id, delivery.wake.sequence).as_str())
         })
         .collect::<Vec<_>>();
 

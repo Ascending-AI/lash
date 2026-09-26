@@ -36,9 +36,8 @@ fn cell_divergence() -> ParkReason {
     }
 }
 
-fn parkable(id: &str, max_attempts: Option<u32>) -> ProcessRegistration {
+fn parkable(max_attempts: Option<u32>) -> ProcessRegistration {
     ProcessRegistration::new(
-        id,
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
@@ -101,31 +100,40 @@ async fn release(registry: &Arc<dyn ProcessRegistry>, lease: &ProcessLease) {
         .expect("release the attempt's lease");
 }
 
-/// Register `id` and park it once under a first attempt, returning the lease
-/// that attempt holds.
+/// Register a parkable process with `max_attempts`, returning its minted id.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn register(registry: &Arc<dyn ProcessRegistry>, max_attempts: Option<u32>) -> ProcessId {
+    registry
+        .register_process(parkable(max_attempts))
+        .await
+        .expect("register the parkable process")
+        .id
+}
+
+/// Register a process and park it once under a first attempt, returning its
+/// id and the lease that attempt holds.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 async fn parked(
     registry: &Arc<dyn ProcessRegistry>,
-    id: &ProcessId,
     reason: ParkReason,
-) -> (ProcessLease, ProcessRecord) {
-    registry
-        .register_process(parkable(id.as_str(), None))
-        .await
-        .expect("register the parkable process");
-    let (lease, _) = start_attempt(registry, id, 1).await;
+) -> (ProcessId, ProcessLease, ProcessRecord) {
+    let id = register(registry, None).await;
+    let (lease, _) = start_attempt(registry, &id, 1).await;
     let record = registry
         .park_process_with_authority(
-            id,
+            &id,
             reason.into(),
             &ProcessExecutionWriteAuthority::lease(lease.clone()),
         )
         .await
         .expect("park the process");
-    (lease, record)
+    (id, lease, record)
 }
 
 #[expect(
@@ -180,17 +188,10 @@ fn query(n: usize) -> ProcessParkQuery {
 pub async fn parked_processes_list_by_since_with_filters_and_keyset_pages(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let a = ProcessId::from("park-list-a");
-    let b = ProcessId::from("park-list-b");
-    let c = ProcessId::from("park-list-c");
-    let unparked = ProcessId::from("park-list-unparked");
-    let (_, park_a) = parked(&registry, &a, cell_divergence()).await;
-    let (_, park_b) = parked(&registry, &b, divergence("llm_call")).await;
-    let (_, park_c) = parked(&registry, &c, divergence("tool_call")).await;
-    registry
-        .register_process(parkable(unparked.as_str(), None))
-        .await
-        .expect("register an unparked process");
+    let (a, _, park_a) = parked(&registry, cell_divergence()).await;
+    let (b, _, park_b) = parked(&registry, divergence("llm_call")).await;
+    let (c, _, park_c) = parked(&registry, divergence("tool_call")).await;
+    register(&registry, None).await;
 
     let since = |record: &ProcessRecord| {
         record
@@ -286,8 +287,7 @@ pub async fn parked_processes_list_by_since_with_filters_and_keyset_pages(
 pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let id = ProcessId::from("park-re-park");
-    let (lease, first) = parked(&registry, &id, cell_divergence()).await;
+    let (id, lease, first) = parked(&registry, cell_divergence()).await;
     let authority = ProcessExecutionWriteAuthority::lease(lease.clone());
     let opened = first
         .park
@@ -360,8 +360,7 @@ pub async fn a_process_re_park_keeps_its_park_and_counts_attempts(
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn progress_after_a_rerun_clears_the_park_once(registry: Arc<dyn ProcessRegistry>) {
-    let id = ProcessId::from("park-progress");
-    let (lease, first) = parked(&registry, &id, cell_divergence()).await;
+    let (id, lease, first) = parked(&registry, cell_divergence()).await;
     let authority = ProcessExecutionWriteAuthority::lease(lease.clone());
     let opened = first.park.as_deref().cloned().expect("the refusal parks");
     registry
@@ -376,7 +375,7 @@ pub async fn progress_after_a_rerun_clears_the_park_once(registry: Arc<dyn Proce
                 kind: crate::WaitKind::Signal {
                     name: "ready".to_string(),
                     event_type: "signal.ready".to_string(),
-                    key: "park-progress:signal.ready:1".to_string(),
+                    key: format!("{id}:signal.ready:1"),
                     ordinal: 1,
                 },
             },
@@ -434,8 +433,7 @@ pub async fn progress_after_a_rerun_clears_the_park_once(registry: Arc<dyn Proce
 pub async fn a_parked_process_that_ends_closes_its_park_by_how_it_ended(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let failed = ProcessId::from("park-ends-failed");
-    let (lease, record) = parked(&registry, &failed, cell_divergence()).await;
+    let (failed, lease, record) = parked(&registry, cell_divergence()).await;
     let park_id = record.park.as_deref().expect("parked").park_id;
     let completed = registry
         .complete_process_with_lease(
@@ -469,12 +467,11 @@ pub async fn a_parked_process_that_ends_closes_its_park_by_how_it_ended(
         ))
     );
 
-    let cancelled = ProcessId::from("park-ends-cancelled");
-    let (lease, record) = parked(&registry, &cancelled, cell_divergence()).await;
+    let (cancelled, lease, record) = parked(&registry, cell_divergence()).await;
     let park_id = record.park.as_deref().expect("parked").park_id;
     let requested = registry
         .request_process_cancel(
-            &crate::ProcessRef::from_record(&record),
+            &record.id,
             crate::CancelOrigin::OperatorRequested,
             "operator:park".to_string(),
             None,
@@ -519,11 +516,7 @@ pub async fn a_parked_process_that_ends_closes_its_park_by_how_it_ended(
 pub async fn only_a_refusing_park_exempts_a_start_from_the_attempt_budget(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let id = ProcessId::from("park-attempt-budget");
-    registry
-        .register_process(parkable(id.as_str(), Some(1)))
-        .await
-        .expect("register a one-attempt process");
+    let id = register(&registry, Some(1)).await;
     let (lease, outcome) = start_attempt(&registry, &id, 1).await;
     assert!(matches!(outcome, crate::ProcessStartOutcome::Started(_)));
     registry
@@ -574,18 +567,8 @@ pub async fn only_a_refusing_park_exempts_a_start_from_the_attempt_budget(
 pub async fn a_compacted_process_park_feed_cursor_is_refused_typed(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    parked(
-        &registry,
-        &ProcessId::from("park-compact-a"),
-        cell_divergence(),
-    )
-    .await;
-    parked(
-        &registry,
-        &ProcessId::from("park-compact-b"),
-        cell_divergence(),
-    )
-    .await;
+    parked(&registry, cell_divergence()).await;
+    parked(&registry, cell_divergence()).await;
     let feed = registry
         .process_park_feed(ParkFeedCursor::initial(), limit(16))
         .await

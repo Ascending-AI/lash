@@ -1130,7 +1130,8 @@ pub(crate) async fn cancel_work(
     AxumPath(process_id): AxumPath<String>,
     State(state): State<AppState>,
 ) -> Result<Json<ProcessCancelAccepted>, AppError> {
-    let process_id = ProcessId::from(process_id);
+    let process_id = ProcessId::parse(&process_id)
+        .map_err(|_| AppError::not_found(format!("unknown process `{process_id}`")))?;
     let process = state
         .process_observer
         .process(&process_id)
@@ -1187,7 +1188,8 @@ pub(crate) async fn await_work(
     State(state): State<AppState>,
 ) -> Result<Json<WorkAwaitResult>, AppError> {
     const AWAIT_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(120);
-    let process_id = ProcessId::from(process_id);
+    let process_id = ProcessId::parse(&process_id)
+        .map_err(|_| AppError::not_found(format!("unknown process `{process_id}`")))?;
     let outcome = match tokio::time::timeout(
         AWAIT_TIMEOUT,
         state.core.processes().await_output(&process_id),

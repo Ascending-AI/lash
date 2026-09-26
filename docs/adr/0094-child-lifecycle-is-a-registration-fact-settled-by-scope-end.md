@@ -9,6 +9,13 @@ specifies SQL-engine behaviour: the SQL tiers' parent-end ledger write and its
 crash window. Those passages stay as written until the PR that deletes the code
 (FIG-3667, FIG-3668, or FIG-3600 for the session lease) rewrites them.
 
+Amended 2026-09-25 (FIG-3607, PR-1): a process is named by its minted, never
+reused id ([ADR 0107](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md)).
+Where this ADR names a process parent scope as `process_id#incarnation` or a
+`ProcessRef`, read the minted `ProcessId`: the id already names one lifetime,
+so there is no incarnation to carry. The lifetime vocabulary is otherwise
+unchanged until FIG-3607 PR-2.
+
 ## Context
 
 Process provenance and process lifecycle had been conflated in two incompatible

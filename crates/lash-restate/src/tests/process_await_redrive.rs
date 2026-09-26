@@ -96,7 +96,7 @@ pub(super) async fn assert_fig790_turn_observation_publisher_suspends_cleanly(
         "run",
         invocation_id,
         &Fig790TurnObservationPublisherInput {
-            process_id: ProcessId::from(format!("{invocation_id}-process")),
+            process_id: ProcessId::fixture(&format!("{invocation_id}-process")),
             prequeue_event,
         },
     )
@@ -132,7 +132,7 @@ pub(super) async fn fig790_turn_observation_publisher_with_empty_channel_suspend
 
 #[derive(Clone, Debug, Serialize, serde::Deserialize)]
 pub(super) struct Fig790ProcessAwaitRedriveInput {
-    pub(super) process_ref: lash_core::ProcessRef,
+    pub(super) process_id: ProcessId,
     pub(super) cancel_on_suspend_wake: bool,
 }
 
@@ -159,7 +159,7 @@ impl Fig790ProcessAwaitRedrive for Fig790ProcessAwaitRedriveImpl {
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "fig790-process-await"),
                 RuntimeEffectCommand::process(ProcessCommand::Await {
-                    process_ref: input.process_ref,
+                    process_id: input.process_id,
                 }),
             ),
             registry_local_executor(Arc::clone(&self.registry)).with_process_turn_cancellation(
@@ -198,28 +198,28 @@ pub(super) fn fig790_cancelled_process_output(process_id: &ProcessId) -> Process
     )
 }
 
-pub(super) async fn fig790_process_await_endpoint(
-    process_id: &ProcessId,
-) -> (Endpoint, Arc<dyn ProcessRegistry>) {
-    process_await_endpoint(rerunnable_registration(process_id)).await
+/// The FIG-790 endpoint over a fresh registry, and the process it registered
+/// for the workflow to await.
+pub(super) async fn fig790_process_await_endpoint()
+-> (Endpoint, Arc<dyn ProcessRegistry>, ProcessId) {
+    process_await_endpoint(rerunnable_registration()).await
 }
 
 /// The process-await fixture over an externally owned process, which a test
 /// can end by completing it as its owner.
-async fn external_process_await_endpoint(
-    process_id: &ProcessId,
-) -> (Endpoint, Arc<dyn ProcessRegistry>) {
-    process_await_endpoint(external_registration(process_id)).await
+async fn external_process_await_endpoint() -> (Endpoint, Arc<dyn ProcessRegistry>, ProcessId) {
+    process_await_endpoint(external_registration()).await
 }
 
 async fn process_await_endpoint(
     registration: ProcessRegistration,
-) -> (Endpoint, Arc<dyn ProcessRegistry>) {
+) -> (Endpoint, Arc<dyn ProcessRegistry>, ProcessId) {
     let registry = process_registry();
-    registry
+    let process_id = registry
         .register_process(registration)
         .await
-        .expect("register the awaited process");
+        .expect("register the awaited process")
+        .id;
     let endpoint = Endpoint::builder()
         .bind(
             Fig790ProcessAwaitRedriveImpl {
@@ -228,7 +228,7 @@ async fn process_await_endpoint(
             .serve(),
         )
         .build();
-    (endpoint, registry)
+    (endpoint, registry, process_id)
 }
 
 /// A process await's first command is its recorded existence guard
@@ -271,13 +271,9 @@ pub(super) async fn process_await_after_guard(
 
 #[tokio::test]
 pub(super) async fn fig790_revoked_session_unwinds_turn_without_cancelling_process() {
-    let process_id = "fig790-revoked-session";
-    let (endpoint, registry) = fig790_process_await_endpoint(&ProcessId::from(process_id)).await;
+    let (endpoint, registry, process_id) = fig790_process_await_endpoint().await;
     let input = Fig790ProcessAwaitRedriveInput {
-        process_ref: lash_core::ProcessRef::new(
-            process_id,
-            lash_core::ProcessIncarnation::from_registration_sequence(1),
-        ),
+        process_id: process_id.clone(),
         cancel_on_suspend_wake: false,
     };
     let registration = serde_json::to_value(RestateDurableWaitRegistration::Revoked)
@@ -331,7 +327,7 @@ pub(super) async fn fig790_revoked_session_unwinds_turn_without_cancelling_proce
     );
     assert!(
         !registry
-            .get_process(&ProcessId::from(process_id))
+            .get_process(&process_id.clone())
             .await
             .expect("revoked await keeps its process record")
             .expect("revoked await keeps the process present")
@@ -353,7 +349,7 @@ pub(super) async fn fig790_revoked_session_unwinds_turn_without_cancelling_proce
     );
     assert!(
         !registry
-            .get_process(&ProcessId::from(process_id))
+            .get_process(&process_id.clone())
             .await
             .expect("redriven revoked await keeps its process record")
             .expect("redriven revoked await keeps the process present")
@@ -363,13 +359,9 @@ pub(super) async fn fig790_revoked_session_unwinds_turn_without_cancelling_proce
 
 #[tokio::test]
 pub(super) async fn fig790_registered_session_revocation_unwinds_without_cancelling_process() {
-    let process_id = "fig790-registered-then-revoked";
-    let (endpoint, registry) = fig790_process_await_endpoint(&ProcessId::from(process_id)).await;
+    let (endpoint, registry, process_id) = fig790_process_await_endpoint().await;
     let input = Fig790ProcessAwaitRedriveInput {
-        process_ref: lash_core::ProcessRef::new(
-            process_id,
-            lash_core::ProcessIncarnation::from_registration_sequence(1),
-        ),
+        process_id: process_id.clone(),
         cancel_on_suspend_wake: false,
     };
     let guard = process_await_guard(&endpoint, "fig790-registered-then-revoked", &input).await;
@@ -422,7 +414,7 @@ pub(super) async fn fig790_registered_session_revocation_unwinds_without_cancell
     );
     assert!(
         !registry
-            .get_process(&ProcessId::from(process_id))
+            .get_process(&process_id.clone())
             .await
             .expect("registered revocation keeps its process record")
             .expect("registered revocation keeps the process present")
@@ -433,13 +425,9 @@ pub(super) async fn fig790_registered_session_revocation_unwinds_without_cancell
 
 #[tokio::test]
 pub(super) async fn fig790_process_terminal_wins_when_terminal_and_cancellation_are_both_ready() {
-    let process_id = "fig790-terminal-and-cancel-ready";
-    let (endpoint, _registry) = fig790_process_await_endpoint(&ProcessId::from(process_id)).await;
+    let (endpoint, _registry, process_id) = fig790_process_await_endpoint().await;
     let input = Fig790ProcessAwaitRedriveInput {
-        process_ref: lash_core::ProcessRef::new(
-            process_id,
-            lash_core::ProcessIncarnation::from_registration_sequence(1),
-        ),
+        process_id: process_id.clone(),
         cancel_on_suspend_wake: false,
     };
     let guard = process_await_guard(&endpoint, "fig790-terminal-and-cancel-ready", &input).await;
@@ -510,13 +498,9 @@ pub(super) async fn fig790_process_terminal_wins_when_terminal_and_cancellation_
 
 #[tokio::test]
 pub(super) async fn fig790_cancel_during_suspension_of_a_process_turn_composes_with_fig779() {
-    let process_id = "fig790-cancel-during-suspension";
-    let (endpoint, _registry) = fig790_process_await_endpoint(&ProcessId::from(process_id)).await;
+    let (endpoint, _registry, process_id) = fig790_process_await_endpoint().await;
     let input = Fig790ProcessAwaitRedriveInput {
-        process_ref: lash_core::ProcessRef::new(
-            process_id,
-            lash_core::ProcessIncarnation::from_registration_sequence(1),
-        ),
+        process_id: process_id.clone(),
         cancel_on_suspend_wake: false,
     };
     let registered = serde_json::to_value(RestateDurableWaitRegistration::Registered)
@@ -574,7 +558,7 @@ pub(super) async fn fig790_cancel_during_suspension_of_a_process_turn_composes_w
             .is_empty()
     );
 
-    let cancelled = fig790_cancelled_process_output(&ProcessId::from(process_id));
+    let cancelled = fig790_cancelled_process_output(&process_id.clone());
     let replay = encode_call_replay(
         "fig790-cancel-during-suspension",
         &input,
@@ -637,17 +621,14 @@ pub(super) async fn fig790_cancel_during_suspension_of_a_process_turn_composes_w
 #[tokio::test]
 pub(super) async fn a_turn_stop_over_a_process_await_replays_its_recorded_cancel_after_the_process_ended()
  {
-    let process_id = "fig3752-stop-over-process-await";
-    let (endpoint, registry) = external_process_await_endpoint(&ProcessId::from(process_id)).await;
+    let key = "fig3752-stop-over-process-await";
+    let (endpoint, registry, process_id) = external_process_await_endpoint().await;
     let input = Fig790ProcessAwaitRedriveInput {
-        process_ref: lash_core::ProcessRef::new(
-            process_id,
-            lash_core::ProcessIncarnation::from_registration_sequence(1),
-        ),
+        process_id: process_id.clone(),
         cancel_on_suspend_wake: false,
     };
-    let guard = process_await_guard(&endpoint, process_id, &input).await;
-    let initial = process_await_after_guard(&endpoint, process_id, &input, &guard).await;
+    let guard = process_await_guard(&endpoint, key, &input).await;
+    let initial = process_await_after_guard(&endpoint, key, &input, &guard).await;
     let initial_calls = restate_call_frames(&initial).expect("decode the race's calls");
     assert_eq!(
         initial_calls
@@ -657,7 +638,7 @@ pub(super) async fn a_turn_stop_over_a_process_await_replays_its_recorded_cancel
         vec!["await_terminal", "register_awakeable"]
     );
     let raced_await = initial_calls[0].result_completion_id;
-    let cancelled = fig790_cancelled_process_output(&ProcessId::from(process_id));
+    let cancelled = fig790_cancelled_process_output(&process_id.clone());
     let answer = |command: &RecordedCommand| {
         let (_, handler) = command.call.as_ref()?;
         match handler.as_str() {
@@ -681,7 +662,7 @@ pub(super) async fn a_turn_stop_over_a_process_await_replays_its_recorded_cancel
     let output = loop {
         let outputs = journal.iter().map(Bytes::as_ref).collect::<Vec<_>>();
         let mut replay = BytesMut::from(
-            encode_recorded_commands_replay(process_id, &input, &outputs, answer)
+            encode_recorded_commands_replay(key, &input, &outputs, answer)
                 .expect("splice the journal so far")
                 .as_ref(),
         );
@@ -718,7 +699,7 @@ pub(super) async fn a_turn_stop_over_a_process_await_replays_its_recorded_cancel
             // store refuses another cancel request.
             registry
                 .complete_process(
-                    &ProcessId::from(process_id),
+                    &process_id.clone(),
                     cancelled.clone(),
                     lash_core::ProcessCompletionAuthority::external_owner(),
                 )
@@ -759,29 +740,26 @@ pub(super) async fn a_turn_stop_over_a_process_await_replays_its_recorded_cancel
 /// terminal the process settled with.
 #[tokio::test]
 pub(super) async fn a_turn_stop_over_an_ended_process_reads_its_terminal_without_a_cancel() {
-    let process_id = "fig3752-stop-over-ended-process";
-    let (endpoint, registry) = external_process_await_endpoint(&ProcessId::from(process_id)).await;
+    let key = "fig3752-stop-over-ended-process";
+    let (endpoint, registry, process_id) = external_process_await_endpoint().await;
     let input = Fig790ProcessAwaitRedriveInput {
-        process_ref: lash_core::ProcessRef::new(
-            process_id,
-            lash_core::ProcessIncarnation::from_registration_sequence(1),
-        ),
+        process_id: process_id.clone(),
         cancel_on_suspend_wake: false,
     };
-    let guard = process_await_guard(&endpoint, process_id, &input).await;
-    let initial = process_await_after_guard(&endpoint, process_id, &input, &guard).await;
+    let guard = process_await_guard(&endpoint, key, &input).await;
+    let initial = process_await_after_guard(&endpoint, key, &input, &guard).await;
     let initial_calls = restate_call_frames(&initial).expect("decode the race's calls");
     let terminal = process_success(serde_json::json!({ "ended": "before the stop" }));
     registry
         .complete_process(
-            &ProcessId::from(process_id),
+            &process_id.clone(),
             terminal.clone(),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("the process ends before the stop reaches it");
     let replay = encode_call_replay(
-        process_id,
+        key,
         &input,
         &[
             (initial_calls[0].clone(), None),
@@ -1842,7 +1820,7 @@ pub(super) async fn pre_stamp_effect_group_payload_state_refuses_typed_before_an
 pub(super) fn durable_wait_register_and_sweep_derive_the_same_address_for_every_scope() {
     let scopes = [
         durable_turn_scope("fig2005-session", "fig2005-turn"),
-        ExecutionScope::process("fig2005-process"),
+        ExecutionScope::process(ProcessId::fixture("fig2005-process")),
         ExecutionScope::queue_drain("fig2005-session", "fig2005-drain"),
         ExecutionScope::session_delete("fig2005-session"),
         ExecutionScope::runtime_operation("fig2005-operation"),
@@ -2171,22 +2149,18 @@ lash_conformance::effect_host_tests!({
 
 /// FIG-3808: a process await's existence guard is a recorded step, so a
 /// crash-redriven awaiter serves the guard its first execution passed. By
-/// the redrive the awaited process has ended, its row has been pruned, and
-/// its name has been registered again: a live guard would refuse where the
-/// first execution was admitted.
+/// the redrive the awaited process has ended and its row has been pruned: a
+/// live guard would refuse where the first execution was admitted.
 #[tokio::test]
 pub(super) async fn a_redriven_process_await_serves_its_recorded_guard_after_the_child_is_pruned() {
-    let process_id = "fig3808-guard-after-prune";
-    let (endpoint, registry) = external_process_await_endpoint(&ProcessId::from(process_id)).await;
+    let key = "fig3808-guard-after-prune";
+    let (endpoint, registry, process_id) = external_process_await_endpoint().await;
     let input = Fig790ProcessAwaitRedriveInput {
-        process_ref: lash_core::ProcessRef::new(
-            process_id,
-            lash_core::ProcessIncarnation::from_registration_sequence(1),
-        ),
+        process_id: process_id.clone(),
         cancel_on_suspend_wake: false,
     };
-    let guard = process_await_guard(&endpoint, process_id, &input).await;
-    let raced = process_await_after_guard(&endpoint, process_id, &input, &guard).await;
+    let guard = process_await_guard(&endpoint, key, &input).await;
+    let raced = process_await_after_guard(&endpoint, key, &input, &guard).await;
     let calls = restate_call_frames(&raced).expect("decode the await's race");
     assert_eq!(
         calls
@@ -2196,12 +2170,12 @@ pub(super) async fn a_redriven_process_await_serves_its_recorded_guard_after_the
         vec!["await_terminal", "register_awakeable"]
     );
 
-    // The child ends, is pruned, and its name is registered again before
+    // The child ends, is pruned, and another process is registered before
     // the awaiter is redriven.
     let terminal = process_success(serde_json::json!({ "ended": "before the redrive" }));
     let ended = registry
         .complete_process(
-            &ProcessId::from(process_id),
+            &process_id.clone(),
             terminal.clone(),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
@@ -2217,18 +2191,18 @@ pub(super) async fn a_redriven_process_await_serves_its_recorded_guard_after_the
         .expect("the ended child is pruned");
     assert!(
         registry
-            .get_process_ref(&input.process_ref)
+            .get_process(&input.process_id)
             .await
             .is_err_or_none(),
-        "the awaited incarnation is gone"
+        "the awaited process is gone"
     );
     registry
-        .register_process(external_registration(process_id))
+        .register_process(external_registration())
         .await
-        .expect("the name is registered again");
+        .expect("another process is registered");
 
     let replay = encode_call_replay(
-        process_id,
+        key,
         &input,
         &[
             (

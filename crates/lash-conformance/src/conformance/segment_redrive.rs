@@ -195,7 +195,11 @@ struct Scenario {
     kind: EffectKind,
     case: CrashCase,
     process_id: ProcessId,
-    child_id: ProcessId,
+    /// The key the segment starts its child under: the start mints the
+    /// child's id, so the law names the child by its key (ADR 0107).
+    child_start_key: crate::StartKey,
+    /// The id the child's start minted, once the law has seen it.
+    child_id: Arc<Mutex<Option<ProcessId>>>,
     registry: Arc<dyn crate::ProcessRegistry>,
     probe: Arc<Probe>,
 }
@@ -267,7 +271,23 @@ impl Scenario {
     }
 
     fn child_registration(&self) -> ProcessRegistration {
-        segment_registration(&self.child_id)
+        segment_registration().with_start_key(Some(self.child_start_key.clone()))
+    }
+
+    /// Records the id the child's start minted, and refuses a second one.
+    fn saw_child(&self, process_id: &ProcessId) {
+        let mut child_id = self.child_id.lock_recover();
+        match child_id.as_ref() {
+            Some(seen) => assert_eq!(
+                seen, process_id,
+                "every execution names the one child the start minted"
+            ),
+            None => *child_id = Some(process_id.clone()),
+        }
+    }
+
+    fn child_id(&self) -> Option<ProcessId> {
+        self.child_id.lock_recover().clone()
     }
 
     fn start_envelope(&self) -> RuntimeEffectEnvelope {
@@ -357,11 +377,15 @@ impl Scenario {
     /// The child's segment body: it counts its run under the child's scope
     /// and settles the child.
     fn child_body(&self) -> ConformanceTurnAttempt {
-        let probe = Arc::clone(&self.probe);
+        let scenario = self.clone();
         Arc::new(move |scoped: ScopedEffectController<'_>| {
-            let probe = Arc::clone(&probe);
+            let scenario = scenario.clone();
             Box::pin(async move {
+                let probe = Arc::clone(&scenario.probe);
                 let scope = scoped.execution_scope().clone();
+                if let ExecutionScope::Process { process_id } = &scope {
+                    scenario.saw_child(process_id);
+                }
                 probe.ran(
                     CHILD,
                     Run {
@@ -410,9 +434,8 @@ fn trigger_run(outcome: &RuntimeEffectOutcome) -> usize {
 
 /// A process the law runs segments of: re-runnable by its once-granted
 /// contract, which the final recovery rules no longer honour.
-fn segment_registration(process_id: &ProcessId) -> ProcessRegistration {
+fn segment_registration() -> ProcessRegistration {
     ProcessRegistration::new(
-        process_id.clone(),
         crate::ProcessInput::External {
             metadata: serde_json::json!({ "law": "segment-redrive" }),
         },
@@ -440,19 +463,27 @@ async fn die(crash: &ConformanceCrash) -> ConformanceTurnEnd {
 async fn child_settled(scenario: &Scenario) {
     tokio::time::timeout(CHILD_SETTLE_TIMEOUT, async {
         loop {
-            let record = scenario
-                .registry
-                .get_process(&scenario.child_id)
-                .await
-                .unwrap_or_else(|error| panic!("read the child: {error}"));
-            if record.is_some_and(|record| record.outcome.is_some()) {
-                return;
+            // The child's id is known once its start answered or its body ran.
+            if let Some(child_id) = scenario.child_id() {
+                let record = scenario
+                    .registry
+                    .get_process(&child_id)
+                    .await
+                    .unwrap_or_else(|error| panic!("read the child: {error}"));
+                if record.is_some_and(|record| record.outcome.is_some()) {
+                    return;
+                }
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
     })
     .await
-    .unwrap_or_else(|_| panic!("the child `{}` settled", scenario.child_id));
+    .unwrap_or_else(|_| {
+        panic!(
+            "the child started under `{}` settled",
+            scenario.child_start_key
+        )
+    });
 }
 
 /// One execution of the segment body. The crashing execution dies at the
@@ -553,15 +584,20 @@ async fn segment_body(
         }
         EffectKind::ChildStart => {
             // The start registers the child and schedules it on the engine.
-            // Unrecorded: the storage write that completes the start fails
-            // once, after the child was registered and scheduled, so the
-            // start answers no result.
+            // Unrecorded: the execution dies at the storage write that
+            // completes the start, after the child was registered and
+            // scheduled and the child settled, so the start answers no
+            // result. (A transient failure of that write is retried inside a
+            // journaled start, so the law kills the execution there instead
+            // of failing the write.)
             let registry =
                 crate::testing::ProcessRegistryFaults::new(Arc::clone(&scenario.registry));
-            if unrecorded_crash.is_some() {
-                registry.fail_next_external_ref_write(crate::PluginError::Session(
-                    "segment-redrive law: the start's completing write fails once".to_string(),
-                ));
+            if let Some(crash) = unrecorded_crash {
+                let settled = scenario.clone();
+                registry.hold_next_external_ref_write(async move {
+                    child_settled(&settled).await;
+                    crash.fire();
+                });
             }
             let registry: Arc<dyn crate::ProcessRegistry> = Arc::new(registry);
             let outcome = scoped
@@ -578,9 +614,11 @@ async fn segment_body(
                     result: crate::ProcessEffectOutcome::Start { record },
                 }) => {
                     assert_eq!(
-                        record.id, scenario.child_id,
+                        record.start_key.as_ref(),
+                        Some(&scenario.child_start_key),
                         "the start answers the child it was asked for"
                     );
+                    scenario.saw_child(&record.id);
                     Ok(1)
                 }
                 _ => Err(effect_error(outcome)),
@@ -668,8 +706,8 @@ fn assert_crash_precondition(scenario: &Scenario) -> BTreeMap<&'static str, usiz
 /// add, given what the crash left.
 fn expected_after_replay(scenario: &Scenario, effect: &'static str, at_crash: usize) -> usize {
     match (scenario.kind, scenario.case, effect) {
-        // The start is keyed by the child's process id: a re-drive of either
-        // case starts no second run of the child.
+        // The start is keyed by its start key: a re-drive of either case
+        // starts no second run of the child.
         (EffectKind::ChildStart, _, _) => at_crash,
         // The first call of the batch was recorded in both cases.
         (EffectKind::ToolBatch, _, BATCH_FIRST) => at_crash,
@@ -697,30 +735,35 @@ async fn run_scenario(
         case.label(),
         recovery_label(recovery)
     );
-    let process_id = ProcessId::from(format!("{prefix}-{name}"));
     let registry = stores.process_registry();
+    let registration = segment_registration();
+    let process_id = registry
+        .register_process(registration.clone())
+        .await
+        .unwrap_or_else(|error| panic!("{name}: register the segment's process: {error}"))
+        .id;
     let scenario = Scenario {
         kind,
         case,
-        child_id: ProcessId::from(format!("{process_id}-child")),
+        child_start_key: crate::StartKey::for_host(
+            crate::StartKeyOwner::HOST,
+            format!("{prefix}-{name}-child"),
+        ),
+        child_id: Arc::new(Mutex::new(None)),
         process_id,
         registry: Arc::clone(&registry),
         probe: Arc::new(Probe::default()),
     };
-    let registration = segment_registration(&scenario.process_id);
-    registry
-        .register_process(registration.clone())
-        .await
-        .unwrap_or_else(|error| panic!("{name}: register the segment's process: {error}"));
     if kind == EffectKind::ChildStart {
         runner
-            .serve_segments(&scenario.child_id, scenario.child_body())
+            .serve_segments(&scenario.child_start_key, scenario.child_body())
             .await;
     }
 
     let crash = ConformanceCrash::new();
     runner
         .run_segment_until_crash(
+            &scenario.process_id,
             registration,
             body(&scenario, Phase::Crashing, Some(crash.clone())),
             crash.clone(),
@@ -765,10 +808,12 @@ async fn run_scenario(
                     "{name}: every run of `{effect}` has one identity: {runs:?}"
                 );
                 if *effect == CHILD {
+                    let child_id = scenario
+                        .child_id()
+                        .unwrap_or_else(|| panic!("{name}: the child's id was seen"));
                     assert!(
                         runs.iter()
-                            .all(|run| run.call_id
-                                == ExecutionScope::process(&scenario.child_id).id()),
+                            .all(|run| run.call_id == ExecutionScope::process(&child_id).id()),
                         "{name}: the child ran as the process the start named: {runs:?}"
                     );
                     assert_eq!(

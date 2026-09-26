@@ -190,7 +190,6 @@ async fn a_start_inside_a_process_execution_inherits_the_recorded_env_ref() {
     let env_store = Arc::new(crate::testing::UnavailableProcessExecutionEnvStore);
     let inherited = crate::ProcessExecutionEnvRef::new("process-env:inherited");
     let parent = crate::ProcessRegistration::new(
-        "parent-process",
         crate::ProcessInput::Engine {
             kind: "test-engine".to_string(),
             payload: serde_json::json!({"program": "parent"}),
@@ -200,11 +199,13 @@ async fn a_start_inside_a_process_execution_inherits_the_recorded_env_ref() {
         crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
     )
     .with_execution_env_ref(Some(inherited.clone()));
-    let context =
-        test_execution_context_with_env_store(env_store).with_process_execution(&parent, None);
+    let context = test_execution_context_with_env_store(env_store).with_process_execution(
+        crate::ProcessId::fixture("parent"),
+        &parent,
+        None,
+    );
 
     let child = crate::ProcessRegistration::new(
-        "child-process",
         crate::ProcessInput::Engine {
             kind: "test-engine".to_string(),
             payload: serde_json::json!({"program": "child"}),
@@ -240,7 +241,7 @@ fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
 
     let mut host_process = test_execution_context();
     host_process.process_execution = Some(RuntimeProcessExecution {
-        process_id: ProcessId::from("host-process"),
+        process_id: crate::process_id_for_test("host-process"),
         originator: crate::ProcessOriginator::host_scoped("automation"),
         env_ref: None,
         wake_session_id: None,
@@ -254,7 +255,7 @@ fn parentless_effect_envelopes_use_process_originator_not_ambient_session() {
 
     let mut session_process = test_execution_context();
     session_process.process_execution = Some(RuntimeProcessExecution {
-        process_id: ProcessId::from("session-process"),
+        process_id: crate::process_id_for_test("session-process"),
         originator: crate::ProcessOriginator::session(crate::SessionScope::new("origin-session")),
         env_ref: None,
         wake_session_id: None,
@@ -294,7 +295,7 @@ async fn execution_context_without_process_execution_returns_typed_error_from_ap
 
     let signal_err = ctx
         .signal_process_by_id(
-            &ProcessId::from("proc-1"),
+            &crate::process_id_for_test("proc-1"),
             "sig-1",
             "sig-id-1".to_string(),
             serde_json::json!({}),
@@ -352,7 +353,7 @@ async fn a_child_started_from_a_turn_parents_on_the_turn() {
 
 #[test]
 fn native_authority_retains_attempt_correlation_without_restate_identity() {
-    let process_id = crate::ProcessId::from("native-process");
+    let process_id = crate::process_id_for_test("native-process");
     let authority = crate::ProcessExecutionWriteAuthority::invocation(
         process_id.clone(),
         "foreign-restate-invocation",

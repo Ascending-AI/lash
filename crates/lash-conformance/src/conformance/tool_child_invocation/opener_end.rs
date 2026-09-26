@@ -389,14 +389,19 @@ pub async fn a_retried_openers_end_finishes_the_closing_group_its_first_end_left
     }
     drop(probe);
 
-    // The durable half: the first end dies with its worker.
+    // The durable half: the first end dies with its worker. The crashed
+    // world and its successor share one durable store set.
+    let stores = (fixture.make_processes)().await;
+    let intent_target =
+        register_intent_target(stores.process_registry().as_ref(), &session_id).await;
     let group_key = Arc::new(std::sync::Mutex::new(None::<String>));
     crashed_world(fixture, {
         let session_id = session_id.clone();
         let spender = spender.clone();
         let group_key = Arc::clone(&group_key);
         let first_race = race();
-        let make_processes = Arc::clone(&fixture.make_processes);
+        let stores = Arc::clone(&stores);
+        let intent_target = intent_target.clone();
         move |world| {
             Box::pin(async move {
                 let observation = Arc::new(LawObservation::default());
@@ -404,10 +409,10 @@ pub async fn a_retried_openers_end_finishes_the_closing_group_its_first_end_left
                     definitions: leaf_definitions(),
                     observation: Arc::clone(&observation),
                     session_id: session_id.clone(),
-                    intent_target: crate::ProcessId::from(format!("{session_id}-intent-target")),
+                    intent_target: intent_target.clone(),
                     start_metadata: serde_json::Value::Null,
                 });
-                let crash_processes = make_processes().await;
+                let crash_processes = Arc::clone(&stores);
                 let env_store = crash_processes.process_env_store();
                 let _env_ref =
                     crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
@@ -460,7 +465,13 @@ pub async fn a_retried_openers_end_finishes_the_closing_group_its_first_end_left
         lease_ttl_ms: LIVE_LEASE_MS,
     })
     .await;
-    let scenario = scenario(fixture, &session_id, serde_json::Value::Null).await;
+    let scenario = scenario_on(
+        stores,
+        &session_id,
+        serde_json::Value::Null,
+        Some(intent_target),
+    )
+    .await;
     install_child_host(&successor.host, &scenario.process_env_store);
     until_claims_lapse(&successor, &group_key).await;
     let closing = successor

@@ -1,13 +1,11 @@
 //! The one process cursor (FIG-3571 §E): a single token that pages a process's
 //! durable event history and resumes its live observation.
 //!
-//! `lashpc2:<epoch>:<process-reference>:<position>:<sequence>`
+//! `lashpc3:<epoch>:<process-reference>:<position>:<sequence>`
 //!
 //! - `epoch` names the live publisher route the cursor was minted under.
-//! - `process-reference` is ONE opaque component naming the exact process
-//!   lifetime. Today it encodes the process id and its incarnation; FIG-3607
-//!   swaps this single component to the minted process id. Hosts never read
-//!   it.
+//! - `process-reference` is ONE opaque component naming the process: its
+//!   minted, never-reused process id (FIG-3607). Hosts never read it.
 //! - `position` is the live publisher position the holder has seen.
 //! - `sequence` is the durable event high-water mark the holder has seen.
 //!
@@ -23,90 +21,50 @@ use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use crate::ProcessId;
 
 /// The version stamp every current process cursor starts with.
-pub const PROCESS_CURSOR_VERSION: &str = "lashpc2";
+pub const PROCESS_CURSOR_VERSION: &str = "lashpc3";
 
 /// Cursor version stamps this build recognises only to refuse them.
-const RETIRED_PROCESS_CURSOR_VERSIONS: &[&str] = &["lashpc1"];
+///
+/// `lashpc2` named a process by its reusable name and incarnation; its
+/// component cannot name a minted process, so it is refused, never read.
+const RETIRED_PROCESS_CURSOR_VERSIONS: &[&str] = &["lashpc1", "lashpc2"];
 
 /// The epoch a cursor carries when no live publisher route existed for its
 /// process when it was minted. It never equals a publisher epoch, so a
 /// subscription from such a cursor always takes a snapshot.
 pub const PROCESS_CURSOR_UNROUTED_EPOCH: &str = "unrouted";
 
-/// The opaque process-lifetime component of a [`ProcessCursor`].
+/// The opaque process component of a [`ProcessCursor`].
+///
+/// It is the minted process id: an id is never reused, so the id alone names
+/// the one process the cursor was minted against, and a cursor can never be
+/// replayed against a successor.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub struct ProcessCursorReference(String);
+pub struct ProcessCursorReference(ProcessId);
 
 impl ProcessCursorReference {
-    /// The reference for one process lifetime.
-    ///
-    /// This is the single place the component's contents are decided; FIG-3607
-    /// replaces its inputs with the minted process id.
-    pub fn for_lifetime(process_id: &ProcessId, incarnation: u64) -> Self {
-        let mut encoded = String::with_capacity(4 + process_id.as_str().len() * 2);
-        encoded.push('r');
-        encoded.push_str(&incarnation.to_string());
-        encoded.push('.');
-        const HEX: &[u8; 16] = b"0123456789abcdef";
-        for byte in process_id.as_str().bytes() {
-            encoded.push(HEX[usize::from(byte >> 4)] as char);
-            encoded.push(HEX[usize::from(byte & 0x0f)] as char);
-        }
-        Self(encoded)
+    /// The reference for one process. This is the single place the
+    /// component's contents are decided.
+    pub fn for_process(process_id: &ProcessId) -> Self {
+        Self(process_id.clone())
     }
 
-    /// Whether this reference names exactly this process lifetime.
-    pub fn names(&self, process_id: &ProcessId, incarnation: u64) -> bool {
-        *self == Self::for_lifetime(process_id, incarnation)
+    /// Whether this reference names exactly this process.
+    pub fn names(&self, process_id: &ProcessId) -> bool {
+        self.0 == *process_id
     }
 
-    /// Whether this reference names some lifetime of `process_id`.
-    pub fn names_process(&self, process_id: &ProcessId) -> bool {
-        self.decode()
-            .is_some_and(|(named, _)| named == process_id.as_str())
-    }
-
-    /// The lifetime this reference names, as the process id and incarnation
-    /// sequence a registry read takes. FIG-3607 replaces this with the minted
-    /// process id.
-    pub fn decode_lifetime(&self) -> Option<(ProcessId, u64)> {
-        self.decode()
-            .map(|(process_id, incarnation)| (ProcessId::from(process_id), incarnation))
-    }
-
-    fn decode(&self) -> Option<(String, u64)> {
-        let rest = self.0.strip_prefix('r')?;
-        let (incarnation, hex) = rest.split_once('.')?;
-        let incarnation = incarnation.parse().ok()?;
-        if hex.is_empty() || hex.len() % 2 != 0 {
-            return None;
-        }
-        let bytes = hex
-            .as_bytes()
-            .chunks(2)
-            .map(|pair| {
-                let digit = |byte: u8| match byte {
-                    b'0'..=b'9' => Some(byte - b'0'),
-                    b'a'..=b'f' => Some(byte - b'a' + 10),
-                    _ => None,
-                };
-                Some((digit(pair[0])? << 4) | digit(pair[1])?)
-            })
-            .collect::<Option<Vec<u8>>>()?;
-        Some((String::from_utf8(bytes).ok()?, incarnation))
+    /// The process this reference names.
+    pub fn process_id(&self) -> &ProcessId {
+        &self.0
     }
 
     fn parse(component: &str) -> Option<Self> {
-        let reference = Self(component.to_string());
-        let (process_id, incarnation) = reference.decode()?;
-        (incarnation > 0
-            && !process_id.is_empty()
-            && Self::for_lifetime(&ProcessId::from(process_id), incarnation) == reference)
-            .then_some(reference)
+        ProcessId::parse(component).ok().map(Self)
     }
 
     pub fn as_str(&self) -> &str {
-        &self.0
+        self.0.as_str()
     }
 }
 
@@ -267,12 +225,12 @@ impl schemars::JsonSchema for ProcessCursor {
         schemars::schema::SchemaObject {
             instance_type: Some(schemars::schema::InstanceType::String.into()),
             string: Some(Box::new(schemars::schema::StringValidation {
-                pattern: Some("^lashpc2:[^:]+:r[0-9]+\\.[0-9a-f]+:[0-9]+:[0-9]+$".to_string()),
+                pattern: Some("^lashpc3:[^:]+:p_[0-9a-f]{32}:[0-9]+:[0-9]+$".to_string()),
                 ..Default::default()
             })),
             metadata: Some(Box::new(schemars::schema::Metadata {
                 description: Some(
-                    "Opaque process cursor: `lashpc2:<epoch>:<process-reference>:<position>:<sequence>`."
+                    "Opaque process cursor: `lashpc3:<epoch>:<process-reference>:<position>:<sequence>`."
                         .to_string(),
                 ),
                 ..Default::default()
@@ -287,32 +245,26 @@ impl schemars::JsonSchema for ProcessCursor {
 mod tests {
     use super::*;
 
+    fn process(n: u128) -> ProcessId {
+        ProcessId::from_minted(0x0000_0000_0000_7000_8000_0000_0000_0000 | n)
+    }
+
     fn reference() -> ProcessCursorReference {
-        ProcessCursorReference::for_lifetime(&ProcessId::from("process:one:two"), 3)
+        ProcessCursorReference::for_process(&process(3))
     }
 
     #[test]
     fn a_cursor_round_trips_with_one_opaque_reference_component() {
         let cursor = ProcessCursor::new("epoch-a", reference(), 7, 11).expect("cursor");
         let wire = cursor.to_string();
-        assert!(wire.starts_with("lashpc2:epoch-a:r3."));
-        assert_eq!(wire.split(':').count(), 5, "{wire}");
+        assert_eq!(
+            wire,
+            "lashpc3:epoch-a:p_00000000000070008000000000000003:7:11"
+        );
         assert_eq!(ProcessCursor::parse(&wire), Ok(cursor.clone()));
-        assert!(
-            cursor
-                .reference()
-                .names(&ProcessId::from("process:one:two"), 3)
-        );
-        assert!(
-            !cursor
-                .reference()
-                .names(&ProcessId::from("process:one:two"), 4)
-        );
-        assert!(
-            cursor
-                .reference()
-                .names_process(&ProcessId::from("process:one:two"))
-        );
+        assert!(cursor.reference().names(&process(3)));
+        assert!(!cursor.reference().names(&process(4)));
+        assert_eq!(cursor.reference().process_id(), &process(3));
         let json = serde_json::to_string(&cursor).expect("serialize");
         assert_eq!(
             serde_json::from_str::<ProcessCursor>(&json).expect("decode"),
@@ -322,18 +274,24 @@ mod tests {
 
     #[test]
     fn a_retired_cursor_is_refused_naming_its_version() {
-        assert_eq!(
-            ProcessCursor::parse("lashpc1:epoch:1:1:process:wire"),
-            Err(ProcessCursorError::RetiredVersion {
-                found: "lashpc1".to_string()
-            })
-        );
-        assert!(
-            serde_json::from_str::<ProcessCursor>("\"lashpc1:epoch:1:1:process:wire\"")
-                .expect_err("retired")
-                .to_string()
-                .contains("lashpc1")
-        );
+        for (retired, wire) in [
+            ("lashpc1", "lashpc1:epoch:1:1:process:wire"),
+            // A `lashpc2` cursor named a reusable name and its incarnation.
+            ("lashpc2", "lashpc2:epoch:r3.702d37:7:11"),
+        ] {
+            assert_eq!(
+                ProcessCursor::parse(wire),
+                Err(ProcessCursorError::RetiredVersion {
+                    found: retired.to_string()
+                })
+            );
+            assert!(
+                serde_json::from_str::<ProcessCursor>(&format!("\"{wire}\""))
+                    .expect_err("retired")
+                    .to_string()
+                    .contains(retired)
+            );
+        }
     }
 
     #[test]
@@ -344,16 +302,16 @@ mod tests {
         for bad in [
             String::new(),
             "invalid".to_string(),
-            "lashpc3:e:r1.61:1:2".to_string(),
+            "lashpc4:e:p_00000000000070008000000000000003:1:2".to_string(),
             good.replace(":1:2", ":1"),
             format!("{good}:9"),
             good.replace(":1:2", ":-1:2"),
             good.replace(":1:2", ":+1:2"),
-            "lashpc2::r1.61:1:2".to_string(),
-            "lashpc2:e:r0.61:1:2".to_string(),
-            "lashpc2:e:r1.6:1:2".to_string(),
-            "lashpc2:e:r1.6A:1:2".to_string(),
-            "lashpc2:e:process:1:2".to_string(),
+            "lashpc3::p_00000000000070008000000000000003:1:2".to_string(),
+            "lashpc3:e:r1.61:1:2".to_string(),
+            "lashpc3:e:p-7:1:2".to_string(),
+            "lashpc3:e:p_0000000000000000000000000000003:1:2".to_string(),
+            "lashpc3:e:process:1:2".to_string(),
         ] {
             assert_eq!(
                 ProcessCursor::parse(&bad),

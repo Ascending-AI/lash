@@ -15,6 +15,7 @@
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the setup helpers around them in this target are test code too"
 )]
 
+use lash_core_execution::ProcessIdMint;
 use lash_core_execution::store::SessionCheckpoint;
 use lash_core_execution::{
     BlobRef, CheckpointComponentDescriptor, DurablePayload, DurableScan, DurableSurface,
@@ -152,28 +153,28 @@ async fn a_parked_segment_is_enumerated_with_its_identity_and_terminal_ones_are_
     let scratch = ScratchSchema::provision(&database_url).await;
     seed_process(
         &scratch,
-        &ProcessId::from("proc-live"),
+        &ProcessId::fixture("proc-live"),
         "waiting",
         Some("session-1"),
     )
     .await;
     seed_process(
         &scratch,
-        &ProcessId::from("proc-done"),
+        &ProcessId::fixture("proc-done"),
         "completed",
         Some("session-2"),
     )
     .await;
     seed_segment(
         &scratch,
-        &ProcessId::from("proc-live"),
+        &ProcessId::fixture("proc-live"),
         0,
         r#"{"segment":"live"}"#,
     )
     .await;
     seed_segment(
         &scratch,
-        &ProcessId::from("proc-done"),
+        &ProcessId::fixture("proc-done"),
         0,
         r#"{"segment":"residue"}"#,
     )
@@ -193,12 +194,13 @@ async fn a_parked_segment_is_enumerated_with_its_identity_and_terminal_ones_are_
         page.items
     );
     let item = &page.items[0];
-    assert_eq!(item.process_id.as_deref(), Some("proc-live"));
+    let live = ProcessId::fixture("proc-live");
+    assert_eq!(item.process_id.as_deref(), Some(live.as_str()));
     assert_eq!(item.session_id.as_deref(), Some("session-1"));
     assert_eq!(item.status.as_deref(), Some("waiting"));
     assert_eq!(
         item.owner_record.as_deref(),
-        Some(r#"{"process":"proc-live"}"#),
+        Some(format!(r#"{{"process":"{live}"}}"#).as_str()),
         "the registry record travels with the item"
     );
     assert_eq!(
@@ -222,16 +224,11 @@ async fn a_live_process_is_walked_with_its_record_and_terminal_ones_are_not() {
         return;
     };
     let scratch = ScratchSchema::provision(&database_url).await;
+    let live = ProcessId::fixture("proc-live");
+    seed_process(&scratch, &live, "running", Some("session-1")).await;
     seed_process(
         &scratch,
-        &ProcessId::from("proc-live"),
-        "running",
-        Some("session-1"),
-    )
-    .await;
-    seed_process(
-        &scratch,
-        &ProcessId::from("proc-done"),
+        &ProcessId::fixture("proc-done"),
         "completed",
         Some("session-2"),
     )
@@ -247,13 +244,13 @@ async fn a_live_process_is_walked_with_its_record_and_terminal_ones_are_not() {
     assert_eq!(page.items.len(), 1, "{:?}", page.items);
     let item = &page.items[0];
     assert_eq!(item.surface, DurableSurface::StartedProcess);
-    assert_eq!(item.cursor, "proc-live");
-    assert_eq!(item.process_id.as_deref(), Some("proc-live"));
+    assert_eq!(item.cursor, live.as_str());
+    assert_eq!(item.process_id.as_ref(), Some(&live));
     assert_eq!(item.session_id.as_deref(), Some("session-1"));
     assert_eq!(item.status.as_deref(), Some("running"));
     assert_eq!(
         item.payload,
-        DurablePayload::Json(r#"{"process":"proc-live"}"#.to_string())
+        DurablePayload::Json(format!(r#"{{"process":"{live}"}}"#))
     );
     assert!(page.next.is_none());
 
@@ -271,7 +268,7 @@ async fn only_undelivered_wakes_are_enumerated() {
     let scratch = ScratchSchema::provision(&database_url).await;
     seed_process(
         &scratch,
-        &ProcessId::from("proc-1"),
+        &ProcessId::fixture("proc-1"),
         "running",
         Some("session-1"),
     )
@@ -279,21 +276,21 @@ async fn only_undelivered_wakes_are_enumerated() {
     seed_wake(
         &scratch,
         "delivery-a",
-        &ProcessId::from("proc-1"),
+        &ProcessId::fixture("proc-1"),
         "pending",
     )
     .await;
     seed_wake(
         &scratch,
         "delivery-b",
-        &ProcessId::from("proc-1"),
+        &ProcessId::fixture("proc-1"),
         "enqueuing",
     )
     .await;
     seed_wake(
         &scratch,
         "delivery-c",
-        &ProcessId::from("proc-1"),
+        &ProcessId::fixture("proc-1"),
         "enqueued",
     )
     .await;
@@ -323,15 +320,39 @@ async fn paging_a_surface_one_item_at_a_time_is_exact() {
     let scratch = ScratchSchema::provision(&database_url).await;
     seed_process(
         &scratch,
-        &ProcessId::from("proc-a"),
+        &ProcessIdMint::sequential_id_for_testing(1),
         "waiting",
         Some("session-a"),
     )
     .await;
-    seed_process(&scratch, &ProcessId::from("proc-b"), "running", None).await;
-    seed_segment(&scratch, &ProcessId::from("proc-a"), 0, r#"{"n":0}"#).await;
-    seed_segment(&scratch, &ProcessId::from("proc-a"), 1, r#"{"n":1}"#).await;
-    seed_segment(&scratch, &ProcessId::from("proc-b"), 0, r#"{"n":2}"#).await;
+    seed_process(
+        &scratch,
+        &ProcessIdMint::sequential_id_for_testing(2),
+        "running",
+        None,
+    )
+    .await;
+    seed_segment(
+        &scratch,
+        &ProcessIdMint::sequential_id_for_testing(1),
+        0,
+        r#"{"n":0}"#,
+    )
+    .await;
+    seed_segment(
+        &scratch,
+        &ProcessIdMint::sequential_id_for_testing(1),
+        1,
+        r#"{"n":1}"#,
+    )
+    .await;
+    seed_segment(
+        &scratch,
+        &ProcessIdMint::sequential_id_for_testing(2),
+        0,
+        r#"{"n":2}"#,
+    )
+    .await;
 
     let preflight = PostgresStorePreflight::from_pool(scratch.pool.clone());
     let mut walked: Vec<String> = Vec::new();
@@ -530,12 +551,12 @@ async fn seed_process(
     scratch
         .apply(&format!(
             "INSERT INTO lash_processes (
-                 process_id, incarnation, registration_fingerprint, originator_id, wake_session_id,
+                 process_id, start_key, originator_id, wake_session_id,
                  identity_kind, identity_label, created_at_ms, updated_at_ms,
                  last_event_sequence, change_seq, status, parent_scope_kind, on_parent_end,
                  record_json
              ) VALUES (
-                 '{process_id}', 1, 'fingerprint', 'originator', {wake},
+                 '{process_id}', NULL, 'originator', {wake},
                  'program', NULL, 0, 0, 0, 1, '{status}', 'host', 'abandon',
                  '{{\"process\":\"{process_id}\"}}'
              )",
@@ -567,10 +588,10 @@ async fn seed_wake(
     scratch
         .apply(&format!(
             "INSERT INTO lash_process_wake_deliveries (
-                 delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
+                 delivery_id, process_id, target_session_id, sequence, state,
                  next_attempt_at_ms, expires_at_ms, delivery_json
              ) VALUES (
-                 '{delivery_id}', '{process_id}', 1, 'session-target', 1, '{state}',
+                 '{delivery_id}', '{process_id}', 'session-target', 1, '{state}',
                  0, 0, '{{\"delivery\":\"{delivery_id}\"}}'
              )"
         ))

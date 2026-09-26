@@ -857,7 +857,7 @@ fn message_origins_written_before_turn_input_provenance_still_deserialize() {
         {
             "id":"m2","role":"Event",
             "parts":[{"id":"m2.p0","kind":"Text","content":"woke"}],
-            "origin":{"kind":"process","process_id":"p1","event_type":"finished","sequence":3}
+            "origin":{"kind":"process","process_id":"p_00000000000070008000000000000001","event_type":"finished","sequence":3}
         }
     ]"#;
     let msgs: Vec<Message> = serde_json::from_str(legacy).expect("legacy snapshot");
@@ -872,7 +872,7 @@ fn message_origins_written_before_turn_input_provenance_still_deserialize() {
     assert_eq!(
         msgs[2].origin,
         Some(MessageOrigin::Process {
-            process_id: ProcessId::from("p1".to_string()),
+            process_id: ProcessId::from_minted(0x0000_0000_0000_7000_8000_0000_0000_0000 | 1),
             event_type: "finished".to_string(),
             sequence: 3,
             wake_id: None,

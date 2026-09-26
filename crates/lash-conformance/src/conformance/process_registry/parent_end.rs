@@ -11,11 +11,9 @@ use pretty_assertions::assert_eq;
 pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let process_id = ProcessId::from("process-parent-end-plan");
     let originator = SessionScope::new("parent-end-retention-session");
     let parent = registry
         .register_process(ProcessRegistration::new(
-            process_id.clone(),
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -28,9 +26,9 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
         ))
         .await
         .expect("register parent-end-plan process");
-    let parent_scope = lash_core::ParentScope::process(lash_core::ProcessRef::from_record(&parent));
+    let process_id = parent.id.clone();
+    let parent_scope = lash_core::ParentScope::process(parent.id.clone());
     let child = ProcessRegistration::new(
-        ProcessId::from("process-parent-end-child"),
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
@@ -144,7 +142,6 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
 
     // A `Cancel` child registering after the ledger row exists is fenced.
     let late = ProcessRegistration::new(
-        ProcessId::from("process-parent-end-late-child"),
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
@@ -165,7 +162,7 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
 
     registry
         .request_process_cancel(
-            &crate::ProcessRef::from_record(&child),
+            &child.id.clone(),
             crate::CancelOrigin::ParentEnded,
             "conformance".to_string(),
             None,
@@ -241,11 +238,9 @@ pub(super) async fn terminal_completion_atomically_retains_parent_end_plan(
 pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let process_id = ProcessId::from("process-parent-end-reclaim");
     let originator = SessionScope::new("parent-end-reclaim-session");
     let parent = registry
         .register_process(ProcessRegistration::new(
-            process_id.clone(),
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -258,11 +253,9 @@ pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
         ))
         .await
         .expect("register parent-end-reclaim process");
-    let parent_scope = lash_core::ParentScope::process(lash_core::ProcessRef::from_record(&parent));
-    let child_id = ProcessId::from("process-parent-end-reclaim-child");
+    let parent_scope = lash_core::ParentScope::process(parent.id.clone());
     let child = registry
         .register_process(ProcessRegistration::new(
-            child_id.clone(),
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -276,7 +269,7 @@ pub(super) async fn settled_parent_end_plans_are_reclaimed_by_retention(
         .await
         .expect("register cancel child under the live parent");
 
-    complete_process(&registry, &process_id, "parent-end-reclaim-parent").await;
+    complete_process(&registry, &parent.id, "parent-end-reclaim-parent").await;
     registry
         .settle_parent_end_plan(&parent_scope)
         .await

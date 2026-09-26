@@ -604,7 +604,7 @@ pub enum ProcessCommand {
         session_id: SessionId,
     },
     Await {
-        process_ref: crate::ProcessRef,
+        process_id: ProcessId,
     },
     /// Arm the process terminal as the resolver of one durable wait, without
     /// waiting for it here.
@@ -614,15 +614,15 @@ pub enum ProcessCommand {
     /// It returns as soon as the boundary has taken responsibility for the
     /// resolution, so the turn that issued it goes on to park on `key` through
     /// the ordinary [`RuntimeEffectCommand::AwaitEvent`] path. Arming is
-    /// idempotent: the same `(process_ref, key)` may be armed on every redrive
+    /// idempotent: the same `(process_id, key)` may be armed on every redrive
     /// of the parked turn, and the first terminal to land resolves the wait
     /// exactly once.
     AttachTerminal {
-        process_ref: crate::ProcessRef,
+        process_id: ProcessId,
         key: crate::AwaitEventKey,
     },
     Cancel {
-        process_ref: crate::ProcessRef,
+        process_id: ProcessId,
         origin: crate::CancelOrigin,
         requester: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -635,7 +635,7 @@ pub enum ProcessCommand {
         refusal: crate::PluginError,
     },
     Signal {
-        process_ref: crate::ProcessRef,
+        process_id: ProcessId,
         signal_name: String,
         signal_id: String,
         request: crate::ProcessEventAppendRequest,
@@ -661,6 +661,8 @@ pub enum ProcessCommand {
 
 #[derive(Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
+// justification: the decode shape mirrors ProcessCommand, whose Start payload is not boxed for the same reason.
+#[allow(clippy::large_enum_variant)]
 enum ProcessCommandDecode {
     Start {
         registration: ProcessRegistration,
@@ -685,14 +687,14 @@ enum ProcessCommandDecode {
         session_id: SessionId,
     },
     Await {
-        process_ref: crate::ProcessRef,
+        process_id: ProcessId,
     },
     AttachTerminal {
-        process_ref: crate::ProcessRef,
+        process_id: ProcessId,
         key: crate::AwaitEventKey,
     },
     Cancel {
-        process_ref: crate::ProcessRef,
+        process_id: ProcessId,
         origin: crate::CancelOrigin,
         requester: String,
         #[serde(default)]
@@ -705,7 +707,7 @@ enum ProcessCommandDecode {
         refusal: crate::PluginError,
     },
     Signal {
-        process_ref: crate::ProcessRef,
+        process_id: ProcessId,
         signal_name: String,
         signal_id: String,
         request: crate::ProcessEventAppendRequest,
@@ -730,15 +732,10 @@ impl<'de> Deserialize<'de> for ProcessCommand {
     {
         let value = serde_json::Value::deserialize(deserializer)?;
         if let Some(object) = value.as_object()
-            && matches!(
-                object.get("op").and_then(serde_json::Value::as_str),
-                Some("await" | "cancel" | "signal")
-            )
-            && object.contains_key("process_id")
-            && !object.contains_key("process_ref")
+            && object.contains_key("process_ref")
         {
             return Err(serde::de::Error::custom(
-                "process_reference_format_cutover: a pre-incarnation process command cannot be replayed because its bare process_id does not identify one process lifetime",
+                "process_reference_format_cutover: an incarnation-bearing process command cannot be replayed because a process is now named by its minted process id",
             ));
         }
         let decoded: ProcessCommandDecode =
@@ -774,17 +771,17 @@ impl<'de> Deserialize<'de> for ProcessCommand {
             ProcessCommandDecode::DeleteSession { session_id } => {
                 Self::DeleteSession { session_id }
             }
-            ProcessCommandDecode::Await { process_ref } => Self::Await { process_ref },
-            ProcessCommandDecode::AttachTerminal { process_ref, key } => {
-                Self::AttachTerminal { process_ref, key }
+            ProcessCommandDecode::Await { process_id } => Self::Await { process_id },
+            ProcessCommandDecode::AttachTerminal { process_id, key } => {
+                Self::AttachTerminal { process_id, key }
             }
             ProcessCommandDecode::Cancel {
-                process_ref,
+                process_id,
                 origin,
                 requester,
                 attribution,
             } => Self::Cancel {
-                process_ref,
+                process_id,
                 origin,
                 requester,
                 attribution,
@@ -801,12 +798,12 @@ impl<'de> Deserialize<'de> for ProcessCommand {
                 refusal,
             },
             ProcessCommandDecode::Signal {
-                process_ref,
+                process_id,
                 signal_name,
                 signal_id,
                 request,
             } => Self::Signal {
-                process_ref,
+                process_id,
                 signal_name,
                 signal_id,
                 request,
@@ -866,11 +863,25 @@ pub struct CheckpointClaimSet {
 }
 
 impl ProcessCommand {
+    /// The effect id of a start under `start_key`: its admitted operation
+    /// identity. A journaled start always carries a key; the unkeyed spelling
+    /// exists only so the executor can refuse the shape by name.
+    pub fn start_effect_id(start_key: Option<&crate::StartKey>) -> String {
+        match start_key {
+            Some(start_key) => format!("process:start:{start_key}"),
+            None => "process:start:unkeyed".to_string(),
+        }
+    }
+
     /// Derives the stable effect ID process-engine and effect-host implementors use to journal this
     /// process command without conflating command kinds.
     pub fn effect_id(&self) -> String {
         match self {
-            Self::Start { registration, .. } => format!("process:start:{}", registration.id),
+            // A start is addressed by its key — its admitted operation
+            // identity — never by the process id it mints (ADR 0107).
+            Self::Start { registration, .. } => {
+                Self::start_effect_id(registration.start_key.as_ref())
+            }
             Self::List {
                 session_scope,
                 mode,
@@ -890,35 +901,24 @@ impl ProcessCommand {
                 )
             }
             Self::DeleteSession { session_id } => format!("process:delete-session:{session_id}"),
-            // Effect IDs are persisted replay identity and retain their
-            // pre-incarnation spelling. The journaled command payload carries
-            // the structural ProcessRef and refuses a superseded lifetime.
-            Self::Await { process_ref } => format!("process:await:{}", process_ref.process_id),
+            Self::Await { process_id } => format!("process:await:{process_id}"),
             // One arming per (process, wait): a turn may park several
             // waits on the same process, and each redrive re-issues the
             // same id so the arming replays against its own journal entry
             // instead of colliding with the terminal wait above.
-            Self::AttachTerminal { process_ref, key } => format!(
-                "process:attach-terminal:{}:{}",
-                process_ref.process_id, key.key_id
-            ),
-            Self::Cancel { process_ref, .. } => {
-                format!("process:cancel:{}", process_ref.process_id)
+            Self::AttachTerminal { process_id, key } => {
+                format!("process:attach-terminal:{process_id}:{}", key.key_id)
             }
+            Self::Cancel { process_id, .. } => format!("process:cancel:{process_id}"),
             Self::CancelRefused { process_id, .. } => {
                 format!("process:cancel:{process_id}")
             }
             Self::Signal {
-                process_ref,
+                process_id,
                 signal_name,
                 signal_id,
                 ..
-            } => {
-                format!(
-                    "process:signal:{}:signal.{signal_name}:{signal_id}",
-                    process_ref.process_id
-                )
-            }
+            } => format!("process:signal:{process_id}:signal.{signal_name}:{signal_id}"),
             Self::EmitEvent {
                 process_id,
                 request,
@@ -1722,17 +1722,17 @@ mod rejection_tests {
     #[test]
     fn process_transfer_v1_identity_golden() {
         let process_ids = vec![
-            ProcessId::from("process:a:b"),
-            ProcessId::from("process\0b"),
-            ProcessId::from("λ"),
+            crate::process_id_for_test("process:a:b"),
+            crate::process_id_for_test("process\0b"),
+            crate::process_id_for_test("λ"),
         ];
         assert_eq!(
             hex(&process_transfer_set_preimage(&process_ids)),
-            "6c6173682d737461626c652d6964656e74697479020100000000000000196c6173682e70726f636573732d7472616e736665722d7365740000000000000003000000000000000b70726f636573733a613a62000000000000000970726f6365737300620000000000000002cebb"
+            "6c6173682d737461626c652d6964656e74697479020100000000000000196c6173682e70726f636573732d7472616e736665722d73657400000000000000030000000000000022705f34393161316432626135353737323338383637313337383231623261396465620000000000000022705f63353534366261373037303637376535613536633432613361353835333531630000000000000022705f3038383039336135386361623762653939616130373333303534623739623865"
         );
         assert_eq!(
             process_transfer_set_identity(&process_ids),
-            "process-transfer-set:v1:blake3:aedb74c73220c6ad3d081471ab61f1505070fa03dbb0013529d4cd84fd48cc0a"
+            "process-transfer-set:v1:blake3:2ab65b6834652333f4817015bfe92bdcc40e9ac97b3cf03a40d76578917a999e"
         );
     }
 
@@ -1795,7 +1795,7 @@ mod rejection_tests {
     fn effect_header_round_trips_without_universal_subject_or_replay_slots() {
         let invocation =
             invocation(RuntimeEffectKind::Sleep).with_caused_by(Some(CausalRef::Process {
-                process_id: ProcessId::from("process"),
+                process_id: crate::process_id_for_test("process"),
             }));
         let encoded = serde_json::to_value(&invocation).expect("effect header encodes");
         assert!(encoded.get("address").is_some());

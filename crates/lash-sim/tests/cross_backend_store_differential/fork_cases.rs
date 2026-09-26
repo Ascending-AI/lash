@@ -344,7 +344,6 @@ pub(super) async fn selected_observer_intents(
     for (index, (factory, registry)) in backends.into_iter().enumerate() {
         let session_id = SessionId::from(format!("selected-observer-{nonce}-{index}"));
         let registration = lash_core::ProcessRegistration::new(
-            format!("selected-process-{nonce}-{index}"),
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -359,9 +358,9 @@ pub(super) async fn selected_observer_intents(
             .register_process(registration.clone())
             .await
             .expect("selected run");
-        let selected = lash_core::ProcessRef::from_record(&first);
+        let selected = first.id.clone();
         let intent =
-            lash_core::facade_support::SessionObserverIntent::host_requested_ref(selected.clone());
+            lash_core::facade_support::SessionObserverIntent::host_requested(selected.clone());
         let request = SessionStoreCreateRequest {
             session_id: session_id.clone(),
             relation: SessionRelation::Fork {
@@ -426,7 +425,7 @@ pub(super) async fn selected_observer_intents(
         );
         // The first apply happened, but a crash prevented consuming its intent.
         registry
-            .add_observer_ref(
+            .add_observer(
                 &session_id,
                 &selected,
                 lash_core::ProcessObserverBy::host(format!("session-create:{session_id}")),
@@ -440,9 +439,10 @@ pub(super) async fn selected_observer_intents(
         )
         .await
         .expect("reconcile interrupted publication");
-        assert!(
-            matches!(receipts[0].outcome, lash_core::plugin::SessionObservedProcessOutcome::Observed { incarnation } if incarnation == selected.incarnation)
-        );
+        assert!(matches!(
+            receipts[0].outcome,
+            lash_core::plugin::SessionObservedProcessOutcome::Observed
+        ));
         let events = registry
             .full_event_window(&first.id, 0)
             .await
@@ -479,7 +479,7 @@ pub(super) async fn selected_observer_intents(
         assert!(meta.pending_observer_intents.is_empty());
         // A second pending selection outlives the process it selected.
         meta.pending_observer_intents = vec![
-            lash_core::facade_support::SessionObserverIntent::host_requested_ref(selected.clone()),
+            lash_core::facade_support::SessionObserverIntent::host_requested(selected.clone()),
         ];
         store
             .save_session_meta(meta)
@@ -506,7 +506,8 @@ pub(super) async fn selected_observer_intents(
         let newer = registry
             .register_process(registration)
             .await
-            .expect("reuse process name");
+            .expect("start a new run from the same registration");
+        assert_ne!(newer.id, selected, "a new run is minted a new id");
         let receipts = lash_core::runtime::reconcile_session_process_observer_intents(
             Some(registry.as_ref()),
             &session_id,
@@ -515,9 +516,12 @@ pub(super) async fn selected_observer_intents(
         .await
         .expect("settle stale exact selection");
         assert!(
-            matches!(receipts[0].outcome, lash_core::plugin::SessionObservedProcessOutcome::IncarnationSuperseded {
-            requested_incarnation, current_incarnation,
-        } if requested_incarnation == selected.incarnation && current_incarnation == newer.incarnation)
+            matches!(
+                receipts[0].outcome,
+                lash_core::plugin::SessionObservedProcessOutcome::NoLongerRetained { .. }
+            ),
+            "a selection of a pruned run settles as no longer retained: {:?}",
+            receipts[0].outcome
         );
         assert!(
             !registry

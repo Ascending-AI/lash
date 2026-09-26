@@ -52,13 +52,12 @@ fn advancing_differential_clock_wall_clock_faces_agree() {
 /// every row has a distinct `(process, sequence)` source. The row id rides in
 /// the wake input, where [`oracle_row_id`] reads it back.
 fn oracle_wake_draft(session_id: &SessionId, row_id: &str) -> QueuedWorkBatchDraft {
-    let process_id = || lash_core::runtime::ProcessId::from(row_id);
+    let process_id = || lash_core::runtime::ProcessId::fixture(row_id);
     lash_core::runtime::process_wake_batch_draft(lash_core::runtime::ProcessWakeDelivery {
         version: lash_core::runtime::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("{row_id}-wake-1"),
         target_session_id: session_id.clone(),
         process_id: process_id(),
-        process_incarnation: lash_core::runtime::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "process.wake".to_string(),
         event_invocation: lash_core::runtime::RuntimeInvocation {

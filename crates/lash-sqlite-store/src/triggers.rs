@@ -412,7 +412,7 @@ impl SqliteTriggerStore {
     fn decode_delivery(
         occurrence_json: String,
         subscription_json: String,
-        process_id: ProcessId,
+        process_id: Option<ProcessId>,
         created_at_ms: i64,
         reservation_status: lash_core_execution::TriggerDeliveryReservationOutcome,
     ) -> Result<lash_core_execution::TriggerDeliveryReservation, lash_core_execution::PluginError>
@@ -444,7 +444,9 @@ impl SqliteTriggerStore {
                     let rows = stmt
                         .query_map(rusqlite::params_from_iter(values.iter()), |row| {
                             Ok((
-                                row.get::<_, String>(0)?,
+                                row.get::<_, Option<String>>(0)?
+                                    .map(|value| crate::sql_process_id(0, value))
+                                    .transpose()?,
                                 row.get::<_, i64>(1)?,
                                 row.get::<_, String>(2)?,
                                 row.get::<_, String>(3)?,
@@ -458,7 +460,7 @@ impl SqliteTriggerStore {
                         deliveries.push(Self::decode_delivery(
                             occurrence_json,
                             subscription_json,
-                            ProcessId::from(process_id),
+                            process_id,
                             created_at_ms,
                             lash_core_execution::TriggerDeliveryReservationOutcome::AlreadyReserved,
                         )?);
@@ -1028,6 +1030,41 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
             .await
     }
 
+    async fn bind_delivery_process(
+        &self,
+        occurrence_id: &str,
+        subscription_id: &str,
+        process_id: &ProcessId,
+    ) -> Result<(), lash_core_execution::PluginError> {
+        let occurrence_id = occurrence_id.to_string();
+        let subscription_id = subscription_id.to_string();
+        let process_id = process_id.clone();
+        self.conn
+            .call(move |conn| {
+                Ok((|| {
+                    let bound = conn
+                        .execute(
+                            trigger_sql().delivery.bind_process.sql(),
+                            params![
+                                occurrence_id.as_str(),
+                                subscription_id.as_str(),
+                                process_id.as_str()
+                            ],
+                        )
+                        .map_err(process_sqlite_error)?;
+                    if bound == 1 {
+                        Ok(())
+                    } else {
+                        Err(lash_core_execution::durable_identity_conflict(format!(
+                            "trigger delivery `{occurrence_id}`/`{subscription_id}` is absent or already bound to another process than `{process_id}`"
+                        )))
+                    }
+                })())
+            })
+            .await
+            .map_err(process_sqlite_error)?
+    }
+
     async fn list_delivery_process_ids(
         &self,
     ) -> Result<Vec<ProcessId>, lash_core_execution::PluginError> {
@@ -1038,10 +1075,9 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                         .prepare(trigger_sql().delivery.select_distinct_process_ids.sql())
                         .map_err(process_sqlite_error)?;
                     let rows = stmt
-                        .query_map([], |row| row.get::<_, String>(0))
+                        .query_map([], |row| crate::row_process_id(row, 0))
                         .map_err(process_sqlite_error)?;
-                    rows.collect::<Result<Vec<String>, _>>()
-                        .map(|ids| ids.into_iter().map(ProcessId::from).collect())
+                    rows.collect::<Result<Vec<_>, _>>()
                         .map_err(process_sqlite_error)
                 })())
             })
@@ -1066,7 +1102,7 @@ impl lash_core_execution::TriggerStore for SqliteTriggerStore {
                             Ok(lash_core_execution::TriggerDeliveryRetentionCandidate {
                                 occurrence_id: row.get(0)?,
                                 subscription_id: row.get(1)?,
-                                process_id: ProcessId::from(row.get::<_, String>(2)?),
+                                process_id: crate::row_process_id(row, 2)?,
                             })
                         })
                         .map_err(process_sqlite_error)?;
@@ -1374,18 +1410,11 @@ fn reserve_sqlite_deliveries(
     for subscription in subscriptions {
         let sql_revision =
             plugin_sql_counter_value("trigger_subscription_revision", subscription.revision)?;
-        let process_id = lash_core_execution::facade_support::deterministic_delivery_process_id(
-            &occurrence.occurrence_id,
-            &subscription.subscription_id,
-            &subscription.incarnation,
-            subscription.revision,
-        )?;
         tx.execute(
             sql.delivery.insert.sql(),
             params![
                 occurrence.occurrence_id.as_str(),
                 subscription.subscription_id.as_str(),
-                process_id.as_str(),
                 subscription.incarnation.as_str(),
                 sql_revision,
                 SqliteTriggerStore::encode_json(&subscription)?,
@@ -1396,7 +1425,7 @@ fn reserve_sqlite_deliveries(
         reservations.push(lash_core_execution::TriggerDeliveryReservation {
             occurrence: occurrence.clone(),
             subscription,
-            process_id,
+            process_id: None,
             created_at_ms,
             reservation_status: lash_core_execution::TriggerDeliveryReservationOutcome::Reserved,
         });
@@ -1417,7 +1446,9 @@ fn sqlite_delivery_snapshots(
     let rows = stmt
         .query_map(params![occurrence.occurrence_id.as_str()], |row| {
             Ok((
-                row.get::<_, String>(0)?,
+                row.get::<_, Option<String>>(0)?
+                    .map(|value| crate::sql_process_id(0, value))
+                    .transpose()?,
                 row.get::<_, i64>(1)?,
                 row.get::<_, String>(2)?,
             ))
@@ -1429,7 +1460,7 @@ fn sqlite_delivery_snapshots(
         reservations.push(lash_core_execution::TriggerDeliveryReservation {
             occurrence: occurrence.clone(),
             subscription: SqliteTriggerStore::decode_subscription(snapshot_json)?,
-            process_id: ProcessId::from(process_id),
+            process_id,
             created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", created_at_ms)?,
             reservation_status: reservation_status.clone(),
         });

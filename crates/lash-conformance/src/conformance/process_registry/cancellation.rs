@@ -5,7 +5,6 @@ use pretty_assertions::assert_eq;
 
 fn owned_registration(id: &str) -> ProcessRegistration {
     ProcessRegistration::new(
-        id,
         ProcessInput::Engine {
             kind: "cancel-conformance".to_string(),
             payload: serde_json::Value::Null,
@@ -28,10 +27,10 @@ fn owned_registration(id: &str) -> ProcessRegistration {
 )]
 async fn read(
     reader: &Arc<dyn crate::ConformanceProcessRegistry>,
-    process_ref: &ProcessRef,
+    process_id: &ProcessId,
 ) -> ProcessRecord {
     reader
-        .get_process_ref(process_ref)
+        .get_process(process_id)
         .await
         .expect("read cancellation fold")
         .expect("retained process")
@@ -50,7 +49,7 @@ pub(super) async fn contract(
         .register_process(registration("cancel-first-wins"))
         .await
         .expect("register cancel target");
-    let process_ref = ProcessRef::from_record(&base);
+    let process_id = base.id.clone();
     assert!(!base.is_terminal());
     assert!(base.cancel_request.is_none());
     let first = CancelRequest::new(CancelOrigin::OperatorRequested, "actor:shared", 11);
@@ -60,8 +59,8 @@ pub(super) async fn contract(
         "both requests carry the identical requester text"
     );
     assert_ne!(first.origin, second.origin, "the request origins differ");
-    let first_append = ProcessEventAppendRequest::cancel_requested(&process_ref, &first);
-    let second_append = ProcessEventAppendRequest::cancel_requested(&process_ref, &second);
+    let first_append = ProcessEventAppendRequest::cancel_requested(&process_id, &first);
+    let second_append = ProcessEventAppendRequest::cancel_requested(&process_id, &second);
     assert_ne!(
         first_append.replay, second_append.replay,
         "different origins must not alias before the fold"
@@ -71,10 +70,10 @@ pub(super) async fn contract(
         "the two proposed facts must remain distinct"
     );
     let receipt = writer
-        .append_event_ref(&process_ref, first_append)
+        .append_event(&process_id, first_append)
         .await
         .expect("accept first cancel");
-    let accepted = read(&reader, &process_ref).await;
+    let accepted = read(&reader, &process_id).await;
     assert_eq!(accepted.cancel_request.as_deref(), Some(&first));
     assert_eq!(
         accepted.cancel_request.as_ref().unwrap().requested_at_ms,
@@ -82,14 +81,14 @@ pub(super) async fn contract(
     );
     assert!(
         matches!(
-            writer.append_event_ref(&process_ref, second_append).await,
+            writer.append_event(&process_id, second_append).await,
             Err(PluginError::ProcessCancelConflict { existing, requested, .. })
                 if existing.origin == CancelOrigin::OperatorRequested && requested.origin == CancelOrigin::ModelRequested
         ),
         "a different origin must reach the typed fold refusal, not a replay-payload conflict"
     );
     assert_eq!(
-        read(&reader, &process_ref).await.cancel_request.as_deref(),
+        read(&reader, &process_id).await.cancel_request.as_deref(),
         Some(&first)
     );
     let retry = CancelRequest {
@@ -98,16 +97,16 @@ pub(super) async fn contract(
     };
     assert_ne!(retry.requested_at_ms, first.requested_at_ms);
     let replay = writer
-        .append_event_ref(
-            &process_ref,
-            ProcessEventAppendRequest::cancel_requested(&process_ref, &retry),
+        .append_event(
+            &process_id,
+            ProcessEventAppendRequest::cancel_requested(&process_id, &retry),
         )
         .await
         .expect("fresh-clock retry replays the first fact");
     assert_eq!(replay.event.sequence, receipt.event.sequence);
     assert_eq!(replay.event.payload, serde_json::json!(first));
     let unchanged = writer
-        .request_process_cancel(&process_ref, first.origin, first.requester.clone(), None)
+        .request_process_cancel(&process_id, first.origin, first.requester.clone(), None)
         .await
         .expect("registry cancellation retry returns the first record");
     assert_eq!(unchanged.last_event_sequence, accepted.last_event_sequence);
@@ -117,32 +116,19 @@ pub(super) async fn contract(
     );
     assert!(matches!(
         writer
-            .request_process_cancel(&process_ref, first.origin, "actor:other".to_string(), None)
+            .request_process_cancel(&process_id, first.origin, "actor:other".to_string(), None)
             .await,
         Err(PluginError::ProcessCancelConflict { .. })
     ));
     assert_eq!(
         reader
-            .full_event_window_ref(&process_ref, 0)
+            .full_event_window(&process_id, 0)
             .await
             .expect("read event tail")
             .len(),
         1,
         "conflicts and retries append no second cancellation fact"
     );
-    let wrong_lifetime = ProcessRef::new(
-        base.id.clone(),
-        lash_core::ProcessIncarnation::from_registration_sequence(
-            base.incarnation.registration_sequence() + 1,
-        ),
-    );
-    assert_ne!(wrong_lifetime.incarnation, process_ref.incarnation);
-    assert!(matches!(
-        writer
-            .request_process_cancel(&wrong_lifetime, first.origin, first.requester.clone(), None)
-            .await,
-        Err(PluginError::ProcessIncarnationSuperseded { .. })
-    ));
 
     let proposed = ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::cancelled(
         lash_core::ToolCancellation::runtime("runner stopped"),
@@ -159,7 +145,7 @@ pub(super) async fn contract(
         completed,
         crate::ProcessCompletionOutcome::Committed(_)
     ));
-    let settled = read(&reader, &process_ref).await;
+    let settled = read(&reader, &process_id).await;
     assert!(
         matches!(
             settled.outcome,
@@ -197,7 +183,7 @@ pub(super) async fn contract(
         )
         .await
         .expect("complete before cancellation");
-    let terminal_ref = ProcessRef::from_record(&terminal);
+    let terminal_ref = terminal.id.clone();
     assert!(read(&reader, &terminal_ref).await.is_terminal());
     assert!(matches!(
         writer
@@ -219,7 +205,7 @@ pub(super) async fn contract(
     assert!(unrun.first_started.is_none());
     assert!(unrun.external_ref.is_none());
     assert!(!unrun.is_terminal());
-    let unrun_ref = ProcessRef::from_record(&unrun);
+    let unrun_ref = unrun.id.clone();
     let failed = writer
         .request_process_cancel(
             &unrun_ref,
@@ -241,7 +227,7 @@ pub(super) async fn contract(
     );
     assert_eq!(read(&reader, &unrun_ref).await, failed);
     let events = reader
-        .full_event_window_ref(&unrun_ref, 0)
+        .full_event_window(&unrun_ref, 0)
         .await
         .expect("read failed-start event");
     assert_eq!(events.len(), 1);
@@ -267,7 +253,7 @@ pub(super) async fn contract(
     };
     assert_ne!(retry.requested_at_ms, standing.requested_at_ms);
     let replay = writer
-        .append_event_ref(
+        .append_event(
             &unrun_ref,
             ProcessEventAppendRequest::cancel_requested(&unrun_ref, &retry),
         )
@@ -293,7 +279,7 @@ pub(super) async fn contract(
         )
         .await
         .expect("record actual first start");
-    let started_ref = ProcessRef::from_record(&started);
+    let started_ref = started.id.clone();
     assert!(read(&reader, &started_ref).await.first_started.is_some());
     let pending = writer
         .request_process_cancel(
@@ -325,7 +311,7 @@ pub(super) async fn contract(
         )
         .await
         .expect("record submission reference");
-    let external_ref = ProcessRef::from_record(&external);
+    let external_ref = external.id.clone();
     assert!(read(&reader, &external_ref).await.external_ref.is_some());
     let pending = writer
         .request_process_cancel(
@@ -354,9 +340,9 @@ pub(super) async fn contract(
         )
         .await
         .expect("register custom terminal producer");
-    let custom_ref = ProcessRef::from_record(&custom);
+    let custom_ref = custom.id.clone();
     writer
-        .append_event_ref(
+        .append_event(
             &custom_ref,
             ProcessEventAppendRequest::new(
                 "custom.finished",

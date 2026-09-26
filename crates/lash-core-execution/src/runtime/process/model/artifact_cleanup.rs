@@ -1,6 +1,4 @@
-use super::{
-    ProcessExecutionEnvRef, ProcessId, ProcessIncarnation, ProcessInput, ProcessRecord, ProcessRef,
-};
+use super::{ProcessExecutionEnvRef, ProcessId, ProcessInput, ProcessRecord};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -10,7 +8,10 @@ use std::sync::Arc;
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessArtifactCleanup {
     pub process_id: ProcessId,
-    pub incarnation: ProcessIncarnation,
+    /// The key the process was started under: its start's staging owner is
+    /// keyed by it, never by the id the start minted (ADR 0107).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_key: Option<crate::StartKey>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub env_ref: Option<ProcessExecutionEnvRef>,
     pub input: Arc<ProcessInput>,
@@ -20,7 +21,7 @@ impl ProcessArtifactCleanup {
     pub fn from_record(record: &ProcessRecord) -> Self {
         Self {
             process_id: record.id.clone(),
-            incarnation: record.incarnation,
+            start_key: record.start_key.clone(),
             env_ref: record.env_ref.clone(),
             input: Arc::clone(&record.input),
         }
@@ -29,22 +30,13 @@ impl ProcessArtifactCleanup {
 
 /// Result of acknowledging one durable process-artifact cleanup record.
 ///
-/// Acknowledgement observes the current process incarnation and the exact
-/// cleanup row within one statement or transaction snapshot. When that
-/// snapshot contains a successor incarnation, implementations prioritize
-/// [`ProcessArtifactCleanupAck::StaleIncarnation`] whether or not this call
-/// deleted the predecessor row. Repeated calls therefore remain idempotently
-/// stale after the cleanup row is gone.
+/// A process id is minted and never reused (ADR 0107), so no later process
+/// can share the pruned process's cleanup: the acknowledgement either removed
+/// the exact record or found none.
 #[derive(Clone, Debug, PartialEq, Eq)]
-#[must_use = "stale process incarnations must not be acknowledged silently"]
 pub enum ProcessArtifactCleanupAck {
-    /// The exact cleanup record was removed and no successor is live.
-    Acknowledged { process_ref: ProcessRef },
-    /// A successor incarnation was detected; the cleanup row may already be absent.
-    StaleIncarnation {
-        expected: ProcessRef,
-        found: ProcessRef,
-    },
-    /// No exact cleanup record or successor incarnation was found.
-    Unknown { process_ref: ProcessRef },
+    /// The exact cleanup record was removed.
+    Acknowledged { process_id: ProcessId },
+    /// No cleanup record was found for the process.
+    Unknown { process_id: ProcessId },
 }

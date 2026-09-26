@@ -8,35 +8,31 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
         observers: &[SessionId],
     ) -> Result<lash_core_execution::ProcessRegistrationOutcome, lash_core_execution::PluginError>
     {
-        let registration = prepare_process_registration(registration)?;
         let mut observers = observers.to_vec();
         observers.sort();
         observers.dedup();
-        let registration_fingerprint =
-            lash_core_execution::runtime::process_registration_fingerprint(
-                &registration,
-                &observers,
-            );
         let wake_session_id = registration.wake_session_id.clone();
         let now = self.clock.timestamp_ms();
         let wake_delivery_config = self.wake_delivery_config;
-        let outcome = self
-            .conn
+        let process_id_mint = self.process_id_mint.clone();
+        self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
-                    if let Some(existing) = Self::load_process_conn(tx, &registration.id)? {
-                        if existing.registration_fingerprint == registration_fingerprint {
-                            return Ok(lash_core_execution::ProcessRegistrationOutcome::existing(
-                                existing,
-                            ));
-                        }
-                        return Err(lash_core_execution::durable_identity_conflict(format!(
-                            "process `{}` registration fingerprint conflict: existing {}, new {}",
-                            registration.id,
-                            existing.registration_fingerprint,
-                            registration_fingerprint
-                        )));
+                    // While the process minted for a key is retained, a
+                    // start under the same key returns that process untouched
+                    // (ADR 0107); a host's key must also present its content.
+                    if let Some(start_key) = registration.start_key.as_ref()
+                        && let Some(existing) = Self::load_process_by_start_key_conn(tx, start_key)?
+                    {
+                        lash_core_execution::runtime::check_retained_start(
+                            &registration,
+                            &existing,
+                        )?;
+                        return Ok(lash_core_execution::ProcessRegistrationOutcome::existing(
+                            existing,
+                        ));
                     }
+                    let registration = prepare_process_registration(registration)?;
                     // Late-registration fencing: a `Cancel` child whose parent
                     // scope already has a ledger row can never be swept, so it
                     // is refused here rather than left to outlive its parent.
@@ -49,24 +45,25 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                         && super::parent_end::plan_exists_conn(tx, &registration.lifecycle.parent)?
                     {
                         return Err(lash_core_execution::PluginError::ParentEnded {
-                            process_id: registration.id.clone(),
+                            start_key: registration.start_key.clone(),
                             parent: registration.lifecycle.parent.clone(),
                         });
                     }
+                    // Minted only once the start is admitted, so no refusal
+                    // names an id that was never registered.
+                    let process_id = process_id_mint.mint();
                     let change_seq = Self::next_change_seq_conn(tx)?;
-                    let record = ProcessRecord::from_prepared_registration(
-                        registration,
-                        registration_fingerprint,
-                        ProcessIncarnation::from_registration_sequence(change_seq),
-                        now,
-                    );
+                    let record =
+                        ProcessRecord::from_prepared_registration(registration, process_id, now);
                     let originator_id = record.originator_id();
                     tx.execute(
                         process_sql().process_sqlite.insert_registration.sql(),
                         params![
                             record.id.as_str(),
-                            record.incarnation.registration_sequence() as i64,
-                            record.registration_fingerprint.as_str(),
+                            record
+                                .start_key
+                                .as_ref()
+                                .map(lash_core_execution::StartKey::as_str),
                             originator_id.as_str(),
                             wake_session_id.as_deref(),
                             record.identity.kind.as_str(),
@@ -84,29 +81,12 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                         ],
                     )
                     .map_err(process_sqlite_error)?;
-                    // The owner is back: lift the scope fence a prune left in
-                    // this file, in this same single-file transaction, so the
-                    // process row and the fence's absence become durable
-                    // together and a registration that fails keeps the id
-                    // fenced (ADR 0049).
-                    tx.execute(
-                        crate::scope_fence::fence_sql(crate::schema_layout::Schema::Main)
-                            .shared
-                            .delete_by_scope
-                            .sql(),
-                        params![process_scope_fence_key(&record.id)?],
-                    )
-                    .map_err(process_sqlite_error)?;
                     let mut record = record;
                     let process_id = record.id.clone();
                     for session_id in &observers {
                         tx.execute(
                             process_sql().observer.insert.sql(),
-                            params![
-                                session_id.as_str(),
-                                record.id.as_str(),
-                                record.incarnation.registration_sequence() as i64
-                            ],
+                            params![session_id.as_str(), record.id.as_str()],
                         )
                         .map_err(process_sqlite_error)?;
                         Self::append_event_conn(
@@ -127,15 +107,7 @@ impl lash_core_execution::ProcessRegistrar for SqliteProcessRegistry {
                 })()))
             })
             .await
-            .map_err(process_sqlite_error)??;
-        // Hosts whose fence is not in this file (a fence written into a
-        // journal before it attached this registry, or an engine-held one)
-        // are lifted now that the row is durable; the call is idempotent for
-        // a host that keeps its process-scope fences here.
-        self.scope_fence_hosts
-            .reinstate_process_scope(&outcome.record.id)
-            .await?;
-        Ok(outcome)
+            .map_err(process_sqlite_error)?
     }
 
     fn bind_effect_host(&self, effect_host: &Arc<dyn lash_core_execution::EffectHost>) {

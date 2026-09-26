@@ -54,7 +54,7 @@ fn foreground_turn_cancel_peek_replay_keys_remain_unchanged() {
 
 #[test]
 fn process_turn_cancel_peek_replay_keys_cover_physical_turn_and_gate() {
-    let scope = ExecutionScope::process("process:subagent:peek-key");
+    let scope = ExecutionScope::process(crate::process_id_for_test("process:subagent:peek-key"));
     let root = TurnAddress::new("session:subagent:peek-key", "process:subagent:peek-key");
     let follow_on = TurnAddress::new(&root.session_id, "process:subagent:peek-key:agent-frame:1");
     assert_eq!(

@@ -292,7 +292,7 @@ mod tests {
     ) -> lash_trace::TraceContext {
         let invocation = crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
-                crate::ExecutionScope::process("trace-process"),
+                crate::ExecutionScope::process(crate::process_id_for_test("trace-process")),
                 "trace-effect",
             )
             .expect("valid trace address"),
@@ -318,7 +318,7 @@ mod tests {
             .insert("host_key".to_string(), serde_json::json!("kept"));
         let cause = crate::CausalRef::Effect {
             address: crate::EffectAddress::new(
-                crate::ExecutionScope::process("cause-process"),
+                crate::ExecutionScope::process(crate::process_id_for_test("cause-process")),
                 "cause-effect",
             )
             .expect("valid cause address"),
@@ -389,7 +389,7 @@ mod tests {
         let sink = Arc::new(RecordingTraceSink::default());
         let sink_dyn: Arc<dyn lash_trace::TraceSink> = sink.clone();
         let cause_address = crate::EffectAddress::new(
-            crate::ExecutionScope::process("cause-process"),
+            crate::ExecutionScope::process(crate::process_id_for_test("cause-process")),
             "cause-effect",
         )
         .expect("valid cause address");
@@ -433,7 +433,7 @@ mod tests {
         let sink_dyn: Arc<dyn lash_trace::TraceSink> = sink.clone();
         let session_id = SessionId::from("direct-session");
         let effect_address = crate::EffectAddress::new(
-            crate::ExecutionScope::process("direct-parent-process"),
+            crate::ExecutionScope::process(crate::process_id_for_test("direct-parent-process")),
             "direct-parent-effect",
         )
         .expect("valid direct parent address");

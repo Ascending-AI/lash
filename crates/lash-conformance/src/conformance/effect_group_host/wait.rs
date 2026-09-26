@@ -47,7 +47,7 @@ pub async fn a_losing_wait_stays_admitted_until_the_group_releases_it<F: Fn() ->
         .expect("a scope binds");
     let key = group_key(prefix, "losing-wait");
     let companion_key_str = group_key(prefix, "losing-wait-companion");
-    let process_id = crate::ProcessId::from(format!("{prefix}-watched-process"));
+    let process_id = crate::ProcessId::fixture(&format!("{prefix}-watched-process"));
 
     let envelope = |replay_key: String, command: RuntimeEffectCommand| {
         RuntimeEffectEnvelope::new(
@@ -338,7 +338,7 @@ pub async fn a_wait_cancelled_before_it_parks_is_still_released<F: Fn() -> Host>
         .await_event_key(
             &execution_scope,
             crate::AwaitEventWaitIdentity::process_signal(
-                crate::ProcessId::from(format!("{prefix}-unparked-process")),
+                crate::ProcessId::fixture(&format!("{prefix}-unparked-process")),
                 "exit",
                 1,
             ),

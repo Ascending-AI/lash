@@ -28,8 +28,6 @@ pub use replay_run::{
 };
 mod language_trace_host;
 pub use language_trace_host::{LanguageTraceHost, trace_failure};
-mod process_identity;
-pub use process_identity::deterministic_lashlang_process_id;
 mod trace_waits;
 mod trigger_commands;
 pub use trace_waits::TraceWaitBookkeeping;
@@ -835,7 +833,7 @@ pub struct PreparedLashlangProcessStart {
 
 pub async fn prepare_lashlang_process_start(
     artifact_store: LashlangArtifacts,
-    parent_start_seed: &str,
+    start_key: Option<lash_core::StartKey>,
     start: lashlang::ProcessStart,
     originator: lash_core::ProcessOriginator,
     lifecycle: lash_core::ProcessLifecyclePolicy,
@@ -913,25 +911,18 @@ pub async fn prepare_lashlang_process_start(
         process_name: start.process_name,
         args,
     };
-    let process_id =
-        deterministic_lashlang_process_id(parent_start_seed, &start.start_site, &process_input)
-            .map_err(|source| LashlangRuntimeError::DeriveProcessId { source })?;
     let process_input = process_input
         .into_process_input()
         .map_err(|source| LashlangRuntimeError::EncodeProcessInput { source })?;
-    let request = lash_core::ProcessStartRequest::new(
-        process_id,
-        process_input,
-        disposition,
-        originator,
-        lifecycle,
-    )
-    .with_max_attempts(Some(max_attempts.get()))
-    .with_extra_event_types(
-        lashlang_process_event_types()
-            .into_iter()
-            .chain(signal_event_types),
-    );
+    let request =
+        lash_core::ProcessStartRequest::new(process_input, disposition, originator, lifecycle)
+            .with_start_key(start_key)
+            .with_max_attempts(Some(max_attempts.get()))
+            .with_extra_event_types(
+                lashlang_process_event_types()
+                    .into_iter()
+                    .chain(signal_event_types),
+            );
     Ok(PreparedLashlangProcessStart {
         request,
         label: display_name,

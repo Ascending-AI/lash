@@ -48,10 +48,7 @@ pub(crate) async fn seed_differential_attachment_rows(
         canonical_uri: "lash-attachment://blake3/differential-process-attachment".to_string(),
         intent_at_epoch_ms: 1_000,
         owner: Some(AttachmentOwner::Process {
-            id: super::DIFFERENTIAL_PROCESS_OWNER_ID.to_string(),
-            incarnation: lash_core::ProcessIncarnation::from_registration_sequence(
-                super::DIFFERENTIAL_PROCESS_OWNER_INCARNATION,
-            ),
+            process_id: super::differential_process_owner_id(),
         }),
     };
     let AttachmentWriteFence::Granted(_) = store.begin_attachment_write(process_owned).await?

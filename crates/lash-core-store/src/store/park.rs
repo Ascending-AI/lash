@@ -549,8 +549,8 @@ pub struct TurnParkTarget {
 /// The one key a parked process is named by, in its park projection and its
 /// park feed.
 ///
-/// Today it is the process's host-facing id; FIG-3607 swaps it for the minted
-/// process id, and every park surface follows this one type.
+/// It is the process's minted, never-reused id, so a park never outlives or
+/// aliases the run it names; every park surface follows this one type.
 pub type ProcessParkKey = crate::ProcessId;
 
 /// One park feed row, shared by the turn and the process feeds. `seq` is the

@@ -1405,7 +1405,9 @@ async fn the_drain_finishes_committed_undrained_children_in_commit_order() {
 /// recorded row without touching the trigger store again.
 #[tokio::test]
 async fn a_trigger_command_runs_on_the_trigger_target_and_replays_from_its_row() {
-    let scope = ExecutionScope::process("trigger-driver-process");
+    let scope = ExecutionScope::process(lash_core_execution::ProcessId::fixture(
+        "trigger-driver-process",
+    ));
     let backend = crate::SqliteBackend::memory()
         .await
         .expect("open the memory backend");

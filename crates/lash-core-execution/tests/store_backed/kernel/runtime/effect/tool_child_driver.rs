@@ -197,10 +197,7 @@ mod tests {
     #[tokio::test]
     async fn a_process_openers_enclosing_incarnation_is_never_the_claim_pin() {
         let mut request = request();
-        let opener_ref = crate::ProcessRef::new(
-            "worker",
-            crate::ProcessIncarnation::from_registration_sequence(7),
-        );
+        let opener_ref = crate::ProcessId::fixture("worker");
         request.scope.opener = crate::EffectOpener::process(opener_ref.clone());
         request.enclosing_process = Some(opener_ref.clone());
         request

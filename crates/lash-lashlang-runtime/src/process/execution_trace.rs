@@ -16,7 +16,6 @@ impl LashlangProcessExecutionTrace {
             process_ref: identity.process_ref,
             process_name: identity.process_name,
             attempt: identity.attempt,
-            incarnation: identity.incarnation,
             engine_execution_id: identity.engine_execution_id,
             resource_call_ids: Arc::default(),
             pending_resource_starts: Arc::default(),
@@ -49,7 +48,6 @@ impl LashlangProcessExecutionTrace {
             engine_execution_id: self.engine_execution_id.clone(),
             generation: Some(lash_trace::TraceLanguageExecutionGeneration::new(
                 self.attempt,
-                self.incarnation.registration_sequence(),
             )),
         }
     }
@@ -253,7 +251,6 @@ impl LashlangProcessExecutionTrace {
                     child: TraceLanguageChildExecution {
                         scope: self.scope(),
                         process_id: child.process_id,
-                        incarnation: child.incarnation,
                         attempt: child.attempt,
                         module_ref: Some(child.module_ref.to_string()),
                         entry_ref: Some(lashlang::process_ref_key(&child.process_ref)),
@@ -437,18 +434,14 @@ impl LashlangProcessExecutionTrace {
             let child = TraceLanguageChildExecution {
                 scope: trace.scope(),
                 process_id: started.process_id,
-                incarnation: started.incarnation.registration_sequence(),
                 attempt: started.attempt,
                 module_ref: None,
                 entry_ref: None,
                 entry_name: started.child_entry_name,
             };
-            let child_graph_key = child.graph_key().unwrap_or_else(|| {
-                format!(
-                    "process:{}:incarnation:{}",
-                    child.process_id, child.incarnation
-                )
-            });
+            let child_graph_key = child
+                .graph_key()
+                .unwrap_or_else(|| format!("process:{}", child.process_id));
             trace.emit(TraceLanguageExecution {
                 event_key: trace.event_key(format!(
                     "child:{parent_node_id}:{occurrence}:{child_graph_key}"

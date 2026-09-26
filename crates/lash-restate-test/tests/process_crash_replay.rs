@@ -212,7 +212,6 @@ async fn publish_process(restate: &RestateTestBackend) -> lash_core::ProcessStar
     .into_process_input()
     .expect("the process input serializes");
     lash_core::ProcessStartRequest::new(
-        ProcessId::from("crash-matrix"),
         input,
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::host(),
@@ -369,19 +368,23 @@ async fn run_process(scenario: Scenario) -> Run {
         restate.server().crash_on(rule);
     }
     let request = publish_process(&restate).await;
-    let process_id = request.id.clone();
+    let started = Arc::new(std::sync::Mutex::new(None::<ProcessId>));
     let mut problems = Vec::new();
     {
         let core = core.clone();
         let request = request.clone();
+        let started = Arc::clone(&started);
         if let Err(error) = in_handler(&restate, "start", move |scoped| {
             let core = core.clone();
             let request = request.clone();
+            let started = Arc::clone(&started);
             Box::pin(async move {
-                core.processes()
+                let record = core
+                    .processes()
                     .start(request, scoped)
                     .await
                     .expect("start the process");
+                *started.lock().unwrap() = Some(record.id);
             })
         })
         .await
@@ -389,6 +392,13 @@ async fn run_process(scenario: Scenario) -> Run {
             problems.push(format!("start: {error}"));
         }
     }
+    // The double mints sequentially, so a start whose answer was lost still
+    // names the backend's first process.
+    let process_id = started
+        .lock()
+        .unwrap()
+        .clone()
+        .unwrap_or_else(|| lash_core::ProcessIdMint::sequential_id_for_testing(1));
     let cancel = |name: &'static str| {
         let core = core.clone();
         let process_id = process_id.clone();
@@ -687,6 +697,17 @@ async fn serial_seeds_with_a_cancel_end_at_the_reference_or_cancelled() {
     assert!(violations.is_empty(), "{violations:#?}");
 }
 
+/// The workflow key of the matrix process's segment `ordinal`: the double
+/// mints sequentially, so the process is the backend's first.
+fn matrix_segment_key(ordinal: u64) -> String {
+    let process_id = lash_core::ProcessIdMint::sequential_id_for_testing(1);
+    if ordinal == 0 {
+        process_id.to_string()
+    } else {
+        format!("{process_id}#{ordinal}")
+    }
+}
+
 /// One crash at `point` in the segment keyed `key`, redriven: the reference
 /// terminal, each tool call once, no failed or paused invocation.
 async fn one_point_recovers(config: ServerConfig, key: &str, point: CrashPoint) {
@@ -713,7 +734,7 @@ async fn one_point_recovers(config: ServerConfig, key: &str, point: CrashPoint) 
 async fn a_lost_handover_result_rewrites_as_the_same_writer() {
     one_point_recovers(
         ServerConfig::default(),
-        "crash-matrix",
+        &matrix_segment_key(0),
         CrashPoint::BeforeRunResult {
             name: Some("lash.segment.handover".to_owned()),
         },
@@ -728,10 +749,11 @@ async fn a_lost_handover_result_rewrites_as_the_same_writer() {
 async fn a_crash_between_retire_and_output_redrives_cleanly() {
     let config = ServerConfig::default().always_replay(true);
     let reference = reference(0x3809, &config).await;
+    let segment_one = matrix_segment_key(1);
     let (_, entries) = reference
         .journals
         .iter()
-        .find(|(target, _)| segment_key(target) == Some("crash-matrix#1"))
+        .find(|(target, _)| segment_key(target) == Some(segment_one.as_str()))
         .expect("the reference crosses into segment 1");
     let output = entries
         .iter()
@@ -740,7 +762,7 @@ async fn a_crash_between_retire_and_output_redrives_cleanly() {
         .expect("segment 1 ends with its output");
     one_point_recovers(
         config,
-        "crash-matrix#1",
+        &segment_one,
         CrashPoint::BeforeCommand { index: output },
     )
     .await;

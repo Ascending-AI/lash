@@ -21,7 +21,6 @@ pub(super) fn process_event_type() -> lash_core::ProcessEventType {
 
 pub(super) fn process_record(process_id: &ProcessId) -> lash_core::ProcessRecord {
     let registration = lash_core::ProcessRegistration::new(
-        process_id,
         lash_core::ProcessInput::External {
             metadata: serde_json::json!({ "label": "External" }),
         },
@@ -41,10 +40,7 @@ pub(super) fn process_record(process_id: &ProcessId) -> lash_core::ProcessRecord
     )
     .with_event_types([process_event_type()])
     .with_wake_session_id(Some(SessionId::from("session-a".to_string())));
-    let mut record = lash_core::ProcessRecord::from_registration(
-        registration,
-        lash_core::ProcessIncarnation::from_registration_sequence(1),
-    );
+    let mut record = lash_core::ProcessRecord::from_registration(registration, process_id.clone());
     record.external_ref = Some(lash_core::ProcessExternalRef {
         backend: "worker".to_string(),
         id: "external:1".to_string(),
@@ -65,8 +61,7 @@ pub(super) fn process_record(process_id: &ProcessId) -> lash_core::ProcessRecord
 
 pub(super) fn process_event(process_id: &ProcessId) -> lash_core::ProcessEvent {
     lash_core::ProcessEvent {
-        process_id: ProcessId::from(process_id.to_string()),
-        process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
+        process_id: process_id.clone(),
         sequence: 1,
         event_type: "process.completed".to_string(),
         payload: serde_json::json!({ "await_output": { "type": "success", "value": true } }),
@@ -80,7 +75,7 @@ pub(super) fn process_event(process_id: &ProcessId) -> lash_core::ProcessEvent {
             "effect:1",
         )
         .with_caused_by(Some(lash_core::CausalRef::Process {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
         })),
         semantics: lash_core::runtime::ProcessEventSemantics {
             terminal: Some(lash_core::facade_support::ProcessTerminalSemantics {
@@ -99,8 +94,7 @@ pub(super) fn process_event(process_id: &ProcessId) -> lash_core::ProcessEvent {
 
 pub(super) fn observed_process() -> lash_core::facade_support::ObservedProcess {
     lash_core::facade_support::ObservedProcess {
-        process_id: ProcessId::from("process:observed"),
-        incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
+        process_id: lash_sansio::ProcessId::fixture("process:observed"),
         last_event_sequence: 0,
         identity: lash_core::ProcessIdentity::labelled("external", Some("External".to_string())),
         lifecycle: lash_core::ProcessStatus::Running,

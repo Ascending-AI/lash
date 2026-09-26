@@ -226,7 +226,7 @@ impl ExecutionHost for SignalHost {
         match op {
             AbilityOp::ResourceOperation(call) => match call.operation.as_str() {
                 "start" => Ok(AbilityResult::Value(lashlang::from_json(
-                    serde_json::json!({ "__handle__": "lash", "id": "p.1.run-1", "process_id": "run-1" }),
+                    process_handle_json("run-1"),
                 ))),
                 "signal" => {
                     let [Value::Record(fields)] = call.args.as_slice() else {
@@ -278,13 +278,34 @@ fn a_foreground_signal_delivers_a_named_process_signal() {
 
 struct StartHost;
 
+/// The JSON handle record a real host mints for the process a fixture labels.
+fn process_handle_json(label: &str) -> serde_json::Value {
+    let process_id = lash_sansio::ProcessId::fixture(label);
+    serde_json::json!({
+        "__handle__": "lash",
+        "id": lash_sansio::handle::HandleId::process(&process_id).as_str(),
+        "process_id": process_id.as_str(),
+    })
+}
+
 /// The handle record a real host mints for a started process; a bare string
 /// is a resolved value, and awaiting one is a guest error.
-fn process_handle(id: &str) -> Value {
+fn process_handle(label: &str) -> Value {
     let mut handle = lashlang::Record::new();
     handle.insert("__handle__".to_string(), Value::String("lash".into()));
-    handle.insert("id".to_string(), Value::String(format!("p.1.{id}").into()));
-    handle.insert("process_id".to_string(), Value::String(id.into()));
+    let process_id = lash_sansio::ProcessId::fixture(label);
+    handle.insert(
+        "id".to_string(),
+        Value::String(
+            lash_sansio::handle::HandleId::process(&process_id)
+                .as_str()
+                .into(),
+        ),
+    );
+    handle.insert(
+        "process_id".to_string(),
+        Value::String(process_id.as_str().into()),
+    );
     Value::Record(std::sync::Arc::new(handle))
 }
 
@@ -456,7 +477,7 @@ impl ExecutionHost for ProcessHandleIdInspectionHost {
                     .expect("a start passes its arguments in `args`");
                 assert_eq!(start_args.get("input"), Some(&Value::Number(42.0)));
                 Ok(AbilityResult::Value(lashlang::from_json(
-                    serde_json::json!({ "__handle__": "lash", "id": "p.1.process-test-42", "process_id": "process-test-42" }),
+                    process_handle_json("process-test-42"),
                 )))
             }
             AbilityOp::ResourceOperation(call) => {
@@ -524,13 +545,17 @@ fn process_handle_exposes_id_member_for_subsequent_operations() {
     assert_eq!(
         outcome,
         ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!({
-            "processId": "process-test-42",
+            "processId": lash_sansio::ProcessId::fixture("process-test-42").as_str(),
             "result": "status-ok"
         })))
     );
     assert_eq!(
         *host.status_checked_process_id.lock().unwrap(),
-        Some("process-test-42".to_string())
+        Some(
+            lash_sansio::ProcessId::fixture("process-test-42")
+                .as_str()
+                .to_string()
+        )
     );
 }
 
@@ -1375,11 +1400,7 @@ impl ExecutionHost for ProcessDurabilityHost {
                     .map(|name| name.to_string())
                     .unwrap_or_else(|| "worker".to_string());
                 Ok(AbilityResult::Value(lashlang::from_json(
-                    serde_json::json!({
-                        "__handle__": "lash",
-                        "id": format!("p.1.{name}"),
-                        "process_id": name,
-                    }),
+                    process_handle_json(&name),
                 )))
             }
             AbilityOp::Await(handle) => {
@@ -2327,11 +2348,7 @@ impl ExecutionHost for MixedAggregateHost {
                     .cloned()
                     .unwrap_or(Value::Null);
                 Ok(AbilityResult::Value(lashlang::from_json(
-                    serde_json::json!({
-                        "__handle__": "lash",
-                        "id": format!("p.1.{input}"),
-                        "process_id": input,
-                    }),
+                    process_handle_json(&input.to_string()),
                 )))
             }
             AbilityOp::Await(handle) => {
@@ -2340,8 +2357,8 @@ impl ExecutionHost for MixedAggregateHost {
                     .and_then(|record| record.get("process_id"))
                     .map(Value::to_string)
                     .unwrap_or_default();
-                if id.starts_with("fail") {
-                    Err(ExecutionHostError::new(format!("process {id} failed")))
+                if id == lash_sansio::ProcessId::fixture("fail-p").as_str() {
+                    Err(ExecutionHostError::new("process fail-p failed"))
                 } else {
                     Ok(AbilityResult::Value(Value::String(
                         format!("process {id} done").into(),
@@ -2444,7 +2461,7 @@ fn promise_all_keeps_nested_process_handles_shallow() {
     assert_eq!(
         run_mixed_aggregate(body).expect("nested process handle remains an ordinary value"),
         ExecutionOutcome::Finished(lashlang::from_json(serde_json::json!([
-            [{"__handle__": "lash", "id": "p.1.p", "process_id": "p"}],
+            [process_handle_json("p")],
             1
         ])))
     );

@@ -3,10 +3,10 @@ use pretty_assertions::assert_eq;
 use super::*;
 
 /// The process-scope sibling of [`leaf_request`]. `opener_ref` pins the
-/// incarnation the recorded opener names — inside `admitted_scope`, the one
-/// checked pair — and `enclosing` is the incarnation the request admits the
+/// process the recorded opener names — inside `admitted_scope`, the one
+/// admitted fact — and `enclosing` is the process the request admits the
 /// call inside. `None` only for the malformed probe: a process opener with
-/// no enclosing incarnation, which `ToolChildRequest::validate` refuses
+/// no enclosing process, which `ToolChildRequest::validate` refuses
 /// because the opener and its enclosing process are one fact (ADR 0099 §1).
 #[expect(
     clippy::expect_used,
@@ -26,8 +26,8 @@ fn process_leaf_request(
     routing: ToolChildCompletionRouting,
     env_ref: &crate::ProcessExecutionEnvRef,
     parent: &crate::RuntimeInvocation,
-    opener_ref: &crate::ProcessRef,
-    enclosing: Option<crate::ProcessRef>,
+    opener_ref: &crate::ProcessId,
+    enclosing: Option<crate::ProcessId>,
     cancellation: crate::TurnControlBindingId,
 ) -> crate::runtime::effect::ToolChildRequest {
     let mut request = crate::runtime::effect::ToolChildRequest::new(
@@ -44,13 +44,11 @@ fn process_leaf_request(
             parent: Some(parent.clone()),
         },
         crate::runtime::effect::ToolChildScope {
-            opener: crate::EffectOpener::for_scope(
-                &crate::AdmittedScope::new(scope.clone(), Some(opener_ref.clone()))
-                    .expect("the recorded pin names the claim's own process"),
-            )
-            .expect("a pinned process scope derives an opener"),
-            admitted_scope: crate::AdmittedScope::new(scope.clone(), Some(opener_ref.clone()))
-                .expect("the recorded pin names the claim's own process"),
+            opener: crate::EffectOpener::for_scope(&crate::AdmittedScope::process(
+                opener_ref.clone(),
+            ))
+            .expect("a process scope derives an opener"),
+            admitted_scope: crate::AdmittedScope::new(scope.clone()),
             session_id: session_id.clone(),
             agent_frame_id: crate::FrameNodeId::new("law-frame").expect("a valid frame id"),
         },
@@ -59,17 +57,17 @@ fn process_leaf_request(
         routing,
         super::law_session_facts(),
     );
-    if let Some(process_ref) = enclosing {
-        request = request.with_enclosing_process(process_ref);
+    if let Some(process_id) = enclosing {
+        request = request.with_enclosing_process(process_id);
     }
     request
 }
 
-/// The incarnation law's group: two deferred leaves — one resolved inside the
+/// The foreign-opener law's group: two deferred leaves — one resolved inside the
 /// crashed world so its settlement orders the crash boundary, one left parked
-/// as the survivor the foreign incarnation must refuse — an orchestrating
+/// as the survivor the foreign opener must refuse — an orchestrating
 /// child under the recorded pin, and a plain leaf. The malformed probe cannot
-/// ride inside the group: a process opener with no enclosing incarnation is
+/// ride inside the group: a process opener with no enclosing process is
 /// refused at envelope construction, which the law asserts directly instead.
 #[expect(
     clippy::expect_used,
@@ -80,7 +78,7 @@ fn incarnation_group(
     session_id: &crate::SessionId,
     group_key: &str,
     env_ref: &crate::ProcessExecutionEnvRef,
-    recorded_ref: &crate::ProcessRef,
+    recorded_ref: &crate::ProcessId,
     routing: ToolChildCompletionRouting,
     cancellation: crate::TurnControlBindingId,
 ) -> crate::RuntimeEffectGroup {
@@ -88,7 +86,7 @@ fn incarnation_group(
     let child = |position: usize,
                  tool_id: &str,
                  routing: ToolChildCompletionRouting,
-                 enclosing: Option<crate::ProcessRef>| {
+                 enclosing: Option<crate::ProcessId>| {
         child_envelope(
             scope,
             group_key,
@@ -144,42 +142,36 @@ fn incarnation_group(
     .expect("the incarnation group assembles")
 }
 
-/// ADR 0099 §1 and the C1 review's pinned-incarnation finding: a process
-/// opener is its name bound to **one** store-minted incarnation, so the
-/// same-name successor is a foreign opener, not a continuation.
+/// ADR 0099 §1 under ADR 0107: a process opener is its minted process id,
+/// so any other live process is a foreign opener, never a continuation.
 ///
-/// One group of four process-scoped children records `process(P)#7` as its
+/// One group of four process-scoped children records `process(P)` as its
 /// opener: two deferred leaves (one resolved to order the crash boundary, one
 /// the durable survivor), an orchestrating child (whose durable-parent
-/// derivation must name the recorded incarnation), and a plain leaf. The
-/// malformed request — a process opener that records no enclosing incarnation
-/// — is asserted directly: the boundary refuses it at envelope construction,
+/// derivation must name the recorded process), and a plain leaf. The
+/// malformed request — a process opener that records no enclosing process —
+/// is asserted directly: the boundary refuses it at envelope construction,
 /// so no journal can hold it, because the opener and its enclosing process
 /// are one fact.
 ///
-/// On the durable tiers the group journals under `process(P)#7`, the worker
-/// dies, and a live `process(P)#9` proves it cannot drain the survivor. On
-/// every tier the orchestrating settlement names `P#7` and the malformed
-/// request is refused with `ToolChildRequestOpener`.
+/// On the durable tiers the group journals under `process(P)`, the worker
+/// dies, and a live opener of another process `Q` proves it cannot drain the
+/// survivor. On every tier the orchestrating settlement names `P` and the
+/// malformed request is refused with `ToolChildRequestOpener`.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
+pub async fn another_process_is_not_the_recorded_opener(
     fixture: &ToolChildLawFixture,
     prefix: &str,
 ) {
     let session_id = crate::SessionId::from(format!("{prefix}-incarnation-session"));
-    let process_id = crate::ProcessId::from(format!("{prefix}-incarnation-process"));
+    let process_id = crate::ProcessId::fixture(&format!("{prefix}-incarnation-process"));
     let scope_p = crate::ExecutionScope::process(process_id.clone());
-    let recorded_ref = crate::ProcessRef::new(
-        process_id.clone(),
-        crate::ProcessIncarnation::from_registration_sequence(7),
-    );
-    let successor_ref = crate::ProcessRef::new(
-        process_id.clone(),
-        crate::ProcessIncarnation::from_registration_sequence(9),
-    );
+    let recorded_ref = process_id.clone();
+    let successor_ref = crate::ProcessId::fixture(&format!("{prefix}-incarnation-other-process"));
+    let scope_q = crate::ExecutionScope::process(successor_ref.clone());
     let opener_7 =
         crate::EffectOpener::for_scope(&crate::AdmittedScope::process(recorded_ref.clone()))
             .expect("a pinned process scope derives an opener");
@@ -196,21 +188,21 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
             definitions: leaf_definitions(),
             observation: Arc::clone(&observation),
             session_id: session_id.clone(),
-            intent_target: crate::ProcessId::from("unused-in-incarnation"),
+            intent_target: crate::ProcessId::fixture("unused-in-incarnation"),
             start_metadata: serde_json::Value::Null,
         })
     };
     // Derived through the same projection the store writes, never a
     // hand-formatted rendering: `storage_id` is the canonical
-    // `identity_encoding` of the recorded `ProcessRef`, so the law still
-    // proves the body's parent is the recorded incarnation and not whatever
+    // `identity_encoding` of the recorded `ProcessId`, so the law still
+    // proves the body's parent is the recorded process and not whatever
     // string a retired delimiter codec would have produced.
     let expected_parent = crate::ParentScope::process(recorded_ref.clone())
         .storage_id()
         .expect("an owned process parent projects a storage id");
 
     // The malformed probe: a process opener that records no enclosing
-    // incarnation. `ToolChildRequest::validate` makes the opener and its
+    // process. `ToolChildRequest::validate` makes the opener and its
     // enclosing process one fact, so the envelope constructor refuses the
     // pair — the malformed request cannot be journaled at all, which is a
     // stronger boundary than the settle-time refusal a group child could
@@ -232,7 +224,7 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
     );
     let error = malformed
         .validate()
-        .expect_err("a process opener without its enclosing incarnation is refused");
+        .expect_err("a process opener without its enclosing process is refused");
     assert_eq!(
         error.code,
         crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
@@ -256,7 +248,7 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
         "no journal can hold a request whose opener and enclosing process disagree: {error}"
     );
 
-    /// Asserts the orchestrating settlement's recorded incarnation — identical
+    /// Asserts the orchestrating settlement's recorded process — identical
     /// on every tier.
     fn assert_process_settlements(
         settlements: &mut [crate::GroupSettlement],
@@ -285,8 +277,8 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
         assert_eq!(
             output["parent"],
             serde_json::json!(expected_parent),
-            "the body's durable parent names the recorded incarnation, never \
-             the name's current owner: {output}"
+            "the body's durable parent names the recorded process, never \
+             another live process: {output}"
         );
         assert_eq!(
             output["nested_ok"],
@@ -299,7 +291,7 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
             .expect("the plain leaf settled");
         assert!(
             plain.outcome.is_ok(),
-            "the plain leaf settles under the recorded incarnation: {:?}",
+            "the plain leaf settles under the recorded process: {:?}",
             plain.outcome
         );
     }
@@ -333,7 +325,7 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
                             definitions: leaf_definitions(),
                             observation: Arc::clone(&observation),
                             session_id: session_id.clone(),
-                            intent_target: crate::ProcessId::from("unused-in-incarnation"),
+                            intent_target: crate::ProcessId::fixture("unused-in-incarnation"),
                             start_metadata: serde_json::Value::Null,
                         }),
                         fixture_processes().await.process_registry(),
@@ -361,7 +353,7 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
                             .await,
                         ))
                         .await
-                        .expect("the group opens under the recorded incarnation's opener");
+                        .expect("the group opens under the recorded process's opener");
                     // Both deferred leaves park. The survivor's await lands
                     // under the process scope's journal — no session listing
                     // can see it — so the crash boundary is ordered instead
@@ -402,11 +394,11 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
             .as_ref()
             .expect("a durable tier hands out a drain");
 
-        // The same-name successor is live. It is a foreign opener: the drain
-        // reports the surviving child unrunnable and runs nothing.
+        // Another process is live. It is a foreign opener: the drain reports
+        // the surviving child unrunnable and runs nothing.
         let guard_9 = register_opener(
             &successor.host,
-            &scope_p,
+            &scope_q,
             provider(),
             Arc::clone(&registry),
             Arc::clone(&env_store),
@@ -416,23 +408,23 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
         let report = drain
             .drain_group(&group_key, &tokio_util::sync::CancellationToken::new())
             .await
-            .expect("the drain pass runs under the successor incarnation");
+            .expect("the drain pass runs under the other process");
         assert!(
             report.children.iter().all(|child| matches!(
                 child.outcome,
                 crate::testing::conformance_support::ChildDrainOutcome::NoExecutor
             )),
-            "incarnation 9 of the same name cannot drive the child incarnation 7 opened: {report:?}"
+            "another process cannot drive the child the recorded process opened: {report:?}"
         );
         assert_eq!(
             observation.executions_of("law_deferred").len(),
             2,
-            "the successor's drain ran nothing — only the crashed world's admission ran the leaves"
+            "the other process's drain ran nothing — only the crashed world's admission ran the leaves"
         );
         drop(guard_9);
 
-        // The recorded incarnation registers again — how a durable process
-        // opener returns — and its drain replays the journaled Pending
+        // The recorded process's opener registers again — how a durable
+        // process opener returns — and its drain replays the journaled Pending
         // attempt; the out-of-band resolution settles the child.
         let _guard_7 = register_opener(
             &successor.host,
@@ -468,18 +460,18 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
                 child.outcome,
                 crate::testing::conformance_support::ChildDrainOutcome::Settled
             )),
-            "the recorded incarnation's drain settles its own child: {report:?}"
+            "the recorded process's drain settles its own child: {report:?}"
         );
     } else {
-        // A drain-less tier: the gate is the open itself. A live
-        // `process(P)#9` does not satisfy it; `process(P)#7` does.
+        // A drain-less tier: the gate is the open itself. A live opener of
+        // `process(Q)` does not satisfy it; `process(P)`'s does.
         let host = world.host;
         let scoped = host
             .scoped(crate::AdmittedScope::process(recorded_ref.clone()))
             .expect("the process scope binds");
         let guard_9 = register_opener(
             &host,
-            &scope_p,
+            &scope_q,
             provider(),
             Arc::clone(&registry),
             Arc::clone(&env_store),
@@ -502,7 +494,7 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
                 .await,
             ))
             .await
-            .expect_err("a group whose recorded incarnation is not the live one refuses to open");
+            .expect_err("a group whose recorded opener is not live refuses to open");
         drop(guard_9);
 
         let _guard_7 = register_opener(
@@ -530,7 +522,7 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
                 .await,
             ))
             .await
-            .expect("the group opens once its recorded incarnation is live");
+            .expect("the group opens once its recorded opener is live");
         let key0 = observation.parked_key(&format!("{group_key}-call-0")).await;
         let key3 = observation.parked_key(&format!("{group_key}-call-3")).await;
         resolve_when_registered(
@@ -570,7 +562,7 @@ pub async fn a_same_name_process_incarnation_is_not_the_recorded_opener(
 
     // Each deferred leaf ran exactly once — the survivor's journaled Pending
     // replayed on the durable tiers — under its recorded session, with the
-    // recorded incarnation's name as its enclosing process.
+    // recorded process as its enclosing process.
     let runs = observation.executions_of("law_deferred");
     assert_eq!(
         runs.len(),

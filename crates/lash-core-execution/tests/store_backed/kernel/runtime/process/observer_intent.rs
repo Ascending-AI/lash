@@ -1,8 +1,8 @@
 mod tests {
+    use crate::SessionId;
     use crate::plugin::{SessionObservedProcessOutcome, SessionObserverIntent};
     use crate::runtime::{SessionObserverIntentSource, reconcile_session_process_observer_intents};
     use crate::support::prelude::*;
-    use crate::{ProcessId, SessionId};
 
     use crate::support::memory_store_set;
 
@@ -10,9 +10,8 @@ mod tests {
     async fn noproc_receipts_preserve_missing_and_pruned_outcomes() {
         let backend = memory_store_set().await;
         let registry = backend.process_registry();
-        registry
+        let registered = registry
             .register_process(crate::ProcessRegistration::new(
-                "pruned-process",
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -27,7 +26,7 @@ mod tests {
             .expect("register process before pruning");
         let pruned = registry
             .complete_process(
-                &ProcessId::from("pruned-process"),
+                &registered.id,
                 crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                     serde_json::Value::Null,
                 )),
@@ -49,10 +48,10 @@ mod tests {
             Some(registry.as_ref()),
             &SessionId::from("noproc-session"),
             SessionObserverIntentSource::Unstored(vec![
-                SessionObserverIntent::host_requested("unknown-host"),
-                SessionObserverIntent::host_requested("unknown-fork"),
-                SessionObserverIntent::host_requested("pruned-process"),
-                SessionObserverIntent::host_requested("pruned-process"),
+                SessionObserverIntent::host_requested(crate::ProcessId::fixture("unknown-host")),
+                SessionObserverIntent::host_requested(crate::ProcessId::fixture("unknown-fork")),
+                SessionObserverIntent::host_requested(pruned.id.clone()),
+                SessionObserverIntent::host_requested(pruned.id.clone()),
             ]),
         )
         .await
@@ -70,11 +69,10 @@ mod tests {
         )));
     }
     #[tokio::test]
-    async fn selected_incarnation_never_retargets_a_reused_process_name() {
+    async fn a_selected_pruned_process_never_retargets_to_a_later_process() {
         let backend = memory_store_set().await;
         let registry = backend.process_registry();
         let registration = crate::ProcessRegistration::new(
-            "reused-observer-name",
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -89,7 +87,7 @@ mod tests {
             .register_process(registration.clone())
             .await
             .expect("first run");
-        let selected = crate::ProcessRef::from_record(&first);
+        let selected = first.id.clone();
         let terminal = registry
             .complete_process(
                 &first.id,
@@ -112,23 +110,25 @@ mod tests {
         let newer = registry
             .register_process(registration)
             .await
-            .expect("new incarnation");
+            .expect("a later process");
         let session_id = SessionId::from("selected-observer");
         let receipts = reconcile_session_process_observer_intents(
             Some(registry.as_ref()),
             &session_id,
-            SessionObserverIntentSource::Unstored(vec![SessionObserverIntent::host_requested_ref(
+            SessionObserverIntentSource::Unstored(vec![SessionObserverIntent::host_requested(
                 selected.clone(),
             )]),
         )
         .await
         .expect("best effort receipt");
-        assert_eq!(
-            receipts[0].outcome,
-            SessionObservedProcessOutcome::IncarnationSuperseded {
-                requested_incarnation: selected.incarnation,
-                current_incarnation: newer.incarnation,
-            }
+        assert_ne!(newer.id, selected, "a minted id is never reused");
+        assert!(
+            matches!(
+                receipts[0].outcome,
+                SessionObservedProcessOutcome::NoLongerRetained { .. }
+            ),
+            "a pruned selection is reported as pruned: {:?}",
+            receipts[0].outcome
         );
         assert!(
             !registry

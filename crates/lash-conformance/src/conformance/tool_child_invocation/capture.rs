@@ -120,7 +120,7 @@ pub async fn a_crashed_child_replays_its_committed_attempts_facts(
                     definitions: leaf_definitions(),
                     observation: Arc::clone(&observation),
                     session_id: session_id.clone(),
-                    intent_target: crate::ProcessId::from("unused-in-capture"),
+                    intent_target: crate::ProcessId::fixture("unused-in-capture"),
                     start_metadata: serde_json::Value::Null,
                 });
                 let _guard = register_opener(
@@ -205,7 +205,7 @@ pub async fn a_crashed_child_replays_its_committed_attempts_facts(
         definitions: leaf_definitions(),
         observation: Arc::clone(&observation),
         session_id: session_id.clone(),
-        intent_target: crate::ProcessId::from("unused-in-capture"),
+        intent_target: crate::ProcessId::fixture("unused-in-capture"),
         start_metadata: serde_json::Value::Null,
     });
     let registry = (fixture.make_processes)().await.process_registry();

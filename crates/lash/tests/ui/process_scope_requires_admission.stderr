@@ -1,0 +1,14 @@
+error[E0308]: mismatched types
+  --> tests/ui/process_scope_requires_admission.rs:10:9
+   |
+ 8 |     let _ = lash::runtime::ScopedEffectController::borrowed(
+   |             ----------------------------------------------- arguments to this function are incorrect
+ 9 |         controller,
+10 |         lash::runtime::ExecutionScope::process(process_id),
+   |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ expected `AdmittedScope`, found `ExecutionScope`
+   |
+note: associated function defined here
+  --> $WORKSPACE/crates/lash-core-execution/src/runtime/effect/executor/control/scope.rs
+   |
+   |     pub fn borrowed(
+   |            ^^^^^^^^

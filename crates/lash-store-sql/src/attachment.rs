@@ -20,7 +20,7 @@
 //! dialect-only; the last two are shared, and each exists **twice**.
 //!
 //! The pair is the deployment, not a parameter. A deployment with a process
-//! registry bound can prove a process owner dead — the owning incarnation is
+//! registry bound can prove a process owner dead — the owning process is
 //! gone from `processes` — and one without it cannot, so it conservatively
 //! retains process-owned rows. Those are two production shapes, so they are
 //! two statements ([`manifest::ManifestStatements::select_live_root`] and

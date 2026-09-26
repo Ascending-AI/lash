@@ -187,7 +187,7 @@ pub(super) async fn recording_context_process_await_reports_turn_cancelled() {
     let task = tokio::spawn(async move {
         RestateControllerContext::await_process_terminal_or_turn_cancel(
             &task_context,
-            ProcessId::from("recording-process-child"),
+            ProcessId::fixture("recording-process-child"),
             Some(turn_cancel),
             crate::controller::context::ProcessCancelRace::NotRaced,
         )
@@ -228,7 +228,7 @@ pub(super) async fn positional_replay_context_process_await_reports_turn_cancell
     let task = tokio::spawn(async move {
         RestateControllerContext::await_process_terminal_or_turn_cancel(
             &task_context,
-            ProcessId::from("positional-process-child"),
+            ProcessId::fixture("positional-process-child"),
             Some(turn_cancel),
             crate::controller::context::ProcessCancelRace::NotRaced,
         )
@@ -271,7 +271,7 @@ pub(super) async fn replayable_recording_context_process_await_reports_turn_canc
     let task = tokio::spawn(async move {
         RestateControllerContext::await_process_terminal_or_turn_cancel(
             &task_context,
-            ProcessId::from("replayable-process-child"),
+            ProcessId::fixture("replayable-process-child"),
             Some(turn_cancel),
             crate::controller::context::ProcessCancelRace::NotRaced,
         )
@@ -353,7 +353,7 @@ pub(super) fn restate_turn_cancel_race_excludes_process_owned_waits() {
     let turn_scope = durable_turn_scope("session", "turn");
     let process_scoped_sleep = lash_core::RuntimeEffectInvocation::new(
         lash_core::EffectAddress::new(
-            ExecutionScope::process("worker"),
+            ExecutionScope::process(lash_core::ProcessId::fixture("worker")),
             "session:turn:1:0:process:worker:sleep:1",
         )
         .expect("valid process sleep address"),
@@ -376,7 +376,9 @@ pub(super) fn restate_turn_cancel_race_excludes_process_owned_waits() {
             &test_restate_authority_id(),
             &process_scoped_sleep,
             true,
-            Some(&ExecutionScope::process("worker")),
+            Some(&ExecutionScope::process(lash_core::ProcessId::fixture(
+                "worker"
+            ))),
         )
         .expect("explicit process scope")
         .is_none(),
@@ -750,7 +752,7 @@ pub(super) async fn restate_routes_every_execution_scope_to_an_exact_durable_wai
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let scopes = [
         durable_turn_scope("session", "turn"),
-        ExecutionScope::process("process"),
+        ExecutionScope::process(lash_core::ProcessId::fixture("process")),
         ExecutionScope::queue_drain("session", "drain"),
         ExecutionScope::session_delete("session"),
         ExecutionScope::runtime_operation("operation"),
@@ -1371,8 +1373,8 @@ pub(super) async fn a_process_parked_on_a_signal_is_cancelled_by_its_durable_rac
     let authority = RestateAuthorityId::new("process-signal-owner").expect("valid test authority");
     let key = restate_await_event_key_for_authority(
         &authority,
-        &ExecutionScope::process("worker"),
-        AwaitEventWaitIdentity::process_signal(lash_core::ProcessId::from("worker"), "go", 1),
+        &ExecutionScope::process(lash_core::ProcessId::fixture("worker")),
+        AwaitEventWaitIdentity::process_signal(lash_core::ProcessId::fixture("worker"), "go", 1),
     )
     .expect("process signal wait key");
     let lent_stop = tokio_util::sync::CancellationToken::new();

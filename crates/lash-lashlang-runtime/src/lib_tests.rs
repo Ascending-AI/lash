@@ -89,24 +89,35 @@ fn effect_group_wait_identity_uses_the_durable_group_contract() {
     );
 }
 
-/// A process engine runs inside a durable process execution. The harness
-/// registers the process under the invocation's authority and wires its event
-/// log, which the runtime writes the durable effect summary to (FIG-3464).
-pub(crate) async fn durable_process_events(
+/// Register the harness process and answer the id the registrar minted for
+/// it: every scope and authority the run needs names that id, so the harness
+/// registers before it builds them (ADR 0107).
+pub(crate) async fn register_harness_process(
     registry: &Arc<dyn lash_core::ProcessRegistry>,
     registration: &lash_core::ProcessRegistration,
-    authority: &lash_core::ProcessExecutionWriteAuthority,
-) -> lash_core_execution::session::RuntimeExecutionProcessEventContext {
+) -> lash_core::ProcessId {
     let env_ref = lash_core::testing::process_execution_env_fixture_ref();
     registry
         .register_process(registration.clone().with_execution_env_ref(Some(env_ref)))
         .await
-        .expect("register the harness process");
+        .expect("register the harness process")
+        .id
+}
+
+/// A process engine runs inside a durable process execution. The harness
+/// records the registered process's start under the invocation's authority and
+/// wires its event log, which the runtime writes the durable effect summary to
+/// (FIG-3464).
+pub(crate) async fn durable_process_events(
+    registry: &Arc<dyn lash_core::ProcessRegistry>,
+    process_id: &lash_core::ProcessId,
+    authority: &lash_core::ProcessExecutionWriteAuthority,
+) -> lash_core_execution::session::RuntimeExecutionProcessEventContext {
     let started = authority
         .invocation_started()
         .expect("the harness invocation names its execution");
     registry
-        .record_first_started_with_authority(&registration.id, started, authority)
+        .record_first_started_with_authority(process_id, started, authority)
         .await
         .expect("record the harness execution start");
     lash_core_execution::session::RuntimeExecutionProcessEventContext {
@@ -215,10 +226,8 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
         process_name: "listen".to_string(),
         args: serde_json::Map::new(),
     };
-    let process_id = lash_core::ProcessId::from("signal-process");
     let registration = || {
         lash_core::ProcessRegistration::new(
-            process_id.clone(),
             input.to_process_input().expect("valid process input"),
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessProvenance::host(),
@@ -235,10 +244,11 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
         )))
     };
     let registry = lash_core::Backend::from(memory_backend().await).process_registry();
-    registry
+    let process_id = registry
         .register_process(registration())
         .await
-        .expect("signal process registers");
+        .expect("signal process registers")
+        .id;
     let owner = lash_core::LeaseOwnerIdentity::opaque("signal-worker", "signal-worker-run");
     let lease = registry
         .claim_process_lease(&process_id, &owner, 60_000)
@@ -260,17 +270,13 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
         )
         .await
         .expect("record signal process start");
-    let incarnation = lash_core::ProcessIncarnation::from_registration_sequence(1);
     let backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open a SQLite memory backend");
     let effect_host = lash_core::Backend::from(backend.clone()).effect_host();
     let scoped = lash_core::EffectHost::scoped_static(
         effect_host.as_ref(),
-        lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
-            process_id.clone(),
-            incarnation,
-        )),
+        lash_core::AdmittedScope::process(process_id.clone()),
     )
     .expect("valid process scope")
     .expect("the backend host lends a static controller");
@@ -292,7 +298,7 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
     let registry_port: Arc<dyn lash_core::ProcessRegistry> = registry;
     let context = lash_core::ProcessEngineRunContext::new(
         registration(),
-        incarnation,
+        process_id.clone(),
         lash_core::ProcessExecutionContext::default().with_execution_write_authority(
             lash_core::ProcessExecutionWriteAuthority::lease(lease).bind_attempt(1),
         ),
@@ -432,9 +438,7 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
         process_name: "batch".to_string(),
         args: serde_json::Map::new(),
     };
-    let process_id = lash_core::ProcessId::from("batch-process");
     let registration = lash_core::ProcessRegistration::new(
-        process_id.clone(),
         input.to_process_input().expect("valid process input"),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
@@ -446,17 +450,15 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
         input.process_identity(),
     ));
-    let incarnation = lash_core::ProcessIncarnation::from_registration_sequence(1);
     let backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open a SQLite memory backend");
+    let registry = lash_core::Backend::from(backend.clone()).process_registry();
+    let process_id = crate::lib_tests::register_harness_process(&registry, &registration).await;
     let effect_host = lash_core::Backend::from(backend.clone()).effect_host();
     let scoped = lash_core::EffectHost::scoped_static(
         effect_host.as_ref(),
-        lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
-            process_id.clone(),
-            incarnation,
-        )),
+        lash_core::AdmittedScope::process(process_id.clone()),
     )
     .expect("valid process scope")
     .expect("the backend host lends a static controller");
@@ -477,14 +479,15 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
     let plugins = Arc::clone(&built.dispatch.plugins);
     let catalog = Arc::clone(&built.dispatch.tool_catalog);
     let expected_catalog = Arc::clone(&catalog);
-    let registry = lash_core::Backend::from(backend.clone()).process_registry();
-    let authority = lash_core::ProcessExecutionWriteAuthority::invocation(process_id, "batch-run")
-        .bind_attempt(1);
-    let process_events = durable_process_events(&registry, &registration, &authority).await;
+    let authority =
+        lash_core::ProcessExecutionWriteAuthority::invocation(process_id.clone(), "batch-run")
+            .bind_attempt(1);
+    let process_events = durable_process_events(&registry, &process_id, &authority).await;
     let execution_registration = registration.clone();
+    let execution_process_id = process_id.clone();
     let context = lash_core::ProcessEngineRunContext::new(
         registration,
-        incarnation,
+        process_id.clone(),
         lash_core::ProcessExecutionContext::default().with_execution_write_authority(authority),
         lash_core::testing::process_work_wiring_for_registry(registry),
         lash_core::SessionId::from("batch-session"),
@@ -504,9 +507,11 @@ async fn real_process_tool_batch_wait_uses_the_dispatch_batch_id() {
             assert!(Arc::ptr_eq(&catalog, &expected_catalog));
             Ok(
                 lash_core_execution::runtime::ProcessEngineRuntimeContext::new(
-                    built
-                        .into_runtime()
-                        .with_process_execution(&execution_registration, process_events),
+                    built.into_runtime().with_process_execution(
+                        execution_process_id,
+                        &execution_registration,
+                        process_events,
+                    ),
                     lash_core_execution::runtime::ProcessEngineRunGuard::new(|_| {
                         Box::pin(async { Ok(()) })
                     }),
@@ -1425,55 +1430,8 @@ fn remote_grant_tool_binding_accessor_reports_absent_valid_and_malformed() {
     assert!(malformed.tool_binding().is_err());
 }
 
-#[test]
-fn deterministic_process_id_reuses_replayed_start_site_and_args() {
-    let input = test_process_input(serde_json::json!({ "root": "." }));
-    let site = test_start_site("child_process:scan", 1);
-
-    let first = deterministic_lashlang_process_id("parent:root", &site, &input)
-        .expect("process id derives");
-    let second = deterministic_lashlang_process_id("parent:root", &site, &input)
-        .expect("process id derives");
-
-    assert_eq!(first, second);
-    assert!(first.starts_with("process:lashlang:v3:blake3:"));
-}
-
-#[test]
-fn deterministic_process_id_separates_parallel_sites_ordinals_and_parents() {
-    let input = test_process_input(serde_json::json!({ "root": "." }));
-    let left = deterministic_lashlang_process_id(
-        "parent:root",
-        &test_start_site("child_process:left", 1),
-        &input,
-    )
-    .expect("left id derives");
-    let right = deterministic_lashlang_process_id(
-        "parent:root",
-        &test_start_site("child_process:right", 1),
-        &input,
-    )
-    .expect("right id derives");
-    let second_ordinal = deterministic_lashlang_process_id(
-        "parent:root",
-        &test_start_site("child_process:left", 2),
-        &input,
-    )
-    .expect("second ordinal id derives");
-    let nested_parent = deterministic_lashlang_process_id(
-        "parent:nested",
-        &test_start_site("child_process:left", 1),
-        &input,
-    )
-    .expect("nested parent id derives");
-
-    assert_ne!(left, right);
-    assert_ne!(left, second_ordinal);
-    assert_ne!(left, nested_parent);
-}
-
 #[tokio::test(flavor = "current_thread")]
-async fn prepared_start_replays_same_registration_id_without_duplicate_child_identity() {
+async fn prepared_start_replays_same_start_key_without_duplicate_child_identity() {
     let store = crate::lib_tests::memory_artifact_store().await;
     let environment = LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),
@@ -1494,7 +1452,10 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
 
     let first = prepare_lashlang_process_start(
         artifact_store.clone(),
-        "parent:root",
+        Some(lash_core::StartKey::for_host(
+            lash_core::StartKeyOwner::HOST,
+            "parent:root",
+        )),
         test_process_start(&output, site.clone(), "."),
         lash_core::ProcessOriginator::host(),
         lash_core::ProcessLifecyclePolicy::new(
@@ -1508,7 +1469,10 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
     .expect("first start prepares");
     let replayed = prepare_lashlang_process_start(
         artifact_store.clone(),
-        "parent:root",
+        Some(lash_core::StartKey::for_host(
+            lash_core::StartKeyOwner::HOST,
+            "parent:root",
+        )),
         test_process_start(&output, site.clone(), "."),
         lash_core::ProcessOriginator::host(),
         lash_core::ProcessLifecyclePolicy::new(
@@ -1522,7 +1486,10 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
     .expect("replayed start prepares");
     let sibling = prepare_lashlang_process_start(
         artifact_store.clone(),
-        "parent:root",
+        Some(lash_core::StartKey::for_host(
+            lash_core::StartKeyOwner::HOST,
+            "parent:root:2",
+        )),
         test_process_start(&output, test_start_site("child_process:scan", 2), "."),
         lash_core::ProcessOriginator::host(),
         lash_core::ProcessLifecyclePolicy::new(
@@ -1535,9 +1502,9 @@ async fn prepared_start_replays_same_registration_id_without_duplicate_child_ide
     .await
     .expect("sibling start prepares");
 
-    assert_eq!(first.request.id, replayed.request.id);
+    assert_eq!(first.request.start_key, replayed.request.start_key);
     assert_eq!(first.request.identity, replayed.request.identity);
-    assert_ne!(first.request.id, sibling.request.id);
+    assert_ne!(first.request.start_key, sibling.request.start_key);
 }
 
 #[tokio::test(flavor = "current_thread")]
@@ -1593,7 +1560,10 @@ process scan(root: str) -> str {
         }
         let error = prepare_lashlang_process_start(
             store.clone(),
-            "parent:four-shape",
+            Some(lash_core::StartKey::for_host(
+                lash_core::StartKeyOwner::HOST,
+                "parent:four-shape",
+            )),
             bad_start,
             lash_core::ProcessOriginator::host(),
             lash_core::ProcessLifecyclePolicy::new(
@@ -1649,7 +1619,10 @@ process scan(root: str) -> str {
 
     prepare_lashlang_process_start(
         store.clone(),
-        "parent:four-shape",
+        Some(lash_core::StartKey::for_host(
+            lash_core::StartKeyOwner::HOST,
+            "parent:four-shape",
+        )),
         start,
         lash_core::ProcessOriginator::host(),
         lash_core::ProcessLifecyclePolicy::new(
@@ -1693,12 +1666,9 @@ process scan(root: str) -> str {
             "incompatible with this host surface",
         ),
     ];
-    for (index, (input, catalog, registry_available, expected_code, expected_message)) in
-        cases.into_iter().enumerate()
-    {
+    for (input, catalog, registry_available, expected_code, expected_message) in cases {
         let payload = serde_json::to_value(&input).expect("valid process payload");
         let registration = lash_core::ProcessRegistration::new(
-            format!("four-shape-run-{index}"),
             input.to_process_input().expect("valid engine input"),
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessProvenance::host(),
@@ -1840,7 +1810,10 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
 
     prepare_lashlang_process_start(
         artifact_store.clone(),
-        "parent:root",
+        Some(lash_core::StartKey::for_host(
+            lash_core::StartKeyOwner::HOST,
+            "parent:root",
+        )),
         start_with(
             lashlang::ProcessDefinitionIdentity::from_artifact_export(
                 &matching.artifact,
@@ -1861,7 +1834,10 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
 
     let error = prepare_lashlang_process_start(
         artifact_store.clone(),
-        "parent:root",
+        Some(lash_core::StartKey::for_host(
+            lash_core::StartKeyOwner::HOST,
+            "parent:root",
+        )),
         start_with(
             lashlang::ProcessDefinitionIdentity::from_artifact_export(
                 &mismatching.artifact,
@@ -1906,7 +1882,10 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
     ] {
         let error = prepare_lashlang_process_start(
             artifact_store.clone(),
-            "parent:root",
+            Some(lash_core::StartKey::for_host(
+                lash_core::StartKeyOwner::HOST,
+                "parent:root",
+            )),
             start_with(definition),
             lash_core::ProcessOriginator::host(),
             lash_core::ProcessLifecyclePolicy::new(
@@ -1936,7 +1915,10 @@ async fn prepared_start_checks_indirect_process_identity_against_named_signature
     );
     let error = prepare_lashlang_process_start(
         artifact_store.clone(),
-        "parent:root",
+        Some(lash_core::StartKey::for_host(
+            lash_core::StartKeyOwner::HOST,
+            "parent:root",
+        )),
         start_with(wrong_ref),
         lash_core::ProcessOriginator::host(),
         lash_core::ProcessLifecyclePolicy::new(
@@ -2006,7 +1988,10 @@ async fn process_signature_union_accepts_a_later_matching_nonprocess_arm() {
 
     prepare_lashlang_process_start(
         artifact_store,
-        "parent:root",
+        Some(lash_core::StartKey::for_host(
+            lash_core::StartKeyOwner::HOST,
+            "parent:root",
+        )),
         start,
         lash_core::ProcessOriginator::host(),
         lash_core::ProcessLifecyclePolicy::new(
@@ -2116,21 +2101,6 @@ fn remote_tool_grant(name: &str) -> lash_remote_protocol::RemoteToolGrant {
     }
 }
 
-fn test_process_input(args: serde_json::Value) -> LashlangProcessInput {
-    let hash = lashlang::ContentHash::new("abc123");
-    let args = args
-        .as_object()
-        .expect("test args must be an object")
-        .clone();
-    LashlangProcessInput {
-        module_ref: lashlang::ModuleRef::new(&hash),
-        process_ref: lashlang::ProcessRef::new(hash.clone(), 7),
-        host_requirements_ref: lashlang::HostRequirementsRef::new(&hash),
-        process_name: "scan".to_string(),
-        args,
-    }
-}
-
 fn test_start_site(node_id: &str, occurrence: u64) -> lashlang::LashlangExecutionCallSite {
     lashlang::LashlangExecutionCallSite {
         site: lashlang::LashlangExecutionSite {
@@ -2196,7 +2166,10 @@ async fn a_prepared_start_records_the_resolved_attempt_bound_and_the_fingerprint
         async move {
             prepare_lashlang_process_start(
                 artifact_store,
-                "parent:bounded",
+                Some(lash_core::StartKey::for_host(
+                    lash_core::StartKeyOwner::HOST,
+                    "parent:bounded",
+                )),
                 start,
                 lash_core::ProcessOriginator::host(),
                 lash_core::ProcessLifecyclePolicy::new(
@@ -2223,15 +2196,12 @@ async fn a_prepared_start_records_the_resolved_attempt_bound_and_the_fingerprint
         "bounding a child does not change its recovery contract"
     );
 
-    // The bound is registration identity (`lifecycle_and_resolved_attempts_are
-    // _registration_identity` in lash-core), so a differing bound is a
-    // different registration for an otherwise identical start site. That is
-    // why a resumed segment re-registers with the value it recorded rather
-    // than with a changed host default.
+    // The start key is the start's only identity (ADR 0107): a differing
+    // bound changes the request, never the key a redrive presents.
     let rebounded = prepare(9).await;
     assert_eq!(rebounded.request.max_attempts, Some(9));
     assert_eq!(
-        bounded.request.id, rebounded.request.id,
-        "the start site alone derives the child id; only the recorded bound differs"
+        bounded.request.start_key, rebounded.request.start_key,
+        "the caller's key alone names the start; only the recorded bound differs"
     );
 }

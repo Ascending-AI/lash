@@ -652,11 +652,8 @@ const TOOL_LEAF: &str = "tool_leaf";
 const PROCESS_AWAIT_LEAF: &str = "await_process_leaf";
 
 /// The process the durable wait is taken against.
-fn awaited_process_ref() -> crate::ProcessRef {
-    crate::ProcessRef::new(
-        crate::ProcessId::from("child-process"),
-        crate::ProcessIncarnation::from_registration_sequence(1),
-    )
+fn awaited_process_ref() -> crate::ProcessId {
+    crate::ProcessId::fixture("child-process")
 }
 
 struct MixedBatchProbeTools {
@@ -780,14 +777,14 @@ async fn mixed_batch(
         let controller = Arc::clone(&controller);
         async move {
             let key = loop {
-                if let Some((process_ref, key)) = processes
+                if let Some((process_id, key)) = processes
                     .terminal_attachments
                     .lock_recover()
                     .first()
                     .cloned()
                 {
                     assert_eq!(
-                        process_ref,
+                        process_id,
                         awaited_process_ref(),
                         "the terminal armed must be the process the wait names"
                     );

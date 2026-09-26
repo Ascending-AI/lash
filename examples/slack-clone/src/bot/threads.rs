@@ -185,8 +185,8 @@ pub async fn open_thread_session(
                 },
             )
             .await?
-            .iter()
-            .map(lash::process::ProcessRef::from_record)
+            .into_iter()
+            .map(|record| record.id)
             .collect();
         match core
             .fork_at(lash::ForkRequest {

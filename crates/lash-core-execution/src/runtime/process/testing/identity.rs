@@ -3,9 +3,9 @@ use crate::SessionId;
 use serde_json::json;
 
 use super::super::model::{
-    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessIdentity, ProcessIncarnation,
-    ProcessInput, ProcessListFilter, ProcessListMode, ProcessProvenance, ProcessRecord,
-    ProcessRegistration, ProcessStatus, RecoveryContract, WaitKind, WaitState,
+    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessIdentity, ProcessInput,
+    ProcessListFilter, ProcessListMode, ProcessProvenance, ProcessRecord, ProcessRegistration,
+    ProcessStatus, RecoveryContract, WaitKind, WaitState,
 };
 
 #[test]
@@ -107,7 +107,6 @@ fn engine_entry(
 ) -> ProcessRecord {
     let mut record = ProcessRecord::from_registration(
         ProcessRegistration::new(
-            process_id,
             ProcessInput::Engine {
                 kind: "test-engine".to_string(),
                 payload: json!({
@@ -131,7 +130,7 @@ fn engine_entry(
         .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
             "process-env:test:{process_id}"
         )))),
-        ProcessIncarnation::from_registration_sequence(1),
+        process_id.clone(),
     );
     record.status = status;
     record
@@ -139,10 +138,10 @@ fn engine_entry(
 
 #[test]
 fn process_list_filter_matches_status_sets_and_the_non_waiting_complement() {
-    let process_ref = process_value("target", 0, "target");
+    let process_id = process_value("target", 0, "target");
     let mut waiting_entry = engine_entry(
-        &ProcessId::from("waiting"),
-        process_ref.clone(),
+        &crate::process_id_for_test("waiting"),
+        process_id.clone(),
         "target",
         ProcessStatus::Waiting,
     );
@@ -156,8 +155,8 @@ fn process_list_filter_matches_status_sets_and_the_non_waiting_complement() {
         },
     });
     let idle_entry = engine_entry(
-        &ProcessId::from("idle"),
-        process_ref,
+        &crate::process_id_for_test("idle"),
+        process_id,
         "target",
         ProcessStatus::Running,
     );

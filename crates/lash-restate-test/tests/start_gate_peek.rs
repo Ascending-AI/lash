@@ -112,8 +112,7 @@ async fn run_turn(seed: u64, crash: Option<CrashRule>) -> Run {
         backend.server().crash_on(rule);
     }
     let turn_id = lash::TurnId::from("turn-1");
-    let admitted = lash_core::AdmittedScope::unpinned(session.turn_scope(turn_id.clone()))
-        .expect("admit the turn scope");
+    let admitted = lash_core::AdmittedScope::new(session.turn_scope(turn_id.clone()));
     let outcome = Arc::new(Mutex::new(None));
     let attempt: lash_restate_test::HandlerAttempt = {
         let outcome = Arc::clone(&outcome);

@@ -169,7 +169,7 @@ pub(super) async fn process_park_feed(
                     page.events.push(ParkFeedEvent {
                         seq,
                         at_ms: plugin_u64_from_sql("ProcessParkEvent", "at_ms", at_ms)?,
-                        target: ProcessParkKey::from(process_id),
+                        target: crate::stored_process_id(&process_id)?,
                         park_id: ParkId::from_feed_sequence(plugin_u64_from_sql(
                             "ProcessParkEvent",
                             "park_id",

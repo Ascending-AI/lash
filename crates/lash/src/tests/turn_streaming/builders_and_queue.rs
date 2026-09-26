@@ -8,13 +8,12 @@ fn process_wake_draft(
     process: &str,
     input: impl Into<String>,
 ) -> crate::persistence::QueuedWorkBatchDraft {
-    let process_id = || lash_core::ProcessId::from(process);
+    let process_id = || lash_core::ProcessId::fixture(process);
     lash_core::runtime::process_wake_batch_draft(lash_core::ProcessWakeDelivery {
         version: lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("{process}-wake-1"),
         target_session_id: session_id.clone(),
         process_id: process_id(),
-        process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "process.wake".to_string(),
         event_invocation: lash_core::RuntimeInvocation {
@@ -178,10 +177,8 @@ pub(super) async fn advanced_turn_preserves_a_custom_effect_scope() -> Result<()
     let backend = recorder.backend().await;
     let effect_host = lash_core::Backend::from(backend.clone()).effect_host();
     let custom_scope = lash_core::ExecutionScope::runtime_operation("custom-foreground-scope");
-    let scoped_effect_controller = effect_host.scoped(
-        lash_core::AdmittedScope::unpinned(custom_scope.clone())
-            .expect("a runtime-operation scope admits unpinned"),
-    )?;
+    let scoped_effect_controller =
+        effect_host.scoped(lash_core::AdmittedScope::new(custom_scope.clone()))?;
     let core = standard_core_over(backend.clone().into())?;
     let session = core.session("custom-effect-scope").open().await?;
 
@@ -1331,13 +1328,19 @@ pub(super) async fn selected_queued_turn_refuses_partial_key_break_without_settl
             .queued_work()
             .await?
             .iter()
-            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .map(|batch| (batch.source_key.clone(), batch.enqueue_seq))
             .collect::<Vec<_>>(),
-        vec![
-            (Some("process:selected-a1:event:1:wake"), 1),
-            (Some("process:selected-b1:event:1:wake"), 2),
-            (Some("process:selected-a2:event:1:wake"), 3),
-        ]
+        [("selected-a1", 1), ("selected-b1", 2), ("selected-a2", 3)]
+            .map(|(process, seq)| {
+                (
+                    Some(format!(
+                        "process:{}:event:1:wake",
+                        lash_core::ProcessId::fixture(process)
+                    )),
+                    seq,
+                )
+            })
+            .to_vec()
     );
     Ok(())
 }

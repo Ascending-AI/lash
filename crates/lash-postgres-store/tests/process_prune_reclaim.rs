@@ -89,7 +89,6 @@ async fn postgres_process_prune_cleanup_evidence_survives_reopen_when_configured
     let registered = registry
         .register_process(
             lash_core_execution::ProcessRegistration::new(
-                "postgres-prune-cleanup",
                 lash_core_execution::ProcessInput::Engine {
                     kind: "test-engine".to_string(),
                     payload: serde_json::json!({"module_ref": "module-postgres"}),
@@ -137,13 +136,13 @@ async fn postgres_process_prune_cleanup_evidence_survives_reopen_when_configured
     assert_eq!(pending[0].env_ref, registered.env_ref);
     assert_eq!(pending[0].input, registered.input);
     let acknowledgement = reopened
-        .complete_process_artifact_cleanup(&registered.id, registered.incarnation)
+        .complete_process_artifact_cleanup(&registered.id)
         .await
         .expect("ack cleanup evidence");
     assert_eq!(
         acknowledgement,
         lash_core_execution::ProcessArtifactCleanupAck::Acknowledged {
-            process_ref: lash_core_execution::ProcessRef::from_record(&registered),
+            process_id: registered.id.clone(),
         }
     );
     assert!(
@@ -165,7 +164,6 @@ async fn postgres_process_prune_removes_queued_run_admission_and_members() {
     let registry = storage.process_registry();
     let process = registry
         .register_process(lash_core_execution::ProcessRegistration::new(
-            "postgres-prune-queued-run",
             lash_core_execution::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },

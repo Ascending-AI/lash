@@ -488,6 +488,7 @@ async fn runtime_scenario_waits_for_stale_session_lease_ttl() {
 
 struct RuntimeScenarioIntentProvider {
     calls: Arc<std::sync::atomic::AtomicUsize>,
+    target: Arc<std::sync::OnceLock<lash_core::ProcessId>>,
 }
 
 fn runtime_scenario_intent_tool() -> lash_core::ToolDefinition {
@@ -530,19 +531,19 @@ impl lash_core::ToolProvider for RuntimeScenarioIntentProvider {
                 })),
                 lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
                     session_id: SessionId::from(session_id.clone()),
-                    process_id: ProcessId::from("runtime-scenario-intent-target"),
+                    process_id: self.target.get().expect("the target is registered").clone(),
                     signal_name: "resume".to_string(),
                     payload: serde_json::json!({"kind": "signal"}),
                 }),
                 lash_core::ToolIntent::EmitProcessEvent(lash_core::EmitProcessEventIntent {
                     session_id: SessionId::from(session_id.clone()),
-                    process_id: ProcessId::from("runtime-scenario-intent-target"),
+                    process_id: self.target.get().expect("the target is registered").clone(),
                     event_type: "runtime.intent.note".to_string(),
                     payload: serde_json::json!({"kind": "emit"}),
                 }),
                 lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
                     session_id: SessionId::from(session_id),
-                    process_id: ProcessId::from("runtime-scenario-intent-target"),
+                    process_id: self.target.get().expect("the target is registered").clone(),
                 }),
             ]),
         )
@@ -553,8 +554,10 @@ impl lash_core::ToolProvider for RuntimeScenarioIntentProvider {
 async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
     let backend = memory_backend().await;
     let provider_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let target = Arc::new(std::sync::OnceLock::new());
     let tool_provider: Arc<dyn lash_core::ToolProvider> = Arc::new(RuntimeScenarioIntentProvider {
         calls: Arc::clone(&provider_calls),
+        target: Arc::clone(&target),
     });
     let model_calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let transport = lash_core::testing::TestProvider::builder()
@@ -598,10 +601,9 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
         .process_registry()
         .cloned()
         .expect("runtime scenario process registry");
-    registry
+    let registered = registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(
-                "runtime-scenario-intent-target",
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -628,6 +630,9 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
         )
         .await
         .expect("register runtime scenario intent target");
+    target
+        .set(registered.id.clone())
+        .expect("the target is registered once");
 
     let turn_scope = host_turn_scope(
         &runtime.host.core,
@@ -639,12 +644,8 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
         .expect("runtime scenario turn owns its controller");
     let wake_key = wake_controller
         .await_event_key(
-            &lash_core::ExecutionScope::process("runtime-scenario-intent-target"),
-            lash_core::AwaitEventWaitIdentity::process_signal(
-                "runtime-scenario-intent-target",
-                "resume",
-                1,
-            ),
+            &lash_core::ExecutionScope::process(registered.id.clone()),
+            lash_core::AwaitEventWaitIdentity::process_signal(registered.id.clone(), "resume", 1),
         )
         .await
         .expect("mint runtime-tier process-signal wait");
@@ -677,7 +678,7 @@ async fn runtime_scenario_opted_in_provider_drains_every_v1_tool_intent() {
         lash_core::Resolution::Ok(serde_json::json!({"kind": "signal"}))
     );
     let events = registry
-        .full_event_window(&ProcessId::from("runtime-scenario-intent-target"), 0)
+        .full_event_window(&registered.id, 0)
         .await
         .expect("read literal intent target events");
     assert_eq!(

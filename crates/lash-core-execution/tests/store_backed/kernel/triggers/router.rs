@@ -387,11 +387,7 @@ mod tests {
                 delivery.outcome
             );
             assert!(
-                registry
-                    .get_process(&delivery.process_id)
-                    .await
-                    .expect("read process")
-                    .is_none(),
+                delivery.process_id.is_none(),
                 "a refused route must not start the target process"
             );
             assert_eq!(
@@ -418,7 +414,10 @@ mod tests {
                 .emit(occurrence(), &scoped)
                 .await
                 .expect("retry emit");
-            assert_eq!(retry.deliveries[0].process_id, delivery.process_id);
+            // The refused attempt started nothing; the retry realizes the same
+            // reservation under its start key (ADR 0107).
+            assert_eq!(delivery.process_id, None);
+            assert!(retry.deliveries[0].process_id.is_some());
             assert_eq!(
                 retry.deliveries[0].outcome,
                 TriggerDeliveryEmitOutcome::AlreadyReserved
@@ -503,7 +502,12 @@ mod tests {
         assert_eq!(delivery.subscription_id, subscription.subscription_id);
         assert_eq!(delivery.outcome, TriggerDeliveryEmitOutcome::Started);
         let record = registry
-            .get_process(&delivery.process_id)
+            .get_process(
+                delivery
+                    .process_id
+                    .as_ref()
+                    .expect("the delivery started a process"),
+            )
             .await
             .expect("read process")
             .expect("started process record");
@@ -573,7 +577,10 @@ mod tests {
             )
             .await
             .expect("emit session trigger");
-        let process_id = &report.deliveries[0].process_id;
+        let process_id = report.deliveries[0]
+            .process_id
+            .as_ref()
+            .expect("the delivery started a process");
         assert!(
             crate::ProcessObserverRegistry::is_observer(
                 &*registry,

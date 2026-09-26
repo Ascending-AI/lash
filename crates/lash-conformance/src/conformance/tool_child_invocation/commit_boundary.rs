@@ -109,7 +109,6 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
         .expect("a turn scope derives an opener");
     let group_key = format!("{prefix}-protected-group");
     let call_0 = format!("{group_key}-call-0");
-    let intent_target = crate::ProcessId::from(format!("{session_id}-intent-target"));
 
     let probe = (fixture.make_world)(ToolChildWorldSpec {
         lease_ttl_ms: LIVE_LEASE_MS,
@@ -188,7 +187,11 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
 
     // The durable half: the child commits, parks inside its drain, the caller
     // closes under Cancel, and the process dies between the §4 point and the
-    // §5 discharge.
+    // §5 discharge. The crashed world and its successor share one durable
+    // store set, as a real deployment's do.
+    let stores = (fixture.make_processes)().await;
+    let intent_target =
+        register_intent_target(stores.process_registry().as_ref(), &session_id).await;
     let observation = Arc::new(LawObservation::default());
     let crash_sink = Arc::new(IntentSink::default());
     crashed_world(fixture, {
@@ -200,7 +203,7 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
         let observation = Arc::clone(&observation);
         let sink = Arc::clone(&crash_sink);
         let opener = opener.clone();
-        let make_processes = Arc::clone(&fixture.make_processes);
+        let stores = Arc::clone(&stores);
         move |world| {
             Box::pin(async move {
                 sink.hold_all();
@@ -211,7 +214,7 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
                     intent_target: intent_target.clone(),
                     start_metadata: serde_json::Value::Null,
                 });
-                let crash_processes = make_processes().await;
+                let crash_processes = Arc::clone(&stores);
                 let env_store = crash_processes.process_env_store();
                 let env_ref =
                     crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
@@ -283,7 +286,13 @@ pub async fn a_committed_childs_final_is_protected_and_its_drain_is_finished(
     let env_ref = crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
     install_child_host(&successor.host, &env_store);
     until_claims_lapse(&successor, &group_key).await;
-    let scenario = scenario(fixture, &session_id, serde_json::Value::Null).await;
+    let scenario = scenario_on(
+        Arc::clone(&stores),
+        &session_id,
+        serde_json::Value::Null,
+        Some(intent_target.clone()),
+    )
+    .await;
     let sink = Arc::new(IntentSink::default());
     let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {
         inner: crate::testing::effect_backed_process_service(
@@ -444,7 +453,9 @@ pub async fn drains_are_admitted_in_recorded_commit_order(
         let group_key = format!("{prefix}-commit-order-crash");
         let call_a = call_a_of(&group_key);
         let call_b = call_b_of(&group_key);
-        let intent_target = crate::ProcessId::from(format!("{session_id}-intent-target"));
+        let stores = (fixture.make_processes)().await;
+        let intent_target =
+            register_intent_target(stores.process_registry().as_ref(), &session_id).await;
         let observation = Arc::new(LawObservation::default());
         let crash_sink = Arc::new(IntentSink::default());
         crashed_world(fixture, {
@@ -457,7 +468,7 @@ pub async fn drains_are_admitted_in_recorded_commit_order(
             let observation = Arc::clone(&observation);
             let sink = Arc::clone(&crash_sink);
             let opener = opener.clone();
-            let make_processes = Arc::clone(&fixture.make_processes);
+            let stores = Arc::clone(&stores);
             move |world| {
                 Box::pin(async move {
                     observation.hold(&call_a);
@@ -469,7 +480,7 @@ pub async fn drains_are_admitted_in_recorded_commit_order(
                         intent_target: intent_target.clone(),
                         start_metadata: serde_json::Value::Null,
                     });
-                    let crash_processes = make_processes().await;
+                    let crash_processes = Arc::clone(&stores);
                     let env_store = crash_processes.process_env_store();
                     let env_ref =
                         crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
@@ -560,7 +571,13 @@ pub async fn drains_are_admitted_in_recorded_commit_order(
         let env_ref = crate::testing::process_execution_env_fixture(env_store.as_ref()).await;
         install_child_host(&successor.host, &env_store);
         until_claims_lapse(&successor, &group_key).await;
-        let scenario = scenario(fixture, &session_id, serde_json::Value::Null).await;
+        let scenario = scenario_on(
+            Arc::clone(&stores),
+            &session_id,
+            serde_json::Value::Null,
+            Some(intent_target.clone()),
+        )
+        .await;
         let sink = Arc::new(IntentSink::default());
         sink.hold(&call_b);
         let processes: Arc<dyn crate::ProcessService> = Arc::new(GatedProcessService {

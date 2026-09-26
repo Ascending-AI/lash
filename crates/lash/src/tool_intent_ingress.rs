@@ -971,9 +971,9 @@ impl ToolIntentIngress {
                 }
             }
             lash_core::ToolIntent::SignalProcess(intent) => {
-                let process_ref = self
+                let process_id = self
                     .process_registry()?
-                    .resolve_process_ref(&intent.process_id)
+                    .require_process_id(&intent.process_id)
                     .await?;
                 let event_type =
                     lash_core::facade_support::process_signal_event_type(&intent.signal_name)?;
@@ -986,16 +986,16 @@ impl ToolIntentIngress {
                         &identity.replay_key,
                     ));
                 lash_core::ProcessCommand::Signal {
-                    process_ref,
+                    process_id,
                     signal_name: intent.signal_name,
                     signal_id: identity.replay_key.clone(),
                     request,
                 }
             }
             lash_core::ToolIntent::CancelProcess(intent) => {
-                let process_ref = self
+                let process_id = self
                     .process_registry()?
-                    .resolve_process_ref(&intent.process_id)
+                    .require_process_id(&intent.process_id)
                     .await?;
                 // Same stamping core's recorded-intent cancel seam applies
                 // (`runtime/session_manager/process_runners/control.rs`): the
@@ -1003,7 +1003,7 @@ impl ToolIntentIngress {
                 // replay attribution. Not a separate contract — the broad
                 // `ProcessCommand` type is why it is spelled again here.
                 lash_core::ProcessCommand::Cancel {
-                    process_ref,
+                    process_id,
                     origin: lash_core::CancelOrigin::ModelRequested,
                     requester: identity.replay_key.clone(),
                     attribution: Some(lash_core::RuntimeReplayAttribution::ToolIntent(
@@ -1064,10 +1064,13 @@ impl ToolIntentIngress {
         draft: lash_core::TriggerSubscriptionDraft,
     ) -> crate::Result<lash_core::TriggerMutationReceipt> {
         let store = self.core.env.core.trigger_store();
-        let scoped = self.core.env.core.control.effect_host.scoped(
-            lash_core::AdmittedScope::unpinned(self.scope.clone())
-                .map_err(lash_core::RuntimeError::from)?,
-        )?;
+        let scoped = self
+            .core
+            .env
+            .core
+            .control
+            .effect_host
+            .scoped(lash_core::AdmittedScope::new(self.scope.clone()))?;
         let invocation = lash_core::RuntimeEffectInvocation::new(
             lash_core::EffectAddress::new(
                 scoped.execution_scope().clone(),
@@ -1218,10 +1221,13 @@ impl ToolIntentIngress {
                 std::sync::Arc::clone(&self.core.env.core.durability.process_env_store),
                 self.core.host_process_engines.clone(),
             );
-        let scoped = self.core.env.core.control.effect_host.scoped(
-            lash_core::AdmittedScope::unpinned(self.scope.clone())
-                .map_err(lash_core::RuntimeError::from)?,
-        )?;
+        let scoped = self
+            .core
+            .env
+            .core
+            .control
+            .effect_host
+            .scoped(lash_core::AdmittedScope::new(self.scope.clone()))?;
         router
             .emit_recorded_reporting_realization(request, &scoped)
             .await
@@ -1280,10 +1286,13 @@ impl ToolIntentIngress {
         command: lash_core::ProcessCommand,
     ) -> crate::Result<(lash_core::ProcessEffectOutcome, bool)> {
         let registry = self.process_registry()?;
-        let scoped = self.core.env.core.control.effect_host.scoped(
-            lash_core::AdmittedScope::unpinned(self.scope.clone())
-                .map_err(lash_core::RuntimeError::from)?,
-        )?;
+        let scoped = self
+            .core
+            .env
+            .core
+            .control
+            .effect_host
+            .scoped(lash_core::AdmittedScope::new(self.scope.clone()))?;
         #[expect(
             clippy::expect_used,
             reason = "the scope comes from the effect host's own `scoped` handle, which \

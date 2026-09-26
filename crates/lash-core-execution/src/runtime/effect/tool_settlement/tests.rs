@@ -192,7 +192,7 @@ fn a_settlement_round_trips_and_refuses_an_unknown_field() {
             kind: crate::ToolIntentKind::StartProcess,
             refusal: crate::ToolIntentRefusalReason::MissingToolCallId,
         }],
-        possession: vec![ProcessId::from("process:indexer")],
+        possession: vec![crate::process_id_for_test("process:indexer")],
         triggers: vec![trigger()],
         checkpoint_messages: vec![message("committed")],
         usage: vec![delta(1, "call-7", 2, spent(11))],

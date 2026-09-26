@@ -389,6 +389,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     /// one class and not the other: see [`ProcessWorkflowStartFailure`].
     fn start_process_workflow<'run>(
         &'run self,
+        process_id: lash_core::ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
     ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>
@@ -955,6 +956,7 @@ macro_rules! impl_restate_controller_context {
 
                 fn start_process_workflow<'run>(
                     &'run self,
+                    process_id: lash_core::ProcessId,
                     registration: ProcessRegistration,
                     execution_context: ProcessExecutionContext,
                 ) -> Pin<
@@ -967,15 +969,19 @@ macro_rules! impl_restate_controller_context {
                 where
                     'ctx: 'run,
                 {
-                    let workflow_key = registration.id.clone();
+                    let workflow_key = process_id.to_string();
                     let request = self
                         .workflow_client::<LashProcessWorkflowClient>(workflow_key.clone())
-                        .run(Json(RestateProcessWorkflowInput {
-                            registration,
-                            execution_context,
-                            segment_ordinal: 0,
-                            journal_version: crate::process::RESTATE_PROCESS_JOURNAL_VERSION,
-                        }));
+                        .run(Json(
+                            RestateProcessWorkflowInput {
+                                process_id,
+                                registration,
+                                execution_context,
+                                segment_ordinal: 0,
+                                journal_version: crate::process::RESTATE_PROCESS_JOURNAL_VERSION,
+                            }
+                            .into(),
+                        ));
                     let handle = request.send();
                     Box::pin(async move {
                         // A journaled send that completes with a terminal
@@ -997,7 +1003,7 @@ macro_rules! impl_restate_controller_context {
                 where
                     'ctx: 'run,
                 {
-                    let workflow_key = request.process_ref.process_id.clone();
+                    let workflow_key = request.process_id.to_string();
                     let request = self
                         .workflow_client::<LashProcessWorkflowClient>(workflow_key.clone())
                         .cancel(Json(request));

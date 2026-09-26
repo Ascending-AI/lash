@@ -31,9 +31,6 @@ const SESSION: &str = "atomic-tool-test-session";
 const TURN: &str = "attempt-atomicity-turn";
 const ATTEMPT_EFFECT_ID: &str = "attempt-atomicity-attempt";
 const CALL_ID: &str = "attempt-atomicity-call";
-const LIVE_PROCESS: &str = "attempt-atomicity-live";
-const TERMINAL_PROCESS: &str = "attempt-atomicity-terminal";
-const EXTERNAL_PROCESS: &str = "attempt-atomicity-external";
 const DIRECT_MODEL: &str = "mock-model";
 const DIRECT_TEXT: &str = "unstubbed direct answer";
 const FOLLOW_ON_EFFECT_ID: &str = "attempt-atomicity-follow-on";
@@ -187,6 +184,10 @@ struct Fixtures {
     registry: Arc<dyn lash_core::ProcessRegistry>,
     trigger_store: Arc<dyn lash_core::TriggerStore>,
     lease: lash_core::ProcessLease,
+    /// The live, terminal and externally-owned matrix processes.
+    live: ProcessId,
+    terminal: ProcessId,
+    external: ProcessId,
     child_process_starts: Arc<AtomicUsize>,
     /// A real runtime, kept alive so the direct-completion client handed to the
     /// matrix is the production one. A stubbed client answers before the
@@ -243,21 +244,15 @@ async fn fixtures() -> Fixtures {
         semantics: lash_core::ProcessEventSemanticsSpec::default(),
     })
     .collect::<Vec<_>>();
-    for (id, disposition) in [
-        (LIVE_PROCESS, lash_core::RecoveryContract::Rerunnable),
-        (
-            TERMINAL_PROCESS,
-            lash_core::RecoveryContract::ExternallyOwned,
-        ),
-        (
-            EXTERNAL_PROCESS,
-            lash_core::RecoveryContract::ExternallyOwned,
-        ),
+    let mut matrix = Vec::new();
+    for disposition in [
+        lash_core::RecoveryContract::Rerunnable,
+        lash_core::RecoveryContract::ExternallyOwned,
+        lash_core::RecoveryContract::ExternallyOwned,
     ] {
-        registry
+        let process_id = registry
             .register_process_with_observers(
                 lash_core::ProcessRegistration::new(
-                    id,
                     lash_core::ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
@@ -272,11 +267,15 @@ async fn fixtures() -> Fixtures {
                 &[SessionId::from(SESSION.to_string())],
             )
             .await
-            .expect("register matrix process");
+            .expect("register matrix process")
+            .id;
+        matrix.push(process_id);
     }
+    let [live, terminal, external]: [ProcessId; 3] =
+        matrix.try_into().expect("three matrix processes");
     registry
         .complete_process(
-            &ProcessId::from(TERMINAL_PROCESS),
+            &terminal,
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::json!("done"),
             )),
@@ -286,14 +285,14 @@ async fn fixtures() -> Fixtures {
         .expect("complete terminal matrix process");
     let owner = lash_core::LeaseOwnerIdentity::opaque("attempt-atomicity", "incarnation");
     let lease = registry
-        .claim_process_lease(&ProcessId::from(LIVE_PROCESS), &owner, 60_000)
+        .claim_process_lease(&live, &owner, 60_000)
         .await
         .expect("claim live process lease")
         .acquired()
         .expect("live process lease");
     registry
         .record_first_started_with_authority(
-            &ProcessId::from(LIVE_PROCESS),
+            &live,
             lash_core::ProcessStarted {
                 owner,
                 fencing_token: lease.fencing_token,
@@ -313,6 +312,9 @@ async fn fixtures() -> Fixtures {
         registry,
         trigger_store,
         lease,
+        live,
+        terminal,
+        external,
         child_process_starts: Arc::new(AtomicUsize::new(0)),
         runtime,
     }
@@ -432,7 +434,7 @@ fn tool_context_with_provider<'run>(
             },
         )))
         .process_events(
-            LIVE_PROCESS,
+            fixtures.live.clone(),
             lash_core::ProcessExecutionWriteAuthority::lease(fixtures.lease.clone()),
             lash_core::testing::process_work_wiring_for_registry(Arc::clone(&fixtures.registry)),
             None,
@@ -669,10 +671,7 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
     let ledger = NestedJournalLedger::new();
     let sentinel = AttemptAtomicitySentinel::new(&tier, Arc::clone(&ledger));
     let command = lash_core::ProcessCommand::Cancel {
-        process_ref: lash_core::ProcessRef::new(
-            LIVE_PROCESS,
-            lash_core::ProcessIncarnation::from_registration_sequence(1),
-        ),
+        process_id: fixtures.live.clone(),
         origin: lash_core::CancelOrigin::OperatorRequested,
         requester: "test:outside-attempt".to_string(),
         attribution: None,
@@ -713,7 +712,7 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
 
     let registry = Arc::clone(&fixtures.registry);
     let nested_target = registry
-        .resolve_process_ref(&ProcessId::from(EXTERNAL_PROCESS))
+        .require_process_id(&fixtures.external)
         .await
         .expect("resolve the nonterminal sentinel target");
     let nested_sentinel = &sentinel;
@@ -730,7 +729,7 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
         ),
         lash_core::RuntimeEffectLocalExecutor::testing(move |_envelope| async move {
             let command = lash_core::ProcessCommand::Cancel {
-                process_ref: nested_target,
+                process_id: nested_target,
                 origin: lash_core::CancelOrigin::OperatorRequested,
                 requester: "test:sentinel-leak".to_string(),
                 attribution: None,
@@ -775,7 +774,10 @@ async fn sentinel_test_only_leak_trips_inside_a_recorded_attempt() {
     .expect("test-only nested leak executes");
     assert_eq!(
         ledger.crossings_inside_attempt(),
-        vec!["execute_effect:process:process:cancel:attempt-atomicity-external".to_string()],
+        vec![format!(
+            "execute_effect:process:process:cancel:{}",
+            fixtures.external
+        )],
         "the literal test-only leak proves the sentinel fails red when a command escapes"
     );
 }
@@ -823,19 +825,19 @@ async fn sentinel_records_exactly_one_crossing_per_tool_intent() {
         })),
         lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
             session_id: SessionId::from(SESSION.to_string()),
-            process_id: ProcessId::from(LIVE_PROCESS.to_string()),
+            process_id: fixtures.live.clone(),
             signal_name: "resume".to_string(),
             payload: serde_json::json!({"step": "signal"}),
         }),
         lash_core::ToolIntent::EmitProcessEvent(lash_core::EmitProcessEventIntent {
             session_id: SessionId::from(SESSION.to_string()),
-            process_id: ProcessId::from(LIVE_PROCESS.to_string()),
+            process_id: fixtures.live.clone(),
             event_type: "attempt.atomicity.note".to_string(),
             payload: serde_json::json!({"step": "event"}),
         }),
         lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
             session_id: SessionId::from(SESSION.to_string()),
-            process_id: ProcessId::from(LIVE_PROCESS.to_string()),
+            process_id: fixtures.live.clone(),
         }),
     ]);
     let outcomes = lash_core::tool_dispatch::execute_final_tool_intents(
@@ -901,7 +903,7 @@ async fn over_budget_intent_batch_refuses_every_intent_and_executes_zero_command
             .map(|index| {
                 lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
                     session_id: SessionId::from(SESSION.to_string()),
-                    process_id: ProcessId::from(LIVE_PROCESS.to_string()),
+                    process_id: fixtures.live.clone(),
                     signal_name: "resume".to_string(),
                     payload: serde_json::json!({"index": index}),
                 })
@@ -958,10 +960,9 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
         lash_core::derive_tool_intent_identity(&SessionId::from(SESSION), TURN, Some(CALL_ID), 9)
             .expect("literal intent identity");
     let registry = fixtures_backend.process_registry();
-    registry
+    let registered = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                "structural-process",
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -981,7 +982,7 @@ async fn sentinel_uses_structural_intent_attribution_and_missing_metadata_overco
         .await
         .expect("register structural attribution target");
     let command = lash_core::ProcessCommand::EmitEvent {
-        process_id: ProcessId::from("structural-process"),
+        process_id: registered.id.clone(),
         request: lash_core::ProcessEventAppendRequest::new(
             "structural.note",
             serde_json::json!({"law": "overcount"}),
@@ -1067,7 +1068,7 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
     let intents = lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::SignalProcess(
         lash_core::SignalProcessIntent {
             session_id: SessionId::from(SESSION.to_string()),
-            process_id: ProcessId::from(LIVE_PROCESS.to_string()),
+            process_id: fixtures.live.clone(),
             signal_name: "resume".to_string(),
             payload: serde_json::json!({"recorded": "payload"}),
         },
@@ -1098,7 +1099,7 @@ async fn journal_first_redrive_ignores_live_terminal_mutation_and_replays_identi
     fixtures
         .registry
         .complete_process(
-            &ProcessId::from(LIVE_PROCESS),
+            &fixtures.live,
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::json!("terminal after first drain"),
             )),

@@ -6,13 +6,14 @@ use pretty_assertions::assert_eq;
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn canonical_process_event_payload_replay(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = ProcessId::from("canonical-process-event-payload-replay");
-    registry
+    let process_id = registry
         .register_process(
-            registration(&process_id).with_extra_event_types([plain_event_type("signal.zero")]),
+            registration("canonical-process-event-payload-replay")
+                .with_extra_event_types([plain_event_type("signal.zero")]),
         )
         .await
-        .expect("register canonical-payload process");
+        .expect("register canonical-payload process")
+        .id;
     let replay_key = lash_core::runtime::process_signal_wait_key(&process_id, "zero", 1);
     let first = registry
         .append_event(
@@ -43,16 +44,16 @@ pub(super) async fn canonical_process_event_payload_replay(registry: Arc<dyn Pro
 pub(super) async fn long_cancellation_requester_replay_is_backend_safe(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let process_id = ProcessId::from("long-cancellation-requester-replay");
     let record = registry
-        .register_process(registration(&process_id))
+        .register_process(registration("long-cancellation-requester-replay"))
         .await
         .expect("register long-cancellation process");
+    let process_id = record.id.clone();
     let requester = (0..800)
         .map(|index| format!("{index:08x}"))
         .collect::<String>();
     let request = ProcessEventAppendRequest::cancel_requested(
-        &ProcessRef::from_record(&record),
+        &record.id.clone(),
         &lash_core::CancelRequest::new(
             lash_core::CancelOrigin::OperatorRequested,
             format!("actor:{requester}"),

@@ -26,10 +26,10 @@ fn ingress_of(core: &LashCore) -> Result<crate::tools::ToolIntentIngress> {
     core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))
 }
 
-fn signal_intent(session_id: &SessionId) -> lash_core::ToolIntent {
+fn signal_intent(session_id: &SessionId, process: &ProcessId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
         session_id: SessionId::from(session_id.to_string()),
-        process_id: ProcessId::from(PROCESS.to_string()),
+        process_id: process.clone(),
         signal_name: SIGNAL.to_string(),
         payload: serde_json::json!({"law": "redelivered-signal"}),
     })
@@ -79,15 +79,16 @@ fn assert_duplicate_identity(
 }
 
 #[tokio::test]
-async fn redelivered_start_realizes_one_process_and_refuses_a_changed_declaration() -> Result<()> {
-    let (core, registry) = ingress_core().await?;
+async fn redelivered_start_realizes_one_process_and_a_changed_declaration_returns_it() -> Result<()>
+{
+    let (core, registry, _process) = ingress_core().await?;
     let key = ingress_of(&core)?.key("redelivered-start", 0);
 
     let first = ingress_of(&core)?
         .submit(key.clone(), start_intent(&SessionId::from(SESSION)))
         .await;
     assert_admitted(&first, "the first start");
-    let started = ProcessId::from(key.identity().replay_key.clone());
+    let started = super::started_process_id(&first);
     let created_at = registry
         .get_process(&started)
         .await?
@@ -105,17 +106,23 @@ async fn redelivered_start_realizes_one_process_and_refuses_a_changed_declaratio
         "a start the registry coalesced onto the recorded row",
     );
     assert_eq!(
+        super::started_process_id(&replayed),
+        started,
+        "the redelivery answers the process its key minted"
+    );
+    assert_eq!(
         registry
             .get_process(&started)
             .await?
             .expect("the coalesced start returns the original process")
             .created_at_ms,
         created_at,
-        "the request id stamped from the identity coalesces the redelivery onto one process"
+        "the start key derived from the identity coalesces the redelivery onto one process"
     );
 
-    // A changed declaration under the same identity is a different
-    // registration for an id the registry has already bound.
+    // The start key is trusted (ADR 0107): a changed declaration under the
+    // same identity names the same key, so the registry returns the process
+    // the key first minted and writes nothing.
     let changed_invocation = second_invocation_of(&core).await?;
     let mut changed = start_intent(&SessionId::from(SESSION));
     let lash_core::ToolIntent::StartProcess(intent) = &mut changed else {
@@ -124,15 +131,24 @@ async fn redelivered_start_realizes_one_process_and_refuses_a_changed_declaratio
     intent.declaration.input = lash_core::ProcessInput::External {
         metadata: serde_json::json!({"law": "changed-under-a-bound-identity"}),
     };
-    let refused = ingress_of(&changed_invocation)?.submit(key, changed).await;
-    assert_duplicate_identity(&refused, lash_core::ToolIntentKind::StartProcess);
+    let coalesced = ingress_of(&changed_invocation)?.submit(key, changed).await;
+    assert_replayed(&coalesced, true, "a changed declaration under a bound key");
     assert_eq!(
-        registry
-            .get_process(&started)
-            .await?
-            .expect("the refused change leaves the first process in place")
-            .created_at_ms,
-        created_at,
+        super::started_process_id(&coalesced),
+        started,
+        "the key answers the process it first minted"
+    );
+    let retained = registry
+        .get_process(&started)
+        .await?
+        .expect("the first process stays in place");
+    assert_eq!(retained.created_at_ms, created_at);
+    assert_eq!(
+        retained.input.as_ref(),
+        &lash_core::ProcessInput::External {
+            metadata: serde_json::Value::Null,
+        },
+        "the changed declaration never reaches the recorded row"
     );
     Ok(())
 }
@@ -148,14 +164,14 @@ async fn redelivered_start_realizes_one_process_and_refuses_a_changed_declaratio
 /// rather than the store's verdict.
 #[tokio::test]
 async fn a_coalesced_start_reports_replayed_and_a_fresh_start_does_not() -> Result<()> {
-    let (core, registry) = ingress_core().await?;
+    let (core, registry, _process) = ingress_core().await?;
     let key = ingress_of(&core)?.key("coalesced-start", 0);
 
     let realized = ingress_of(&core)?
         .submit(key.clone(), start_intent(&SessionId::from(SESSION)))
         .await;
     assert_replayed(&realized, false, "the start that created the row");
-    let started = ProcessId::from(key.identity().replay_key.clone());
+    let started = super::started_process_id(&realized);
     let created_at = registry
         .get_process(&started)
         .await?
@@ -191,17 +207,23 @@ async fn a_coalesced_start_reports_replayed_and_a_fresh_start_does_not() -> Resu
 
 #[tokio::test]
 async fn redelivered_event_appends_once_and_refuses_a_changed_payload() -> Result<()> {
-    let (core, registry) = ingress_core().await?;
+    let (core, registry, process) = ingress_core().await?;
     let key = ingress_of(&core)?.key("redelivered-emit", 0);
 
     let first = ingress_of(&core)?
-        .submit(key.clone(), emit_intent(&SessionId::from(SESSION)))
+        .submit(
+            key.clone(),
+            emit_intent(&SessionId::from(SESSION), &process),
+        )
         .await;
     assert_admitted(&first, "the first emission");
 
     let redelivery = second_invocation_of(&core).await?;
     let replayed = ingress_of(&redelivery)?
-        .submit(key.clone(), emit_intent(&SessionId::from(SESSION)))
+        .submit(
+            key.clone(),
+            emit_intent(&SessionId::from(SESSION), &process),
+        )
         .await;
     assert_admitted(&replayed, "the redelivered emission");
     assert_replayed(
@@ -210,13 +232,13 @@ async fn redelivered_event_appends_once_and_refuses_a_changed_payload() -> Resul
         "an append the store coalesced onto the recorded event",
     );
     assert_eq!(
-        emitted_event_count(&registry, EVENT).await?,
+        emitted_event_count(&registry, &process, EVENT).await?,
         1,
         "the event replay key coalesces the redelivery onto the first append"
     );
 
     let changed_invocation = second_invocation_of(&core).await?;
-    let mut changed = emit_intent(&SessionId::from(SESSION));
+    let mut changed = emit_intent(&SessionId::from(SESSION), &process);
     let lash_core::ToolIntent::EmitProcessEvent(intent) = &mut changed else {
         unreachable!("fixture is an event intent")
     };
@@ -224,7 +246,7 @@ async fn redelivered_event_appends_once_and_refuses_a_changed_payload() -> Resul
     let refused = ingress_of(&changed_invocation)?.submit(key, changed).await;
     assert_duplicate_identity(&refused, lash_core::ToolIntentKind::EmitProcessEvent);
     assert_eq!(
-        emitted_event_count(&registry, EVENT).await?,
+        emitted_event_count(&registry, &process, EVENT).await?,
         1,
         "a refused change cannot append a second event"
     );
@@ -233,18 +255,24 @@ async fn redelivered_event_appends_once_and_refuses_a_changed_payload() -> Resul
 
 #[tokio::test]
 async fn redelivered_signal_appends_once_and_refuses_a_changed_payload() -> Result<()> {
-    let (core, registry) = ingress_core().await?;
+    let (core, registry, process) = ingress_core().await?;
     let key = ingress_of(&core)?.key("redelivered-signal", 0);
     let signal_event = format!("signal.{SIGNAL}");
 
     let first = ingress_of(&core)?
-        .submit(key.clone(), signal_intent(&SessionId::from(SESSION)))
+        .submit(
+            key.clone(),
+            signal_intent(&SessionId::from(SESSION), &process),
+        )
         .await;
     assert_admitted(&first, "the first signal");
 
     let redelivery = second_invocation_of(&core).await?;
     let replayed = ingress_of(&redelivery)?
-        .submit(key.clone(), signal_intent(&SessionId::from(SESSION)))
+        .submit(
+            key.clone(),
+            signal_intent(&SessionId::from(SESSION), &process),
+        )
         .await;
     assert_admitted(&replayed, "the redelivered signal");
     assert_replayed(
@@ -253,13 +281,13 @@ async fn redelivered_signal_appends_once_and_refuses_a_changed_payload() -> Resu
         "a signal the store coalesced onto the recorded event",
     );
     assert_eq!(
-        emitted_event_count(&registry, &signal_event).await?,
+        emitted_event_count(&registry, &process, &signal_event).await?,
         1,
         "the signal wait key coalesces the redelivery onto the first append"
     );
 
     let changed_invocation = second_invocation_of(&core).await?;
-    let mut changed = signal_intent(&SessionId::from(SESSION));
+    let mut changed = signal_intent(&SessionId::from(SESSION), &process);
     let lash_core::ToolIntent::SignalProcess(intent) = &mut changed else {
         unreachable!("fixture is a signal intent")
     };
@@ -267,7 +295,7 @@ async fn redelivered_signal_appends_once_and_refuses_a_changed_payload() -> Resu
     let refused = ingress_of(&changed_invocation)?.submit(key, changed).await;
     assert_duplicate_identity(&refused, lash_core::ToolIntentKind::SignalProcess);
     assert_eq!(
-        emitted_event_count(&registry, &signal_event).await?,
+        emitted_event_count(&registry, &process, &signal_event).await?,
         1,
         "a refused change cannot append a second signal"
     );
@@ -276,14 +304,17 @@ async fn redelivered_signal_appends_once_and_refuses_a_changed_payload() -> Resu
 
 #[tokio::test]
 async fn redelivered_cancel_requests_the_same_cancellation_once() -> Result<()> {
-    let (core, registry) = ingress_core().await?;
+    let (core, registry, process) = ingress_core().await?;
     let key = ingress_of(&core)?.key("redelivered-cancel", 0);
 
     let first = ingress_of(&core)?
-        .submit(key.clone(), cancel_intent(&SessionId::from(SESSION)))
+        .submit(
+            key.clone(),
+            cancel_intent(&SessionId::from(SESSION), &process),
+        )
         .await;
     assert_admitted(&first, "the first cancel");
-    let requested = cancel_request_snapshot(&registry, PROCESS).await?;
+    let requested = cancel_request_snapshot(&registry, &process).await?;
     assert!(
         requested.is_some(),
         "the first cancel records a cancel request"
@@ -291,7 +322,10 @@ async fn redelivered_cancel_requests_the_same_cancellation_once() -> Result<()> 
 
     let redelivery = second_invocation_of(&core).await?;
     let replayed = ingress_of(&redelivery)?
-        .submit(key.clone(), cancel_intent(&SessionId::from(SESSION)))
+        .submit(
+            key.clone(),
+            cancel_intent(&SessionId::from(SESSION), &process),
+        )
         .await;
     assert_admitted(&replayed, "the redelivered cancel");
     assert_replayed(
@@ -300,7 +334,7 @@ async fn redelivered_cancel_requests_the_same_cancellation_once() -> Result<()> 
         "a cancel the store coalesced onto the recorded request",
     );
     assert_eq!(
-        cancel_request_snapshot(&registry, PROCESS).await?,
+        cancel_request_snapshot(&registry, &process).await?,
         requested,
         "the identity is the cancel requester, so the redelivery coalesces onto the first request"
     );
@@ -314,11 +348,9 @@ async fn redelivered_cancel_requests_the_same_cancellation_once() -> Result<()> 
     // changed target is refused with the same `DuplicateIdentity` vocabulary
     // the other four shapes and the runtime-owned tier use, and the second
     // process is never cancelled.
-    let other_target = "redelivered-cancel-other-target";
     let other = registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(
-                other_target,
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -338,18 +370,18 @@ async fn redelivered_cancel_requests_the_same_cancellation_once() -> Result<()> 
     let refused = ingress_of(&changed_invocation)?
         .submit(
             key,
-            cancel_intent_for_target(&SessionId::from(SESSION), other_target),
+            cancel_intent_for_target(&SessionId::from(SESSION), &other.id),
         )
         .await;
     assert_duplicate_identity(&refused, lash_core::ToolIntentKind::CancelProcess);
     assert!(
-        cancel_request_snapshot(&registry, other_target)
+        cancel_request_snapshot(&registry, &other.id)
             .await?
             .is_none(),
         "the refused change never reaches the second target"
     );
     assert_eq!(
-        cancel_request_snapshot(&registry, PROCESS).await?,
+        cancel_request_snapshot(&registry, &process).await?,
         requested,
         "the refused change leaves the first cancellation as recorded"
     );
@@ -407,10 +439,11 @@ async fn redelivered_trigger_ingests_once_and_refuses_a_changed_payload() -> Res
 
 async fn emitted_event_count(
     registry: &Arc<dyn ProcessRegistry>,
+    process: &ProcessId,
     event_type: &str,
 ) -> Result<usize> {
     Ok(registry
-        .full_event_window(&ProcessId::from(PROCESS), 0)
+        .full_event_window(process, 0)
         .await?
         .iter()
         .filter(|event| event.event_type == event_type)
@@ -419,10 +452,10 @@ async fn emitted_event_count(
 
 async fn cancel_request_snapshot(
     registry: &Arc<dyn ProcessRegistry>,
-    process_id: &str,
+    process_id: &ProcessId,
 ) -> Result<Option<lash_core::CancelRequest>> {
     Ok(registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(process_id)
         .await?
         .expect("the fixture process exists")
         .cancel_request

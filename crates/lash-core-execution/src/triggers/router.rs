@@ -13,7 +13,6 @@ const LEGACY_TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 3;
 pub(super) const TRIGGER_DEFINITION_FAMILY_VERSION: u8 = 5;
 const TRIGGER_LOOKUP_FAMILY_VERSION: u8 = 2;
 const TRIGGER_SOURCE_FAMILY_VERSION: u8 = 1;
-const TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION: u8 = 1;
 const DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION: u8 = 3;
 
 pub(super) fn trigger_definition_family_version(draft: &TriggerSubscriptionDraft) -> u8 {
@@ -356,36 +355,18 @@ pub fn derived_trigger_subscription_key(
     )
 }
 
-pub fn deterministic_delivery_process_id(
-    occurrence_id: &str,
-    subscription_id: &str,
-    incarnation: &str,
-    revision: u64,
-) -> Result<ProcessId, PluginError> {
-    let preimage =
-        trigger_delivery_process_preimage(occurrence_id, subscription_id, incarnation, revision);
-    Ok(ProcessId::from(crate::stable_identity::rendered_hash(
-        "process:trigger-delivery",
-        TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION,
-        &preimage,
-    )))
-}
-
-fn trigger_delivery_process_preimage(
-    occurrence_id: &str,
-    subscription_id: &str,
-    incarnation: &str,
-    revision: u64,
-) -> Vec<u8> {
-    let mut identity = crate::stable_identity::IdentityEncoder::new(
-        "lash.trigger-delivery-process",
-        TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION,
-    );
-    identity.string(occurrence_id);
-    identity.string(subscription_id);
-    identity.string(incarnation);
-    identity.u64(revision);
-    identity.finish()
+/// The start key of the one process a trigger delivery starts (ADR 0107).
+///
+/// Derived from the delivery's identity — its occurrence and the exact
+/// subscription revision it was reserved against — so every attempt at the
+/// delivery, the first and every recovery, presents the same key.
+pub fn trigger_delivery_start_key(reservation: &TriggerDeliveryReservation) -> crate::StartKey {
+    crate::StartKey::for_trigger_delivery(
+        &reservation.occurrence.occurrence_id,
+        &reservation.subscription.subscription_id,
+        &reservation.subscription.incarnation,
+        reservation.subscription.revision,
+    )
 }
 
 /// The refusal a recorded emission raises when one of its deliveries did not
@@ -551,7 +532,7 @@ impl TriggerRouter {
             // Emit the deterministic process start before consulting it. The
             // journal and deterministic process id provide the dedupe point;
             // status may shape only the post-emission report.
-            if let Err(err) = self
+            let process_id = match self
                 .start_delivery(
                     &reservation,
                     Arc::clone(process_work.registry()),
@@ -559,11 +540,17 @@ impl TriggerRouter {
                 )
                 .await
             {
-                deliveries.push(reservation.emit_report(TriggerDeliveryEmitOutcome::Failed {
-                    reason: err.to_string(),
-                }));
-                continue;
-            }
+                Ok(process_id) => process_id,
+                Err(err) => {
+                    deliveries.push(reservation.emit_report(
+                        None,
+                        TriggerDeliveryEmitOutcome::Failed {
+                            reason: err.to_string(),
+                        },
+                    ));
+                    continue;
+                }
+            };
             started_any = true;
             let outcome = match reservation.reservation_status {
                 TriggerDeliveryReservationOutcome::Reserved => TriggerDeliveryEmitOutcome::Started,
@@ -571,7 +558,7 @@ impl TriggerRouter {
                     TriggerDeliveryEmitOutcome::AlreadyReserved
                 }
             };
-            deliveries.push(reservation.emit_report(outcome));
+            deliveries.push(reservation.emit_report(Some(process_id), outcome));
         }
         if started_any {
             let _ = process_work
@@ -590,7 +577,7 @@ impl TriggerRouter {
         reservation: &TriggerDeliveryReservation,
         process_registry: Arc<dyn crate::ProcessRegistry>,
         effect_controller: &crate::ScopedEffectController<'_>,
-    ) -> Result<(), PluginError> {
+    ) -> Result<ProcessId, PluginError> {
         let subscription = &reservation.subscription;
         let occurrence = &reservation.occurrence;
         // Delivery validates against the contract this subscription captured at
@@ -647,7 +634,6 @@ impl TriggerRouter {
         // subscription already survived, and every delivery for one reservation
         // must stay deterministic.
         let registration = crate::ProcessRegistration::new(
-            reservation.process_id.clone(),
             target.clone(),
             // Trigger targets are journaled engine/tool rows, idempotent by
             // process id, so recovery may re-execute them (ADR 0019).
@@ -659,6 +645,7 @@ impl TriggerRouter {
                 crate::OnParentEnd::Abandon,
             ),
         )
+        .with_start_key(Some(trigger_delivery_start_key(reservation)))
         .with_admitted_identity(crate::AdmittedProcessIdentity::pinned(
             subscription.target_identity.clone(),
         ))
@@ -730,8 +717,21 @@ impl TriggerRouter {
             .await?;
         match outcome {
             crate::RuntimeEffectOutcome::Process {
-                result: crate::ProcessEffectOutcome::Start { .. },
-            } => Ok(()),
+                result: crate::ProcessEffectOutcome::Start { record },
+            } => {
+                // The delivery owns exactly the process its key minted: bind
+                // it before the delivery is reported, so recovery resumes an
+                // unbound reservation and never starts a second process for a
+                // bound one (ADR 0107).
+                self.store
+                    .bind_delivery_process(
+                        &occurrence.occurrence_id,
+                        &subscription.subscription_id,
+                        &record.id,
+                    )
+                    .await?;
+                Ok(record.id)
+            }
             other => Err(PluginError::Session(format!(
                 "trigger process start returned the wrong outcome: {}",
                 other.kind().as_str()

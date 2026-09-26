@@ -379,7 +379,7 @@ impl DurableProcessWorker {
                     .config
                     .process_registry()
                     .request_process_cancel(
-                        &crate::ProcessRef::from_record(child),
+                        &child.id.clone(),
                         CancelOrigin::ParentEnded,
                         requester.clone(),
                         None,
@@ -437,7 +437,7 @@ impl DurableProcessWorker {
             .await
             .ok()
             .flatten()?;
-        let parent = ParentScope::process(crate::ProcessRef::from_record(&record));
+        let parent = ParentScope::process(record.id.clone());
         self.config
             .process_registry()
             .get_parent_end_plan(&parent)

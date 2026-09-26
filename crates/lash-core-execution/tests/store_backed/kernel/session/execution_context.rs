@@ -3,9 +3,8 @@ mod tests {
 
     use crate::{ProcessId, RuntimeExecutionContext};
 
-    fn registration_for_parent_scope(process_id: &str) -> crate::ProcessRegistration {
+    fn registration_for_parent_scope(_process_id: &str) -> crate::ProcessRegistration {
         crate::ProcessRegistration::new(
-            ProcessId::from(process_id),
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -70,7 +69,6 @@ mod tests {
             .build()
             .into_runtime();
         let registration = crate::ProcessRegistration::new(
-            "journaled-process",
             crate::ProcessInput::Engine {
                 kind: "test-engine".to_string(),
                 payload: serde_json::json!({"program": "probe"}),
@@ -136,33 +134,11 @@ mod tests {
         );
     }
 
-    /// A process scope nobody bound an admitted incarnation to cannot be built —
-    /// `AdmittedScope` refuses the unpinned pair at construction, so no execution
-    /// context can ever carry the reusable name as a fallback. The registry in
-    /// this fixture *could* resolve the name, which is what makes the construction
-    /// refusal prove the derivation never asks it.
+    /// A child started by a process parents on that process's minted id, even
+    /// when the process was pruned and another process now runs the same
+    /// definition: nothing on the derivation reads the registry.
     #[tokio::test]
-    async fn a_process_scope_without_an_admitted_incarnation_is_unconstructible() {
-        let backend = crate::support::memory_store_backend().await;
-        let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
-        registry
-            .register_process(registration_for_parent_scope("worker"))
-            .await
-            .expect("first registration");
-        assert!(
-            matches!(
-                crate::AdmittedScope::new(crate::ExecutionScope::process("worker"), None),
-                Err(crate::AdmittedScopeError::ProcessIncarnationMissing { .. })
-            ),
-            "the reusable name alone is never admitted"
-        );
-    }
-
-    /// A same-name successor already retained in the registry does not rebind the
-    /// pinned parent: a child started by incarnation 1 of `worker` parents on
-    /// incarnation 1 even though the registry now holds incarnation 2.
-    #[tokio::test]
-    async fn a_child_started_from_a_process_incarnation_keeps_the_pinned_parent() {
+    async fn a_child_parents_on_the_process_that_started_it() {
         let backend = crate::support::memory_store_backend().await;
         let registry: Arc<dyn crate::ProcessRegistry> = backend.process_registry();
         let retired = registry
@@ -178,49 +154,36 @@ mod tests {
                 crate::ProcessCompletionAuthority::external_owner(),
             )
             .await
-            .expect("complete the first incarnation");
+            .expect("complete the first process");
         registry
             .prune_terminal_processes(u64::MAX, None, crate::ProjectionWatermark::NoProjector)
             .await
-            .expect("prune the retired incarnation");
+            .expect("prune the first process");
         let successor = registry
             .register_process(registration_for_parent_scope("worker"))
             .await
-            .expect("same-name successor registration");
-        assert_ne!(
-            successor.incarnation, retired.incarnation,
-            "the fixture must hold a successor incarnation under the same name"
-        );
-        // Recovery validates a retained pair with get_process_ref — and the
-        // superseded incarnation is refused there, not rebound.
+            .expect("a later process of the same definition");
+        assert_ne!(successor.id, retired.id, "a minted id is never reused");
         assert!(
-            registry
-                .get_process_ref(&crate::ProcessRef::new(
-                    retired.id.clone(),
-                    retired.incarnation,
-                ))
-                .await
-                .is_err(),
-            "get_process_ref must refuse the superseded incarnation"
+            registry.get_process(&retired.id).await.is_err(),
+            "a pruned process's id refuses; it never resolves to the later process"
         );
 
         let context = scoped_context(
             &backend,
             "session-1",
-            crate::AdmittedScope::process(crate::ProcessRef::new(
-                retired.id.clone(),
-                retired.incarnation,
-            )),
+            crate::AdmittedScope::process(retired.id.clone()),
         )
         .with_process_execution(
+            retired.id.clone(),
             &registration_for_parent_scope("worker"),
             Some(process_event_context(&retired.id, Arc::clone(&registry))),
         );
         assert_eq!(
             context
                 .child_process_parent_scope()
-                .expect("the pinned incarnation is the parent"),
-            crate::ParentScope::process(crate::ProcessRef::from_record(&retired)),
+                .expect("the starting process is the parent"),
+            crate::ParentScope::process(retired.id.clone()),
         );
     }
 }

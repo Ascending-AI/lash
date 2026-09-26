@@ -499,8 +499,10 @@ impl DurableProcessWorker {
     /// Durable substrates use this method so a non-terminal boundary can end the current
     /// substrate invocation; the native worker's lease-fenced drive loops over segment
     /// boundaries internally.
+    #[allow(clippy::too_many_arguments)]
     pub async fn run_process_segment_with_scoped_effect_controller(
         &self,
+        process_id: ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
         execution_write_authority: crate::ProcessExecutionWriteAuthority,
@@ -508,14 +510,13 @@ impl DurableProcessWorker {
         cancellation: CancellationToken,
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, PluginError> {
-        self.ensure_stable_process_id(&registration)?;
         // Externally-owned rows are never executed by lash (ADR 0019). Reject the
         // disposition before touching a runtime — the old fabricated-success path
         // for External inputs is deleted.
         if registration.disposition == RecoveryContract::ExternallyOwned {
             return Err(PluginError::Session(format!(
                 "process `{}` is externally-owned and must not be executed by lash",
-                registration.id
+                process_id
             )));
         }
         // The substrate's handler minted this controller from its own context;
@@ -530,12 +531,11 @@ impl DurableProcessWorker {
         let current = self
             .config
             .process_registry()
-            .get_process(&registration.id)
+            .get_process(&process_id)
             .await?
-            .ok_or_else(|| {
-                crate::runtime::registry_transitions::unknown_process(&registration.id)
-            })?;
+            .ok_or_else(|| crate::runtime::registry_transitions::unknown_process(&process_id))?;
         self.run_process_segment_from_current(
+            process_id,
             registration,
             current,
             execution_context,
@@ -551,6 +551,7 @@ impl DurableProcessWorker {
     #[allow(clippy::too_many_arguments)]
     async fn run_process_segment_from_current(
         &self,
+        process_id: ProcessId,
         registration: ProcessRegistration,
         current: ProcessRecord,
         execution_context: ProcessExecutionContext,
@@ -560,7 +561,7 @@ impl DurableProcessWorker {
         handover: Option<crate::SegmentHandover>,
         admission: SegmentAdmissionOwner,
     ) -> Result<crate::ProcessRunOutcome, PluginError> {
-        let attachment_owner = crate::ProcessRef::from_record(&current);
+        let attachment_owner = current.id.clone();
         let (owner, fencing_token) = match &execution_write_authority {
             crate::ProcessExecutionWriteAuthority::Lease { lease, .. } => {
                 (self.config.lease_owner.clone(), lease.fencing_token)
@@ -603,7 +604,7 @@ impl DurableProcessWorker {
                 .config
                 .process_registry()
                 .record_first_started_with_authority(
-                    &registration.id,
+                    &process_id,
                     crate::ProcessStarted {
                         owner,
                         fencing_token,
@@ -616,32 +617,15 @@ impl DurableProcessWorker {
                 .await?
                 .into_record()?,
         };
-        // The attachment owner was read from `current`, before the start that
-        // admitted this execution: this worker's authority CAS, or the
-        // substrate's own journaled start, which recorded the same record's
-        // incarnation. Either refuses a superseded incarnation, so reaching here
-        // means the admitted record still carries the incarnation we are about
-        // to bind under. Pinned because an owner bound from a stale incarnation would
-        // root the earlier incarnation's blobs forever (FIG-2980), and because
-        // the binding below must never be hoisted above this call.
-        debug_assert_eq!(
-            admitted.incarnation, attachment_owner.incarnation,
-            "attachment owner must carry the incarnation the authority CAS admitted"
-        );
-        let admitted_incarnation = admitted.incarnation;
         // The authority CAS above is the admission: the controller must
-        // already carry the exact pair it returned, because the caller pinned
-        // it from the same record read. A mismatch means the pin was minted
-        // from a stale record — a same-name successor — which is refused as a
-        // admission error, never relabelled (ADR 0099 §1).
-        let cas_admission =
-            crate::AdmittedScope::process(crate::ProcessRef::from_record(&admitted));
+        // already be admitted for the process it returned (ADR 0099 §1).
+        let cas_admission = crate::AdmittedScope::process(admitted.id.clone());
         if scoped_effect_controller.admitted_scope() != &cas_admission {
             return Err(PluginError::Runtime(crate::RuntimeError::new(
                 crate::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
                 format!(
                     "process worker for `{}` was pinned to {:?} but the admission CAS admitted {:?}",
-                    registration.id,
+                    process_id,
                     scoped_effect_controller.admitted_scope(),
                     cas_admission,
                 ),
@@ -656,7 +640,7 @@ impl DurableProcessWorker {
         if current.is_refusing_park() {
             self.config
                 .process_registry()
-                .begin_parked_rerun_with_authority(&registration.id, &execution_write_authority)
+                .begin_parked_rerun_with_authority(&process_id, &execution_write_authority)
                 .await?;
         }
         let park_authority = execution_write_authority.clone();
@@ -673,13 +657,14 @@ impl DurableProcessWorker {
         {
             let error =
                 PluginError::Runtime(crate::RuntimeError::retired_process_generation(refusal));
-            self.park_refused_process(&registration.id, &error, &park_authority)
+            self.park_refused_process(&process_id, &error, &park_authority)
                 .await?;
             return Err(error);
         }
         let execution_context =
             execution_context.with_execution_write_authority(execution_write_authority);
-        let mut runtime = Box::pin(self.runtime_for_registration(&registration)).await?;
+        let mut runtime =
+            Box::pin(self.runtime_for_registration(&process_id, &registration)).await?;
         let _attachment_owner_binding = matches!(
             registration.input.as_ref(),
             ProcessInput::ToolCall { .. } | ProcessInput::Engine { .. }
@@ -712,10 +697,9 @@ impl DurableProcessWorker {
         let manager = RuntimeSessionServices::for_worker(&runtime, true).map_err(|err| {
             PluginError::Session(format!(
                 "failed to build runtime env for process `{}`: {err}",
-                registration.id
+                process_id
             ))
         })?;
-        let process_id = registration.id.clone();
         let result = manager
             .run_process(
                 // The opener is the name bound to the incarnation this run was
@@ -723,7 +707,7 @@ impl DurableProcessWorker {
                 // returned rather than re-read later (ADR 0099 §1).
                 crate::execution::runtime::effect::AdmittedProcess {
                     registration,
-                    incarnation: admitted_incarnation,
+                    process_id: process_id.clone(),
                 },
                 execution_context,
                 Arc::clone(self.config.process_registry()),
@@ -945,7 +929,8 @@ impl DurableProcessWorker {
         }
     }
 
-    /// Start any trigger deliveries whose process row was never registered, and
+    /// Start any trigger delivery whose reservation is still unbound — its start
+    /// never completed — and
     /// return the admission report of the re-entrant drive that follows, when
     /// one ran. `None` means this reconcile admitted nothing of its own, so the
     /// caller's report keeps whatever intake state the caller established.
@@ -956,17 +941,6 @@ impl DurableProcessWorker {
         if candidates.is_empty() {
             return Ok(None);
         }
-        let candidate_process_ids = candidates
-            .iter()
-            .map(|delivery| delivery.process_id.clone())
-            .collect::<Vec<_>>();
-        let missing_process_ids = self
-            .config
-            .process_registry()
-            .filter_unregistered_process_ids(&candidate_process_ids)
-            .await?
-            .into_iter()
-            .collect::<BTreeSet<_>>();
         let process_work = self.process_wiring();
         // The reconcile admits what it starts in one explicit drive below and
         // hands that drive's report to its caller. A start's own advisory poke
@@ -992,20 +966,19 @@ impl DurableProcessWorker {
             );
         let mut started_any = false;
         for delivery in candidates {
-            if missing_process_ids.contains(&delivery.process_id) {
+            // A bound delivery owns the process its key minted and is never
+            // started again, even after that process is pruned (ADR 0107).
+            if delivery.process_id.is_none() {
                 let Some(scoped_effect_controller) = self
                     .config
                     .runtime_host
                     .control
                     .effect_host
-                    .scoped_static(
-                        lash_core::AdmittedScope::unpinned(
-                            lash_core::runtime::trigger_delivery_reconcile_scope(
-                                &delivery.process_id,
-                            ),
-                        )
-                        .map_err(|err| PluginError::Session(err.to_string()))?,
-                    )
+                    .scoped_static(lash_core::AdmittedScope::new(
+                        lash_core::runtime::trigger_delivery_reconcile_scope(
+                            &lash_core::facade_support::trigger_delivery_start_key(&delivery),
+                        ),
+                    ))
                     .map_err(|err| PluginError::Session(err.to_string()))?
                 else {
                     return Err(PluginError::Session(
@@ -1021,9 +994,8 @@ impl DurableProcessWorker {
                     )
                     .await
                 {
-                    Ok(()) => started_any = true,
+                    Ok(_) => started_any = true,
                     Err(err) => tracing::warn!(
-                        process_id = %delivery.process_id,
                         occurrence_id = %delivery.occurrence.occurrence_id,
                         subscription_id = %delivery.subscription.subscription_id,
                         error = %err,
@@ -1244,6 +1216,7 @@ impl DurableProcessWorker {
         let mut handover = None;
         loop {
             match Box::pin(self.run_process_with_lease_renewal(
+                process_id.clone(),
                 registration.clone(),
                 execution_context.clone(),
                 lease.clone(),
@@ -1304,22 +1277,20 @@ impl DurableProcessWorker {
     /// from expiring under the live owner.
     async fn run_process_with_lease_renewal(
         &self,
+        process_id: ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
         mut lease: ProcessLease,
         handover: Option<crate::SegmentHandover>,
     ) -> Result<crate::ProcessRunOutcome, RecoverFailure> {
-        let process_id = registration.id.clone();
         let requires_cancelled_session_turn = matches!(
             registration.input.as_ref(),
             ProcessInput::SessionTurn { .. }
         );
-        self.ensure_stable_process_id(&registration)
-            .map_err(RecoverFailure::Run)?;
         if registration.disposition == RecoveryContract::ExternallyOwned {
             return Err(RecoverFailure::Run(PluginError::Session(format!(
                 "process `{}` is externally-owned and must not be executed by lash",
-                registration.id
+                process_id
             ))));
         }
         let current = match self.read_for_recovery(&process_id).await {
@@ -1382,9 +1353,7 @@ impl DurableProcessWorker {
             .runtime_host
             .control
             .effect_host
-            .scoped_static(crate::AdmittedScope::process(
-                crate::ProcessRef::from_record(&current),
-            ))
+            .scoped_static(crate::AdmittedScope::process(current.id.clone()))
             .map_err(|err| RecoverFailure::Run(PluginError::Session(err.to_string())))?
             .ok_or_else(|| {
                 RecoverFailure::Run(PluginError::Session(
@@ -1392,6 +1361,7 @@ impl DurableProcessWorker {
                 ))
             })?;
         let pending = self.run_process_segment_from_current(
+            process_id.clone(),
             registration,
             current,
             execution_context,
@@ -1505,14 +1475,14 @@ impl DurableProcessWorker {
 
     pub async fn request_process_cancel(
         &self,
-        process_ref: &crate::ProcessRef,
+        process_id: &crate::ProcessId,
         request: &crate::CancelRequest,
     ) -> Result<(), PluginError> {
         self.config
             .process_registry()
-            .append_event_ref(
-                process_ref,
-                crate::ProcessEventAppendRequest::cancel_requested(process_ref, request),
+            .append_event(
+                process_id,
+                crate::ProcessEventAppendRequest::cancel_requested(process_id, request),
             )
             .await
             .map(|_| ())
@@ -1541,7 +1511,7 @@ impl DurableProcessWorker {
         };
         let turn_request = crate::TurnCancelRequest::new(
             crate::TurnAddress::new(session_id, crate::TurnId::from(record.id.as_str())),
-            format!("process-cancel:{}:{}", record.id, record.incarnation),
+            format!("process-cancel:{}", record.id),
             Some(request.requester.clone()),
         );
         crate::TurnWorkDriver::for_catalog(
@@ -1556,28 +1526,29 @@ impl DurableProcessWorker {
 
     async fn runtime_for_registration(
         &self,
+        process_id: &ProcessId,
         registration: &ProcessRegistration,
     ) -> Result<LashRuntime, PluginError> {
         match registration.input.as_ref() {
             ProcessInput::SessionTurn { create_request, .. } => {
-                Box::pin(self.runtime_for_session_turn(registration, create_request.as_ref())).await
+                Box::pin(self.runtime_for_session_turn(process_id, create_request.as_ref())).await
             }
             ProcessInput::ToolCall { .. } | ProcessInput::Engine { .. } => {
-                Box::pin(self.runtime_for_process_env(registration)).await
+                Box::pin(self.runtime_for_process_env(process_id, registration)).await
             }
             // Externally-owned rows are rejected before dispatch (ADR 0019), so an
             // External input has no execution runtime; fail loudly rather than
             // fabricate one.
             ProcessInput::External { .. } => Err(PluginError::Session(format!(
                 "process `{}` is externally-owned and has no execution runtime",
-                registration.id
+                process_id
             ))),
         }
     }
 
     async fn runtime_for_session_turn(
         &self,
-        registration: &ProcessRegistration,
+        process_id: &ProcessId,
         create_request: &crate::SessionCreateRequest,
     ) -> Result<LashRuntime, PluginError> {
         let mut policy = create_request
@@ -1590,7 +1561,7 @@ impl DurableProcessWorker {
         // Boxed: building a process runtime is a rare, cold path whose future
         // holds a whole session policy, so it stays off the caller's stack.
         Box::pin(self.build_process_runtime(
-            crate::process_runtime_session_ids(&registration.id)[1].clone(),
+            crate::process_runtime_session_ids(process_id)[1].clone(),
             policy,
             create_request.plugin_options.clone(),
             "session turn request",
@@ -1600,12 +1571,13 @@ impl DurableProcessWorker {
 
     async fn runtime_for_process_env(
         &self,
+        process_id: &ProcessId,
         registration: &ProcessRegistration,
     ) -> Result<LashRuntime, PluginError> {
         let Some(env_ref) = registration.env_ref.as_ref() else {
             return Err(PluginError::Session(format!(
                 "process `{}` is missing a captured execution env",
-                registration.id
+                process_id
             )));
         };
         let env = crate::runtime::load_process_execution_env(
@@ -1618,7 +1590,7 @@ impl DurableProcessWorker {
         )
         .await?;
         Box::pin(self.build_process_runtime(
-            crate::process_runtime_session_ids(&registration.id)[0].clone(),
+            crate::process_runtime_session_ids(process_id)[0].clone(),
             env.policy,
             env.plugin_options,
             env_ref.as_str(),
@@ -1671,25 +1643,6 @@ impl DurableProcessWorker {
             ))
         })
     }
-
-    /// Enforce the stable-process-id invariant at every (re-)execution: process
-    /// execution identity is the persisted `process_id`, so a retry — a Restate
-    /// `run` re-invocation (keyed `LashProcessWorkflow/{process_id}`) or a
-    /// recovery sweep re-running a non-terminal row — must present that stable
-    /// id. An empty/fresh id has lost its idempotency anchor and is rejected
-    /// loudly here, mirroring how `ExecutionScope` rejects an
-    /// empty turn id at the durable-effect boundary.
-    fn ensure_stable_process_id(
-        &self,
-        registration: &ProcessRegistration,
-    ) -> Result<(), PluginError> {
-        if registration.id.trim().is_empty() {
-            return Err(PluginError::Session(
-                crate::RuntimeError::missing_process_execution_id().to_string(),
-            ));
-        }
-        Ok(())
-    }
 }
 
 fn runner_outcome_requires_cancel_fence(
@@ -1738,9 +1691,9 @@ impl crate::ProcessWorkSubstrate for RegistrationOnlyProcessWork {
 
     async fn await_process_terminal(
         &self,
-        process_ref: &crate::ProcessRef,
+        process_id: &crate::ProcessId,
     ) -> Result<crate::ProcessTerminalWait, PluginError> {
-        self.inner.await_process_terminal(process_ref).await
+        self.inner.await_process_terminal(process_id).await
     }
 }
 

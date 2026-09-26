@@ -383,7 +383,7 @@ macro_rules! tool_child_invocation_tests {
                 "tool-child-foreign-opener"
             ),
             (
-                a_same_name_process_incarnation_is_not_the_recorded_opener,
+                another_process_is_not_the_recorded_opener,
                 "tool-child-process-incarnation"
             ),
             (

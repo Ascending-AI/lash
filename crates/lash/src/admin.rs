@@ -428,12 +428,12 @@ impl SessionAdmin {
         process_id: &ProcessId,
     ) -> Result<lash_core::ProcessAwaitOutput> {
         let process_work = &self.process_work;
-        let process_ref = self
+        let process_id = self
             .process_registry()?
-            .resolve_process_ref(process_id)
+            .require_process_id(process_id)
             .await?;
         loop {
-            match process_work.await_process_terminal(&process_ref).await? {
+            match process_work.await_process_terminal(&process_id).await? {
                 lash_core::ProcessTerminalWait::Terminal(output) => return Ok(output),
                 lash_core::ProcessTerminalWait::Reattach => {}
             }
@@ -579,8 +579,7 @@ impl SessionAdmin {
         let scoped_effect_controller = runtime
             .effect_host()
             .scoped_static(
-                lash_core::AdmittedScope::unpinned(operation_scope.clone())
-                    .map_err(|err| EmbedError::Runtime(err.into()))?,
+                lash_core::AdmittedScope::new(operation_scope.clone()),
             )
             .map_err(EmbedError::Runtime)?
             .ok_or_else(|| {
@@ -705,6 +704,7 @@ impl SessionAdmin {
                 runtime.process_service()?,
             )
         };
+        let request = request.keyed_in(&scoped_effect_controller);
         let scope = lash_core::ProcessOpScope::new(scoped_effect_controller);
         let summary = processes
             .start_from_request(&session_id, request, scope)

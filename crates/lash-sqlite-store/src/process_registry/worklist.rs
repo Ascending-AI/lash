@@ -72,7 +72,7 @@ pub(super) async fn list_non_terminal_page(
         .call(move |conn| {
             Ok((|| {
                 let through_process_id = match continuation.as_ref() {
-                    Some(cursor) => cursor.through_process_id().to_string(),
+                    Some(cursor) => cursor.through_process_id().clone(),
                     None => match conn
                         .query_row(
                             process_sql()
@@ -80,7 +80,11 @@ pub(super) async fn list_non_terminal_page(
                                 .select_max_worklist_process_id
                                 .sql(),
                             [],
-                            |row| row.get::<_, Option<String>>(0),
+                            |row| {
+                                row.get::<_, Option<String>>(0)?
+                                    .map(|value| crate::sql_process_id(0, value))
+                                    .transpose()
+                            },
                         )
                         .map_err(process_sqlite_error)?
                     {
@@ -98,14 +102,14 @@ pub(super) async fn list_non_terminal_page(
                 let (sql, after_process_id) = match continuation.as_ref() {
                     Some(cursor) => (
                         worklist.list_next_worklist_page.sql(),
-                        Some(cursor.after_process_id()),
+                        Some(cursor.after_process_id().as_str()),
                     ),
                     None => (worklist.list_first_worklist_page.sql(), None),
                 };
                 let mut stmt = conn.prepare(sql).map_err(process_sqlite_error)?;
                 let rows = stmt
                     .query_map(
-                        params![through_process_id, after_process_id, row_limit],
+                        params![through_process_id.as_str(), after_process_id, row_limit],
                         |row| row.get::<_, String>(0),
                     )
                     .map_err(process_sqlite_error)?;
@@ -157,12 +161,12 @@ mod tests {
                          SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 10000
                      )
                      INSERT INTO processes (
-                         process_id, incarnation, registration_fingerprint, originator_id,
+                         process_id, originator_id,
                          identity_kind, created_at_ms, updated_at_ms,
                          last_event_sequence, change_seq, status,
                          parent_scope_kind, parent_scope_id, on_parent_end, record_json
                      )
-                     SELECT printf('plan-%05d', i), i, 'fp', 'host', 'test', 0, 0, 0, i,
+                     SELECT printf('plan-%05d', i), 'host', 'test', 0, 0, 0, i,
                             CASE WHEN i <= 100 THEN 'running' ELSE 'completed' END,
                             'host', NULL, 'abandon',
                             '{}'

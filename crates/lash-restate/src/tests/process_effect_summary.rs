@@ -10,7 +10,7 @@ use lash_core::ProcessEventLogTestSupport as _;
 
 use lashlang::testing::ast_builders as b;
 
-pub(super) async fn counting_lashlang_registration(process_id: &ProcessId) -> ProcessRegistration {
+pub(super) async fn counting_lashlang_registration() -> ProcessRegistration {
     // process worker() {
     //   called = tools.recovery_count({ line: "summary" })
     //   finish called.executed
@@ -60,7 +60,6 @@ pub(super) async fn counting_lashlang_registration(process_id: &ProcessId) -> Pr
     .await
     .expect("store effect-summary artifact");
     ProcessRegistration::new(
-        process_id.clone(),
         lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
@@ -84,7 +83,10 @@ pub(super) async fn counting_lashlang_registration(process_id: &ProcessId) -> Pr
 }
 
 fn invocation(process_id: &ProcessId) -> lash_core::ProcessExecutionWriteAuthority {
-    lash_core::ProcessExecutionWriteAuthority::invocation(process_id, "effect-summary-invocation")
+    lash_core::ProcessExecutionWriteAuthority::invocation(
+        process_id.clone(),
+        "effect-summary-invocation",
+    )
 }
 
 /// Runs the process's one Restate invocation against `context`'s journal.
@@ -92,6 +94,7 @@ pub(super) async fn run_invocation(
     registry: Arc<dyn ProcessRegistry>,
     executions: &Arc<AtomicUsize>,
     context: &Arc<ReplayableRecordingContext>,
+    process_id: &ProcessId,
     registration: &ProcessRegistration,
 ) -> Result<lash_core::ProcessRunOutcome, lash_core::PluginError> {
     let worker = recovery_worker_with_plugins(
@@ -102,15 +105,14 @@ pub(super) async fn run_invocation(
     .await;
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(context));
     let scope = controller
-        .process_scope_for_test(
-            recorded_process_admission(registry.as_ref(), &registration.id).await,
-        )
+        .process_scope_for_test(recorded_process_admission(registry.as_ref(), process_id).await)
         .expect("scope the process invocation");
     worker
         .run_process_segment_with_scoped_effect_controller(
+            process_id.clone(),
             registration.clone(),
             ProcessExecutionContext::default(),
-            invocation(&registration.id),
+            invocation(process_id),
             scope,
             tokio_util::sync::CancellationToken::new(),
             None,
@@ -147,13 +149,13 @@ fn settled_success(outcome: &lash_core::ProcessRunOutcome) -> serde_json::Value 
 
 #[tokio::test]
 async fn restate_crash_between_journaled_effect_and_summary_append_replays_once() {
-    let process_id = ProcessId::from("restate-effect-summary-crash");
     let registry = process_registry();
-    let registration = counting_lashlang_registration(&process_id).await;
-    registry
+    let registration = counting_lashlang_registration().await;
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register the effect-summary process");
+        .expect("register the effect-summary process")
+        .id;
     let executions = Arc::new(AtomicUsize::new(0));
     let context = Arc::new(ReplayableRecordingContext::default());
 
@@ -167,6 +169,7 @@ async fn restate_crash_between_journaled_effect_and_summary_append_replays_once(
         Arc::clone(&faults) as Arc<dyn ProcessRegistry>,
         &executions,
         &context,
+        &process_id,
         &registration,
     )
     .await
@@ -182,9 +185,15 @@ async fn restate_crash_between_journaled_effect_and_summary_append_replays_once(
     // Restate replays the invocation: the journaled attempt answers without
     // re-running the tool, and the summary is appended once.
     context.start_replay();
-    let replayed = run_invocation(Arc::clone(&registry), &executions, &context, &registration)
-        .await
-        .expect("replay the invocation");
+    let replayed = run_invocation(
+        Arc::clone(&registry),
+        &executions,
+        &context,
+        &process_id,
+        &registration,
+    )
+    .await
+    .expect("replay the invocation");
     assert_eq!(settled_success(&replayed), serde_json::json!(1));
     assert_eq!(
         executions.load(Ordering::SeqCst),
@@ -200,9 +209,15 @@ async fn restate_crash_between_journaled_effect_and_summary_append_replays_once(
     );
 
     // A second replay recovers the same event rather than appending again.
-    let again = run_invocation(Arc::clone(&registry), &executions, &context, &registration)
-        .await
-        .expect("replay the invocation again");
+    let again = run_invocation(
+        Arc::clone(&registry),
+        &executions,
+        &context,
+        &process_id,
+        &registration,
+    )
+    .await
+    .expect("replay the invocation again");
     assert_eq!(settled_success(&again), serde_json::json!(1));
     let summarise = |events: &[lash_core::ProcessEvent]| {
         events
@@ -219,13 +234,13 @@ async fn restate_crash_between_journaled_effect_and_summary_append_replays_once(
 
 #[tokio::test]
 async fn restate_replay_refuses_a_changed_summary_payload_without_reaching_the_program() {
-    let process_id = ProcessId::from("restate-effect-summary-conflict");
     let registry = process_registry();
-    let registration = counting_lashlang_registration(&process_id).await;
-    registry
+    let registration = counting_lashlang_registration().await;
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register the effect-summary process");
+        .expect("register the effect-summary process")
+        .id;
     let executions = Arc::new(AtomicUsize::new(0));
     let context = Arc::new(ReplayableRecordingContext::default());
     let faults = Arc::new(lash_core::EffectSummaryAppendFaults::new(
@@ -237,6 +252,7 @@ async fn restate_replay_refuses_a_changed_summary_payload_without_reaching_the_p
         Arc::clone(&faults) as Arc<dyn ProcessRegistry>,
         &executions,
         &context,
+        &process_id,
         &registration,
     )
     .await
@@ -255,9 +271,15 @@ async fn restate_replay_refuses_a_changed_summary_payload_without_reaching_the_p
         .expect("seed a divergent record under the effect key");
 
     context.start_replay();
-    let refused = run_invocation(Arc::clone(&registry), &executions, &context, &registration)
-        .await
-        .expect_err("the replay refuses a changed payload under the same key");
+    let refused = run_invocation(
+        Arc::clone(&registry),
+        &executions,
+        &context,
+        &process_id,
+        &registration,
+    )
+    .await
+    .expect_err("the replay refuses a changed payload under the same key");
     assert!(
         refused
             .to_string()

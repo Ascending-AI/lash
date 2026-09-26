@@ -147,9 +147,7 @@ lash_store_sql::statements! {
          SELECT catalog.*,
                 CASE WHEN deleted THEN '[]' ELSE COALESCE((
                     SELECT jsonb_agg(
-                               jsonb_build_array(
-                                   process_index, process_id, process_incarnation
-                               )
+                               jsonb_build_array(process_index, process_id)
                                ORDER BY process_index
                            )::TEXT
                     FROM session_meta_pending_observer_intents

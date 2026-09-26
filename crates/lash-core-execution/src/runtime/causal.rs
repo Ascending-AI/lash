@@ -372,12 +372,12 @@ pub fn process_event_invocation(
     RuntimeInvocation {
         attribution: RuntimeAttribution::none(),
         subject: RuntimeSubject::ProcessEvent {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             sequence,
             event_type: event_type.to_string(),
         },
         caused_by: Some(CausalRef::Process {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
         }),
         replay,
     }
@@ -669,7 +669,8 @@ mod tests {
     fn turn_invocations_use_admitted_scope_without_losing_turn_attribution() {
         let session_id = SessionId::from("session:subagent:call");
         let turn_id = TurnId::from("process:subagent:call");
-        let process_scope = ExecutionScope::process("process:subagent:call");
+        let process_scope =
+            ExecutionScope::process(crate::process_id_for_test("process:subagent:call"));
 
         let effect = turn_effect_invocation(
             &process_scope,
@@ -767,16 +768,16 @@ mod tests {
             ),
             (
                 CausalRef::Process {
-                    process_id: ProcessId::from("p"),
+                    process_id: crate::process_id_for_test("p"),
                 },
-                "direct-discriminator:v3:blake3:eac75dd2c168f76cea7cae3e74092032011f7780d7ad02de1d58802c8fe5fc8a",
+                "direct-discriminator:v3:blake3:34ad73dc0d8b6305ccdc1207afa8e4ef37c30035a2c2bf9455256563d6861c74",
             ),
             (
                 CausalRef::ProcessEvent {
-                    process_id: ProcessId::from("p"),
+                    process_id: crate::process_id_for_test("p"),
                     sequence: 0,
                 },
-                "direct-discriminator:v3:blake3:b5038f10e78fe53324ca47ca7b8aa50a47203e4784f6bb6c895e31a8536b3034",
+                "direct-discriminator:v3:blake3:8e1e40c288970d6da166b74e66c8fd393ace16bf4ca2c36edd30d23a65976b1c",
             ),
             (
                 CausalRef::TriggerOccurrence {

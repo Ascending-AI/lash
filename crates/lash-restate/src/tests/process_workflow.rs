@@ -7,7 +7,7 @@ use lashlang::testing::ast_builders as b;
 pub(super) async fn persisted_handover_is_change_feed_and_event_invariant() {
     let (registry, continuations) = process_stores();
     let _record = registry
-        .register_process(rerunnable_registration("segment-invariant"))
+        .register_process(rerunnable_registration())
         .await
         .expect("register process");
     let (_, cursor) = registry
@@ -16,7 +16,7 @@ pub(super) async fn persisted_handover_is_change_feed_and_event_invariant() {
         .expect("initial change feed");
     continuations
         .put_segment_handover(
-            &ProcessId::from("segment-invariant"),
+            &_record.id,
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 1,
@@ -37,7 +37,7 @@ pub(super) async fn persisted_handover_is_change_feed_and_event_invariant() {
     assert_eq!(next_cursor, cursor);
     assert!(
         registry
-            .full_event_window(&ProcessId::from("segment-invariant"), 0)
+            .full_event_window(&_record.id, 0)
             .await
             .expect("events")
             .is_empty()
@@ -64,19 +64,17 @@ pub(super) async fn cancel_redrives_successor_engine() {
         )),
         test_restate_authority_id(),
     );
-    let registration = rerunnable_registration("cancel-between-segments");
-    registry
+    let registration = rerunnable_registration();
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register process");
+        .expect("register process")
+        .id;
     registry
         .append_event(
-            &ProcessId::from("cancel-between-segments"),
+            &process_id,
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                &registry
-                    .resolve_process_ref(&ProcessId::from("cancel-between-segments"))
-                    .await
-                    .expect("retained cancellation target"),
+                &process_id,
                 &lash_core::CancelRequest::new(
                     lash_core::CancelOrigin::OperatorRequested,
                     "actor:fixture:cancel_redrives_successor_engine",
@@ -89,9 +87,10 @@ pub(super) async fn cancel_redrives_successor_engine() {
     let outcome = tokio::time::timeout(
         Duration::from_secs(5),
         workflow.run_registration_for_test(
+            process_id.clone(),
             registration,
             ProcessExecutionContext::default(),
-            process_scope(&ProcessId::from("cancel-between-segments")),
+            process_scope(&process_id),
             1,
             Some(lash_core::SegmentHandover {
                 reason: lash_core::BoundaryReason::JournalBudget,
@@ -110,24 +109,25 @@ pub(super) async fn cancel_redrives_successor_engine() {
     ));
     assert_eq!(
         signal_transport.requests.lock_recover()[0].url,
-        "https://restate.invalid/LashProcessWorkflow/cancel-between-segments%231/await_cancel",
+        format!("https://restate.invalid/LashProcessWorkflow/{process_id}%231/await_cancel"),
         "the successor watches its own segment's cancel promise"
     );
 }
 
+fn process_1() -> ProcessId {
+    ProcessId::fixture("process-1")
+}
+
 #[test]
 pub(super) fn cancel_terminal_from_successor_routes_to_root_await_workflow_key() {
+    assert_eq!(terminal_completion_workflow_key(&process_1(), 0), None);
     assert_eq!(
-        terminal_completion_workflow_key(&ProcessId::from("process-1"), 0),
-        None
+        terminal_completion_workflow_key(&process_1(), 1),
+        Some(process_1().to_string())
     );
     assert_eq!(
-        terminal_completion_workflow_key(&ProcessId::from("process-1"), 1),
-        Some("process-1".to_string())
-    );
-    assert_eq!(
-        process_segment_workflow_key(&ProcessId::from("process-1"), 1),
-        "process-1#1",
+        process_segment_workflow_key(&process_1(), 1),
+        format!("{}#1", process_1()),
         "the running successor key must differ from the terminal await key"
     );
 }
@@ -165,18 +165,19 @@ pub(super) fn controller_handler_error_classification_keeps_lane_busy_retryable(
 #[tokio::test]
 pub(super) async fn terminal_child_failure_becomes_typed_process_output_for_the_awaiting_parent() {
     let registry = process_registry();
-    let registration = rerunnable_registration("terminal-child-failure");
+    let registration = rerunnable_registration();
     let record = registry
         .register_process(registration.clone())
         .await
         .expect("register terminal-failure child");
+    let process_id = record.id.clone();
     let parent_context = Arc::new(RecordingContext::default());
     let parent = RestateRuntimeEffectController::new_for_test(Arc::clone(&parent_context));
     let parent_wait = parent.execute_effect(
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, "await-terminal-child-failure"),
             RuntimeEffectCommand::process(ProcessCommand::Await {
-                process_ref: lash_core::ProcessRef::from_record(&record),
+                process_id: record.id.clone(),
             }),
         ),
         registry_local_executor(Arc::clone(&registry)),
@@ -204,6 +205,7 @@ pub(super) async fn terminal_child_failure_becomes_typed_process_output_for_the_
         "run",
         "terminal-child-failure",
         &RestateProcessWorkflowInput {
+            process_id: process_id.clone(),
             registration,
             execution_context: ProcessExecutionContext::default(),
             segment_ordinal: 0,
@@ -213,19 +215,16 @@ pub(super) async fn terminal_child_failure_becomes_typed_process_output_for_the_
     )
     .await
     .expect("terminal child workflow must complete through the Restate endpoint");
-    let promise_key = restate_process_terminal_await_key(
-        &test_restate_authority_id(),
-        &ProcessId::from("terminal-child-failure"),
-    )
-    .expect("terminal promise key")
-    .promise_key();
+    let promise_key = restate_process_terminal_await_key(&test_restate_authority_id(), &process_id)
+        .expect("terminal promise key")
+        .promise_key();
     let resolution = restate_completed_promise(&endpoint_output, &promise_key)
         .expect("terminal child workflow must publish its process-terminal promise");
     let serde_json::Value::String(resolution) = resolution else {
         panic!("terminal promise completion must carry its serialized typed resolution")
     };
     parent_context.resolve_process_terminal_resolution(
-        &ProcessId::from("terminal-child-failure"),
+        &process_id,
         serde_json::from_str(&resolution).expect("decode published terminal resolution"),
     );
     let awaited = tokio::time::timeout(Duration::from_secs(1), &mut parent_wait)
@@ -248,7 +247,7 @@ pub(super) async fn terminal_child_failure_becomes_typed_process_output_for_the_
     assert_eq!(failure.retry, lash_core::ToolRetryStatus::Never);
     assert_eq!(
         registry
-            .get_process(&ProcessId::from("terminal-child-failure"))
+            .get_process(&process_id)
             .await
             .expect("read terminal child")
             .and_then(|record| record.outcome),
@@ -261,13 +260,13 @@ pub(super) async fn terminal_child_failure_becomes_typed_process_output_for_the_
 #[tokio::test]
 pub(super) async fn replay_divergence_mid_child_aborts_parent_without_terminalizing_rerunnable_child()
  {
-    let process_id = "divergence-aborted-child";
     let registry = process_registry();
-    let registration = rerunnable_registration(process_id);
-    registry
+    let registration = rerunnable_registration();
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register divergence-aborted child");
+        .expect("register divergence-aborted child")
+        .id;
     let runner = Arc::new(DivergenceThenSuccessRunner {
         runs: AtomicUsize::new(0),
     });
@@ -279,11 +278,12 @@ pub(super) async fn replay_divergence_mid_child_aborts_parent_without_terminaliz
 
     let error = workflow
         .run_registration_for_test(
+            process_id.clone(),
             registration.clone(),
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::testing::UnavailableEffectController),
-                durable_admission(&ExecutionScope::process(process_id)),
+                durable_admission(&ExecutionScope::process(process_id.clone())),
             )
             .expect("divergence-aborted child scope"),
             0,
@@ -299,7 +299,7 @@ pub(super) async fn replay_divergence_mid_child_aborts_parent_without_terminaliz
         "parent abort lost the typed divergence code: {rendered}"
     );
     let interrupted = registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await
         .expect("read interrupted child")
         .expect("interrupted child remains registered");
@@ -310,11 +310,12 @@ pub(super) async fn replay_divergence_mid_child_aborts_parent_without_terminaliz
 
     let rerun = workflow
         .run_registration_for_test(
+            process_id.clone(),
             registration,
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::testing::UnavailableEffectController),
-                durable_admission(&ExecutionScope::process(process_id)),
+                durable_admission(&ExecutionScope::process(process_id.clone())),
             )
             .expect("rerun child scope"),
             0,
@@ -332,13 +333,13 @@ pub(super) async fn replay_divergence_mid_child_aborts_parent_without_terminaliz
 
 #[tokio::test]
 pub(super) async fn opaque_process_infrastructure_failure_does_not_become_terminal_process_truth() {
-    let process_id = "opaque-infrastructure-failure";
     let registry = process_registry();
-    let registration = rerunnable_registration(process_id);
-    registry
+    let registration = rerunnable_registration();
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register rerunnable child");
+        .expect("register rerunnable child")
+        .id;
     let runner = Arc::new(OpaqueFailureThenSuccessRunner {
         runs: AtomicUsize::new(0),
     });
@@ -350,11 +351,12 @@ pub(super) async fn opaque_process_infrastructure_failure_does_not_become_termin
 
     workflow
         .run_registration_for_test(
+            process_id.clone(),
             registration.clone(),
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::testing::UnavailableEffectController),
-                durable_admission(&ExecutionScope::process(process_id)),
+                durable_admission(&ExecutionScope::process(process_id.clone())),
             )
             .expect("first child scope"),
             0,
@@ -363,7 +365,7 @@ pub(super) async fn opaque_process_infrastructure_failure_does_not_become_termin
         .await
         .expect_err("opaque infrastructure failure must abort the invocation");
     let interrupted = registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await
         .expect("read interrupted child")
         .expect("child remains registered");
@@ -372,11 +374,12 @@ pub(super) async fn opaque_process_infrastructure_failure_does_not_become_termin
 
     let rerun = workflow
         .run_registration_for_test(
+            process_id.clone(),
             registration,
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::testing::UnavailableEffectController),
-                durable_admission(&ExecutionScope::process(process_id)),
+                durable_admission(&ExecutionScope::process(process_id.clone())),
             )
             .expect("rerun child scope"),
             0,
@@ -415,7 +418,7 @@ pub(super) fn ingress_submit_maps_an_unregistered_service_to_the_terminal_code()
         body: "not found".to_string(),
     };
     let lash_core::PluginError::Runtime(error) =
-        crate::process::process_ingress_submit_error(&ProcessId::from("proc-1"), unregistered)
+        crate::process::process_ingress_submit_error(&ProcessId::fixture("proc-1"), unregistered)
     else {
         panic!("ingress submit failures must stay typed runtime errors");
     };
@@ -432,7 +435,7 @@ pub(super) fn ingress_submit_maps_an_unregistered_service_to_the_terminal_code()
         body: "unavailable".to_string(),
     };
     let lash_core::PluginError::Runtime(error) =
-        crate::process::process_ingress_submit_error(&ProcessId::from("proc-1"), transient)
+        crate::process::process_ingress_submit_error(&ProcessId::fixture("proc-1"), transient)
     else {
         panic!("ingress submit failures must stay typed runtime errors");
     };
@@ -479,8 +482,8 @@ pub(super) fn runtime_handler_error_classification_makes_terminal_runtime_error_
 #[test]
 pub(super) fn boundary_with_armed_wait_is_declined_instead_of_terminalized() {
     let mut record = lash_core::ProcessRecord::from_registration(
-        rerunnable_registration("wait"),
-        lash_core::ProcessIncarnation::from_registration_sequence(1),
+        rerunnable_registration(),
+        ProcessId::fixture("wait"),
     );
     record.wait = Some(lash_core::WaitState {
         since_ms: 1,
@@ -514,8 +517,12 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
         .build();
     let context = Arc::new(RecordingContext::with_endpoint(endpoint));
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
-    let registration = rerunnable_registration("task-smoke")
-        .with_wake_session_id(Some(SessionId::from("wake-smoke")));
+    let registration = rerunnable_registration()
+        .with_wake_session_id(Some(SessionId::from("wake-smoke")))
+        .with_start_key(Some(lash_core::StartKey::for_host(
+            lash_core::StartKeyOwner::HOST,
+            "background-smoke-start",
+        )));
     let execution_context = ProcessExecutionContext::default().with_causal_invocation(Some(
         runtime_invocation(RuntimeEffectKind::ToolAttempt, "tool-smoke").into_runtime_invocation(),
     ));
@@ -541,16 +548,17 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
     else {
         panic!("wrong start outcome");
     };
+    let process_id = record.id.clone();
 
     let external_ref = record.external_ref.as_ref().expect("external ref");
     assert_eq!(external_ref.backend, "restate");
-    assert_eq!(external_ref.id, "LashProcessWorkflow/task-smoke");
+    assert_eq!(external_ref.id, format!("LashProcessWorkflow/{process_id}"));
     assert_eq!(
         external_ref
             .metadata
             .as_ref()
             .and_then(|metadata| metadata.get("invocation_id")),
-        Some(&serde_json::json!("invocation-task-smoke"))
+        Some(&serde_json::json!(format!("invocation-{process_id}")))
     );
 
     let observed = registry
@@ -564,33 +572,38 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
         .await
         .expect("session observed");
     assert_eq!(observed.len(), 1);
-    assert_eq!(observed[0].id, "task-smoke");
+    assert_eq!(observed[0].id, process_id);
     let observed_external_ref = observed[0].external_ref.as_ref().expect("external ref");
     assert_eq!(observed_external_ref.backend, "restate");
-    assert_eq!(observed_external_ref.id, "LashProcessWorkflow/task-smoke");
+    assert_eq!(
+        observed_external_ref.id,
+        format!("LashProcessWorkflow/{process_id}")
+    );
 
     assert_eq!(
         context
             .started
             .lock_recover()
             .iter()
-            .map(|registration| registration.id.as_str())
+            .map(|registration| registration.start_key.clone())
             .collect::<Vec<_>>(),
-        vec!["task-smoke"]
+        vec![Some(lash_core::StartKey::for_host(
+            lash_core::StartKeyOwner::HOST,
+            "background-smoke-start"
+        ))]
     );
     assert_eq!(
         runner.ran.lock_recover().as_slice(),
         &[RecordedProcessRun {
-            process_id: ProcessId::from("task-smoke"),
+            process_id: process_id.clone(),
             wake_target_session_id: Some(SessionId::from("wake-smoke")),
             tool_effect_id: Some("tool-smoke".to_string()),
-            execution_scope_id: "task-smoke".to_string(),
+            execution_scope_id: process_id.to_string(),
         }]
     );
 
-    let process_ref = lash_core::ProcessRef::from_record(&record);
     let live = registry
-        .get_process_ref(&process_ref)
+        .get_process(&process_id)
         .await
         .expect("read cancel target")
         .expect("retained target");
@@ -602,7 +615,7 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "background-smoke-cancel"),
                 RuntimeEffectCommand::process(ProcessCommand::Cancel {
-                    process_ref: process_ref.clone(),
+                    process_id: process_id.clone(),
                     origin: lash_core::CancelOrigin::OperatorRequested,
                     requester: "actor:smoke".to_string(),
                     attribution: None,
@@ -618,7 +631,7 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
     else {
         panic!("expected cancellation outcome");
     };
-    assert_eq!(lash_core::ProcessRef::from_record(&record), process_ref);
+    assert_eq!(record.id, process_id);
     let request = record
         .cancel_request
         .as_deref()
@@ -627,7 +640,7 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
     assert_eq!(request.requester, "actor:smoke");
     let expected = RestateProcessCancelRequest {
         journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
-        process_ref,
+        process_id,
         request: request.clone(),
     };
     assert_eq!(
@@ -688,7 +701,7 @@ impl lash_core::ToolProvider for RecoveryProcessTool {
         // the intent executor emits it once the attempt commits.
         let intent = lash_core::ToolIntent::EmitProcessEvent(lash_core::EmitProcessEventIntent {
             session_id: SessionId::from(call.context.session_id()),
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             event_type: "process.wake".to_string(),
             payload: serde_json::json!({ "message": line, "wake_input": line }),
         });
@@ -880,7 +893,6 @@ fn process_control_resources() -> lashlang::LashlangHostCatalog {
 }
 
 pub(super) async fn segmented_child_await_registration(
-    process_id: &ProcessId,
     env_ref: lash_core::ProcessExecutionEnvRef,
 ) -> ProcessRegistration {
     // process child() {
@@ -927,7 +939,6 @@ pub(super) async fn segmented_child_await_registration(
     .await
     .expect("store segmented child-await artifact");
     ProcessRegistration::new(
-        process_id,
         lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
@@ -975,15 +986,12 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
         )
         .with_segment_effect_budget_selector(|_| 1),
     );
-    let registration = segmented_child_await_registration(
-        &ProcessId::from("segmented-child-await-parent"),
-        persist_recovery_env_ref().await,
-    )
-    .await;
-    registry
+    let registration = segmented_child_await_registration(persist_recovery_env_ref().await).await;
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register segmented child-await parent");
+        .expect("register segmented child-await parent")
+        .id;
 
     let mut ordinal = 0_u64;
     let mut input_handover = None;
@@ -1001,17 +1009,18 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
         );
         // Every segment continues the root segment's execution.
         let execution_authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-            &registration.id,
+            &process_id,
             "segmented-child-await-root-execution",
         );
         let outcome = workflow
             .run_registration_for_test(
+                process_id.clone(),
                 registration.clone(),
                 ProcessExecutionContext::default()
                     .with_execution_write_authority(execution_authority.clone()),
                 controller
                     .process_scope_for_test(durable_admission(&ExecutionScope::process(
-                        &registration.id,
+                        process_id.clone(),
                     )))
                     .expect("segmented child-await scope"),
                 ordinal,
@@ -1028,19 +1037,20 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
                         .graphs()
                         .into_iter()
                         .find(|graph| {
-                            matches!(&graph.subject, lash_trace::TraceRuntimeSubject::Process { process_id }
-                                if process_id == registration.id)
+                            matches!(&graph.subject, lash_trace::TraceRuntimeSubject::Process { process_id: subject_id }
+                                if *subject_id == process_id)
                         })
                         .expect("parent attempt graph before replay");
                     context.start_replay();
                     let replay = workflow
                         .run_registration_for_test(
+                            process_id.clone(),
                             registration.clone(),
                             ProcessExecutionContext::default()
                                 .with_execution_write_authority(execution_authority),
                             controller
                                 .process_scope_for_test(durable_admission(
-                                    &ExecutionScope::process(&registration.id),
+                                    &ExecutionScope::process(process_id.clone()),
                                 ))
                                 .expect("replayed segment scope"),
                             ordinal,
@@ -1056,8 +1066,8 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
                         .graphs()
                         .into_iter()
                         .find(|graph| {
-                            matches!(&graph.subject, lash_trace::TraceRuntimeSubject::Process { process_id }
-                                if process_id == registration.id)
+                            matches!(&graph.subject, lash_trace::TraceRuntimeSubject::Process { process_id: subject_id }
+                                if *subject_id == process_id)
                         })
                         .expect("parent attempt graph after replay");
                     assert_eq!(
@@ -1067,7 +1077,7 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
                 }
                 continuations
                     .put_segment_handover(
-                        &registration.id,
+                        &process_id,
                         lash_core::PersistedSegmentHandover {
                             writer: String::new(),
                             segment_ordinal: next,
@@ -1078,7 +1088,7 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
                     .expect("store segmented child-await handover");
                 input_handover = Some(
                     continuations
-                        .get_segment_handover(&registration.id, next)
+                        .get_segment_handover(&process_id, next)
                         .await
                         .expect("reload segmented child-await handover")
                         .expect("stored segmented child-await handover")
@@ -1104,8 +1114,8 @@ pub(super) async fn lashlang_process_retains_child_possession_across_restate_seg
         .graphs()
         .into_iter()
         .filter(|graph| {
-            matches!(&graph.subject, lash_trace::TraceRuntimeSubject::Process { process_id }
-            if process_id == registration.id)
+            matches!(&graph.subject, lash_trace::TraceRuntimeSubject::Process { process_id: subject_id }
+            if *subject_id == process_id)
         })
         .collect::<Vec<_>>();
     let mut attempts = parent_graphs
@@ -1173,7 +1183,6 @@ pub(super) fn process_wake_event_type() -> lash_core::ProcessEventType {
 }
 
 pub(super) async fn snapshot_lashlang_registration(
-    process_id: &ProcessId,
     env_ref: lash_core::ProcessExecutionEnvRef,
 ) -> ProcessRegistration {
     // process main() {
@@ -1233,7 +1242,6 @@ pub(super) async fn snapshot_lashlang_registration(
         .expect("main process ref")
         .clone();
     ProcessRegistration::new(
-        process_id,
         lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked_module.artifact.module_ref().clone(),
             process_ref,
@@ -1292,7 +1300,6 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
     let creator_scope = lash_core::SessionScope::new("root");
     let env_ref = persist_recovery_env_ref().await;
     let registration = ProcessRegistration::new(
-        "recover-tool",
         ProcessInput::ToolCall {
             call: lash_core::PreparedToolCall::from_parts(
                 "recover-call",
@@ -1312,9 +1319,17 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
     )
     .with_extra_event_types([process_wake_event_type()])
     .with_execution_env_ref(Some(env_ref))
-    .with_wake_session_id(Some(creator_scope.session_id.clone()));
+    .with_wake_session_id(Some(creator_scope.session_id.clone()))
+    .with_start_key(Some(lash_core::StartKey::for_host(
+        lash_core::StartKeyOwner::HOST,
+        "recovery-start",
+    )));
 
-    host_a
+    let RuntimeEffectOutcome::Process {
+        result: ProcessEffectOutcome::Start {
+            record: recover_tool,
+        },
+    } = host_a
         .execute_effect(
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "recovery-start"),
@@ -1330,10 +1345,13 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
                     as Arc<dyn lash_core::ProcessExecutionEnvStore>),
         )
         .await
-        .expect("schedule and run process through Restate endpoint");
-    registry_a
+        .expect("schedule and run process through Restate endpoint")
+    else {
+        panic!("the recovery start must report the started process");
+    };
+    let recover_tool_id = recover_tool.id;
+    let recover_cancel_id = registry_a
         .register_process(ProcessRegistration::new(
-            "recover-cancel",
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -1345,7 +1363,8 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
             ),
         ))
         .await
-        .expect("register nonterminal cancellation target before reopen");
+        .expect("register nonterminal cancellation target before reopen")
+        .id;
     drop(host_a);
     drop(registry_a);
 
@@ -1368,17 +1387,18 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
         .await
         .expect("list reopened observations");
     assert_eq!(observed.len(), 1);
-    assert_eq!(observed[0].id, "recover-tool");
-    let recovered_process_ref = lash_core::ProcessRef::from_record(
-        &registry_b
-            .get_process(&ProcessId::from("recover-cancel"))
+    assert_eq!(observed[0].id, recover_tool_id);
+    assert!(
+        registry_b
+            .get_process(&recover_cancel_id)
             .await
             .expect("read reopened cancellation target")
-            .expect("reopened cancellation target remains registered"),
+            .is_some(),
+        "the reopened cancellation target remains registered"
     );
     assert_eq!(
         lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
-            .await_terminal(&ProcessId::from("recover-tool"))
+            .await_terminal(&recover_tool_id)
             .await
             .expect("await recovered terminal process"),
         process_success(serde_json::json!({ "echo": "wake-after-rebuild" }))
@@ -1429,7 +1449,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "recovery-cancel"),
                 RuntimeEffectCommand::process(ProcessCommand::Cancel {
-                    process_ref: recovered_process_ref,
+                    process_id: recover_cancel_id.clone(),
                     origin: lash_core::CancelOrigin::OperatorRequested,
                     requester: "actor:post-rebuild".to_string(),
                     attribution: None,
@@ -1441,7 +1461,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
         .expect("cancel through reopened process workflow");
     assert!(
         registry_b
-            .full_event_window(&ProcessId::from("recover-cancel"), 0)
+            .full_event_window(&recover_cancel_id, 0)
             .await
             .expect("events after cancel")
             .iter()

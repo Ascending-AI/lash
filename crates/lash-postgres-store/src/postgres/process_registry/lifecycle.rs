@@ -61,8 +61,8 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         await_output: ProcessAwaitOutput,
     ) -> Result<lash_core_execution::ProcessCompletionOutcome, PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        let process_id = lease.process_id.as_str();
-        let mut record = require_process_tx(&mut tx, &ProcessId::from(process_id)).await?;
+        let process_id = &lease.process_id;
+        let mut record = require_process_tx(&mut tx, process_id).await?;
         let await_output = await_output.with_cancel_origin(
             record
                 .cancel_request
@@ -76,11 +76,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
                 &await_output,
             ));
         }
-        let request = facade_support::terminal_append_request(
-            &ProcessId::from(process_id),
-            &await_output,
-            None,
-        );
+        let request = facade_support::terminal_append_request(process_id, &await_output, None);
         // A successful prior terminal append is replay-idempotent even though
         // that transaction already cleared the lease, so the lease fence is
         // re-checked inside the append sequence on the insert arm only.
@@ -104,7 +100,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
         // statement's predicate is the backstop and `require_fenced_write_applied`
         // returns this site's refusal if it and the locked read ever disagree.
         let released = sqlx::query(process_sql().lease.release.sql())
-            .bind(process_id)
+            .bind(process_id.as_str())
             .bind(&lease.lease_token)
             .bind(lease.fencing_token as i64)
             .execute(&mut *tx)
@@ -117,7 +113,7 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             process_id,
             released,
             || PluginError::ProcessLeaseSuperseded {
-                process_id: ProcessId::from(process_id.to_string()),
+                process_id: process_id.clone(),
             },
         )?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
@@ -234,13 +230,13 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
 
     async fn request_process_cancel(
         &self,
-        process_ref: &ProcessRef,
+        process_id: &ProcessId,
         origin: lash_core_execution::CancelOrigin,
         requester: String,
         attribution: Option<lash_core_execution::RuntimeReplayAttribution>,
     ) -> Result<ProcessRecord, PluginError> {
         self.request_process_cancel_reporting_realization(
-            process_ref,
+            process_id,
             origin,
             requester,
             attribution,
@@ -251,13 +247,13 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
 
     async fn request_process_cancel_reporting_realization(
         &self,
-        process_ref: &ProcessRef,
+        process_id: &ProcessId,
         origin: lash_core_execution::CancelOrigin,
         requester: String,
         attribution: Option<lash_core_execution::RuntimeReplayAttribution>,
     ) -> Result<(ProcessRecord, lash_core_execution::StoreRealization), PluginError> {
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        let mut record = require_process_ref_tx(&mut tx, process_ref).await?;
+        let mut record = require_process_tx(&mut tx, process_id).await?;
         let now = self.clock.timestamp_ms();
         let request = lash_core_execution::CancelRequest::new(origin, requester, now);
         match lash_core_execution::runtime::prepare_process_transition(

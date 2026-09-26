@@ -11,25 +11,18 @@ macro_rules! delegate_process_query {
     ($wrapper:ty, $inner:ident) => {
         #[async_trait::async_trait]
         impl $crate::runtime::process::registry_concerns::ProcessQuery for $wrapper {
-            async fn resolve_process_ref(
-                &self,
-                process_id: &ProcessId,
-            ) -> Result<$crate::ProcessRef, $crate::PluginError> {
-                self.$inner.resolve_process_ref(process_id).await
-            }
-
-            async fn get_process_ref(
-                &self,
-                process_ref: &$crate::ProcessRef,
-            ) -> Result<Option<$crate::ProcessRecord>, $crate::PluginError> {
-                self.$inner.get_process_ref(process_ref).await
-            }
-
             async fn get_process(
                 &self,
                 process_id: &ProcessId,
             ) -> Result<Option<$crate::ProcessRecord>, $crate::PluginError> {
                 self.$inner.get_process(process_id).await
+            }
+
+            async fn get_process_by_start_key(
+                &self,
+                start_key: &$crate::StartKey,
+            ) -> Result<Option<$crate::ProcessRecord>, $crate::PluginError> {
+                self.$inner.get_process_by_start_key(start_key).await
             }
 
             async fn list_processes(
@@ -114,14 +107,35 @@ macro_rules! delegate_process_query {
 }
 pub(crate) use delegate_process_query;
 
+/// The minted process id a registration answered with.
+///
+/// A registration carries no id until the registrar mints one, so a decorator
+/// that keys a side effect by process reads it off the forwarded result.
+pub trait RegisteredProcess {
+    fn registered_process_id(&self) -> &crate::ProcessId;
+}
+
+impl RegisteredProcess for crate::ProcessRecord {
+    fn registered_process_id(&self) -> &crate::ProcessId {
+        &self.id
+    }
+}
+
+impl RegisteredProcess for crate::ProcessRegistrationOutcome {
+    fn registered_process_id(&self) -> &crate::ProcessId {
+        &self.record.id
+    }
+}
+
 /// The supplied hooks wrap the forwarded registration and event-producing
 /// operations so a decorator can retain its side effects without replacing
-/// the delegation itself.
+/// the delegation itself. A registration hook learns the minted id from the
+/// forwarded result, through [`RegisteredProcess`].
 macro_rules! delegate_process_registrar {
     (
         $wrapper:ty,
         $inner:ident,
-        registration |$registration_self:ident, $registration_process_id:ident, $registration_call:ident| $registration_hook:block,
+        registration |$registration_self:ident, $registration_call:ident| $registration_hook:block,
         event |$event_self:ident, $event_process_id:ident, $event_call:ident| $event_hook:block
     ) => {
         #[async_trait::async_trait]
@@ -130,7 +144,6 @@ macro_rules! delegate_process_registrar {
                 &self,
                 registration: $crate::ProcessRegistration,
             ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
-                let $registration_process_id = registration.id.clone();
                 let $registration_self = self;
                 let $registration_call = self.$inner.register_process(registration);
                 $registration_hook
@@ -141,7 +154,6 @@ macro_rules! delegate_process_registrar {
                 registration: $crate::ProcessRegistration,
                 observers: &[$crate::SessionId],
             ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
-                let $registration_process_id = registration.id.clone();
                 let $registration_self = self;
                 let $registration_call = self
                     .$inner
@@ -154,7 +166,6 @@ macro_rules! delegate_process_registrar {
                 registration: $crate::ProcessRegistration,
                 observers: &[$crate::SessionId],
             ) -> Result<$crate::ProcessRegistrationOutcome, $crate::PluginError> {
-                let $registration_process_id = registration.id.clone();
                 let $registration_self = self;
                 let $registration_call = self
                     .$inner
@@ -203,17 +214,6 @@ macro_rules! delegate_process_event_log {
                 $event_hook
             }
 
-            async fn append_event_ref(
-                &self,
-                process_ref: &$crate::ProcessRef,
-                request: $crate::ProcessEventAppendRequest,
-            ) -> Result<$crate::ProcessEventAppendReceipt, $crate::PluginError> {
-                let $event_process_id = &process_ref.process_id;
-                let $event_self = self;
-                let $event_call = self.$inner.append_event_ref(process_ref, request);
-                $event_hook
-            }
-
             async fn append_event_with_authority(
                 &self,
                 process_id: &$crate::ProcessId,
@@ -228,9 +228,9 @@ macro_rules! delegate_process_event_log {
                 $event_hook
             }
 
-            async fn event_page_ref(
+            async fn event_page_after(
                 &self,
-                process_ref: &$crate::ProcessRef,
+                process_id: &$crate::ProcessId,
                 after_sequence: u64,
                 limit: std::num::NonZeroUsize,
                 mode: $crate::ProcessEventQueryMode,
@@ -239,7 +239,7 @@ macro_rules! delegate_process_event_log {
                 $crate::PluginError,
             > {
                 self.$inner
-                    .event_page_ref(process_ref, after_sequence, limit, mode)
+                    .event_page_after(process_id, after_sequence, limit, mode)
                     .await
             }
 
@@ -251,17 +251,6 @@ macro_rules! delegate_process_event_log {
             ) -> Result<u64, $crate::PluginError> {
                 self.$inner
                     .count_events_through(process_id, event_type, up_to_sequence)
-                    .await
-            }
-
-            async fn count_events_through_ref(
-                &self,
-                process_ref: &$crate::ProcessRef,
-                event_type: &str,
-                up_to_sequence: u64,
-            ) -> Result<u64, $crate::PluginError> {
-                self.$inner
-                    .count_events_through_ref(process_ref, event_type, up_to_sequence)
                     .await
             }
 
@@ -378,31 +367,31 @@ macro_rules! delegate_process_lifecycle {
 
             async fn request_process_cancel(
                 &self,
-                process_ref: &$crate::ProcessRef,
+                process_id: &$crate::ProcessId,
                 origin: $crate::CancelOrigin,
                 requester: String,
                 attribution: Option<$crate::RuntimeReplayAttribution>,
             ) -> Result<$crate::ProcessRecord, $crate::PluginError> {
-                let $event_process_id = &process_ref.process_id;
+                let $event_process_id = process_id;
                 let $event_self = self;
                 let $event_call =
                     self.$inner
-                        .request_process_cancel(process_ref, origin, requester, attribution);
+                        .request_process_cancel(process_id, origin, requester, attribution);
                 $event_hook
             }
 
             async fn request_process_cancel_reporting_realization(
                 &self,
-                process_ref: &$crate::ProcessRef,
+                process_id: &$crate::ProcessId,
                 origin: $crate::CancelOrigin,
                 requester: String,
                 attribution: Option<$crate::RuntimeReplayAttribution>,
             ) -> Result<($crate::ProcessRecord, $crate::StoreRealization), $crate::PluginError>
             {
-                let $event_process_id = &process_ref.process_id;
+                let $event_process_id = process_id;
                 let $event_self = self;
                 let $event_call = self.$inner.request_process_cancel_reporting_realization(
-                    process_ref,
+                    process_id,
                     origin,
                     requester,
                     attribution,
@@ -500,17 +489,6 @@ macro_rules! delegate_process_observer_registry {
                 by: $crate::ProcessObserverBy,
             ) -> Result<(), $crate::PluginError> {
                 self.$inner.add_observer(session_id, process_id, by).await
-            }
-
-            async fn add_observer_ref(
-                &self,
-                session_id: &SessionId,
-                process_ref: &$crate::ProcessRef,
-                by: $crate::ProcessObserverBy,
-            ) -> Result<(), $crate::PluginError> {
-                self.$inner
-                    .add_observer_ref(session_id, process_ref, by)
-                    .await
             }
 
             async fn remove_observer(
@@ -754,10 +732,9 @@ macro_rules! delegate_process_retention {
             async fn complete_process_artifact_cleanup(
                 &self,
                 process_id: &$crate::ProcessId,
-                incarnation: $crate::ProcessIncarnation,
             ) -> Result<$crate::ProcessArtifactCleanupAck, $crate::PluginError> {
                 self.$inner
-                    .complete_process_artifact_cleanup(process_id, incarnation)
+                    .complete_process_artifact_cleanup(process_id)
                     .await
             }
 

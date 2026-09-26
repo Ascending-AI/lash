@@ -1,5 +1,4 @@
 use super::*;
-use lash_core::ProcessQuery as _;
 use lash_core::{
     ProcessEventLog as _, ProcessEventLogTestSupport as _, ProcessObserverRegistry as _,
     ProcessRetention as _, ProcessWakeOutbox as _,
@@ -166,10 +165,9 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
     .expect("build core over a clocked memory backend");
     let registry = core.process_registry();
     let delivery_expiry_ms = registry.wake_delivery_config().delivery_expiry_ms;
-    registry
+    let builder_clock_process_id = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                "builder-clock-process",
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -194,10 +192,11 @@ async fn the_backend_process_registry_stamps_from_the_backend_clock() {
             .with_wake_session_id(Some(SessionId::from("builder-clock-target"))),
         )
         .await
-        .expect("register clock-wiring process");
+        .expect("register clock-wiring process")
+        .id;
     registry
         .append_event(
-            &ProcessId::from("builder-clock-process"),
+            &builder_clock_process_id,
             lash_core::ProcessEventAppendRequest::new(
                 "builder.clock.wake",
                 serde_json::json!({"wake_input": "wake"}),
@@ -330,9 +329,9 @@ impl lash_core::ProcessWorkSubstrate for NoopProcessWork {
 
     async fn await_process_terminal(
         &self,
-        process_ref: &lash_core::ProcessRef,
+        process_id: &lash_core::ProcessId,
     ) -> std::result::Result<lash_core::ProcessTerminalWait, lash_core::PluginError> {
-        panic!("unexpected terminal wait for {process_ref}")
+        panic!("unexpected terminal wait for {process_id}")
     }
 }
 
@@ -430,12 +429,8 @@ async fn facade_native_process_wiring_shares_worker_change_hub() -> Result<()> {
         .expect("native worker change hub");
     let ports = core.substrate_slot.ports().await;
     let wiring_registry = Arc::clone(ports.process.registry());
-    let process_id = "facade-native-same-hub";
-    let mut worker_changes = worker_hub.subscribe(&ProcessId::from(process_id));
-
-    wiring_registry
+    let process_id = wiring_registry
         .register_process(lash_core::ProcessRegistration::new(
-            process_id,
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -446,6 +441,19 @@ async fn facade_native_process_wiring_shares_worker_change_hub() -> Result<()> {
                 lash_core::OnParentEnd::Abandon,
             ),
         ))
+        .await?
+        .id;
+    // The id is minted at registration, so the worker-side hub is watched
+    // from there, and the next write through the wiring registry must wake it.
+    let mut worker_changes = worker_hub.subscribe(&process_id);
+    wiring_registry
+        .complete_process(
+            &process_id,
+            lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
+                serde_json::Value::Null,
+            )),
+            lash_core::ProcessCompletionAuthority::external_owner(),
+        )
         .await?;
 
     tokio::time::timeout(
@@ -680,10 +688,9 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         .expect("fork observer source leaf");
     core.pin(&fork_node_id).await?;
 
-    registry
+    let fork_visible_process_id = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                "fork-visible-process",
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -710,11 +717,12 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
             .with_wake_session_id(Some(SessionId::from("fork-observer-source"))),
         )
         .await
-        .expect("register fork-visible process");
+        .expect("register fork-visible process")
+        .id;
     registry
         .add_observer(
             &SessionId::from("fork-observer-source"),
-            &ProcessId::from("fork-visible-process"),
+            &fork_visible_process_id,
             lash_core::ProcessObserverBy::host("fork-test-source"),
         )
         .await
@@ -728,17 +736,13 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
                 source_session_id: ("fork-observer-source").into(),
                 source_node_id: (&fork_node_id).into(),
             },
-            observed_processes: vec![
-                registry
-                    .resolve_process_ref(&ProcessId::from("fork-visible-process"))
-                    .await?,
-            ],
+            observed_processes: vec![fork_visible_process_id.clone()],
         })
         .await?;
     assert_eq!(fork_receipt.observed_processes.len(), 1);
     assert_eq!(
         fork_receipt.observed_processes[0].process_id,
-        "fork-visible-process"
+        fork_visible_process_id
     );
     let branch_store = factory
         .open_existing_store(&lash_core::SessionStoreCreateRequest {
@@ -769,7 +773,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         .await
         .expect("list inherited observations");
     assert_eq!(inherited.len(), 1);
-    assert_eq!(inherited[0].id, "fork-visible-process");
+    assert_eq!(inherited[0].id, fork_visible_process_id);
 
     registry.set_process_read_error(Some(lash_core::PluginError::Session(
         "transient fork observer registry failure".to_string(),
@@ -781,10 +785,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
             source_session_id: ("fork-observer-source").into(),
             source_node_id: (&fork_node_id).into(),
         },
-        observed_processes: inherited
-            .iter()
-            .map(lash_core::ProcessRef::from_record)
-            .collect(),
+        observed_processes: inherited.iter().map(|record| record.id.clone()).collect(),
     })
     .await
     .expect("transient observer registry failure must not fail fork_at");
@@ -839,11 +840,12 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
 
     let mut recovery_meta = published_meta;
     recovery_meta.pending_observer_intents.push(
-        lash_core::facade_support::SessionObserverIntent::host_requested("fork-visible-process"),
+        lash_core::facade_support::SessionObserverIntent::host_requested(
+            fork_visible_process_id.clone(),
+        ),
     );
-    registry
+    let fork_pruned_process_id = registry
         .register_process(lash_core::ProcessRegistration::new(
-            "fork-pruned-process",
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -855,10 +857,11 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
             ),
         ))
         .await
-        .expect("register process that will be pruned during fork publication");
+        .expect("register process that will be pruned during fork publication")
+        .id;
     let pruned_terminal = registry
         .complete_process(
-            &ProcessId::from("fork-pruned-process"),
+            &fork_pruned_process_id,
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
@@ -875,7 +878,9 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         .await
         .expect("prune inherited process before recovery");
     recovery_meta.pending_observer_intents.push(
-        lash_core::facade_support::SessionObserverIntent::host_requested("fork-pruned-process"),
+        lash_core::facade_support::SessionObserverIntent::host_requested(
+            fork_pruned_process_id.clone(),
+        ),
     );
     branch_store
         .save_session_meta(recovery_meta)
@@ -884,7 +889,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
     registry
         .remove_observer(
             &SessionId::from("fork-observer-branch"),
-            &ProcessId::from("fork-visible-process"),
+            &fork_visible_process_id,
             lash_core::ProcessObserverBy::host("fork-test-crash"),
         )
         .await
@@ -924,7 +929,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
     registry
         .remove_observer(
             &SessionId::from("fork-observer-branch"),
-            &ProcessId::from("fork-visible-process"),
+            &fork_visible_process_id,
             lash_core::ProcessObserverBy::host("fork-test-revoke"),
         )
         .await
@@ -945,10 +950,9 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         "a later deliberate observer removal must remain removed"
     );
 
-    registry
+    let fork_selective_process_id = registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(
-                "fork-selective-process",
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -962,7 +966,8 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
             &[SessionId::from("fork-observer-source")],
         )
         .await
-        .expect("register second observed process");
+        .expect("register second observed process")
+        .id;
     core.fork_at(crate::ForkRequest {
         session_id: ("fork-only-branch").into(),
         node_id: (&fork_node_id).into(),
@@ -970,11 +975,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
             source_session_id: ("fork-observer-source").into(),
             source_node_id: (&fork_node_id).into(),
         },
-        observed_processes: vec![
-            registry
-                .resolve_process_ref(&ProcessId::from("fork-selective-process"))
-                .await?,
-        ],
+        observed_processes: vec![fork_selective_process_id.clone()],
     })
     .await?;
     let only = registry
@@ -991,24 +992,24 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
         only.iter()
             .map(|record| record.id.as_str())
             .collect::<Vec<_>>(),
-        vec!["fork-selective-process"]
+        vec![fork_selective_process_id.as_str()]
     );
     let event_count_before = registry
-        .full_event_window(&ProcessId::from("fork-selective-process"), 0)
+        .full_event_window(&fork_selective_process_id, 0)
         .await
         .expect("read observer audit before duplicate apply")
         .len();
     registry
         .add_observer(
             &SessionId::from("fork-only-branch"),
-            &ProcessId::from("fork-selective-process"),
+            &fork_selective_process_id,
             lash_core::ProcessObserverBy::host("observer-test"),
         )
         .await
         .expect("reapply fork observer");
     assert_eq!(
         registry
-            .full_event_window(&ProcessId::from("fork-selective-process"), 0)
+            .full_event_window(&fork_selective_process_id, 0)
             .await
             .expect("read observer audit after duplicate apply")
             .len(),
@@ -1042,7 +1043,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
 
     registry
         .append_event(
-            &ProcessId::from("fork-visible-process"),
+            &fork_visible_process_id,
             lash_core::ProcessEventAppendRequest::new(
                 "fork.wake",
                 serde_json::json!({"wake_input": "source-only"}),
@@ -1057,7 +1058,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
             .expect("list wake deliveries")
             .iter()
             .any(|delivery| {
-                delivery.wake.process_id == "fork-visible-process"
+                delivery.wake.process_id == fork_visible_process_id
                     && delivery.wake.target_session_id == "fork-observer-source"
             }),
         "observer inheritance must not retarget the source wake subscription"
@@ -1071,7 +1072,6 @@ async fn duplicate_only_fork_intents_are_canonical(
 ) -> Result<()> {
     let source_session_id = SessionId::from(format!("duplicate-only-source-{case}"));
     let branch_session_id = SessionId::from(format!("duplicate-only-branch-{case}"));
-    let process_id = ProcessId::from(format!("duplicate-only-process-{case}"));
     let factory = backend.session_store_factory();
     let registry = backend.process_registry();
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
@@ -1114,10 +1114,9 @@ async fn duplicate_only_fork_intents_are_canonical(
         .expect("source has a forkable frame node");
     core.pin(&fork_node_id).await?;
 
-    registry
+    let process_id = registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(
-                &process_id,
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -1130,7 +1129,8 @@ async fn duplicate_only_fork_intents_are_canonical(
             ),
             std::slice::from_ref(&source_session_id),
         )
-        .await?;
+        .await?
+        .id;
 
     let receipt = core
         .fork_at(crate::ForkRequest {
@@ -1140,10 +1140,7 @@ async fn duplicate_only_fork_intents_are_canonical(
                 source_session_id: (&source_session_id).into(),
                 source_node_id: (&fork_node_id).into(),
             },
-            observed_processes: vec![
-                registry.resolve_process_ref(&process_id).await?,
-                registry.resolve_process_ref(&process_id).await?,
-            ],
+            observed_processes: vec![process_id.clone(), process_id.clone()],
         })
         .await?;
 
@@ -1193,13 +1190,11 @@ async fn duplicate_only_fork_intents_are_canonical_in_sqlite() -> Result<()> {
 #[tokio::test]
 async fn session_create_observer_intent_replays_idempotently_on_open() -> Result<()> {
     let session_id = "session-create-observer-recovery";
-    let process_id = "session-create-observed-process";
     let backend = memory_backend().await;
     let factory = backend.session_store_factory();
     let registry = backend.process_registry();
-    registry
+    let process_id = registry
         .register_process(lash_core::ProcessRegistration::new(
-            process_id,
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -1210,11 +1205,14 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
                 lash_core::OnParentEnd::Abandon,
             ),
         ))
-        .await?;
+        .await?
+        .id;
     let store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
             pending_observer_intents: vec![
-                lash_core::facade_support::SessionObserverIntent::host_requested(process_id),
+                lash_core::facade_support::SessionObserverIntent::host_requested(
+                    process_id.clone(),
+                ),
             ],
             session_id: SessionId::from(session_id.to_string()),
             relation: lash_core::SessionRelation::Root,
@@ -1231,19 +1229,19 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
 
     assert!(
         !registry
-            .is_observer(&SessionId::from(session_id), &ProcessId::from(process_id))
+            .is_observer(&SessionId::from(session_id), &process_id)
             .await?,
         "the fixture must preserve the real crash gap before publication"
     );
     core.session(session_id).open().await?;
     assert!(
         registry
-            .is_observer(&SessionId::from(session_id), &ProcessId::from(process_id))
+            .is_observer(&SessionId::from(session_id), &process_id)
             .await?,
         "open must publish the observer edge left pending by a create crash"
     );
     let observer_event_count = registry
-        .full_event_window(&ProcessId::from(process_id), 0)
+        .full_event_window(&process_id, 0)
         .await?
         .into_iter()
         .filter(|event| event.event_type == "process.observer_added")
@@ -1255,7 +1253,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
     core.session(session_id).open().await?;
     assert_eq!(
         registry
-            .full_event_window(&ProcessId::from(process_id), 0)
+            .full_event_window(&process_id, 0)
             .await?
             .into_iter()
             .filter(|event| event.event_type == "process.observer_added")
@@ -1275,14 +1273,14 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
     registry
         .remove_observer(
             &SessionId::from(session_id),
-            &ProcessId::from(process_id),
+            &process_id,
             lash_core::ProcessObserverBy::host("post-recovery-removal"),
         )
         .await?;
     core.session(session_id).open().await?;
     assert!(
         !registry
-            .is_observer(&SessionId::from(session_id), &ProcessId::from(process_id))
+            .is_observer(&SessionId::from(session_id), &process_id)
             .await?,
         "consumed create intent must not recreate a deliberately removed edge"
     );
@@ -1304,12 +1302,10 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
 
     for (case, simulate_crash_between_layers) in [("fresh", false), ("crash-resume", true)] {
         let session_id = SessionId::from(format!("nested-observer-intent-{case}"));
-        let create_process_id = ProcessId::from(format!("nested-create-process-{case}"));
-        let fork_process_id = ProcessId::from(format!("nested-fork-process-{case}"));
-        for process_id in [&create_process_id, &fork_process_id] {
-            registry
+        let mut registered = Vec::new();
+        for _ in 0..2 {
+            let process_id = registry
                 .register_process(lash_core::ProcessRegistration::new(
-                    process_id,
                     lash_core::ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
@@ -1320,8 +1316,12 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
                         lash_core::OnParentEnd::Abandon,
                     ),
                 ))
-                .await?;
+                .await?
+                .id;
+            registered.push(process_id);
         }
+        let [create_process_id, fork_process_id] =
+            <[ProcessId; 2]>::try_from(registered).expect("two registered processes");
         let store = factory
             .create_store(&lash_core::SessionStoreCreateRequest {
                 pending_observer_intents: vec![

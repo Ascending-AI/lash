@@ -1028,13 +1028,12 @@ await control.continue_as({
 
 /// Queued turn work a terminal checkpoint withholds: one process wake.
 fn withheld_wake(session_id: &SessionId) -> lash_core::runtime::QueuedWorkBatchDraft {
-    let process_id = lash_core::runtime::ProcessId::from("withheld-at-terminal");
+    let process_id = lash_core::runtime::ProcessId::fixture("withheld-at-terminal");
     lash_core::runtime::process_wake_batch_draft(lash_core::runtime::ProcessWakeDelivery {
         version: lash_core::runtime::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: "withheld-at-terminal-wake".to_string(),
         target_session_id: session_id.clone(),
         process_id: process_id.clone(),
-        process_incarnation: lash_core::runtime::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "process.wake".to_string(),
         event_invocation: lash_core::runtime::RuntimeInvocation {

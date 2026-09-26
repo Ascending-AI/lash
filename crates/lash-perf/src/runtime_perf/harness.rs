@@ -219,10 +219,9 @@ impl TurnEntry {
                 });
                 let effect_host = session.effect_host();
                 let scoped = effect_host
-                    .scoped(
-                        lash_core::AdmittedScope::unpinned(session.turn_scope(scope_turn_id))
-                            .map_err(anyhow::Error::from)?,
-                    )
+                    .scoped(lash_core::AdmittedScope::new(
+                        session.turn_scope(scope_turn_id),
+                    ))
                     .map_err(anyhow::Error::from)?;
                 drive_turn(session, input, turn_id.cloned(), cancel, scoped, drive).await
             }
@@ -230,9 +229,7 @@ impl TurnEntry {
                 let turn_id = turn_id.cloned().unwrap_or_else(|| {
                     TurnId::from(format!("runtime-perf-turn-{}", uuid::Uuid::new_v4()))
                 });
-                let admitted =
-                    lash_core::AdmittedScope::unpinned(session.turn_scope(turn_id.clone()))
-                        .map_err(anyhow::Error::from)?;
+                let admitted = lash_core::AdmittedScope::new(session.turn_scope(turn_id.clone()));
                 let report: Arc<Mutex<Option<anyhow::Result<lash::TurnReport>>>> =
                     Arc::new(Mutex::new(None));
                 let attempt: lash_restate_test::HandlerAttempt = {

@@ -160,14 +160,14 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
     process
         .execute_batch(PROCESS_SCHEMA)
         .expect("create process constraint fixture");
-    let process_columns = "process_id, incarnation, registration_fingerprint, originator_id,
+    let process_columns = "process_id, originator_id,
         identity_kind, created_at_ms, updated_at_ms, last_event_sequence, change_seq,
         status, parent_scope_kind, parent_scope_id, on_parent_end, record_json";
     assert_check_rejects(
         &process,
         &format!(
             "INSERT INTO processes ({process_columns}) VALUES
-             ('bad-status', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
+             ('bad-status', 'originator', 'standard', 0, 0, 0, 0,
               'paused', 'host', NULL, 'abandon', '{{}}')"
         ),
         "ck_processes_status",
@@ -176,7 +176,7 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         &process,
         &format!(
             "INSERT INTO processes ({process_columns}) VALUES
-             ('bad-parent-kind', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
+             ('bad-parent-kind', 'originator', 'standard', 0, 0, 0, 0,
               'running', 'session', 'scope', 'abandon', '{{}}')"
         ),
         "ck_processes_parent_scope_kind",
@@ -185,7 +185,7 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         &process,
         &format!(
             "INSERT INTO processes ({process_columns}) VALUES
-             ('host-with-id', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
+             ('host-with-id', 'originator', 'standard', 0, 0, 0, 0,
               'running', 'host', 'scope', 'abandon', '{{}}')"
         ),
         "ck_processes_parent_scope_id",
@@ -194,7 +194,7 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         &process,
         &format!(
             "INSERT INTO processes ({process_columns}) VALUES
-             ('turn-without-id', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
+             ('turn-without-id', 'originator', 'standard', 0, 0, 0, 0,
               'running', 'turn', NULL, 'abandon', '{{}}')"
         ),
         "ck_processes_parent_scope_id",
@@ -203,7 +203,7 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
         &process,
         &format!(
             "INSERT INTO processes ({process_columns}) VALUES
-             ('bad-on-parent-end', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
+             ('bad-on-parent-end', 'originator', 'standard', 0, 0, 0, 0,
               'running', 'host', NULL, 'detach', '{{}}')"
         ),
         "ck_processes_on_parent_end",
@@ -217,25 +217,25 @@ fn sqlite_checks_reject_every_registered_illegal_vocabulary_cluster() {
     process
         .execute_batch(&format!(
             "INSERT INTO processes ({process_columns}) VALUES
-             ('wake-parent', 1, 'fingerprint', 'originator', 'standard', 0, 0, 0, 0,
+             ('wake-parent', 'originator', 'standard', 0, 0, 0, 0,
               'running', 'host', NULL, 'abandon', '{{}}')"
         ))
         .expect("insert valid wake parent");
     assert_check_rejects(
         &process,
         "INSERT INTO process_wake_deliveries (
-             delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
+             delivery_id, process_id, target_session_id, sequence, state,
              next_attempt_at_ms, expires_at_ms, delivery_json
-         ) VALUES ('bad-state', 'wake-parent', 1, 'target', 1, 'claimed', 0, 1, '{}')",
+         ) VALUES ('bad-state', 'wake-parent', 'target', 1, 'claimed', 0, 1, '{}')",
         "ck_process_wake_deliveries_state",
     );
     assert_check_rejects(
         &process,
         "INSERT INTO process_wake_deliveries (
-             delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
+             delivery_id, process_id, target_session_id, sequence, state,
              next_attempt_at_ms, expires_at_ms, discard_reason, delivery_json
          ) VALUES (
-             'bad-discard', 'wake-parent', 1, 'target', 2, 'discarded', 0, 1,
+             'bad-discard', 'wake-parent', 'target', 2, 'discarded', 0, 1,
              'unroutable', '{}'
          )",
         "ck_process_wake_deliveries_discard_reason",

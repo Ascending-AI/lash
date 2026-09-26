@@ -93,12 +93,19 @@ impl ConformanceProcessWaitTransport {
         }
     }
 
-    fn assert_reattached_to(&self, process_id: &ProcessId) {
+    /// The law's waiter reattached once, both times to the one process it
+    /// awaits: the law registers that process, so its id is the one the
+    /// registrar minted and the transport reads it off the requests.
+    fn assert_reattached_once(&self) {
         let requests = self.request_urls.lock_recover();
         assert_eq!(requests.len(), 2, "Restate process wait must reattach once");
-        let expected = format!("/LashProcessWorkflow/{process_id}/await_terminal");
         assert!(
-            requests.iter().all(|url| url.ends_with(&expected)),
+            requests[0].contains("/LashProcessWorkflow/")
+                && requests[0].ends_with("/await_terminal"),
+            "the wait attaches to a process workflow: {requests:?}"
+        );
+        assert!(
+            requests.iter().all(|url| url == &requests[0]),
             "every Restate attachment must retain the same process id: {requests:?}"
         );
     }
@@ -269,7 +276,6 @@ lash_conformance::turn_runner_tests!(
         let prefix: &'static str = Box::leak(
             format!("restate-public-signal-intent-{}", harness.run_nonce()).into_boxed_str(),
         );
-        let target = ProcessId::from(format!("{prefix}-target"));
         (
             (harness, wait_transport),
             prefix,
@@ -281,7 +287,7 @@ lash_conformance::turn_runner_tests!(
             // attach transport; the turn-cancel laws never touch it.
             move |law: &'static str| async move {
                 if law == "public_signal_intent_wakes_parked_process" {
-                    verify_transport.assert_reattached_to(&target);
+                    verify_transport.assert_reattached_once();
                 }
             },
         )
@@ -413,7 +419,7 @@ lash_conformance::wake_delivery_ordering_tests!({
             barrier_transport.wait_for_bounded_reattachment().await;
         },
         move || async move {
-            verify_transport.assert_reattached_to(&ProcessId::from("wake-ordering-terminal"));
+            verify_transport.assert_reattached_once();
         },
     )
 });
@@ -454,7 +460,7 @@ lash_conformance::wake_delivery_crash_tests!({
             barrier_transport.wait_for_bounded_reattachment().await;
         },
         move || async move {
-            verify_transport.assert_reattached_to(&ProcessId::from("wake-crash-terminal"));
+            verify_transport.assert_reattached_once();
         },
     )
 });
@@ -582,19 +588,6 @@ async fn live_restate_fig1464_over_budget_group_open_gives_up_before_the_group_i
     harness.finish().await;
 }
 
-#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-#[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
-async fn live_restate_cold_reopen_witnesses() {
-    let harness = effect_group_conformance::LiveConformanceHarness::start().await;
-    tokio::time::timeout(
-        Duration::from_secs(240),
-        harness.run_cold_reopen_witnesses(),
-    )
-    .await
-    .expect("Restate cold-reopen witnesses exceeded 240 seconds");
-    harness.finish().await;
-}
-
 lash_conformance::effect_host_await_event_witness_tests!(
     #[ignore = "requires an isolated Restate server; run by `just effect-group-conformance-e2e`"]
     {
@@ -674,7 +667,6 @@ mod on_the_server_double {
         let prefix: &'static str = Box::leak(
             format!("restate-public-signal-intent-{}", harness.run_nonce()).into_boxed_str(),
         );
-        let target = ProcessId::from(format!("{prefix}-target"));
         (
             (harness, wait_transport),
             prefix,
@@ -684,7 +676,7 @@ mod on_the_server_double {
             turn_runner,
             move |law: &'static str| async move {
                 if law == "public_signal_intent_wakes_parked_process" {
-                    verify_transport.assert_reattached_to(&target);
+                    verify_transport.assert_reattached_once();
                 }
             },
         )
@@ -831,18 +823,6 @@ mod on_the_server_double {
         )
         .await
         .expect("group-open budget witness on the server double exceeded 120 seconds");
-        harness.finish().await;
-    }
-
-    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-    async fn cold_reopen_witnesses() {
-        let harness = LiveConformanceHarness::start_on(HarnessServer::in_process()).await;
-        tokio::time::timeout(
-            Duration::from_secs(240),
-            harness.run_cold_reopen_witnesses(),
-        )
-        .await
-        .expect("cold-reopen witnesses on the server double exceeded 240 seconds");
         harness.finish().await;
     }
 }
@@ -1293,6 +1273,12 @@ pub(super) async fn fig1464_over_budget_group_open_replay_under_a_larger_budget_
 /// FIG-1767: the eager effect arm (the durable process command) emits
 /// byte-identical journal records before and after collapsing into the shared
 /// helper.
+/// The row the FIG-1767 sample command signals: the first id a
+/// sequential-mint registry hands out, so the golden bytes stay fixed.
+fn fig1767_target() -> ProcessId {
+    lash_core::ProcessIdMint::sequential_id_for_testing(1)
+}
+
 #[tokio::test]
 pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
     let context = Arc::new(ReplayableRecordingContext::default());
@@ -1314,10 +1300,7 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         process_invocation,
         RuntimeEffectCommand::Process {
             command: Box::new(ProcessCommand::Signal {
-                process_ref: lash_core::ProcessRef::new(
-                    ProcessId::from("fig1767-proc"),
-                    lash_core::ProcessIncarnation::from_registration_sequence(1),
-                ),
+                process_id: fig1767_target(),
                 signal_name: "resume".to_string(),
                 signal_id: "fig1767-signal".to_string(),
                 request: lash_core::ProcessEventAppendRequest::new(
@@ -1329,19 +1312,19 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
     );
     // The sample command signals a real row: the command names an exact process
     // lifetime, so the registry must hold it for the effect to reach the journal.
-    let process_registry = process_registry();
-    process_registry
-        .register_process(
-            external_registration("fig1767-proc").with_extra_event_types([
-                lash_core::ProcessEventType {
-                    name: "signal.resume".to_string(),
-                    payload_schema: lash_core::LashSchema::any(),
-                    semantics: lash_core::ProcessEventSemanticsSpec::default(),
-                },
-            ]),
-        )
+    let process_registry = sequential_process_registry();
+    let fig1767_proc_id = process_registry
+        .register_process(external_registration().with_extra_event_types([
+            lash_core::ProcessEventType {
+                name: "signal.resume".to_string(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            },
+        ]))
         .await
-        .expect("register the process the sample command signals");
+        .expect("register the process the sample command signals")
+        .id;
+    assert_eq!(fig1767_proc_id, fig1767_target());
     controller
         .execute_effect(
             process_envelope.clone(),
@@ -1395,7 +1378,7 @@ pub(super) async fn fig1767_journal_entry_byte_sequence_equality() {
         );
         assert_eq!(
             normalized_record,
-            r##"{"effect_journal_version":12,"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"signal\",\"process_ref\":{\"process_id\":\"fig1767-proc\",\"incarnation\":1},\"signal_name\":\"resume\",\"signal_id\":\"fig1767-signal\",\"request\":{\"event_type\":\"signal.resume\",\"payload\":{\"source\":\"fig1767\"}}}}}","hash":"20d4cec599f2608d4d3b9257b9def351f9e4b193aff837496b293488474521a3"},"outcome":{"Ok":{"type":"process","result":{"op":"signal","event":{"process_id":"fig1767-proc","process_incarnation":1,"sequence":1,"event_type":"signal.resume","payload":{"source":"fig1767"},"invocation":{"attribution":{},"subject":{"type":"process_event","process_id":"fig1767-proc","sequence":1,"event_type":"signal.resume"},"caused_by":{"type":"process","process_id":"fig1767-proc"}},"semantics":{},"occurred_at":0}}}}}"##,
+            r##"{"effect_journal_version":13,"envelope":{"json":"{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"turn\",\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\"},\"replay_key\":\"fig1767-process-cmd\"},\"effect_id\":\"fig1767-process-cmd\",\"attribution\":{\"session_id\":\"fig1767-session\",\"turn_id\":\"fig1767-turn\",\"turn_index\":1,\"protocol_iteration\":0}},\"command\":{\"type\":\"process\",\"command\":{\"op\":\"signal\",\"process_id\":\"p_00000000000070008000000000000001\",\"signal_name\":\"resume\",\"signal_id\":\"fig1767-signal\",\"request\":{\"event_type\":\"signal.resume\",\"payload\":{\"source\":\"fig1767\"}}}}}","hash":"85ee3e3e3b582d47e22a2995dae428d5932b79cf755ce8c28af76855b30cf293"},"outcome":{"Ok":{"type":"process","result":{"op":"signal","event":{"process_id":"p_00000000000070008000000000000001","sequence":1,"event_type":"signal.resume","payload":{"source":"fig1767"},"invocation":{"attribution":{},"subject":{"type":"process_event","process_id":"p_00000000000070008000000000000001","sequence":1,"event_type":"signal.resume"},"caused_by":{"type":"process","process_id":"p_00000000000070008000000000000001"}},"semantics":{},"occurred_at":0}}}}}"##,
             "process command recorded effect golden bytes changed"
         );
     }
@@ -1430,10 +1413,7 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
         process_invocation,
         RuntimeEffectCommand::Process {
             command: Box::new(ProcessCommand::Signal {
-                process_ref: lash_core::ProcessRef::new(
-                    ProcessId::from("fig1767-proc"),
-                    lash_core::ProcessIncarnation::from_registration_sequence(1),
-                ),
+                process_id: fig1767_target(),
                 signal_name: "resume".to_string(),
                 signal_id: "fig1767-signal".to_string(),
                 request: lash_core::ProcessEventAppendRequest::new(
@@ -1446,19 +1426,19 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
 
     // The sample command signals a real row: the command names an exact process
     // lifetime, so the registry must hold it for the effect to reach the journal.
-    let recorded_registry = process_registry();
-    recorded_registry
-        .register_process(
-            external_registration("fig1767-proc").with_extra_event_types([
-                lash_core::ProcessEventType {
-                    name: "signal.resume".to_string(),
-                    payload_schema: lash_core::LashSchema::any(),
-                    semantics: lash_core::ProcessEventSemanticsSpec::default(),
-                },
-            ]),
-        )
+    let recorded_registry = sequential_process_registry();
+    let fig1767_proc_id = recorded_registry
+        .register_process(external_registration().with_extra_event_types([
+            lash_core::ProcessEventType {
+                name: "signal.resume".to_string(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            },
+        ]))
         .await
-        .expect("register the process the sample command signals");
+        .expect("register the process the sample command signals")
+        .id;
+    assert_eq!(fig1767_proc_id, fig1767_target());
     let recorded_proc_err = RestateRuntimeEffectController::with_options_for_test(
         Arc::clone(&context),
         RestateEffectControllerOptions::default().journaled_effect_byte_budget(16),
@@ -1479,19 +1459,19 @@ pub(super) async fn fig1767_give_up_verdict_redrive_executes_nothing() {
     // Use a real process executor: if the gate moved after the work, its outcome observer would
     // witness the ParentEnd operation before the missing effect record fails the redrive.
     context.replaying.store(true, Ordering::SeqCst);
-    let replay_registry = process_registry();
-    replay_registry
-        .register_process(
-            external_registration("fig1767-proc").with_extra_event_types([
-                lash_core::ProcessEventType {
-                    name: "fig1767.sample".to_string(),
-                    payload_schema: lash_core::LashSchema::any(),
-                    semantics: lash_core::ProcessEventSemanticsSpec::default(),
-                },
-            ]),
-        )
+    let replay_registry = sequential_process_registry();
+    let fig1767_proc_id = replay_registry
+        .register_process(external_registration().with_extra_event_types([
+            lash_core::ProcessEventType {
+                name: "fig1767.sample".to_string(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            },
+        ]))
         .await
-        .expect("register process for redrive witness");
+        .expect("register process for redrive witness")
+        .id;
+    assert_eq!(fig1767_proc_id, fig1767_target());
     let process_executed = Arc::new(AtomicBool::new(false));
     let ran_proc = Arc::clone(&process_executed);
     let process_observer: lash_core::ProcessOutcomeObserver = Arc::new(move |_, _| {
@@ -1785,9 +1765,8 @@ pub(super) fn completed_tool_record(call_id: &str, tool_name: &str) -> lash_core
     }
 }
 
-pub(super) fn external_registration(id: &str) -> ProcessRegistration {
+pub(super) fn external_registration() -> ProcessRegistration {
     ProcessRegistration::new(
-        id,
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
@@ -1800,9 +1779,8 @@ pub(super) fn external_registration(id: &str) -> ProcessRegistration {
     )
 }
 
-pub(super) fn rerunnable_registration(id: &str) -> ProcessRegistration {
+pub(super) fn rerunnable_registration() -> ProcessRegistration {
     ProcessRegistration::new(
-        id,
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
@@ -1815,9 +1793,8 @@ pub(super) fn rerunnable_registration(id: &str) -> ProcessRegistration {
     )
 }
 
-pub(super) fn rerunnable_session_turn_registration(id: &str) -> ProcessRegistration {
+pub(super) fn rerunnable_session_turn_registration() -> ProcessRegistration {
     ProcessRegistration::new(
-        id,
         ProcessInput::SessionTurn {
             definition_key: "test-session-turn:v1".to_string(),
             create_request: Box::new(lash_core::SessionCreateRequest::child_session(
@@ -1837,9 +1814,8 @@ pub(super) fn rerunnable_session_turn_registration(id: &str) -> ProcessRegistrat
     )
 }
 
-pub(super) fn owner_bound_registration(id: &str) -> ProcessRegistration {
+pub(super) fn owner_bound_registration() -> ProcessRegistration {
     ProcessRegistration::new(
-        id,
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
@@ -1877,6 +1853,12 @@ pub(super) fn process_registry() -> Arc<dyn ProcessRegistry> {
     })
 }
 
+/// A registry whose minted ids are the sequential test ids, for a law that
+/// must name a process before the controller under test starts it.
+pub(super) fn sequential_process_registry() -> Arc<dyn ProcessRegistry> {
+    sequential_process_stores().0
+}
+
 pub(super) fn continuation_store() -> Arc<dyn lash_core::ProcessContinuationStore> {
     sync_await(async {
         lash_sqlite_store::SqliteBackend::memory()
@@ -1895,6 +1877,31 @@ pub(super) fn process_stores() -> (
             .await
             .expect("sqlite process stores")
             .process_registry()
+    });
+    (
+        Arc::clone(&storage) as Arc<dyn ProcessRegistry>,
+        storage as Arc<dyn lash_core::ProcessContinuationStore>,
+    )
+}
+
+/// Process stores whose registrar mints the sequential test ids, for a
+/// redelivery law that re-registers its process on fresh stores: the
+/// redelivered run must carry the id the recorded journal names.
+pub(super) fn sequential_process_stores() -> (
+    Arc<dyn ProcessRegistry>,
+    Arc<dyn lash_core::ProcessContinuationStore>,
+) {
+    let storage = sync_await(async {
+        lash_sqlite_store::SqliteBackend::memory_with_options_and_clock(
+            lash_sqlite_store::SqliteBackendOptions {
+                process_id_mint: lash_core::ProcessIdMint::sequential_for_testing(),
+                ..lash_sqlite_store::SqliteBackendOptions::memory()
+            },
+            Arc::new(lash_core::facade_support::SystemClock),
+        )
+        .await
+        .expect("sqlite process stores")
+        .process_registry()
     });
     (
         Arc::clone(&storage) as Arc<dyn ProcessRegistry>,

@@ -10,10 +10,8 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
     )
     .build(crate::testing::runtime_lease_owner())
     .expect("build core with a process registry");
-    let process_id = "deployment-drain-status-waiting";
-    registry
+    let process_id = registry
         .register_process(lash_core::ProcessRegistration::new(
-            process_id,
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -25,9 +23,10 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
             ),
         ))
         .await
-        .expect("register waiting process");
+        .expect("register waiting process")
+        .id;
     let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-        process_id,
+        process_id.clone(),
         "deployment-drain-status-waiting-run",
     )
     .bind_attempt(1);
@@ -35,12 +34,12 @@ async fn deployment_drain_status_keeps_waiting_process_non_drained() {
         .invocation_started()
         .expect("attempt-bound invocation has a start fact");
     registry
-        .record_first_started_with_authority(&ProcessId::from(process_id), started, &authority)
+        .record_first_started_with_authority(&process_id, started, &authority)
         .await
         .expect("record process start");
     registry
         .set_process_wait_with_authority(
-            &ProcessId::from(process_id),
+            &process_id,
             lash_core::WaitState {
                 since_ms: 1,
                 kind: lash_core::WaitKind::Signal {
@@ -170,10 +169,8 @@ async fn parked_work_merges_parked_turns_and_processes() {
     .build(crate::testing::runtime_lease_owner())
     .expect("build core");
 
-    let process_id = ProcessId::from("parked-work-process");
-    registry
+    let process_id = registry
         .register_process(lash_core::ProcessRegistration::new(
-            process_id.clone(),
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -185,9 +182,10 @@ async fn parked_work_merges_parked_turns_and_processes() {
             ),
         ))
         .await
-        .expect("register the process");
+        .expect("register the process")
+        .id;
     let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-        process_id.as_str(),
+        process_id.clone(),
         "parked-work-process-run",
     )
     .bind_attempt(1);

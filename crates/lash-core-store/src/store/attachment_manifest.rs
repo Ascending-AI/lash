@@ -93,21 +93,15 @@ pub struct AttachmentIntent {
 /// Owner identity is one value, not a bag of independently nullable columns.
 /// The two shapes the durable surfaces accept are the two variants here, so
 /// the pairing rules the SQL `CHECK` constraints enforce — an owner kind
-/// without an id, an id without a kind, a process owner without its
-/// registry-minted incarnation, a turn owner carrying one — are unrepresentable
-/// rather than validated. Process names are reusable, so the incarnation is
-/// part of a process owner's identity and never optional within it.
+/// without an id, an id without a kind — are unrepresentable rather than
+/// validated. A process owner is its minted process id, which is never reused
+/// (ADR 0107), so attachments can never bind to a later process.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum AttachmentOwner {
     /// A durable turn, identified by its operation storage key.
     Turn { id: String },
-    /// One incarnation of a durable process. The name alone is not an
-    /// identity: a reused process name binds attachments to the new
-    /// incarnation, never the retired one.
-    Process {
-        id: String,
-        incarnation: crate::ProcessIncarnation,
-    },
+    /// One durable process.
+    Process { process_id: crate::ProcessId },
 }
 
 impl AttachmentOwner {
@@ -120,55 +114,42 @@ impl AttachmentOwner {
     }
 
     /// The persisted owner id: a turn's operation storage key, or a process
-    /// name.
+    /// id.
     pub fn id(&self) -> &str {
         match self {
-            Self::Turn { id } | Self::Process { id, .. } => id,
-        }
-    }
-
-    /// The persisted incarnation, present only for process owners.
-    pub const fn incarnation(&self) -> Option<crate::ProcessIncarnation> {
-        match self {
-            Self::Turn { .. } => None,
-            Self::Process { incarnation, .. } => Some(*incarnation),
+            Self::Turn { id } => id,
+            Self::Process { process_id } => process_id.as_str(),
         }
     }
 }
 
-/// Strictly decode the three durable attachment-owner columns into one owner.
+/// Strictly decode the two durable attachment-owner columns into one owner.
 ///
-/// Process names are reusable, so a process owner without the registry-minted
-/// incarnation is a retired pre-cutover shape and must never be reinterpreted
-/// as the current incarnation with the same name. Every column combination the
-/// [`AttachmentOwner`] variants cannot express is corrupt stored data.
+/// Every column combination the [`AttachmentOwner`] variants cannot express —
+/// including a process owner whose id is not a minted process id — is corrupt
+/// stored data.
 pub fn decode_attachment_owner(
     owner_kind: Option<&str>,
     owner_id: Option<String>,
-    owner_incarnation: Option<u64>,
 ) -> Result<Option<AttachmentOwner>, StoreError> {
     let corrupt = |message: String| StoreError::StoredDataCorrupt {
         record_kind: "AttachmentManifest owner",
         message,
     };
-    match (owner_kind, owner_id, owner_incarnation) {
-        (None, None, None) => Ok(None),
-        (Some("turn"), Some(id), None) => Ok(Some(AttachmentOwner::Turn { id })),
-        (Some("process"), Some(id), Some(incarnation)) => Ok(Some(AttachmentOwner::Process {
-            id,
-            incarnation: crate::ProcessIncarnation::from_registration_sequence(incarnation),
-        })),
-        (Some("process"), Some(owner_id), None) => Err(corrupt(format!(
-            "process attachment owner `{owner_id}` has no incarnation; bare process-owner identities are unsupported"
-        ))),
-        (Some(unknown), _, _) if AttachmentOwnerKind::from_wire_str(unknown).is_none() => {
+    match (owner_kind, owner_id) {
+        (None, None) => Ok(None),
+        (Some("turn"), Some(id)) => Ok(Some(AttachmentOwner::Turn { id })),
+        (Some("process"), Some(id)) => crate::ProcessId::parse(&id)
+            .map(|process_id| Some(AttachmentOwner::Process { process_id }))
+            .map_err(|error| corrupt(error.to_string())),
+        (Some(unknown), _) if AttachmentOwnerKind::from_wire_str(unknown).is_none() => {
             Err(StoreError::StoredDataCorrupt {
                 record_kind: "AttachmentManifest owner kind",
                 message: format!("unknown attachment owner kind `{unknown}`"),
             })
         }
-        (kind, id, incarnation) => Err(corrupt(format!(
-            "inconsistent attachment owner fields: kind {kind:?}, id present {}, incarnation {incarnation:?}",
+        (kind, id) => Err(corrupt(format!(
+            "inconsistent attachment owner fields: kind {kind:?}, id present {}",
             id.is_some()
         ))),
     }

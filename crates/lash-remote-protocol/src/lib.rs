@@ -284,7 +284,15 @@ pub use usage_activity::*;
 // `RemoteProcessResumeRefusal` reason, the one "cannot resume safely"
 // Abandoned terminal. A window-98 peer refuses the unknown writer tag in a
 // process record or terminal, so peers must adopt 99.
-pub const REMOTE_PROTOCOL_VERSION: u32 = 99;
+// Window 100: FIG-3607 names a process by its minted, never-reused
+// `ProcessId` (`p_` + 32 hex digits). Every `incarnation` field and the
+// `RemoteProcessRef` pair are gone, a start request carries an optional
+// `start_key` instead of a caller-chosen `id`, records carry the retained
+// key's `start_key_digest` (never re-hashed as a caller's key), cursors are `lashpc3`, the `retired` history retention and the
+// `process_id_reused` gap are gone, and a trigger delivery receipt's
+// `process_id` is optional. A window-99 peer sends host-named ids and
+// incarnations this decoder refuses, so peers must adopt 100.
+pub const REMOTE_PROTOCOL_VERSION: u32 = 100;
 
 /// One versioned remote-protocol message.
 ///

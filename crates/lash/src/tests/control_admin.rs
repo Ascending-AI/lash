@@ -31,9 +31,9 @@ impl lash_core::ProcessWorkSubstrate for NoopProcessWork {
 
     async fn await_process_terminal(
         &self,
-        process_ref: &lash_core::ProcessRef,
+        process_id: &lash_core::ProcessId,
     ) -> std::result::Result<lash_core::ProcessTerminalWait, lash_core::PluginError> {
-        panic!("unexpected terminal wait for {process_ref}")
+        panic!("unexpected terminal wait for {process_id}")
     }
 }
 
@@ -581,10 +581,8 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     let registry = core.process_registry();
     let session = core.session("process-observation-events").open().await?;
     let cursor = session.observe().current_observation().cursor;
-    let process_id = "observed-process";
-
+    // Keyed, so the replay below presents the same start (ADR 0107).
     let request = lash_core::ProcessStartRequest::new(
-        process_id,
         lash_core::ProcessInput::ToolCall {
             call: lash_core::PreparedToolCall::from_parts(
                 "observed-process-call",
@@ -602,6 +600,10 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
             lash_core::OnParentEnd::Abandon,
         ),
     )
+    .with_start_key(Some(lash_core::StartKey::for_host(
+        lash_core::StartKeyOwner::HOST,
+        "observed-process",
+    )))
     .with_observers(["process-observation-events".to_string()])
     .with_env_spec(lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::empty(),
@@ -613,8 +615,12 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     let started = session
         .admin()
         .processes()
-        .start(request.clone(), process_scope(&core, process_id))
+        .start(
+            request.clone(),
+            runtime_operation_scope(&core, "process-observation-events-start"),
+        )
         .await?;
+    let process_id = started.process_id.clone();
     assert_eq!(
         lash_core::ProcessQuery::get_process(registry.as_ref(), &started.process_id)
             .await?
@@ -625,7 +631,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
             lash_core::OnParentEnd::Abandon
         )
     );
-    session
+    let replayed = session
         .admin()
         .processes()
         .start(
@@ -637,39 +643,37 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         )
         .await
         .expect("public session start replay bypasses the retired staging owner");
+    assert_eq!(
+        replayed.process_id, process_id,
+        "a replayed start under its key answers the process the key minted"
+    );
     session
         .admin()
         .processes()
-        .cancel(
-            &ProcessId::from(process_id),
-            process_scope(&core, process_id),
-        )
+        .cancel(&process_id, process_scope(&core, &process_id))
         .await?;
     core.env
         .process_registry()
         .expect("watched registry")
         .complete_process(
-            &ProcessId::from(process_id),
+            &process_id,
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::cancelled(
                 lash_core::ToolCancellation::runtime("cancelled by test worker"),
             )),
-            lash_core::ProcessCompletionAuthority::workflow_key(process_id),
+            lash_core::ProcessCompletionAuthority::workflow_key(process_id.as_str()),
         )
         .await?;
 
     let SessionResume::Replayed { events } = session.observe().resume_from_cursor(&cursor)? else {
         panic!("recent cursor should replay process observation events");
     };
-    let durable = registry
-        .recent_events(&ProcessId::from(process_id), 128)
-        .await?;
+    let durable = registry.recent_events(&process_id, 128).await?;
     let current = registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await?
         .expect("current process");
     let page_request = lash_remote_protocol::RemoteProcessEventsRequest {
-        process_id: ProcessId::from(process_id),
-        incarnation: current.incarnation.registration_sequence(),
+        process_id: current.id.clone(),
         limit: std::num::NonZeroUsize::new(128).expect("nonzero"),
         mode: lash_core::ProcessEventQueryMode::Lite,
         cursor: None,
@@ -678,24 +682,13 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         core.processes().events_remote(&page_request).await?.outcome,
         lash_core::ProcessEventReadOutcome::Retained(_)
     ));
-    let retired_request = lash_remote_protocol::RemoteProcessEventsRequest {
-        incarnation: page_request.incarnation + 1,
-        ..page_request
-    };
-    assert!(matches!(
-        core.processes().events_remote(&retired_request).await?.outcome,
-        lash_core::ProcessEventReadOutcome::NoLongerRetained(
-            lash_core::ProcessEventHistoryRetention::Retired {
-                requested_incarnation,
-                current_incarnation,
-            }
-        ) if requested_incarnation.registration_sequence() == retired_request.incarnation
-            && current_incarnation == current.incarnation
-    ));
-    let reused_id = ProcessId::from("remote-paged-reused");
+    // FIG-3611: once a keyed process is pruned, the same key starts a new
+    // process under a new id, and the pruned id still answers as pruned — it
+    // never addresses the successor (ADR 0107).
+    let reused_key =
+        lash_core::StartKey::for_host(lash_core::StartKeyOwner::HOST, "remote-paged-reused");
     let registration = || {
         lash_core::ProcessRegistration::new(
-            reused_id.clone(),
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -706,6 +699,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
                 lash_core::OnParentEnd::Abandon,
             ),
         )
+        .with_start_key(Some(reused_key.clone()))
     };
     let registry_port = core
         .env
@@ -715,7 +709,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     let old = registry_port.register_process(registration()).await?;
     registry_port
         .complete_process(
-            &reused_id,
+            &old.id,
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
@@ -726,10 +720,12 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         .prune_terminal_processes(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
         .await?;
     let successor = registry_port.register_process(registration()).await?;
-    assert_ne!(old.incarnation, successor.incarnation);
+    assert_ne!(
+        old.id, successor.id,
+        "a pruned process's key starts a new process with a new id"
+    );
     let old_request = lash_remote_protocol::RemoteProcessEventsRequest {
-        process_id: reused_id,
-        incarnation: old.incarnation.registration_sequence(),
+        process_id: old.id.clone(),
         limit: std::num::NonZeroUsize::MIN,
         mode: lash_core::ProcessEventQueryMode::Full,
         cursor: None,
@@ -737,12 +733,18 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
     assert!(matches!(
         core.processes().events_remote(&old_request).await?.outcome,
         lash_core::ProcessEventReadOutcome::NoLongerRetained(
-            lash_core::ProcessEventHistoryRetention::Retired {
-                requested_incarnation,
-                current_incarnation,
-            }
-        ) if requested_incarnation == old.incarnation
-            && current_incarnation == successor.incarnation
+            lash_core::ProcessEventHistoryRetention::Pruned { .. }
+        )
+    ));
+    assert!(matches!(
+        core.processes()
+            .events_remote(&lash_remote_protocol::RemoteProcessEventsRequest {
+                process_id: successor.id.clone(),
+                ..old_request
+            })
+            .await?
+            .outcome,
+        lash_core::ProcessEventReadOutcome::Retained(_)
     ));
     let lifecycle = durable
         .iter()
@@ -764,7 +766,7 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         .iter()
         .filter_map(|event| match &event.payload {
             lash_core::SessionObservationEventPayload::ProcessChanged { kind, process_ids }
-                if process_ids.as_slice() == [ProcessId::from(process_id)] =>
+                if process_ids.as_slice() == std::slice::from_ref(&process_id) =>
             {
                 Some(*kind)
             }
@@ -776,9 +778,8 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         "the session stream carries exactly the durable lifecycle, in order, with its sequences"
     );
     let terminal_cursor = session.observe().current_observation().cursor;
-    let external_registration = |id: &ProcessId| {
+    let external_registration = || {
         lash_core::ProcessRegistration::new(
-            id.clone(),
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -791,13 +792,13 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
         )
     };
     let session_observer = SessionId::from("process-observation-events");
-    let failed_id = ProcessId::from("observed-failed-process");
-    registry_port
+    let failed_id = registry_port
         .register_process_with_observers(
-            external_registration(&failed_id),
+            external_registration(),
             std::slice::from_ref(&session_observer),
         )
-        .await?;
+        .await?
+        .id;
     registry_port
         .complete_process(
             &failed_id,
@@ -811,13 +812,13 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await?;
-    let abandoned_id = ProcessId::from("observed-abandoned-process");
-    registry_port
+    let abandoned_id = registry_port
         .register_process_with_observers(
-            external_registration(&abandoned_id),
+            external_registration(),
             std::slice::from_ref(&session_observer),
         )
-        .await?;
+        .await?
+        .id;
     core.processes()
         .request_abandon(&abandoned_id, "test operator", None)
         .await?;
@@ -835,13 +836,13 @@ async fn process_start_and_cancel_emit_typed_observation_events() -> Result<()> 
             lash_core::ProcessCompletionAuthority::ReconciledAbandon,
         )
         .await?;
-    let departed_id = ProcessId::from("observed-caller-departed-process");
-    registry_port
+    let departed_id = registry_port
         .register_process_with_observers(
-            external_registration(&departed_id),
+            external_registration(),
             std::slice::from_ref(&session_observer),
         )
-        .await?;
+        .await?
+        .id;
     registry_port.record_caller_departure(&departed_id).await?;
     let SessionResume::Replayed {
         events: terminal_events,
@@ -1045,12 +1046,11 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("host-cancel").open().await?;
-    session
+    let host_process = session
         .admin()
         .processes()
         .start(
             lash_core::ProcessStartRequest::external(
-                "host-process",
                 lash_core::ProcessOriginator::host(),
                 serde_json::Value::Null,
                 lash_core::ProcessLifecyclePolicy::new(
@@ -1059,20 +1059,18 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
                 ),
             )
             .with_observers(["host-cancel".to_string()]),
-            process_scope(&core, "host-process"),
+            runtime_operation_scope(&core, "host-cancel-start"),
         )
-        .await?;
+        .await?
+        .process_id;
 
     let summary = session
         .admin()
         .processes()
-        .cancel(
-            &ProcessId::from("host-process"),
-            process_scope(&core, "host-process"),
-        )
+        .cancel(&host_process, process_scope(&core, &host_process))
         .await?;
 
-    assert_eq!(summary.process_id, "host-process");
+    assert_eq!(summary.process_id, host_process);
     assert_eq!(
         summary.status,
         lash_core::ProcessStatus::Running,
@@ -1082,7 +1080,7 @@ async fn processes_cancel_cancels_visible_process() -> Result<()> {
         complete_full_page(
             core.processes()
                 .events(
-                    crate::process::ProcessEventsFrom::Start(ProcessId::from("host-process")),
+                    crate::process::ProcessEventsFrom::Start(host_process.clone()),
                     std::num::NonZeroUsize::new(64).expect("non-zero event page size"),
                     lash_core::ProcessEventQueryMode::Full,
                 )
@@ -1110,13 +1108,13 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
     .process_tool_visibility_filter(Arc::new(HideAllProcessTools))
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("host-filter-bypass").open().await?;
-    for process_id in ["host-filter-signal", "host-filter-cancel"] {
-        session
+    let mut started = Vec::new();
+    for label in ["host-filter-signal", "host-filter-cancel"] {
+        let process_id = session
             .admin()
             .processes()
             .start(
                 lash_core::ProcessStartRequest::external(
-                    process_id,
                     lash_core::ProcessOriginator::host(),
                     serde_json::Value::Null,
                     lash_core::ProcessLifecyclePolicy::new(
@@ -1130,10 +1128,14 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
                     semantics: lash_core::ProcessEventSemanticsSpec::default(),
                 }])
                 .with_observers(["host-filter-bypass".to_string()]),
-                process_scope(&core, process_id),
+                runtime_operation_scope(&core, format!("{label}-start")),
             )
-            .await?;
+            .await?
+            .process_id;
+        started.push(process_id);
     }
+    let [signalled, cancelled] =
+        <[ProcessId; 2]>::try_from(started).expect("two started processes");
 
     assert_eq!(
         session.admin().processes().list_all().await?.len(),
@@ -1144,11 +1146,11 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
         .admin()
         .processes()
         .signal(
-            &ProcessId::from("host-filter-signal"),
+            &signalled,
             "ready",
             "host-filter-signal-id",
             serde_json::json!({"source": "host"}),
-            process_scope(&core, "host-filter-signal"),
+            process_scope(&core, &signalled),
         )
         .await?;
     assert!(
@@ -1157,7 +1159,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
                 .admin()
                 .processes()
                 .events(
-                    crate::process::ProcessEventsFrom::Start(ProcessId::from("host-filter-signal")),
+                    crate::process::ProcessEventsFrom::Start(signalled.clone()),
                     std::num::NonZeroUsize::new(64).expect("non-zero event page size"),
                     lash_core::ProcessEventQueryMode::Full,
                 )
@@ -1171,10 +1173,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
     session
         .admin()
         .processes()
-        .cancel(
-            &ProcessId::from("host-filter-cancel"),
-            process_scope(&core, "host-filter-cancel"),
-        )
+        .cancel(&cancelled, process_scope(&core, &cancelled))
         .await?;
     assert!(
         complete_full_page(
@@ -1182,7 +1181,7 @@ async fn process_admin_list_signal_and_cancel_bypass_model_tool_filter() -> Resu
                 .admin()
                 .processes()
                 .events(
-                    crate::process::ProcessEventsFrom::Start(ProcessId::from("host-filter-cancel")),
+                    crate::process::ProcessEventsFrom::Start(cancelled.clone()),
                     std::num::NonZeroUsize::new(64).expect("non-zero event page size"),
                     lash_core::ProcessEventQueryMode::Full,
                 )
@@ -1218,13 +1217,13 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     .model(mock_model_spec())
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("host-cancel-all").open().await?;
-    for process_id in ["host-process-a", "host-process-b"] {
-        session
+    let mut started = Vec::new();
+    for label in ["host-process-a", "host-process-b"] {
+        let process_id = session
             .admin()
             .processes()
             .start(
                 lash_core::ProcessStartRequest::external(
-                    process_id,
                     lash_core::ProcessOriginator::host(),
                     serde_json::Value::Null,
                     lash_core::ProcessLifecyclePolicy::new(
@@ -1233,10 +1232,13 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
                     ),
                 )
                 .with_observers(["host-cancel-all".to_string()]),
-                process_scope(&core, process_id),
+                runtime_operation_scope(&core, format!("{label}-start")),
             )
-            .await?;
+            .await?
+            .process_id;
+        started.push(process_id);
     }
+    started.sort();
 
     let mut summaries = session
         .admin()
@@ -1248,9 +1250,9 @@ async fn processes_cancel_all_cancels_visible_processes() -> Result<()> {
     assert_eq!(
         summaries
             .iter()
-            .map(|summary| summary.process_id.as_str())
+            .map(|summary| summary.process_id.clone())
             .collect::<Vec<_>>(),
-        vec!["host-process-a", "host-process-b"]
+        started
     );
     Ok(())
 }
@@ -1419,7 +1421,6 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
     for (case, backend) in cases {
         let parent_session_id = SessionId::from(format!("managed-observer-parent-{case}"));
         let child_session_id = SessionId::from(format!("managed-observer-child-{case}"));
-        let create_process_id = ProcessId::from(format!("managed-create-process-{case}"));
         let backend = DecoratedBackend::over(backend).process_work(|registry| {
             lash_core::ProcessWorkWiring::new(
                 lash_core::facade_support::watch_process_registry(registry),
@@ -1437,9 +1438,8 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
         let registry = core.process_registry();
         let _parent = core.session(&parent_session_id).open().await?;
 
-        registry
+        let create_process_id = registry
             .register_process(lash_core::ProcessRegistration::new(
-                &create_process_id,
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -1450,7 +1450,8 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
                     lash_core::OnParentEnd::Abandon,
                 ),
             ))
-            .await?;
+            .await?
+            .id;
 
         store_factory
             .create_store(&lash_core::SessionStoreCreateRequest {

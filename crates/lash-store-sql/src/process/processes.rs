@@ -14,7 +14,7 @@ pub const TABLE: &str = "processes";
 
 /// Every column, in insert order. The only statements that name all of them
 /// are the two backends' registration inserts.
-pub const INSERT_COLUMNS: &str = "process_id, incarnation, registration_fingerprint, originator_id,
+pub const INSERT_COLUMNS: &str = "process_id, start_key, originator_id,
                 wake_session_id, identity_kind, identity_label, created_at_ms, updated_at_ms,
                 last_event_sequence, change_seq, status, parent_scope_kind, parent_scope_id,
                 on_parent_end, cancel_requested_at_ms, record_json";
@@ -86,6 +86,10 @@ crate::statements! {
         /// The stored record for `?1`.
         select_record_json_by_id = "SELECT record_json FROM processes WHERE process_id = ?1";
 
+        /// The retained process registered under start key `?1`, if any: the
+        /// idempotency half of a registration (ADR 0107).
+        select_record_json_by_start_key = "SELECT record_json FROM processes WHERE start_key = ?1";
+
         exists_by_id = "SELECT EXISTS(SELECT 1 FROM processes WHERE process_id = ?1)";
 
         /// The session `?1`'s wakes are delivered to, if any.
@@ -96,8 +100,7 @@ crate::statements! {
 
         clear_wake_session_for_session = "UPDATE processes SET wake_session_id = NULL WHERE wake_session_id = ?1";
 
-        /// The identity columns are absent because none of them is mutable:
-        /// a re-registration writes a new row rather than rewriting this one.
+        /// The identity columns are absent because none of them is mutable.
         /// `?8`/`?9` are the parked projection: the live park's `since_ms`
         /// and reason code, both `NULL` while the process is not parked.
         /// `?10` is the retired executable generation a `retired_generation`

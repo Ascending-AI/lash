@@ -50,13 +50,13 @@ pub struct ProcessWorklistCursor {
 impl ProcessWorklistCursor {
     pub fn new(
         backend: impl Into<String>,
-        after_process_id: impl Into<ProcessId>,
-        through_process_id: impl Into<ProcessId>,
+        after_process_id: ProcessId,
+        through_process_id: ProcessId,
     ) -> Self {
         Self {
             backend: backend.into(),
-            after_process_id: after_process_id.into(),
-            through_process_id: through_process_id.into(),
+            after_process_id,
+            through_process_id,
         }
     }
 
@@ -66,12 +66,12 @@ impl ProcessWorklistCursor {
     }
 
     /// Exclusive keyset boundary for the next page.
-    pub fn after_process_id(&self) -> &str {
+    pub fn after_process_id(&self) -> &ProcessId {
         &self.after_process_id
     }
 
     /// Inclusive upper key captured when the scan began.
-    pub fn through_process_id(&self) -> &str {
+    pub fn through_process_id(&self) -> &ProcessId {
         &self.through_process_id
     }
 }
@@ -318,13 +318,15 @@ mod wake_delivery_identity_tests {
             version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
             wake_id: format!("wake:v1:blake3:{}", "a".repeat(64)),
             target_session_id: SessionId::from("session"),
-            process_id: ProcessId::from("process"),
-            process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
+            process_id: crate::process_id_for_test("process"),
             sequence: 1,
             event_type: "process.wake".to_string(),
             event_invocation: crate::RuntimeInvocation::effect(
-                crate::EffectAddress::new(crate::ExecutionScope::process("process"), "replay")
-                    .expect("valid wake address"),
+                crate::EffectAddress::new(
+                    crate::ExecutionScope::process(crate::process_id_for_test("process")),
+                    "replay",
+                )
+                .expect("valid wake address"),
                 crate::RuntimeAttribution::none(),
                 "effect",
             ),
@@ -347,13 +349,15 @@ mod wake_delivery_identity_tests {
                 version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
                 wake_id: wake_id.to_string(),
                 target_session_id: SessionId::from("session"),
-                process_id: ProcessId::from("process"),
-                process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
+                process_id: crate::process_id_for_test("process"),
                 sequence: 1,
                 event_type: "process.wake".to_string(),
                 event_invocation: crate::RuntimeInvocation::effect(
-                    crate::EffectAddress::new(crate::ExecutionScope::process("process"), "replay")
-                        .expect("valid wake address"),
+                    crate::EffectAddress::new(
+                        crate::ExecutionScope::process(crate::process_id_for_test("process")),
+                        "replay",
+                    )
+                    .expect("valid wake address"),
                     crate::RuntimeAttribution::none(),
                     "effect",
                 ),
@@ -615,20 +619,10 @@ pub trait ProcessEventLogTestSupport: ProcessEventLog {
         process_id: &ProcessId,
         after_sequence: u64,
     ) -> Result<Vec<super::events::ProcessEvent>, PluginError> {
-        let process_ref = self.resolve_process_ref(process_id).await?;
-        self.full_event_window_ref(&process_ref, after_sequence)
-            .await
-    }
-
-    async fn full_event_window_ref(
-        &self,
-        process_ref: &super::model::ProcessRef,
-        after_sequence: u64,
-    ) -> Result<Vec<super::events::ProcessEvent>, PluginError> {
         let limit = std::num::NonZeroUsize::new(4_096).unwrap_or(std::num::NonZeroUsize::MIN);
         let outcome = self
-            .event_page_ref(
-                process_ref,
+            .event_page_after(
+                process_id,
                 after_sequence,
                 limit,
                 super::events::ProcessEventQueryMode::Full,
@@ -656,16 +650,6 @@ pub trait ProcessEventLogTestSupport: ProcessEventLog {
             ) => Err(PluginError::ProcessNoLongerRetained {
                 terminal_label,
                 pruned_at_ms,
-            }),
-            super::events::ProcessEventReadOutcome::NoLongerRetained(
-                super::events::ProcessEventHistoryRetention::Retired {
-                    requested_incarnation,
-                    current_incarnation,
-                },
-            ) => Err(PluginError::ProcessIncarnationSuperseded {
-                process_id: process_ref.process_id.clone(),
-                requested_incarnation,
-                current_incarnation,
             }),
         }
     }

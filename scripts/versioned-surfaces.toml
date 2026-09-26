@@ -82,7 +82,33 @@ manifest = "engine:restate.process_journal"
 [[surface.guard]]
 kind = "rust_items"
 paths = ["crates/lash-restate/src/process/admission.rs"]
-symbols = ["ADMIT_STEP", "START_STEP", "AdmissionVerdict", "StartOutcome"]
+symbols = [
+  "ADMIT_STEP",
+  "START_STEP",
+  "AdmissionVerdict",
+  "StartOutcome",
+  "stamped_journal_version",
+  "decode_stamped_request",
+]
+
+# The process workflow's input and the requests a caller sends into a running
+# process workflow are stamped with this generation and refused by it before
+# their shape is decoded, so a change to any of their shapes bumps it.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-restate/src/process/mod.rs", "crates/lash-restate/src/process_attach.rs"]
+symbols = [
+  "RestateProcessWorkflowInput",
+  "RestateProcessWorkflowPayload",
+  "RestateProcessCancelRequest",
+  "RestateProcessCompleteRequest",
+  "RestateProcessAwaitRequest",
+  "RestateProcessAttachRequest",
+]
+
+[[surface.guard]]
+kind = "file"
+paths = ["crates/lash-restate/src/process/stamped_requests.rs"]
 
 [[surface]]
 constant = "JOURNAL_LOGIC_EPOCH"
@@ -188,6 +214,20 @@ must_cover = [
   "CREATE TABLE IF NOT EXISTS lash_trigger_occurrences",
   "CREATE TABLE IF NOT EXISTS lash_trigger_deliveries",
   "CREATE TABLE IF NOT EXISTS lash_lashlang_artifacts",
+]
+
+# ADR 0103 / `CanonicalRuntimeEffectEnvelope`: a change that moves the
+# serialized bytes of a `RuntimeEffectCommand` variant advances both store
+# generations, because a journal of the old bytes no longer reconstructs its
+# recorded hashes and must be refused at open rather than replayed.
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-core-execution/src/runtime/effect/envelope.rs"]
+must_cover = [
+  "RuntimeEffectInvocation",
+  "RuntimeEffectEnvelope",
+  "RuntimeEffectCommand",
+  "RuntimeEffectOutcome",
 ]
 
 # The queued admission JSON is decoded under the PostgreSQL component stamp.
@@ -400,6 +440,20 @@ paths = [
 symbols = ["EFFECT_SCHEMA", "AWAIT_EVENT_TABLES", "SCOPE_RETIREMENT_TABLE"]
 elide = "sql_idempotent_index"
 
+# ADR 0103 / `CanonicalRuntimeEffectEnvelope`: a change that moves the
+# serialized bytes of a `RuntimeEffectCommand` variant advances both store
+# generations, because a journal of the old bytes no longer reconstructs its
+# recorded hashes and must be refused at open rather than replayed.
+[[surface.guard]]
+kind = "rust_serde_shapes"
+paths = ["crates/lash-core-execution/src/runtime/effect/envelope.rs"]
+must_cover = [
+  "RuntimeEffectInvocation",
+  "RuntimeEffectEnvelope",
+  "RuntimeEffectCommand",
+  "RuntimeEffectOutcome",
+]
+
 [[surface]]
 constant = "FLEET_FORMAT_VERSION"
 constant_path = "crates/lash-core-store/src/store/fleet_format.rs"
@@ -439,6 +493,34 @@ manifest = "ProcessWakeDelivery"
 kind = "rust_items"
 paths = ["crates/lash-core-store/src/process_identity.rs"]
 symbols = ["ProcessWakeDelivery"]
+
+[[surface]]
+constant = "START_KEY_FAMILY_VERSION"
+constant_path = "crates/lash-core-store/src/process_identity.rs"
+upgrade = "coexist"
+description = "process start-key preimage and rendering: the key the registrar's unique start-key index, trigger deliveries, `process:start:<key>` effect ids and start staging owners are addressed by (ADR 0107)"
+
+# Start keys are durable: a redrive re-derives its key and must meet the key
+# the first attempt stored, so a preimage or rendering edit that silently
+# re-keys an idempotent start would start a second process. The guard covers
+# every derivation path, the namespace tags and names, the owner scoping of a
+# host key, and the admitted-scope projection the derived keys share.
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/process_identity.rs"]
+symbols = [
+  "START_KEY_DOMAIN",
+  "START_KEY_PREFIX",
+  "StartKeyNamespace",
+  "StartKeyOwner",
+  "derive",
+  "for_tool_intent",
+  "for_orchestration_call",
+  "for_trigger_delivery",
+  "for_host",
+  "for_keyless_host",
+  "write_scope",
+]
 
 [[surface]]
 constant = "TURN_INPUT_SUBMISSION_FAMILY_VERSION"
@@ -639,28 +721,6 @@ symbols = [
 ]
 
 [[surface]]
-constant = "PROCESS_REGISTRATION_FAMILY_VERSION"
-constant_path = "crates/lash-core-execution/src/runtime/process/validation.rs"
-upgrade = "coexist"
-description = "stable process-registration definition fingerprint"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = [
-  "crates/lash-core-execution/src/runtime/process/validation.rs",
-  "crates/lash-core-execution/src/runtime/process/identity_projection.rs",
-]
-symbols = [
-  "process_registration_fingerprint_preimage",
-  "project_registration_output_contract",
-  "project_process_event_type",
-  "project_process_value_selector",
-  "project_registration_causal_ref",
-  "project_process_payload_leaf",
-  "project_process_schema_leaf",
-]
-
-[[surface]]
 constant = "TRIGGER_COMMAND_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers.rs"
 upgrade = "coexist"
@@ -753,17 +813,6 @@ paths = [
 symbols = ["trigger_source_preimage", "project_process_payload_leaf"]
 
 [[surface]]
-constant = "TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION"
-constant_path = "crates/lash-core-execution/src/triggers/router.rs"
-upgrade = "coexist"
-description = "stable trigger-delivery process identity"
-
-[[surface.guard]]
-kind = "rust_items"
-paths = ["crates/lash-core-execution/src/triggers/router.rs"]
-symbols = ["trigger_delivery_process_preimage"]
-
-[[surface]]
 constant = "DERIVED_TRIGGER_SUBSCRIPTION_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers/router.rs"
 upgrade = "coexist"
@@ -847,8 +896,6 @@ symbols = [
   "RuntimeReplay",
   "RuntimeReplayAttribution",
   "ToolIntentIdentity",
-  "ProcessRef",
-  "ProcessIncarnation",
   "ProcessExecutionEnvRef",
   "FrameNodeId",
   "ToolId",
@@ -2392,6 +2439,13 @@ manifest = "engine:restate.process_command_journal"
 kind = "rust_items"
 paths = ["crates/lash-restate/src/controller/process_command.rs"]
 symbols = ["JournaledCancelCommandIdentity", "JournaledCancelAdmission"]
+
+# A Restate process start journals its registration, so a parent's replay
+# reads the recorded start instead of registering again (ADR 0107).
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-execution/src/runtime/process/start_staging.rs"]
+symbols = ["RegisteredProcessStart"]
 
 [[surface]]
 constant = "DURABLE_WAIT_REGISTRY_FORMAT_VERSION"

@@ -23,6 +23,7 @@
 use super::*;
 
 const SESSION: &str = "race-recovery";
+/// The start key of the intent target both workers register.
 const INTENT_PROCESS: &str = "race-recovery-intent-target";
 const INTENT_EVENT: &str = "race.recovery.loser";
 
@@ -35,6 +36,8 @@ struct RaceTools {
     /// turn's gate waits on it, so the opener is still live — and its end has
     /// not closed the group — when recovery drives the loser.
     loser_ran: Arc<tokio::sync::Notify>,
+    /// The process every declared intent is realized against.
+    intent_process: lash_sansio::ProcessId,
 }
 
 fn step_definition() -> lash_core::ToolDefinition {
@@ -102,7 +105,7 @@ impl ToolProvider for RaceTools {
             lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::EmitProcessEvent(
                 lash_core::EmitProcessEventIntent {
                     session_id: SessionId::from(SESSION),
-                    process_id: lash_sansio::ProcessId::from(INTENT_PROCESS),
+                    process_id: self.intent_process.clone(),
                     event_type: INTENT_EVENT.to_string(),
                     payload: serde_json::json!({ "id": id }),
                 },
@@ -163,11 +166,13 @@ fn message_plugin() -> Arc<dyn PluginFactory> {
     ))
 }
 
-async fn register_intent_target(registry: &dyn ProcessRegistry) {
+/// Registers the intent target under a fixed start key, so the crashing worker
+/// and the one that recovers it — two processes over one store — both answer
+/// the one process the key minted (ADR 0107).
+async fn register_intent_target(registry: &dyn ProcessRegistry) -> lash_sansio::ProcessId {
     registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(
-                INTENT_PROCESS,
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -178,6 +183,10 @@ async fn register_intent_target(registry: &dyn ProcessRegistry) {
                     lash_core::OnParentEnd::Abandon,
                 ),
             )
+            .with_start_key(Some(lash_core::StartKey::for_host(
+                lash_core::StartKeyOwner::HOST,
+                INTENT_PROCESS,
+            )))
             .with_extra_event_types(vec![lash_core::ProcessEventType {
                 name: INTENT_EVENT.to_string(),
                 payload_schema: lash_core::LashSchema::any(),
@@ -186,7 +195,8 @@ async fn register_intent_target(registry: &dyn ProcessRegistry) {
             &[SessionId::from(SESSION)],
         )
         .await
-        .expect("register the intent target process");
+        .expect("register the intent target process")
+        .id
 }
 
 /// The worker a parent runs twice: once to crash at the gate, once to recover.
@@ -248,13 +258,14 @@ async fn race_recovery_worker() -> Result<()> {
     )
     .into();
     let registry = backend.process_registry();
-    register_intent_target(registry.as_ref()).await;
+    let intent_process = register_intent_target(registry.as_ref()).await;
     let core = explicit_ephemeral_facets(rlm_core_builder_over(backend))
         .provider(provider)
         .model(mock_model_spec())
         .tools(Arc::new(RaceTools {
             crash,
             loser_ran: Arc::new(tokio::sync::Notify::new()),
+            intent_process: intent_process.clone(),
         }));
     let core = core
         .plugin(message_plugin())
@@ -297,7 +308,7 @@ async fn race_recovery_worker() -> Result<()> {
         "the recovered turn finishes"
     );
     let recovered = registry
-        .recent_events(&lash_sansio::ProcessId::from(INTENT_PROCESS), 16)
+        .recent_events(&intent_process, 16)
         .await
         .expect("read the intent target")
         .into_iter()

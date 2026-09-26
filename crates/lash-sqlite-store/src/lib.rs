@@ -44,7 +44,6 @@
 
 use lash_sansio::SessionId;
 mod namespace;
-mod process_key;
 #[cfg(test)]
 mod process_lifecycle_sql_tests;
 #[cfg(test)]
@@ -82,14 +81,14 @@ use lash_core_execution::{
     AttachmentOwnerKind, BlobRef, DeliveryPolicy, GcReport, LeaseOwnerIdentity,
     PersistedSegmentHandover, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
     ProcessContinuationStore, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
-    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessIncarnation, ProcessLease,
-    ProcessLeaseClaimOutcome, ProcessLeaseCompletion, ProcessListFilter, ProcessLiveReferenceView,
-    ProcessObserverBy, ProcessPruneReport, ProcessRecord, ProcessRef, ProcessRegistration,
-    ProcessRegistry, ProcessStartOutcome, ProcessStarted, QueuedWorkStore, RuntimePersistence,
-    SessionCommitStore, SessionExecutionLease, SessionExecutionLeaseAcquisition,
-    SessionExecutionLeaseAuthority, SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore,
-    SessionListFilter, SessionMeta, SessionStoreCreateRequest, SessionStoreFactory, SessionSummary,
-    StoreError, StoreMaintenance, TurnInputStore, VacuumReport, facade_support::ProcessStartPlan,
+    ProcessExecutionWriteAuthority, ProcessExternalRef, ProcessLease, ProcessLeaseClaimOutcome,
+    ProcessLeaseCompletion, ProcessListFilter, ProcessLiveReferenceView, ProcessObserverBy,
+    ProcessPruneReport, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStartOutcome,
+    ProcessStarted, QueuedWorkStore, RuntimePersistence, SessionCommitStore, SessionExecutionLease,
+    SessionExecutionLeaseAcquisition, SessionExecutionLeaseAuthority,
+    SessionExecutionLeaseClaimOutcome, SessionExecutionLeaseStore, SessionListFilter, SessionMeta,
+    SessionStoreCreateRequest, SessionStoreFactory, SessionSummary, StoreError, StoreMaintenance,
+    TurnInputStore, VacuumReport, facade_support::ProcessStartPlan,
     facade_support::ProcessTransition, facade_support::ProcessTransitionPlan,
     facade_support::registry_transitions,
 };
@@ -253,6 +252,8 @@ pub struct SqliteProcessRegistry {
     /// This registry's database: bound effect hosts attach it and keep their
     /// process-scope fences in it, beside the process rows (ADR 0049).
     location: DatabaseLocation,
+    /// Where registration mints process ids (ADR 0107).
+    process_id_mint: lash_core_execution::ProcessIdMint,
 }
 
 fn sqlite_error(err: rusqlite::Error) -> StoreError {

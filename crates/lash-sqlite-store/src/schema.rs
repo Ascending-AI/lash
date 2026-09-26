@@ -277,7 +277,6 @@ CREATE TABLE IF NOT EXISTS session_meta_pending_observer_intents (
     session_id    TEXT NOT NULL,
     process_index INTEGER NOT NULL,
     process_id    TEXT NOT NULL,
-    process_incarnation INTEGER,
     PRIMARY KEY (session_id, process_id),
     UNIQUE (session_id, process_index),
     FOREIGN KEY (session_id) REFERENCES session_meta(session_id) ON DELETE CASCADE
@@ -495,8 +494,7 @@ CREATE TABLE IF NOT EXISTS attachment_manifest (
     committed_at_ms  INTEGER,
     owner_kind       TEXT CONSTRAINT ck_attachment_manifest_owner_kind CHECK (owner_kind IN ('turn', 'process')),
     owner_id         TEXT,
-    owner_incarnation INTEGER,
-    CONSTRAINT ck_attachment_manifest_owner_identity CHECK ((owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL) OR (owner_kind = 'turn' AND owner_id IS NOT NULL AND owner_incarnation IS NULL) OR (owner_kind = 'process' AND owner_id IS NOT NULL AND owner_incarnation IS NOT NULL)),
+    CONSTRAINT ck_attachment_manifest_owner_identity CHECK ((owner_kind IS NULL AND owner_id IS NULL) OR (owner_kind IN ('turn', 'process') AND owner_id IS NOT NULL)),
     PRIMARY KEY (session_id, attachment_id)
 );
 
@@ -559,7 +557,7 @@ CREATE INDEX IF NOT EXISTS idx_attachment_manifest_uncommitted
 CREATE INDEX IF NOT EXISTS idx_attachment_manifest_written
     ON attachment_manifest(attachment_id, written_at_ms);
 CREATE INDEX IF NOT EXISTS idx_attachment_manifest_owner
-    ON attachment_manifest(session_id, owner_kind, owner_id, owner_incarnation, committed_at_ms);
+    ON attachment_manifest(session_id, owner_kind, owner_id, committed_at_ms);
 CREATE INDEX IF NOT EXISTS idx_artifact_refs_blob_ref
     ON artifact_refs(blob_ref);
 
@@ -962,13 +960,18 @@ CREATE TABLE IF NOT EXISTS fleet_format (
 /// session's current admission (ADR 0105 L-S8); a later seal of the same
 /// admission by another execution is refused. A pre-97 database is rejected
 /// at open and recreated; it is not migrated.
-pub(crate) const SCHEMA_VERSION: i32 = 97;
+/// Bumped to 98 for FIG-3607: a process is named by its minted, never-reused
+/// process id, so `attachment_manifest` drops `owner_incarnation` and
+/// `session_meta_pending_observer_intents` drops `process_incarnation`, and
+/// the durable `RuntimeErrorCode` vocabulary drops
+/// `process_incarnation_superseded`. A pre-98 database is rejected at open
+/// and recreated; it is not migrated.
+pub(crate) const SCHEMA_VERSION: i32 = 98;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (
     process_id            TEXT PRIMARY KEY,
-    incarnation           INTEGER NOT NULL,
-    registration_fingerprint     TEXT NOT NULL,
+    start_key             TEXT,
     originator_id         TEXT NOT NULL,
     wake_session_id       TEXT,
     identity_kind         TEXT NOT NULL,
@@ -986,7 +989,6 @@ CREATE TABLE IF NOT EXISTS processes (
     parked_reason_code    TEXT,
     park_executable_generation TEXT,
     record_json           TEXT NOT NULL,
-    UNIQUE(process_id, incarnation),
     CONSTRAINT ck_processes_parked CHECK ((parked_since_ms IS NULL) = (parked_reason_code IS NULL)),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),
     CONSTRAINT ck_processes_parent_scope_kind CHECK (parent_scope_kind IN ('turn', 'queue_drain', 'process', 'host')),
@@ -996,6 +998,9 @@ CREATE TABLE IF NOT EXISTS processes (
 
 CREATE INDEX IF NOT EXISTS idx_processes_status
     ON processes(status);
+-- A start key maps to the one retained process minted for it (ADR 0107).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_processes_start_key
+    ON processes(start_key) WHERE start_key IS NOT NULL;
 CREATE INDEX IF NOT EXISTS idx_processes_live_worklist
     ON processes(process_id) WHERE status IN ('running', 'waiting');
 
@@ -1083,13 +1088,12 @@ INSERT OR IGNORE INTO process_change_clock (
 
 CREATE TABLE IF NOT EXISTS process_events (
     process_id        TEXT NOT NULL,
-    process_incarnation INTEGER NOT NULL,
     sequence          INTEGER NOT NULL,
     event_type        TEXT NOT NULL,
     idempotency_key   TEXT,
     event_json        TEXT NOT NULL,
-    PRIMARY KEY (process_id, process_incarnation, sequence),
-    FOREIGN KEY (process_id, process_incarnation) REFERENCES processes(process_id, incarnation) ON DELETE CASCADE
+    PRIMARY KEY (process_id, sequence),
+    FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_process_events_key
@@ -1106,7 +1110,6 @@ CREATE TABLE IF NOT EXISTS wake_allocation_floors (
 CREATE TABLE IF NOT EXISTS process_wake_deliveries (
     delivery_id       TEXT PRIMARY KEY,
     process_id        TEXT NOT NULL,
-    process_incarnation INTEGER NOT NULL,
     target_session_id TEXT NOT NULL,
     sequence          INTEGER NOT NULL,
     state             TEXT NOT NULL,
@@ -1119,7 +1122,7 @@ CREATE TABLE IF NOT EXISTS process_wake_deliveries (
     delivery_json     TEXT NOT NULL,
     CONSTRAINT ck_process_wake_deliveries_state CHECK (state IN ('pending', 'enqueuing', 'enqueued', 'discarded')),
     CONSTRAINT ck_process_wake_deliveries_discard_reason CHECK (discard_reason IN ('expired', 'target_gone', 'retargeted', 'sequence_rewound')),
-    FOREIGN KEY (process_id, process_incarnation) REFERENCES processes(process_id, incarnation) ON DELETE CASCADE
+    FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_wake_deliveries_pending
@@ -1132,31 +1135,26 @@ CREATE INDEX IF NOT EXISTS idx_wake_deliveries_group_sequence
 CREATE TABLE IF NOT EXISTS process_observers (
     session_id       TEXT NOT NULL,
     process_id       TEXT NOT NULL,
-    process_incarnation INTEGER NOT NULL,
-    PRIMARY KEY (session_id, process_id, process_incarnation),
-    FOREIGN KEY (process_id, process_incarnation) REFERENCES processes(process_id, incarnation) ON DELETE CASCADE
+    PRIMARY KEY (session_id, process_id),
+    FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_process_observers_process
     ON process_observers(process_id, session_id);
 
 CREATE TABLE IF NOT EXISTS process_tombstones (
-    process_id          TEXT NOT NULL,
-    incarnation         INTEGER NOT NULL,
+    process_id          TEXT PRIMARY KEY,
     terminal_label      TEXT NOT NULL,
     pruned_at_ms        INTEGER NOT NULL,
-    pruned_change_seq   INTEGER NOT NULL,
-    PRIMARY KEY (process_id, incarnation)
+    pruned_change_seq   INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_process_tombstones_change
     ON process_tombstones(pruned_change_seq);
 
 CREATE TABLE IF NOT EXISTS process_artifact_cleanup (
-    process_id       TEXT NOT NULL,
-    incarnation      INTEGER NOT NULL,
+    process_id       TEXT PRIMARY KEY,
     cleanup_json     TEXT NOT NULL,
-    PRIMARY KEY (process_id, incarnation),
-    FOREIGN KEY (process_id, incarnation) REFERENCES process_tombstones(process_id, incarnation) ON DELETE RESTRICT
+    FOREIGN KEY (process_id) REFERENCES process_tombstones(process_id) ON DELETE RESTRICT
 );
 
 CREATE TABLE IF NOT EXISTS process_leases (
@@ -1303,7 +1301,12 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// `started_json` start marker a Restate segment's admission writes
 /// set-if-absent before its first effect. A pre-43 registry lacks the column,
 /// so it is rejected at open and recreated.
-pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 43;
+/// Version 44 (FIG-3607) names a process by its minted, never-reused process
+/// id: `processes` drops `incarnation` and `registration_fingerprint` and gains
+/// the nullable `start_key`, unique while retained, and every table keyed by
+/// `(process_id, incarnation)` is keyed by `process_id` alone. A pre-44
+/// registry holds reusable names, so it is rejected at open and recreated.
+pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 44;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS trigger_subscriptions (
@@ -1351,7 +1354,7 @@ CREATE INDEX IF NOT EXISTS idx_trigger_occurrences_reclaimable
 CREATE TABLE IF NOT EXISTS trigger_deliveries (
     occurrence_id    TEXT NOT NULL,
     subscription_id  TEXT NOT NULL,
-    process_id       TEXT NOT NULL,
+    process_id       TEXT,
     subscription_incarnation TEXT NOT NULL,
     subscription_revision INTEGER NOT NULL,
     subscription_snapshot_json TEXT NOT NULL,
@@ -1397,7 +1400,12 @@ CREATE INDEX IF NOT EXISTS idx_trigger_deliveries_subscription
 // Version 11 (FIG-3376) moves the `SessionCreateRequest` carried in trigger
 // targets to the spawn-time plugin-init cutover and drops `usage_source`;
 // existing trigger stores are rejected rather than migrated.
-pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 11;
+// Version 12 (FIG-3607) makes a delivery's `process_id` its nullable binding:
+// the reservation starts unbound, and the minted id of the process its start
+// key registered is bound before the delivery is reported. Existing trigger
+// stores hold precomputed process names, so they are rejected rather than
+// migrated.
+pub(crate) const TRIGGER_SCHEMA_VERSION: i32 = 12;
 
 pub(crate) const EFFECT_SCHEMA: &str = "
 
@@ -1646,7 +1654,13 @@ CREATE TABLE IF NOT EXISTS turn_cancel_closure_participants (
 /// resolve to `runtime_effect_group` rows — the membership table's
 /// children-before-group write order riding a deferred foreign key. A pre-34
 /// journal is rejected at open and recreated.
-pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 34;
+/// Version 35 (FIG-3607) moves the serialized bytes of the process commands a
+/// journal holds: a process is named by its minted id (no incarnation), a
+/// start carries its start key instead of a host-chosen id and is addressed by
+/// it, and a process scope names the minted id. A pre-35 journal would decode
+/// its process scopes to no process and its process commands to a replay
+/// mismatch, so it is rejected at open and recreated.
+pub(crate) const EFFECT_SCHEMA_VERSION: i32 = 35;
 
 pub(crate) async fn apply_pragmas(conn: &SqliteConnection) -> rusqlite::Result<()> {
     // WAL + busy_timeout are already applied in `SqliteConnection::open`. The

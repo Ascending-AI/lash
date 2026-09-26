@@ -10,6 +10,12 @@ deletion exclusion) and FIG-3411 (§6, §8, §12, §13, carriage and handover);
 FIG-3394 the incarnation binding §1 validates; and FIG-3395 the aggregate oracle
 that froze the pre-cutover baseline.
 
+Amended 2026-09-25 (FIG-3607, PR-1): §1's process opener is the minted
+`ProcessId` ([ADR 0107](0107-a-process-is-named-by-a-minted-id-a-start-by-its-key.md)).
+The id is never reused, so the incarnation binding FIG-3394 validated is
+subsumed by the id itself: a process opener is `Process { process_id }`, and a
+request whose enclosing process is not its opener's id is refused as before.
+
 FIG-3397 was the integration landing, in three slices. Integration (a) formed
 every product tool batch as a durable group of tool children on all four tiers;
 (b) deleted the batch path the groups replaced; (c) accepted `Promise.race` and

@@ -3,11 +3,11 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
+use crate::SessionId;
 use crate::plugin::{PluginSession, StaticPluginFactory};
 use crate::runtime::RuntimeEffectControllerHandle;
 use crate::support::prelude::*;
 use crate::tool_dispatch::*;
-use crate::{ProcessId, SessionId};
 use crate::{
     ToolCall, ToolCallOutcome, ToolContext, ToolOutcome, ToolProvider, ToolRetryPolicy,
     ToolRetryStatus,
@@ -139,12 +139,14 @@ async fn internal_probe_dispatch_context<'h>(
 struct AttemptIntentTools {
     definition: crate::ToolDefinition,
     calls: Arc<AtomicUsize>,
+    target: Arc<std::sync::OnceLock<crate::ProcessId>>,
 }
 
 #[derive(Clone)]
 struct RetryingIntentTools {
     definition: crate::ToolDefinition,
     calls: Arc<AtomicUsize>,
+    target: crate::ProcessId,
 }
 
 #[derive(Clone)]
@@ -456,7 +458,7 @@ impl ToolProvider for RetryingIntentTools {
         let intents = crate::ToolIntents::v3(vec![crate::ToolIntent::EmitProcessEvent(
             crate::EmitProcessEventIntent {
                 session_id: SessionId::from("session"),
-                process_id: ProcessId::from("retry-intent-target"),
+                process_id: self.target.clone(),
                 event_type: "attempt.retry.final".to_string(),
                 payload: json!({"attempt": call.context.attempt_number()}),
             },
@@ -578,13 +580,13 @@ impl ToolProvider for AttemptIntentTools {
                 })),
                 crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
                     session_id: SessionId::from("session"),
-                    process_id: ProcessId::from("attempt-intents-target"),
+                    process_id: self.target.get().expect("the target is registered").clone(),
                     signal_name: "resume".to_string(),
                     payload: json!({"ordinal": 1}),
                 }),
                 crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
                     session_id: SessionId::from("session"),
-                    process_id: ProcessId::from("attempt-intents-target"),
+                    process_id: self.target.get().expect("the target is registered").clone(),
                     event_type: "attempt.intent.note".to_string(),
                     payload: json!({"ordinal": 2}),
                 }),
@@ -599,7 +601,7 @@ impl ToolProvider for AttemptIntentTools {
                 }),
                 crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
                     session_id: SessionId::from("session"),
-                    process_id: ProcessId::from("attempt-intents-target"),
+                    process_id: self.target.get().expect("the target is registered").clone(),
                 }),
             ]),
         )
@@ -2097,9 +2099,11 @@ async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinat
     // worker, which this target does not install.
     let definition = named_beta_tool("attempt_intents");
     let calls = Arc::new(AtomicUsize::new(0));
+    let target = Arc::new(std::sync::OnceLock::new());
     let provider: Arc<dyn ToolProvider> = Arc::new(AttemptIntentTools {
         definition: definition.clone(),
         calls: Arc::clone(&calls),
+        target: Arc::clone(&target),
     });
     let mut context = exact_dispatch_context(
         crate::support::controller_dispatch_ports(
@@ -2131,10 +2135,9 @@ async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinat
             semantics: crate::ProcessEventSemanticsSpec::default(),
         })
         .collect::<Vec<_>>();
-    registry
+    let registered = registry
         .register_process_with_observers(
             crate::ProcessRegistration::new(
-                "attempt-intents-target",
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -2150,6 +2153,9 @@ async fn attempt_context_provider_realizes_every_v2_intent_through_the_coordinat
         )
         .await
         .expect("register intent target");
+    target
+        .set(registered.id.clone())
+        .expect("the target is registered once");
     context.processes = crate::testing::effect_backed_process_service(
         Arc::clone(&registry),
         backend.process_env_store(),

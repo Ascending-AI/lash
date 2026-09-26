@@ -410,7 +410,6 @@ mod tests {
         ProcessEventLog as _, ProcessLifecycle as _, ProcessObserverRegistry as _,
         ProcessRegistrar as _, ProcessRetention as _, ProcessWakeOutbox as _,
     };
-    use lash_sansio::ProcessId;
     use std::sync::Arc;
 
     use lash_core::store::RuntimeCommit;
@@ -427,16 +426,15 @@ mod tests {
 
     async fn collect_process_events(
         registry: &dyn lash_core::ProcessRegistry,
-        process_id: &ProcessId,
+        process_id: &lash_core::ProcessId,
     ) -> Result<Vec<lash_core::ProcessEvent>, lash_core::PluginError> {
         let limit = std::num::NonZeroUsize::new(256).unwrap_or(std::num::NonZeroUsize::MIN);
-        let process_ref = registry.resolve_process_ref(process_id).await?;
         let mut after_sequence = 0;
         let mut events = Vec::new();
         loop {
             let outcome = registry
-                .event_page_ref(
-                    &process_ref,
+                .event_page_after(
+                    process_id,
                     after_sequence,
                     limit,
                     lash_core::ProcessEventQueryMode::Full,
@@ -453,18 +451,6 @@ mod tests {
                     return Err(lash_core::PluginError::ProcessNoLongerRetained {
                         terminal_label,
                         pruned_at_ms,
-                    });
-                }
-                lash_core::ProcessEventReadOutcome::NoLongerRetained(
-                    lash_core::ProcessEventHistoryRetention::Retired {
-                        requested_incarnation,
-                        current_incarnation,
-                    },
-                ) => {
-                    return Err(lash_core::PluginError::ProcessIncarnationSuperseded {
-                        process_id: process_id.clone(),
-                        requested_incarnation,
-                        current_incarnation,
                     });
                 }
             };
@@ -520,11 +506,9 @@ mod tests {
             .await
             .expect("SQLite memory store set");
         let registry = backend.process_registry();
-        let process_id = "transcript-process";
-        registry
+        let process_id = registry
             .register_process(
                 lash_core::ProcessRegistration::new(
-                    process_id,
                     lash_core::ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
@@ -549,10 +533,11 @@ mod tests {
                 .with_wake_session_id(Some(SessionId::from("source-session"))),
             )
             .await
-            .expect("register transcript process");
+            .expect("register transcript process")
+            .id;
         registry
             .append_event(
-                &ProcessId::from(process_id),
+                &process_id,
                 ProcessEventAppendRequest::new(
                     "producer.wake",
                     serde_json::json!({"wake_input": "resume"}),
@@ -561,7 +546,7 @@ mod tests {
             .await
             .expect("append wake event");
         registry
-            .retarget_subscription(&ProcessId::from(process_id), Some("branch-session"))
+            .retarget_subscription(&process_id, Some("branch-session"))
             .await
             .expect("retarget subscription");
         let retargeted = registry
@@ -583,18 +568,17 @@ mod tests {
             "retargeted",
             "a retarget must settle its stale wake delivery as retargeted"
         );
-        let retarget_event =
-            collect_process_events(registry.as_ref(), &ProcessId::from(process_id))
-                .await
-                .expect("read process audit events")
-                .into_iter()
-                .find(|event| event.event_type == "process.subscription_retargeted")
-                .expect("retarget audit event");
+        let retarget_event = collect_process_events(registry.as_ref(), &process_id)
+            .await
+            .expect("read process audit events")
+            .into_iter()
+            .find(|event| event.event_type == "process.subscription_retargeted")
+            .expect("retarget audit event");
         assert_eq!(retarget_event.event_type, "process.subscription_retargeted");
 
         let terminal = registry
             .complete_process(
-                &ProcessId::from(process_id),
+                &process_id,
                 ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                     serde_json::json!({"done": true}),
                 )),
@@ -613,7 +597,7 @@ mod tests {
         let output = lash_core::NativeProcessWork::for_registry(
             registry as Arc<dyn lash_core::ProcessRegistry>,
         )
-        .await_terminal(&ProcessId::from(process_id))
+        .await_terminal(&process_id)
         .await
         .expect("await pruned process");
         assert!(matches!(

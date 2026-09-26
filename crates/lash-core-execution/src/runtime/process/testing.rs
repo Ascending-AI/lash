@@ -20,8 +20,8 @@ mod support;
 pub use effect_summary_faults::EffectSummaryAppendFaults;
 pub use parent_end_fault::fail_parent_end_once;
 pub use registration_refusals::{
-    REFUSAL_FIXTURE_PROCESS_ID as PROCESS_REFUSAL_FIXTURE_PROCESS_ID,
-    accepted_process_registration, refused_process_registrations,
+    REFUSAL_FIXTURE_START_KEY as PROCESS_REFUSAL_FIXTURE_START_KEY, accepted_process_registration,
+    refused_process_registrations,
 };
 pub use registry_faults::{
     ProcessRegistryFaults, RegistrationHoldPoint, WorklistPagePause, WorklistPageRead,

@@ -33,15 +33,15 @@ pub async fn process_event_append_arms_are_ordered(
 
     // Entry point 1: the unfenced host append, which reaches the replay arm
     // proper through a repeated replay key.
-    let host_id = ProcessId::from("append-arm-host");
-    registry
+    let host_id = registry
         .register_process(
-            registration(host_id.as_str())
+            registration("append-arm-host")
                 .with_extra_event_types([wake_event_type("producer.wake")])
                 .with_wake_session_id(Some(target_session_id.clone())),
         )
         .await
-        .expect("register host-append arm process");
+        .expect("register host-append arm process")
+        .id;
     let host_request = || {
         ProcessEventAppendRequest::new(
             "producer.wake",
@@ -102,14 +102,14 @@ pub async fn process_event_append_arms_are_ordered(
     );
 
     // Entry point 2: unleased completion under an explicit authority.
-    let unleased_id = ProcessId::from("append-arm-unleased-completion");
-    registry
+    let unleased_id = registry
         .register_process(
-            registration(unleased_id.as_str())
+            registration("append-arm-unleased-completion")
                 .with_wake_session_id(Some(target_session_id.clone())),
         )
         .await
-        .expect("register unleased-completion arm process");
+        .expect("register unleased-completion arm process")
+        .id;
     let unleased_output = ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
         serde_json::json!({"append_arm": "unleased"}),
     ));
@@ -153,13 +153,14 @@ pub async fn process_event_append_arms_are_ordered(
     );
 
     // Entry point 3: leased completion.
-    let leased_id = ProcessId::from("append-arm-leased-completion");
-    registry
+    let leased_id = registry
         .register_process(
-            registration(leased_id.as_str()).with_wake_session_id(Some(target_session_id.clone())),
+            registration("append-arm-leased-completion")
+                .with_wake_session_id(Some(target_session_id.clone())),
         )
         .await
-        .expect("register leased-completion arm process");
+        .expect("register leased-completion arm process")
+        .id;
     let lease = registry
         .claim_process_lease(
             &leased_id,
@@ -258,11 +259,11 @@ async fn terminal_sequence(
 async fn durable_effect_outcome_event_crash_windows(
     registry: Arc<dyn crate::ConformanceProcessRegistry>,
 ) {
-    let process_id = ProcessId::from("durable-effect-outcome-crash-windows");
-    registry
-        .register_process(registration(process_id.as_str()))
+    let process_id = registry
+        .register_process(registration("durable-effect-outcome-crash-windows"))
         .await
-        .expect("register effect-summary process");
+        .expect("register effect-summary process")
+        .id;
     let lease = registry
         .claim_process_lease(
             &process_id,
@@ -338,11 +339,9 @@ async fn durable_effect_outcome_event_crash_windows(
 
     // A durable substrate may replay the invocation that already completed
     // the process, reaching the append again after terminalisation.
-    let invoked_id = ProcessId::from("durable-effect-outcome-terminal-redrive");
-    registry
+    let invoked_id = registry
         .register_process(
             ProcessRegistration::new(
-                invoked_id.clone(),
                 ProcessInput::Engine {
                     kind: "conformance-effect-engine".to_string(),
                     payload: serde_json::Value::Null,
@@ -363,12 +362,13 @@ async fn durable_effect_outcome_event_crash_windows(
                         "conformance-effect-engine",
                         serde_json::Value::Null,
                     ),
-                    Some(invoked_id.as_str()),
+                    Some("durable-effect-outcome-terminal-redrive"),
                 ),
             )),
         )
         .await
-        .expect("register invocation-owned effect-summary process");
+        .expect("register invocation-owned effect-summary process")
+        .id;
     let invocation = crate::ProcessExecutionWriteAuthority::invocation(
         invoked_id.clone(),
         "effect-summary-invocation",

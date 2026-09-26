@@ -8,14 +8,16 @@ use pretty_assertions::assert_eq;
 )]
 pub(super) async fn registration_contract(registry: Arc<dyn crate::ConformanceProcessRegistry>) {
     let parent = registry
-        .register_process(registration(&ProcessId::from("lifecycle-parent")))
+        .register_process(registration("lifecycle-parent"))
         .await
         .expect("register parent");
-    let policy = ProcessLifecyclePolicy::new(
-        ParentScope::process(crate::ProcessRef::from_record(&parent)),
-        OnParentEnd::Cancel,
-    );
-    let mut child = registration(&ProcessId::from("lifecycle-child"));
+    let policy =
+        ProcessLifecyclePolicy::new(ParentScope::process(parent.id.clone()), OnParentEnd::Cancel);
+    // The child starts under a key, so a replay of its start after the
+    // parent ended returns the retained child instead of starting a new one.
+    let mut child = registration("lifecycle-child").with_start_key(Some(
+        crate::StartKey::for_host(crate::StartKeyOwner::HOST, "lifecycle-child"),
+    ));
     child.lifecycle = policy.clone();
     let admitted = registry
         .register_process(child.clone())
@@ -53,12 +55,12 @@ pub(super) async fn registration_contract(registry: Arc<dyn crate::ConformancePr
             .expect("identical replay after parent end"),
         admitted
     );
-    let mut late = registration(&ProcessId::from("lifecycle-late-child"));
+    let mut late = registration("lifecycle-late-child");
     late.lifecycle = policy.clone();
     assert!(
         matches!(registry.register_process(late).await, Err(PluginError::ParentEnded { parent: ref scope, .. }) if scope == &policy.parent)
     );
-    let mut detached = registration(&ProcessId::from("lifecycle-detached-child"));
+    let mut detached = registration("lifecycle-detached-child");
     detached.lifecycle = ProcessLifecyclePolicy::new(policy.parent, OnParentEnd::Abandon);
     let detached_policy = detached.lifecycle.clone();
     assert_eq!(
@@ -69,13 +71,13 @@ pub(super) async fn registration_contract(registry: Arc<dyn crate::ConformancePr
             .lifecycle,
         detached_policy
     );
-    let mut invalid = registration(&ProcessId::from("lifecycle-invalid-host"));
+    let mut invalid = registration("lifecycle-invalid-host");
     invalid.lifecycle.on_parent_end = OnParentEnd::Cancel;
     assert!(
         registry.register_process(invalid).await.is_err(),
         "Host never ends"
     );
-    let mut turn_child = registration(&ProcessId::from("lifecycle-turn-child"));
+    let mut turn_child = registration("lifecycle-turn-child");
     turn_child.lifecycle = ProcessLifecyclePolicy::new(
         ParentScope::turn(
             crate::SessionId::from("lifecycle-session"),
@@ -116,32 +118,35 @@ pub(super) async fn empty_tool_call_identifiers_leave_no_row(
             "empty-call-id",
             "",
             "tool",
-            "process `empty-call-id` tool call must carry a call id",
+            "process `keyless start` tool call must carry a call id",
         ),
         (
             "whitespace-call-id",
             "  ",
             "tool",
-            "process `whitespace-call-id` tool call must carry a call id",
+            "process `keyless start` tool call must carry a call id",
         ),
         (
             "empty-tool-name",
             "call",
             "",
-            "process `empty-tool-name` tool call must carry a tool name",
+            "process `keyless start` tool call must carry a tool name",
         ),
         (
             "whitespace-tool-name",
             "call",
             "\t",
-            "process `whitespace-tool-name` tool call must carry a tool name",
+            "process `keyless start` tool call must carry a tool name",
         ),
     ];
 
-    for (process_id, call_id, tool_name, expected) in cases {
-        let process_id = ProcessId::from(process_id);
+    for (label, call_id, tool_name, expected) in cases {
+        let before = registry
+            .list_processes(&ProcessListFilter::default())
+            .await
+            .expect("list before refused tool-call registration")
+            .len();
         let registration = ProcessRegistration::new(
-            &process_id,
             ProcessInput::ToolCall {
                 call: crate::PreparedToolCall::from_parts(
                     call_id,
@@ -157,25 +162,17 @@ pub(super) async fn empty_tool_call_identifiers_leave_no_row(
             ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
         )
         .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
-            "process-env:{process_id}"
+            "process-env:{label}"
         ))));
 
         assert_session_refusal(registry.register_process(registration).await, expected);
-        assert!(
+        assert_eq!(
             registry
-                .get_process(&process_id)
-                .await
-                .expect("read refused tool-call process")
-                .is_none(),
-            "a refused tool-call registration must not leave a point-readable row"
-        );
-        assert!(
-            !registry
                 .list_processes(&ProcessListFilter::default())
                 .await
                 .expect("list after refused tool-call registration")
-                .iter()
-                .any(|record| record.id == process_id),
+                .len(),
+            before,
             "a refused tool-call registration must not leave a listed row"
         );
     }
@@ -210,12 +207,11 @@ pub async fn superseded_process_lease_cannot_release_or_complete(
         assert_eq!(stored.owner.incarnation_id, expected.owner.incarnation_id);
         assert_eq!(stored.expires_at_epoch_ms, expected.expires_at_epoch_ms);
     }
-
-    let process_id = ProcessId::from("lease-takeover-release");
-    registry
-        .register_process(registration(&process_id))
+    let process_id = registry
+        .register_process(registration("lease-takeover-release"))
         .await
-        .expect("register takeover process");
+        .expect("register takeover process")
+        .id;
 
     // A claims P under L1, stalls past TTL, and B takes over under L2.
     let owner_a = process_lease_owner("owner-a");

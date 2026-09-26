@@ -61,14 +61,6 @@ impl NativeProcessWork {
     }
 
     #[cfg(any(test, feature = "testing"))]
-    pub async fn await_terminal_ref(
-        &self,
-        process_ref: &crate::ProcessRef,
-    ) -> Result<ProcessAwaitOutput, PluginError> {
-        self.terminal_awaiter.await_terminal_ref(process_ref).await
-    }
-
-    #[cfg(any(test, feature = "testing"))]
     pub async fn await_event(
         &self,
         process_id: &ProcessId,
@@ -102,10 +94,10 @@ impl ProcessWorkSubstrate for NativeProcessWork {
 
     async fn await_process_terminal(
         &self,
-        process_ref: &crate::ProcessRef,
+        process_id: &crate::ProcessId,
     ) -> Result<ProcessTerminalWait, PluginError> {
         self.terminal_awaiter
-            .await_terminal_ref(process_ref)
+            .await_terminal(process_id)
             .await
             .map(ProcessTerminalWait::Terminal)
     }

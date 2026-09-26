@@ -303,7 +303,7 @@ fn process_handles_record() -> Value {
     chunk_1.insert(
         "id".to_string(),
         Value::String(
-            lash_sansio::handle::HandleId::process("spawn-one", 1)
+            lash_sansio::handle::HandleId::process(&lash_sansio::ProcessId::fixture("spawn-one"))
                 .as_str()
                 .into(),
         ),
@@ -320,7 +320,7 @@ fn process_handles_record() -> Value {
     chunk_2.insert(
         "id".to_string(),
         Value::String(
-            lash_sansio::handle::HandleId::process("spawn-two", 1)
+            lash_sansio::handle::HandleId::process(&lash_sansio::ProcessId::fixture("spawn-two"))
                 .as_str()
                 .into(),
         ),
@@ -363,9 +363,11 @@ impl BenchHost {
                 record.insert(
                     "id".to_string(),
                     Value::String(
-                        lash_sansio::handle::HandleId::process(name, 1)
-                            .as_str()
-                            .into(),
+                        lash_sansio::handle::HandleId::process(&lash_sansio::ProcessId::fixture(
+                            name,
+                        ))
+                        .as_str()
+                        .into(),
                     ),
                 );
                 record.insert("tool".to_string(), Value::String(name.to_string().into()));

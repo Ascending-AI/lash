@@ -856,9 +856,9 @@ pub async fn queued_work_exact_claim_preserves_physical_order_and_key_breaks(
         claim
             .batches
             .iter()
-            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
-        vec![(Some("process:exact-a1:event:1:wake"), 1)],
+        vec![(Some("exact-a1"), 1)],
         "an exact claim must preserve enqueue order and stop at the physical B key break"
     );
     assert_eq!(
@@ -867,12 +867,9 @@ pub async fn queued_work_exact_claim_preserves_physical_order_and_key_breaks(
             .await
             .expect("list exact-key-break remainder")
             .iter()
-            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
-        vec![
-            (Some("process:exact-b1:event:1:wake"), 2),
-            (Some("process:exact-a2:event:1:wake"), 3)
-        ],
+        vec![(Some("exact-b1"), 2), (Some("exact-a2"), 3)],
         "the key-break row and later requested row must remain queued in physical order"
     );
     release_session_execution_lease_for_test(&store, &lease).await;

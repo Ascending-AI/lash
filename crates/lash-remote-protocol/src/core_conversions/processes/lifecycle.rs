@@ -17,10 +17,7 @@ impl From<lash_core::EffectOpener> for RemoteEffectOpener {
                 session_id,
                 drain_id,
             },
-            lash_core::EffectOpener::Process { process_ref } => Self::Process {
-                process_id: process_ref.process_id,
-                incarnation: process_ref.incarnation.registration_sequence(),
-            },
+            lash_core::EffectOpener::Process { process_id } => Self::Process { process_id },
         }
     }
 }
@@ -36,13 +33,7 @@ impl From<RemoteEffectOpener> for lash_core::EffectOpener {
                 session_id,
                 drain_id,
             } => Self::queue_drain(session_id, drain_id),
-            RemoteEffectOpener::Process {
-                process_id,
-                incarnation,
-            } => Self::process(lash_core::ProcessRef::new(
-                process_id,
-                lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
-            )),
+            RemoteEffectOpener::Process { process_id } => Self::process(process_id),
         }
     }
 }

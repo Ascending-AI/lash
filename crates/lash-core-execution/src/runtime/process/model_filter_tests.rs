@@ -2,15 +2,14 @@ use crate::ProcessId;
 use serde_json::json;
 
 use super::model::{
-    ProcessExecutionEnvRef, ProcessIdentity, ProcessIncarnation, ProcessInput, ProcessListFilter,
-    ProcessListMode, ProcessOriginator, ProcessProvenance, ProcessRecord, ProcessRegistration,
-    ProcessStatus, RecoveryContract, SessionScope,
+    ProcessExecutionEnvRef, ProcessIdentity, ProcessInput, ProcessListFilter, ProcessListMode,
+    ProcessOriginator, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessStatus,
+    RecoveryContract, SessionScope,
 };
 
 fn record(process_id: &ProcessId, label: &str, created_at_ms: u64) -> ProcessRecord {
     let mut record = ProcessRecord::from_registration(
         ProcessRegistration::new(
-            process_id,
             ProcessInput::Engine {
                 kind: "test-engine".to_string(),
                 payload: json!({}),
@@ -28,7 +27,7 @@ fn record(process_id: &ProcessId, label: &str, created_at_ms: u64) -> ProcessRec
         .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
             "process-env:test:{process_id}"
         )))),
-        ProcessIncarnation::from_registration_sequence(1),
+        process_id.clone(),
     );
     record.created_at_ms = created_at_ms;
     record
@@ -64,7 +63,7 @@ fn process_list_filter_matches_definition_and_status() {
     }))
     .expect("decode filter");
 
-    let mut matching = record(&ProcessId::from("matching"), "target", 100);
+    let mut matching = record(&crate::process_id_for_test("matching"), "target", 100);
     matching.identity.definition = Some(crate::ProcessDefinitionRef::unclaimed(
         "test-engine",
         target_ref,
@@ -73,7 +72,11 @@ fn process_list_filter_matches_definition_and_status() {
     matching.outcome = Some(crate::ProcessAwaitOutput::from_tool_output(
         crate::ToolCallOutput::success(json!(true)),
     ));
-    let mut wrong_definition = record(&ProcessId::from("wrong-definition"), "other", 100);
+    let mut wrong_definition = record(
+        &crate::process_id_for_test("wrong-definition"),
+        "other",
+        100,
+    );
     wrong_definition.identity.definition = Some(crate::ProcessDefinitionRef::unclaimed(
         "test-engine",
         other_ref,
@@ -87,7 +90,7 @@ fn process_list_filter_matches_definition_and_status() {
 
 #[test]
 fn process_list_filter_matches_enriched_facets() {
-    let mut matching = record(&ProcessId::from("matching"), "target", 100);
+    let mut matching = record(&crate::process_id_for_test("matching"), "target", 100);
     matching.provenance = ProcessProvenance::session(SessionScope::new("origin-session"))
         .with_caused_by(Some(crate::CausalRef::TriggerOccurrence {
             occurrence_id: "occurrence-target".to_string(),
@@ -95,7 +98,11 @@ fn process_list_filter_matches_enriched_facets() {
             subscription_incarnation: None,
             subscription_revision: None,
         }));
-    let mut wrong_subscription = record(&ProcessId::from("wrong-subscription"), "target", 100);
+    let mut wrong_subscription = record(
+        &crate::process_id_for_test("wrong-subscription"),
+        "target",
+        100,
+    );
     wrong_subscription.provenance = ProcessProvenance::session(SessionScope::new("origin-session"))
         .with_caused_by(Some(crate::CausalRef::TriggerOccurrence {
             occurrence_id: "occurrence-target".to_string(),
@@ -103,7 +110,11 @@ fn process_list_filter_matches_enriched_facets() {
             subscription_incarnation: None,
             subscription_revision: None,
         }));
-    let mut missing_subscription = record(&ProcessId::from("missing-subscription"), "target", 100);
+    let mut missing_subscription = record(
+        &crate::process_id_for_test("missing-subscription"),
+        "target",
+        100,
+    );
     missing_subscription.provenance = ProcessProvenance::session(SessionScope::new(
         "origin-session",
     ))
@@ -113,7 +124,7 @@ fn process_list_filter_matches_enriched_facets() {
         subscription_incarnation: None,
         subscription_revision: None,
     }));
-    let wrong = record(&ProcessId::from("wrong"), "other", 200);
+    let wrong = record(&crate::process_id_for_test("wrong"), "other", 200);
 
     let filter = ProcessListFilter::decode(&json!({
         "originator": {"type": "session", "session_id": "origin-session"},
@@ -155,15 +166,19 @@ fn process_list_filter_keeps_live_rows_and_bounds_retired_rows() {
     }))
     .expect("decode recently retired filter");
 
-    let mut old_live = record(&ProcessId::from("old-live"), "live", 1);
+    let mut old_live = record(&crate::process_id_for_test("old-live"), "live", 1);
     old_live.updated_at_ms = 1;
-    let mut fresh_terminal = record(&ProcessId::from("fresh-terminal"), "fresh", 1);
+    let mut fresh_terminal = record(&crate::process_id_for_test("fresh-terminal"), "fresh", 1);
     fresh_terminal.status = ProcessStatus::Completed;
     fresh_terminal.updated_at_ms = 100;
-    let mut old_terminal = record(&ProcessId::from("old-terminal"), "old", 1);
+    let mut old_terminal = record(&crate::process_id_for_test("old-terminal"), "old", 1);
     old_terminal.status = ProcessStatus::Completed;
     old_terminal.updated_at_ms = 99;
-    let mut old_caller_departed = record(&ProcessId::from("old-caller-departed"), "departed", 1);
+    let mut old_caller_departed = record(
+        &crate::process_id_for_test("old-caller-departed"),
+        "departed",
+        1,
+    );
     old_caller_departed.status = ProcessStatus::CallerDeparted;
     old_caller_departed.updated_at_ms = 99;
 

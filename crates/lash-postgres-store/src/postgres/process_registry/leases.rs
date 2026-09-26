@@ -149,7 +149,7 @@ impl lash_core_execution::ProcessLeases for PostgresProcessRegistry {
             .map_err(plugin_sqlx_error)?;
         let mut leases_by_id = std::collections::HashMap::with_capacity(rows.len());
         for row in rows {
-            let process_id: ProcessId = ProcessId::from(row.get::<String, _>(0));
+            let process_id = crate::stored_process_id(&row.get::<String, _>(0))?;
             let lease = facade_support::registry_transitions::ProcessLeaseRow {
                 owner_id: row.get(1),
                 incarnation_id: row.get(6),

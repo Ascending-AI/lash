@@ -222,11 +222,22 @@ struct ProcessHost {
 }
 
 /// The handle record a real host mints for a started process.
-fn process_handle(id: &str) -> Value {
+fn process_handle(label: &str) -> Value {
     let mut handle = lashlang::Record::new();
     handle.insert("__handle__".to_string(), Value::String("lash".into()));
-    handle.insert("id".to_string(), Value::String(format!("p.1.{id}").into()));
-    handle.insert("process_id".to_string(), Value::String(id.into()));
+    let process_id = lash_sansio::ProcessId::fixture(label);
+    handle.insert(
+        "id".to_string(),
+        Value::String(
+            lash_sansio::handle::HandleId::process(&process_id)
+                .as_str()
+                .into(),
+        ),
+    );
+    handle.insert(
+        "process_id".to_string(),
+        Value::String(process_id.as_str().into()),
+    );
     Value::Record(std::sync::Arc::new(handle))
 }
 

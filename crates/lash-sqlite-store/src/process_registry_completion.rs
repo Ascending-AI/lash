@@ -19,7 +19,7 @@ pub(super) async fn complete_process(
     await_output: ProcessAwaitOutput,
     authority: lash_core_execution::ProcessCompletionAuthority,
 ) -> Result<lash_core_execution::ProcessCompletionOutcome, lash_core_execution::PluginError> {
-    let process_id = ProcessId::from(process_id.to_string());
+    let process_id = process_id.clone();
     let now = registry.clock.timestamp_ms();
     let wake_delivery_config = registry.wake_delivery_config;
     registry
@@ -87,7 +87,7 @@ pub(super) async fn complete_process_with_lease(
             Ok(tx_outcome((|| {
                 let process_id = lease.process_id.as_str();
                 let mut record =
-                    SqliteProcessRegistry::require_process_conn(tx, &ProcessId::from(process_id))?;
+                    SqliteProcessRegistry::require_process_conn(tx, &lease.process_id)?;
                 let await_output = await_output.with_cancel_origin(
                     record
                         .cancel_request
@@ -101,7 +101,7 @@ pub(super) async fn complete_process_with_lease(
                     ));
                 }
                 let request = lash_core_execution::facade_support::terminal_append_request(
-                    &ProcessId::from(process_id),
+                    &lease.process_id,
                     &await_output,
                     None,
                 );
@@ -143,7 +143,7 @@ pub(super) async fn complete_process_with_lease(
                     process_id,
                     released,
                     || lash_core_execution::PluginError::ProcessLeaseSuperseded {
-                        process_id: ProcessId::from(process_id),
+                        process_id: lease.process_id.clone(),
                     },
                 )?;
                 Ok(lash_core_execution::ProcessCompletionOutcome::Committed(

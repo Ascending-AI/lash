@@ -246,13 +246,11 @@ pub(super) async fn worker_on_backend(
 }
 
 pub(super) fn engine_registration(
-    id: impl Into<ProcessId>,
     kind: &str,
     env_ref: ProcessExecutionEnvRef,
     payload: serde_json::Value,
 ) -> ProcessRegistration {
     ProcessRegistration::new(
-        id,
         ProcessInput::Engine {
             kind: kind.to_string(),
             payload,

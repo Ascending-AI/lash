@@ -5,13 +5,14 @@ use super::*;
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub(super) async fn assert_out_of_range_sequences_are_rejected(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = ProcessId::from("process-event-page-sql-cursor-range");
-    registry
+    let process_id = registry
         .register_process(
-            registration(&process_id).with_extra_event_types([plain_event_type("cursor.event")]),
+            registration("process-event-page-sql-cursor-range")
+                .with_extra_event_types([plain_event_type("cursor.event")]),
         )
         .await
-        .expect("register cursor-range process");
+        .expect("register cursor-range process")
+        .id;
     for index in 0..2 {
         registry
             .append_event(
@@ -38,8 +39,8 @@ pub(super) async fn assert_out_of_range_sequences_are_rejected(registry: Arc<dyn
     let crate::ProcessEventPageMore::More { .. } = first.more else {
         panic!("cursor-range fixture must page");
     };
-    let process_ref = registry
-        .resolve_process_ref(&process_id)
+    let process_id = registry
+        .require_process_id(&process_id)
         .await
         .expect("resolve cursor-range process");
 
@@ -47,8 +48,8 @@ pub(super) async fn assert_out_of_range_sequences_are_rejected(registry: Arc<dyn
         let mut returned_events = Vec::new();
         let result: Result<(), String> = async {
             let outcome = registry
-                .event_page_ref(
-                    &process_ref,
+                .event_page_after(
+                    &process_id,
                     after_sequence,
                     std::num::NonZeroUsize::MIN,
                     crate::ProcessEventQueryMode::Full,
@@ -74,40 +75,6 @@ pub(super) async fn assert_out_of_range_sequences_are_rejected(registry: Arc<dyn
             "a rejected cursor must return no process events"
         );
     }
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-pub(super) async fn assert_retired_history(
-    registry: &Arc<dyn ProcessRegistry>,
-    first_ref: &ProcessRef,
-    first: &ProcessRecord,
-    second: &ProcessRecord,
-) {
-    let retired_page = registry
-        .event_page_ref(
-            first_ref,
-            0,
-            std::num::NonZeroUsize::new(8).expect("non-zero page size"),
-            crate::ProcessEventQueryMode::Lite,
-        )
-        .await
-        .expect("a retired history is a typed page outcome");
-    assert!(
-        matches!(
-            retired_page,
-            crate::ProcessEventReadOutcome::NoLongerRetained(
-                crate::ProcessEventHistoryRetention::Retired {
-                    requested_incarnation,
-                    current_incarnation,
-                }
-            ) if requested_incarnation == first.incarnation
-                && current_incarnation == second.incarnation
-        ),
-        "a page read for an old incarnation must report retired history: {retired_page:?}"
-    );
 }
 
 #[expect(

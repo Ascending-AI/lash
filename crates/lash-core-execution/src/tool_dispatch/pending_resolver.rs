@@ -29,9 +29,9 @@ pub async fn arm_pending_resolver(
 ) -> Result<(), crate::PluginError> {
     match pending.resolved_by.as_ref() {
         None => Ok(()),
-        Some(crate::PendingResolver::ProcessTerminal { process_ref }) => {
+        Some(crate::PendingResolver::ProcessTerminal { process_id }) => {
             processes
-                .attach_process_terminal(process_ref, key, scope)
+                .attach_process_terminal(process_id, key, scope)
                 .await
         }
     }

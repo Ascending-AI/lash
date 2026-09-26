@@ -214,9 +214,8 @@ pub struct AbandonRequest {
 pub enum ArtifactOwner {
     /// Host-managed publication retained until that host explicitly releases it.
     Host(String),
-    /// One incarnation of a durable process record retaining the bytes it
-    /// references. A reusable process name alone is not an owner identity.
-    Process(ProcessRef),
+    /// One durable process retaining the bytes it references.
+    Process(ProcessId),
     /// A publication staged by replayable execution before ownership transfers
     /// to a registered process.
     Execution(crate::ExecutionScope),
@@ -229,8 +228,8 @@ impl ArtifactOwner {
     }
 
     /// Construct the owner represented by one durable process record.
-    pub fn process(process_ref: ProcessRef) -> Self {
-        Self::Process(process_ref)
+    pub fn process(process_id: ProcessId) -> Self {
+        Self::Process(process_id)
     }
 
     /// Construct the staging owner for one replayable execution scope.
@@ -238,10 +237,12 @@ impl ArtifactOwner {
         Self::Execution(scope)
     }
 
-    /// Construct the stable staging owner for one replayable process start.
-    pub fn process_start(process_id: &ProcessId) -> Self {
+    /// Construct the stable staging owner for one replayable process start,
+    /// addressed by the start's effect id — its admitted operation identity,
+    /// never the process id the start will mint.
+    pub fn process_start(start_effect_id: &str) -> Self {
         Self::execution(crate::ExecutionScope::RuntimeOperation {
-            operation_id: format!("process-start:{process_id}"),
+            operation_id: format!("process-start:{start_effect_id}"),
         })
     }
 
@@ -249,7 +250,7 @@ impl ArtifactOwner {
     pub fn storage_parts(&self) -> Result<(&'static str, String), crate::PluginError> {
         let (kind, id) = match self {
             Self::Host(id) => ("host", id.clone()),
-            Self::Process(process_ref) => ("process", process_ref.to_string()),
+            Self::Process(process_id) => ("process", process_id.to_string()),
             Self::Execution(scope) => (
                 "execution",
                 scope
@@ -690,6 +691,17 @@ impl ProcessOriginator {
         }
     }
 
+    /// The owner a host-supplied start key is scoped to: the host scope, or
+    /// the originating session (never its frame).
+    pub fn start_key_owner(&self) -> StartKeyOwner<'_> {
+        match self {
+            Self::Host { scope } => StartKeyOwner::Host {
+                scope: scope.as_deref(),
+            },
+            Self::Session { session_id, .. } => StartKeyOwner::Session { session_id },
+        }
+    }
+
     pub(crate) fn id(&self) -> String {
         match self {
             Self::Host { scope } => scope
@@ -738,9 +750,17 @@ impl SessionScope {
 }
 
 /// Serializable process spec used to start or recover a runtime process.
+///
+/// Unknown fields are refused: the retired shape named its process with an
+/// `id` of its own, and must not decode as a keyless start.
 #[derive(Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ProcessRegistration {
-    pub id: ProcessId,
+    /// The start's idempotency key (ADR 0107). While a process registered
+    /// under the same key is retained, registration returns that process
+    /// instead of minting another. `None` is a keyless start: always new.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_key: Option<StartKey>,
     pub input: Arc<ProcessInput>,
     pub disposition: RecoveryContract,
     pub lifecycle: ProcessLifecyclePolicy,
@@ -763,7 +783,7 @@ pub struct ProcessRegistration {
 impl Clone for ProcessRegistration {
     fn clone(&self) -> Self {
         Self {
-            id: self.id.clone(),
+            start_key: self.start_key.clone(),
             input: Arc::clone(&self.input),
             disposition: self.disposition,
             lifecycle: self.lifecycle.clone(),
@@ -780,8 +800,10 @@ impl Clone for ProcessRegistration {
 impl ProcessRegistration {
     /// Constructs a `ProcessRegistration` for store and durable-substrate implementors while
     /// persisting and coordinating durable process execution.
+    ///
+    /// The registration carries no process id: the registrar mints one. A
+    /// start that must be idempotent adds its key with [`Self::with_start_key`].
     pub fn new(
-        id: impl Into<ProcessId>,
         input: ProcessInput,
         disposition: RecoveryContract,
         provenance: ProcessProvenance,
@@ -789,7 +811,7 @@ impl ProcessRegistration {
     ) -> Self {
         let identity = ProcessIdentity::from_process_input(&input);
         Self {
-            id: id.into(),
+            start_key: None,
             input: Arc::new(input),
             disposition,
             lifecycle,
@@ -803,18 +825,28 @@ impl ProcessRegistration {
     }
 
     #[cfg(any(test, feature = "testing"))]
-    pub(crate) fn session_start_draft(
-        id: impl Into<ProcessId>,
-        input: ProcessInput,
-        disposition: RecoveryContract,
-    ) -> Self {
+    pub(crate) fn session_start_draft(input: ProcessInput, disposition: RecoveryContract) -> Self {
         Self::new(
-            id,
             input,
             disposition,
             ProcessProvenance::host(),
             ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
         )
+    }
+
+    /// Sets the start's idempotency key.
+    pub fn with_start_key(mut self, start_key: Option<StartKey>) -> Self {
+        self.start_key = start_key;
+        self
+    }
+
+    /// How a refusal names this start: a registration carries no process id
+    /// until the registrar mints one, so it is named by its key when it has
+    /// one (ADR 0107).
+    pub fn refusal_name(&self) -> String {
+        self.start_key
+            .as_ref()
+            .map_or_else(|| "keyless start".to_string(), |key| format!("start {key}"))
     }
 
     /// Sets the process provenance carried by a `ProcessRegistration` for store and
@@ -1232,13 +1264,9 @@ impl ProcessExternalRef {
 /// A process, as the holder of a handle to it sees it.
 ///
 /// The view is the one handle record (ADR 0095) plus the summary fields a
-/// holder is allowed to read. Before the cutover it spelled the same fact three
-/// times — a `__handle__` string nobody read, an `id` that was a copy of
-/// `process_id`, and a separate `incarnation` — so cells reached for `id` as if
-/// it were a process id and the coordinator patched the incarnation on
-/// afterwards. `id` is now the opaque [`HandleId`], the marker field is a
-/// constant, and `process_id` and `incarnation` are the parts that id carries,
-/// filled in only by [`ProcessHandleView::new`].
+/// holder is allowed to read. `id` is the opaque [`HandleId`], the marker field
+/// is a constant, and `process_id` is the part that id carries, filled in only
+/// by [`ProcessHandleView::new`].
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[expect(
     clippy::manual_non_exhaustive,
@@ -1249,7 +1277,6 @@ pub struct ProcessHandleView {
     handle_kind: (),
     pub id: HandleId,
     pub process_id: ProcessId,
-    pub incarnation: ProcessIncarnation,
     pub kind: ProcessEngineKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
@@ -1287,18 +1314,11 @@ impl ProcessHandleView {
     ///
     /// This is the only way to build one, so the id and the parts it reports can
     /// never disagree.
-    pub fn new(
-        process_id: impl Into<ProcessId>,
-        incarnation: ProcessIncarnation,
-        identity: ProcessIdentity,
-        status: ProcessStatus,
-    ) -> Self {
-        let process_id = process_id.into();
+    pub fn new(process_id: ProcessId, identity: ProcessIdentity, status: ProcessStatus) -> Self {
         Self {
             handle_kind: (),
-            id: HandleId::process(process_id.as_str(), incarnation.registration_sequence()),
+            id: HandleId::process(&process_id),
             process_id,
-            incarnation,
             kind: identity.kind,
             label: identity.label,
             definition: identity.definition,
@@ -1316,19 +1336,13 @@ impl ProcessHandleView {
     /// Builds a `ProcessHandleView` from record data for store and durable-substrate
     /// implementors while persisting and coordinating durable process execution.
     pub fn from_record(record: ProcessRecord) -> Self {
-        Self::new(
-            record.id,
-            record.incarnation,
-            record.identity,
-            record.status,
-        )
+        Self::new(record.id, record.identity, record.status)
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessCancelReceipt {
     pub process_id: ProcessId,
-    pub incarnation: ProcessIncarnation,
     pub status: ProcessStatus,
     pub origin: CancelOrigin,
 }
@@ -1345,7 +1359,6 @@ impl ProcessCancelReceipt {
         })?;
         Ok(Self {
             process_id: record.id,
-            incarnation: record.incarnation,
             status: record.status,
             origin: request.origin,
         })
@@ -1456,7 +1469,6 @@ impl ProcessObserverBy {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProcessTombstone {
     pub process_id: ProcessId,
-    pub incarnation: ProcessIncarnation,
     pub terminal_label: String,
     pub pruned_at_ms: u64,
     pub pruned_change_seq: u64,
@@ -1474,13 +1486,15 @@ pub enum ProcessChange {
 /// into this record.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct ProcessRecord {
+    /// The minted id: the process's only identity, never reused (ADR 0107).
     pub id: ProcessId,
-    pub incarnation: ProcessIncarnation,
+    /// The key the process was started under, while it is retained.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_key: Option<StartKey>,
     /// Sequence of the newest event folded into this record. Registration
     /// starts at zero; every event append advances the value in the same
     /// transaction that persists the event and projected record.
     pub last_event_sequence: u64,
-    pub registration_fingerprint: String,
     pub input: Arc<ProcessInput>,
     /// Declared recovery contract. Required with no serde default: pre-column
     /// durable rows cannot deserialize and are handled by each store's schema
@@ -1530,17 +1544,13 @@ pub struct ProcessRecord {
     pub outcome: Option<ProcessOutcome>,
 }
 impl ProcessRecord {
-    /// Builds a `ProcessRecord` from registration data for store and durable-substrate implementors
-    /// while persisting and coordinating durable process execution.
-    pub fn from_registration(
-        registration: ProcessRegistration,
-        incarnation: ProcessIncarnation,
-    ) -> Self {
-        Self::from_registration_with_clock(registration, incarnation, &crate::SystemClock)
+    /// Builds the record of a process the registrar just minted `id` for.
+    pub fn from_registration(registration: ProcessRegistration, id: ProcessId) -> Self {
+        Self::from_registration_with_clock(registration, id, &crate::SystemClock)
     }
 
-    /// Builds a `ProcessRecord` from registration with clock data for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
+    /// Builds the record of a process the registrar just minted `id` for, at
+    /// the clock's time.
     ///
     /// Panics when the registration is invalid, so callers that accept
     /// host-supplied registrations validate them with
@@ -1548,34 +1558,24 @@ impl ProcessRecord {
     #[expect(clippy::expect_used, reason = "callers validate first")]
     pub fn from_registration_with_clock(
         registration: ProcessRegistration,
-        incarnation: ProcessIncarnation,
+        id: ProcessId,
         clock: &dyn crate::Clock,
     ) -> Self {
         let registration = prepare_process_registration(registration)
             .expect("process registration should be valid before record construction");
-        let registration_fingerprint =
-            super::validation::process_registration_fingerprint(&registration, &[]);
-        Self::from_prepared_registration(
-            registration,
-            registration_fingerprint,
-            incarnation,
-            clock.timestamp_ms(),
-        )
+        Self::from_prepared_registration(registration, id, clock.timestamp_ms())
     }
 
-    /// Builds a `ProcessRecord` from prepared registration data for store and durable-substrate
-    /// implementors while persisting and coordinating durable process execution.
+    /// Builds the record of a prepared registration under its minted `id`.
     pub fn from_prepared_registration(
         registration: ProcessRegistration,
-        registration_fingerprint: String,
-        incarnation: ProcessIncarnation,
+        id: ProcessId,
         now_ms: u64,
     ) -> Self {
         Self {
-            id: registration.id,
-            incarnation,
+            id,
+            start_key: registration.start_key,
             last_event_sequence: 0,
-            registration_fingerprint,
             input: registration.input,
             disposition: registration.disposition,
             lifecycle: registration.lifecycle,
@@ -1620,15 +1620,5 @@ impl ProcessRecord {
     /// coordinating durable process execution.
     pub fn originator_id(&self) -> String {
         self.provenance.originator.id()
-    }
-}
-
-impl lash_core_store::process_identity::ProcessRecordIdentity for ProcessRecord {
-    fn process_id(&self) -> &ProcessId {
-        &self.id
-    }
-
-    fn process_incarnation(&self) -> ProcessIncarnation {
-        self.incarnation
     }
 }

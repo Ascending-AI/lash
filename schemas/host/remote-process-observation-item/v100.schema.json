@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/remote-process-observation-item/v99",
+  "$id": "https://lash.dev/schemas/remote-process-observation-item/v100",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "AttachmentMaterializationReason": {
@@ -380,8 +380,8 @@
       ]
     },
     "ProcessCursor": {
-      "description": "Opaque process cursor: `lashpc2:<epoch>:<process-reference>:<position>:<sequence>`.",
-      "pattern": "^lashpc2:[^:]+:r[0-9]+\\.[0-9a-f]+:[0-9]+:[0-9]+$",
+      "description": "Opaque process cursor: `lashpc3:<epoch>:<process-reference>:<position>:<sequence>`.",
+      "pattern": "^lashpc3:[^:]+:p_[0-9a-f]{32}:[0-9]+:[0-9]+$",
       "type": "string"
     },
     "RemoteProcessDurableCompleteness": {
@@ -629,34 +629,6 @@
         },
         {
           "additionalProperties": false,
-          "description": "The process id now names a later lifetime.",
-          "properties": {
-            "current_incarnation": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "reason": {
-              "enum": [
-                "retired"
-              ],
-              "type": "string"
-            },
-            "requested_incarnation": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "current_incarnation",
-            "reason",
-            "requested_incarnation"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
           "description": "No retained process or tombstone has this id.",
           "properties": {
             "reason": {
@@ -721,7 +693,6 @@
             "subscriber_lagged",
             "publisher_replaced",
             "routing_unavailable",
-            "process_id_reused",
             "cross_process",
             "invalid_cursor",
             "publisher_joined_mid_run",
@@ -1773,11 +1744,6 @@
             "null"
           ]
         },
-        "incarnation": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
         "module_ref": {
           "type": [
             "string",
@@ -1792,7 +1758,6 @@
         }
       },
       "required": [
-        "incarnation",
         "process_id",
         "scope"
       ],
@@ -2234,11 +2199,6 @@
             "null"
           ]
         },
-        "incarnation": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
         "module_ref": {
           "type": "string"
         },
@@ -2363,7 +2323,7 @@
       "type": "string"
     },
     "TraceLashlangEventIdentity": {
-      "description": "Canonical identity of one fold input.\n\nNode transitions use `(node_id, node_kind, occurrence, attempt, incarnation)` plus the transition kind. The transition kind lets a start and its terminal fact merge monotonically while still making a second, different start or terminal a typed conflict.",
+      "description": "Canonical identity of one fold input.\n\nNode transitions use `(node_id, node_kind, occurrence, attempt)` plus the transition kind. The transition kind lets a start and its terminal fact merge monotonically while still making a second, different start or terminal a typed conflict.",
       "properties": {
         "attempt": {
           "format": "uint32",
@@ -2375,11 +2335,6 @@
             "string",
             "null"
           ]
-        },
-        "incarnation": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
         },
         "node_id": {
           "type": [
@@ -2504,7 +2459,7 @@
         },
         "schema_version": {
           "enum": [
-            35
+            36
           ],
           "format": "uint32",
           "minimum": 0.0,
@@ -2573,11 +2528,6 @@
             "null"
           ]
         },
-        "child_incarnation": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
         "child_module_ref": {
           "type": [
             "string",
@@ -2595,7 +2545,6 @@
         }
       },
       "required": [
-        "child_incarnation",
         "child_process_id",
         "parent_graph_key",
         "parent_node_id"
@@ -4498,7 +4447,7 @@
         },
         "schema_version": {
           "enum": [
-            35
+            36
           ],
           "format": "uint32",
           "minimum": 0.0,
@@ -5130,11 +5079,6 @@
         "cursor": {
           "$ref": "#/definitions/ProcessCursor"
         },
-        "incarnation": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
         "process_id": {
           "type": "string"
         },
@@ -5150,7 +5094,6 @@
       },
       "required": [
         "cursor",
-        "incarnation",
         "process_id",
         "snapshot",
         "type"
@@ -5162,11 +5105,6 @@
       "properties": {
         "cursor": {
           "$ref": "#/definitions/ProcessCursor"
-        },
-        "incarnation": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
         },
         "process_id": {
           "type": "string"
@@ -5183,7 +5121,6 @@
       },
       "required": [
         "cursor",
-        "incarnation",
         "process_id",
         "record",
         "type"
@@ -5199,11 +5136,6 @@
         },
         "event_type": {
           "type": "string"
-        },
-        "incarnation": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
         },
         "process_id": {
           "type": "string"
@@ -5223,7 +5155,6 @@
       "required": [
         "cursor",
         "event_type",
-        "incarnation",
         "process_id",
         "sequence",
         "type"
@@ -5235,11 +5166,6 @@
       "properties": {
         "cursor": {
           "$ref": "#/definitions/ProcessCursor"
-        },
-        "incarnation": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
         },
         "process_id": {
           "type": "string"
@@ -5269,7 +5195,6 @@
       },
       "required": [
         "cursor",
-        "incarnation",
         "process_id",
         "reason",
         "snapshot",
@@ -5279,6 +5204,6 @@
     }
   ],
   "title": "RemoteProcessObservationItem",
-  "x-lash-schema-version": 99,
+  "x-lash-schema-version": 100,
   "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
 }

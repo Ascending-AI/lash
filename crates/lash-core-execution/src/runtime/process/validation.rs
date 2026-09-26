@@ -1,6 +1,6 @@
 use crate::ProcessId;
 use lash_sansio::{CancelOrigin, CancelRequest};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 
 use crate::SessionId;
 use crate::plugin::PluginError;
@@ -10,13 +10,10 @@ use super::events::{
     ProcessEventSemanticsSpec, ProcessTerminalSemantics, ProcessWakeDelivery,
     default_process_event_types, is_runtime_lifecycle_event_type, runtime_lifecycle_event_type,
 };
-use super::identity_projection::{
-    project_process_event_type, project_process_payload_leaf, project_process_schema_leaf,
-};
 use super::materialization::materialize_process_event_semantics;
 use super::model::{
-    AbandonRequest, ProcessExternalRef, ProcessRecord, ProcessRef, ProcessRegistration,
-    ProcessStarted, ProcessStatus, RecoveryContract, WaitState,
+    AbandonRequest, ProcessExternalRef, ProcessRecord, ProcessRegistration, ProcessStarted,
+    ProcessStatus, RecoveryContract, WaitState,
 };
 
 pub fn validate_generic_process_event_append(
@@ -166,10 +163,7 @@ pub fn prepare_process_start(
     {
         return Ok(ProcessStartPlan::AlreadyApplied);
     }
-    authority.validate_resume_predecessor(
-        &ProcessId::from(record.id.as_str()),
-        record.first_started.as_deref(),
-    )?;
+    authority.validate_resume_predecessor(&record.id, record.first_started.as_deref())?;
 
     let expected_attempt = match record.first_started.as_deref() {
         None => 1,
@@ -268,10 +262,7 @@ pub fn prepare_process_transition(
             {
                 return Ok(ProcessTransitionPlan::Unchanged);
             }
-            let mut append = ProcessEventAppendRequest::cancel_requested(
-                &ProcessRef::from_record(record),
-                &request,
-            );
+            let mut append = ProcessEventAppendRequest::cancel_requested(&record.id, &request);
             if record.is_terminal() || record.cancel_request.is_some() {
                 route_transition_refusal_to_fold(&mut append)?;
             }
@@ -422,12 +413,6 @@ pub fn apply_process_event_projection(
             event.process_id, record.id
         )));
     }
-    if event.process_incarnation != record.incarnation {
-        return Err(PluginError::Session(format!(
-            "process event incarnation {} cannot project record incarnation {} for `{}`",
-            event.process_incarnation, record.incarnation, record.id
-        )));
-    }
 
     let kind = ProcessEventKind::from_event_type(&event.event_type);
     match kind {
@@ -534,7 +519,7 @@ pub fn apply_process_event_projection(
                 Some(existing) if existing.same_cancellation_as(&request) => {}
                 Some(existing) => {
                     return Err(PluginError::ProcessCancelConflict {
-                        process_ref: ProcessRef::from_record(record),
+                        process_id: record.id.clone(),
                         existing: Box::new(existing.clone()),
                         requested: Box::new(request),
                     });
@@ -779,7 +764,7 @@ pub fn prepare_process_event_append(
     occurred_at_ms: u64,
     wake_session_id: Option<&SessionId>,
 ) -> Result<ProcessEventAppendPlan, PluginError> {
-    let process_id = record.id.as_str();
+    let process_id = &record.id;
     let wake_suppressed = request.wake_suppressed;
     if ProcessEventKind::from_event_type(&request.event_type) == ProcessEventKind::UnknownRuntime {
         return Err(PluginError::ReservedProcessEvent {
@@ -823,7 +808,7 @@ pub fn prepare_process_event_append(
                 None
             };
             let wake_delivery = prepare_wake_delivery(
-                &ProcessId::from(process_id),
+                process_id,
                 record,
                 existing.sequence,
                 existing.event_type.clone(),
@@ -847,7 +832,7 @@ pub fn prepare_process_event_append(
         && super::events::process_signal_name_from_event_type(&request.event_type).is_some()
     {
         return Err(PluginError::ProcessAlreadyTerminal {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             status: record.status,
         });
     }
@@ -866,7 +851,7 @@ pub fn prepare_process_event_append(
                 request.event_type
             ))
         })?;
-    require_event_replay(&ProcessId::from(process_id), &request, &declared.semantics)?;
+    require_event_replay(process_id, &request, &declared.semantics)?;
     declared
         .payload_schema
         .validate(&request.payload)
@@ -874,7 +859,7 @@ pub fn prepare_process_event_append(
             PluginError::Session(format!("invalid `{}` payload: {err}", request.event_type))
         })?;
     let mut semantics = materialize_process_event_semantics(
-        &ProcessId::from(process_id),
+        process_id,
         sequence,
         &request.payload,
         &declared.semantics,
@@ -906,18 +891,17 @@ pub fn prepare_process_event_append(
     }
     if semantics.terminal.is_some() && record.is_terminal() {
         return Err(PluginError::ProcessAlreadyTerminal {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             status: record.status,
         });
     }
     let event = ProcessEvent {
-        process_id: ProcessId::from(process_id.to_string()),
-        process_incarnation: record.incarnation,
+        process_id: process_id.clone(),
         sequence,
         event_type: request.event_type,
         payload: request.payload,
         invocation: crate::runtime::causal::process_event_invocation(
-            &ProcessId::from(process_id),
+            process_id,
             sequence,
             declared.name.as_str(),
             request.replay,
@@ -928,7 +912,7 @@ pub fn prepare_process_event_append(
     let mut projected_record = record.clone();
     apply_process_event_projection(&mut projected_record, &event)?;
     let wake_delivery = prepare_wake_delivery(
-        &ProcessId::from(process_id),
+        process_id,
         record,
         event.sequence,
         event.event_type.clone(),
@@ -984,8 +968,7 @@ fn prepare_wake_delivery(
     };
     process_wake_delivery(ProcessWakeDeliveryRequest {
         target_session_id: SessionId::from(target_session_id.to_string()),
-        process_id: ProcessId::from(process_id.to_string()),
-        process_incarnation: record.incarnation,
+        process_id: process_id.clone(),
         sequence,
         event_type,
         event_invocation,
@@ -1022,309 +1005,46 @@ pub fn prepare_process_registration(
     Ok(registration)
 }
 
-// Bumped to 4 (FIG-1383): the definition preimage's process-status tag registry
-// gained `caller_departed`. The versioned-surface guard fails closed on any
-// preimage edit, so the family version moves with it even though tag 7 is
-// additive and every pre-existing preimage encodes byte-identically.
-// Bumped to 5 (FIG-2828): effect causes now encode their admitted execution
-// scope and replay key instead of descriptive session/effect fields.
-// Bumped to 6 (FIG-2960): required lifecycle policy joins the resolved attempt bound.
-// Bumped to 7 (FIG-2992): process identity leaves the preimage entirely. Kind,
-// label and definition reference are all derivations — of the recorded input and
-// of the engine registry's admission of it — so hashing them added no fact the
-// input did not already fix, while making a display label a registration
-// conflict. The v6 preimage of an identity-bearing registration is frozen as a
-// witness in `validation_tests.rs`.
-// Bumped to 8 (FIG-3418): `ParentScope` becomes `Owned(EffectOpener) | Host` and
-// the preimage gains tag 4 for the queue-drain arm. Turn, process and host
-// preimages encode byte-identically to v7, so an identical replay of an
-// existing registration keeps its fingerprint across the cutover.
-const PROCESS_REGISTRATION_FAMILY_VERSION: u8 = 8;
-
-/// Permanent tag registry for the process-registration definition fingerprint.
+/// Decides whether a start that found `retained` under its key may be
+/// returned it (ADR 0107).
 ///
-/// Input kinds: 1 tool call, 2 engine, 3 session turn, 4 external. Recovery:
-/// 1 rerunnable, 2 owner bound, 3 externally owned. Originators: 1 host,
-/// 2 session. Causal refs: 1 turn, 2 effect, 3 tool call, 4 process,
-/// 5 process event, 6 trigger occurrence, 7 session node. Arbitrary JSON and
-/// schemas are each one canonical opaque bytes leaf. Tool output contracts: 1
-/// static, 2 from-input-schema. Value selectors: 1
-/// payload, 2 pointer, 3 const, 4 template, 5 present. Process statuses: 1
-/// running, 2 waiting, 3 completed, 4 failed, 5 cancelled, 6 abandoned,
-/// 7 caller departed. Parent scopes: 1 turn, 2 process, 3 host, 4 queue drain.
-/// Parent-end actions: 1 abandon, 2 cancel. Retired tags remain burned.
-fn process_registration_fingerprint_preimage(
-    registration: &ProcessRegistration,
-    observers: &[SessionId],
-) -> Vec<u8> {
-    let family_version = PROCESS_REGISTRATION_FAMILY_VERSION;
-    let ProcessRegistration {
-        id: _,
-        input,
-        disposition,
-        lifecycle,
-        max_attempts,
-        identity: _,
-        event_types,
-        provenance,
-        env_ref,
-        wake_session_id,
-    } = registration;
-    let mut fingerprint = crate::stable_identity::IdentityEncoder::new(
-        "lash.process-registration-definition",
-        family_version,
-    );
-
-    match input.as_ref() {
-        super::model::ProcessInput::ToolCall { call } => {
-            let crate::PreparedToolCall {
-                call_id,
-                tool_id,
-                tool_name,
-                args,
-                replay,
-                prepared_payload,
-            } = call;
-            fingerprint.tag(1);
-            fingerprint.string(call_id);
-            fingerprint.string(tool_id.as_str());
-            fingerprint.string(tool_name);
-            project_process_payload_leaf(&mut fingerprint, args);
-            fingerprint.optional(replay.as_ref(), |identity, replay| {
-                let lash_sansio::llm::types::ProviderReplayMeta {
-                    item_id,
-                    opaque,
-                    origin,
-                } = replay;
-                identity.optional(item_id.as_deref(), |identity, value| identity.string(value));
-                identity.optional(opaque.as_deref(), |identity, value| identity.string(value));
-                identity.optional(origin.as_ref(), crate::stable_identity::provider_route);
-            });
-            project_process_payload_leaf(&mut fingerprint, prepared_payload);
-        }
-        super::model::ProcessInput::Engine { kind, payload } => {
-            fingerprint.tag(2);
-            fingerprint.string(kind);
-            project_process_payload_leaf(&mut fingerprint, payload);
-        }
-        super::model::ProcessInput::SessionTurn {
-            definition_key,
-            create_request: _,
-            turn_input: _,
-            output_contract,
-        } => {
-            fingerprint.tag(3);
-            fingerprint.string(definition_key);
-            project_registration_output_contract(&mut fingerprint, output_contract);
-        }
-        super::model::ProcessInput::External { metadata } => {
-            fingerprint.tag(4);
-            project_process_payload_leaf(&mut fingerprint, metadata);
-        }
-    }
-    fingerprint.tag(match disposition {
-        super::model::RecoveryContract::Rerunnable => 1,
-        super::model::RecoveryContract::OwnerBound => 2,
-        super::model::RecoveryContract::ExternallyOwned => 3,
-    });
-    fingerprint.optional(*max_attempts, crate::stable_identity::IdentityEncoder::u32);
-    match &lifecycle.parent {
-        super::model::ParentScope::Owned(opener) => match opener {
-            crate::EffectOpener::Turn {
-                session_id,
-                turn_id,
-            } => {
-                fingerprint.tag(1);
-                fingerprint.string(session_id.as_str());
-                fingerprint.string(turn_id.as_str());
-            }
-            crate::EffectOpener::Process { process_ref } => {
-                fingerprint.tag(2);
-                fingerprint.string(process_ref.process_id.as_str());
-                fingerprint.u64(process_ref.incarnation.registration_sequence());
-            }
-            crate::EffectOpener::QueueDrain {
-                session_id,
-                drain_id,
-            } => {
-                fingerprint.tag(4);
-                fingerprint.string(session_id.as_str());
-                fingerprint.string(drain_id.as_str());
-            }
-        },
-        super::model::ParentScope::Host => fingerprint.tag(3),
-    }
-    fingerprint.tag(match lifecycle.on_parent_end {
-        super::model::OnParentEnd::Abandon => 1,
-        super::model::OnParentEnd::Cancel => 2,
-    });
-
-    // Identity is deliberately absent from the preimage: it is derived from the
-    // recorded input and the engine registry's admission of it, both of which
-    // the preimage already fixes. See the family version note above.
-    let super::model::ProcessProvenance {
-        originator,
-        caused_by,
-    } = provenance;
-    match originator {
-        super::model::ProcessOriginator::Host { scope } => {
-            fingerprint.tag(1);
-            fingerprint.optional(scope.as_deref(), |identity, scope| identity.string(scope));
-        }
-        super::model::ProcessOriginator::Session {
-            session_id,
-            agent_frame_id,
-        } => {
-            fingerprint.tag(2);
-            fingerprint.string(session_id);
-            if let Some(agent_frame_id) = agent_frame_id {
-                // Preserve the v2 preimage for historical unframed session
-                // originators while making a real elevation change conflict.
-                fingerprint.tag(3);
-                fingerprint.string(agent_frame_id);
-            }
-        }
-    }
-    fingerprint.optional(caused_by.as_ref(), project_registration_causal_ref);
-    fingerprint.optional(env_ref.as_ref(), |identity, env_ref| {
-        identity.string(env_ref.as_str());
-    });
-    fingerprint.optional(wake_session_id.as_deref(), |identity, session_id| {
-        identity.string(session_id);
-    });
-
-    // A built-in declaration is excluded only when it is byte-for-byte the
-    // default. A caller override of a core name changes executable semantics
-    // and must therefore conflict. Source order is not definition-bearing.
-    let core_event_types = default_process_event_types()
-        .into_iter()
-        .map(|event_type| (event_type.name.clone(), event_type))
-        .collect::<HashMap<_, _>>();
-    let mut application_event_types = event_types
-        .iter()
-        .filter(|event_type| core_event_types.get(&event_type.name) != Some(event_type))
-        .collect::<Vec<_>>();
-    application_event_types.sort_by(|left, right| left.name.cmp(&right.name));
-    fingerprint.sequence(
-        application_event_types.iter().copied(),
-        |identity, event_type| {
-            project_process_event_type(identity, event_type);
-        },
-    );
-
-    let mut observers = observers.to_vec();
-    observers.sort();
-    observers.dedup();
-    fingerprint.sequence(observers.iter(), |identity, observer| {
-        identity.string(observer);
-    });
-    fingerprint.finish()
-}
-
-fn project_registration_output_contract(
-    identity: &mut crate::stable_identity::IdentityEncoder,
-    contract: &crate::ToolOutputContract,
-) {
-    match contract {
-        crate::ToolOutputContract::Static => identity.tag(1),
-        crate::ToolOutputContract::FromInputSchema {
-            input_field,
-            default_schema,
-        } => {
-            identity.tag(2);
-            identity.string(input_field);
-            identity.optional(default_schema.as_ref(), project_process_schema_leaf);
-        }
-    }
-}
-
-fn project_registration_causal_ref(
-    identity: &mut crate::stable_identity::IdentityEncoder,
-    caused_by: &crate::CausalRef,
-) {
-    match caused_by {
-        crate::CausalRef::Turn {
-            session_id,
-            turn_id,
-        } => {
-            identity.tag(1);
-            identity.string(session_id);
-            identity.string(turn_id);
-        }
-        crate::CausalRef::Effect { address } => {
-            identity.tag(2);
-            crate::runtime::causal::project_effect_address(identity, address);
-        }
-        crate::CausalRef::ToolCall {
-            session_id,
-            call_id,
-        } => {
-            identity.tag(3);
-            identity.string(session_id);
-            identity.string(call_id);
-        }
-        crate::CausalRef::Process { process_id } => {
-            identity.tag(4);
-            identity.string(process_id);
-        }
-        crate::CausalRef::ProcessEvent {
-            process_id,
-            sequence,
-        } => {
-            identity.tag(5);
-            identity.string(process_id);
-            identity.u64(*sequence);
-        }
-        crate::CausalRef::TriggerOccurrence {
-            occurrence_id,
-            subscription_id,
-            subscription_incarnation,
-            subscription_revision,
-        } => {
-            identity.tag(6);
-            identity.string(occurrence_id);
-            identity.optional(subscription_id.as_deref(), |identity, value| {
-                identity.string(value)
-            });
-            identity.optional(subscription_incarnation.as_deref(), |identity, value| {
-                identity.string(value);
-            });
-            identity.optional(
-                *subscription_revision,
-                crate::stable_identity::IdentityEncoder::u64,
-            );
-        }
-        crate::CausalRef::SessionNode {
-            session_id,
-            node_id,
-        } => {
-            identity.tag(7);
-            identity.string(session_id);
-            identity.string(node_id);
-        }
-    }
-}
-
-/// Fingerprint the normalized registration definition plus its atomic initial
-/// observer set. The process id remains the independent lookup address; this
-/// separately versioned value is compared only after that lookup succeeds.
-/// Version 2 is a reject-and-recreate cutover coordinated by the Lash store
-/// schema versions. External process registries must apply the same lifecycle
-/// policy before accepting v2 fingerprints.
+/// A key lash derives from an admitted operation is trusted: the retained
+/// process is returned whatever the start submitted. A host's key (one it
+/// supplied, or its keyless start's derived key) is the host's claim that the
+/// two starts are one, so a start under it with different content is a
+/// [`durable_identity_conflict`](crate::durable_identity_conflict) rather than
+/// a silent return of another start's process.
 ///
-/// Initial observers participate in start idempotency: replaying a process id
-/// with a different visibility set is a conflicting registration.
-pub fn process_registration_fingerprint(
+/// # Errors
+///
+/// A registration that does not validate, or the conflict.
+pub fn check_retained_start(
     registration: &ProcessRegistration,
-    observers: &[SessionId],
-) -> String {
-    let family_version = PROCESS_REGISTRATION_FAMILY_VERSION;
-    let preimage = process_registration_fingerprint_preimage(registration, observers);
-    crate::stable_identity::rendered_hash(
-        "process-registration-definition",
-        family_version,
-        &preimage,
-    )
+    retained: &ProcessRecord,
+) -> Result<(), PluginError> {
+    let Some(start_key) = registration.start_key.as_ref() else {
+        return Ok(());
+    };
+    if !start_key.fences_content() {
+        return Ok(());
+    }
+    let submitted = prepare_process_registration(registration.clone())?;
+    let same = submitted.input == retained.input
+        && submitted.disposition == retained.disposition
+        && submitted.lifecycle == retained.lifecycle
+        && submitted.max_attempts == retained.max_attempts
+        && submitted.identity == retained.identity
+        && submitted.event_types == retained.event_types
+        && submitted.provenance == retained.provenance
+        && submitted.env_ref == retained.env_ref;
+    if same {
+        Ok(())
+    } else {
+        Err(crate::durable_identity_conflict(format!(
+            "process start key `{start_key}` is bound to process `{}`, which was started with different content",
+            retained.id
+        )))
+    }
 }
 
 pub fn require_event_replay(
@@ -1389,7 +1109,6 @@ pub(super) fn ensure_core_event_types(registration: &mut ProcessRegistration) {
 pub enum ProcessRegistrationRefusal {
     HostParentCancels,
     TurnParentSessionMismatch,
-    InvalidProcessKey,
     ZeroMaxAttempts,
     ToolCallWithoutCallId,
     ToolCallWithoutToolName,
@@ -1408,7 +1127,6 @@ impl ProcessRegistrationRefusal {
     pub const ALL: &'static [Self] = &[
         Self::HostParentCancels,
         Self::TurnParentSessionMismatch,
-        Self::InvalidProcessKey,
         Self::ZeroMaxAttempts,
         Self::ToolCallWithoutCallId,
         Self::ToolCallWithoutToolName,
@@ -1428,6 +1146,12 @@ pub(crate) type ProcessRegistrationRefused = (ProcessRegistrationRefusal, Plugin
 
 fn refuse(rule: ProcessRegistrationRefusal, message: String) -> ProcessRegistrationRefused {
     (rule, PluginError::Session(message))
+}
+
+/// How a refusal names the start it refused: a registration carries no process
+/// id until the registrar mints one, so it is named by its key when it has one.
+fn registration_name(registration: &ProcessRegistration) -> String {
+    registration.refusal_name()
 }
 
 /// Validates a registration and names the rule that refused it.
@@ -1464,18 +1188,12 @@ pub(crate) fn classify_process_registration(
         }
         _ => {}
     }
-    if let Some(reason) = crate::store::process_key::invalid_process_key_reason(&registration.id) {
-        return Err(refuse(
-            ProcessRegistrationRefusal::InvalidProcessKey,
-            reason.into(),
-        ));
-    }
     if registration.max_attempts == Some(0) {
         return Err(refuse(
             ProcessRegistrationRefusal::ZeroMaxAttempts,
             format!(
                 "process `{}` max_attempts must be greater than zero",
-                registration.id
+                registration_name(registration)
             ),
         ));
     }
@@ -1486,7 +1204,7 @@ pub(crate) fn classify_process_registration(
                     ProcessRegistrationRefusal::ToolCallWithoutCallId,
                     format!(
                         "process `{}` tool call must carry a call id",
-                        registration.id
+                        registration_name(registration)
                     ),
                 ));
             }
@@ -1495,7 +1213,7 @@ pub(crate) fn classify_process_registration(
                     ProcessRegistrationRefusal::ToolCallWithoutToolName,
                     format!(
                         "process `{}` tool call must carry a tool name",
-                        registration.id
+                        registration_name(registration)
                     ),
                 ));
             }
@@ -1504,7 +1222,7 @@ pub(crate) fn classify_process_registration(
                     ProcessRegistrationRefusal::ExecutionEnvMissing,
                     format!(
                         "process `{}` requires a captured execution env",
-                        registration.id
+                        registration_name(registration)
                     ),
                 ));
             }
@@ -1515,7 +1233,7 @@ pub(crate) fn classify_process_registration(
                     ProcessRegistrationRefusal::ExecutionEnvMissing,
                     format!(
                         "process `{}` requires a captured execution env",
-                        registration.id
+                        registration_name(registration)
                     ),
                 ));
             }
@@ -1526,7 +1244,7 @@ pub(crate) fn classify_process_registration(
                     ProcessRegistrationRefusal::ExecutionEnvNotAllowed,
                     format!(
                         "process `{}` must not capture an execution env for this input kind",
-                        registration.id
+                        registration_name(registration)
                     ),
                 ));
             }
@@ -1537,7 +1255,7 @@ pub(crate) fn classify_process_registration(
                     ProcessRegistrationRefusal::EmptySessionTurnDefinitionKey,
                     format!(
                         "process `{}` session-turn definition_key must not be empty",
-                        registration.id
+                        registration_name(registration)
                     ),
                 ));
             }
@@ -1546,7 +1264,7 @@ pub(crate) fn classify_process_registration(
                     ProcessRegistrationRefusal::ExecutionEnvNotAllowed,
                     format!(
                         "process `{}` must not capture an execution env for this input kind",
-                        registration.id
+                        registration_name(registration)
                     ),
                 ));
             }
@@ -1557,7 +1275,10 @@ pub(crate) fn classify_process_registration(
         if event_type.name.trim().is_empty() {
             return Err(refuse(
                 ProcessRegistrationRefusal::EmptyEventTypeName,
-                format!("process `{}` declares an empty event type", registration.id),
+                format!(
+                    "process `{}` declares an empty event type",
+                    registration_name(registration)
+                ),
             ));
         }
         if !names.insert(event_type.name.as_str()) {
@@ -1565,7 +1286,8 @@ pub(crate) fn classify_process_registration(
                 ProcessRegistrationRefusal::DuplicateEventType,
                 format!(
                     "process `{}` declares duplicate event type `{}`",
-                    registration.id, event_type.name
+                    registration_name(registration),
+                    event_type.name
                 ),
             ));
         }
@@ -1576,7 +1298,8 @@ pub(crate) fn classify_process_registration(
                 ProcessRegistrationRefusal::ReservedRuntimeEventType,
                 format!(
                     "process `{}` declares reserved runtime lifecycle event type `{}`",
-                    registration.id, event_type.name
+                    registration_name(registration),
+                    event_type.name
                 ),
             ));
         }
@@ -1587,7 +1310,7 @@ pub(crate) fn classify_process_registration(
                     format!(
                         "terminal event `{}` for process `{}` must declare a terminal status, got `{}`",
                         event_type.name,
-                        registration.id,
+                        registration_name(registration),
                         terminal.status.label()
                     ),
                 ));
@@ -1597,7 +1320,8 @@ pub(crate) fn classify_process_registration(
                     ProcessRegistrationRefusal::TerminalEventWithoutAwaitOutput,
                     format!(
                         "terminal event `{}` for process `{}` must declare await output",
-                        event_type.name, registration.id
+                        event_type.name,
+                        registration_name(registration)
                     ),
                 ));
             }

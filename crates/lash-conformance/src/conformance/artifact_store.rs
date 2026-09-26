@@ -116,10 +116,7 @@ pub async fn process_env_transfer_and_fence(store: Arc<dyn crate::ProcessExecuti
     let env_ref = spec.stable_ref().expect("stable env ref");
     let bytes = spec.to_store_bytes().expect("encode env spec");
     let staged = execution_owner("env-transfer");
-    let process = crate::ArtifactOwner::process(crate::ProcessRef::new(
-        "env-process",
-        crate::ProcessIncarnation::from_registration_sequence(1),
-    ));
+    let process = crate::ArtifactOwner::process(crate::ProcessId::fixture("env-process"));
     store
         .publish_process_execution_env(&staged, &env_ref, &bytes)
         .await

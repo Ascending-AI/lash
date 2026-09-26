@@ -24,38 +24,30 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
     .await;
 
     let process_id = "e2e-await-sink-prune";
-    core.processes()
+    let process_id = core
+        .processes()
         .start(
-            process.start_request(&ProcessId::from(process_id)),
+            process.start_request(process_id),
             runtime_operation_scope(&core, "e2e-start"),
         )
-        .await?;
-    wait_for_waiting_signal(&core, &ProcessId::from(process_id), "ready").await;
+        .await?
+        .id;
+    wait_for_waiting_signal(&core, &process_id, "ready").await;
 
     // Hold the terminal await while the process is still running; it must resolve
     // only once the signal drives the process to finish.
     let await_core = core.clone();
-    let await_id = process_id.to_string();
+    let await_id = process_id.clone();
     let started = std::time::Instant::now();
-    let waiter = tokio::spawn(async move {
-        await_core
-            .processes()
-            .await_output(&ProcessId::from(await_id))
-            .await
-    });
+    let waiter = tokio::spawn(async move { await_core.processes().await_output(&await_id).await });
 
     let payload = serde_json::json!({ "ok": true, "answer": 42 });
     core.processes()
         .signal(
-            &ProcessId::from(process_id),
+            &process_id,
             "ready",
             "e2e-signal-1",
-            signal_request(
-                &ProcessId::from(process_id),
-                "ready",
-                "e2e-signal-1",
-                payload.clone(),
-            ),
+            signal_request(&process_id, "ready", "e2e-signal-1", payload.clone()),
             runtime_operation_scope(&core, "e2e-signal"),
         )
         .await?;
@@ -115,12 +107,7 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
         "the sink observed the terminal append; got {collected:?}"
     );
 
-    wait_for_terminal(
-        &core,
-        &ProcessId::from(process_id),
-        lash_core::ProcessStatus::Completed,
-    )
-    .await;
+    wait_for_terminal(&core, &process_id, lash_core::ProcessStatus::Completed).await;
 
     // Retention: prune the terminal registry rows. The registry forgets the
     // process, but the host's projected copies (the sink log) remain intact.
@@ -140,7 +127,7 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
     );
     assert!(
         matches!(
-            registry.get_process(&ProcessId::from(process_id)).await,
+            registry.get_process(&process_id).await,
             Err(lash_core::PluginError::ProcessNoLongerRetained { .. })
         ),
         "the pruned process returns the typed retained-history miss"

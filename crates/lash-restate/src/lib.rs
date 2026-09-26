@@ -139,8 +139,8 @@ pub use process::{
     RESTATE_PROCESS_JOURNAL_VERSION, RestateProcessAwaitRequest, RestateProcessCancelRequest,
     RestateProcessCancelSignal, RestateProcessCompleteRequest, RestateProcessDeployment,
     RestateProcessIngressRunner, RestateProcessServing, RestateProcessWorkerSlot,
-    RestateProcessWorkflowInput, RestateProcessWorkflowOutput, SegmentStarted,
-    reconcile_process_parks, resume_parked_process,
+    RestateProcessWorkflowInput, RestateProcessWorkflowOutput, RestateProcessWorkflowPayload,
+    SegmentStarted, reconcile_process_parks, resume_parked_process,
 };
 pub use process_attach::RestateProcessAttachRequest;
 pub use session_administration::{RestateSessionAdministration, RestateSessionDeleteExecution};

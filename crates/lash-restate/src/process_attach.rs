@@ -20,7 +20,7 @@
 //! same invocation to the same workflow key, and Restate attaches to the run
 //! already in flight instead of starting a second waiter.
 
-use lash_core::{AwaitEventKey, ProcessRef, Resolution};
+use lash_core::{AwaitEventKey, ProcessId, Resolution};
 use restate_sdk::context::{ContextClient, WorkflowContext};
 use restate_sdk::errors::HandlerResult;
 use restate_sdk::serde::Json;
@@ -33,10 +33,14 @@ use crate::durable_wait::{
 use crate::process::{LashProcessWorkflowClient, RestateProcessAwaitRequest};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(
+    into = "crate::process::StampedAttachRequest",
+    try_from = "serde_json::Value"
+)]
 pub struct RestateProcessAttachRequest {
-    /// The exact incarnation whose terminal resolves the wait. A later
-    /// incarnation of the same id is a different process and never resolves it.
-    pub process_ref: ProcessRef,
+    /// The process whose terminal resolves the wait. A minted id is never
+    /// reused, so no other process can resolve it (ADR 0107).
+    pub process_id: ProcessId,
     /// The wait to resolve once that terminal lands.
     pub key: AwaitEventKey,
 }
@@ -67,11 +71,11 @@ impl LashProcessAttach for LashProcessAttachImpl {
         ctx: WorkflowContext<'_>,
         Json(request): Json<RestateProcessAttachRequest>,
     ) -> HandlerResult<Json<()>> {
-        let RestateProcessAttachRequest { process_ref, key } = request;
+        let RestateProcessAttachRequest { process_id, key } = request;
         let output = ctx
-            .workflow_client::<LashProcessWorkflowClient>(process_ref.process_id.to_string())
+            .workflow_client::<LashProcessWorkflowClient>(process_id.to_string())
             .await_terminal(Json(RestateProcessAwaitRequest {
-                process_id: process_ref.process_id.clone(),
+                process_id: process_id.clone(),
             }))
             .call()
             .await;

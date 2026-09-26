@@ -23,8 +23,12 @@ pub(super) async fn filter_unregistered_process_ids(
     )
     .fetch_all(pool)
     .await
-    .map(|ids: Vec<String>| ids.into_iter().map(ProcessId::from).collect())
     .map_err(plugin_sqlx_error)
+    .and_then(|ids: Vec<String>| {
+        ids.iter()
+            .map(|id| crate::stored_process_id(id))
+            .collect::<Result<Vec<_>, _>>()
+    })
 }
 
 pub(super) async fn filter_tombstoned_process_ids(
@@ -48,6 +52,10 @@ pub(super) async fn filter_tombstoned_process_ids(
     )
     .fetch_all(pool)
     .await
-    .map(|ids: Vec<String>| ids.into_iter().map(ProcessId::from).collect())
     .map_err(plugin_sqlx_error)
+    .and_then(|ids: Vec<String>| {
+        ids.iter()
+            .map(|id| crate::stored_process_id(id))
+            .collect::<Result<Vec<_>, _>>()
+    })
 }

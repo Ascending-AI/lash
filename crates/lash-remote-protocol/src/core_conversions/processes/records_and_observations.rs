@@ -6,7 +6,6 @@ impl TryFrom<lash_core::ProcessEvent> for RemoteProcessEvent {
     fn try_from(value: lash_core::ProcessEvent) -> Result<Self, Self::Error> {
         let lash_core::ProcessEvent {
             process_id,
-            process_incarnation,
             sequence,
             event_type,
             payload,
@@ -16,7 +15,6 @@ impl TryFrom<lash_core::ProcessEvent> for RemoteProcessEvent {
         } = value;
         Ok(Self {
             process_id,
-            process_incarnation: process_incarnation.registration_sequence(),
             sequence,
             event_type,
             payload,
@@ -34,7 +32,6 @@ impl TryFrom<RemoteProcessEvent> for lash_core::ProcessEvent {
         value.validate("RemoteProcessEvent")?;
         let RemoteProcessEvent {
             process_id,
-            process_incarnation,
             sequence,
             event_type,
             payload,
@@ -48,9 +45,6 @@ impl TryFrom<RemoteProcessEvent> for lash_core::ProcessEvent {
         })?;
         Ok(Self {
             process_id,
-            process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(
-                process_incarnation,
-            ),
             sequence,
             event_type,
             payload,
@@ -100,7 +94,6 @@ impl From<lash_core::ProcessHandleView> for RemoteProcessHandleView {
         let lash_core::ProcessHandleView {
             id,
             process_id,
-            incarnation,
             kind,
             label,
             definition,
@@ -111,7 +104,6 @@ impl From<lash_core::ProcessHandleView> for RemoteProcessHandleView {
             handle_kind: (),
             id: id.to_string(),
             process_id,
-            incarnation: incarnation.registration_sequence(),
             kind: kind.into(),
             label,
             definition: definition.map(Into::into),
@@ -128,7 +120,6 @@ impl TryFrom<RemoteProcessHandleView> for lash_core::ProcessHandleView {
         let RemoteProcessHandleView {
             id,
             process_id,
-            incarnation,
             kind,
             label,
             definition,
@@ -136,11 +127,10 @@ impl TryFrom<RemoteProcessHandleView> for lash_core::ProcessHandleView {
             ..
         } = value;
         // The view is rebuilt from its parts rather than adopting the peer's
-        // `id` text, so a handle that arrives naming a different process or
-        // incarnation than the fields beside it cannot survive the crossing.
+        // `id` text, so a handle that arrives naming a different process than
+        // the field beside it cannot survive the crossing.
         let rebuilt = lash_core::ProcessHandleView::new(
             process_id,
-            lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
             lash_core::ProcessIdentity {
                 kind: kind.into(),
                 label,
@@ -151,8 +141,7 @@ impl TryFrom<RemoteProcessHandleView> for lash_core::ProcessHandleView {
         if rebuilt.id.as_str() != id {
             return Err(RemoteProtocolError::InvalidEnvelope {
                 type_name: "RemoteProcessHandleView",
-                message: "handle id does not name the process and incarnation beside it"
-                    .to_string(),
+                message: "handle id does not name the process beside it".to_string(),
             });
         }
         Ok(rebuilt)
@@ -165,9 +154,8 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
     fn try_from(value: lash_core::ProcessRecord) -> Result<Self, Self::Error> {
         let lash_core::ProcessRecord {
             id,
-            incarnation,
+            start_key,
             last_event_sequence,
-            registration_fingerprint: _,
             input,
             disposition,
             lifecycle,
@@ -189,7 +177,7 @@ impl TryFrom<lash_core::ProcessRecord> for RemoteProcessRecord {
         } = value;
         Ok(Self {
             process_id: id,
-            incarnation: incarnation.registration_sequence(),
+            start_key_digest: start_key.map(|start_key| start_key.as_str().to_string()),
             last_event_sequence,
             input: input.as_ref().clone().try_into()?,
             disposition: disposition.into(),
@@ -224,7 +212,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
         value.validate("RemoteProcessRecord")?;
         let RemoteProcessRecord {
             process_id,
-            incarnation,
+            start_key_digest,
             last_event_sequence,
             input,
             disposition,
@@ -245,14 +233,24 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
             status,
             outcome,
         } = value;
+        let start_key = start_key_digest
+            .map(|start_key| {
+                lash_core::StartKey::parse(&start_key).map_err(|error| {
+                    RemoteProtocolError::InvalidEnvelope {
+                        type_name: "RemoteProcessRecord",
+                        message: error.to_string(),
+                    }
+                })
+            })
+            .transpose()?;
         let registration =
             lash_core::ProcessRegistration::new(
-                process_id,
                 input.try_into()?,
                 disposition.into(),
                 provenance.try_into()?,
                 lifecycle.try_into()?,
             )
+            .with_start_key(start_key)
             .with_max_attempts(max_attempts)
             .with_admitted_identity(lash_core::AdmittedProcessIdentity::pinned(identity.into()))
             .with_event_types(event_types.into_iter().map(Into::into))
@@ -273,10 +271,7 @@ impl TryFrom<RemoteProcessRecord> for lash_core::ProcessRecord {
                     message: format!("process registration is not valid: {error}"),
                 }
             })?;
-        let mut record = lash_core::ProcessRecord::from_registration(
-            registration,
-            lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
-        );
+        let mut record = lash_core::ProcessRecord::from_registration(registration, process_id);
         record.created_at_ms = created_at_ms;
         record.updated_at_ms = updated_at_ms;
         record.last_event_sequence = last_event_sequence;
@@ -300,7 +295,6 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
     fn try_from(value: lash_core::facade_support::ObservedProcess) -> Result<Self, Self::Error> {
         let lash_core::facade_support::ObservedProcess {
             process_id,
-            incarnation,
             last_event_sequence,
             identity,
             lifecycle,
@@ -326,7 +320,6 @@ impl TryFrom<lash_core::facade_support::ObservedProcess> for RemoteObservedProce
         } = value;
         Ok(Self {
             process_id,
-            incarnation: incarnation.registration_sequence(),
             last_event_sequence,
             identity: identity.into(),
             lifecycle: lifecycle.into(),
@@ -362,7 +355,6 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
         value.validate("RemoteObservedProcess")?;
         let RemoteObservedProcess {
             process_id,
-            incarnation,
             last_event_sequence,
             identity,
             lifecycle,
@@ -388,7 +380,6 @@ impl TryFrom<RemoteObservedProcess> for lash_core::facade_support::ObservedProce
         } = value;
         Ok(Self {
             process_id,
-            incarnation: lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
             last_event_sequence,
             identity: identity.into(),
             lifecycle: lifecycle.into(),
@@ -500,7 +491,7 @@ impl TryFrom<lash_core::facade_support::ProcessWorkSnapshot> for RemoteProcessWo
         } = value;
         Ok(Self {
             session_id,
-            visible_processes: visible_processes.into_iter().map(Into::into).collect(),
+            visible_processes: visible_processes.into_iter().collect(),
             items: items
                 .into_iter()
                 .map(TryInto::try_into)
@@ -521,7 +512,7 @@ impl TryFrom<RemoteProcessWorkSnapshot> for lash_core::facade_support::ProcessWo
         } = value;
         Ok(Self {
             session_id,
-            visible_processes: visible_processes.into_iter().map(Into::into).collect(),
+            visible_processes: visible_processes.into_iter().collect(),
             items: items
                 .into_iter()
                 .map(TryInto::try_into)

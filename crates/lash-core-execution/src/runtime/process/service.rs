@@ -5,7 +5,7 @@ use crate::plugin::PluginError;
 use super::events::{ProcessAwaitOutput, ProcessEvent};
 use super::model::{
     ProcessCancelReceipt, ProcessCompletionOutcome, ProcessHandleView, ProcessListMode,
-    ProcessRecord, ProcessRef, ProcessRegistration, ProcessStartOptions, ProcessStartRequest,
+    ProcessRecord, ProcessRegistration, ProcessStartOptions, ProcessStartRequest,
 };
 use super::op_scope::ProcessOpScope;
 
@@ -75,24 +75,6 @@ pub trait ProcessService: Send + Sync {
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessHandleView, PluginError>;
 
-    /// Reads the attempt bound already recorded for `process_id`, if a row exists.
-    ///
-    /// The registry row is the durable truth for a child's resolved
-    /// `max_attempts`: a redrive that re-registers the same deterministic child
-    /// id must reuse the recorded bound rather than the caller's current host
-    /// default, or the registration fingerprint conflicts forever. Returns
-    /// `None` when no row exists yet, which is the only case in which the
-    /// caller's own resolution decides. Services without a registry read keep
-    /// the default and behave as they did before the bound existed.
-    async fn recorded_max_attempts(
-        &self,
-        session_id: &SessionId,
-        process_id: &ProcessId,
-    ) -> Result<Option<u32>, PluginError> {
-        let _ = (session_id, process_id);
-        Ok(None)
-    }
-
     async fn start(
         &self,
         session_id: &SessionId,
@@ -148,10 +130,10 @@ pub trait ProcessService: Send + Sync {
 
     async fn await_process_ref(
         &self,
-        process_ref: &ProcessRef,
+        process_id: &ProcessId,
         scope: ProcessOpScope<'_>,
     ) -> Result<ProcessAwaitOutput, PluginError> {
-        self.await_process(&process_ref.process_id, scope).await
+        self.await_process(process_id, scope).await
     }
 
     /// The default refuses: a service that cannot observe process terminals
@@ -159,11 +141,11 @@ pub trait ProcessService: Send + Sync {
     /// resolve, which would hang the parked call forever.
     async fn attach_process_terminal(
         &self,
-        process_ref: &ProcessRef,
+        process_id: &ProcessId,
         key: &crate::AwaitEventKey,
         scope: ProcessOpScope<'_>,
     ) -> Result<(), PluginError> {
-        let _ = (process_ref, key, scope);
+        let _ = (process_id, key, scope);
         Err(PluginError::Session(
             "arming a process terminal is unavailable in this service".to_string(),
         ))
@@ -182,19 +164,6 @@ pub trait ProcessService: Send + Sync {
         process_ids: &[ProcessId],
         scope: ProcessOpScope<'_>,
     ) -> Result<(), PluginError>;
-
-    async fn validate_visible_refs(
-        &self,
-        session_id: &SessionId,
-        process_refs: &[ProcessRef],
-        scope: ProcessOpScope<'_>,
-    ) -> Result<(), PluginError> {
-        let process_ids = process_refs
-            .iter()
-            .map(|process_ref| process_ref.process_id.clone())
-            .collect::<Vec<_>>();
-        self.validate_visible(session_id, &process_ids, scope).await
-    }
 
     async fn cancel(
         &self,
@@ -445,8 +414,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        ProcessAwaitOutput, ProcessEvent, ProcessIncarnation, ProcessInput, ProcessProvenance,
-        ProcessRegistration, ProcessStatus,
+        ProcessAwaitOutput, ProcessEvent, ProcessInput, ProcessProvenance, ProcessRegistration,
+        ProcessStatus,
     };
 
     struct RecordingProcessService {
@@ -477,7 +446,6 @@ mod tests {
                 .map(|process_id| {
                     ProcessRecord::from_registration(
                         ProcessRegistration::new(
-                            process_id,
                             ProcessInput::External {
                                 metadata: json!(null),
                             },
@@ -488,7 +456,7 @@ mod tests {
                                 crate::OnParentEnd::Abandon,
                             ),
                         ),
-                        ProcessIncarnation::from_registration_sequence(1),
+                        process_id.clone(),
                     )
                 })
                 .collect();
@@ -658,7 +626,6 @@ mod tests {
     fn cancelled_record(process_id: &ProcessId) -> ProcessRecord {
         let mut record = ProcessRecord::from_registration(
             ProcessRegistration::new(
-                process_id,
                 ProcessInput::External {
                     metadata: json!(null),
                 },
@@ -669,7 +636,7 @@ mod tests {
                     crate::OnParentEnd::Abandon,
                 ),
             ),
-            ProcessIncarnation::from_registration_sequence(1),
+            process_id.clone(),
         );
         record.status = ProcessStatus::Cancelled;
         record.outcome = Some(ProcessAwaitOutput::from_tool_output(
@@ -691,10 +658,16 @@ mod tests {
     #[tokio::test]
     async fn cancel_all_visible_cancels_each_visible_live_process() {
         let service = RecordingProcessService::new(
-            [ProcessId::from("process-1"), ProcessId::from("process-2")],
-            cancelled_record(&ProcessId::from("template")),
+            [
+                crate::process_id_for_test("process-1"),
+                crate::process_id_for_test("process-2"),
+            ],
+            cancelled_record(&crate::process_id_for_test("template")),
         )
-        .with_visible_entries([ProcessId::from("process-1"), ProcessId::from("process-2")]);
+        .with_visible_entries([
+            crate::process_id_for_test("process-1"),
+            crate::process_id_for_test("process-2"),
+        ]);
         let summaries = service
             .cancel_all_visible(
                 &SessionId::from("session-1"),
@@ -708,12 +681,18 @@ mod tests {
                 .iter()
                 .map(|summary| summary.process_id.as_str())
                 .collect::<Vec<_>>(),
-            vec!["process-1", "process-2"]
+            vec![
+                "p_c5546c16360677e5a56c42a3a5c9e20c",
+                "p_c5546c16390677e5a56c42a3a5c9e5bd"
+            ]
         );
         assert!(service.validate_calls().is_empty());
         assert_eq!(
             service.cancel_calls(),
-            vec!["process-1".to_string(), "process-2".to_string()]
+            vec![
+                crate::process_id_for_test("process-1"),
+                crate::process_id_for_test("process-2")
+            ]
         );
     }
 }

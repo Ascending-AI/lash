@@ -732,7 +732,7 @@ mod tests {
                 FormatEvidence::Direct,
             )],
             drain: vec![DrainBlocker {
-                process_id: Some(ProcessId::from("p-1")),
+                process_id: Some(ProcessId::fixture("p-1")),
                 session_id: Some(SessionId::from("s-1")),
                 status: Some("waiting".to_string()),
                 format: "Lashlang segment handover".to_string(),
@@ -774,7 +774,10 @@ mod tests {
         assert_eq!(json["components"][0]["found"][0]["version"], 2);
         assert_eq!(json["components"][0]["found"][0]["count"], 1);
         assert_eq!(json["components"][0]["evidence"]["kind"], "direct");
-        assert_eq!(json["drain"][0]["process_id"], "p-1");
+        assert_eq!(
+            json["drain"][0]["process_id"],
+            ProcessId::fixture("p-1").as_str()
+        );
         assert_eq!(json["drain"][0]["found"], 2);
     }
 

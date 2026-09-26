@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use super::{LiveOpenerContext, LiveOpenerRegistry};
-use crate::{EffectOpener, ProcessId, ProcessRef, SessionId};
+use crate::{EffectOpener, ProcessId, SessionId};
 
 /// A dispatch context is 24 fields of deployment wiring; the registry cares
 /// about none of them, so one throwaway is enough for every case here.
@@ -70,11 +70,8 @@ fn live_context() -> LiveOpenerContext {
     )
 }
 
-fn process_opener(name: &str, incarnation: u64) -> EffectOpener {
-    EffectOpener::process(ProcessRef::new(
-        ProcessId::from(name),
-        crate::ProcessIncarnation::from_registration_sequence(incarnation),
-    ))
+fn process_opener(name: &str) -> EffectOpener {
+    EffectOpener::process(ProcessId::fixture(name))
 }
 
 /// The rule the whole mechanism rests on: a child whose opener is not live
@@ -96,9 +93,9 @@ fn an_opener_this_host_does_not_run_is_absent_rather_than_an_error() {
 fn openers_are_keyed_by_value_not_by_rendered_text() {
     let registry = Arc::new(LiveOpenerRegistry::new());
     // A turn whose session id is spelled exactly like a process opener's
-    // `{process_id}#{incarnation}` rendering.
-    let turn_like_a_process = EffectOpener::turn("indexer#7", "turn-1");
-    let real_process = process_opener("indexer", 7);
+    // rendering.
+    let real_process = process_opener("indexer");
+    let turn_like_a_process = EffectOpener::turn(real_process.render(), "turn-1");
 
     let (_guard, _ended) = registry.register(turn_like_a_process.clone(), live_context());
 
@@ -111,21 +108,20 @@ fn openers_are_keyed_by_value_not_by_rendered_text() {
     assert_eq!(registry.len(), 1);
 }
 
-/// A process re-registered under the same name is a different opener, so it
-/// does not inherit its predecessor's children.
+/// Two processes are two openers, so one does not inherit the other's
+/// children.
 #[test]
-fn a_new_incarnation_is_a_different_opener() {
+fn another_process_is_a_different_opener() {
     let registry = Arc::new(LiveOpenerRegistry::new());
-    let first = process_opener("indexer", 1);
-    let second = process_opener("indexer", 2);
+    let first = process_opener("indexer-a");
+    let second = process_opener("indexer-b");
 
     let (_guard, _ended) = registry.register(first.clone(), live_context());
 
     assert!(registry.is_live(&first));
     assert!(
         !registry.is_live(&second),
-        "the reusable name is not the opener: a second incarnation must not find the first's \
-         registration"
+        "a second process must not find the first's registration"
     );
 }
 

@@ -148,7 +148,9 @@ async fn direct_effect_retirement_waits_for_every_bound_catalog_participant() {
     let factory_b = SqliteSessionStoreFactory::new(dir.path().join("catalog-b"));
     factory_a.bind_effect_host(&effect_host);
     factory_b.bind_effect_host(&effect_host);
-    let scope = ExecutionScope::process("shared-retirement-scope");
+    let scope = ExecutionScope::process(lash_core_execution::ProcessId::fixture(
+        "shared-retirement-scope",
+    ));
     let (store_a, lease_a, authorization_a) =
         authorize_completion_closure(&host, &factory_a, "catalog-a-session", "turn", &scope).await;
     let (store_b, lease_b, authorization_b) =
@@ -220,7 +222,9 @@ async fn owner_retirement_before_authorization_refuses_the_catalog_without_a_pin
     registry.bind_effect_host(&effect_host);
     let factory = SqliteSessionStoreFactory::new(dir.path().join("catalog"));
     factory.bind_effect_host(&effect_host);
-    let scope = ExecutionScope::process("retired-before-authorization");
+    let scope = ExecutionScope::process(lash_core_execution::ProcessId::fixture(
+        "retired-before-authorization",
+    ));
     let address = TurnAddress::new("late-catalog-session", "turn");
     let store = factory
         .create_store(&lash_core_execution::SessionStoreCreateRequest {
@@ -390,7 +394,9 @@ async fn process_scoped_physical_turn_start_gates_are_distinct_and_replayable() 
     let dir = tempfile::tempdir().expect("temporary database directory");
     let path = dir.path().join("physical-turn-peeks.sqlite");
     let host = SqliteEffectHost::open(&path).await.unwrap();
-    let process_scope = ExecutionScope::process("process:subagent:physical-turn-peeks");
+    let process_scope = ExecutionScope::process(lash_core_execution::ProcessId::fixture(
+        "process:subagent:physical-turn-peeks",
+    ));
     let scoped = host.scoped(durable_admission(&process_scope)).unwrap();
     let root = TurnAddress::new(
         "session:subagent:physical-turn-peeks",

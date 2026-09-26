@@ -197,7 +197,7 @@ struct LeafExecution {
     /// leaf; `Null` for a catalog one.
     execution_binding: serde_json::Value,
     /// The enclosing process the attempt's context reported — the recorded
-    /// incarnation's name when the driver honoured the retained `ProcessRef`.
+    /// incarnation's name when the driver honoured the retained `ProcessId`.
     enclosing_process: Option<String>,
 }
 
@@ -409,7 +409,7 @@ impl crate::ToolProvider for LawLeafProvider {
             context.session_id(),
             context.attempt_number(),
             context.tool_execution_binding().clone(),
-            context.enclosing_process(),
+            context.enclosing_process().map(crate::ProcessId::as_str),
         );
         match name.as_str() {
             name if name == LEAF_PLAIN.trim_start_matches("tool:") => {
@@ -844,15 +844,12 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation for La
             replies.first().map(|reply| &reply.output.outcome),
             Some(crate::ToolCallOutcome::Success(_))
         );
-        // The started id derives from the body's own call id, so a redrive
-        // re-requests the same start rather than minting a second process.
-        let started_id = crate::ProcessId::from(format!(
-            "{}-started",
-            context.tool_call_id().unwrap_or("law-orchestrating")
-        ));
-        // The durable parent derives through the admitted scope plus the
-        // pinned `ProcessRef` — the incarnation the journal admitted, never a
-        // registry lookup. A lost pin answers `None` for `admitted_process`
+        // The start is keyed by the body's admitted scope, call id and start
+        // ordinal, so a redrive re-requests the same start rather than
+        // registering a second process (ADR 0107).
+        // The durable parent derives through the admitted scope's minted
+        // `ProcessId` — the process the journal admitted, never a registry
+        // lookup. A lost pin answers `None` for `admitted_process`
         // and this errors rather than running.
         let parent_scope = match context.child_process_parent_scope() {
             Ok(scope) => scope,
@@ -862,16 +859,26 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation for La
                 ));
             }
         };
+        let start_key = match context.start_key(0) {
+            Ok(start_key) => start_key,
+            Err(error) => {
+                return crate::ToolOutcome::err_fmt(format!(
+                    "the orchestrating body could not key its start: {error}"
+                ));
+            }
+        };
         match context
-            .start_process(crate::ProcessStartRequest::external(
-                started_id,
-                crate::ProcessOriginator::host(),
-                serde_json::json!({ "lane": "orchestrating" }),
-                crate::ProcessLifecyclePolicy::new(
-                    crate::ParentScope::Host,
-                    crate::OnParentEnd::Abandon,
-                ),
-            ))
+            .start_process(
+                crate::ProcessStartRequest::external(
+                    crate::ProcessOriginator::host(),
+                    serde_json::json!({ "lane": "orchestrating" }),
+                    crate::ProcessLifecyclePolicy::new(
+                        crate::ParentScope::Host,
+                        crate::OnParentEnd::Abandon,
+                    ),
+                )
+                .with_start_key(Some(start_key)),
+            )
             .await
         {
             Ok(view) => crate::ToolOutcome::ok(serde_json::json!({
@@ -1045,8 +1052,12 @@ fn register_opener_inner(
     extras: OpenerExtras,
 ) -> crate::runtime::effect::LiveOpenerGuard {
     let installed = install_child_host(host, &process_env_store);
-    let admitted = crate::AdmittedScope::new(scope.clone(), opener.process_ref().cloned())
-        .expect("the opener's scope and incarnation agree");
+    let admitted = crate::AdmittedScope::new(scope.clone());
+    assert_eq!(
+        opener.process_id(),
+        admitted.process_id(),
+        "an opener registers at its own scope"
+    );
     let dispatch = build_opener_dispatch(
         host,
         &admitted,
@@ -1256,19 +1267,18 @@ impl crate::ProcessService for GatedProcessService {
                 .to_string(),
             _ => "<unlabelled>".to_string(),
         };
-        let identity = format!("start:{}", request.id);
+        let identity = match &request.start_key {
+            Some(start_key) => format!("start:{start_key}"),
+            None => "start:<keyless>".to_string(),
+        };
         self.sink.admit(&call_id).await;
         self.sink.record_landed(&call_id, "start", &identity);
         let started = self
             .inner
             .start_from_recorded_intent(session_id, request, scope)
             .await?;
-        self.sink.confirm_landed(
-            &call_id,
-            "start",
-            &identity,
-            format!("{}#{:?}", started.process_id, started.incarnation),
-        );
+        self.sink
+            .confirm_landed(&call_id, "start", &identity, started.process_id.to_string());
         Ok(started)
     }
 
@@ -1298,10 +1308,7 @@ impl crate::ProcessService for GatedProcessService {
             &call_id,
             "event",
             &identity,
-            format!(
-                "{}#{:?}#{}",
-                event.process_id, event.process_incarnation, event.sequence
-            ),
+            format!("{}#{}", event.process_id, event.sequence),
         );
         Ok(event)
     }
@@ -1322,16 +1329,6 @@ impl crate::ProcessService for GatedProcessService {
     ) -> Result<crate::ProcessHandleView, crate::PluginError> {
         self.inner
             .start_from_request(session_id, request, scope)
-            .await
-    }
-
-    async fn recorded_max_attempts(
-        &self,
-        session_id: &crate::SessionId,
-        process_id: &crate::ProcessId,
-    ) -> Result<Option<u32>, crate::PluginError> {
-        self.inner
-            .recorded_max_attempts(session_id, process_id)
             .await
     }
 
@@ -1379,20 +1376,20 @@ impl crate::ProcessService for GatedProcessService {
 
     async fn await_process_ref(
         &self,
-        process_ref: &crate::ProcessRef,
+        process_id: &crate::ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
-        self.inner.await_process_ref(process_ref, scope).await
+        self.inner.await_process_ref(process_id, scope).await
     }
 
     async fn attach_process_terminal(
         &self,
-        process_ref: &crate::ProcessRef,
+        process_id: &crate::ProcessId,
         key: &crate::AwaitEventKey,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
         self.inner
-            .attach_process_terminal(process_ref, key, scope)
+            .attach_process_terminal(process_id, key, scope)
             .await
     }
 
@@ -1413,17 +1410,6 @@ impl crate::ProcessService for GatedProcessService {
     ) -> Result<(), crate::PluginError> {
         self.inner
             .validate_visible(session_id, process_ids, scope)
-            .await
-    }
-
-    async fn validate_visible_refs(
-        &self,
-        session_id: &crate::SessionId,
-        process_refs: &[crate::ProcessRef],
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<(), crate::PluginError> {
-        self.inner
-            .validate_visible_refs(session_id, process_refs, scope)
             .await
     }
 
@@ -1598,8 +1584,7 @@ fn leaf_request(
     let crate::ExecutionScope::Turn { .. } = scope else {
         unreachable!("the law's children are admitted under a turn scope")
     };
-    let admitted =
-        crate::AdmittedScope::unpinned(scope.clone()).expect("a turn scope admits unpinned");
+    let admitted = crate::AdmittedScope::new(scope.clone());
     crate::runtime::effect::ToolChildRequest::new(
         crate::PreparedToolCall::from_parts(
             call_id,
@@ -1760,44 +1745,33 @@ struct Scenario {
 /// Stands up the scenario state: the process registry with the intent target
 /// registered, the environment the children's requests record, and the leaf
 /// provider that serves them.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
 async fn scenario(
     fixture: &ToolChildLawFixture,
     session_id: &crate::SessionId,
     start_metadata: serde_json::Value,
 ) -> Scenario {
     let stores = (fixture.make_processes)().await;
+    scenario_on(stores, session_id, start_metadata, None).await
+}
+
+/// A scenario over `stores`. A crash law passes the stores its crashed world
+/// used and the intent target it registered there, so the successor realizes
+/// the recorded intents against the process they name: an intent names a
+/// minted process, which exists only in the registry that minted it.
+async fn scenario_on(
+    stores: Arc<dyn crate::StoreSet>,
+    session_id: &crate::SessionId,
+    start_metadata: serde_json::Value,
+    intent_target: Option<crate::ProcessId>,
+) -> Scenario {
     let registry = stores.process_registry();
     let process_env_store = stores.process_env_store();
     let process_definitions = stores.process_definition_registry();
     let attachment_store = stores.attachment_store();
-    let intent_target = crate::ProcessId::from(format!("{session_id}-intent-target"));
-    registry
-        .register_process_with_observers(
-            crate::ProcessRegistration::new(
-                intent_target.clone(),
-                crate::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
-                crate::RecoveryContract::ExternallyOwned,
-                crate::ProcessProvenance::host(),
-                crate::ProcessLifecyclePolicy::new(
-                    crate::ParentScope::Host,
-                    crate::OnParentEnd::Abandon,
-                ),
-            )
-            .with_extra_event_types([crate::ProcessEventType {
-                name: "law.intent-event".to_string(),
-                payload_schema: crate::LashSchema::any(),
-                semantics: crate::ProcessEventSemanticsSpec::default(),
-            }]),
-            std::slice::from_ref(session_id),
-        )
-        .await
-        .expect("register the intent target process");
+    let intent_target = match intent_target {
+        Some(intent_target) => intent_target,
+        None => register_intent_target(registry.as_ref(), session_id).await,
+    };
     let env_ref = crate::testing::process_execution_env_fixture(process_env_store.as_ref()).await;
     let observation = Arc::new(LawObservation::default());
     Scenario {
@@ -1816,6 +1790,40 @@ async fn scenario(
         env_ref,
         intent_target,
     }
+}
+
+/// Registers the process the leaves' intents signal and append to.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn register_intent_target(
+    registry: &dyn crate::ProcessRegistry,
+    session_id: &crate::SessionId,
+) -> crate::ProcessId {
+    registry
+        .register_process_with_observers(
+            crate::ProcessRegistration::new(
+                crate::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryContract::ExternallyOwned,
+                crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
+            )
+            .with_extra_event_types([crate::ProcessEventType {
+                name: "law.intent-event".to_string(),
+                payload_schema: crate::LashSchema::any(),
+                semantics: crate::ProcessEventSemanticsSpec::default(),
+            }]),
+            std::slice::from_ref(session_id),
+        )
+        .await
+        .expect("register the intent target process")
+        .id
 }
 
 /// The parent invocation the children's recorded identities derive from — the

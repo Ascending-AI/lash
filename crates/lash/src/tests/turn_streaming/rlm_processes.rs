@@ -721,10 +721,7 @@ finish(value);"#,
         .as_ref()
         .expect("running process has a started fact")
         .attempt;
-    let graph_key = format!(
-        "process:{}:incarnation:{}:attempt:{attempt}",
-        running.process_id, running.incarnation
-    );
+    let graph_key = format!("process:{}:attempt:{attempt}", running.process_id);
     let graph = graph_store
         .graph(&graph_key)
         .expect("Lashlang graph snapshot");
@@ -743,10 +740,9 @@ finish(value);"#,
             .any(|graph| graph.entry_name == running.label())
     );
 
-    let process_ref = lash_core::ProcessRef::new(running.process_id.clone(), running.incarnation);
     let mut subscription = core
         .processes()
-        .subscribe_observation(&process_ref, None)
+        .subscribe_observation(&running.process_id, None)
         .await?;
     let Some(crate::process::ProcessObservationItem::Snapshot { snapshot, .. }) =
         subscription.recv().await?

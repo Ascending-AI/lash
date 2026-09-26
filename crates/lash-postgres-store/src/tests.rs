@@ -667,13 +667,12 @@ async fn one_id_selected_drain_touches_at_most_four_queue_rows() {
     .expect("seed 10,000 ready selected-drain batches");
     // Every seeded row carries the same process-wake payload: the proof is
     // about how many queue rows the selected claim touches, not their content.
-    let process_id = || lash_core_execution::ProcessId::from("selected-plan-process");
+    let process_id = || lash_core_execution::ProcessId::fixture("selected-plan-process");
     let wake = lash_core_execution::ProcessWakeDelivery {
         version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: "selected-plan-wake".to_string(),
         target_session_id: session_id.clone(),
         process_id: process_id(),
-        process_incarnation: lash_core_execution::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "process.wake".to_string(),
         event_invocation: lash_core_execution::RuntimeInvocation {

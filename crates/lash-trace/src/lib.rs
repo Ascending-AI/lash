@@ -152,7 +152,12 @@ pub use lashlang_graph::{
 /// the same source traces under different node ids than version 33.
 /// Version 35 (FIG-3670) renames the language-execution identity's engine
 /// invocation field to `engine_execution_id`: the kernel names no engine.
-pub const TRACE_SCHEMA_VERSION: u32 = 35;
+///
+/// Version 36 (FIG-3607) names a process by its minted, never-reused id: a
+/// language execution's generation is its attempt alone, graph keys drop the
+/// `:incarnation:` segment, and child links drop `incarnation` and
+/// `child_incarnation`.
+pub const TRACE_SCHEMA_VERSION: u32 = 36;
 
 /// A durable trace record was written under a schema this reader does not support.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -1514,23 +1519,18 @@ impl TraceRuntimeSubject {
 )]
 pub struct TraceLanguageExecutionGeneration {
     attempt: u32,
-    incarnation: u64,
 }
 
 impl TraceLanguageExecutionGeneration {
-    pub const fn new(attempt: u32, incarnation: u64) -> Self {
-        Self {
-            attempt,
-            incarnation,
-        }
+    /// One durable attempt of a process. The process id is minted once and
+    /// never reused, so it already names the lifetime; the attempt is the
+    /// only generation left to tell apart.
+    pub const fn new(attempt: u32) -> Self {
+        Self { attempt }
     }
 
     pub const fn attempt(self) -> u32 {
         self.attempt
-    }
-
-    pub const fn incarnation(self) -> u64 {
-        self.incarnation
     }
 }
 
@@ -1546,8 +1546,8 @@ pub struct TraceLanguageExecutionIdentity {
     pub entry_name: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine_execution_id: Option<String>,
-    /// Store-minted process lifetime and one-based durable attempt. Absent
-    /// only for a foreground effect execution that is not process-admitted.
+    /// One-based durable attempt of the process. Absent only for a foreground
+    /// effect execution that is not process-admitted.
     #[serde(flatten)]
     pub generation: Option<TraceLanguageExecutionGeneration>,
 }
@@ -1563,7 +1563,6 @@ struct TraceLanguageExecutionIdentityWire {
     entry_name: String,
     engine_execution_id: Option<String>,
     attempt: Option<u32>,
-    incarnation: Option<u64>,
 }
 
 impl<'de> Deserialize<'de> for TraceLanguageExecutionIdentity {
@@ -1572,11 +1571,6 @@ impl<'de> Deserialize<'de> for TraceLanguageExecutionIdentity {
         D: serde::Deserializer<'de>,
     {
         let wire = TraceLanguageExecutionIdentityWire::deserialize(deserializer)?;
-        if wire.attempt.is_some() != wire.incarnation.is_some() {
-            return Err(serde::de::Error::custom(
-                "language execution attempt and incarnation must be present together",
-            ));
-        }
         Ok(Self {
             scope: wire.scope,
             subject: wire.subject,
@@ -1586,13 +1580,7 @@ impl<'de> Deserialize<'de> for TraceLanguageExecutionIdentity {
             entry_ref: wire.entry_ref,
             entry_name: wire.entry_name,
             engine_execution_id: wire.engine_execution_id,
-            generation: match (wire.attempt, wire.incarnation) {
-                (Some(attempt), Some(incarnation)) => {
-                    Some(TraceLanguageExecutionGeneration::new(attempt, incarnation))
-                }
-                (None, None) => None,
-                _ => unreachable!("paired generation was validated above"),
-            },
+            generation: wire.attempt.map(TraceLanguageExecutionGeneration::new),
         })
     }
 }
@@ -1605,19 +1593,11 @@ impl TraceLanguageExecutionIdentity {
         }
     }
 
-    pub const fn incarnation(&self) -> Option<u64> {
-        match self.generation {
-            Some(generation) => Some(generation.incarnation()),
-            None => None,
-        }
-    }
-
     pub fn graph_key(&self) -> String {
         match self.generation {
             Some(generation) => format!(
-                "{}:incarnation:{incarnation}:attempt:{attempt}",
+                "{}:attempt:{attempt}",
                 self.subject.graph_key(),
-                incarnation = generation.incarnation(),
                 attempt = generation.attempt(),
             ),
             None => self.subject.graph_key(),
@@ -1637,7 +1617,6 @@ pub struct TraceLanguageExecution {
 pub struct TraceLanguageChildExecution {
     pub scope: TraceRuntimeScope,
     pub process_id: lash_sansio::ProcessId,
-    pub incarnation: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attempt: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1650,12 +1629,8 @@ pub struct TraceLanguageChildExecution {
 
 impl TraceLanguageChildExecution {
     pub fn graph_key(&self) -> Option<String> {
-        self.attempt.map(|attempt| {
-            format!(
-                "process:{}:incarnation:{}:attempt:{attempt}",
-                self.process_id, self.incarnation,
-            )
-        })
+        self.attempt
+            .map(|attempt| format!("process:{}:attempt:{attempt}", self.process_id,))
     }
 }
 

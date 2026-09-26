@@ -766,12 +766,39 @@ impl TriggerStore for PostgresTriggerStore {
         list_deliveries_with(&self.pool, trigger_sql().delivery.list_all.sql(), None).await
     }
 
+    async fn bind_delivery_process(
+        &self,
+        occurrence_id: &str,
+        subscription_id: &str,
+        process_id: &ProcessId,
+    ) -> Result<(), PluginError> {
+        let bound = sqlx::query(trigger_sql().delivery.bind_process.sql())
+            .bind(occurrence_id)
+            .bind(subscription_id)
+            .bind(process_id.as_str())
+            .execute(&self.pool)
+            .await
+            .map_err(plugin_sqlx_error)?
+            .rows_affected();
+        if bound == 1 {
+            Ok(())
+        } else {
+            Err(lash_core_execution::durable_identity_conflict(format!(
+                "trigger delivery `{occurrence_id}`/`{subscription_id}` is absent or already bound to another process than `{process_id}`"
+            )))
+        }
+    }
+
     async fn list_delivery_process_ids(&self) -> Result<Vec<ProcessId>, PluginError> {
         sqlx::query_scalar(trigger_sql().delivery.select_distinct_process_ids.sql())
             .fetch_all(&self.pool)
             .await
-            .map(|ids: Vec<String>| ids.into_iter().map(ProcessId::from).collect())
             .map_err(plugin_sqlx_error)
+            .and_then(|ids: Vec<String>| {
+                ids.iter()
+                    .map(|id| crate::stored_process_id(id))
+                    .collect::<Result<Vec<_>, _>>()
+            })
     }
 
     async fn list_delivery_retention_candidates(
@@ -781,16 +808,15 @@ impl TriggerStore for PostgresTriggerStore {
             .fetch_all(&self.pool)
             .await
             .map_err(plugin_sqlx_error)?;
-        Ok(rows
-            .into_iter()
-            .map(
-                |row| lash_core_execution::TriggerDeliveryRetentionCandidate {
+        rows.into_iter()
+            .map(|row| {
+                Ok(lash_core_execution::TriggerDeliveryRetentionCandidate {
                     occurrence_id: row.get(0),
                     subscription_id: row.get(1),
-                    process_id: ProcessId::from(row.get::<String, _>(2)),
-                },
-            )
-            .collect())
+                    process_id: crate::stored_process_id(&row.get::<String, _>(2))?,
+                })
+            })
+            .collect()
     }
 
     async fn list_session_owner_ids_for_retention(&self) -> Result<Vec<SessionId>, PluginError> {
@@ -1080,18 +1106,11 @@ async fn reserve_postgres_deliveries(
                 continue;
             }
         };
-        let process_id = lash_core_execution::facade_support::deterministic_delivery_process_id(
-            &occurrence.occurrence_id,
-            &subscription.subscription_id,
-            &subscription.incarnation,
-            subscription.revision,
-        )?;
         let sql_revision =
             plugin_sql_counter_value("trigger_subscription_revision", subscription.revision)?;
         sqlx::query(sql.delivery.insert.sql())
             .bind(&occurrence.occurrence_id)
             .bind(&subscription.subscription_id)
-            .bind(process_id.as_str())
             .bind(&subscription.incarnation)
             .bind(sql_revision)
             .bind(serde_json::to_string(&subscription).map_err(process_decode_error)?)
@@ -1102,7 +1121,7 @@ async fn reserve_postgres_deliveries(
         reservations.push(TriggerDeliveryReservation {
             occurrence: occurrence.clone(),
             subscription,
-            process_id,
+            process_id: None,
             created_at_ms,
             reservation_status: lash_core_execution::TriggerDeliveryReservationOutcome::Reserved,
         });
@@ -1127,7 +1146,10 @@ async fn postgres_delivery_snapshots(
             Ok(TriggerDeliveryReservation {
                 occurrence: occurrence.clone(),
                 subscription: serde_json::from_str(&json).map_err(process_decode_error)?,
-                process_id: ProcessId::from(row.get::<String, _>(0)),
+                process_id: row
+                    .get::<Option<String>, _>(0)
+                    .map(|value| crate::stored_process_id(&value))
+                    .transpose()?,
                 created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", row.get(1))?,
                 reservation_status:
                     lash_core_execution::TriggerDeliveryReservationOutcome::AlreadyReserved,
@@ -1159,7 +1181,10 @@ async fn list_deliveries_with(
                 occurrence: serde_json::from_str(&occurrence_json).map_err(process_decode_error)?,
                 subscription: serde_json::from_str(&subscription_json)
                     .map_err(process_decode_error)?,
-                process_id: ProcessId::from(row.get::<String, _>(0)),
+                process_id: row
+                    .get::<Option<String>, _>(0)
+                    .map(|value| crate::stored_process_id(&value))
+                    .transpose()?,
                 created_at_ms: plugin_u64_from_sql("TriggerDelivery", "created_at_ms", row.get(1))?,
                 reservation_status:
                     lash_core_execution::TriggerDeliveryReservationOutcome::AlreadyReserved,

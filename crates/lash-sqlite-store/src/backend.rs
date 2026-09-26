@@ -32,6 +32,10 @@ pub struct SqliteBackendOptions {
     /// Retention and staleness bounds of the process registry's wake
     /// deliveries.
     pub wake_delivery: lash_core_execution::WakeDeliveryConfig,
+    /// Where the process registry mints process ids (ADR 0107): at random,
+    /// unless a test that replays committed bytes needs them deterministic.
+    #[doc(hidden)]
+    pub process_id_mint: lash_core_execution::ProcessIdMint,
     /// Deterministic transaction faults, installed on every session store the
     /// backend's factory opens (FIG-2971: production builds do not compile
     /// the hook).
@@ -48,6 +52,10 @@ pub struct SqliteStoreSetOptions {
     /// Retention and staleness bounds of the process registry's wake
     /// deliveries.
     pub wake_delivery: lash_core_execution::WakeDeliveryConfig,
+    /// Where the process registry mints process ids (ADR 0107): at random,
+    /// unless a test that replays committed bytes needs them deterministic.
+    #[doc(hidden)]
+    pub process_id_mint: lash_core_execution::ProcessIdMint,
     /// Deterministic transaction faults, installed on every session store the
     /// store set's factory opens.
     #[cfg(feature = "testing")]
@@ -74,6 +82,7 @@ impl From<SqliteStoreSetOptions> for SqliteBackendOptions {
             store: options.store,
             effect_replay: SqliteEffectReplayOptions::default(),
             wake_delivery: options.wake_delivery,
+            process_id_mint: options.process_id_mint,
             #[cfg(feature = "testing")]
             fault_injector: options.fault_injector,
         }
@@ -98,6 +107,7 @@ impl SqliteBackendOptions {
         SqliteStoreSetOptions {
             store: self.store,
             wake_delivery: self.wake_delivery,
+            process_id_mint: self.process_id_mint.clone(),
             #[cfg(feature = "testing")]
             fault_injector: self.fault_injector.clone(),
         }
@@ -479,7 +489,8 @@ impl SqliteStoreSet {
                 None,
             )
             .await?
-            .with_wake_delivery_config(options.wake_delivery),
+            .with_wake_delivery_config(options.wake_delivery)
+            .with_process_id_mint_for_testing(options.process_id_mint.clone()),
         );
         let trigger_store =
             Arc::new(SqliteTriggerStore::open_at(&triggers, Arc::clone(&clock)).await?);

@@ -667,7 +667,6 @@ mod commit_identity_effect_tests;
 #[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
 mod append_request_identity_tests {
     use super::*;
-    use crate::ProcessId;
 
     fn operation(id: &str) -> OperationId {
         OperationId::new(
@@ -847,7 +846,7 @@ mod append_request_identity_tests {
                         "role": "Assistant",
                         "origin": {
                             "kind": "process",
-                            "process_id": "process-id",
+                            "process_id": "p_0192f000000070008000000000000001",
                             "event_type": "event-type",
                             "sequence": 18446744073709551615_u64,
                             "wake_id": "wake-id",
@@ -970,10 +969,10 @@ mod append_request_identity_tests {
                 call_id: "c".to_string(),
             },
             crate::CausalRef::Process {
-                process_id: ProcessId::from("p"),
+                process_id: crate::process_id_for_test("p"),
             },
             crate::CausalRef::ProcessEvent {
-                process_id: ProcessId::from("p"),
+                process_id: crate::process_id_for_test("p"),
                 sequence: u64::MAX,
             },
             crate::CausalRef::TriggerOccurrence {

@@ -2303,8 +2303,8 @@ async fn sweep_reput_race(f: Arc<dyn SessionStoreFactory>, make_bytes: &Attachme
 /// on a public API. The owner is now one [`AttachmentOwner`], so the malformed
 /// input no longer exists to diverge on, and what remains to certify is that
 /// the three owner shapes round-trip identically everywhere: a turn owner
-/// carries no incarnation, a process owner always carries its own, and an
-/// unowned direct host put reads back with no owner at all.
+/// names its turn, a process owner its minted process id, and an unowned
+/// direct host put reads back with no owner at all.
 #[expect(
     clippy::expect_used,
     clippy::unwrap_used,
@@ -2318,8 +2318,7 @@ pub async fn attachment_owner_identity_round_trips_conformance(f: Arc<dyn Sessio
         id: format!("owner-identity-turn-{namespace}"),
     };
     let process_owner = crate::AttachmentOwner::Process {
-        id: format!("owner-identity-process-{namespace}"),
-        incarnation: lash_core::ProcessIncarnation::from_registration_sequence(7),
+        process_id: crate::ProcessId::fixture(&format!("owner-identity-process-{namespace}")),
     };
     let cases: [(&str, Option<crate::AttachmentOwner>); 3] = [
         ("owner-identity-turn", Some(turn_owner.clone())),
@@ -2363,19 +2362,9 @@ pub async fn attachment_owner_identity_round_trips_conformance(f: Arc<dyn Sessio
         "a turn owner projects the turn discriminant"
     );
     assert_eq!(
-        turn_owner.incarnation(),
-        None,
-        "a turn owner never carries an incarnation"
-    );
-    assert_eq!(
         process_owner.kind(),
         lash_core::AttachmentOwnerKind::Process,
         "a process owner projects the process discriminant"
-    );
-    assert_eq!(
-        process_owner.incarnation(),
-        Some(lash_core::ProcessIncarnation::from_registration_sequence(7)),
-        "a process owner always carries its incarnation"
     );
 
     f.delete_session(&SessionId::from(session_id))

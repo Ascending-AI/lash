@@ -1588,12 +1588,12 @@ pub async fn process_wakes_batch_by_default(store: Arc<dyn RuntimePersistence>) 
     let merged_wakes = [
         policy_test_wake(
             &SessionId::from("wake-default-batch"),
-            &ProcessId::from("process-a"),
+            &crate::ProcessId::fixture("process-a"),
             1,
         ),
         policy_test_wake(
             &SessionId::from("wake-default-batch"),
-            &ProcessId::from("process-b"),
+            &crate::ProcessId::fixture("process-b"),
             1,
         ),
     ];
@@ -1673,14 +1673,13 @@ pub(super) fn policy_test_wake(
         version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("wake:{process_id}:{sequence}"),
         target_session_id: SessionId::from(session_id.to_string()),
-        process_id: ProcessId::from(process_id.to_string()),
-        process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
+        process_id: process_id.clone(),
         sequence,
         event_type: "process.wake".to_string(),
         event_invocation: RuntimeInvocation {
             attribution: RuntimeAttribution::for_session(session_id),
             subject: RuntimeSubject::ProcessEvent {
-                process_id: ProcessId::from(process_id.to_string()),
+                process_id: process_id.clone(),
                 sequence,
                 event_type: "process.wake".to_string(),
             },

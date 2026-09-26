@@ -222,7 +222,6 @@ pub enum RemoteLiveReplayGapReason {
 #[serde(deny_unknown_fields)]
 pub struct RemoteProcessObservationRequest {
     pub process_id: ProcessId,
-    pub incarnation: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cursor: Option<lash_sansio::ProcessCursor>,
 }
@@ -244,12 +243,6 @@ impl RemoteProcessObservationRequest {
             "process_id",
             &self.process_id,
         )?;
-        if self.incarnation == 0 {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name: "RemoteProcessObservationRequest",
-                message: "incarnation must be greater than zero".to_string(),
-            });
-        }
         Ok(())
     }
 }
@@ -262,7 +255,6 @@ pub enum RemoteProcessObservationGapReason {
     SubscriberLagged,
     PublisherReplaced,
     RoutingUnavailable,
-    ProcessIdReused,
     CrossProcess,
     InvalidCursor,
     PublisherJoinedMidRun,
@@ -361,11 +353,6 @@ pub enum RemoteProcessHistoryRetention {
         terminal_label: String,
         pruned_at_ms: u64,
     },
-    /// The process id now names a later lifetime.
-    Retired {
-        requested_incarnation: u64,
-        current_incarnation: u64,
-    },
     /// No retained process or tombstone has this id.
     Unknown,
 }
@@ -400,27 +387,23 @@ pub struct RemoteProcessObservationSnapshot {
 pub enum RemoteProcessObservationItem {
     Snapshot {
         process_id: ProcessId,
-        incarnation: u64,
         cursor: lash_sansio::ProcessCursor,
         snapshot: RemoteProcessObservationSnapshot,
     },
     Event {
         process_id: ProcessId,
-        incarnation: u64,
         cursor: lash_sansio::ProcessCursor,
         record: Box<lash_trace::TraceRecord>,
     },
     /// A durable event committed; read it through the events operation.
     Committed {
         process_id: ProcessId,
-        incarnation: u64,
         cursor: lash_sansio::ProcessCursor,
         sequence: u64,
         event_type: String,
     },
     Gap {
         process_id: ProcessId,
-        incarnation: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         requested_cursor: Option<lash_sansio::ProcessCursor>,
         cursor: lash_sansio::ProcessCursor,
@@ -445,38 +428,26 @@ impl RemoteProcessObservationItem {
             type_name: "RemoteProcessObservationItem",
             message: message.to_string(),
         };
-        let (process_id, incarnation, cursor, snapshot) = match self {
+        let (process_id, cursor, snapshot) = match self {
             Self::Snapshot {
                 process_id,
-                incarnation,
                 cursor,
                 snapshot,
-            } => (process_id, *incarnation, cursor, Some(snapshot)),
+            } => (process_id, cursor, Some(snapshot)),
             Self::Event {
-                process_id,
-                incarnation,
-                cursor,
-                ..
+                process_id, cursor, ..
             }
             | Self::Committed {
-                process_id,
-                incarnation,
-                cursor,
-                ..
-            } => (process_id, *incarnation, cursor, None),
+                process_id, cursor, ..
+            } => (process_id, cursor, None),
             Self::Gap {
                 process_id,
-                incarnation,
                 cursor,
                 snapshot,
                 ..
-            } => (process_id, *incarnation, cursor, Some(snapshot)),
+            } => (process_id, cursor, Some(snapshot)),
         };
-        require_non_empty("RemoteProcessObservationItem", "process_id", process_id)?;
-        if incarnation == 0 {
-            return Err(invalid("incarnation must be greater than zero"));
-        }
-        if !cursor.reference().names(process_id, incarnation) {
+        if !cursor.reference().names(process_id) {
             return Err(invalid("cursor names another process lifetime"));
         }
         match self {
@@ -488,10 +459,10 @@ impl RemoteProcessObservationItem {
                             &event.identity.subject,
                             lash_trace::TraceRuntimeSubject::Process { process_id: observed }
                                 if observed == process_id
-                        ) && event.identity.incarnation() == Some(incarnation)
+                        )
                 ) =>
             {
-                return Err(invalid("node event belongs to another process incarnation"));
+                return Err(invalid("node event belongs to another process"));
             }
             Self::Committed { sequence, .. } if *sequence != cursor.sequence() => {
                 return Err(invalid("committed item cursor must carry its sequence"));

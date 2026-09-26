@@ -1,6 +1,5 @@
 //! Deterministic embedding acceptance for the host-facing fork/rewind API.
 
-use lash::ProcessId;
 use lash::SessionId;
 use std::sync::Arc;
 
@@ -107,9 +106,8 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         .expect("enumerate retained host fork points");
     assert_eq!(points, vec![pinned.clone()]);
 
-    processes
+    let observed_process = processes
         .register_process(ProcessRegistration::new(
-            "fork-contract-observed-process",
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -121,11 +119,12 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
             ),
         ))
         .await
-        .expect("register process observed by the source");
+        .expect("register process observed by the source")
+        .id;
     processes
         .add_observer(
             &SessionId::from(SOURCE_SESSION),
-            &ProcessId::from("fork-contract-observed-process"),
+            &observed_process,
             ProcessObserverBy::host("fork-contract-source-observer"),
         )
         .await
@@ -141,38 +140,9 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         )
         .await
         .expect("host selects exact observed runs")
-        .iter()
-        .map(lash::process::ProcessRef::from_record)
+        .into_iter()
+        .map(|record| record.id)
         .collect::<Vec<_>>();
-    let conflicting_target = SessionId::from("conflicting-observer-selection");
-    let mut different_run = selected[0].clone();
-    different_run.incarnation = lash::process::ProcessIncarnation::from_registration_sequence(
-        different_run.incarnation.registration_sequence() + 1,
-    );
-    let error = core
-        .fork_at(lash::ForkRequest {
-            session_id: conflicting_target.clone(),
-            node_id: retained_node_id.clone(),
-            relation: SessionRelation::Root,
-            observed_processes: vec![selected[0].clone(), different_run],
-        })
-        .await
-        .expect_err("conflicting incarnations must be refused before creating a target");
-    assert!(
-        matches!(error, lash::EmbedError::Store(lash::persistence::StoreError::Backend(message)) if message.contains("conflicting incarnations"))
-    );
-    assert!(
-        stores
-            .open_existing_store(&SessionStoreCreateRequest {
-                session_id: conflicting_target,
-                relation: SessionRelation::Root,
-                pending_observer_intents: Vec::new(),
-                policy: source_state.policy.clone(),
-            })
-            .await
-            .expect("inspect refused fork target")
-            .is_none()
-    );
     let first_branch = core
         .fork_at(lash::ForkRequest {
             session_id: (FIRST_BRANCH).into(),
@@ -231,12 +201,11 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         )
         .await
         .expect("read inherited branch observations");
-    assert_eq!(inherited[0].id, "fork-contract-observed-process");
+    assert_eq!(inherited[0].id, observed_process);
 
     // The surviving branches need not agree about which work to observe.
     let other = processes
         .register_process(ProcessRegistration::new(
-            "fork-contract-other-process",
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -252,15 +221,15 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
     processes
         .remove_observer(
             &SessionId::from(FIRST_BRANCH),
-            &selected[0].process_id,
+            &selected[0],
             ProcessObserverBy::host("choose-other-work"),
         )
         .await
         .expect("replace first branch observer");
     processes
-        .add_observer_ref(
+        .add_observer(
             &SessionId::from(FIRST_BRANCH),
-            &lash::process::ProcessRef::from_record(&other),
+            &other.id,
             ProcessObserverBy::host("choose-other-work"),
         )
         .await
@@ -275,8 +244,8 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         )
         .await
         .expect("select intended survivor before deletion")
-        .iter()
-        .map(lash::process::ProcessRef::from_record)
+        .into_iter()
+        .map(|record| record.id)
         .collect::<Vec<_>>();
 
     let administration = core.session_administration().await;
@@ -349,8 +318,7 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         1,
         "rewind must preserve explicitly selected live branch observers"
     );
-    assert_eq!(observed[0].id, selected[0].process_id);
-    assert_eq!(observed[0].incarnation, selected[0].incarnation);
+    assert_eq!(observed[0].id, selected[0]);
     let rewind_store = stores
         .open_existing_store(&SessionStoreCreateRequest {
             session_id: REWOUND_BRANCH.into(),

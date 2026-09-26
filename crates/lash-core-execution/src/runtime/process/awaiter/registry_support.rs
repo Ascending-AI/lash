@@ -38,16 +38,13 @@ impl WatchedProcessRegistry {
         if sinks.is_empty() {
             return;
         }
-        let Ok(process_ref) = self.inner.resolve_process_ref(process_id).await else {
-            return;
-        };
         let limit = std::num::NonZeroUsize::new(128).unwrap_or(std::num::NonZeroUsize::MIN);
         let mut after_sequence = cursor;
         loop {
             let Ok(crate::ProcessEventReadOutcome::Retained(page)) = self
                 .inner
-                .event_page_ref(
-                    &process_ref,
+                .event_page_after(
+                    process_id,
                     after_sequence,
                     limit,
                     crate::ProcessEventQueryMode::Full,

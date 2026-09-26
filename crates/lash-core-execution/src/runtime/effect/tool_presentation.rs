@@ -26,7 +26,10 @@ use super::executor::RuntimeEffectControllerError;
 ///
 /// Version 2 (FIG-3515) carries message parts whose tool results hold ordered
 /// text and attachment blocks, one result per call.
-pub const TOOL_PRESENTATION_VERSION: u16 = 2;
+///
+/// Version 3 (FIG-3607) names processes by their minted id alone, so a
+/// presented process handle carries no incarnation.
+pub const TOOL_PRESENTATION_VERSION: u16 = 3;
 
 /// The journaled product of one tool result's presentation chain.
 ///

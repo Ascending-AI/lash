@@ -41,18 +41,18 @@ async fn cancelled_session_turn_never_creates_and_leaves_foreign_sessions_alone(
     .with_process_event_sink(Arc::clone(&sink) as Arc<dyn crate::ProcessEventSink>);
     config.native_substrate.worker_sweep.rescan_interval = Duration::from_secs(3600);
     let worker = DurableProcessWorker::new(config).expect("valid cancel worker");
-    let process_id = "session-turn-cancelled-before-start";
-    registry
-        .register_process(session_turn_registration(
-            &ProcessId::from(process_id),
-            &SessionId::from(foreign_session_id),
-        ))
+    let _process_id = "session-turn-cancelled-before-start";
+    let cancel_never_creates_foreign_root_record = registry
+        .register_process(session_turn_registration(&SessionId::from(
+            foreign_session_id,
+        )))
         .await
         .expect("register SessionTurn fixture");
+    let process_id = cancel_never_creates_foreign_root_record.id.clone();
     registry
         .append_event(
-            &ProcessId::from(process_id),
-            crate::ProcessEventAppendRequest::cancel_requested(&registry.resolve_process_ref(&ProcessId::from(process_id)).await.expect("retained cancellation target"),
+            &process_id,
+            crate::ProcessEventAppendRequest::cancel_requested(&registry.require_process_id(&process_id).await.expect("retained cancellation target"),
 &crate::CancelRequest::new(crate::CancelOrigin::OperatorRequested, "actor:fixture:cancelled_session_turn_never_creates_and_leaves_foreign_sessions_alone", 11)),
         )
         .await
@@ -63,9 +63,9 @@ async fn cancelled_session_turn_never_creates_and_leaves_foreign_sessions_alone(
         .await
         .expect("admit cancelled SessionTurn");
     assert_eq!(report.admitted, vec![process_id.to_string()]);
-    await_terminal(&registry, &ProcessId::from(process_id)).await;
+    await_terminal(&registry, &process_id).await;
     let record = registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await
         .expect("read cancelled SessionTurn")
         .expect("cancelled SessionTurn remains retained");

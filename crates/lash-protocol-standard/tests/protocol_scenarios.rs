@@ -784,7 +784,11 @@ fn standard_protocol_scenario_native_tool_loop_reenters_model_after_checkpoint()
     "#);
 }
 
-struct StandardIntentProvider;
+/// Declares all four intents; signal, emit and cancel address `target`, the
+/// process the scenario registered.
+struct StandardIntentProvider {
+    target: lash_core::ProcessId,
+}
 
 fn standard_intent_tool() -> lash_core::ToolDefinition {
     lash_core::ToolDefinition::raw(
@@ -824,19 +828,19 @@ impl lash_core::ToolProvider for StandardIntentProvider {
                 })),
                 lash_core::ToolIntent::SignalProcess(lash_core::SignalProcessIntent {
                     session_id: lash_core::SessionId::from(session_id.clone()),
-                    process_id: lash_core::ProcessId::from("standard-intent-target"),
+                    process_id: self.target.clone(),
                     signal_name: "resume".to_string(),
                     payload: serde_json::json!({"kind": "signal"}),
                 }),
                 lash_core::ToolIntent::EmitProcessEvent(lash_core::EmitProcessEventIntent {
                     session_id: lash_core::SessionId::from(session_id.clone()),
-                    process_id: lash_core::ProcessId::from("standard-intent-target"),
+                    process_id: self.target.clone(),
                     event_type: "standard.intent.note".to_string(),
                     payload: serde_json::json!({"kind": "emit"}),
                 }),
                 lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
                     session_id: lash_core::SessionId::from(session_id),
-                    process_id: lash_core::ProcessId::from("standard-intent-target"),
+                    process_id: self.target.clone(),
                 }),
             ]),
         )
@@ -849,10 +853,9 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
         .await
         .expect("open a SQLite memory backend");
     let registry = lash_core::Backend::from(backend.clone()).process_registry();
-    registry
+    let standard_intent_target_id = registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(
-                "standard-intent-target",
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -878,7 +881,8 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
             &[SessionId::from("standard-protocol-scenario")],
         )
         .await
-        .expect("register Standard intent target");
+        .expect("register Standard intent target")
+        .id;
     let requests = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
     let model_calls = Arc::new(AtomicUsize::new(0));
     let provider = lash_core::testing::TestProvider::builder()
@@ -921,7 +925,9 @@ async fn standard_protocol_scenario_projects_every_v1_intent_outcome_into_model_
             }
         })
         .build();
-    let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(StandardIntentProvider);
+    let tools: Arc<dyn lash_core::ToolProvider> = Arc::new(StandardIntentProvider {
+        target: standard_intent_target_id,
+    });
     let mut factories: Vec<Arc<dyn lash_core::facade_support::PluginFactory>> = vec![Arc::new(
         lash_protocol_standard::StandardProtocolPluginFactory::new(),
     )];

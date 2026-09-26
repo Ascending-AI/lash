@@ -474,7 +474,7 @@ mod tests {
         DurableItem {
             surface,
             cursor: "c".to_string(),
-            process_id: Some(ProcessId::from("p-1")),
+            process_id: Some(ProcessId::fixture("p-1")),
             session_id: Some(SessionId::from("s-1")),
             status: Some("waiting".to_string()),
             owner_record: None,

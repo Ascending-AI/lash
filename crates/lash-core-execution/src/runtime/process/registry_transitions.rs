@@ -27,7 +27,7 @@ use crate::plugin::PluginError;
 use crate::store::session_execution_lease::LeaseOwnerIdentity;
 
 use super::events::{PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessWakeDelivery};
-use super::model::{PROCESS_LEASE_SCHEMA_VERSION, ProcessLease, ProcessRef};
+use super::model::{PROCESS_LEASE_SCHEMA_VERSION, ProcessLease};
 use super::registry::{
     WakeDelivery, WakeDeliveryDisposition, WakeDeliveryState, WakeDiscardReason,
 };
@@ -49,9 +49,8 @@ struct ProcessWakeDeliveryFormatVersionProbe {
 fn decode_process_wake_delivery(delivery_json: &str) -> Result<ProcessWakeDelivery, PluginError> {
     let probe: ProcessWakeDeliveryFormatVersionProbe =
         serde_json::from_str(delivery_json).map_err(registry_row_decode_error)?;
-    let found = probe
-        .version
-        .unwrap_or(PROCESS_WAKE_DELIVERY_FORMAT_VERSION - 1);
+    // A delivery written before the format carried a stamp is format 2.
+    let found = probe.version.unwrap_or(2);
     if found != PROCESS_WAKE_DELIVERY_FORMAT_VERSION {
         return Err(PluginError::ProcessWakeDeliveryFormatVersionMismatch {
             expected: PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
@@ -118,7 +117,7 @@ impl ProcessLeaseRow {
         };
         Some(ProcessLease {
             schema_version: PROCESS_LEASE_SCHEMA_VERSION,
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             owner: LeaseOwnerIdentity {
                 incarnation_id: self.incarnation_id.unwrap_or_else(|| owner_id.clone()),
                 owner_id,
@@ -170,7 +169,7 @@ pub fn authorize_process_lease_write(
 ) -> Result<(), PluginError> {
     if claimed.process_id != process_id || !process_lease_still_holds(stored, claimed, now_ms) {
         return Err(PluginError::ProcessLeaseSuperseded {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
         });
     }
     Ok(())
@@ -308,7 +307,7 @@ pub fn acquired_process_lease(
 ) -> ProcessLease {
     ProcessLease {
         schema_version: PROCESS_LEASE_SCHEMA_VERSION,
-        process_id: ProcessId::from(process_id.to_string()),
+        process_id: process_id.clone(),
         owner: owner.clone(),
         lease_token: crate::stable_hash::blake3_hex(
             "lash-process-lease/v2",
@@ -345,23 +344,10 @@ pub fn process_no_longer_retained(stamp: ProcessTombstoneStamp) -> PluginError {
     }
 }
 
-/// Refusal for a durable reference whose reusable name now identifies another
-/// process lifetime.
-pub fn process_incarnation_superseded(
-    requested: &ProcessRef,
-    current_incarnation: super::model::ProcessIncarnation,
-) -> PluginError {
-    PluginError::ProcessIncarnationSuperseded {
-        process_id: requested.process_id.clone(),
-        requested_incarnation: requested.incarnation,
-        current_incarnation,
-    }
-}
-
 /// Refusal for a process id no registry ever knew.
 pub fn unknown_process(process_id: &ProcessId) -> PluginError {
     PluginError::ProcessUnknown {
-        process_id: ProcessId::from(process_id.to_string()),
+        process_id: process_id.clone(),
     }
 }
 

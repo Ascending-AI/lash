@@ -98,7 +98,7 @@ fn processes_area_witnesses_b() {
         }
     });
     // W0360: lash::runtime::ExecutionScope::process [function]
-    let _ = lash::runtime::ExecutionScope::process(lash::ProcessId::from("x"));
+    let _ = lash::runtime::ExecutionScope::process(lash::ProcessId::fixture("x"));
     // W0361: lash::runtime::ProcessCommand::Await [variant]
     variant_witness(|value: &lash::runtime::ProcessCommand| {
         matches!(value, lash::runtime::ProcessCommand::Await { .. })
@@ -323,8 +323,7 @@ fn processes_area_witnesses_b() {
     // W0430: lash::tools::ToolContext::emit_child_process_started [function]
     let _ = lash::tools::ToolContext::emit_child_process_started(
         todo!(),
-        lash::ProcessId::from("x"),
-        todo!(),
+        lash::ProcessId::fixture("x"),
         todo!(),
         todo!(),
     );
@@ -344,7 +343,7 @@ fn processes_area_witnesses_b() {
         }
     });
     // W0436: lash::durability::EffectJournalRetirement::process [function]
-    let _ = lash::durability::EffectJournalRetirement::process(lash::ProcessId::from("x"));
+    let _ = lash::durability::EffectJournalRetirement::process(lash::ProcessId::fixture("x"));
     // W0437: lash::process::ProcessChange [enum]
     type_witness::<lash::process::ProcessChange>();
     // W0438: lash::process::ProcessChange::Deleted [variant]
@@ -512,7 +511,7 @@ fn processes_area_witnesses_b() {
     let _ = lash::process::ProcessExecutionWriteAuthority::bind_attempt;
     // W0491: lash::process::ProcessExecutionWriteAuthority::invocation [function]
     let _ = lash::process::ProcessExecutionWriteAuthority::invocation(
-        lash::ProcessId::from("x"),
+        lash::ProcessId::fixture("x"),
         String::new(),
     );
     // W0493: lash::process::ProcessExecutionWriteAuthority::invocation_started [function]
@@ -1189,14 +1188,12 @@ fn processes_area_witnesses_b() {
     // W0713: lash_core::facade_support::SessionObserverIntent [struct]
     type_witness::<lash_core::facade_support::SessionObserverIntent>();
     // W0716: lash_core::facade_support::SessionObserverIntent::host_requested [function]
-    let _ = lash_core::facade_support::SessionObserverIntent::host_requested("x");
+    let _ = lash_core::facade_support::SessionObserverIntent::host_requested(
+        lash::ProcessId::fixture("x"),
+    );
     // W0717: lash_core::facade_support::SessionObserverIntent::process_id [field]
     field_witness(|value: &lash_core::facade_support::SessionObserverIntent| {
         let _ = &value.process_id;
-    });
-    // W0718: lash_core::facade_support::SessionObserverIntent::process_incarnation [field]
-    field_witness(|value: &lash_core::facade_support::SessionObserverIntent| {
-        let _ = &value.process_incarnation;
     });
     // W0722: lash::plugins::PluginError::ProcessCallerDeparted [variant]
     variant_witness(|value: &lash::plugins::PluginError| {

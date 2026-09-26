@@ -475,9 +475,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
             self.runtime_parent_invocation
                 .as_ref()
                 .and_then(crate::RuntimeInvocation::effect_address)
-                .and_then(|address| {
-                    crate::AdmittedScope::unpinned(address.execution_scope.clone()).ok()
-                })
+                .map(|address| crate::AdmittedScope::new(address.execution_scope.clone()))
                 .unwrap_or_else(|| {
                     crate::AdmittedScope::turn(
                         self.session_id.clone(),

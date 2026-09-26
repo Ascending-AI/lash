@@ -80,7 +80,6 @@ mod tests {
         );
         let process = registry
             .register_process(ProcessRegistration::new(
-                "external-attachment-process",
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -185,8 +184,7 @@ mod tests {
                 .is_empty()
         );
         assert!(attachment_backend.list().await.unwrap().is_empty());
-        let handle =
-            RuntimeExecutionContext::process_handle_json(&crate::ProcessRef::from_record(&process));
+        let handle = RuntimeExecutionContext::process_handle_json(&process.id.clone());
         let reply =
             crate::await_process_handle(&context, "await-external-attachment".to_string(), handle)
                 .await;
@@ -343,7 +341,6 @@ mod tests {
         });
         let env_store = backend.process_env_store();
         let parent = crate::ProcessRegistration::new(
-            "parent-process",
             crate::ProcessInput::Engine {
                 kind: "test-engine".to_string(),
                 payload: serde_json::json!({"program": "parent"}),
@@ -371,7 +368,7 @@ mod tests {
             crate::PluginOptions::default(),
             crate::testing::standard_test_policy(),
         ))
-        .with_process_execution(&parent, None);
+        .with_process_execution(crate::ProcessId::fixture("parent"), &parent, None);
 
         let started = crate::start_tool_process(
             &context,
@@ -384,15 +381,20 @@ mod tests {
         let crate::ToolCallOutcome::Success(_handle) = started.output.outcome else {
             panic!("expected process handle output");
         };
-        // The minted handle is the one record: an opaque id that names the
-        // process and the incarnation it was taken against, not a copy of the
-        // process id beside a separate incarnation field.
+        // The handle is the one record: an opaque id naming the process the
+        // registrar minted, beside that id.
+        let process_id = crate::ProcessId::parse(
+            handle_json["process_id"]
+                .as_str()
+                .expect("the handle names its process"),
+        )
+        .expect("a minted process id");
         assert_eq!(
             handle_json,
             serde_json::json!({
                 "__handle__": "lash",
-                "id": lash_sansio::handle::HandleId::process("async-call-1", 1).as_str(),
-                "process_id": "async-call-1",
+                "id": lash_sansio::handle::HandleId::process(&process_id).as_str(),
+                "process_id": process_id,
             })
         );
         assert_eq!(
@@ -400,30 +402,26 @@ mod tests {
                 .as_ref()
                 .and_then(lash_sansio::handle::HandleId::target),
             Some(lash_sansio::handle::HandleTarget::Process {
-                process_id: "async-call-1".to_string(),
-                incarnation: 1,
+                process_id: process_id.clone(),
             })
         );
         assert_eq!(prepares.load(Ordering::SeqCst), 1);
         let record = registry
-            .get_process(&ProcessId::from("async-call-1"))
+            .get_process(&process_id)
             .await
             .expect("read process")
             .expect("registered process");
         registry
             .remove_observer(
                 &SessionId::from("session"),
-                &ProcessId::from("async-call-1"),
+                &process_id,
                 crate::ProcessObserverBy::host("remove-test-observer"),
             )
             .await
             .expect("remove persisted observer");
         assert!(
             !registry
-                .is_observer(
-                    &SessionId::from("session"),
-                    &ProcessId::from("async-call-1")
-                )
+                .is_observer(&SessionId::from("session"), &process_id)
                 .await
                 .expect("check removed observer"),
             "tool-started process must rely on its persisted observer edge"
@@ -445,8 +443,9 @@ mod tests {
         assert!(!awaited.output.is_success());
         let await_error = awaited.output.value_for_projection().to_string();
         assert!(
-            await_error
-                .contains("process handle `async-call-1` is not live or visible in this session"),
+            await_error.contains(&format!(
+                "process handle `{process_id}` is not live or visible in this session"
+            )),
             "revoked tool-started handle must return the typed visibility miss: {await_error}"
         );
         let record = awaited.record.expect("await record");
@@ -472,7 +471,6 @@ mod tests {
         let target_process = registry
             .register_process(
                 ProcessRegistration::new(
-                    "target-process",
                     ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
@@ -494,7 +492,7 @@ mod tests {
         registry
             .add_observer(
                 &SessionId::from("session"),
-                &ProcessId::from("target-process"),
+                &target_process.id,
                 crate::ProcessObserverBy::host("foreground-signal-test"),
             )
             .await
@@ -543,11 +541,9 @@ mod tests {
             crate::TurnContext::default(),
         );
 
-        let handle =
-            lash_sansio::handle::handle_record_json(&lash_sansio::handle::HandleId::process(
-                "target-process",
-                target_process.incarnation.registration_sequence(),
-            ));
+        let handle = lash_sansio::handle::handle_record_json(
+            &lash_sansio::handle::HandleId::process(&target_process.id),
+        );
         let signalled = crate::signal_process_handle(
             &context,
             "signal-1".to_string(),
@@ -566,7 +562,7 @@ mod tests {
         assert_eq!(record.call_id.as_deref(), Some("signal-1"));
         assert_eq!(record.tool, "signal_process");
         let events = registry
-            .full_event_window(&ProcessId::from("target-process"), 0)
+            .full_event_window(&target_process.id, 0)
             .await
             .expect("list events");
         assert!(
@@ -590,7 +586,7 @@ mod tests {
     /// readable by `cancel`.
     ///
     /// The three malformed shapes are kept distinguishable on purpose: they are
-    /// the parser's three branches (`ProcessRef::from_handle_json`), and a
+    /// the parser's three branches (`ProcessId::from_handle_json`), and a
     /// parser that collapsed them would still refuse every one of them.
     #[tokio::test]
     async fn an_unreadable_process_handle_is_refused_and_recorded_by_every_handle_operation() {
@@ -658,11 +654,8 @@ mod tests {
                 lash_sansio::handle::handle_record_json(&lash_sansio::handle::HandleId::tool(7, 1)),
             ),
             (
-                "a process handle without an incarnation",
-                lash_sansio::handle::handle_record_json(&lash_sansio::handle::HandleId::process(
-                    "process-7",
-                    0,
-                )),
+                "a process handle whose id no registrar minted",
+                json!({ "__handle__": "lash", "id": "p.process-7" }),
             ),
         ];
 
@@ -750,7 +743,6 @@ mod tests {
         let hidden_process = registry
             .register_process(
                 ProcessRegistration::new(
-                    "hidden-process",
                     ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
@@ -812,11 +804,9 @@ mod tests {
             None,
             crate::TurnContext::default(),
         );
-        let handle =
-            lash_sansio::handle::handle_record_json(&lash_sansio::handle::HandleId::process(
-                "hidden-process",
-                hidden_process.incarnation.registration_sequence(),
-            ));
+        let handle = lash_sansio::handle::handle_record_json(
+            &lash_sansio::handle::HandleId::process(&hidden_process.id),
+        );
 
         let awaited = crate::await_process_handle(
             &context,
@@ -855,9 +845,10 @@ mod tests {
                 "{operation} must return the exact same typed visibility miss"
             );
             assert!(
-                error.to_string().contains(
-                    "process handle `hidden-process` is not live or visible in this session"
-                ),
+                error.to_string().contains(&format!(
+                    "process handle `{}` is not live or visible in this session",
+                    hidden_process.id
+                )),
                 "{operation} must return the shared typed visibility miss: {error}"
             );
         }
@@ -876,10 +867,9 @@ mod tests {
             Some("cancel-hidden-process")
         );
 
-        let mut local_incarnations = BTreeMap::new();
-        for process_id in ["local-signal", "local-cancel", "local-await"] {
+        let mut local_ids = BTreeMap::new();
+        for label in ["local-signal", "local-cancel", "local-await"] {
             let mut registration = ProcessRegistration::new(
-                process_id,
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -890,7 +880,7 @@ mod tests {
                     crate::OnParentEnd::Abandon,
                 ),
             );
-            if process_id == "local-signal" {
+            if label == "local-signal" {
                 registration = registration.with_extra_event_types([crate::ProcessEventType {
                     name: "signal.ready".to_string(),
                     payload_schema: crate::LashSchema::any(),
@@ -901,12 +891,12 @@ mod tests {
                 .register_process(registration)
                 .await
                 .expect("register run-local process without observer edge");
-            local_incarnations.insert(process_id, record.incarnation);
-            crate::record_started_process(&context, &ProcessId::from(process_id));
+            crate::record_started_process(&context, &record.id);
+            local_ids.insert(label, record.id);
         }
         registry
             .complete_process(
-                &ProcessId::from("local-await"),
+                &local_ids["local-await"],
                 crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!(
                     "local done"
                 ))),
@@ -916,17 +906,13 @@ mod tests {
             .expect("complete run-local await process");
         let local_handle = |process_id: &ProcessId| {
             lash_sansio::handle::handle_record_json(&lash_sansio::handle::HandleId::process(
-                process_id.as_str(),
-                local_incarnations
-                    .get(process_id.as_str())
-                    .expect("registered process incarnation")
-                    .registration_sequence(),
+                process_id,
             ))
         };
         let local_signal = crate::signal_process_handle(
             &context,
             "signal-local".to_string(),
-            local_handle(&ProcessId::from("local-signal")),
+            local_handle(&local_ids["local-signal"]),
             "ready".to_string(),
             serde_json::Value::Null,
         )
@@ -934,13 +920,13 @@ mod tests {
         let local_cancel = crate::cancel_process_handle(
             &context,
             "cancel-local".to_string(),
-            local_handle(&ProcessId::from("local-cancel")),
+            local_handle(&local_ids["local-cancel"]),
         )
         .await;
         let local_await = crate::await_process_handle(
             &context,
             "await-local".to_string(),
-            local_handle(&ProcessId::from("local-await")),
+            local_handle(&local_ids["local-await"]),
         )
         .await;
         for (operation, reply) in [
@@ -962,7 +948,7 @@ mod tests {
 
         registry
             .complete_process(
-                &ProcessId::from("hidden-process"),
+                &hidden_process.id,
                 crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!(
                     "done"
                 ))),
@@ -973,13 +959,13 @@ mod tests {
         registry
             .add_observer(
                 &SessionId::from("session"),
-                &ProcessId::from("hidden-process"),
+                &hidden_process.id,
                 crate::ProcessObserverBy::host("observe-hidden-process"),
             )
             .await
             .expect("observe process");
         let retained = registry
-            .get_process(&ProcessId::from("hidden-process"))
+            .get_process(&hidden_process.id)
             .await
             .expect("read observed process")
             .expect("observed process remains retained");
@@ -1003,7 +989,7 @@ mod tests {
             "signaling a retained terminal process must return the typed terminal error"
         );
         let after_rejected_signal = registry
-            .get_process(&ProcessId::from("hidden-process"))
+            .get_process(&hidden_process.id)
             .await
             .expect("read terminal process after rejected signal")
             .expect("terminal process remains retained");
@@ -1024,9 +1010,7 @@ mod tests {
             .expect("prune observed process");
         assert_eq!(prune.pruned_processes, 1);
         assert!(matches!(
-            registry
-                .get_process(&ProcessId::from("hidden-process"))
-                .await,
+            registry.get_process(&hidden_process.id).await,
             Err(crate::PluginError::ProcessNoLongerRetained { .. })
         ));
         let pruned_await = crate::await_process_handle(
@@ -1117,10 +1101,8 @@ mod tests {
             crate::testing::MockSessionManager::default()
                 .with_process_registry(Arc::clone(&registry)),
         );
-        let child = ProcessId::from("intent-started-child");
         let started = registry
             .register_process(ProcessRegistration::new(
-                child.clone(),
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -1133,6 +1115,7 @@ mod tests {
             ))
             .await
             .expect("register the child a start declaration realizes");
+        let child = started.id.clone();
         registry
             .complete_process(
                 &child,
@@ -1192,8 +1175,7 @@ mod tests {
             None,
             crate::TurnContext::default(),
         );
-        let realized_handle =
-            RuntimeExecutionContext::process_handle_json(&crate::ProcessRef::from_record(&started));
+        let realized_handle = RuntimeExecutionContext::process_handle_json(&started.id.clone());
 
         assert!(
             !context.started_process_ids().contains(&child),

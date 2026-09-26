@@ -24,7 +24,7 @@ fn peer_record(
     registration: lash_core::ProcessRegistration,
 ) -> Result<RemoteProcessRecord, RemoteProtocolError> {
     let lash_core::ProcessRegistration {
-        id,
+        start_key,
         input,
         disposition,
         lifecycle,
@@ -36,8 +36,8 @@ fn peer_record(
         wake_session_id: _,
     } = registration;
     Ok(RemoteProcessRecord {
-        process_id: id,
-        incarnation: 1,
+        process_id: lash_sansio::ProcessId::fixture("registration-parity"),
+        start_key_digest: start_key.map(|key| key.as_str().to_string()),
         last_event_sequence: 0,
         input: input.as_ref().clone().try_into()?,
         disposition: disposition.into(),

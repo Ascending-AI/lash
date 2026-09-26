@@ -23,7 +23,7 @@ pub(super) struct ProcessLeaseObservation {
 pub(super) struct ProcessRows {
     pub(super) records: Vec<serde_json::Value>,
     pub(super) events: Vec<serde_json::Value>,
-    pub(super) observers: Vec<(SessionId, ProcessId, u64)>,
+    pub(super) observers: Vec<(SessionId, ProcessId)>,
     pub(super) leases: Vec<ProcessLeaseObservation>,
     pub(super) wake_deliveries: Vec<serde_json::Value>,
     pub(super) wake_allocation_floors: Vec<(SessionId, ProcessId, u64)>,
@@ -105,42 +105,14 @@ pub(super) fn normalized_trigger_delivery_json(
     let fields = value
         .as_object_mut()
         .expect("trigger delivery observation must be an object");
-    let occurrence_id = fields
-        .get("occurrence_id")
-        .and_then(serde_json::Value::as_str)
-        .expect("trigger delivery occurrence id");
-    let subscription_id = fields
-        .get("subscription_id")
-        .and_then(serde_json::Value::as_str)
-        .expect("trigger delivery subscription id");
-    let process_id = fields
-        .get("process_id")
-        .and_then(serde_json::Value::as_str)
-        .expect("trigger delivery process id");
-    let snapshot = fields
-        .get("subscription_snapshot")
-        .and_then(serde_json::Value::as_object)
-        .expect("trigger delivery subscription snapshot");
-    let incarnation = snapshot
-        .get("incarnation")
-        .and_then(serde_json::Value::as_str)
-        .expect("trigger delivery subscription incarnation");
-    let revision = snapshot
-        .get("revision")
-        .and_then(serde_json::Value::as_u64)
-        .expect("trigger delivery subscription revision");
-    let expected_process_id = lash_core::facade_support::deterministic_delivery_process_id(
-        occurrence_id,
-        subscription_id,
-        incarnation,
-        revision,
-    )
-    .expect("derive trigger delivery process id");
-    let process_id_matches_derivation = process_id == expected_process_id;
-    fields.remove("process_id");
+    // A delivery's process is minted when the delivery starts it, so the two
+    // backends agree on whether a process is bound, not on its id.
+    let process_id_bound = fields
+        .remove("process_id")
+        .is_some_and(|process_id| !process_id.is_null());
     fields.insert(
-        "process_id_matches_derivation".to_string(),
-        serde_json::Value::Bool(process_id_matches_derivation),
+        "process_id_bound".to_string(),
+        serde_json::Value::Bool(process_id_bound),
     );
     normalized_trigger_json(value, incarnations)
 }
@@ -240,13 +212,12 @@ pub(super) fn read_sqlite_surface(
     );
     let observers = {
         let mut stmt = process
-            .prepare("SELECT session_id, process_id, process_incarnation FROM process_observers ORDER BY session_id, process_id, process_incarnation")
+            .prepare("SELECT session_id, process_id FROM process_observers ORDER BY session_id, process_id")
             .unwrap();
         stmt.query_map([], |row| {
             Ok((
                 SessionId::from(row.get::<_, String>(0)?),
-                ProcessId::from(row.get::<_, String>(1)?),
-                u64::try_from(row.get::<_, i64>(2)?).expect("non-negative process incarnation"),
+                stored_process_id(row.get::<_, String>(1)?),
             ))
         })
         .unwrap()
@@ -267,7 +238,7 @@ pub(super) fn read_sqlite_surface(
             let incarnation_id: Option<String> = row.get(2)?;
             let claimed: i64 = row.get(5)?;
             Ok(ProcessLeaseObservation {
-                process_id: ProcessId::from(row.get::<_, String>(0)?),
+                process_id: stored_process_id(row.get::<_, String>(0)?),
                 lease_token_present: row.get::<_, Option<String>>(3)?.is_some(),
                 owner: if row.get::<_, Option<String>>(3)?.is_some() {
                     serde_json::to_value(decode_lease_owner(owner_id, incarnation_id)).unwrap()
@@ -337,7 +308,7 @@ pub(super) fn read_sqlite_surface(
         stmt.query_map([], |row| {
             Ok((
                 SessionId::from(row.get::<_, String>(0)?),
-                ProcessId::from(row.get::<_, String>(1)?),
+                stored_process_id(row.get::<_, String>(1)?),
                 row.get::<_, i64>(2)? as u64,
             ))
         })
@@ -347,15 +318,14 @@ pub(super) fn read_sqlite_surface(
     };
     let tombstones = sqlite_simple_json_rows(
         &process,
-        "SELECT process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq
-         FROM process_tombstones ORDER BY process_id, incarnation",
+        "SELECT process_id, terminal_label, pruned_at_ms, pruned_change_seq
+         FROM process_tombstones ORDER BY process_id",
         |row| {
             Ok(normalized_json(serde_json::json!({
                 "process_id": row.get::<_, String>(0)?,
-                "incarnation": row.get::<_, i64>(1)?,
-                "terminal_label": row.get::<_, String>(2)?,
-                "pruned_at_ms": row.get::<_, i64>(3)?,
-                "pruned_change_seq": row.get::<_, i64>(4)?,
+                "terminal_label": row.get::<_, String>(1)?,
+                "pruned_at_ms": row.get::<_, i64>(2)?,
+                "pruned_change_seq": row.get::<_, i64>(3)?,
             })))
         },
     );
@@ -465,7 +435,6 @@ pub(super) fn read_sqlite_triggers(connection: &rusqlite::Connection) -> Trigger
 }
 
 #[expect(
-    clippy::expect_used,
     clippy::unwrap_used,
     reason = "test support: the surrounding harness code establishes this value; a refusal panics the harness with its case name by design"
 )]
@@ -484,18 +453,14 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
     .unwrap();
     let events = event_rows.into_iter().map(|(process_id, event)| normalized_json(serde_json::json!({"process_id": process_id, "event": serde_json::from_str::<serde_json::Value>(&event).unwrap()}))).collect();
     let observers = sqlx::query_as(
-        "SELECT session_id, process_id, process_incarnation FROM lash_process_observers ORDER BY session_id, process_id, process_incarnation",
+        "SELECT session_id, process_id FROM lash_process_observers ORDER BY session_id, process_id",
     )
     .fetch_all(pool)
     .await
     .unwrap()
     .into_iter()
-    .map(|(session_id, process_id, incarnation): (String, String, i64)| {
-        (
-            SessionId::from(session_id),
-            ProcessId::from(process_id),
-            u64::try_from(incarnation).expect("non-negative process incarnation"),
-        )
+    .map(|(session_id, process_id): (String, String)| {
+        (SessionId::from(session_id), stored_process_id(process_id))
     })
     .collect();
     type PgLeaseRow = (
@@ -512,7 +477,7 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
         .map(
             |(process_id, owner_id, incarnation, token, fencing, claimed)| {
                 ProcessLeaseObservation {
-                    process_id: ProcessId::from(process_id),
+                    process_id: stored_process_id(process_id),
                     owner: if token.is_some() {
                         serde_json::to_value(decode_lease_owner(owner_id, incarnation)).unwrap()
                     } else {
@@ -590,13 +555,13 @@ pub(super) async fn read_postgres_surface(pool: &PgPool) -> SurfaceState {
         .map(|(session, process, sequence)| {
             (
                 SessionId::from(session),
-                ProcessId::from(process),
+                stored_process_id(process),
                 sequence as u64,
             )
         })
         .collect();
-    let tombstone_rows: Vec<(String, i64, String, i64, i64)> = sqlx::query_as("SELECT process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq FROM lash_process_tombstones ORDER BY process_id, incarnation").fetch_all(pool).await.unwrap();
-    let tombstones = tombstone_rows.into_iter().map(|(process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq)| normalized_json(serde_json::json!({"process_id": process_id, "incarnation": incarnation, "terminal_label": terminal_label, "pruned_at_ms": pruned_at_ms, "pruned_change_seq": pruned_change_seq}))).collect();
+    let tombstone_rows: Vec<(String, String, i64, i64)> = sqlx::query_as("SELECT process_id, terminal_label, pruned_at_ms, pruned_change_seq FROM lash_process_tombstones ORDER BY process_id").fetch_all(pool).await.unwrap();
+    let tombstones = tombstone_rows.into_iter().map(|(process_id, terminal_label, pruned_at_ms, pruned_change_seq)| normalized_json(serde_json::json!({"process_id": process_id, "terminal_label": terminal_label, "pruned_at_ms": pruned_at_ms, "pruned_change_seq": pruned_change_seq}))).collect();
     let fence_rows: Vec<(String, String, i64)> = sqlx::query_as("SELECT session_id, process_id, allocation_floor FROM lash_wake_redelivery_fences ORDER BY session_id, process_id").fetch_all(pool).await.unwrap();
     let wake_redelivery_fences = fence_rows
         .into_iter()
@@ -703,4 +668,14 @@ pub(super) fn states_agree(observations: &[(&str, SurfaceState)]) -> bool {
             && pair[0].1.turn_parks == pair[1].1.turn_parks
             && pair[0].1.turn_park_loads == pair[1].1.turn_park_loads
     })
+}
+
+/// A process id a store row holds: always one a registrar minted, or a
+/// fixture of the same shape.
+#[expect(
+    clippy::expect_used,
+    reason = "test support: a stored process id that does not decode is a store defect the differential must surface"
+)]
+fn stored_process_id(value: String) -> ProcessId {
+    ProcessId::parse(&value).expect("a stored process id decodes")
 }

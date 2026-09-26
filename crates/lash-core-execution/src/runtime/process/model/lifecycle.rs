@@ -5,7 +5,7 @@ use super::{
     ProcessExecutionEnvRef, ProcessId, ProcessInput, ProcessProvenance, ProcessRegistration,
     RecoveryContract, SessionId,
 };
-use crate::{EffectOpener, ProcessRef};
+use crate::EffectOpener;
 
 /// The host-selected action when a process's parent scope ends.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
@@ -40,8 +40,8 @@ impl OnParentEnd {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", content = "opener", rename_all = "snake_case")]
 pub enum ParentScope {
-    /// A durable opener — a turn, a queued-work drain or one process
-    /// incarnation — owns the child.
+    /// A durable opener — a turn, a queued-work drain or one process — owns
+    /// the child.
     Owned(EffectOpener),
     /// Host-selected lifecycle ownership. A host scope never ends within a
     /// process's lifetime.
@@ -54,7 +54,10 @@ pub enum ParentScope {
 /// `(kind, id)` columns beside it are only its index projection. A reader
 /// refuses any other version rather than guessing at a shape it was not
 /// built for.
-pub const PARENT_SCOPE_STORAGE_PAYLOAD_VERSION: u16 = 1;
+///
+/// Version 2: a process parent names its minted process id, with no
+/// incarnation (ADR 0107).
+pub const PARENT_SCOPE_STORAGE_PAYLOAD_VERSION: u16 = 2;
 
 /// The versioned typed parent persisted beside the index projection.
 ///
@@ -106,10 +109,10 @@ impl ParentScope {
         Self::Owned(EffectOpener::queue_drain(session_id, drain_id))
     }
 
-    /// The parent one process incarnation is.
+    /// The parent one process is.
     #[must_use]
-    pub fn process(process_ref: ProcessRef) -> Self {
-        Self::Owned(EffectOpener::process(process_ref))
+    pub fn process(process_id: ProcessId) -> Self {
+        Self::Owned(EffectOpener::process(process_id))
     }
 
     /// The owning opener, when the parent is owned rather than host-managed.
@@ -208,7 +211,7 @@ impl ParentScope {
     ///
     /// [`crate::EffectOpener`] is the one owner vocabulary (ADR 0099 §1) —
     /// derived once, at admission, by [`crate::EffectOpener::for_scope`] from
-    /// the admitted scope plus its pinned `ProcessRef` — and this is the only
+    /// the admitted scope — and this is the only
     /// projection of that vocabulary into a `ParentScope`.
     ///
     /// A `QueueDrain` opener is a durable owner in exactly §1's sense, and
@@ -237,14 +240,13 @@ impl ProcessLifecyclePolicy {
 }
 
 /// A start request as a leaf tool attempt declares it: everything a process
-/// start needs except its id.
+/// start needs except its key.
 ///
-/// The id is not declaration material. It is a pure function of the declaring
-/// attempt's intent identity ([`ProcessId::from_intent_identity`]), so the
-/// attempt can name the child it is starting before the start commits, and the
-/// executor derives the same id on every redrive. Carrying an id here instead
-/// would hash a field the executor overwrites into the submission payload,
-/// which is what tripped the duplicate-identity check on redrive (FIG-2994).
+/// The key is not declaration material. It is a pure function of the declaring
+/// attempt's intent identity ([`crate::StartKey::for_tool_intent`]), so every
+/// redrive of the declaration presents the same key and starts the same
+/// process. The process id is minted by the registrar at realization and read
+/// back off the recorded result (ADR 0107).
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessStartDeclaration {
     pub input: ProcessInput,
@@ -269,7 +271,7 @@ pub struct ProcessStartDeclaration {
 
 impl ProcessStartDeclaration {
     /// Declare a process start for store and durable-substrate implementors.
-    /// The id is absent by construction; realization derives it.
+    /// The key is absent by construction; realization derives it.
     pub fn new(
         input: ProcessInput,
         disposition: RecoveryContract,
@@ -351,12 +353,11 @@ impl ProcessStartDeclaration {
     }
 
     /// The only way a declaration becomes a request: every realization route
-    /// passes `ProcessId::from_intent_identity(identity)` here, so the id the
-    /// attempt returned and the id the executor starts are the same value by
-    /// construction rather than by convention.
-    pub fn into_request(self, id: ProcessId) -> ProcessStartRequest {
+    /// passes `StartKey::for_tool_intent(identity)` here, so every redrive of
+    /// one declaration starts the same process by construction.
+    pub fn into_request(self, start_key: crate::StartKey) -> ProcessStartRequest {
         ProcessStartRequest {
-            id,
+            start_key: Some(start_key),
             input: self.input,
             disposition: self.disposition,
             lifecycle: self.lifecycle,
@@ -374,7 +375,9 @@ impl ProcessStartDeclaration {
 /// Public host-facing request for starting a visible process handle.
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessStartRequest {
-    pub id: ProcessId,
+    /// The start's idempotency key; `None` starts a new process every time.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_key: Option<crate::StartKey>,
     pub input: ProcessInput,
     pub disposition: RecoveryContract,
     pub lifecycle: ProcessLifecyclePolicy,
@@ -398,15 +401,17 @@ pub struct ProcessStartRequest {
 impl ProcessStartRequest {
     /// Constructs a `ProcessStartRequest` for store and durable-substrate implementors while
     /// persisting and coordinating durable process execution.
+    ///
+    /// The request carries no process id: the registrar mints one. An
+    /// idempotent start adds a key with [`Self::with_start_key`].
     pub fn new(
-        id: impl Into<ProcessId>,
         input: ProcessInput,
         disposition: RecoveryContract,
         originator: super::ProcessOriginator,
         lifecycle: ProcessLifecyclePolicy,
     ) -> Self {
         Self {
-            id: id.into(),
+            start_key: None,
             input,
             disposition,
             lifecycle,
@@ -423,18 +428,46 @@ impl ProcessStartRequest {
     /// External placeholder start: `ProcessInput::External` is always
     /// [`RecoveryContract::ExternallyOwned`] — lash never executes it.
     pub fn external(
-        id: impl Into<ProcessId>,
         originator: super::ProcessOriginator,
         metadata: serde_json::Value,
         lifecycle: ProcessLifecyclePolicy,
     ) -> Self {
         Self::new(
-            id,
             ProcessInput::External { metadata },
             RecoveryContract::ExternallyOwned,
             originator,
             lifecycle,
         )
+    }
+
+    /// Sets the start's idempotency key.
+    pub fn with_start_key(mut self, start_key: Option<crate::StartKey>) -> Self {
+        self.start_key = start_key;
+        self
+    }
+
+    /// Keys the start with a host-supplied key, scoped to the request's
+    /// originator: the same key from two sessions starts two processes
+    /// (ADR 0107).
+    #[must_use]
+    pub fn with_host_start_key(self, key: impl AsRef<[u8]>) -> Self {
+        let start_key = crate::StartKey::for_host(self.originator.start_key_owner(), key);
+        self.with_start_key(Some(start_key))
+    }
+
+    /// A host start as the host rails realize it under `scope`: the host's
+    /// own key makes the start idempotent while its process is retained, and
+    /// a keyless start is always new, keyed by the scope and its ordinal
+    /// among the run's keyless starts, so a durable handler's replay re-issues
+    /// the same key (ADR 0107).
+    #[must_use]
+    pub fn keyed_in(self, scope: &crate::ScopedEffectController<'_>) -> Self {
+        if self.start_key.is_some() {
+            self
+        } else {
+            let start_key = scope.next_keyless_start_key();
+            self.with_start_key(Some(start_key))
+        }
     }
 
     /// Sets the env spec carried by a `ProcessStartRequest` for store and durable-substrate
@@ -495,8 +528,8 @@ impl ProcessStartRequest {
         self
     }
 
-    /// Drops the id a caller happened to carry, leaving the declaration a leaf
-    /// attempt records. The id is re-derived from the attempt identity at
+    /// Drops the key a caller happened to carry, leaving the declaration a leaf
+    /// attempt records. The key is re-derived from the attempt identity at
     /// realization, never carried across the journal.
     pub fn into_declaration(self) -> ProcessStartDeclaration {
         ProcessStartDeclaration {
@@ -517,12 +550,12 @@ impl ProcessStartRequest {
     /// persisting and coordinating durable process execution.
     pub fn into_registration(self, env_ref: Option<ProcessExecutionEnvRef>) -> ProcessRegistration {
         let mut registration = ProcessRegistration::new(
-            self.id,
             self.input,
             self.disposition,
             ProcessProvenance::new(self.originator),
             self.lifecycle,
         )
+        .with_start_key(self.start_key)
         .with_max_attempts(self.max_attempts)
         .with_event_types(self.event_types)
         .with_execution_env_ref(env_ref)
@@ -543,10 +576,7 @@ mod tests {
     }
 
     fn process_scope() -> ParentScope {
-        ParentScope::process(ProcessRef::new(
-            ProcessId::from("worker"),
-            crate::ProcessIncarnation::from_registration_sequence(3),
-        ))
+        ParentScope::process(crate::process_id_for_test("worker"))
     }
 
     /// The payload round-trips only against its own index projection.

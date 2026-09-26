@@ -116,7 +116,6 @@ fn resolve_child_graph_keys(graphs: &mut BTreeMap<String, TraceLashlangGraph>) {
                 .and_then(|item| item.event.identity.generation)?;
             Some((
                 process_id.clone(),
-                generation.incarnation(),
                 generation.attempt(),
                 graph.graph_key.clone(),
             ))
@@ -126,16 +125,15 @@ fn resolve_child_graph_keys(graphs: &mut BTreeMap<String, TraceLashlangGraph>) {
         for child in &mut graph.children {
             let matches = process_graphs
                 .iter()
-                .filter(|(process_id, incarnation, attempt, _)| {
+                .filter(|(process_id, attempt, _)| {
                     process_id == child.child_process_id
-                        && *incarnation == child.child_incarnation
                         && child
                             .child_attempt
                             .is_none_or(|expected| expected == *attempt)
                 })
                 .collect::<Vec<_>>();
             if matches.len() == 1 {
-                child.child_graph_key = Some(matches[0].3.clone());
+                child.child_graph_key = Some(matches[0].2.clone());
             }
         }
     }
@@ -508,7 +506,6 @@ fn materialize_graph(
                         *node_kind,
                         *occurrence,
                         item.event.identity.attempt(),
-                        item.event.identity.incarnation(),
                     ))
                     .or_default()
                     .start = Some(item.timestamp);
@@ -531,7 +528,6 @@ fn materialize_graph(
                         *node_kind,
                         *occurrence,
                         item.event.identity.attempt(),
-                        item.event.identity.incarnation(),
                     ))
                     .or_default()
                     .waiting = Some((item.timestamp, awaited.clone()));
@@ -554,7 +550,6 @@ fn materialize_graph(
                         *node_kind,
                         *occurrence,
                         item.event.identity.attempt(),
-                        item.event.identity.incarnation(),
                     ))
                     .or_default()
                     .resumed = Some(item.timestamp);
@@ -577,7 +572,6 @@ fn materialize_graph(
                         *node_kind,
                         *occurrence,
                         item.event.identity.attempt(),
-                        item.event.identity.incarnation(),
                     ))
                     .or_default()
                     .explicit_terminal = Some(OccurrenceTerminal::Completed(item.timestamp));
@@ -601,7 +595,6 @@ fn materialize_graph(
                         *node_kind,
                         *occurrence,
                         item.event.identity.attempt(),
-                        item.event.identity.incarnation(),
                     ))
                     .or_default()
                     .explicit_terminal =
@@ -624,7 +617,6 @@ fn materialize_graph(
                         *node_kind,
                         *occurrence,
                         item.event.identity.attempt(),
-                        item.event.identity.incarnation(),
                     ))
                     .or_default()
                     .explicit_terminal = Some(OccurrenceTerminal::Cancelled(item.timestamp));
@@ -652,7 +644,6 @@ fn materialize_graph(
                         ExecutionNodeKind::Branch,
                         *occurrence,
                         item.event.identity.attempt(),
-                        item.event.identity.incarnation(),
                     ))
                     .or_default()
                     .provisional_terminal = Some(OccurrenceTerminal::Completed(item.timestamp));
@@ -690,7 +681,6 @@ fn materialize_graph(
                     parent_node_id: parent_node_id.clone(),
                     child_graph_key: child.graph_key(),
                     child_process_id: child.process_id.clone(),
-                    child_incarnation: child.incarnation,
                     child_attempt: child.attempt,
                     child_module_ref: child.module_ref.clone(),
                     child_entry_ref: child.entry_ref.clone(),
@@ -762,7 +752,7 @@ struct OccurrenceFold {
     provisional_terminal: Option<OccurrenceTerminal>,
 }
 
-type OccurrenceKey = (String, ExecutionNodeKind, u64, Option<u32>, Option<u64>);
+type OccurrenceKey = (String, ExecutionNodeKind, u64, Option<u32>);
 
 enum OccurrenceTerminal {
     Completed(DateTime<Utc>),
@@ -787,7 +777,7 @@ fn apply_occurrences(
             .count() as u64;
         let terminals = matching
             .iter()
-            .filter_map(|((_, _, occurrence, _, _), folded)| {
+            .filter_map(|((_, _, occurrence, _), folded)| {
                 folded_terminal(folded).map(|terminal| {
                     let (status, end) = match terminal {
                         OccurrenceTerminal::Completed(end) => {
@@ -823,7 +813,7 @@ fn apply_occurrences(
         .into_iter()
         .flatten()
         .max_by_key(|terminal| terminal.occurrence);
-        if let Some(((_, _, occurrence, _, _), folded)) = matching.last() {
+        if let Some(((_, _, occurrence, _), folded)) = matching.last() {
             node.observation = match folded_terminal(folded) {
                 Some(OccurrenceTerminal::Completed(end)) => {
                     TraceLashlangNodeObservation::Completed {
@@ -950,11 +940,10 @@ fn node_occurrence(identity: &TraceLashlangEventIdentity) -> Option<(&str, u64)>
 
 fn child_link_key(
     child: &TraceLashlangGraphChildLink,
-) -> (String, lash_sansio::ProcessId, u64, Option<u32>) {
+) -> (String, lash_sansio::ProcessId, Option<u32>) {
     (
         child.parent_node_id.clone(),
         child.child_process_id.clone(),
-        child.child_incarnation,
         child.child_attempt,
     )
 }
@@ -1263,7 +1252,6 @@ fn merge_late_retained_event(
                 parent_node_id: retention.node_id.clone(),
                 child_graph_key: child.graph_key(),
                 child_process_id: child.process_id.clone(),
-                child_incarnation: child.incarnation,
                 child_attempt: child.attempt,
                 child_module_ref: child.module_ref.clone(),
                 child_entry_ref: child.entry_ref.clone(),

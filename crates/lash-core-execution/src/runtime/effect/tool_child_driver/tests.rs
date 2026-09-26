@@ -469,18 +469,12 @@ fn opener_derivation_names_every_admitted_opener_scope() {
         opener_for_execution_scope(&drain),
         Some(crate::EffectOpener::queue_drain("session", "drain-1"))
     );
-    let process_ref = crate::ProcessRef::new(
-        "process-1",
-        crate::ProcessIncarnation::from_registration_sequence(7),
-    );
-    let process = crate::AdmittedScope::process(process_ref.clone());
+    let process_id = crate::ProcessId::fixture("process-1");
+    let process = crate::AdmittedScope::process(process_id.clone());
     assert_eq!(
         opener_for_execution_scope(&process),
-        Some(crate::EffectOpener::process(process_ref.clone()))
+        Some(crate::EffectOpener::process(process_id.clone()))
     );
-    // The half-admitted shapes — a process scope with no incarnation, or with
-    // another process's — cannot reach the derivation at all: `AdmittedScope`
-    // refuses them at construction, so there is no call site to test.
     for admitted in [
         crate::AdmittedScope::session_delete("session"),
         crate::AdmittedScope::runtime_operation("op-1"),

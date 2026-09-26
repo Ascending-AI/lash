@@ -172,10 +172,10 @@ LASH_POSTGRES_DATABASE_URL="$postgres_url" \
 require_checkpoints "$artifact_dir/01-wake-delivery.log" \
   wake_discarded_target_gone wake_discarded_expired \
   blocked_group_redrive_lever blocked_group_cleared_after_redrive \
-  reused_process_id_allocates_above_the_floor \
+  restarted_process_wakes_under_a_new_id \
   rewound_sequence_is_discarded_without_blocking
 echo "scenario 1 evidence: TargetGone and Expired typed discards plus blocked-head redrive passed on PostgreSQL" | tee -a "$test_output"
-echo "scenario 6 evidence: prune/re-register delivered a strictly higher sequence; forced rewind surfaced sequence_rewound" | tee -a "$test_output"
+echo "scenario 6 evidence: a restart after prune woke under a new process id; forced rewind surfaced sequence_rewound" | tee -a "$test_output"
 
 "${compose[@]}" --profile crash run --rm crash-worker retarget \
   2>&1 | tee "$artifact_dir/02-retarget.jsonl" | tee -a "$test_output"

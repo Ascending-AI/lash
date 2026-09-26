@@ -5,7 +5,7 @@ use std::fmt;
 fn lease() -> ProcessLease {
     ProcessLease {
         schema_version: PROCESS_LEASE_SCHEMA_VERSION,
-        process_id: ProcessId::from("process-lease-wire"),
+        process_id: lash_core_execution::ProcessId::fixture("process-lease-wire"),
         owner: crate::LeaseOwnerIdentity::opaque("worker", "worker-incarnation"),
         lease_token: "lease-token".to_string(),
         fencing_token: u64::MAX,
@@ -36,8 +36,12 @@ fn assert_version_error(error: impl fmt::Display, actual: u32) {
 }
 
 fn messagepack_string(value: &str) -> Vec<u8> {
-    assert!(value.len() < 32);
-    let mut encoded = vec![0xa0 | value.len() as u8];
+    // fixstr below 32 bytes, str8 up to 255 (a minted process id is 34).
+    let mut encoded = match u8::try_from(value.len()) {
+        Ok(len) if len < 32 => vec![0xa0 | len],
+        Ok(len) => vec![0xd9, len],
+        Err(_) => panic!("test strings fit str8"),
+    };
     encoded.extend(value.as_bytes());
     encoded
 }
@@ -100,7 +104,10 @@ fn messagepack_lease(
         vec![0xcf, 255, 255, 255, 255, 255, 255, 255, 255]
     };
     let mut fields = vec![
-        ("process_id", messagepack_string("p")),
+        (
+            "process_id",
+            messagepack_string("p_d228cb69801a7cafb8912b704e4a9e4f"),
+        ),
         ("owner", owner),
         ("lease_token", lease_token),
         ("fencing_token", fencing_token),
@@ -118,7 +125,10 @@ fn assert_messagepack_fixture_decodes(encoded: &[u8], expected_fencing_token: u6
     let decoded: ProcessLease =
         rmp_serde::from_slice(encoded).expect("deserialize compatible MessagePack lease map");
     assert_eq!(decoded.schema_version, PROCESS_LEASE_SCHEMA_VERSION);
-    assert_eq!(decoded.process_id, ProcessId::from("p"));
+    assert_eq!(
+        decoded.process_id,
+        lash_core_execution::ProcessId::fixture("p")
+    );
     assert_eq!(
         decoded.owner,
         crate::LeaseOwnerIdentity::opaque("worker", "boot")
@@ -152,7 +162,7 @@ fn serde_content_lease(
     let mut fields = vec![
         (
             serde_content_string("process_id"),
-            serde_content_string("p"),
+            serde_content_string("p_d228cb69801a7cafb8912b704e4a9e4f"),
         ),
         (serde_content_string("owner"), owner),
         (
@@ -203,7 +213,7 @@ fn process_lease_json_output_and_direct_round_trip_stay_stable() {
     let encoded = serde_json::to_string(&expected).expect("serialize process lease");
     assert_eq!(
         encoded,
-        r#"{"schema_version":2,"process_id":"process-lease-wire","owner":{"owner_id":"worker","incarnation_id":"worker-incarnation"},"lease_token":"lease-token","fencing_token":18446744073709551615,"claimed_at_epoch_ms":18446744073709551614,"expires_at_epoch_ms":18446744073709551613}"#
+        r#"{"schema_version":2,"process_id":"p_04817e71227577c38acc9a555aa5b469","owner":{"owner_id":"worker","incarnation_id":"worker-incarnation"},"lease_token":"lease-token","fencing_token":18446744073709551615,"claimed_at_epoch_ms":18446744073709551614,"expires_at_epoch_ms":18446744073709551613}"#
     );
 
     let decoded: ProcessLease =
@@ -671,8 +681,8 @@ fn process_lease_duplicate_owner_fields_remain_errors_in_all_map_paths() {
     }
 
     for encoded in [
-        r#"{"schema_version":2,"owner":{"owner_id":"first","owner_id":"last","incarnation_id":"boot"},"process_id":"p","lease_token":"tok","fencing_token":1,"claimed_at_epoch_ms":1,"expires_at_epoch_ms":2}"#,
-        r#"{"owner":{"owner_id":"first","owner_id":"last","incarnation_id":"boot"},"schema_version":2,"process_id":"p","lease_token":"tok","fencing_token":1,"claimed_at_epoch_ms":1,"expires_at_epoch_ms":2}"#,
+        r#"{"schema_version":2,"owner":{"owner_id":"first","owner_id":"last","incarnation_id":"boot"},"process_id":"p_d228cb69801a7cafb8912b704e4a9e4f","lease_token":"tok","fencing_token":1,"claimed_at_epoch_ms":1,"expires_at_epoch_ms":2}"#,
+        r#"{"owner":{"owner_id":"first","owner_id":"last","incarnation_id":"boot"},"schema_version":2,"process_id":"p_d228cb69801a7cafb8912b704e4a9e4f","lease_token":"tok","fencing_token":1,"claimed_at_epoch_ms":1,"expires_at_epoch_ms":2}"#,
     ] {
         let error = serde_json::from_str::<ProcessLease>(encoded)
             .expect_err("JSON duplicate owner identity must be rejected");

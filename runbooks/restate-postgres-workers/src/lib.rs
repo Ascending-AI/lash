@@ -225,7 +225,9 @@ pub struct TurnRequest {
 pub struct TurnResponse {
     pub workflow_id: String,
     pub worker_id: String,
-    pub process_id: ProcessId,
+    /// The first process the turn started, if it started one.
+    #[serde(default)]
+    pub process_id: Option<ProcessId>,
     #[serde(default)]
     pub process_ids: Vec<ProcessId>,
     pub attachment_id: String,
@@ -346,7 +348,7 @@ pub async fn record_terminal_result(pool: &PgPool, response: &TurnResponse) -> R
         "#,
     )
     .bind(&response.workflow_id)
-    .bind(response.process_id.as_str())
+    .bind(response.process_id.as_ref().map_or("", ProcessId::as_str))
     .bind(&response.worker_id)
     .bind(&response.attachment_id)
     .bind(&response.final_text)

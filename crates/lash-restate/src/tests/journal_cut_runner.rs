@@ -294,9 +294,9 @@ mod served_only_outside_a_run {
 
         async fn await_process_terminal(
             &self,
-            process_ref: &lash_core::ProcessRef,
+            process_id: &ProcessId,
         ) -> Result<lash_core::ProcessTerminalWait, lash_core::PluginError> {
-            panic!("unexpected terminal wait for {process_ref}")
+            panic!("unexpected terminal wait for {process_id}")
         }
     }
 
@@ -313,16 +313,16 @@ mod served_only_outside_a_run {
     /// `crash_after`, so the next attempt replays them.
     fn job(
         registry: &Arc<dyn lash_core::ProcessRegistry>,
-        process_id: &ProcessId,
+        start_key: &lash_core::StartKey,
         served_only: bool,
         crash_after: bool,
         answers: tokio::sync::mpsc::UnboundedSender<Answers>,
     ) -> ConformanceTurnAttempt {
         let registry = Arc::clone(registry);
-        let process_id = process_id.clone();
+        let start_key = start_key.clone();
         Arc::new(move |scoped| {
             let registry = Arc::clone(&registry);
-            let process_id = process_id.clone();
+            let start_key = start_key.clone();
             let answers = answers.clone();
             Box::pin(async move {
                 let scope = scoped.execution_scope().clone();
@@ -350,7 +350,6 @@ mod served_only_outside_a_run {
                     )
                 };
                 let registration = lash_core::ProcessRegistration::new(
-                    process_id.clone(),
                     lash_core::ProcessInput::External {
                         metadata: serde_json::json!({ "fixture": "served-only" }),
                     },
@@ -360,13 +359,12 @@ mod served_only_outside_a_run {
                         lash_core::ParentScope::Host,
                         lash_core::OnParentEnd::Abandon,
                     ),
-                );
+                )
+                .with_start_key(Some(start_key.clone()));
                 let started = guarded
                     .execute_effect(
                         RuntimeEffectEnvelope::new(
-                            invocation(format!(
-                                "{namespace}:0000000000:process:start:{process_id}"
-                            )),
+                            invocation(format!("{namespace}:0000000000:process:start:{start_key}")),
                             RuntimeEffectCommand::Process {
                                 command: Box::new(ProcessCommand::Start {
                                     registration,
@@ -403,15 +401,33 @@ mod served_only_outside_a_run {
         })
     }
 
-    /// The process workflows the double was asked to run for `process_id`.
-    fn workflow_runs(
-        server: &lash_restate_test::RestateTestServer,
-        process_id: &ProcessId,
-    ) -> usize {
+    /// The process workflows the double was asked to run.
+    fn workflow_runs(server: &lash_restate_test::RestateTestServer) -> usize {
         server
             .invocations()
             .iter()
-            .filter(|invocation| invocation.target.contains(process_id.as_str()))
+            .filter(|invocation| {
+                invocation
+                    .target
+                    .starts_with(crate::LashService::ProcessWorkflow.name())
+            })
+            .count()
+    }
+
+    /// The processes the registry holds under `start_key`.
+    async fn started_under(
+        registry: &Arc<dyn lash_core::ProcessRegistry>,
+        start_key: &lash_core::StartKey,
+    ) -> usize {
+        registry
+            .list_processes(&lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..Default::default()
+            })
+            .await
+            .unwrap_or_else(|error| panic!("read the registry: {error}"))
+            .into_iter()
+            .filter(|record| record.start_key.as_ref() == Some(start_key))
             .count()
     }
 
@@ -426,13 +442,16 @@ mod served_only_outside_a_run {
         let nonce = harness.run_nonce();
         let session_id = SessionId::from(format!("served-only-{nonce}"));
         let turn_id = TurnId::from("served-only-turn");
-        let process_id = ProcessId::from(format!("served-only-probe-{nonce}"));
+        let start_key = lash_core::StartKey::for_host(
+            lash_core::StartKeyOwner::HOST,
+            format!("served-only-probe-{nonce}"),
+        );
         let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel::<Answers>();
         harness
             .turn_runner()
             .run_turn(
                 lash_core::AdmittedScope::turn(&session_id, &turn_id),
-                job(&registry, &process_id, true, false, answers),
+                job(&registry, &start_key, true, false, answers),
             )
             .await;
         let (started, slept, tripped) = answered
@@ -452,16 +471,13 @@ mod served_only_outside_a_run {
             Some(RuntimeErrorCode::LashlangCellBindingDrift),
             "the refusal trips the command's guard, so the turn parks"
         );
-        assert!(
-            registry
-                .get_process(&process_id)
-                .await
-                .unwrap_or_else(|error| panic!("read the registry: {error}"))
-                .is_none(),
+        assert_eq!(
+            started_under(&registry, &start_key).await,
+            0,
             "the drifted command started no process"
         );
         assert_eq!(
-            workflow_runs(&server, &process_id),
+            workflow_runs(&server),
             0,
             "the drifted command submitted no process workflow"
         );
@@ -479,14 +495,17 @@ mod served_only_outside_a_run {
         let nonce = harness.run_nonce();
         let session_id = SessionId::from(format!("served-recorded-{nonce}"));
         let turn_id = TurnId::from("served-recorded-turn");
-        let process_id = ProcessId::from(format!("served-recorded-probe-{nonce}"));
+        let start_key = lash_core::StartKey::for_host(
+            lash_core::StartKeyOwner::HOST,
+            format!("served-recorded-probe-{nonce}"),
+        );
         let (answers, mut answered) = tokio::sync::mpsc::unbounded_channel::<Answers>();
         harness
             .turn_runner()
             .run_crashed_then_redriven_turn(
                 lash_core::AdmittedScope::turn(&session_id, &turn_id),
-                job(&registry, &process_id, false, true, answers.clone()),
-                job(&registry, &process_id, true, false, answers),
+                job(&registry, &start_key, false, true, answers.clone()),
+                job(&registry, &start_key, true, false, answers),
             )
             .await;
         let (started, slept, tripped) = answered
@@ -496,16 +515,13 @@ mod served_only_outside_a_run {
         started.unwrap_or_else(|refusal| panic!("the recorded start is served: {refusal:?}"));
         slept.unwrap_or_else(|refusal| panic!("the recorded sleep is served: {refusal:?}"));
         assert!(tripped.is_none(), "nothing refused: {tripped:?}");
-        assert!(
-            registry
-                .get_process(&process_id)
-                .await
-                .unwrap_or_else(|error| panic!("read the registry: {error}"))
-                .is_some(),
+        assert_eq!(
+            started_under(&registry, &start_key).await,
+            1,
             "the recorded start's row stands"
         );
         assert_eq!(
-            workflow_runs(&server, &process_id),
+            workflow_runs(&server),
             1,
             "the start's workflow was submitted once, by the first attempt"
         );

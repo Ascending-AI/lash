@@ -8,11 +8,17 @@ mod tests {
         let registry: Arc<dyn crate::ProcessRegistry> =
             crate::support::memory_store_set().await.process_registry();
         let context = crate::testing::mock_tool_context().with_process_events_for_testing(
-            "process-2",
+            crate::ProcessId::fixture("process-2"),
             registry,
-            crate::ProcessExecutionWriteAuthority::invocation("process-2", "exec-1"),
+            crate::ProcessExecutionWriteAuthority::invocation(
+                crate::ProcessId::fixture("process-2"),
+                "exec-1",
+            ),
         );
-        assert_eq!(context.enclosing_process(), Some("process-2"));
+        assert_eq!(
+            context.enclosing_process(),
+            Some(&crate::ProcessId::fixture("process-2"))
+        );
     }
 
     #[tokio::test]
@@ -21,11 +27,17 @@ mod tests {
         let registry: Arc<dyn crate::ProcessRegistry> =
             crate::support::memory_store_set().await.process_registry();
         let _ = crate::testing::mock_tool_context()
-            .with_enclosing_process("process-a", tokio_util::sync::CancellationToken::new())
+            .with_enclosing_process(
+                crate::ProcessId::fixture("process-a"),
+                tokio_util::sync::CancellationToken::new(),
+            )
             .with_process_events_for_testing(
-                "process-b",
+                crate::ProcessId::fixture("process-b"),
                 registry,
-                crate::ProcessExecutionWriteAuthority::invocation("process-b", "exec-1"),
+                crate::ProcessExecutionWriteAuthority::invocation(
+                    crate::ProcessId::fixture("process-b"),
+                    "exec-1",
+                ),
             );
     }
 }

@@ -126,51 +126,19 @@ impl lash_core_execution::ProcessRetention for SqliteProcessRegistry {
     async fn complete_process_artifact_cleanup(
         &self,
         process_id: &ProcessId,
-        incarnation: lash_core_execution::ProcessIncarnation,
     ) -> Result<lash_core_execution::ProcessArtifactCleanupAck, lash_core_execution::PluginError>
     {
         let process_id = process_id.clone();
         self.conn
             .write(move |tx| {
-                let current_incarnation = tx
-                    .query_row(
-                        process_sql().process_sqlite.select_incarnation.sql(),
-                        params![process_id.as_str()],
-                        |row| row.get::<_, i64>(0),
-                    )
-                    .optional()?;
                 let removed = tx.execute(
-                    process_sql().cleanup_sqlite.delete_for_incarnation.sql(),
-                    params![
-                        process_id.as_str(),
-                        incarnation.registration_sequence() as i64
-                    ],
+                    process_sql().cleanup.delete_for_process.sql(),
+                    params![process_id.as_str()],
                 )?;
-                let process_ref =
-                    lash_core_execution::ProcessRef::new(process_id.clone(), incarnation);
-                Ok(match current_incarnation {
-                    Some(found) => {
-                        let found =
-                            lash_core_execution::ProcessIncarnation::from_registration_sequence(
-                                u64_from_sql("ProcessRecord", "incarnation", found)?,
-                            );
-                        if found != incarnation {
-                            lash_core_execution::ProcessArtifactCleanupAck::StaleIncarnation {
-                                expected: process_ref,
-                                found: lash_core_execution::ProcessRef::new(process_id, found),
-                            }
-                        } else if removed == 1 {
-                            lash_core_execution::ProcessArtifactCleanupAck::Acknowledged {
-                                process_ref,
-                            }
-                        } else {
-                            lash_core_execution::ProcessArtifactCleanupAck::Unknown { process_ref }
-                        }
-                    }
-                    None if removed == 1 => {
-                        lash_core_execution::ProcessArtifactCleanupAck::Acknowledged { process_ref }
-                    }
-                    None => lash_core_execution::ProcessArtifactCleanupAck::Unknown { process_ref },
+                Ok(if removed == 1 {
+                    lash_core_execution::ProcessArtifactCleanupAck::Acknowledged { process_id }
+                } else {
+                    lash_core_execution::ProcessArtifactCleanupAck::Unknown { process_id }
                 })
             })
             .await

@@ -29,10 +29,6 @@ impl From<PluginError> for RuntimeEffectControllerError {
             err @ PluginError::ProcessNoLongerRetained { .. } => {
                 Self::new(RuntimeErrorCode::ProcessNoLongerRetained, err.to_string())
             }
-            err @ PluginError::ProcessIncarnationSuperseded { .. } => Self::new(
-                RuntimeErrorCode::ProcessIncarnationSuperseded,
-                err.to_string(),
-            ),
             err => Self::new(RuntimeErrorCode::Plugin, err.to_string()),
         }
     }
@@ -41,16 +37,15 @@ impl From<PluginError> for RuntimeEffectControllerError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ProcessId;
 
     #[test]
     fn parent_ended_refusal_stays_typed_and_terminal_through_effect_controller() {
         let error = PluginError::ParentEnded {
-            process_id: ProcessId::from("late-child"),
-            parent: crate::ParentScope::process(crate::ProcessRef::new(
-                ProcessId::from("ended-parent"),
-                crate::ProcessIncarnation::from_registration_sequence(1),
+            start_key: Some(crate::StartKey::for_host(
+                crate::StartKeyOwner::HOST,
+                "late-child",
             )),
+            parent: crate::ParentScope::process(crate::process_id_for_test("ended-parent")),
         };
         assert!(error.is_terminal());
         assert!(!error.is_retryable());
@@ -68,10 +63,7 @@ mod tests {
             crate::CancelRequest::new(crate::CancelOrigin::ModelRequested, "actor:second", 22);
         assert!(!existing.same_cancellation_as(&requested));
         let error = PluginError::ProcessCancelConflict {
-            process_ref: crate::ProcessRef::new(
-                "conflict",
-                crate::ProcessIncarnation::from_registration_sequence(1),
-            ),
+            process_id: crate::process_id_for_test("conflict"),
             existing: Box::new(existing),
             requested: Box::new(requested),
         };
@@ -90,13 +82,13 @@ mod tests {
         for (error, expected) in [
             (
                 PluginError::ProcessNotVisible {
-                    process_id: ProcessId::from("missing"),
+                    process_id: crate::process_id_for_test("missing"),
                 },
                 RuntimeErrorCode::ProcessNotVisible,
             ),
             (
                 PluginError::ProcessAlreadyTerminal {
-                    process_id: ProcessId::from("done"),
+                    process_id: crate::process_id_for_test("done"),
                     status: crate::ProcessStatus::Completed,
                 },
                 RuntimeErrorCode::ProcessAlreadyTerminal,
@@ -107,14 +99,6 @@ mod tests {
                     pruned_at_ms: 42,
                 },
                 RuntimeErrorCode::ProcessNoLongerRetained,
-            ),
-            (
-                PluginError::ProcessIncarnationSuperseded {
-                    process_id: ProcessId::from("reused"),
-                    requested_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
-                    current_incarnation: crate::ProcessIncarnation::from_registration_sequence(2),
-                },
-                RuntimeErrorCode::ProcessIncarnationSuperseded,
             ),
         ] {
             assert_eq!(RuntimeEffectControllerError::from(error).code, expected);

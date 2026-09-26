@@ -1562,10 +1562,9 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
         .cloned()
         .expect("process registry");
     let target_scope = lash_core::SessionScope::new("root");
-    registry
+    let registered = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                "wake-after-user-input",
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -1584,7 +1583,7 @@ pub(super) async fn next_turn_input_turn_claims_process_wake_at_active_checkpoin
     let wake = append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        &ProcessId::from("wake-after-user-input"),
+        &registered.id,
         lash_core::ProcessEventAppendRequest::new(
             "process.wake",
             json!({
@@ -1675,10 +1674,9 @@ pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn
         .cloned()
         .expect("process registry");
     let target_scope = lash_core::SessionScope::new("root");
-    registry
+    let registered = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                "selected-wake",
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -1697,7 +1695,7 @@ pub(super) async fn selected_process_wake_drain_does_not_claim_pending_next_turn
     let wake = append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        &ProcessId::from("selected-wake"),
+        &registered.id,
         lash_core::ProcessEventAppendRequest::new(
             "process.wake",
             json!({
@@ -1846,10 +1844,9 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
         .cloned()
         .expect("process registry");
     let target_scope = lash_core::SessionScope::new(SESSION_ID);
-    registry
+    let registered = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                "terminal-checkpoint-wake",
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -1868,7 +1865,7 @@ pub(super) async fn wake_claimed_at_a_terminal_checkpoint_drives_a_follow_on_tur
     let wake = append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        &ProcessId::from("terminal-checkpoint-wake"),
+        &registered.id,
         lash_core::ProcessEventAppendRequest::new(
             "process.wake",
             json!({
@@ -2029,10 +2026,9 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
         .cloned()
         .expect("process registry");
     let target_scope = lash_core::SessionScope::new(SESSION_ID);
-    registry
+    let registered = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                "cancel-claimed-wake",
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -2051,7 +2047,7 @@ pub(super) async fn process_wake_claimed_at_checkpoint_is_completed_when_turn_is
     let wake = append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        &ProcessId::from("cancel-claimed-wake"),
+        &registered.id,
         lash_core::ProcessEventAppendRequest::new(
             "process.wake",
             json!({

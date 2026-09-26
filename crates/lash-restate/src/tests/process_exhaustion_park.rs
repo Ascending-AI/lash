@@ -30,6 +30,7 @@ impl RestateProcessRunner for FlakyRunner {
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
+        _process_id: ProcessId,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
@@ -141,11 +142,11 @@ pub(super) async fn an_exhausted_process_parks_and_completes_when_resumed() {
     let admin = crate::RestateAdminClient::new(connection.clone());
     deployment.install_park_reconciler(admin.clone());
 
-    let process_id = ProcessId::from("r0c-exhausted-body");
-    registry
-        .register_process(rerunnable_registration(process_id.as_str()))
+    let process_id = registry
+        .register_process(rerunnable_registration())
         .await
-        .expect("register the process");
+        .expect("register the process")
+        .id;
     let sweep = deployment.test_process_work();
     let _ = sweep
         .admit_pending_processes("r0c sweep")

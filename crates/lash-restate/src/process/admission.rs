@@ -26,7 +26,7 @@
 //! 2. **Start** (`lash.segment.start`). Record the marker with that nonce,
 //!    set-if-absent. The recorded nonce equals ours: this execution's marker,
 //!    written now or by this execution's own earlier try, and the step journals
-//!    the process incarnation it started, so nothing after it reads the record
+//!    the process it started, so nothing after it reads the record
 //!    live. A different nonce: an execution this one does not continue started
 //!    the segment, so the process ends `SubstrateLost`.
 //! 3. **Effects**, only with the [`SegmentStarted`] proof step 2 returns. The
@@ -41,7 +41,7 @@
 //! or the invocation id, both of which repeat after a purge.
 
 use lash_core::{
-    PluginError, ProcessExecutionWriteAuthority, ProcessRecord, ProcessRef, ProcessRegistry,
+    PluginError, ProcessExecutionWriteAuthority, ProcessId, ProcessRecord, ProcessRegistry,
     ProcessSegmentKey, ProcessStarted, SegmentStartMarker,
 };
 use restate_sdk::context::{ContextSideEffects, RunFuture, WorkflowContext};
@@ -60,8 +60,13 @@ use std::sync::Arc;
 /// Every submitter stamps it on
 /// [`RestateProcessWorkflowInput`](super::RestateProcessWorkflowInput), and the
 /// handler refuses any other generation before it journals anything. An
-/// unstamped input is generation 1, the prefix before FIG-3588.
-pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 3;
+/// unstamped input is generation 1, the prefix before FIG-3588. Generation 4
+/// (FIG-3607) names the process by its minted id alone: the input carries the
+/// id beside its registration, which no longer names one, the start step
+/// journals the id it started, and the requests a caller sends into a running
+/// workflow (complete, await, cancel, attach) are stamped with this generation
+/// and refused by it before their shape is decoded.
+pub const RESTATE_PROCESS_JOURNAL_VERSION: u32 = 4;
 
 /// The manual epoch of the journal-bearing handlers' logic, hashed into the
 /// build's drain generation beside the drain-format versions (FIG-3795).
@@ -84,6 +89,41 @@ pub(crate) fn unstamped_journal_version() -> u32 {
     1
 }
 
+/// The generation a process input or request was written by, read before
+/// its shape is decoded: an input of another generation is refused by
+/// generation, never by a shape error its retired fields would raise.
+pub(crate) fn stamped_journal_version(payload: &serde_json::Value) -> u32 {
+    payload
+        .get("journal_version")
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|version| u32::try_from(version).ok())
+        .unwrap_or_else(unstamped_journal_version)
+}
+
+/// Decodes a process request sent into a running workflow, refusing a request
+/// of another journal generation before decoding its shape.
+///
+/// # Errors
+///
+/// A terminal error naming the retired generation, or naming why a request of
+/// this generation does not decode.
+pub(crate) fn decode_stamped_request<T: serde::de::DeserializeOwned>(
+    request_kind: &str,
+    payload: serde_json::Value,
+) -> Result<T, TerminalError> {
+    let version = stamped_journal_version(&payload);
+    if version != RESTATE_PROCESS_JOURNAL_VERSION {
+        return Err(TerminalError::new(format!(
+            "{request_kind} carries restate-process-journal-v{version}; this handler serves generation {RESTATE_PROCESS_JOURNAL_VERSION}"
+        )));
+    }
+    serde_json::from_value(payload).map_err(|error| {
+        TerminalError::new(format!(
+            "{request_kind} of generation {RESTATE_PROCESS_JOURNAL_VERSION} does not decode: {error}"
+        ))
+    })
+}
+
 /// Proof that this execution's segment start marker committed.
 ///
 /// Minted only by [`admit_segment`], after its start step journaled. The
@@ -101,22 +141,22 @@ pub struct SegmentStarted {
 
 impl SegmentStarted {
     fn new(
-        process: ProcessRef,
+        process_id: ProcessId,
         segment_ordinal: u64,
         execution_id: String,
         generation: Option<lash_core::ExecutableGeneration>,
     ) -> Self {
         let authority =
-            ProcessExecutionWriteAuthority::invocation(process.process_id.clone(), execution_id);
+            ProcessExecutionWriteAuthority::invocation(process_id.clone(), execution_id);
         Self {
-            admitted: lash_core::AdmittedScope::process(process),
+            admitted: lash_core::AdmittedScope::process(process_id),
             segment_ordinal,
             authority,
             generation: generation.map(Box::new),
         }
     }
 
-    /// The executable generation the incarnation's start record names: what
+    /// The executable generation the process's start record names: what
     /// the runner's engine must run the segment as (FIG-3571).
     pub fn generation(&self) -> Option<&lash_core::ExecutableGeneration> {
         self.generation.as_deref()
@@ -206,8 +246,8 @@ enum AdmissionVerdict {
 enum StartOutcome {
     Started {
         execution_id: String,
-        process: ProcessRef,
-        /// The executable generation the incarnation's start record names
+        process_id: ProcessId,
+        /// The executable generation the process's start record names
         /// (FIG-3571), journaled with the start so a replay holds the segment
         /// to the stamp it was admitted under.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -314,7 +354,7 @@ async fn read_record(
 /// them, and no effect may follow them except under the proof they return.
 ///
 /// `generation` is the executable generation the process's engine runs it as
-/// (FIG-3571). Segment 0's start marker *is* the incarnation's start record,
+/// (FIG-3571). Segment 0's start marker *is* the process's start record,
 /// which every later attempt and segment inherits, so it names that
 /// generation exactly as the runner would; the start returns the stamp the
 /// record holds, and a segment whose runner names another is parked before
@@ -468,10 +508,10 @@ pub(crate) async fn admit_segment(
     match start {
         StartOutcome::Started {
             execution_id,
-            process,
+            process_id,
             generation,
         } => Ok(SegmentAdmission::Started(Box::new(AdmittedSegment {
-            started: SegmentStarted::new(process, segment_ordinal, execution_id, generation),
+            started: SegmentStarted::new(process_id, segment_ordinal, execution_id, generation),
             handover,
             policy,
             writer,
@@ -508,7 +548,7 @@ async fn start_root_segment(
             if existing.owner.engine_process_execution_id(process_id) == Some(nonce.as_str()) {
                 StartOutcome::Started {
                     execution_id: nonce,
-                    process: ProcessRef::from_record(&record),
+                    process_id: record.id.clone(),
                     generation: existing.generation.clone(),
                 }
             } else {
@@ -535,7 +575,7 @@ async fn start_root_segment(
         lash_core::ProcessStartOutcome::Started(_)
         | lash_core::ProcessStartOutcome::AlreadyApplied(_) => Ok(StartOutcome::Started {
             execution_id: nonce,
-            process: ProcessRef::from_record(&record),
+            process_id: record.id.clone(),
             generation,
         }),
         lash_core::ProcessStartOutcome::AlreadyStarted { current, .. }
@@ -609,7 +649,7 @@ async fn start_later_segment(
     Ok(if recorded.nonce == nonce {
         StartOutcome::Started {
             execution_id,
-            process: ProcessRef::from_record(&record),
+            process_id: record.id.clone(),
             generation: root.generation.clone(),
         }
     } else {

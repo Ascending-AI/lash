@@ -472,7 +472,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     pub(crate) fn record_started_process(&self, process_id: &ProcessId) {
         self.started_process_ids
             .lock_recover()
-            .insert(ProcessId::from(process_id.to_string()));
+            .insert(process_id.clone());
     }
 
     pub(crate) fn session_graph_service(&self) -> &dyn crate::plugin::SessionGraphService {
@@ -610,7 +610,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// process name and no incarnation. The admitted scope the controller was
     /// built with carries the exact pair, and this is where an execution that
     /// must name its opener (ADR 0099 §1) reads it back.
-    pub fn admitted_process(&self) -> Option<crate::ProcessRef> {
+    pub fn admitted_process(&self) -> Option<crate::ProcessId> {
         self.dispatch
             .effect_controller
             .scoped()
@@ -870,11 +870,12 @@ impl<'run> RuntimeExecutionContext<'run> {
 
     pub fn with_process_execution(
         mut self,
+        process_id: ProcessId,
         registration: &crate::ProcessRegistration,
         event_context: impl Into<Option<RuntimeExecutionProcessEventContext>>,
     ) -> Self {
         self.process_execution = Some(RuntimeProcessExecution {
-            process_id: registration.id.clone(),
+            process_id,
             originator: registration.provenance.originator.clone(),
             env_ref: registration.env_ref.clone(),
             wake_session_id: registration.wake_session_id.clone(),
@@ -1192,10 +1193,8 @@ impl<'run> RuntimeExecutionContext<'run> {
                     .is_some_and(CancellationToken::is_cancelled))
     }
 
-    pub(super) fn process_id(&self) -> Option<&str> {
-        self.process_execution
-            .as_ref()
-            .map(|exec| exec.process_id.as_str())
+    pub(super) fn process_id(&self) -> Option<&ProcessId> {
+        self.process_execution.as_ref().map(|exec| &exec.process_id)
     }
 
     pub(super) fn process_event_context(&self) -> Option<&RuntimeExecutionProcessEventContext> {
@@ -1324,10 +1323,7 @@ impl<'run> RuntimeExecutionContext<'run> {
     /// The enclosing durable parent for a code-executor's child start.
     ///
     /// Derived through the one owner derivation — the admitted scope the
-    /// controller was built with — so a same-name successor in the registry
-    /// cannot rebind a child this execution's opener still owns (FIG-3417).
-    /// There is no registry access here by design: `resolve_process_ref` is a
-    /// name lookup, and a name is not an owner.
+    /// controller was built with. There is no registry access here by design.
     pub fn child_process_parent_scope(&self) -> Result<crate::ParentScope, crate::PluginError> {
         let scoped = self.dispatch.effect_controller.scoped();
         let opener = crate::EffectOpener::for_scope(scoped.admitted_scope())
@@ -1344,24 +1340,9 @@ impl<'run> RuntimeExecutionContext<'run> {
         let _phase = self.named_phase("process.start_child");
         let registration = request.into_registration(None);
         let (registration, env_spec) = self.process_start_execution_env(registration);
-        let process_id = registration.id.clone();
-        // The registry row, not the caller's pin, is the durable truth for a
-        // child's attempt bound: a redrive that re-registers the same
-        // deterministic child id after the host default moved must re-register
-        // with the recorded value or the registration fingerprint conflicts
-        // forever. Only a child with no row yet takes the caller's resolution.
-        let registration = match self
-            .dispatch
-            .processes
-            .recorded_max_attempts(&self.session_id, &process_id)
-            .await
-        {
-            Ok(Some(recorded)) => registration.with_max_attempts(Some(recorded)),
-            Ok(None) => registration,
-            Err(err) => {
-                return crate::ToolInvocationReply::error(serde_json::json!(err.to_string()));
-            }
-        };
+        // A redrive presents the same start key and gets the retained process
+        // back untouched (ADR 0107), so the attempt bound it recorded stands
+        // whatever this attempt resolved.
         let mut options = crate::ProcessStartOptions::new()
             .with_initial_observers(self.child_process_observers())
             .with_env_spec(env_spec);
@@ -1380,10 +1361,8 @@ impl<'run> RuntimeExecutionContext<'run> {
             .await
         {
             Ok(record) => {
-                self.record_started_process(&process_id);
-                crate::ToolInvocationReply::success(Self::process_handle_json(
-                    &crate::ProcessRef::from_record(&record),
-                ))
+                self.record_started_process(&record.id);
+                crate::ToolInvocationReply::success(Self::process_handle_json(&record.id))
             }
             Err(err) => crate::ToolInvocationReply::error(serde_json::json!(err.to_string())),
         }
@@ -1514,20 +1493,14 @@ impl<'run> RuntimeExecutionContext<'run> {
         signal_id: String,
         payload: serde_json::Value,
     ) -> Result<crate::ProcessEvent, crate::RuntimeEffectControllerError> {
-        let registry = self
-            .process_execution
+        self.process_execution
             .as_ref()
             .and_then(|exec| exec.event_context.as_ref())
-            .map(|context| Arc::clone(context.process_work.registry()))
             .ok_or_else(missing_process_execution_error)?;
         let event_type = crate::process_signal_event_type(signal_name)?;
-        let process_ref = registry
-            .resolve_process_ref(process_id)
-            .await
-            .map_err(crate::RuntimeEffectControllerError::from)?;
         let replay_key = crate::process_signal_wait_key(process_id, signal_name, &signal_id);
         let command = crate::ProcessCommand::Signal {
-            process_ref,
+            process_id: process_id.clone(),
             signal_name: signal_name.to_string(),
             signal_id,
             request: crate::ProcessEventAppendRequest::new(event_type.clone(), payload)
@@ -1574,6 +1547,12 @@ impl<'run> RuntimeExecutionContext<'run> {
             invocation,
             crate::RuntimeEffectCommand::process(command),
         );
+        let registry = self
+            .process_execution
+            .as_ref()
+            .and_then(|exec| exec.event_context.as_ref())
+            .map(|context| Arc::clone(context.process_work.registry()))
+            .ok_or_else(missing_process_execution_error)?;
         let local_executor = crate::RuntimeEffectLocalExecutor::processes(
             Arc::clone(&registry),
             self.process_work

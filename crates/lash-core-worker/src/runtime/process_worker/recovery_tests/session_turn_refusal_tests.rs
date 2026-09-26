@@ -42,23 +42,23 @@ async fn session_turn_against_a_catalog_without_by_id_lookup_fails_in_one_admiss
     .with_process_event_sink(Arc::clone(&sink) as Arc<dyn crate::ProcessEventSink>);
     config.native_substrate.worker_sweep.rescan_interval = Duration::from_secs(3600);
     let worker = DurableProcessWorker::new(config).expect("valid worker");
-    let process_id = "session-turn-no-by-id-catalog";
-    registry
-        .register_process(session_turn_registration(
-            &ProcessId::from(process_id),
-            &SessionId::from("no-by-id-catalog-child"),
-        ))
+    let _process_id = "session-turn-no-by-id-catalog";
+    let session_turn_no_by_id_catalog_record = registry
+        .register_process(session_turn_registration(&SessionId::from(
+            "no-by-id-catalog-child",
+        )))
         .await
         .expect("register SessionTurn fixture");
+    let process_id = session_turn_no_by_id_catalog_record.id.clone();
 
     let report = worker
         .drive_pending_processes()
         .await
         .expect("admit the SessionTurn");
     assert_eq!(report.admitted, vec![process_id.to_string()]);
-    await_terminal(&registry, &ProcessId::from(process_id)).await;
+    await_terminal(&registry, &process_id).await;
     let record = registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await
         .expect("read refused SessionTurn")
         .expect("refused SessionTurn remains retained");

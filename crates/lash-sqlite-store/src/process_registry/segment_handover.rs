@@ -7,7 +7,7 @@ impl SqliteProcessRegistry {
         process_id: &ProcessId,
         handover: PersistedSegmentHandover,
     ) -> Result<(), lash_core_execution::PluginError> {
-        let process_id = ProcessId::from(process_id.to_string());
+        let process_id = process_id.clone();
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -69,7 +69,7 @@ impl SqliteProcessRegistry {
         process_id: &ProcessId,
         segment_ordinal: u64,
     ) -> Result<Option<PersistedSegmentHandover>, lash_core_execution::PluginError> {
-        let process_id = ProcessId::from(process_id.to_string());
+        let process_id = process_id.clone();
         self.conn
             .call(move |conn| {
                 Ok((|| {
@@ -94,7 +94,7 @@ impl SqliteProcessRegistry {
         &self,
         process_id: &ProcessId,
     ) -> Result<Option<PersistedSegmentHandover>, lash_core_execution::PluginError> {
-        let process_id = ProcessId::from(process_id.to_string());
+        let process_id = process_id.clone();
         self.conn
             .call(move |conn| {
                 Ok((|| {
@@ -196,7 +196,7 @@ impl SqliteProcessRegistry {
         process_id: &ProcessId,
         segment_ordinal: u64,
     ) -> Result<(), lash_core_execution::PluginError> {
-        let process_id = ProcessId::from(process_id.to_string());
+        let process_id = process_id.clone();
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
@@ -217,7 +217,7 @@ impl SqliteProcessRegistry {
         &self,
         process_id: &ProcessId,
     ) -> Result<(), lash_core_execution::PluginError> {
-        let process_id = ProcessId::from(process_id.to_string());
+        let process_id = process_id.clone();
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {

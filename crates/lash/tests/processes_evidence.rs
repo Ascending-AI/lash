@@ -44,7 +44,8 @@ fn processes_area_witnesses() {
         }
     });
     // W0005: lash::AwaitEventWaitIdentity::process_signal [function]
-    let _ = lash::AwaitEventWaitIdentity::process_signal("proc", "sig", 1);
+    let _ =
+        lash::AwaitEventWaitIdentity::process_signal(lash::ProcessId::fixture("proc"), "sig", 1);
     // W0006: lash::durability::DurableProcessWorkerConfig::with_turn_phase_probe_slot [function]
     let _ = lash::durability::DurableProcessWorkerConfig::with_turn_phase_probe_slot;
     // W0007: lash::runtime::RuntimeEffectLocalExecutor::with_process_turn_cancellation [function]
@@ -845,7 +846,7 @@ fn processes_area_witnesses() {
     // W0199: lash::process::ProcessExecutionEnvSpec::to_store_bytes [function]
     let _ = lash::process::ProcessExecutionEnvSpec::to_store_bytes;
     // W0200: lash::process::ProcessHandleView::new [function]
-    let _ = lash::process::ProcessHandleView::new("x", todo!(), todo!(), todo!());
+    let _ = lash::process::ProcessHandleView::new(todo!(), todo!(), todo!());
     // W0201: lash::process::ProcessIdentity::definition [field]
     field_witness(|value: &lash::process::ProcessIdentity| {
         let _ = &value.definition;
@@ -1182,11 +1183,7 @@ fn processes_area_witnesses() {
         let _ = &value.event_types;
     });
     // W0290: lash::process::ProcessStartRequest::external [function]
-    let _ = lash::process::ProcessStartRequest::external("x", todo!(), todo!(), todo!());
-    // W0291: lash::process::ProcessStartRequest::id [field]
-    field_witness(|value: &lash::process::ProcessStartRequest| {
-        let _ = &value.id;
-    });
+    let _ = lash::process::ProcessStartRequest::external(todo!(), todo!(), todo!());
     // W0292: lash::process::ProcessStartRequest::identity [field]
     field_witness(|value: &lash::process::ProcessStartRequest| {
         let _ = &value.identity;
@@ -1202,7 +1199,7 @@ fn processes_area_witnesses() {
         let _ = &value.max_attempts;
     });
     // W0296: lash::process::ProcessStartRequest::new [function]
-    let _ = lash::process::ProcessStartRequest::new("x", todo!(), todo!(), todo!(), todo!());
+    let _ = lash::process::ProcessStartRequest::new(todo!(), todo!(), todo!(), todo!());
     // W0297: lash::process::ProcessStartRequest::observers [field]
     field_witness(|value: &lash::process::ProcessStartRequest| {
         let _ = &value.observers;

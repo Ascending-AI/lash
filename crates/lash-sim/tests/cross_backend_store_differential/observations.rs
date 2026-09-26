@@ -161,7 +161,6 @@ pub(super) struct AttachmentManifestObservation {
     pub(super) committed: bool,
     pub(super) owner_kind: Option<AttachmentOwnerKind>,
     pub(super) owner_id: Option<String>,
-    pub(super) owner_incarnation: Option<u64>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]

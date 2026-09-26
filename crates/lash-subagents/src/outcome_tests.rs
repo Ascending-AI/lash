@@ -1,6 +1,5 @@
 use super::*;
 use lash_core::ProcessAwaitOutput;
-use lash_sansio::ProcessId;
 use serde_json::json;
 
 fn successful_turn_output(turn: lash_core::facade_support::AssembledTurn) -> ProcessAwaitOutput {
@@ -18,10 +17,8 @@ async fn registry_result(
         .await
         .expect("open a SQLite memory backend");
     let registry = lash_core::Backend::from(backend.clone()).process_registry();
-    let process_id = "subagent-outcome";
-    registry
+    let process_id = registry
         .register_process(lash_core::ProcessRegistration::new(
-            process_id,
             lash_core::ProcessInput::External {
                 metadata: Value::Null,
             },
@@ -33,10 +30,11 @@ async fn registry_result(
             ),
         ))
         .await
-        .unwrap();
+        .unwrap()
+        .id;
     let terminal = registry
         .complete_process(
-            &ProcessId::from(process_id),
+            &process_id,
             output,
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
@@ -53,7 +51,7 @@ async fn registry_result(
             .unwrap();
     }
     let output = lash_core::NativeProcessWork::for_registry(registry)
-        .await_terminal(&ProcessId::from(process_id))
+        .await_terminal(&process_id)
         .await
         .unwrap();
     child_task_result(output, output_schema)

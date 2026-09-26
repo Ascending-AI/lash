@@ -3,7 +3,6 @@
 use super::process_registry::registration;
 use super::*;
 use crate::{PluginError, ProjectionWatermark};
-use lash_sansio::ProcessId;
 use pretty_assertions::assert_eq;
 
 /// Test-consumer model for the typed Process Change Feed recovery contract:
@@ -49,13 +48,14 @@ pub async fn process_change_cursor_below_tombstone_compaction_horizon_is_refused
     registry: Arc<dyn ProcessRegistry>,
 ) {
     let process_id = "change-feed-prune-horizon";
-    registry
+    let change_feed_prune_horizon_record = registry
         .register_process(registration(process_id))
         .await
         .expect("register prune-horizon process");
+    let process_id = change_feed_prune_horizon_record.id.clone();
     registry
         .complete_process(
-            &ProcessId::from(process_id),
+            &process_id,
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),

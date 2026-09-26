@@ -12,7 +12,7 @@ impl RuntimeSessionServices {
     /// recorded process result.
     pub(in crate::runtime::session_manager::process_runners) async fn run_process_session_turn(
         &self,
-        registration: crate::ProcessRegistration,
+        process_id: crate::ProcessId,
         mut create_request: crate::SessionCreateRequest,
         turn_input: crate::TurnInput,
         execution_write_authority: crate::ProcessExecutionWriteAuthority,
@@ -20,22 +20,28 @@ impl RuntimeSessionServices {
         cancellation: tokio_util::sync::CancellationToken,
     ) -> Result<crate::ProcessAwaitOutput, crate::ProcessInfraError> {
         create_request = create_request.with_caused_by(crate::CausalRef::Process {
-            process_id: registration.id.clone(),
+            process_id: process_id.clone(),
         });
+        // A child session the start did not name is the process's own,
+        // derived from its minted id (ADR 0107).
+        if create_request.session_id.is_none() {
+            create_request = create_request
+                .with_session_id(crate::runtime::process_child_session_id(&process_id));
+        }
         // `ProcessInput::SessionTurn` is durable input. Its `create_request`
         // carries only persisted policy, so fill an omitted provider_id from
         // the parent runtime policy before the child session is built.
         self.inherit_session_turn_provider_id(&mut create_request);
         // The child session's first turn is deliberately scoped by the
         // process identity that started it, so the crossing is spelled out.
-        // The process worker admitted this controller under `registration.id`.
+        // The process worker admitted this controller under the process id.
         // Keep that execution authority through the child turn; session and
         // turn ids remain the turn's foreground routing and attribution.
-        let child_turn_id = crate::TurnId::from(registration.id.as_str());
+        let child_turn_id = crate::TurnId::from(process_id.as_str());
         match Box::pin(
             self.initialize_session_and_run_turn(session_init::ProcessSessionTurnInit {
                 create_request,
-                process_id: &registration.id,
+                process_id: &process_id,
                 turn_id: child_turn_id,
                 turn_input,
                 execution_write_authority: &execution_write_authority,
@@ -49,13 +55,13 @@ impl RuntimeSessionServices {
                 let child_session_id = run.session_id.clone();
                 let state = process_terminal_state_for_turn(&run.turn);
                 Ok(crate::ProcessAwaitOutput::from_tool_output(
-                    output_from_process_turn(&registration, &child_session_id, run.turn, state),
+                    output_from_process_turn(&process_id, &child_session_id, run.turn, state),
                 ))
             }
             Err(err) => {
                 if let Some(session_id) = err.retained_session_id() {
                     tracing::debug!(
-                        process_id = %registration.id,
+                        process_id = %process_id,
                         session_id = %session_id,
                         "process session turn left a retained child session"
                     );
@@ -318,7 +324,7 @@ fn process_turn_failure_raw(
 }
 
 fn output_from_process_turn(
-    registration: &crate::ProcessRegistration,
+    process_id: &crate::ProcessId,
     child_session_id: &SessionId,
     turn: crate::AssembledTurn,
     state: crate::ProcessStatus,
@@ -346,7 +352,7 @@ fn output_from_process_turn(
         return crate::ToolCallOutput::failure(failure_from_process_turn(&turn));
     }
     crate::ToolCallOutput::success(serde_json::json!({
-        "process_id": registration.id,
+        "process_id": process_id,
         "child_session_id": child_session_id,
         "turn": turn,
     }))

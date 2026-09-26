@@ -3,7 +3,7 @@
 --
 
 
--- Dumped from database version 16.15 (Debian 16.15-1.pgdg13+2)
+-- Dumped from database version 16.15
 -- Dumped by pg_dump version 16.15
 
 SET statement_timeout = 0;
@@ -80,10 +80,9 @@ CREATE TABLE lash_durable_read_fixture.lash_attachment_manifest (
     committed_at_ms bigint,
     owner_kind text,
     owner_id text,
-    owner_incarnation bigint,
     write_id text,
     written_at_ms bigint,
-    CONSTRAINT ck_lash_attachment_manifest_owner_identity CHECK ((((owner_kind IS NULL) AND (owner_id IS NULL) AND (owner_incarnation IS NULL)) OR ((owner_kind = 'turn'::text) AND (owner_id IS NOT NULL) AND (owner_incarnation IS NULL)) OR ((owner_kind = 'process'::text) AND (owner_id IS NOT NULL) AND (owner_incarnation IS NOT NULL)))),
+    CONSTRAINT ck_lash_attachment_manifest_owner_identity CHECK ((((owner_kind IS NULL) AND (owner_id IS NULL)) OR ((owner_kind = ANY (ARRAY['turn'::text, 'process'::text])) AND (owner_id IS NOT NULL)))),
     CONSTRAINT lash_attachment_manifest_owner_kind_check CHECK ((owner_kind = ANY (ARRAY['turn'::text, 'process'::text])))
 );
 
@@ -130,6 +129,17 @@ CREATE TABLE lash_durable_read_fixture.lash_deleted_sessions (
     head_revision bigint,
     relation_kind text,
     parent_session_id text
+);
+
+
+--
+-- Name: lash_fleet_format; Type: TABLE; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE TABLE lash_durable_read_fixture.lash_fleet_format (
+    singleton boolean DEFAULT true NOT NULL,
+    format_version integer NOT NULL,
+    CONSTRAINT ck_fleet_format_singleton CHECK (singleton)
 );
 
 
@@ -271,7 +281,6 @@ ALTER SEQUENCE lash_durable_read_fixture.lash_pending_turn_inputs_enqueue_seq_se
 
 CREATE TABLE lash_durable_read_fixture.lash_process_artifact_cleanup (
     process_id text NOT NULL COLLATE pg_catalog."C",
-    incarnation bigint NOT NULL,
     cleanup_json text NOT NULL
 );
 
@@ -314,7 +323,6 @@ CREATE TABLE lash_durable_read_fixture.lash_process_definitions (
 
 CREATE TABLE lash_durable_read_fixture.lash_process_events (
     process_id text NOT NULL COLLATE pg_catalog."C",
-    process_incarnation bigint NOT NULL,
     sequence bigint NOT NULL,
     event_type text NOT NULL,
     idempotency_key text,
@@ -343,8 +351,7 @@ CREATE TABLE lash_durable_read_fixture.lash_process_leases (
 
 CREATE TABLE lash_durable_read_fixture.lash_process_observers (
     session_id text NOT NULL,
-    process_id text NOT NULL COLLATE pg_catalog."C",
-    process_incarnation bigint NOT NULL
+    process_id text NOT NULL COLLATE pg_catalog."C"
 );
 
 
@@ -395,7 +402,6 @@ CREATE TABLE lash_durable_read_fixture.lash_process_segment_handovers (
 
 CREATE TABLE lash_durable_read_fixture.lash_process_tombstones (
     process_id text NOT NULL COLLATE pg_catalog."C",
-    incarnation bigint NOT NULL,
     terminal_label text NOT NULL,
     pruned_at_ms bigint NOT NULL,
     pruned_change_seq bigint NOT NULL
@@ -409,7 +415,6 @@ CREATE TABLE lash_durable_read_fixture.lash_process_tombstones (
 CREATE TABLE lash_durable_read_fixture.lash_process_wake_deliveries (
     delivery_id text NOT NULL,
     process_id text NOT NULL COLLATE pg_catalog."C",
-    process_incarnation bigint NOT NULL,
     target_session_id text NOT NULL,
     sequence bigint NOT NULL,
     state text NOT NULL,
@@ -431,8 +436,7 @@ CREATE TABLE lash_durable_read_fixture.lash_process_wake_deliveries (
 
 CREATE TABLE lash_durable_read_fixture.lash_processes (
     process_id text NOT NULL COLLATE pg_catalog."C",
-    incarnation bigint NOT NULL,
-    registration_fingerprint text NOT NULL,
+    start_key text COLLATE pg_catalog."C",
     originator_id text NOT NULL,
     wake_session_id text,
     identity_kind text NOT NULL,
@@ -693,6 +697,7 @@ CREATE TABLE lash_durable_read_fixture.lash_session_meta (
     drive_epoch bigint DEFAULT 0 NOT NULL,
     drive_admission_id text,
     admission_base_checkpoint_ref text,
+    drive_root_start text,
     CONSTRAINT ck_session_meta_caused_by_family CHECK ((((caused_by_kind IS NULL) AND (caused_by_session_id IS NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_process_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'turn'::text) AND (caused_by_session_id IS NOT NULL) AND (caused_by_turn_id IS NOT NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_process_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'effect_address'::text) AND (caused_by_effect_id IS NOT NULL) AND (caused_by_session_id IS NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_process_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'tool_call'::text) AND (caused_by_session_id IS NOT NULL) AND (caused_by_call_id IS NOT NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_process_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'process'::text) AND (caused_by_process_id IS NOT NULL) AND (caused_by_session_id IS NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'process_event'::text) AND (caused_by_process_id IS NOT NULL) AND (caused_by_process_event_sequence IS NOT NULL) AND (caused_by_session_id IS NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'trigger_occurrence'::text) AND (caused_by_occurrence_id IS NOT NULL) AND (caused_by_session_id IS NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_process_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_node_id IS NULL)) OR ((caused_by_kind = 'session_node'::text) AND (caused_by_session_id IS NOT NULL) AND (caused_by_node_id IS NOT NULL) AND (caused_by_turn_id IS NULL) AND (caused_by_effect_id IS NULL) AND (caused_by_call_id IS NULL) AND (caused_by_process_id IS NULL) AND (caused_by_process_event_sequence IS NULL) AND (caused_by_occurrence_id IS NULL) AND (caused_by_subscription_id IS NULL) AND (caused_by_subscription_incarnation IS NULL) AND (caused_by_subscription_revision IS NULL)) OR ((caused_by_kind IS NOT NULL) AND (NOT (caused_by_kind = ANY (ARRAY['turn'::text, 'effect_address'::text, 'tool_call'::text, 'process'::text, 'process_event'::text, 'trigger_occurrence'::text, 'session_node'::text])))))),
     CONSTRAINT ck_session_meta_caused_by_kind CHECK ((caused_by_kind = ANY (ARRAY['turn'::text, 'effect_address'::text, 'tool_call'::text, 'process'::text, 'process_event'::text, 'trigger_occurrence'::text, 'session_node'::text]))),
     CONSTRAINT ck_session_meta_relation_family CHECK ((((relation_kind = 'root'::text) AND (parent_session_id IS NULL) AND (caused_by_kind IS NULL) AND (source_session_id IS NULL) AND (source_node_id IS NULL)) OR ((relation_kind = 'child'::text) AND (parent_session_id IS NOT NULL) AND (source_session_id IS NULL) AND (source_node_id IS NULL)) OR ((relation_kind = 'fork'::text) AND (parent_session_id IS NULL) AND (caused_by_kind IS NULL) AND (source_session_id IS NOT NULL) AND (source_node_id IS NOT NULL)) OR ((relation_kind IS NOT NULL) AND (NOT (relation_kind = ANY (ARRAY['root'::text, 'child'::text, 'fork'::text])))))),
@@ -707,8 +712,7 @@ CREATE TABLE lash_durable_read_fixture.lash_session_meta (
 CREATE TABLE lash_durable_read_fixture.lash_session_meta_pending_observer_intents (
     session_id text NOT NULL,
     process_index bigint NOT NULL,
-    process_id text NOT NULL,
-    process_incarnation bigint
+    process_id text NOT NULL
 );
 
 
@@ -750,7 +754,7 @@ CREATE TABLE lash_durable_read_fixture.lash_tool_intent_submissions (
 CREATE TABLE lash_durable_read_fixture.lash_trigger_deliveries (
     occurrence_id text NOT NULL,
     subscription_id text NOT NULL,
-    process_id text NOT NULL,
+    process_id text,
     subscription_incarnation text NOT NULL,
     subscription_revision bigint NOT NULL,
     subscription_snapshot_json text NOT NULL,
@@ -1035,7 +1039,7 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_usage_deltas ALTER COLUMN seq SE
 -- Data for Name: lash_attachment_manifest; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_attachment_manifest VALUES ('durable-read-attachment', 'durable-read-fixture', 'session:durable-read-fixture:sha256:durable-read-attachment', 100, 1700000000000, NULL, NULL, NULL, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_attachment_manifest VALUES ('durable-read-attachment', 'durable-read-fixture', 'session:durable-read-fixture:sha256:durable-read-attachment', 100, 1700000000000, NULL, NULL, NULL, NULL);
 
 
 --
@@ -1077,6 +1081,13 @@ INSERT INTO lash_durable_read_fixture.lash_checkpoint_blob_refs VALUES ('0b89f04
 --
 
 INSERT INTO lash_durable_read_fixture.lash_deleted_sessions VALUES ('durable-read-deleted-session', 1700000000000, NULL, 0, 'root', NULL);
+
+
+--
+-- Data for Name: lash_fleet_format; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
+--
+
+INSERT INTO lash_durable_read_fixture.lash_fleet_format VALUES (true, 1);
 
 
 --
@@ -1247,7 +1258,7 @@ INSERT INTO lash_durable_read_fixture.lash_runtime_turn_commits VALUES ('durable
 -- Data for Name: lash_schema_versions; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 135);
+INSERT INTO lash_durable_read_fixture.lash_schema_versions VALUES ('lash-postgres-store', 139);
 
 
 --
@@ -1267,7 +1278,7 @@ INSERT INTO lash_durable_read_fixture.lash_session_execution_leases VALUES ('dur
 -- Data for Name: lash_session_meta; Type: TABLE DATA; Schema: lash_durable_read_fixture; Owner: -
 --
 
-INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fixture', 3, 1700000000000, 1700000000000, 'root', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL);
+INSERT INTO lash_durable_read_fixture.lash_session_meta VALUES ('durable-read-fixture', 3, 1700000000000, 1700000000000, 'root', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 0, NULL, NULL, NULL);
 
 
 --
@@ -1477,6 +1488,14 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_deleted_sessions
 
 
 --
+-- Name: lash_fleet_format lash_fleet_format_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+--
+
+ALTER TABLE ONLY lash_durable_read_fixture.lash_fleet_format
+    ADD CONSTRAINT lash_fleet_format_pkey PRIMARY KEY (singleton);
+
+
+--
 -- Name: lash_fork_lineage lash_fork_lineage_pkey; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -1561,7 +1580,7 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_pending_turn_inputs
 --
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_process_artifact_cleanup
-    ADD CONSTRAINT lash_process_artifact_cleanup_pkey PRIMARY KEY (process_id, incarnation);
+    ADD CONSTRAINT lash_process_artifact_cleanup_pkey PRIMARY KEY (process_id);
 
 
 --
@@ -1593,7 +1612,7 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_process_definitions
 --
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_process_events
-    ADD CONSTRAINT lash_process_events_pkey PRIMARY KEY (process_id, process_incarnation, sequence);
+    ADD CONSTRAINT lash_process_events_pkey PRIMARY KEY (process_id, sequence);
 
 
 --
@@ -1609,7 +1628,7 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_process_leases
 --
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_process_observers
-    ADD CONSTRAINT lash_process_observers_pkey PRIMARY KEY (session_id, process_id, process_incarnation);
+    ADD CONSTRAINT lash_process_observers_pkey PRIMARY KEY (session_id, process_id);
 
 
 --
@@ -1641,7 +1660,7 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_process_segment_handovers
 --
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_process_tombstones
-    ADD CONSTRAINT lash_process_tombstones_pkey PRIMARY KEY (process_id, incarnation);
+    ADD CONSTRAINT lash_process_tombstones_pkey PRIMARY KEY (process_id);
 
 
 --
@@ -1658,14 +1677,6 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_process_wake_deliveries
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_processes
     ADD CONSTRAINT lash_processes_pkey PRIMARY KEY (process_id);
-
-
---
--- Name: lash_processes lash_processes_process_id_incarnation_key; Type: CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
---
-
-ALTER TABLE ONLY lash_durable_read_fixture.lash_processes
-    ADD CONSTRAINT lash_processes_process_id_incarnation_key UNIQUE (process_id, incarnation);
 
 
 --
@@ -1983,7 +1994,7 @@ CREATE INDEX idx_lash_artifact_owners_owner ON lash_durable_read_fixture.lash_ar
 -- Name: idx_lash_attachment_manifest_owner; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
-CREATE INDEX idx_lash_attachment_manifest_owner ON lash_durable_read_fixture.lash_attachment_manifest USING btree (session_id, owner_kind, owner_id, owner_incarnation, committed_at_ms);
+CREATE INDEX idx_lash_attachment_manifest_owner ON lash_durable_read_fixture.lash_attachment_manifest USING btree (session_id, owner_kind, owner_id, committed_at_ms);
 
 
 --
@@ -2152,6 +2163,13 @@ CREATE INDEX idx_lash_processes_parked ON lash_durable_read_fixture.lash_process
 --
 
 CREATE INDEX idx_lash_processes_pending_cancel ON lash_durable_read_fixture.lash_processes USING btree (cancel_requested_at_ms, process_id) WHERE ((cancel_requested_at_ms IS NOT NULL) AND (status <> ALL (ARRAY['completed'::text, 'failed'::text, 'cancelled'::text, 'abandoned'::text])));
+
+
+--
+-- Name: idx_lash_processes_start_key; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE UNIQUE INDEX idx_lash_processes_start_key ON lash_durable_read_fixture.lash_processes USING btree (start_key) WHERE (start_key IS NOT NULL);
 
 
 --
@@ -2354,19 +2372,19 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_checkpoint_blob_refs
 
 
 --
--- Name: lash_process_artifact_cleanup lash_process_artifact_cleanup_process_id_incarnation_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+-- Name: lash_process_artifact_cleanup lash_process_artifact_cleanup_process_id_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_process_artifact_cleanup
-    ADD CONSTRAINT lash_process_artifact_cleanup_process_id_incarnation_fkey FOREIGN KEY (process_id, incarnation) REFERENCES lash_durable_read_fixture.lash_process_tombstones(process_id, incarnation) ON DELETE RESTRICT;
+    ADD CONSTRAINT lash_process_artifact_cleanup_process_id_fkey FOREIGN KEY (process_id) REFERENCES lash_durable_read_fixture.lash_process_tombstones(process_id) ON DELETE RESTRICT;
 
 
 --
--- Name: lash_process_events lash_process_events_process_id_process_incarnation_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+-- Name: lash_process_events lash_process_events_process_id_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_process_events
-    ADD CONSTRAINT lash_process_events_process_id_process_incarnation_fkey FOREIGN KEY (process_id, process_incarnation) REFERENCES lash_durable_read_fixture.lash_processes(process_id, incarnation) ON DELETE CASCADE;
+    ADD CONSTRAINT lash_process_events_process_id_fkey FOREIGN KEY (process_id) REFERENCES lash_durable_read_fixture.lash_processes(process_id) ON DELETE CASCADE;
 
 
 --
@@ -2378,11 +2396,11 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_process_leases
 
 
 --
--- Name: lash_process_observers lash_process_observers_process_id_process_incarnation_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+-- Name: lash_process_observers lash_process_observers_process_id_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_process_observers
-    ADD CONSTRAINT lash_process_observers_process_id_process_incarnation_fkey FOREIGN KEY (process_id, process_incarnation) REFERENCES lash_durable_read_fixture.lash_processes(process_id, incarnation) ON DELETE CASCADE;
+    ADD CONSTRAINT lash_process_observers_process_id_fkey FOREIGN KEY (process_id) REFERENCES lash_durable_read_fixture.lash_processes(process_id) ON DELETE CASCADE;
 
 
 --
@@ -2394,11 +2412,11 @@ ALTER TABLE ONLY lash_durable_read_fixture.lash_process_segment_handovers
 
 
 --
--- Name: lash_process_wake_deliveries lash_process_wake_deliveries_process_id_process_incarnatio_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
+-- Name: lash_process_wake_deliveries lash_process_wake_deliveries_process_id_fkey; Type: FK CONSTRAINT; Schema: lash_durable_read_fixture; Owner: -
 --
 
 ALTER TABLE ONLY lash_durable_read_fixture.lash_process_wake_deliveries
-    ADD CONSTRAINT lash_process_wake_deliveries_process_id_process_incarnatio_fkey FOREIGN KEY (process_id, process_incarnation) REFERENCES lash_durable_read_fixture.lash_processes(process_id, incarnation) ON DELETE CASCADE;
+    ADD CONSTRAINT lash_process_wake_deliveries_process_id_fkey FOREIGN KEY (process_id) REFERENCES lash_durable_read_fixture.lash_processes(process_id) ON DELETE CASCADE;
 
 
 --

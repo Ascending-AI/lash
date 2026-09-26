@@ -20,7 +20,7 @@ use super::*;
 /// The events the intent target recorded for `event_type`, by leaf id.
 async fn emitted_ids(run: &OracleRun, event_type: &str) -> Vec<String> {
     run.registry
-        .recent_events(&lash_sansio::ProcessId::from(INTENT_PROCESS), 64)
+        .recent_events(&run.theatre.intent_process(), 64)
         .await
         .expect("read the intent target's events")
         .into_iter()
@@ -410,7 +410,7 @@ finish({ timedOut: winner === undefined, job: job.process_id });"#,
         .unwrap_or_else(|| panic!("the cell reports the job, got {value}"));
     let record = run
         .registry
-        .get_process(&lash_sansio::ProcessId::from(process_id))
+        .get_process(&lash_sansio::ProcessId::parse(process_id).expect("the job is a minted id"))
         .await
         .expect("read the job")
         .expect("the job is registered");
@@ -482,7 +482,7 @@ async fn a_turn_cancelled_while_parked_on_rank_n_ends_cancelled(
     let theatre = Arc::new(OracleTheatre::default());
     let backend = tier.backend().await;
     let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
-    register_intent_target(registry.as_ref(), session_id).await;
+    register_intent_target(registry.as_ref(), session_id, &theatre).await;
     let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
     let core = oracle_core(
         backend.into(),

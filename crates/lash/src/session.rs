@@ -1500,9 +1500,9 @@ mod reconcile_tests {
 
         async fn await_process_terminal(
             &self,
-            process_ref: &lash_core::ProcessRef,
+            process_id: &lash_core::ProcessId,
         ) -> std::result::Result<lash_core::ProcessTerminalWait, lash_core::PluginError> {
-            panic!("unexpected terminal wait for {process_ref}")
+            panic!("unexpected terminal wait for {process_id}")
         }
     }
 

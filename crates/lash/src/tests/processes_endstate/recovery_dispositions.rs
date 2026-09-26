@@ -41,9 +41,8 @@ fn recovery_process_worker(
     .expect("valid test native substrate config")
 }
 
-fn owner_bound_external_registration(id: &str) -> lash_core::ProcessRegistration {
+fn owner_bound_external_registration() -> lash_core::ProcessRegistration {
     lash_core::ProcessRegistration::new(
-        id,
         lash_core::ProcessInput::External {
             metadata: serde_json::json!({}),
         },
@@ -70,13 +69,13 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
     let worker = recovery_process_worker(&backend, drain_owner.clone());
 
     // A started OwnerBound row this host owns (first_started under `drain_owner`).
-    let process_id = "owner-bound-drain";
-    registry
-        .register_process(owner_bound_external_registration(process_id))
-        .await?;
+    let process_id = registry
+        .register_process(owner_bound_external_registration())
+        .await?
+        .id;
     registry
         .record_first_started(
-            &ProcessId::from(process_id),
+            &process_id,
             lash_core::ProcessStarted {
                 owner: drain_owner.clone(),
                 fencing_token: 0,
@@ -90,13 +89,8 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
     // Hold the terminal await on the still-running row through the facade await
     // seam — it must resolve only once drain terminalizes the work.
     let await_core = core.clone();
-    let await_id = process_id.to_string();
-    let waiter = tokio::spawn(async move {
-        await_core
-            .processes()
-            .await_output(&ProcessId::from(await_id))
-            .await
-    });
+    let await_id = process_id.clone();
+    let waiter = tokio::spawn(async move { await_core.processes().await_output(&await_id).await });
 
     // The host drains its own started OwnerBound work natively at close.
     let report = worker.drain_owner_bound_work().await?;
@@ -123,7 +117,7 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
     // The Abandoned terminal is model-visible read-side (a fourth terminal peer).
     let observed = core
         .processes()
-        .get(&ProcessId::from(process_id))
+        .get(&process_id)
         .await?
         .expect("abandoned row observed through the facade");
     assert_eq!(observed.lifecycle, lash_core::ProcessStatus::Abandoned);
@@ -147,10 +141,7 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
             .is_empty(),
         "a foreign sweep must not resurrect the abandoned row onto the worklist"
     );
-    let re_awaited = core
-        .processes()
-        .await_output(&ProcessId::from(process_id))
-        .await?;
+    let re_awaited = core.processes().await_output(&process_id).await?;
     let lash_core::ProcessAwaitOutput::Abandoned { evidence, .. } = re_awaited else {
         panic!("the abandoned terminal was mutated by a foreign sweep: {re_awaited:#?}");
     };
@@ -173,7 +164,7 @@ async fn owner_bound_graceful_drain_resolves_awaiter_and_prunes_end_to_end() -> 
     assert_eq!(prune.pruned_processes, 1);
     assert!(
         matches!(
-            core.processes().get(&ProcessId::from(process_id)).await,
+            core.processes().get(&process_id).await,
             Err(crate::EmbedError::Plugin(
                 lash_core::PluginError::ProcessNoLongerRetained { .. }
             ))
@@ -204,13 +195,13 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
     let worker = recovery_process_worker(&backend, sweep_owner);
     let silent_owner = recovery_local_owner("silent-owner", "host-b", "silent-start");
 
-    let process_id = "silent-owner-bound";
-    registry
-        .register_process(owner_bound_external_registration(process_id))
-        .await?;
+    let process_id = registry
+        .register_process(owner_bound_external_registration())
+        .await?
+        .id;
     registry
         .record_first_started(
-            &ProcessId::from(process_id),
+            &process_id,
             lash_core::ProcessStarted {
                 owner: silent_owner.clone(),
                 fencing_token: 0,
@@ -221,7 +212,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
         )
         .await?;
     let silent_lease = registry
-        .claim_process_lease(&ProcessId::from(process_id), &silent_owner, 60_000)
+        .claim_process_lease(&process_id, &silent_owner, 60_000)
         .await?
         .acquired()
         .expect("silent holder claims its lease");
@@ -231,7 +222,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
     let _ = worker.drive_pending_processes().await?;
     let observed = core
         .processes()
-        .get(&ProcessId::from(process_id))
+        .get(&process_id)
         .await?
         .expect("silent row observed");
     assert_eq!(
@@ -263,11 +254,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
     // observers while pending.
     let after_request = core
         .processes()
-        .request_abandon(
-            &ProcessId::from(process_id),
-            "operator",
-            Some("host retired".to_string()),
-        )
+        .request_abandon(&process_id, "operator", Some("host retired".to_string()))
         .await?;
     let request = after_request
         .abandon_request
@@ -281,7 +268,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
     );
     assert!(
         core.processes()
-            .get(&ProcessId::from(process_id))
+            .get(&process_id)
             .await?
             .and_then(|process| process.abandon_request)
             .is_some(),
@@ -299,7 +286,7 @@ async fn silent_owner_stays_running_then_abandon_request_reconciles_end_to_end()
 
     let output = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        core.processes().await_output(&ProcessId::from(process_id)),
+        core.processes().await_output(&process_id),
     )
     .await
     .expect("reconciled terminal resolves within bound")?;
@@ -328,13 +315,11 @@ async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
     let core = process_test_core(backend.clone().into())?;
 
-    let departed = "facade-caller-departed";
-    let live = "facade-caller-live";
-    for id in [departed, live] {
-        registry
+    let mut registered = Vec::new();
+    for _ in 0..2 {
+        let id = registry
             .register_process(
                 lash_core::ProcessRegistration::new(
-                    id,
                     lash_core::ProcessInput::External {
                         metadata: serde_json::json!({}),
                     },
@@ -351,15 +336,17 @@ async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
                     ),
                 ),
             )
-            .await?;
+            .await?
+            .id;
+        registered.push(id);
     }
-    registry
-        .record_caller_departure(&ProcessId::from(departed))
-        .await?;
+    let [departed, live] =
+        <[ProcessId; 2]>::try_from(registered).expect("two registered processes");
+    registry.record_caller_departure(&departed).await?;
 
     let observed = core
         .processes()
-        .get(&ProcessId::from(departed))
+        .get(&departed)
         .await?
         .expect("the caller-departed row is observable");
     assert_eq!(
@@ -371,7 +358,7 @@ async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
     // Awaiting it is refused with a typed error rather than parking forever.
     let refusal = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        core.processes().await_output(&ProcessId::from(departed)),
+        core.processes().await_output(&departed),
     )
     .await
     .expect("an await on a caller-departed row must be bounded, not parked")
@@ -401,7 +388,7 @@ async fn caller_departed_rows_are_selectable_retention_policy() -> Result<()> {
     );
     assert_eq!(
         registry
-            .get_process(&ProcessId::from(live))
+            .get_process(&live)
             .await?
             .expect("the running sibling survives retention")
             .status,

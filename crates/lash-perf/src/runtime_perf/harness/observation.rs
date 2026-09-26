@@ -1,4 +1,3 @@
-use lash_sansio::ProcessId;
 use std::sync::Arc;
 
 use super::BenchmarkRuntime;
@@ -127,13 +126,13 @@ impl BenchmarkRuntime {
             session
                 .admin()
                 .processes()
-                .await_output(&ProcessId::from(delivery.process_id.as_str()))
+                .await_output(&delivery.process_id)
                 .await?;
         }
         let terminal_processes = [session
             .admin()
             .processes()
-            .get(&ProcessId::from(delivery.process_id.as_str()))
+            .get(&delivery.process_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("trigger delivery process disappeared"))?];
         let observation = TriggerDeliveryTerminalObservation {

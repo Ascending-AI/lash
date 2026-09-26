@@ -119,29 +119,6 @@ impl<'de> serde::Deserialize<'de> for RemoteProcessExecutionEnvRef {
     }
 }
 
-/// Refuses process ids the durable process key encoding cannot store.
-///
-/// The rule is core's `invalid_process_key_reason`, restated because the base
-/// remote DTOs deliberately do not depend on `lash-core` (the `core-conversions`
-/// feature is optional). The decoder re-runs core's own validator, so this is
-/// an early, field-named refusal and not the authority (FIG-2985).
-fn require_storable_process_key(
-    type_name: &'static str,
-    value: &str,
-) -> Result<(), RemoteProtocolError> {
-    let reason = if value.contains('\0') {
-        "process_id must not contain NUL"
-    } else if value.contains('#') {
-        "process_id contains reserved segment separator `#`"
-    } else {
-        return Ok(());
-    };
-    Err(RemoteProtocolError::InvalidEnvelope {
-        type_name,
-        message: reason.to_string(),
-    })
-}
-
 fn is_canonical_process_execution_env_ref(value: &str) -> bool {
     let Some(digest) = value.strip_prefix(RemoteProcessExecutionEnvRef::PREFIX) else {
         return false;
@@ -534,25 +511,6 @@ impl RemoteProcessWaitState {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
-pub struct RemoteProcessRef {
-    pub process_id: ProcessId,
-    pub incarnation: u64,
-}
-
-impl RemoteProcessRef {
-    pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
-        require_non_empty(type_name, "process_id", &self.process_id)?;
-        if self.incarnation == 0 {
-            return Err(RemoteProtocolError::InvalidEnvelope {
-                type_name,
-                message: "process incarnation must be non-zero".to_string(),
-            });
-        }
-        Ok(())
-    }
-}
-
 /// Writes the handle marker field as the one kind, and refuses any other.
 pub(crate) mod handle_kind_field {
     pub fn serialize<S: serde::Serializer>(_: &(), serializer: S) -> Result<S::Ok, S::Error> {
@@ -584,7 +542,6 @@ pub struct RemoteProcessHandleView {
     pub handle_kind: (),
     pub id: String,
     pub process_id: ProcessId,
-    pub incarnation: u64,
     pub kind: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub label: Option<String>,
@@ -597,11 +554,6 @@ impl RemoteProcessHandleView {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         require_non_empty(type_name, "id", &self.id)?;
         require_non_empty(type_name, "process_id", &self.process_id)?;
-        RemoteProcessRef {
-            process_id: self.process_id.clone(),
-            incarnation: self.incarnation,
-        }
-        .validate(type_name)?;
         require_non_empty(type_name, "kind", &self.kind)?;
         if let Some(definition) = &self.definition {
             definition.validate(type_name)?;
@@ -613,7 +565,11 @@ impl RemoteProcessHandleView {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessRecord {
     pub process_id: ProcessId,
-    pub incarnation: u64,
+    /// The digest of the key the process was started under, while it is
+    /// retained. It is not a caller's key: a caller that retries sends its
+    /// own raw `start_key` again, never this digest.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_key_digest: Option<String>,
     pub last_event_sequence: u64,
     pub input: RemoteProcessInput,
     pub disposition: RemoteRecoveryContract,
@@ -676,12 +632,6 @@ fn validate_status_and_outcome(
 impl RemoteProcessRecord {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         require_non_empty(type_name, "process_id", &self.process_id)?;
-        require_storable_process_key(type_name, &self.process_id)?;
-        RemoteProcessRef {
-            process_id: self.process_id.clone(),
-            incarnation: self.incarnation,
-        }
-        .validate(type_name)?;
         self.lifecycle
             .validate(type_name, &self.provenance.originator)?;
         self.input.validate(type_name)?;
@@ -744,7 +694,7 @@ impl RemoteProcessRecord {
 pub struct RemoteProcessWorkSnapshot {
     pub session_id: SessionId,
     #[serde(default)]
-    pub visible_processes: Vec<RemoteProcessRef>,
+    pub visible_processes: Vec<ProcessId>,
     #[serde(default)]
     pub items: Vec<RemoteProcessWorkItem>,
 }
@@ -752,9 +702,6 @@ pub struct RemoteProcessWorkSnapshot {
 impl RemoteProcessWorkSnapshot {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         require_non_empty("RemoteProcessWorkSnapshot", "session_id", &self.session_id)?;
-        for process_ref in &self.visible_processes {
-            process_ref.validate("RemoteProcessWorkSnapshot")?;
-        }
         for item in &self.items {
             item.validate("RemoteProcessWorkSnapshot")?;
         }
@@ -818,7 +765,6 @@ impl RemoteProcessWorkItem {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteObservedProcess {
     pub process_id: ProcessId,
-    pub incarnation: u64,
     pub last_event_sequence: u64,
     pub identity: RemoteProcessIdentity,
     pub lifecycle: RemoteProcessStatus,
@@ -865,11 +811,6 @@ pub struct RemoteObservedProcess {
 impl RemoteObservedProcess {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         require_non_empty(type_name, "process_id", &self.process_id)?;
-        RemoteProcessRef {
-            process_id: self.process_id.clone(),
-            incarnation: self.incarnation,
-        }
-        .validate(type_name)?;
         self.identity.validate(type_name)?;
         self.policy.validate(type_name, &self.originator)?;
         self.input.validate(type_name)?;
@@ -918,7 +859,6 @@ impl RemoteObservedProcessEvent {
 #[serde(deny_unknown_fields)]
 pub struct RemoteProcessEvent {
     pub process_id: ProcessId,
-    pub process_incarnation: u64,
     pub sequence: u64,
     pub event_type: String,
     #[serde(default)]
@@ -933,11 +873,6 @@ pub struct RemoteProcessEvent {
 impl RemoteProcessEvent {
     pub fn validate(&self, type_name: &'static str) -> Result<(), RemoteProtocolError> {
         require_non_empty(type_name, "process_id", &self.process_id)?;
-        RemoteProcessRef {
-            process_id: self.process_id.clone(),
-            incarnation: self.process_incarnation,
-        }
-        .validate(type_name)?;
         require_non_empty(type_name, "event_type", &self.event_type)?;
         if let Some(invocation) = &self.invocation {
             invocation.validate(type_name)?;

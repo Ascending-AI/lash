@@ -3,15 +3,14 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
 
+    use crate::SessionId;
     use crate::runtime::ProcessRegistryFaults;
     use crate::runtime::{WakeDeliveryDriver, WorkCadencePolicy};
-    use crate::{ProcessId, SessionId};
 
     use crate::support::memory_store_set;
 
-    fn external_registration(process_id: &ProcessId) -> crate::ProcessRegistration {
+    fn external_registration() -> crate::ProcessRegistration {
         crate::ProcessRegistration::new(
-            process_id,
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -25,15 +24,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn superseded_wake_delivery_is_refused_before_enqueueing_the_successor() {
+    async fn a_wake_for_a_pruned_process_is_refused_before_enqueueing() {
         let backend = memory_store_set().await;
         let registry = Arc::new(ProcessRegistryFaults::new(backend.process_registry()));
         let old = registry
-            .register_process(external_registration(&ProcessId::from(
-                "reused-wake-delivery",
-            )))
+            .register_process(external_registration())
             .await
-            .expect("register old incarnation");
+            .expect("register the first process");
         registry
             .complete_process(
                 &old.id,
@@ -43,30 +40,27 @@ mod tests {
                 crate::ProcessCompletionAuthority::external_owner(),
             )
             .await
-            .expect("complete old incarnation");
+            .expect("complete the first process");
         registry
             .prune_terminal_processes(u64::MAX, None, crate::ProjectionWatermark::NoProjector)
             .await
-            .expect("prune old incarnation");
+            .expect("prune the first process");
         let current = registry
-            .register_process(external_registration(&ProcessId::from(
-                "reused-wake-delivery",
-            )))
+            .register_process(external_registration())
             .await
-            .expect("register successor incarnation");
-        assert_ne!(old.incarnation, current.incarnation);
+            .expect("register a later process");
+        assert_ne!(old.id, current.id, "a minted id is never reused");
         registry
             .inject_claimed_wake_delivery(crate::ProcessWakeDelivery {
                 version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
                 wake_id: format!("wake:v1:blake3:{}", "a".repeat(64)),
                 target_session_id: SessionId::from("wake-target"),
                 process_id: old.id.clone(),
-                process_incarnation: old.incarnation,
                 sequence: 1,
                 event_type: "producer.wake".to_string(),
                 event_invocation: crate::RuntimeInvocation::effect(
                     crate::EffectAddress::new(
-                        crate::ExecutionScope::process("reused-wake-delivery"),
+                        crate::ExecutionScope::process(old.id.clone()),
                         "wake-replay",
                     )
                     .expect("valid wake delivery address"),
@@ -78,7 +72,7 @@ mod tests {
                 input: "wake".to_string(),
                 created_at_ms: 0,
             })
-            .expect("inject old-incarnation wake");
+            .expect("inject the pruned process's wake");
 
         let result = WakeDeliveryDriver::drive_pending_once(
             registry,
@@ -92,9 +86,9 @@ mod tests {
         assert!(
             matches!(
                 result,
-                Err(crate::PluginError::ProcessIncarnationSuperseded { .. })
+                Err(crate::PluginError::ProcessNoLongerRetained { .. })
             ),
-            "old wake delivery must refuse the successor, got {result:?}"
+            "a pruned process's wake must refuse, got {result:?}"
         );
     }
 

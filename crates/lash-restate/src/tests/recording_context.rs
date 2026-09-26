@@ -551,13 +551,13 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
 
     fn start_process_workflow<'run>(
         &'run self,
+        process_id: lash_core::ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
     ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>
     where
         'ctx: 'run,
     {
-        let process_id = registration.id.clone();
         let endpoint = self.endpoint.clone();
         self.process_command_log
             .lock_recover()
@@ -595,8 +595,9 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
                 invoke_process_workflow_endpoint(
                     &endpoint,
                     "run",
-                    &process_id,
+                    process_id.as_str(),
                     &RestateProcessWorkflowInput {
+                        process_id: process_id.clone(),
                         registration,
                         execution_context,
                         segment_ordinal: 0,
@@ -619,12 +620,18 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
         'ctx: 'run,
     {
         let endpoint = self.endpoint.clone();
-        let process_id = request.process_ref.process_id.clone();
+        let process_id = request.process_id.clone();
         self.cancelled.lock_recover().push(request.clone());
         Box::pin(async move {
             if let Some(endpoint) = endpoint {
-                invoke_process_workflow_endpoint(&endpoint, "cancel", &process_id, &request, false)
-                    .await?;
+                invoke_process_workflow_endpoint(
+                    &endpoint,
+                    "cancel",
+                    process_id.as_str(),
+                    &request,
+                    false,
+                )
+                .await?;
             }
             Ok(())
         })
@@ -927,7 +934,12 @@ pub(super) struct ToolIntentJournalCorpusFixture {
 pub(super) const TOOL_INTENT_CORPUS_KEY: &str = "tool-intent-corpus-v2";
 pub(super) const TOOL_INTENT_CORPUS_SESSION: &str = "tool-intent-corpus-session";
 pub(super) const TOOL_INTENT_CORPUS_TURN: &str = "tool-intent-corpus-turn";
-pub(super) const TOOL_INTENT_CORPUS_TARGET: &str = "tool-intent-corpus-target";
+/// The corpus's signal target: the first process the corpus backend's
+/// sequential mint registers, so the checked-in journal bytes name it
+/// (ADR 0107).
+pub(super) fn tool_intent_corpus_target() -> ProcessId {
+    lash_core::ProcessIdMint::sequential_id_for_testing(1)
+}
 
 #[restate_sdk::workflow]
 trait ToolIntentCorpusReplay {
@@ -984,9 +996,7 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
                                         session_id: SessionId::from(
                                             TOOL_INTENT_CORPUS_SESSION.to_string(),
                                         ),
-                                        process_id: ProcessId::from(
-                                            TOOL_INTENT_CORPUS_TARGET.to_string(),
-                                        ),
+                                        process_id: tool_intent_corpus_target(),
                                         signal_name: "resume".to_string(),
                                         payload: serde_json::json!({
                                             "source": "checked-in-endpoint-corpus"
@@ -1039,16 +1049,21 @@ impl ToolIntentCorpusReplay for ToolIntentCorpusReplayImpl {
 
 pub(super) async fn tool_intent_corpus_endpoint() -> (Endpoint, Arc<dyn ProcessRegistry>) {
     let clock: Arc<dyn lash_core::Clock> = Arc::new(ToolIntentCorpusClock);
-    let backend = lash_sqlite_store::SqliteBackend::memory_with_clock(clock)
-        .await
-        .expect("open corpus backend");
+    let backend = lash_sqlite_store::SqliteBackend::memory_with_options_and_clock(
+        lash_sqlite_store::SqliteBackendOptions {
+            process_id_mint: lash_core::ProcessIdMint::sequential_for_testing(),
+            ..lash_sqlite_store::SqliteBackendOptions::memory()
+        },
+        clock,
+    )
+    .await
+    .expect("open corpus backend");
     let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
     let process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore> =
         backend.process_env_store();
-    registry
+    let tool_intent_corpus_target = registry
         .register_process(
             ProcessRegistration::new(
-                TOOL_INTENT_CORPUS_TARGET,
                 ProcessInput::External {
                     metadata: serde_json::json!({"fixture": "endpoint-corpus"}),
                 },
@@ -1066,7 +1081,9 @@ pub(super) async fn tool_intent_corpus_endpoint() -> (Endpoint, Arc<dyn ProcessR
             }]),
         )
         .await
-        .expect("seed corpus signal target");
+        .expect("seed corpus signal target")
+        .id;
+    assert_eq!(tool_intent_corpus_target, self::tool_intent_corpus_target());
     let endpoint = Endpoint::builder()
         .bind(
             ToolIntentCorpusReplayImpl {
@@ -1129,7 +1146,7 @@ pub(super) async fn replay_tool_intent_corpus_fixture(
     .await
     .expect("feed checked-in corpus bytes through the Restate endpoint");
     let signal_events = registry
-        .full_event_window(&ProcessId::from(TOOL_INTENT_CORPUS_TARGET), 0)
+        .full_event_window(&tool_intent_corpus_target(), 0)
         .await
         .expect("read corpus signal outcomes")
         .into_iter()
@@ -1146,9 +1163,9 @@ pub(super) async fn replay_tool_intent_corpus_fixture(
 pub(super) async fn checked_in_tool_intent_journals_replay_through_endpoint_with_literal_outcomes()
 {
     for checked_in in [
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v17-mid-drain.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v17-mid-intent.json").as_slice(),
-        include_bytes!("../../tests/fixtures/tool_intent_journals/v17-full-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v18-mid-drain.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v18-mid-intent.json").as_slice(),
+        include_bytes!("../../tests/fixtures/tool_intent_journals/v18-full-drain.json").as_slice(),
     ] {
         let fixture: ToolIntentJournalCorpusFixture =
             serde_json::from_slice(checked_in).expect("decode checked-in endpoint corpus fixture");
@@ -1198,6 +1215,7 @@ pub(super) async fn checked_in_tool_intent_journals_of_other_generations_refuse_
     const GENERATION_NINE: &str = "carries effect-journal generation 9;";
     const GENERATION_TEN: &str = "carries effect-journal generation 10;";
     const GENERATION_ELEVEN: &str = "carries effect-journal generation 11;";
+    const GENERATION_TWELVE: &str = "carries effect-journal generation 12;";
     for (name, checked_in, refusal) in [
         (
             "v1-full-drain",
@@ -1451,6 +1469,24 @@ pub(super) async fn checked_in_tool_intent_journals_of_other_generations_refuse_
                 .as_slice(),
             GENERATION_ELEVEN,
         ),
+        (
+            "v17-mid-drain",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v17-mid-drain.json")
+                .as_slice(),
+            GENERATION_TWELVE,
+        ),
+        (
+            "v17-mid-intent",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v17-mid-intent.json")
+                .as_slice(),
+            GENERATION_TWELVE,
+        ),
+        (
+            "v17-full-drain",
+            include_bytes!("../../tests/fixtures/tool_intent_journals/v17-full-drain.json")
+                .as_slice(),
+            GENERATION_TWELVE,
+        ),
     ] {
         let fixture: ToolIntentJournalCorpusFixture = serde_json::from_slice(checked_in)
             .expect("decode the checked-in endpoint corpus fixture");
@@ -1483,7 +1519,7 @@ pub(super) async fn checked_in_tool_intent_journals_of_other_generations_refuse_
         );
         assert_eq!(
             registry
-                .full_event_window(&ProcessId::from(TOOL_INTENT_CORPUS_TARGET), 0)
+                .full_event_window(&tool_intent_corpus_target(), 0)
                 .await
                 .expect("read the refusal witness target")
                 .into_iter()
@@ -1561,16 +1597,16 @@ pub(super) async fn capture_tool_intent_journal_corpus_from_real_endpoint_interr
 
     let captures = [
         (
-            "v17-mid-drain",
+            "v18-mid-drain",
             "after_tool_attempt_before_signal_command",
             mid_drain,
         ),
         (
-            "v17-mid-intent",
+            "v18-mid-intent",
             "after_signal_command_commit_before_reply",
             mid_intent,
         ),
-        ("v17-full-drain", "full_drain", full),
+        ("v18-full-drain", "full_drain", full),
     ];
     for (name, crash_point, invocation_body) in captures {
         let mut fixture = ToolIntentJournalCorpusFixture {
@@ -1793,11 +1829,20 @@ impl ReplayableRecordingContext {
 }
 
 /// A journaled step that is not a recorded effect: a process command's
-/// journaled fact, or the frontier marker a process start or a sleep
-/// journals before it acts (FIG-3779).
+/// journaled fact (a cancel admission, an await's existence guard, a process
+/// wait step, or a start's registration, compensation and external reference,
+/// ADR 0107), or the frontier marker a process start or a sleep journals
+/// before it acts (FIG-3779).
 fn is_process_command_journal_fact(effect_name: &str) -> bool {
-    effect_name.ends_with(".process-cancel-admission:v1")
-        || effect_name.ends_with(".process-await-guard:v1")
+    [
+        ".process-cancel-admission:v1",
+        ".process-await-guard:v1",
+        ".process-start-register:v1",
+        ".process-start-compensate:v1",
+        ".process-start-external-ref:v1",
+    ]
+    .iter()
+    .any(|suffix| effect_name.ends_with(suffix))
         || effect_name.starts_with("lash.process.wait.")
         || effect_name.ends_with(":frontier")
 }
@@ -1926,6 +1971,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<PositionalReplayContext> {
 
     fn start_process_workflow<'run>(
         &'run self,
+        _process_id: lash_core::ProcessId,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
     ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>
@@ -2219,6 +2265,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
 
     fn start_process_workflow<'run>(
         &'run self,
+        process_id: lash_core::ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
     ) -> Pin<Box<dyn Future<Output = Result<String, ProcessWorkflowStartFailure>> + Send + 'run>>
@@ -2229,14 +2276,13 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
         let context = Arc::clone(self);
         Box::pin(async move {
             if context.defer_process_workflows.load(Ordering::SeqCst) {
-                return Ok(format!("invocation-{}", registration.id));
+                return Ok(format!("invocation-{process_id}"));
             }
             let Some(worker) = worker else {
                 return Err(ProcessWorkflowStartFailure::Rejected(TerminalError::new(
                     "process workflow start is unsupported",
                 )));
             };
-            let process_id = registration.id.clone();
             let process_task_context = Arc::clone(&context);
             let process_task_id = process_id.clone();
             let process_task = tokio_util::task::AbortOnDropHandle::new(tokio::spawn(async move {
@@ -2260,6 +2306,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
                 loop {
                     match worker
                         .run_process_segment_with_scoped_effect_controller(
+                            process_task_id.clone(),
                             registration.clone(),
                             execution_context.clone(),
                             execution_write_authority.clone(),
@@ -2293,10 +2340,11 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
                     )));
                 }
             };
+            let invocation = format!("invocation-{process_id}");
             context
                 .events
                 .resolve_process_terminal(&process_id, &output);
-            Ok(format!("invocation-{process_id}"))
+            Ok(invocation)
         })
     }
 
@@ -2307,10 +2355,9 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<ReplayableRecordingContext> {
     where
         'ctx: 'run,
     {
-        self.journal_commands.lock_recover().push(format!(
-            "call:process-cancel:{}",
-            request.process_ref.process_id
-        ));
+        self.journal_commands
+            .lock_recover()
+            .push(format!("call:process-cancel:{}", request.process_id));
         self.events.cancelled.lock_recover().push(request);
         Box::pin(async { Ok(()) })
     }

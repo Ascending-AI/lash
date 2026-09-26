@@ -12,13 +12,11 @@ use lash_sansio::SessionId;
 )]
 pub async fn fork_observer_intent_transient_failure(backend: crate::Backend) {
     const SESSION_ID: &str = "fork-observer-transient-session";
-    const PROCESS_ID: &str = "fork-observer-transient-process";
 
     let factory = backend.session_store_factory();
     let registry = crate::testing::ProcessRegistryFaults::new(backend.process_registry());
-    registry
+    let process_id = registry
         .register_process(crate::ProcessRegistration::new(
-            PROCESS_ID,
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -30,12 +28,13 @@ pub async fn fork_observer_intent_transient_failure(backend: crate::Backend) {
             ),
         ))
         .await
-        .expect("register fork observer process");
+        .expect("register fork observer process")
+        .id;
 
     let store = factory
         .create_store(&crate::SessionStoreCreateRequest {
             pending_observer_intents: vec![crate::SessionObserverIntent::host_requested(
-                PROCESS_ID,
+                process_id.clone(),
             )],
             session_id: SessionId::from(SESSION_ID.to_string()),
             relation: crate::SessionRelation::Fork {

@@ -290,7 +290,8 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
         .expect("claim first closure lane")
         .acquired()
         .expect("first closure lane is free");
-    let physical_scope = crate::ExecutionScope::process("turn-cancel-shared-process");
+    let physical_scope =
+        crate::ExecutionScope::process(crate::ProcessId::fixture("turn-cancel-shared-process"));
     let selected_binding =
         crate::turn_control_binding_id_for_scope(TURN_CANCEL_BINDING_ID, &physical_scope)
             .expect("bind process scope");
@@ -390,10 +391,14 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
                 &first.fence(),
                 &crate::turn_control_binding_id_for_scope(
                     TURN_CANCEL_BINDING_ID,
-                    &crate::ExecutionScope::process("turn-cancel-wrong-successor-process"),
+                    &crate::ExecutionScope::process(crate::ProcessId::fixture(
+                        "turn-cancel-wrong-successor-process"
+                    )),
                 )
                 .expect("bind wrong successor physical scope"),
-                &crate::ExecutionScope::process("turn-cancel-wrong-successor-process"),
+                &crate::ExecutionScope::process(crate::ProcessId::fixture(
+                    "turn-cancel-wrong-successor-process"
+                )),
             )
             .await,
         Err(crate::StoreError::TurnCancelBindingMismatch { .. })
@@ -404,7 +409,9 @@ pub(super) async fn turn_cancel_closure_settlement_is_fenced_and_non_overwritabl
                 &request.session_id,
                 &first.fence(),
                 &selected_binding,
-                &crate::ExecutionScope::process("turn-cancel-wrong-successor-process"),
+                &crate::ExecutionScope::process(crate::ProcessId::fixture(
+                    "turn-cancel-wrong-successor-process"
+                )),
             )
             .await,
         Err(crate::StoreError::TurnCancelBindingMismatch { .. })
@@ -846,8 +853,9 @@ pub(super) async fn turn_cancel_scope_retirement_serializes_with_authorization(
         (store, lease, authorization)
     }
 
-    let authorization_first_scope =
-        crate::ExecutionScope::process("turn-cancel-scope-retirement:authorization-first");
+    let authorization_first_scope = crate::ExecutionScope::process(crate::ProcessId::fixture(
+        "turn-cancel-scope-retirement:authorization-first",
+    ));
     let (authorization_first_store, authorization_first_lease, authorization_first) = prepared(
         &factory,
         "authorization-first",
@@ -881,8 +889,9 @@ pub(super) async fn turn_cancel_scope_retirement_serializes_with_authorization(
         .await
         .expect("retire after the pin is consumed");
 
-    let retired_first_scope =
-        crate::ExecutionScope::process("turn-cancel-scope-retirement:retired-first");
+    let retired_first_scope = crate::ExecutionScope::process(crate::ProcessId::fixture(
+        "turn-cancel-scope-retirement:retired-first",
+    ));
     factory
         .retire_turn_cancel_closure_scope(&retired_first_scope)
         .await
@@ -903,8 +912,9 @@ pub(super) async fn turn_cancel_scope_retirement_serializes_with_authorization(
             .is_empty()
     );
 
-    let overlapping_scope =
-        crate::ExecutionScope::process("turn-cancel-scope-retirement:overlapping");
+    let overlapping_scope = crate::ExecutionScope::process(crate::ProcessId::fixture(
+        "turn-cancel-scope-retirement:overlapping",
+    ));
     let (overlapping_store, overlapping_lease, overlapping) =
         prepared(&factory, "overlapping", overlapping_scope.clone()).await;
     let start = Arc::new(tokio::sync::Barrier::new(2));

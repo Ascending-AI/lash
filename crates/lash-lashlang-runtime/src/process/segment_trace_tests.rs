@@ -34,13 +34,12 @@ fn traced_process() -> (LashlangProcessExecutionTrace, Arc<TraceLashlangGraphSto
         lash_trace::TraceContext::default(),
         LashlangProcessTraceIdentity {
             session_id: None,
-            process_id: lash_core::ProcessId::from("process"),
+            process_id: lash_core::ProcessId::fixture("process"),
             source_identity: "source-identity".to_string(),
             module_ref: lashlang::ModuleRef::new(&hash),
             process_ref: lashlang::ProcessRef::new(hash, 0),
             process_name: "main".to_string(),
             attempt: 1,
-            incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
             engine_execution_id: None,
         },
     );
@@ -222,48 +221,60 @@ fn process_branch_selection_derives_the_untaken_arm_in_each_iteration() {
 
 #[test]
 fn process_trace_session_attribution_comes_only_from_a_session_originator() {
-    let identity = |originator: lash_core::ProcessOriginator, attempt, incarnation| {
+    let identity = |originator: lash_core::ProcessOriginator, attempt, process: &str| {
         let hash = lashlang::ContentHash::new("trace-provenance");
         LashlangProcessExecutionTrace::new(
             None,
             lash_trace::TraceContext::default().for_session("ambient-capability"),
             LashlangProcessTraceIdentity {
                 session_id: process_trace_session_id(&originator),
-                process_id: lash_core::ProcessId::from("process"),
+                process_id: lash_core::ProcessId::fixture(process),
                 source_identity: "source-identity".to_string(),
                 module_ref: lashlang::ModuleRef::new(&hash),
                 process_ref: lashlang::ProcessRef::new(hash, 0),
                 process_name: "main".to_string(),
                 attempt,
-                incarnation: lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
                 engine_execution_id: None,
             },
         )
         .identity()
     };
 
-    let host_identity = identity(lash_core::ProcessOriginator::host_scoped("operator"), 1, 1);
+    let host_identity = identity(
+        lash_core::ProcessOriginator::host_scoped("operator"),
+        1,
+        "process",
+    );
     assert_eq!(
         host_identity.scope.session_id, None,
         "a host namespace and ambient capability are not runtime session attribution"
     );
     assert_eq!(host_identity.attempt(), Some(1));
-    assert_eq!(host_identity.incarnation(), Some(1));
     assert_ne!(
         host_identity.graph_key(),
-        identity(lash_core::ProcessOriginator::host_scoped("operator"), 2, 1,).graph_key(),
+        identity(
+            lash_core::ProcessOriginator::host_scoped("operator"),
+            2,
+            "process"
+        )
+        .graph_key(),
         "attempts partition process trace graphs"
     );
     assert_ne!(
         host_identity.graph_key(),
-        identity(lash_core::ProcessOriginator::host_scoped("operator"), 1, 2,).graph_key(),
-        "incarnations partition process trace graphs"
+        identity(
+            lash_core::ProcessOriginator::host_scoped("operator"),
+            1,
+            "other-process"
+        )
+        .graph_key(),
+        "processes partition process trace graphs"
     );
     assert_eq!(
         identity(
             lash_core::ProcessOriginator::session(lash_core::SessionScope::new("actual-session",)),
             1,
-            1,
+            "process",
         )
         .scope
         .session_id,
@@ -281,13 +292,12 @@ fn interrupted_resource_node_and_retried_occurrence_keep_distinct_trace_generati
             lash_trace::TraceContext::default(),
             LashlangProcessTraceIdentity {
                 session_id: None,
-                process_id: lash_core::ProcessId::from("recovered-process"),
+                process_id: lash_core::ProcessId::fixture("recovered-process"),
                 source_identity: "source-identity".to_string(),
                 module_ref: lashlang::ModuleRef::new(&hash),
                 process_ref: lashlang::ProcessRef::new(hash, 0),
                 process_name: "main".to_string(),
                 attempt,
-                incarnation: lash_core::ProcessIncarnation::from_registration_sequence(3),
                 engine_execution_id: None,
             },
         )
@@ -365,13 +375,12 @@ fn untraced_completed_resource_calls_retain_no_correlation_state() {
         lash_trace::TraceContext::default(),
         LashlangProcessTraceIdentity {
             session_id: None,
-            process_id: lash_core::ProcessId::from("process"),
+            process_id: lash_core::ProcessId::fixture("process"),
             source_identity: "source-identity".to_string(),
             module_ref: lashlang::ModuleRef::new(&hash),
             process_ref: lashlang::ProcessRef::new(hash, 0),
             process_name: "main".to_string(),
             attempt: 1,
-            incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
             engine_execution_id: None,
         },
     );

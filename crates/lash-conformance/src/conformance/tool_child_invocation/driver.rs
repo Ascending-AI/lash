@@ -356,15 +356,15 @@ pub async fn tool_children_run_through_the_invocation_driver(
         serde_json::json!(true),
         "the body's nested call executed through the child's rebound dispatch"
     );
-    let started_id = format!("{group_key}-call-6-started");
-    assert_eq!(
-        value["started"],
-        serde_json::json!(started_id.clone()),
-        "the body's durable start is part of its settled output"
-    );
+    let started_id = value["started"]
+        .as_str()
+        .and_then(|started| crate::ProcessId::parse(started).ok())
+        .unwrap_or_else(|| {
+            panic!("the body's durable start is part of its settled output: {value}")
+        });
     assert_eq!(
         orchestrating.1.possession,
-        vec![crate::ProcessId::from(started_id)],
+        vec![started_id],
         "an orchestrating body's realized start rides the settlement's possession"
     );
     assert_eq!(

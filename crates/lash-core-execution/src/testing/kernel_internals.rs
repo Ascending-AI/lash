@@ -192,12 +192,12 @@ pub fn record_started_process(
 
 pub async fn await_process_with_cancellation(
     context: &crate::RuntimeExecutionContext<'_>,
-    process_ref: &crate::ProcessRef,
+    process_id: &crate::ProcessId,
     parent_invocation: Option<crate::RuntimeInvocation>,
     cancellation: Option<tokio_util::sync::CancellationToken>,
 ) -> Result<crate::ProcessAwaitOutput, PluginError> {
     context
-        .await_process_with_cancellation(process_ref, parent_invocation, cancellation)
+        .await_process_with_cancellation(process_id, parent_invocation, cancellation)
         .await
 }
 

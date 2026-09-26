@@ -515,8 +515,7 @@ async fn undelivered_disposition_matrix_applies_for_both_modes() {
                     CancellationToken::new(),
                     host_admitted_scope(
                         &runtime.host.core,
-                        lash_core::AdmittedScope::unpinned(persisted.turn_scope(&turn_id))
-                            .expect("turn scope"),
+                        lash_core::AdmittedScope::new(persisted.turn_scope(&turn_id)),
                     ),
                 )
                 .await
@@ -592,7 +591,7 @@ async fn a_stop_in_either_mode_never_drains_next_turn_work_queued_behind_it() {
         let turn_id = format!("no-drain-{mode:?}").to_ascii_lowercase();
         let turn_scope = host_admitted_scope(
             &runtime.host.core,
-            lash_core::AdmittedScope::unpinned(persisted.turn_scope(&turn_id)).expect("turn scope"),
+            lash_core::AdmittedScope::new(persisted.turn_scope(&turn_id)),
         );
         let turn = lash_core::task::spawn(async move {
             runtime

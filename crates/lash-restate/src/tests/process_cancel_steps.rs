@@ -19,15 +19,16 @@ fn boundary_handover(tag: u8) -> lash_core::SegmentHandover {
     }
 }
 
-async fn record_cancel(registry: &Arc<dyn ProcessRegistry>, process_id: &str, requester: &str) {
+async fn record_cancel(
+    registry: &Arc<dyn ProcessRegistry>,
+    process_id: &ProcessId,
+    requester: &str,
+) {
     registry
         .append_event(
-            &ProcessId::from(process_id),
+            process_id,
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                &registry
-                    .resolve_process_ref(&ProcessId::from(process_id))
-                    .await
-                    .expect("retained cancellation target"),
+                process_id,
                 &lash_core::CancelRequest::new(
                     lash_core::CancelOrigin::OperatorRequested,
                     requester,
@@ -46,29 +47,22 @@ async fn record_cancel(registry: &Arc<dyn ProcessRegistry>, process_id: &str, re
 /// then retires its handover (FIG-3673).
 #[tokio::test]
 pub(super) async fn a_cancel_in_the_handover_gap_is_forwarded_after_the_successor_hands_over() {
-    let process_id = "p16-handover-gap-cancel";
     let (registry, continuations) = process_stores();
-    let registration = rerunnable_registration(process_id);
-    registry
+    let registration = rerunnable_registration();
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register the segmented process");
-    let (execution_authority, started) = invocation_started(
-        &ProcessId::from(process_id),
-        "p16-handover-gap-execution",
-        1,
-    );
+        .expect("register the segmented process")
+        .id;
+    let (execution_authority, started) =
+        invocation_started(&process_id, "p16-handover-gap-execution", 1);
     registry
-        .record_first_started_with_authority(
-            &ProcessId::from(process_id),
-            started,
-            &execution_authority,
-        )
+        .record_first_started_with_authority(&process_id, started, &execution_authority)
         .await
         .expect("record the process's start");
     continuations
         .put_segment_handover(
-            &ProcessId::from(process_id),
+            &process_id,
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 1,
@@ -88,12 +82,13 @@ pub(super) async fn a_cancel_in_the_handover_gap_is_forwarded_after_the_successo
         )
         .build();
     let input = RestateProcessWorkflowInput {
+        process_id: process_id.clone(),
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 1,
         journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
     };
-    let key = process_segment_workflow_key(&ProcessId::from(process_id), 1);
+    let key = process_segment_workflow_key(&process_id, 1);
 
     let admission = admission_journal(&endpoint, &key, &input)
         .await
@@ -116,10 +111,10 @@ pub(super) async fn a_cancel_in_the_handover_gap_is_forwarded_after_the_successo
 
     // The cancel lands in the gap, and the successor hands over to segment 3
     // before segment 1 is redriven.
-    record_cancel(&registry, process_id, "actor:fixture:handover-gap").await;
+    record_cancel(&registry, &process_id, "actor:fixture:handover-gap").await;
     continuations
         .put_segment_handover(
-            &ProcessId::from(process_id),
+            &process_id,
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 3,
@@ -130,7 +125,7 @@ pub(super) async fn a_cancel_in_the_handover_gap_is_forwarded_after_the_successo
         .expect("segment 2 hands over to segment 3");
     assert!(
         continuations
-            .get_segment_handover(&ProcessId::from(process_id), 1)
+            .get_segment_handover(&process_id, 1)
             .await
             .expect("read handover 1")
             .is_some(),
@@ -155,7 +150,7 @@ pub(super) async fn a_cancel_in_the_handover_gap_is_forwarded_after_the_successo
             .iter()
             .map(|call| (call.key.as_str(), call.handler.as_str()))
             .collect::<Vec<_>>(),
-        vec![("p16-handover-gap-cancel#2", "deliver_cancel")],
+        vec![(format!("{process_id}#2").as_str(), "deliver_cancel")],
         "the cancel that landed in the gap reaches the successor"
     );
     assert_eq!(
@@ -168,7 +163,7 @@ pub(super) async fn a_cancel_in_the_handover_gap_is_forwarded_after_the_successo
     );
     assert!(
         continuations
-            .get_segment_handover(&ProcessId::from(process_id), 1)
+            .get_segment_handover(&process_id, 1)
             .await
             .expect("read handover 1")
             .is_none(),
@@ -177,7 +172,7 @@ pub(super) async fn a_cancel_in_the_handover_gap_is_forwarded_after_the_successo
     for ordinal in [2, 3] {
         assert!(
             continuations
-                .get_segment_handover(&ProcessId::from(process_id), ordinal)
+                .get_segment_handover(&process_id, ordinal)
                 .await
                 .expect("read a later handover")
                 .is_some(),
@@ -191,16 +186,16 @@ pub(super) async fn a_cancel_in_the_handover_gap_is_forwarded_after_the_successo
 /// chose even when the latest handover has moved on since (FIG-3673).
 #[tokio::test]
 pub(super) async fn a_redriven_cancel_forwards_to_its_recorded_route() {
-    let process_id = "p16-cancel-route";
     let (registry, continuations) = process_stores();
-    let registration = rerunnable_registration(process_id);
+    let registration = rerunnable_registration();
     let record = registry
         .register_process(registration)
         .await
         .expect("register the process");
+    let process_id = record.id.clone();
     continuations
         .put_segment_handover(
-            &ProcessId::from(process_id),
+            &process_id,
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 2,
@@ -220,7 +215,7 @@ pub(super) async fn a_redriven_cancel_forwards_to_its_recorded_route() {
         )
         .build();
     let request = RestateProcessCancelRequest::new(
-        lash_core::ProcessRef::from_record(&record),
+        record.id.clone(),
         lash_core::CancelRequest::new(
             lash_core::CancelOrigin::OperatorRequested,
             "actor:fixture:cancel-route",
@@ -232,7 +227,7 @@ pub(super) async fn a_redriven_cancel_forwards_to_its_recorded_route() {
         &endpoint,
         "LashProcessWorkflow",
         "cancel",
-        endpoint_protocol::encode_invocation_body(process_id, &request)
+        endpoint_protocol::encode_invocation_body(process_id.as_str(), &request)
             .expect("encode the cancel invocation"),
         Vec::new(),
     )
@@ -250,11 +245,11 @@ pub(super) async fn a_redriven_cancel_forwards_to_its_recorded_route() {
             .iter()
             .map(|call| (call.key.as_str(), call.handler.as_str()))
             .collect::<Vec<_>>(),
-        vec![("p16-cancel-route#2", "deliver_cancel")]
+        vec![(format!("{process_id}#2").as_str(), "deliver_cancel")]
     );
     assert!(
         registry
-            .get_process(&ProcessId::from(process_id))
+            .get_process(&process_id)
             .await
             .expect("read the process")
             .expect("the process stands")
@@ -266,7 +261,7 @@ pub(super) async fn a_redriven_cancel_forwards_to_its_recorded_route() {
     // The process moved on before the redrive: the latest handover is 3.
     continuations
         .put_segment_handover(
-            &ProcessId::from(process_id),
+            &process_id,
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 3,
@@ -275,10 +270,11 @@ pub(super) async fn a_redriven_cancel_forwards_to_its_recorded_route() {
         )
         .await
         .expect("segment 3 owns the process now");
-    let replay = encode_recorded_commands_replay(process_id, &request, &[&first], |command| {
-        (command.message_type == CALL_COMMAND).then_some(serde_json::Value::Null)
-    })
-    .expect("splice the cancel journal");
+    let replay =
+        encode_recorded_commands_replay(process_id.as_str(), &request, &[&first], |command| {
+            (command.message_type == CALL_COMMAND).then_some(serde_json::Value::Null)
+        })
+        .expect("splice the cancel journal");
     let redriven = invoke_endpoint_body_with_json_call_responses(
         &endpoint,
         "LashProcessWorkflow",
@@ -308,12 +304,12 @@ pub(super) async fn a_redriven_cancel_forwards_to_its_recorded_route() {
 #[tokio::test]
 pub(super) async fn a_retired_cancel_request_is_refused_before_any_command() {
     for handler in ["cancel", "deliver_cancel"] {
-        let process_id = format!("p16-retired-{handler}");
         let registry = process_registry();
         let record = registry
-            .register_process(rerunnable_registration(&process_id))
+            .register_process(rerunnable_registration())
             .await
             .expect("register the process");
+        let process_id = record.id.clone();
         let endpoint = Endpoint::builder()
             .bind(
                 LashProcessWorkflowImpl::new_for_test(
@@ -326,7 +322,7 @@ pub(super) async fn a_retired_cancel_request_is_refused_before_any_command() {
             .build();
         for journal_version in [None, Some(2_u32)] {
             let mut request = serde_json::to_value(RestateProcessCancelRequest::new(
-                lash_core::ProcessRef::from_record(&record),
+                record.id.clone(),
                 lash_core::CancelRequest::new(
                     lash_core::CancelOrigin::OperatorRequested,
                     "actor:fixture:retired-cancel",
@@ -343,10 +339,15 @@ pub(super) async fn a_retired_cancel_request_is_refused_before_any_command() {
                         .remove("journal_version");
                 }
             }
-            let output =
-                invoke_process_workflow_endpoint(&endpoint, handler, &process_id, &request, true)
-                    .await
-                    .unwrap_or_default();
+            let output = invoke_process_workflow_endpoint(
+                &endpoint,
+                handler,
+                process_id.as_str(),
+                &request,
+                true,
+            )
+            .await
+            .unwrap_or_default();
             assert_eq!(
                 restate_recorded_commands(&output).map(|commands| {
                     commands
@@ -369,7 +370,7 @@ pub(super) async fn a_retired_cancel_request_is_refused_before_any_command() {
         }
         assert!(
             registry
-                .get_process(&ProcessId::from(process_id.as_str()))
+                .get_process(&process_id)
                 .await
                 .expect("read the process")
                 .expect("the process stands")
@@ -408,13 +409,13 @@ impl HttpTransport for RecordingIngress {
 /// own journal can never replay (FIG-3673).
 #[tokio::test]
 pub(super) async fn a_retired_generation_refusal_publishes_its_stored_terminal() {
-    let process_id = "p16-retired-publish";
     let registry = process_registry();
-    let registration = rerunnable_registration(process_id);
-    registry
+    let registration = rerunnable_registration();
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register the process");
+        .expect("register the process")
+        .id;
     let ingress = Arc::new(RecordingIngress::default());
     let endpoint = Endpoint::builder()
         .bind(
@@ -432,6 +433,7 @@ pub(super) async fn a_retired_generation_refusal_publishes_its_stored_terminal()
         )
         .build();
     let mut input = serde_json::to_value(RestateProcessWorkflowInput {
+        process_id: process_id.clone(),
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
@@ -439,12 +441,13 @@ pub(super) async fn a_retired_generation_refusal_publishes_its_stored_terminal()
     })
     .expect("encode the input");
     input["journal_version"] = serde_json::json!(2);
-    let output = invoke_process_workflow_endpoint(&endpoint, "run", process_id, &input, true)
-        .await
-        .unwrap_or_default();
+    let output =
+        invoke_process_workflow_endpoint(&endpoint, "run", process_id.as_str(), &input, true)
+            .await
+            .unwrap_or_default();
     assert!(restate_output_failure_message(&output).is_some());
     let stored = registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await
         .expect("read the refused process")
         .and_then(|record| record.outcome)
@@ -453,7 +456,7 @@ pub(super) async fn a_retired_generation_refusal_publishes_its_stored_terminal()
     assert_eq!(requests.len(), 1, "one publish");
     assert_eq!(
         requests[0].url,
-        "https://restate.invalid/LashProcessWorkflow/p16-retired-publish/complete_terminal"
+        format!("https://restate.invalid/LashProcessWorkflow/{process_id}/complete_terminal")
     );
     let published: RestateProcessCompleteRequest =
         serde_json::from_slice(requests[0].body.as_ref()).expect("decode the publish");

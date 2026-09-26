@@ -231,7 +231,7 @@ impl crate::ProcessEngine for AttachmentWritingEngine {
 
 #[tokio::test]
 async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manifest() {
-    const PROCESS_ID: &str = "parent-bound-process";
+    let process_id = crate::ProcessId::fixture("parent-bound-process");
     let policy = crate::SessionPolicy {
         provider_id: "test".to_string(),
         model: crate::ModelSpec::builder("test-model")
@@ -268,7 +268,7 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
     .expect("valid test native substrate config");
 
     let runtime = Box::pin(worker.build_process_runtime(
-        SessionId::from(format!("process-env:{PROCESS_ID}")),
+        SessionId::from(format!("process-env:{process_id}")),
         policy,
         crate::PluginOptions::default(),
         "parent-bound regression",
@@ -280,10 +280,7 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
         .core
         .durability
         .attachment_store
-        .bind_process_scoped(crate::ProcessRef::new(
-            PROCESS_ID,
-            crate::ProcessIncarnation::from_registration_sequence(1),
-        ));
+        .bind_process_scoped(process_id.clone());
     runtime
         .host
         .core
@@ -305,16 +302,15 @@ async fn process_runtime_keeps_state_separate_from_parent_bound_attachment_manif
         .await
         .expect("list parent-bound process intents");
     assert_eq!(entries.len(), 1);
-    assert_eq!(entries[0].session_id, format!("process-env:{PROCESS_ID}"));
+    assert_eq!(entries[0].session_id, format!("process-env:{process_id}"));
     assert!(matches!(
         &entries[0].owner,
-        Some(crate::AttachmentOwner::Process { id, .. }) if id == PROCESS_ID
+        Some(crate::AttachmentOwner::Process { process_id: owner }) if *owner == process_id
     ));
 }
 
 #[tokio::test]
 async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
-    const PROCESS_ID: &str = "attachment-owner-recovered-engine";
     let backend = memory_backend().await;
     let registry = backend.process_registry();
     let factory = backend.session_store_factory();
@@ -353,10 +349,9 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
         .with_session_policy(policy)
     })
     .expect("valid test native substrate config");
-    registry
+    let process_id = registry
         .register_process(
             ProcessRegistration::new(
-                PROCESS_ID,
                 ProcessInput::Engine {
                     kind: "attachment-writing-engine".to_string(),
                     payload: serde_json::Value::Null,
@@ -371,17 +366,18 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
             .with_execution_env_ref(Some(env_ref)),
         )
         .await
-        .expect("register process");
+        .expect("register process")
+        .id;
 
     let _ = worker
         .drive_pending_processes()
         .await
         .expect("recover process");
-    await_terminal(&registry, &ProcessId::from(PROCESS_ID)).await;
+    await_terminal(&registry, &process_id).await;
 
     let request = crate::SessionStoreCreateRequest {
         pending_observer_intents: Vec::new(),
-        session_id: SessionId::from(format!("process-env:{PROCESS_ID}")),
+        session_id: SessionId::from(format!("process-env:{process_id}")),
         relation: crate::SessionRelation::default(),
         policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
     };
@@ -396,7 +392,10 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
         .expect("list process intents");
     assert_eq!(entries.len(), 2);
     assert!(entries.iter().all(|entry| {
-        matches!(&entry.owner, Some(crate::AttachmentOwner::Process { id, .. }) if id == PROCESS_ID)
+        matches!(
+            &entry.owner,
+            Some(crate::AttachmentOwner::Process { process_id: owner }) if *owner == process_id
+        )
     }));
     let attachment_ids = entries
         .iter()
@@ -421,15 +420,18 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
     }
 }
 
-/// FIG-2980: the worker binds the attachment owner from the record the registry
-/// hands it, so a reused process name must root its blobs under the incarnation
-/// that is actually running. `register_process` only mints a fresh incarnation
-/// when no row exists, so this drives the real lifecycle — run, complete, prune,
-/// re-register — rather than hand-minting a second incarnation.
+/// FIG-2980, FIG-3611 L4: the worker binds the attachment owner from the
+/// record the registry hands it. A start under a key whose process was pruned
+/// starts a new process with a new id (ADR 0107), so its process-env session is
+/// its own — never the pruned predecessor's tombstoned one — and its blobs root
+/// under the id that is actually running. This drives the real lifecycle — run,
+/// complete, prune, start again under the same key.
+///
+/// Red on the parent commit (it was ignored there): the re-registered name
+/// reused the pruned process's tombstoned process-env session and could not
+/// create it.
 #[tokio::test]
-#[ignore = "FIG-3607: a pruned process's process-env session is tombstoned, so a re-registered name cannot create it; FIG-3607's minted ProcessId gives every registration a fresh session. Un-ignore in FIG-3607."]
-async fn a_reused_process_name_binds_attachments_to_the_new_incarnation() {
-    const PROCESS_ID: &str = "attachment-owner-reincarnated-engine";
+async fn a_start_after_prune_binds_attachments_to_its_own_process() {
     let backend = memory_backend().await;
     let registry = backend.process_registry();
     let factory = backend.session_store_factory();
@@ -470,7 +472,6 @@ async fn a_reused_process_name_binds_attachments_to_the_new_incarnation() {
 
     let registration = || {
         ProcessRegistration::new(
-            PROCESS_ID,
             ProcessInput::Engine {
                 kind: "attachment-writing-engine".to_string(),
                 payload: serde_json::Value::Null,
@@ -483,72 +484,68 @@ async fn a_reused_process_name_binds_attachments_to_the_new_incarnation() {
             ),
         )
         .with_execution_env_ref(Some(env_ref.clone()))
+        .with_start_key(Some(crate::StartKey::for_host(
+            crate::StartKeyOwner::HOST,
+            "attachment-owner-start",
+        )))
     };
 
     let first = registry
         .register_process(registration())
         .await
-        .expect("register first incarnation");
+        .expect("register the first process");
     let _ = worker
         .drive_pending_processes()
         .await
-        .expect("drive first incarnation");
-    await_terminal(&registry, &ProcessId::from(PROCESS_ID)).await;
+        .expect("drive the first process");
+    await_terminal(&registry, &first.id).await;
 
-    let owner_incarnations = |entries: &[crate::AttachmentManifestEntry]| {
-        assert!(
-            entries.iter().all(|entry| {
-                matches!(
-                    &entry.owner,
-                    Some(crate::AttachmentOwner::Process { id, .. }) if id == PROCESS_ID
-                )
-            }),
-            "every intent is process-owned under the reused name"
-        );
+    let owners = |entries: &[crate::AttachmentManifestEntry]| {
         entries
             .iter()
-            .map(|entry| {
-                entry
-                    .owner
-                    .as_ref()
-                    .and_then(crate::AttachmentOwner::incarnation)
+            .map(|entry| match &entry.owner {
+                Some(crate::AttachmentOwner::Process { process_id }) => process_id.clone(),
+                other => panic!("every intent is process-owned: {other:?}"),
             })
             .collect::<std::collections::BTreeSet<_>>()
     };
-    let process_env_store = || async {
-        let request = crate::SessionStoreCreateRequest {
-            pending_observer_intents: Vec::new(),
-            session_id: SessionId::from(format!("process-env:{PROCESS_ID}")),
-            relation: crate::SessionRelation::default(),
-            policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
-        };
-        factory
-            .open_existing_store(&request)
-            .await
-            .expect("open process owner store")
-            .expect("process owner store exists")
+    let process_env_store = |process_id: ProcessId| {
+        let factory = Arc::clone(&factory);
+        async move {
+            let request = crate::SessionStoreCreateRequest {
+                pending_observer_intents: Vec::new(),
+                session_id: SessionId::from(format!("process-env:{process_id}")),
+                relation: crate::SessionRelation::default(),
+                policy: crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
+            };
+            factory
+                .open_existing_store(&request)
+                .await
+                .expect("open process owner store")
+                .expect("process owner store exists")
+        }
     };
 
-    let first_entries = process_env_store()
+    let first_entries = process_env_store(first.id.clone())
         .await
         .list_uncommitted(u64::MAX)
         .await
-        .expect("list first-incarnation process intents");
+        .expect("list the first process's intents");
     assert!(
         !first_entries.is_empty(),
         "precondition: the first run wrote process-owned intents"
     );
     assert_eq!(
-        owner_incarnations(&first_entries),
-        std::collections::BTreeSet::from([Some(first.incarnation)]),
-        "the first run roots its attachments under its own incarnation"
+        owners(&first_entries),
+        std::collections::BTreeSet::from([first.id.clone()]),
+        "the first run roots its attachments under its own id"
     );
 
     let terminal = registry
-        .get_process(&ProcessId::from(PROCESS_ID))
+        .get_process(&first.id)
         .await
-        .expect("read terminal first incarnation")
-        .expect("first incarnation still registered");
+        .expect("read the terminal first process")
+        .expect("the first process is still retained");
     registry
         .prune_terminal_processes(
             terminal.updated_at_ms.saturating_add(1),
@@ -556,35 +553,34 @@ async fn a_reused_process_name_binds_attachments_to_the_new_incarnation() {
             crate::ProjectionWatermark::NoProjector,
         )
         .await
-        .expect("prune the first incarnation");
+        .expect("prune the first process");
     let second = registry
         .register_process(registration())
         .await
-        .expect("register second incarnation");
+        .expect("start again under the same key");
     assert_ne!(
-        first.incarnation, second.incarnation,
-        "precondition: re-registration under the same name must mint a new incarnation"
+        first.id, second.id,
+        "a start after prune mints a new process, never the pruned id"
     );
 
     let _ = worker
         .drive_pending_processes()
         .await
-        .expect("drive second incarnation");
-    await_terminal(&registry, &ProcessId::from(PROCESS_ID)).await;
+        .expect("drive the second process");
+    await_terminal(&registry, &second.id).await;
 
-    let second_entries = process_env_store()
+    let second_entries = process_env_store(second.id.clone())
         .await
         .list_uncommitted(u64::MAX)
         .await
-        .expect("list second-incarnation process intents");
+        .expect("list the second process's intents");
     assert!(
         !second_entries.is_empty(),
         "precondition: the second run wrote process-owned intents"
     );
     assert_eq!(
-        owner_incarnations(&second_entries),
-        std::collections::BTreeSet::from([Some(second.incarnation)]),
-        "the reused name binds under the incarnation that is running, never the \
-         pruned predecessor's"
+        owners(&second_entries),
+        std::collections::BTreeSet::from([second.id.clone()]),
+        "the new process binds under its own id, never the pruned predecessor's"
     );
 }

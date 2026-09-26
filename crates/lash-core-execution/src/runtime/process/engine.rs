@@ -1,5 +1,4 @@
 use crate::ProcessId;
-use crate::ProcessIncarnation;
 use crate::SessionId;
 use std::collections::BTreeMap;
 use std::future::Future;
@@ -190,7 +189,6 @@ type RuntimeContextBuilder<'run> = Box<
 #[derive(Clone)]
 pub struct ProcessEngineProcessContext {
     process_id: ProcessId,
-    incarnation: ProcessIncarnation,
     process_work: crate::ProcessWorkWiring,
     execution_write_authority: super::model::ProcessExecutionWriteAuthority,
     store: Option<Arc<dyn crate::RuntimePersistence>>,
@@ -204,7 +202,6 @@ impl ProcessEngineProcessContext {
     #[allow(clippy::too_many_arguments)]
     fn new(
         process_id: ProcessId,
-        incarnation: ProcessIncarnation,
         process_work: crate::ProcessWorkWiring,
         execution_write_authority: super::model::ProcessExecutionWriteAuthority,
         store: Option<Arc<dyn crate::RuntimePersistence>>,
@@ -215,7 +212,6 @@ impl ProcessEngineProcessContext {
     ) -> Self {
         Self {
             process_id,
-            incarnation,
             process_work,
             execution_write_authority,
             store,
@@ -233,8 +229,8 @@ impl ProcessEngineProcessContext {
             .await
     }
 
-    /// Read a page of this run's own process lifetime strictly after
-    /// `after_sequence`; a successor lifetime is never read.
+    /// Read a page of this run's own process events strictly after
+    /// `after_sequence`.
     pub async fn event_page(
         &self,
         after_sequence: u64,
@@ -246,12 +242,7 @@ impl ProcessEngineProcessContext {
     > {
         self.process_work
             .registry()
-            .event_page_ref(
-                &super::model::ProcessRef::new(self.process_id.clone(), self.incarnation),
-                after_sequence,
-                limit,
-                mode,
-            )
+            .event_page_after(&self.process_id, after_sequence, limit, mode)
             .await
     }
 
@@ -303,16 +294,11 @@ impl ProcessEngineProcessContext {
         &self,
         process_id: &ProcessId,
     ) -> Result<ProcessAwaitOutput, crate::PluginError> {
-        let process_ref = self
-            .process_work
-            .registry()
-            .resolve_process_ref(process_id)
-            .await?;
         loop {
             match self
                 .process_work
                 .port()
-                .await_process_terminal(&process_ref)
+                .await_process_terminal(process_id)
                 .await?
             {
                 crate::ProcessTerminalWait::Terminal(output) => return Ok(output),
@@ -324,14 +310,9 @@ impl ProcessEngineProcessContext {
 
 pub struct ProcessEngineRunContext<'run> {
     registration: ProcessRegistration,
-    /// The store-minted incarnation this run was admitted under.
-    ///
-    /// The registration carries the process *name*, which is reusable; the
-    /// opener an engine mints identities against is the name bound to one
-    /// incarnation (ADR 0099 §1). The worker reads it off the record its
-    /// authority CAS admitted, so it is the same incarnation the attachment
-    /// owner and the lease fence were bound from.
-    incarnation: ProcessIncarnation,
+    /// The minted id of the process this run executes: the opener an engine
+    /// mints identities against (ADR 0099 §1, ADR 0107).
+    process_id: ProcessId,
     execution_context: ProcessExecutionContext,
     processes: ProcessEngineProcessContext,
     session_id: SessionId,
@@ -356,7 +337,7 @@ impl<'run> ProcessEngineRunContext<'run> {
     )]
     pub fn new(
         registration: ProcessRegistration,
-        incarnation: ProcessIncarnation,
+        process_id: ProcessId,
         execution_context: ProcessExecutionContext,
         process_work: crate::ProcessWorkWiring,
         session_id: SessionId,
@@ -379,8 +360,7 @@ impl<'run> ProcessEngineRunContext<'run> {
             .clone()
             .expect("process worker installs execution write authority");
         let processes = ProcessEngineProcessContext::new(
-            registration.id.clone(),
-            incarnation,
+            process_id.clone(),
             process_work,
             execution_write_authority,
             store.clone(),
@@ -391,7 +371,7 @@ impl<'run> ProcessEngineRunContext<'run> {
         );
         Self {
             registration,
-            incarnation,
+            process_id,
             execution_context,
             processes,
             session_id,
@@ -415,10 +395,10 @@ impl<'run> ProcessEngineRunContext<'run> {
         &self.registration
     }
 
-    /// The incarnation this run was admitted under, which together with the
-    /// registration's id is the logical opener (ADR 0099 §1).
-    pub fn incarnation(&self) -> ProcessIncarnation {
-        self.incarnation
+    /// The minted id of the process this run executes: the logical opener
+    /// (ADR 0099 §1).
+    pub fn process_id(&self) -> &ProcessId {
+        &self.process_id
     }
 
     /// Exposes execution context to protocol and process-engine implementors while running a
@@ -815,10 +795,7 @@ impl ProcessEngineRegistry {
             return Ok(());
         };
         self.require(kind)?
-            .release_artifacts(
-                &crate::ArtifactOwner::process(crate::ProcessRef::from_record(record)),
-                payload,
-            )
+            .release_artifacts(&crate::ArtifactOwner::process(record.id.clone()), payload)
             .await
     }
 
@@ -833,10 +810,7 @@ impl ProcessEngineRegistry {
         };
         self.require(kind)?
             .release_artifacts(
-                &crate::ArtifactOwner::process(crate::ProcessRef::new(
-                    cleanup.process_id.clone(),
-                    cleanup.incarnation,
-                )),
+                &crate::ArtifactOwner::process(cleanup.process_id.clone()),
                 payload,
             )
             .await

@@ -19,12 +19,11 @@ pub(super) async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_aft
         .expect("open registry"),
     ) as Arc<dyn ProcessRegistry>;
     let env_ref = persist_snapshot_recovery_env_ref("tool-authority:sha256:ok").await;
-    registry_a
-        .register_process(
-            snapshot_lashlang_registration(&ProcessId::from("snapshot-ok"), env_ref).await,
-        )
+    let snapshot_ok = registry_a
+        .register_process(snapshot_lashlang_registration(env_ref).await)
         .await
-        .expect("register snapshot-backed process");
+        .expect("register snapshot-backed process")
+        .id;
     drop(registry_a);
 
     let registry_b = Arc::new(
@@ -48,7 +47,7 @@ pub(super) async fn sqlite_process_recovery_rebuilds_snapshot_plugin_options_aft
 
     assert_eq!(
         lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
-            .await_terminal(&ProcessId::from("snapshot-ok"))
+            .await_terminal(&snapshot_ok)
             .await
             .expect("await recovered snapshot-backed process"),
         process_success(serde_json::json!("snapshot:restored"))
@@ -127,43 +126,32 @@ pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure
         .expect("open registry"),
     ) as Arc<dyn ProcessRegistry>;
     let env_ref = persist_snapshot_recovery_env_ref("tool-authority:sha256:revoked").await;
-    let mut requirements_mismatch = snapshot_lashlang_registration(
-        &ProcessId::from("snapshot-requirements-mismatch"),
-        env_ref.clone(),
-    )
-    .await;
+    let mut requirements_mismatch = snapshot_lashlang_registration(env_ref.clone()).await;
     mutate_snapshot_lashlang_input(&mut requirements_mismatch, |input| {
         input.host_requirements_ref =
             lashlang::HostRequirementsRef::new(&lashlang::ContentHash::new("mismatch"));
     });
-    registry_a
+    let requirements_mismatch = registry_a
         .register_process(requirements_mismatch)
         .await
-        .expect("register host-requirements mismatch");
+        .expect("register host-requirements mismatch")
+        .id;
 
-    let mut process_ref_mismatch = snapshot_lashlang_registration(
-        &ProcessId::from("snapshot-process-ref-mismatch"),
-        env_ref.clone(),
-    )
-    .await;
+    let mut process_ref_mismatch = snapshot_lashlang_registration(env_ref.clone()).await;
     mutate_snapshot_lashlang_input(&mut process_ref_mismatch, |input| {
         input.process_ref = lashlang::ProcessRef::new(lashlang::ContentHash::new("mismatch"), 0);
     });
-    registry_a
+    let process_ref_mismatch = registry_a
         .register_process(process_ref_mismatch)
         .await
-        .expect("register process-ref mismatch");
+        .expect("register process-ref mismatch")
+        .id;
 
-    registry_a
-        .register_process(
-            snapshot_lashlang_registration(
-                &ProcessId::from("snapshot-invalid-host-environment"),
-                env_ref.clone(),
-            )
-            .await,
-        )
+    let invalid_host_environment = registry_a
+        .register_process(snapshot_lashlang_registration(env_ref.clone()).await)
         .await
-        .expect("register invalid host environment");
+        .expect("register invalid host environment")
+        .id;
     drop(registry_a);
 
     let registry_b = Arc::new(
@@ -188,11 +176,11 @@ pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure
         .await
         .expect("drive immutable and invalid-host admission failures");
 
-    let incompatible_id = ProcessId::from("snapshot-incompatible-host-environment");
-    registry_b
-        .register_process(snapshot_lashlang_registration(&incompatible_id, env_ref).await)
+    let incompatible_host_environment = registry_b
+        .register_process(snapshot_lashlang_registration(env_ref).await)
         .await
-        .expect("register incompatible host environment");
+        .expect("register incompatible host environment")
+        .id;
     let worker_c = recovery_worker_with_plugins(
         Arc::clone(&registry_b),
         store_factory,
@@ -205,22 +193,16 @@ pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure
         .expect("drive incompatible-host admission failure");
 
     for (process_id, expected_code) in [
+        (requirements_mismatch, "process_host_requirements_mismatch"),
+        (process_ref_mismatch, "process_ref_mismatch"),
+        (invalid_host_environment, "process_host_environment_invalid"),
         (
-            "snapshot-requirements-mismatch",
-            "process_host_requirements_mismatch",
-        ),
-        ("snapshot-process-ref-mismatch", "process_ref_mismatch"),
-        (
-            "snapshot-invalid-host-environment",
-            "process_host_environment_invalid",
-        ),
-        (
-            "snapshot-incompatible-host-environment",
+            incompatible_host_environment,
             "process_host_environment_incompatible",
         ),
     ] {
         let await_output = lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
-            .await_terminal(&ProcessId::from(process_id))
+            .await_terminal(&process_id)
             .await
             .unwrap_or_else(|error| panic!("await terminal {process_id}: {error}"));
         let ProcessAwaitOutput::Settled { output } = await_output else {
@@ -251,10 +233,7 @@ pub(super) async fn sqlite_process_recovery_preserves_lashlang_admission_failure
 /// in the process-global in-memory artifact store, mirroring how a trigger
 /// route's linked module is published before the process runs; that store
 /// survives the registry/worker reopen within a single test process.
-pub(super) async fn trigger_lashlang_registration(
-    process_id: &ProcessId,
-    resource: &str,
-) -> ProcessRegistration {
+pub(super) async fn trigger_lashlang_registration(resource: &str) -> ProcessRegistration {
     // process notify(resource: str) { finish { triggered: resource } }
     let module = b::module(
         vec![b::process(
@@ -288,7 +267,6 @@ pub(super) async fn trigger_lashlang_registration(
     args.insert("resource".to_string(), serde_json::json!(resource));
     let env_ref = persist_recovery_env_ref().await;
     ProcessRegistration::new(
-        process_id,
         lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked_module.artifact.module_ref().clone(),
             process_ref,
@@ -338,7 +316,7 @@ pub(super) fn sole_lifted_process_name(artifact: &lashlang::ModuleArtifact) -> S
     name
 }
 
-pub(super) async fn typescript_process_registration(process_id: &ProcessId) -> ProcessRegistration {
+pub(super) async fn typescript_process_registration() -> ProcessRegistration {
     let linked = lash_typescript::link(
         r#"
         const worker = async () => { return { ok: true }; };
@@ -365,7 +343,6 @@ pub(super) async fn typescript_process_registration(process_id: &ProcessId) -> P
         .expect("worker process declaration");
     let env_ref = persist_recovery_env_ref().await;
     ProcessRegistration::new(
-        process_id,
         lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
@@ -391,7 +368,7 @@ pub(super) async fn typescript_process_registration(process_id: &ProcessId) -> P
     .with_execution_env_ref(Some(env_ref))
 }
 
-pub(super) async fn sleeping_process_registration(process_id: &ProcessId) -> ProcessRegistration {
+pub(super) async fn sleeping_process_registration() -> ProcessRegistration {
     let environment = lashlang::LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),
         lashlang::LashlangAbilities::all(),
@@ -417,7 +394,6 @@ pub(super) async fn sleeping_process_registration(process_id: &ProcessId) -> Pro
     let worker = sole_lifted_process_name(&linked.artifact);
     let env_ref = persist_recovery_env_ref().await;
     ProcessRegistration::new(
-        process_id,
         lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
@@ -440,9 +416,7 @@ pub(super) async fn sleeping_process_registration(process_id: &ProcessId) -> Pro
     .with_execution_env_ref(Some(env_ref))
 }
 
-pub(super) async fn sleeping_then_tool_process_registration(
-    process_id: &ProcessId,
-) -> ProcessRegistration {
+pub(super) async fn sleeping_then_tool_process_registration() -> ProcessRegistration {
     // process worker() {
     //   sleep for "5m"
     //   called = await tools.snapshot_echo({ line: "after wake" })?
@@ -498,7 +472,6 @@ pub(super) async fn sleeping_then_tool_process_registration(
     .expect("store sleeping post-wake-effect artifact");
     let env_ref = persist_snapshot_recovery_env_ref("tool-authority:sha256:ok").await;
     ProcessRegistration::new(
-        process_id,
         lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
@@ -523,13 +496,13 @@ pub(super) async fn sleeping_then_tool_process_registration(
 
 #[tokio::test]
 pub(super) async fn process_sleep_wake_settles_recorded_cancel_before_resuming() {
-    let process_id = ProcessId::from("sleep-cancel-typescript");
     let (registry, continuations) = process_stores();
-    let registration = sleeping_process_registration(&process_id).await;
-    registry
+    let registration = sleeping_process_registration().await;
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register sleeping process");
+        .expect("register sleeping process")
+        .id;
     let worker = recovery_worker(Arc::clone(&registry), memory_session_store_factory().await).await;
     let workflow = Arc::new(LashProcessWorkflowImpl::new_for_test(
         Arc::new(RestateCoreProcessRunner::new(worker)),
@@ -552,6 +525,7 @@ pub(super) async fn process_sleep_wake_settles_recorded_cancel_before_resuming()
             );
             workflow
                 .run_registration_for_test(
+                    process_id.clone(),
                     registration,
                     ProcessExecutionContext::default()
                         .with_execution_write_authority(execution_write_authority),
@@ -572,10 +546,7 @@ pub(super) async fn process_sleep_wake_settles_recorded_cancel_before_resuming()
         .append_event(
             &process_id,
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                &registry
-                    .resolve_process_ref(&process_id)
-                    .await
-                    .expect("retained cancellation target"),
+                &process_id,
                 &lash_core::CancelRequest::new(
                     lash_core::CancelOrigin::OperatorRequested,
                     "actor:fixture:process_sleep_wake_settles_recorded_cancel_before_resuming",
@@ -614,13 +585,13 @@ pub(super) async fn process_sleep_wake_settles_recorded_cancel_before_resuming()
 
 #[tokio::test]
 pub(super) async fn a_cancel_in_the_redelivery_gap_replays_the_recorded_post_wake_effect() {
-    let process_id = "sleep-cancel-post-wake-effect";
     let (registry, continuations) = process_stores();
-    let registration = sleeping_then_tool_process_registration(&ProcessId::from(process_id)).await;
-    registry
+    let registration = sleeping_then_tool_process_registration().await;
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register sleeping post-wake-effect process");
+        .expect("register sleeping post-wake-effect process")
+        .id;
     let worker = recovery_worker_with_plugins(
         Arc::clone(&registry),
         memory_session_store_factory().await,
@@ -635,7 +606,7 @@ pub(super) async fn a_cancel_in_the_redelivery_gap_replays_the_recorded_post_wak
     let context = Arc::new(ReplayableRecordingContext::default());
     context.park_sleeps();
     let execution_write_authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-        process_id,
+        process_id.clone(),
         "sleep-cancel-post-wake-effect-invocation",
     );
     let first_run = {
@@ -643,6 +614,7 @@ pub(super) async fn a_cancel_in_the_redelivery_gap_replays_the_recorded_post_wak
         let context = Arc::clone(&context);
         let registration = registration.clone();
         let execution_write_authority = execution_write_authority.clone();
+        let process_id = process_id.clone();
         tokio::spawn(async move {
             let controller = RestateRuntimeEffectController::with_options_for_test(
                 context,
@@ -650,6 +622,7 @@ pub(super) async fn a_cancel_in_the_redelivery_gap_replays_the_recorded_post_wak
             );
             workflow
                 .run_registration_for_test(
+                    process_id.clone(),
                     registration,
                     ProcessExecutionContext::default()
                         .with_execution_write_authority(execution_write_authority),
@@ -698,7 +671,7 @@ pub(super) async fn a_cancel_in_the_redelivery_gap_replays_the_recorded_post_wak
 
     assert_eq!(
         registry
-            .get_process(&ProcessId::from(process_id))
+            .get_process(&process_id)
             .await
             .expect("read process after worker crash")
             .expect("crashed process remains registered")
@@ -709,8 +682,8 @@ pub(super) async fn a_cancel_in_the_redelivery_gap_replays_the_recorded_post_wak
 
     registry
         .append_event(
-            &ProcessId::from(process_id),
-            lash_core::ProcessEventAppendRequest::cancel_requested(&registry.resolve_process_ref(&ProcessId::from(process_id)).await.expect("retained cancellation target"),
+            &process_id,
+            lash_core::ProcessEventAppendRequest::cancel_requested(&process_id,
 &lash_core::CancelRequest::new(lash_core::CancelOrigin::OperatorRequested, "actor:fixture:process_sleep_wake_cancel_gap_preempts_replay_of_post_wake_effect", 11)),
         )
         .await
@@ -726,11 +699,14 @@ pub(super) async fn a_cancel_in_the_redelivery_gap_replays_the_recorded_post_wak
     );
     let redelivery = workflow
         .run_registration_for_test(
+            process_id.clone(),
             registration,
             ProcessExecutionContext::default()
                 .with_execution_write_authority(execution_write_authority),
             controller
-                .process_scope_for_test(durable_admission(&ExecutionScope::process(process_id)))
+                .process_scope_for_test(durable_admission(&ExecutionScope::process(
+                    process_id.clone(),
+                )))
                 .expect("sleeping post-wake-effect redelivery scope"),
             0,
             None,
@@ -773,12 +749,11 @@ pub(super) async fn a_cancel_in_the_redelivery_gap_replays_the_recorded_post_wak
 #[tokio::test]
 pub(super) async fn typescript_artifact_runs_through_process_engine_to_terminal() {
     let registry = process_registry();
-    registry
-        .register_process(
-            typescript_process_registration(&ProcessId::from("typescript-worker")).await,
-        )
+    let typescript_worker = registry
+        .register_process(typescript_process_registration().await)
         .await
-        .expect("register TypeScript process");
+        .expect("register TypeScript process")
+        .id;
 
     let worker = recovery_worker(Arc::clone(&registry), memory_session_store_factory().await).await;
     let _ = worker
@@ -787,7 +762,7 @@ pub(super) async fn typescript_artifact_runs_through_process_engine_to_terminal(
         .expect("run stored TypeScript artifact");
     assert_eq!(
         lash_core::NativeProcessWork::for_registry(Arc::clone(&registry))
-            .await_terminal(&ProcessId::from("typescript-worker"))
+            .await_terminal(&typescript_worker)
             .await
             .expect("await TypeScript process"),
         process_success(serde_json::json!({ "ok": true }))
@@ -843,14 +818,13 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
         .await
         .expect("open registry"),
     ) as Arc<dyn ProcessRegistry>;
-    registry_a
-        .register_process(
-            trigger_lashlang_registration(&ProcessId::from("trigger-notify"), "issue-42").await,
-        )
+    let trigger_notify = registry_a
+        .register_process(trigger_lashlang_registration("issue-42").await)
         .await
-        .expect("register trigger-started process");
+        .expect("register trigger-started process")
+        .id;
     let persisted_before_rebuild = registry_a
-        .get_process(&ProcessId::from("trigger-notify"))
+        .get_process(&trigger_notify)
         .await
         .expect("read process")
         .expect("persisted trigger-started process before recovery");
@@ -873,7 +847,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
         .expect("reopen registry"),
     ) as Arc<dyn ProcessRegistry>;
     let reopened_record = registry_b
-        .get_process(&ProcessId::from("trigger-notify"))
+        .get_process(&trigger_notify)
         .await
         .expect("read process")
         .expect("trigger-started process survives registry reopen");
@@ -894,7 +868,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
             .iter()
             .map(|record| record.id.as_str())
             .collect::<Vec<_>>(),
-        vec!["trigger-notify"],
+        vec![trigger_notify.as_str()],
         "the trigger-started process must be on the recovery worklist after reopen"
     );
 
@@ -906,7 +880,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
 
     assert_eq!(
         lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
-            .await_terminal(&ProcessId::from("trigger-notify"))
+            .await_terminal(&trigger_notify)
             .await
             .expect("await recovered trigger-started process"),
         process_success(serde_json::json!({ "triggered": "issue-42" })),
@@ -933,7 +907,7 @@ pub(super) async fn sqlite_trigger_started_process_recovered_after_worker_regist
         .expect("second recovery sweep is idempotent");
     assert_eq!(
         lash_core::NativeProcessWork::for_registry(Arc::clone(&registry_b))
-            .await_terminal(&ProcessId::from("trigger-notify"))
+            .await_terminal(&trigger_notify)
             .await
             .expect("await after idempotent re-sweep"),
         process_success(serde_json::json!({ "triggered": "issue-42" }))
@@ -999,18 +973,17 @@ pub(super) fn counting_tool_plugin(
 }
 
 pub(super) fn counting_tool_registration(
-    id: &str,
+    label: &str,
     disposition: lash_core::RecoveryContract,
     env_ref: lash_core::ProcessExecutionEnvRef,
 ) -> ProcessRegistration {
     ProcessRegistration::new(
-        id,
         ProcessInput::ToolCall {
             call: lash_core::PreparedToolCall::from_parts(
-                format!("{id}-call"),
+                format!("{label}-call"),
                 "tool:recovery_count",
                 "recovery_count",
-                serde_json::json!({ "line": id }),
+                serde_json::json!({ "line": label }),
                 None,
                 serde_json::Value::Null,
             ),
@@ -1274,18 +1247,19 @@ pub(super) async fn process_workflow_impl_runs_through_runner() {
     // The workflow only ever runs lash-executed rows: `submit_record` refuses to
     // POST an ExternallyOwned row, and the registry rejects a workflow-key
     // completion of one (ADR 0027) — so the fixture is Rerunnable.
-    let registration = rerunnable_registration("task-workflow")
-        .with_wake_session_id(Some(SessionId::from("wake-session")));
-    registry
+    let registration =
+        rerunnable_registration().with_wake_session_id(Some(SessionId::from("wake-session")));
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register workflow process");
+        .expect("register workflow process")
+        .id;
     let execution_context = ProcessExecutionContext::default().with_causal_invocation(Some(
         runtime_invocation(RuntimeEffectKind::ToolAttempt, "tool-effect").into_runtime_invocation(),
     ));
 
     let record = registry
-        .get_process(&ProcessId::from("task-workflow"))
+        .get_process(&process_id)
         .await
         .expect("read workflow target")
         .expect("retained target");
@@ -1293,11 +1267,12 @@ pub(super) async fn process_workflow_impl_runs_through_runner() {
 
     let output = workflow
         .run_registration_for_test(
+            process_id.clone(),
             registration,
             execution_context,
             lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::testing::UnavailableEffectController),
-                durable_admission(&ExecutionScope::process("task-workflow")),
+                durable_admission(&ExecutionScope::process(process_id.clone())),
             )
             .expect("process scope"),
             0,
@@ -1314,10 +1289,10 @@ pub(super) async fn process_workflow_impl_runs_through_runner() {
     assert_eq!(
         runner.ran.lock_recover().as_slice(),
         &[RecordedProcessRun {
-            process_id: ProcessId::from("task-workflow"),
+            process_id: process_id.clone(),
             wake_target_session_id: Some(SessionId::from("wake-session")),
             tool_effect_id: Some("tool-effect".to_string()),
-            execution_scope_id: "task-workflow".to_string(),
+            execution_scope_id: process_id.to_string(),
         }]
     );
 }
@@ -1328,14 +1303,15 @@ pub(super) async fn terminal_retry_returns_the_stored_outcome() {
     let registry = process_registry();
     let workflow =
         LashProcessWorkflowImpl::new_for_test(runner, registry.clone(), continuation_store());
-    registry
-        .register_process(rerunnable_registration("terminal-retry"))
+    let terminal_retry_id = registry
+        .register_process(rerunnable_registration())
         .await
-        .expect("register process");
+        .expect("register process")
+        .id;
     let stored = process_success(serde_json::json!({"winner": "stored"}));
     registry
         .complete_process(
-            &ProcessId::from("terminal-retry"),
+            &terminal_retry_id,
             stored.clone(),
             lash_core::ProcessCompletionAuthority::workflow_key("terminal-retry"),
         )
@@ -1344,7 +1320,7 @@ pub(super) async fn terminal_retry_returns_the_stored_outcome() {
 
     let replayed = workflow
         .complete_with_stored_outcome(
-            &ProcessId::from("terminal-retry"),
+            &terminal_retry_id,
             process_failure(
                 lash_core::ToolFailureClass::Execution,
                 "divergent",
@@ -1358,7 +1334,7 @@ pub(super) async fn terminal_retry_returns_the_stored_outcome() {
     assert_eq!(replayed, stored);
     assert_eq!(
         registry
-            .full_event_window(&ProcessId::from("terminal-retry"), 0)
+            .full_event_window(&terminal_retry_id, 0)
             .await
             .expect("terminal events")
             .into_iter()
@@ -1376,8 +1352,9 @@ pub(super) fn invocation_started(
     lash_core::ProcessExecutionWriteAuthority,
     lash_core::ProcessStarted,
 ) {
-    let authority = lash_core::ProcessExecutionWriteAuthority::invocation(process_id, execution_id)
-        .bind_attempt(attempt);
+    let authority =
+        lash_core::ProcessExecutionWriteAuthority::invocation(process_id.clone(), execution_id)
+            .bind_attempt(attempt);
     let mut started = authority
         .invocation_started()
         .expect("bound invocation authority");
@@ -1388,17 +1365,18 @@ pub(super) fn invocation_started(
 #[tokio::test]
 pub(super) async fn restate_invocation_identity_distinguishes_replay_from_fresh_execution() {
     let registry = process_registry();
-    registry
-        .register_process(rerunnable_registration("invocation-rerun").with_max_attempts(Some(2)))
+    let invocation_rerun_id = registry
+        .register_process(rerunnable_registration().with_max_attempts(Some(2)))
         .await
-        .expect("register rerunnable");
+        .expect("register rerunnable")
+        .id;
 
     let (first_authority, first_started) =
-        invocation_started(&ProcessId::from("invocation-rerun"), "invocation-1", 1);
+        invocation_started(&invocation_rerun_id, "invocation-1", 1);
     assert!(matches!(
         registry
             .record_first_started_with_authority(
-                &ProcessId::from("invocation-rerun"),
+                &invocation_rerun_id,
                 first_started.clone(),
                 &first_authority,
             )
@@ -1409,7 +1387,7 @@ pub(super) async fn restate_invocation_identity_distinguishes_replay_from_fresh_
     assert!(matches!(
         registry
             .record_first_started_with_authority(
-                &ProcessId::from("invocation-rerun"),
+                &invocation_rerun_id,
                 first_started,
                 &first_authority,
             )
@@ -1419,11 +1397,11 @@ pub(super) async fn restate_invocation_identity_distinguishes_replay_from_fresh_
     ));
 
     let (second_authority, second_started) =
-        invocation_started(&ProcessId::from("invocation-rerun"), "invocation-2", 2);
+        invocation_started(&invocation_rerun_id, "invocation-2", 2);
     assert!(matches!(
         registry
             .record_first_started_with_authority(
-                &ProcessId::from("invocation-rerun"),
+                &invocation_rerun_id,
                 second_started,
                 &second_authority,
             )
@@ -1432,11 +1410,11 @@ pub(super) async fn restate_invocation_identity_distinguishes_replay_from_fresh_
         lash_core::ProcessStartOutcome::Started(_)
     ));
     let (third_authority, third_started) =
-        invocation_started(&ProcessId::from("invocation-rerun"), "invocation-3", 3);
+        invocation_started(&invocation_rerun_id, "invocation-3", 3);
     assert!(matches!(
         registry
             .record_first_started_with_authority(
-                &ProcessId::from("invocation-rerun"),
+                &invocation_rerun_id,
                 third_started,
                 &third_authority,
             )
@@ -1453,18 +1431,16 @@ pub(super) async fn restate_invocation_identity_distinguishes_replay_from_fresh_
 #[tokio::test]
 pub(super) async fn owner_bound_segment_continuation_reuses_root_invocation_identity() {
     let registry = process_registry();
-    registry
-        .register_process(owner_bound_registration("owner-bound-segment"))
+    let owner_bound_segment_id = registry
+        .register_process(owner_bound_registration())
         .await
-        .expect("register owner-bound");
-    let (root_authority, root_started) = invocation_started(
-        &ProcessId::from("owner-bound-segment"),
-        "root-invocation",
-        1,
-    );
+        .expect("register owner-bound")
+        .id;
+    let (root_authority, root_started) =
+        invocation_started(&owner_bound_segment_id, "root-invocation", 1);
     registry
         .record_first_started_with_authority(
-            &ProcessId::from("owner-bound-segment"),
+            &owner_bound_segment_id,
             root_started.clone(),
             &root_authority,
         )
@@ -1475,7 +1451,7 @@ pub(super) async fn owner_bound_segment_continuation_reuses_root_invocation_iden
     // lifecycle facts under the root's execution id (FIG-3588 admission binds
     // it from the retained start).
     let successor_authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-        ProcessId::from("owner-bound-segment"),
+        owner_bound_segment_id.clone(),
         "root-invocation",
     )
     .bind_attempt(1);
@@ -1486,7 +1462,7 @@ pub(super) async fn owner_bound_segment_continuation_reuses_root_invocation_iden
     assert!(matches!(
         registry
             .record_first_started_with_authority(
-                &ProcessId::from("owner-bound-segment"),
+                &owner_bound_segment_id,
                 successor_started,
                 &successor_authority,
             )
@@ -1494,15 +1470,12 @@ pub(super) async fn owner_bound_segment_continuation_reuses_root_invocation_iden
             .expect("mid-chain continuation"),
         lash_core::ProcessStartOutcome::AlreadyApplied(_)
     ));
-    let (fresh_authority, fresh_started) = invocation_started(
-        &ProcessId::from("owner-bound-segment"),
-        "fresh-invocation",
-        2,
-    );
+    let (fresh_authority, fresh_started) =
+        invocation_started(&owner_bound_segment_id, "fresh-invocation", 2);
     assert!(matches!(
         registry
             .record_first_started_with_authority(
-                &ProcessId::from("owner-bound-segment"),
+                &owner_bound_segment_id,
                 fresh_started,
                 &fresh_authority,
             )
@@ -1529,15 +1502,16 @@ pub(super) async fn run_registration_abandons_restarted_owner_bound_without_runn
         registry.clone(),
         continuation_store(),
     );
-    let registration = owner_bound_registration("ob-restart");
-    registry
+    let registration = owner_bound_registration();
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register owner-bound process");
+        .expect("register owner-bound process")
+        .id;
     // Simulate the prior incarnation that began executing but never completed.
     registry
         .record_first_started(
-            &ProcessId::from("ob-restart"),
+            &process_id,
             lash_core::ProcessStarted {
                 owner: started_owner.clone(),
                 fencing_token: 0,
@@ -1551,11 +1525,12 @@ pub(super) async fn run_registration_abandons_restarted_owner_bound_without_runn
 
     let output = workflow
         .run_registration_for_test(
+            process_id.clone(),
             registration,
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::testing::UnavailableEffectController),
-                durable_admission(&ExecutionScope::process("ob-restart")),
+                durable_admission(&ExecutionScope::process(process_id.clone())),
             )
             .expect("process scope"),
             0,
@@ -1576,7 +1551,7 @@ pub(super) async fn run_registration_abandons_restarted_owner_bound_without_runn
     assert_eq!(evidence.writer, AbandonWriter::Sweep);
     assert_eq!(evidence.owner.as_ref(), Some(&started_owner));
     let record = registry
-        .get_process(&ProcessId::from("ob-restart"))
+        .get_process(&process_id)
         .await
         .expect("read process")
         .expect("get abandoned row");
@@ -1599,19 +1574,21 @@ pub(super) async fn run_registration_runs_fresh_owner_bound() {
         registry.clone(),
         continuation_store(),
     );
-    let registration = owner_bound_registration("ob-fresh");
-    registry
+    let registration = owner_bound_registration();
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register fresh owner-bound process");
+        .expect("register fresh owner-bound process")
+        .id;
 
     let output = workflow
         .run_registration_for_test(
+            process_id.clone(),
             registration,
             ProcessExecutionContext::default(),
             lash_core::ScopedEffectController::shared(
                 Arc::new(lash_core::testing::UnavailableEffectController),
-                durable_admission(&ExecutionScope::process("ob-fresh")),
+                durable_admission(&ExecutionScope::process(process_id.clone())),
             )
             .expect("process scope"),
             0,
@@ -1632,7 +1609,7 @@ pub(super) async fn run_registration_runs_fresh_owner_bound() {
             .iter()
             .map(|run| run.process_id.clone())
             .collect::<Vec<_>>(),
-        vec!["ob-fresh".to_string()],
+        vec![process_id.clone()],
         "a fresh OwnerBound row runs through the runner on first invocation"
     );
 }
@@ -1651,10 +1628,11 @@ pub(super) async fn ingress_runner_submits_by_segment_key_and_restate_coalesces_
     // worklist row the ingress runner must submit. ExternallyOwned rows are
     // never submitted (ADR 0019), so the submittable case uses a Rerunnable row.
     let registry = process_registry();
-    registry
-        .register_process(rerunnable_registration("task-1"))
+    let task_1_id = registry
+        .register_process(rerunnable_registration())
         .await
-        .expect("register");
+        .expect("register")
+        .id;
 
     let (base_url, captured, server) = spawn_restate_http_capture(vec![
         MockHttpResponse {
@@ -1687,7 +1665,7 @@ pub(super) async fn ingress_runner_submits_by_segment_key_and_restate_coalesces_
     );
     for request in &requests {
         assert!(
-            request.starts_with("POST /LashProcessWorkflow/task-1/run/send "),
+            request.starts_with(&format!("POST /LashProcessWorkflow/{task_1_id}/run/send ")),
             "submits the segment-0 workflow key: {request}"
         );
         assert!(
@@ -1695,19 +1673,19 @@ pub(super) async fn ingress_runner_submits_by_segment_key_and_restate_coalesces_
             "workflow sends must not carry an idempotency header; Restate coalesces by workflow key: {request}"
         );
     }
-    assert_eq!(first.admitted, vec!["task-1".to_string()]);
-    assert_eq!(second.admitted, vec!["task-1".to_string()]);
+    assert_eq!(first.admitted, vec![task_1_id.to_string()]);
+    assert_eq!(second.admitted, vec![task_1_id.to_string()]);
 
     // The durable backend reference is recorded so the process is observably
     // owned by Restate, and it names the segment it was minted for.
     let record = registry
-        .get_process(&ProcessId::from("task-1"))
+        .get_process(&task_1_id)
         .await
         .expect("read process")
         .expect("get process");
     let external = record.external_ref.as_ref().expect("external ref recorded");
     assert_eq!(external.backend.as_str(), "restate");
-    assert_eq!(external.id, "LashProcessWorkflow/task-1");
+    assert_eq!(external.id, format!("LashProcessWorkflow/{task_1_id}"));
     assert_eq!(
         external.segment_ordinal,
         Some(0),
@@ -1736,17 +1714,18 @@ pub(super) async fn ingress_runner_submits_by_segment_key_and_restate_coalesces_
 #[tokio::test]
 pub(super) async fn ingress_sweep_starts_the_crashed_row_once_and_submits_the_cancelling_row() {
     let registry = process_registry();
-    registry
-        .register_process(rerunnable_registration("crashed-before-submit"))
+    let crashed_before_submit_id = registry
+        .register_process(rerunnable_registration())
         .await
-        .expect("register the row whose host died before it submitted");
+        .expect("register the row whose host died before it submitted")
+        .id;
     let cancelling = registry
-        .register_process(rerunnable_registration("cancel-requested"))
+        .register_process(rerunnable_registration())
         .await
         .expect("register the row that carries a standing cancel request");
     registry
         .request_process_cancel(
-            &lash_core::ProcessRef::from_record(&cancelling),
+            &cancelling.id,
             lash_core::CancelOrigin::OperatorRequested,
             "operator".to_string(),
             None,
@@ -1794,10 +1773,14 @@ pub(super) async fn ingress_sweep_starts_the_crashed_row_once_and_submits_the_ca
     submitted.sort();
     assert_eq!(
         submitted,
-        vec![
-            "cancel-requested".to_string(),
-            "crashed-before-submit".to_string()
-        ],
+        {
+            let mut expected = vec![
+                cancelling.id.to_string(),
+                crashed_before_submit_id.to_string(),
+            ];
+            expected.sort();
+            expected
+        },
         "both rows reach the ingress, keyed by their own segment: {requests:?}"
     );
     let mut admitted = report
@@ -1806,13 +1789,14 @@ pub(super) async fn ingress_sweep_starts_the_crashed_row_once_and_submits_the_ca
         .map(ToString::to_string)
         .collect::<Vec<_>>();
     admitted.sort();
-    assert_eq!(
-        admitted,
-        vec![
-            "cancel-requested".to_string(),
-            "crashed-before-submit".to_string()
-        ]
-    );
+    assert_eq!(admitted, {
+        let mut expected = vec![
+            cancelling.id.to_string(),
+            crashed_before_submit_id.to_string(),
+        ];
+        expected.sort();
+        expected
+    });
     assert!(
         report.deferred.is_empty(),
         "neither row is deferred: {:?}",
@@ -1823,7 +1807,7 @@ pub(super) async fn ingress_sweep_starts_the_crashed_row_once_and_submits_the_ca
     // the sweep submitted it and wrote no terminal of its own. Its run honours
     // the standing request.
     let cancelling = registry
-        .get_process(&ProcessId::from("cancel-requested"))
+        .get_process(&cancelling.id)
         .await
         .expect("read process")
         .expect("the cancelling row stands");
@@ -1837,7 +1821,7 @@ pub(super) async fn ingress_sweep_starts_the_crashed_row_once_and_submits_the_ca
             .external_ref
             .as_ref()
             .map(|external| external.id.as_str()),
-        Some("LashProcessWorkflow/cancel-requested"),
+        Some(format!("LashProcessWorkflow/{}", cancelling.id).as_str()),
         "the submitted row names the workflow that will settle it"
     );
     assert!(cancelling.cancel_request.is_some());

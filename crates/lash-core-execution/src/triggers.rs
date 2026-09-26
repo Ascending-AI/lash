@@ -159,7 +159,9 @@ pub enum TriggerDeliveryEmitOutcome {
 pub struct TriggerDeliveryEmitReceipt {
     pub occurrence_id: String,
     pub subscription_id: String,
-    pub process_id: ProcessId,
+    /// The process the delivery started; absent when it failed to start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_id: Option<ProcessId>,
     pub outcome: TriggerDeliveryEmitOutcome,
 }
 
@@ -187,7 +189,7 @@ impl TriggerEmitReport {
         self.deliveries
             .iter()
             .filter(|delivery| delivery.outcome == TriggerDeliveryEmitOutcome::Started)
-            .map(|delivery| delivery.process_id.clone())
+            .filter_map(|delivery| delivery.process_id.clone())
             .collect()
     }
 }
@@ -1668,7 +1670,12 @@ pub enum TriggerDeliveryReservationOutcome {
 pub struct TriggerDeliveryReservation {
     pub occurrence: TriggerOccurrenceRecord,
     pub subscription: TriggerSubscriptionRecord,
-    pub process_id: ProcessId,
+    /// The process this delivery started, bound after the start registered it
+    /// and before the delivery is reported (ADR 0107). `None` while the
+    /// reservation is unbound: its start has not yet completed, and recovery
+    /// resumes it under the same start key.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_id: Option<ProcessId>,
     pub created_at_ms: u64,
     pub reservation_status: TriggerDeliveryReservationOutcome,
 }
@@ -1781,11 +1788,15 @@ pub fn sort_trigger_delivery_reservations(reservations: &mut [TriggerDeliveryRes
 }
 
 impl TriggerDeliveryReservation {
-    fn emit_report(&self, outcome: TriggerDeliveryEmitOutcome) -> TriggerDeliveryEmitReceipt {
+    fn emit_report(
+        &self,
+        process_id: Option<ProcessId>,
+        outcome: TriggerDeliveryEmitOutcome,
+    ) -> TriggerDeliveryEmitReceipt {
         TriggerDeliveryEmitReceipt {
             occurrence_id: self.occurrence.occurrence_id.clone(),
             subscription_id: self.subscription.subscription_id.clone(),
-            process_id: self.process_id.clone(),
+            process_id,
             outcome,
         }
     }
@@ -1852,8 +1863,21 @@ pub trait TriggerStore: Send + Sync {
     /// direct delivery-table view to close the reserve/start crash window.
     async fn list_deliveries(&self) -> Result<Vec<TriggerDeliveryReservation>, PluginError>;
 
-    /// List the distinct deterministic process ids currently referenced by
-    /// delivery rows, without materializing occurrence or subscription JSON.
+    /// Bind the process a delivery's start registered to its reservation.
+    ///
+    /// Idempotent: binding the same process again is a no-op. Binding a
+    /// different process to an already-bound reservation is refused — a
+    /// delivery's key mints one process while that process is retained, and
+    /// a bound delivery is never started again.
+    async fn bind_delivery_process(
+        &self,
+        occurrence_id: &str,
+        subscription_id: &str,
+        process_id: &ProcessId,
+    ) -> Result<(), PluginError>;
+
+    /// List the distinct process ids currently bound to delivery rows,
+    /// without materializing occurrence or subscription JSON.
     /// Process-retention reconciliation uses this narrow worklist query.
     async fn list_delivery_process_ids(&self) -> Result<Vec<ProcessId>, PluginError>;
 

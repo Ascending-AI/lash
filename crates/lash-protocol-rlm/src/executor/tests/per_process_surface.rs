@@ -272,9 +272,22 @@ async fn trigger_fired_process_runs_under_session_contributed_event_type() {
         .drive_pending_processes()
         .await
         .expect("worker reconciles and drives the trigger delivery");
+    // The worker's reconciliation starts the unbound delivery and binds the
+    // process its start minted (ADR 0107).
+    let process_id = trigger_store
+        .list_deliveries()
+        .await
+        .expect("list trigger deliveries")
+        .into_iter()
+        .find(|reserved| {
+            reserved.occurrence.occurrence_id == delivery.occurrence.occurrence_id
+                && reserved.subscription.subscription_id == delivery.subscription.subscription_id
+        })
+        .and_then(|reserved| reserved.process_id)
+        .expect("the reconciled delivery is bound to the process it started");
     let terminal = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        NativeProcessWork::for_registry(Arc::clone(&registry)).await_terminal(&delivery.process_id),
+        NativeProcessWork::for_registry(Arc::clone(&registry)).await_terminal(&process_id),
     )
     .await
     .expect("trigger delivery reaches terminal state")

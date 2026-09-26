@@ -3,9 +3,8 @@ use std::collections::BTreeMap;
 use super::materialization::select_value;
 use super::*;
 
-fn registration(id: &str) -> ProcessRegistration {
+fn registration(_id: &str) -> ProcessRegistration {
     ProcessRegistration::new(
-        id,
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
@@ -19,7 +18,7 @@ fn registration(id: &str) -> ProcessRegistration {
 fn process_event_old_system_time_json_is_rejected() {
     let record = ProcessRecord::from_registration(
         registration("process-old-time-shape"),
-        ProcessIncarnation::from_registration_sequence(1),
+        crate::process_id_for_test("process-old-time-shape"),
     );
     let plan = prepare_process_event_append(
         &record,
@@ -94,7 +93,7 @@ fn process_wake_turn_text_frames_process_id_sequence_and_input() {
 
     assert_eq!(
         process_wake_turn_text(&wake),
-        "Background process wake\nProcess: process-1\nEvent: process.ready #7\nWake input:\nline one\nline two"
+        "Background process wake\nProcess: p_c5546c16360677e5a56c42a3a5c9e20c\nEvent: process.ready #7\nWake input:\nline one\nline two"
     );
 }
 
@@ -112,7 +111,7 @@ fn process_wake_turn_cause_preserves_process_origin() {
     assert_eq!(cause.event_type, "process.ready");
     assert_eq!(
         cause.text,
-        "Background process wake\nProcess: process-1\nEvent: process.ready #7\nWake input:\nline one\nline two"
+        "Background process wake\nProcess: p_c5546c16360677e5a56c42a3a5c9e20c\nEvent: process.ready #7\nWake input:\nline one\nline two"
     );
     assert!(matches!(
         cause.origin,
@@ -122,7 +121,7 @@ fn process_wake_turn_cause_preserves_process_origin() {
             sequence,
             wake_id,
             caused_by,
-        } if process_id == "process-1"
+        } if process_id == crate::process_id_for_test("process-1")
             && event_type == "process.ready"
             && sequence == 7
             && wake_id.as_deref() == Some("wake:abc")
@@ -146,7 +145,7 @@ fn process_wake_delivery_carries_event_invocation_and_process_cause() {
             process_id,
             sequence: 7,
             event_type,
-        } if process_id == "process-1" && event_type == "process.ready"
+        } if process_id == crate::process_id_for_test("process-1") && event_type == "process.ready"
     ));
 }
 
@@ -159,19 +158,18 @@ fn wake_delivery(
         version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: "wake:abc".to_string(),
         target_session_id: SessionId::from("target"),
-        process_id: ProcessId::from("process-1"),
-        process_incarnation: ProcessIncarnation::from_registration_sequence(1),
+        process_id: crate::process_id_for_test("process-1"),
         sequence: 7,
         event_type: event_type.clone(),
         event_invocation: crate::RuntimeInvocation {
             attribution: crate::RuntimeAttribution::for_session("target"),
             subject: crate::RuntimeSubject::ProcessEvent {
-                process_id: ProcessId::from("process-1"),
+                process_id: crate::process_id_for_test("process-1"),
                 sequence: 7,
                 event_type,
             },
             caused_by: Some(crate::CausalRef::Process {
-                process_id: ProcessId::from("process-1"),
+                process_id: crate::process_id_for_test("process-1"),
             }),
             replay: None,
         },
@@ -237,7 +235,7 @@ fn selector_extracts_payload_pointer_const_template_and_present() {
 fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
     let record = ProcessRecord::from_registration(
         registration("process-repair-waiting"),
-        ProcessIncarnation::from_registration_sequence(1),
+        crate::process_id_for_test("process-repair-waiting"),
     );
     let wait = WaitState {
         kind: WaitKind::Signal {
@@ -248,8 +246,10 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
         },
         since_ms: 42,
     };
-    let waiting_request =
-        ProcessEventAppendRequest::wait_entered(&ProcessId::from("process-repair-waiting"), &wait);
+    let waiting_request = ProcessEventAppendRequest::wait_entered(
+        &crate::process_id_for_test("process-repair-waiting"),
+        &wait,
+    );
     let waiting =
         prepare_process_event_append(&record, waiting_request.clone(), 1, None, None, 42, None)
             .expect("prepare waiting event");
@@ -317,7 +317,7 @@ fn replayed_waiting_non_tail_does_not_repair_terminal_projection() {
 fn replayed_terminal_event_repairs_non_terminal_status_projection() {
     let record = ProcessRecord::from_registration(
         registration("process-repair"),
-        ProcessIncarnation::from_registration_sequence(1),
+        crate::process_id_for_test("process-repair"),
     );
     let request = ProcessEventAppendRequest::new(
         "process.completed",
@@ -369,10 +369,8 @@ fn replayed_generic_tail_repairs_projection_across_sender_floor_gap() {
             payload_schema: crate::LashSchema::any(),
             semantics: ProcessEventSemanticsSpec::default(),
         }]);
-    let mut stale_record = ProcessRecord::from_registration(
-        registration,
-        ProcessIncarnation::from_registration_sequence(1),
-    );
+    let mut stale_record =
+        ProcessRecord::from_registration(registration, crate::process_id_for_test("process"));
     stale_record.updated_at_ms = 0;
     let request =
         ProcessEventAppendRequest::new("producer.progress", serde_json::json!({"value": 1}))
@@ -413,10 +411,8 @@ fn replayed_generic_non_tail_does_not_rewind_projection_timestamp() {
             payload_schema: crate::LashSchema::any(),
             semantics: ProcessEventSemanticsSpec::default(),
         }]);
-    let record = ProcessRecord::from_registration(
-        registration,
-        ProcessIncarnation::from_registration_sequence(1),
-    );
+    let record =
+        ProcessRecord::from_registration(registration, crate::process_id_for_test("process"));
     let first_request =
         ProcessEventAppendRequest::new("producer.progress", serde_json::json!({"value": 1}))
             .with_replay_key("process-generic-stale-replay:1");

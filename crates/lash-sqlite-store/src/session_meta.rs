@@ -1,6 +1,5 @@
 use super::*;
 use crate::session_sql::session_sql;
-use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
@@ -24,7 +23,10 @@ pub(crate) fn stored_relation_from_row(
                 .map(lash_core_execution::TurnId::from),
             effect_id: row.get(6)?,
             call_id: row.get(7)?,
-            process_id: row.get::<_, Option<String>>(8)?.map(ProcessId::from),
+            process_id: row
+                .get::<_, Option<String>>(8)?
+                .map(|value| crate::sql_process_id(8, value))
+                .transpose()?,
             process_event_sequence: row.get(9)?,
             occurrence_id: row.get(10)?,
             subscription_id: row.get(11)?,
@@ -115,7 +117,6 @@ pub(crate) fn write_session_meta(
                     "observer-intent process"
                 )?,
                 intent.process_id.as_str(),
-                intent.process_incarnation,
             ],
         )
         .map_err(sqlite_error)?;
@@ -204,17 +205,13 @@ pub(crate) fn load_session_meta(
         .map_err(sqlite_error)?;
     let observer_rows = stmt
         .query_map(params![stored.session_id.as_str()], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<i64>>(2)?,
-            ))
+            Ok((row.get::<_, i64>(0)?, crate::row_process_id(row, 1)?))
         })
         .map_err(sqlite_error)?
         .collect::<Result<Vec<_>, _>>()
         .map_err(sqlite_error)?;
     drop(stmt);
-    for (process_index, process_id, process_incarnation) in observer_rows {
+    for (process_index, process_id) in observer_rows {
         if SessionMetaCodec::read_index(
             SESSION_META_CODEC,
             process_index,
@@ -226,12 +223,9 @@ pub(crate) fn load_session_meta(
                 "observer-intent process indexes are not contiguous",
             ));
         }
-        stored.pending_observer_intents.push(
-            lash_core_execution::store_backend_support::StoredObserverIntent {
-                process_id: ProcessId::from(process_id),
-                process_incarnation,
-            },
-        );
+        stored
+            .pending_observer_intents
+            .push(lash_core_execution::store_backend_support::StoredObserverIntent { process_id });
     }
     let meta = SessionMetaCodec::decode(SESSION_META_CODEC, stored)?;
     tx.commit().map_err(sqlite_error)?;

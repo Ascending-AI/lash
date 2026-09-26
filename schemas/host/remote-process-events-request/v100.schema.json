@@ -1,11 +1,11 @@
 {
-  "$id": "https://lash.dev/schemas/remote-process-events-request/v99",
+  "$id": "https://lash.dev/schemas/remote-process-events-request/v100",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
     "ProcessCursor": {
-      "description": "Opaque process cursor: `lashpc2:<epoch>:<process-reference>:<position>:<sequence>`.",
-      "pattern": "^lashpc2:[^:]+:r[0-9]+\\.[0-9a-f]+:[0-9]+:[0-9]+$",
+      "description": "Opaque process cursor: `lashpc3:<epoch>:<process-reference>:<position>:<sequence>`.",
+      "pattern": "^lashpc3:[^:]+:p_[0-9a-f]{32}:[0-9]+:[0-9]+$",
       "type": "string"
     },
     "ProcessEventQueryMode": {
@@ -40,11 +40,6 @@
       ],
       "description": "The process cursor to read after; absent reads from the start."
     },
-    "incarnation": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
-    },
     "limit": {
       "format": "uint",
       "minimum": 1.0,
@@ -58,13 +53,12 @@
     }
   },
   "required": [
-    "incarnation",
     "limit",
     "mode",
     "process_id"
   ],
   "title": "RemoteProcessEventsRequest",
   "type": "object",
-  "x-lash-schema-version": 99,
+  "x-lash-schema-version": 100,
   "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
 }

@@ -735,24 +735,13 @@ where
         true
     }
 
-    /// A bare controller has no process admission of its own, so a group
-    /// opened on it is admitted unpinned: a process's groups open only under
-    /// its segment controller, which knows the incarnation.
+    /// A bare controller admits a group under the group's own scope: a
+    /// process scope names its minted id, so there is nothing to pin.
     async fn open_effect_group(
         &self,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
-        let opener =
-            lash_core::AdmittedScope::unpinned(group.invocation().execution_scope().clone())
-                .map_err(|error| {
-                    RuntimeEffectControllerError::new(
-                        lash_core::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
-                        format!(
-                            "effect group {} has no admitted opener: {error}",
-                            group.group_key()
-                        ),
-                    )
-                })?;
+        let opener = lash_core::AdmittedScope::new(group.invocation().execution_scope().clone());
         self.open_effect_group_opened_by(group, &opener).await
     }
 
@@ -1460,14 +1449,14 @@ pub use process_command::PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION;
 use process_command::execute_restate_process_command;
 async fn signal_ordinal_for_event(
     registry: &dyn ProcessRegistry,
-    process_ref: &lash_core::ProcessRef,
+    process_id: &lash_core::ProcessId,
     event_type: &str,
     sequence: u64,
 ) -> Result<u64, PluginError> {
     // COUNT at the store, not a full log fetch: per-signal cost must stay
     // flat for long-lived processes that accumulate large event histories.
     registry
-        .count_events_through_ref(process_ref, event_type, sequence)
+        .count_events_through(process_id, event_type, sequence)
         .await
 }
 
@@ -1488,7 +1477,7 @@ mod identity_trace_tests {
     #[test]
     fn restate_trace_projection_uses_shared_parent_precedence_and_scoped_nodes() {
         let parent_address = lash_core::EffectAddress::new(
-            ExecutionScope::process("restate-parent-process"),
+            ExecutionScope::process(lash_core::ProcessId::fixture("restate-parent-process")),
             "shared-replay-key",
         )
         .expect("valid Restate causal address");

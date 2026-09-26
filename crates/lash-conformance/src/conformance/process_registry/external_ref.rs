@@ -19,11 +19,11 @@ use pretty_assertions::assert_eq;
 pub async fn external_ref_is_written_compare_and_set_by_segment_ordinal(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let process_id = ProcessId::from("external-ref-compare-and-set");
-    registry
+    let process_id = registry
         .register_process(registration("external-ref-compare-and-set"))
         .await
-        .expect("register process");
+        .expect("register process")
+        .id;
     let reference = |ordinal: Option<u64>, id: &str| crate::ProcessExternalRef {
         backend: "restate".to_string(),
         id: id.to_string(),
@@ -96,7 +96,9 @@ pub async fn external_ref_is_written_compare_and_set_by_segment_ordinal(
                 },
             )
             .await,
-        "process `external-ref-compare-and-set` external ref conflict: existing restate / workflow#2, requested other-backend / workflow#9",
+        &format!(
+            "process `{process_id}` external ref conflict: existing restate / workflow#2, requested other-backend / workflow#9"
+        ),
     );
     let record = registry
         .get_process(&process_id)

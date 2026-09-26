@@ -1646,9 +1646,11 @@ async fn await_list_process_starts_and_joins_handles() {
                     handle.insert(
                         "id".to_string(),
                         Value::String(
-                            lash_sansio::handle::HandleId::process("echo", 1)
-                                .as_str()
-                                .into(),
+                            lash_sansio::handle::HandleId::process(
+                                &lash_sansio::ProcessId::fixture("echo"),
+                            )
+                            .as_str()
+                            .into(),
                         ),
                     );
                     handle.insert(

@@ -358,7 +358,7 @@ impl DurableProcessWorker {
             }
             ProcessRecoveryOutcome::RunFailed(error) => {
                 self.emit_worker_fault(ProcessWorkerFault::RecoveryRunFailed {
-                    process_id: ProcessId::from(process_id.to_string()),
+                    process_id: process_id.clone(),
                     error: error.to_string(),
                 })
                 .await;

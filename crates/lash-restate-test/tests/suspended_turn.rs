@@ -241,8 +241,7 @@ async fn start_turn_with(options: TurnOptions) -> Turn {
         .await
         .expect("open the session");
     let turn_id = lash::TurnId::from("turn-1");
-    let admitted = lash_core::AdmittedScope::unpinned(session.turn_scope(turn_id.clone()))
-        .expect("admit the turn scope");
+    let admitted = lash_core::AdmittedScope::new(session.turn_scope(turn_id.clone()));
     let answer = Arc::new(Mutex::new(None));
     let activities = Arc::new(Mutex::new(Vec::new()));
     let attempts = Arc::new(AtomicUsize::new(0));

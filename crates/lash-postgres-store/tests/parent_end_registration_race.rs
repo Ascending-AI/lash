@@ -53,7 +53,6 @@ fn cancel_child(
     parent: lash_core_execution::ParentScope,
 ) -> lash_core_execution::ProcessRegistration {
     lash_core_execution::ProcessRegistration::new(
-        format!("parent-end-race-child-{index:02}"),
         lash_core_execution::ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
@@ -83,7 +82,7 @@ async fn settle(registry: &Arc<dyn ProcessRegistry>, parent: &lash_core_executio
         for child in &children {
             registry
                 .request_process_cancel(
-                    &lash_core_execution::ProcessRef::from_record(child),
+                    &child.id,
                     lash_core_execution::CancelOrigin::ParentEnded,
                     "parent-end-race".to_string(),
                     None,

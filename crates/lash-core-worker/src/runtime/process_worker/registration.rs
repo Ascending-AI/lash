@@ -1,10 +1,11 @@
 use crate::{ProcessRecord, ProcessRegistration};
 
 /// Rebuild a runnable registration from a persisted row, preserving its
-/// declared recovery contract.
+/// declared recovery contract. Reconstruction resumes the record's minted id
+/// and never registers anything (ADR 0107).
 pub(super) fn registration_from_record(record: ProcessRecord) -> ProcessRegistration {
     ProcessRegistration {
-        id: record.id,
+        start_key: record.start_key,
         input: record.input,
         disposition: record.disposition,
         lifecycle: record.lifecycle,

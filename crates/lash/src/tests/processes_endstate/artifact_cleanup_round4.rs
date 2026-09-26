@@ -6,7 +6,7 @@
 use super::*;
 
 #[tokio::test]
-async fn stale_process_cleanup_cannot_release_reregistered_incarnation_owner() -> Result<()> {
+async fn a_pruned_process_cleanup_cannot_release_its_successor_owner() -> Result<()> {
     let dir = tempfile::tempdir().expect("stale cleanup tempdir");
     let backend = Arc::new(
         lash_sqlite_store::SqliteBackend::open(dir.path())
@@ -19,7 +19,6 @@ async fn stale_process_cleanup_cannot_release_reregistered_incarnation_owner() -
         state: std::sync::Mutex::new(PruneEngineState::default()),
         release_failures: std::sync::atomic::AtomicUsize::new(1),
     });
-    let process_id = ProcessId::from("reused-process-owner");
     let env_spec = process_env_spec();
     let env_ref = env_spec.stable_ref().expect("stable environment ref");
     let env_bytes = env_spec.to_store_bytes().expect("environment bytes");
@@ -27,7 +26,6 @@ async fn stale_process_cleanup_cannot_release_reregistered_incarnation_owner() -
     let first = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                process_id.clone(),
                 lash_core::ProcessInput::Engine {
                     kind: engine.kind().to_string(),
                     payload: serde_json::json!({"artifact_ref": "reused-process-owner"}),
@@ -42,7 +40,7 @@ async fn stale_process_cleanup_cannot_release_reregistered_incarnation_owner() -
             .with_execution_env_ref(Some(env_ref.clone())),
         )
         .await?;
-    let first_owner = lash_core::ArtifactOwner::process(lash_core::ProcessRef::from_record(&first));
+    let first_owner = lash_core::ArtifactOwner::process(first.id.clone());
     artifact_store
         .publish_process_execution_env(&first_owner, &env_ref, &env_bytes)
         .await?;
@@ -53,7 +51,7 @@ async fn stale_process_cleanup_cannot_release_reregistered_incarnation_owner() -
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
-            lash_core::ProcessCompletionAuthority::workflow_key(process_id.to_string()),
+            lash_core::ProcessCompletionAuthority::workflow_key(first.id.to_string()),
         )
         .await?;
 
@@ -67,13 +65,12 @@ async fn stale_process_cleanup_cannot_release_reregistered_incarnation_owner() -
             .prune(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
             .await
             .is_err(),
-        "engine release fault must leave the first incarnation cleanup pending"
+        "engine release fault must leave the first process's cleanup pending"
     );
 
     let second = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                process_id.clone(),
                 lash_core::ProcessInput::Engine {
                     kind: engine.kind().to_string(),
                     payload: serde_json::json!({"artifact_ref": "reused-process-owner"}),
@@ -88,23 +85,15 @@ async fn stale_process_cleanup_cannot_release_reregistered_incarnation_owner() -
             .with_execution_env_ref(Some(env_ref.clone())),
         )
         .await?;
-    assert_ne!(first.incarnation, second.incarnation);
-    let second_owner =
-        lash_core::ArtifactOwner::process(lash_core::ProcessRef::from_record(&second));
+    assert_ne!(first.id, second.id, "the successor is minted a new id");
+    let second_owner = lash_core::ArtifactOwner::process(second.id.clone());
     assert_ne!(
         first_owner, second_owner,
-        "owner identity is incarnation-typed"
+        "an owner is named by its process's minted id"
     );
     assert!(matches!(
-        registry
-            .get_process_ref(&lash_core::ProcessRef::from_record(&first))
-            .await,
-        Err(lash_core::PluginError::ProcessIncarnationSuperseded {
-            requested_incarnation,
-            current_incarnation,
-            ..
-        }) if requested_incarnation == first.incarnation
-            && current_incarnation == second.incarnation
+        registry.get_process(&first.id).await,
+        Err(lash_core::PluginError::ProcessNoLongerRetained { .. })
     ));
     artifact_store
         .publish_process_execution_env(&second_owner, &env_ref, &env_bytes)
@@ -117,18 +106,17 @@ async fn stale_process_cleanup_cannot_release_reregistered_incarnation_owner() -
         .await?;
     assert_eq!(
         report.artifact_cleanup_acknowledgements,
-        vec![lash_core::ProcessArtifactCleanupAck::StaleIncarnation {
-            expected: lash_core::ProcessRef::from_record(&first),
-            found: lash_core::ProcessRef::from_record(&second),
+        vec![lash_core::ProcessArtifactCleanupAck::Acknowledged {
+            process_id: first.id.clone(),
         }],
-        "the facade must surface that the durable cleanup belonged to a predecessor incarnation"
+        "the facade acknowledges the pruned process's own cleanup"
     );
     assert!(
         artifact_store
             .get_process_execution_env(&env_ref)
             .await?
             .is_some(),
-        "acknowledging the stale cleanup must preserve the live incarnation's owner"
+        "acknowledging the pruned process's cleanup must preserve the successor's owner"
     );
     assert!(
         registry

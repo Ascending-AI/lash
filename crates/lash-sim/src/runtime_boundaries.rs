@@ -99,9 +99,8 @@ impl RuntimeBoundaryHarness {
     }
 
     /// The admitted runtime-operation scope a boundary's effect runs under.
-    fn admitted(scope: &ExecutionScope) -> Result<AdmittedScope, RuntimeBoundaryError> {
-        AdmittedScope::unpinned(scope.clone())
-            .map_err(|err| RuntimeBoundaryError::new(format!("admit effect scope: {err}")))
+    fn admitted(scope: &ExecutionScope) -> AdmittedScope {
+        AdmittedScope::new(scope.clone())
     }
 
     /// One handler attempt that runs `effect` on the handler's controller and
@@ -153,7 +152,7 @@ impl RuntimeBoundaryHarness {
         let run = Arc::new(Mutex::new(EffectRun::default()));
         self.engine
             .restate()
-            .run_in_handler(Self::admitted(scope)?, Self::attempt(&effect, &run, false))
+            .run_in_handler(Self::admitted(scope), Self::attempt(&effect, &run, false))
             .await
             .map_err(RuntimeBoundaryError::new)?;
         let mut run = run.lock_recover();
@@ -269,7 +268,7 @@ impl RuntimeBoundaryHarness {
         self.engine
             .restate()
             .run_crashed_then_redriven(
-                Self::admitted(&scope)?,
+                Self::admitted(&scope),
                 Self::attempt(&first, &first_run, true),
                 Self::attempt(&redrive, &redrive_run, false),
             )

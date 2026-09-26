@@ -93,9 +93,11 @@ impl ExecutionHost for AsyncHost {
                     record.insert(
                         "id".to_string(),
                         Value::String(
-                            lash_sansio::handle::HandleId::process("proc-1", 1)
-                                .as_str()
-                                .into(),
+                            lash_sansio::handle::HandleId::process(
+                                &lash_sansio::ProcessId::fixture("proc-1"),
+                            )
+                            .as_str()
+                            .into(),
                         ),
                     );
                     record.insert(
@@ -280,7 +282,7 @@ async fn process_handle_await_reports_the_child_and_its_resolution() {
             _ => None,
         });
     let (site, occurrence, process_ids) = waiting.expect("observed child-process wait");
-    assert_eq!(process_ids, &[lash_sansio::ProcessId::from("proc-1")]);
+    assert_eq!(process_ids, &[lash_sansio::ProcessId::fixture("proc-1")]);
     assert!(observations.iter().any(|observation| matches!(
         observation,
         LashlangExecutionObservation::NodeResumed {
@@ -312,9 +314,11 @@ async fn aggregate_await_reports_all_children_once() {
                 record.insert(
                     "id".to_string(),
                     Value::String(
-                        lash_sansio::handle::HandleId::process(&format!("proc-{ordinal}"), 1)
-                            .as_str()
-                            .into(),
+                        lash_sansio::handle::HandleId::process(&lash_sansio::ProcessId::fixture(
+                            &format!("proc-{ordinal}"),
+                        ))
+                        .as_str()
+                        .into(),
                     ),
                 );
                 return Ok(AbilityResult::Value(Value::Record(Arc::new(record))));
@@ -372,8 +376,8 @@ async fn aggregate_await_reports_all_children_once() {
     assert_eq!(
         waits,
         [&vec![
-            lash_sansio::ProcessId::from("proc-1"),
-            lash_sansio::ProcessId::from("proc-2")
+            lash_sansio::ProcessId::fixture("proc-1"),
+            lash_sansio::ProcessId::fixture("proc-2")
         ]]
     );
     assert_eq!(

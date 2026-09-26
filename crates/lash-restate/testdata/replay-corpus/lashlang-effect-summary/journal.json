@@ -1,20 +1,20 @@
 {
   "scenario": "lashlang-effect-summary",
-  "recorded_at_git_sha": "f4303464b4916c75fc60fcd8f8d46466bf483576",
+  "recorded_at_git_sha": "7caa78958d6412ccefcf9b0ead106a5c8bf52c19",
   "format": "lash-restate RecordedRuntimeEffect JSON v1; map keys are Restate effect names",
   "records": {
-    "lash:lashlang:v2:process:28:replay-corpus-effect-summary:incarnation:1:0000000000:present": {
+    "lash:lashlang:v2:process:34:p_00000000000070008000000000000001:0000000000:present": {
       "envelope": {
-        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"replay-corpus-effect-summary\"},\"replay_key\":\"lashlang:v2:process:28:replay-corpus-effect-summary:incarnation:1:0000000000:present\"},\"effect_id\":\"lashlang:v2:process:28:replay-corpus-effect-summary:incarnation:1:0000000000:present\"},\"command\":{\"type\":\"present_tool_result\",\"call_id\":\"lashlang:v2:process:28:replay-corpus-effect-summary:incarnation:1:0000000000\",\"tool_name\":\"recovery_count\",\"args\":{\"line\":\"summary\"},\"output\":{\"outcome\":{\"status\":\"success\",\"payload\":{\"$lash_tool_value\":\"untrusted_json\",\"value\":{\"executed\":1,\"line\":\"summary\"}}}}}}",
-        "hash": "91996344a510aaeaaa5c302deb64ccb1103a1ff13c6fffc6eba09a69b463b08f"
+        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"p_00000000000070008000000000000001\"},\"replay_key\":\"lashlang:v2:process:34:p_00000000000070008000000000000001:0000000000:present\"},\"effect_id\":\"lashlang:v2:process:34:p_00000000000070008000000000000001:0000000000:present\"},\"command\":{\"type\":\"present_tool_result\",\"call_id\":\"lashlang:v2:process:34:p_00000000000070008000000000000001:0000000000\",\"tool_name\":\"recovery_count\",\"args\":{\"line\":\"summary\"},\"output\":{\"outcome\":{\"status\":\"success\",\"payload\":{\"$lash_tool_value\":\"untrusted_json\",\"value\":{\"executed\":1,\"line\":\"summary\"}}}}}}",
+        "hash": "dd27d2d70ca0216f3870e40947b3626f76d0f6d4342acb10401cfd011db8d91a"
       },
       "outcome": {
         "Ok": {
           "type": "present_tool_result",
           "presentation": {
-            "version": 2,
+            "version": 3,
             "model_return": {
-              "call_id": "lashlang:v2:process:28:replay-corpus-effect-summary:incarnation:1:0000000000",
+              "call_id": "lashlang:v2:process:34:p_00000000000070008000000000000001:0000000000",
               "tool_name": "recovery_count",
               "parts": [
                 {
@@ -27,10 +27,10 @@
         }
       }
     },
-    "lash:lashlang:v2:process:28:replay-corpus-effect-summary:incarnation:1:lk2:0000000000:attempt:1": {
+    "lash:lashlang:v2:process:34:p_00000000000070008000000000000001:lk2:0000000000:attempt:1": {
       "envelope": {
-        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"replay-corpus-effect-summary\"},\"replay_key\":\"lashlang:v2:process:28:replay-corpus-effect-summary:incarnation:1:lk2:0000000000:attempt:1\"},\"effect_id\":\"lashlang:v2:process:28:replay-corpus-effect-summary:incarnation:1:lk2:0000000000:attempt:1\",\"caused_by\":{\"type\":\"effect\",\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"replay-corpus-effect-summary\"},\"replay_key\":\"lashlang:v2:process:28:replay-corpus-effect-summary:incarnation:1:lk2:0000000000\"}}},\"command\":{\"type\":\"tool_attempt\",\"call\":{\"call_id\":\"lashlang:v2:process:28:replay-corpus-effect-summary:incarnation:1:0000000000\",\"tool_id\":\"tool:recovery_count\",\"tool_name\":\"recovery_count\",\"args\":{\"line\":\"summary\"}},\"attempt\":1,\"max_attempts\":1}}",
-        "hash": "fdd4b5adba23e187abe4dd508bfa8cfb49ae629f7d177069c4a5028175a025fd"
+        "json": "{\"invocation\":{\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"p_00000000000070008000000000000001\"},\"replay_key\":\"lashlang:v2:process:34:p_00000000000070008000000000000001:lk2:0000000000:attempt:1\"},\"effect_id\":\"lashlang:v2:process:34:p_00000000000070008000000000000001:lk2:0000000000:attempt:1\",\"caused_by\":{\"type\":\"effect\",\"address\":{\"execution_scope\":{\"type\":\"process\",\"process_id\":\"p_00000000000070008000000000000001\"},\"replay_key\":\"lashlang:v2:process:34:p_00000000000070008000000000000001:lk2:0000000000\"}}},\"command\":{\"type\":\"tool_attempt\",\"call\":{\"call_id\":\"lashlang:v2:process:34:p_00000000000070008000000000000001:0000000000\",\"tool_id\":\"tool:recovery_count\",\"tool_name\":\"recovery_count\",\"args\":{\"line\":\"summary\"}},\"attempt\":1,\"max_attempts\":1}}",
+        "hash": "d281cab7531d5f485c1ffb022299e71aa287048587f209f940829095c411c0c9"
       },
       "outcome": {
         "Ok": {
@@ -38,7 +38,7 @@
           "launch": {
             "status": "done",
             "record": {
-              "call_id": "lashlang:v2:process:28:replay-corpus-effect-summary:incarnation:1:0000000000",
+              "call_id": "lashlang:v2:process:34:p_00000000000070008000000000000001:0000000000",
               "tool": "recovery_count",
               "args": {
                 "line": "summary"

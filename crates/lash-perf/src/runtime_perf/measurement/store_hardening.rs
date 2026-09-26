@@ -1,5 +1,4 @@
 use super::*;
-use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 
 const HARDENING_IDENTITY_ITERATIONS: usize = 64;
@@ -288,28 +287,14 @@ fn measure_hardening_identity_phases(
     turn_index: usize,
     phase_profile: &mut BTreeMap<String, RuntimePerfPhaseRunResult>,
 ) -> anyhow::Result<()> {
-    let registration =
-        lash_core::runtime::prepare_process_registration(lash_core::ProcessRegistration::new(
-            format!("identity-process-{turn_index}"),
-            lash_core::ProcessInput::External {
-                metadata: serde_json::json!({
-                    "nested": {"z": 3, "a": [1, 2, 3]},
-                    "turn": turn_index,
-                }),
-            },
-            lash_core::RecoveryContract::ExternallyOwned,
-            lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
-        ))?;
+    // A registration's identity work is its start key: the registrar keys
+    // idempotency on it and compares no content (ADR 0107).
     let (_, phase) =
         measure_runtime_perf_phase("store_hardening.identity.process_registration", || {
             for index in 0..HARDENING_IDENTITY_ITERATIONS {
-                std::hint::black_box(lash_core::runtime::process_registration_fingerprint(
-                    &registration,
-                    &[SessionId::from(format!("observer-{index}"))],
+                std::hint::black_box(lash_core::StartKey::for_host(
+                    lash_core::StartKeyOwner::HOST,
+                    format!("identity-process-{turn_index}-{index}"),
                 ));
             }
             Ok(())
@@ -504,12 +489,8 @@ async fn measure_process_prune(
 ) -> anyhow::Result<()> {
     let prune_scope = format!("perf-prune:{run_id}:{turn_index}");
     for index in 0..HARDENING_PRUNE_BATCH {
-        let process_id = ProcessId::from(format!(
-            "perf-prune-{backend}-{run_id}-{turn_index}-{index}"
-        ));
-        registry
+        let process_id = registry
             .register_process(lash_core::ProcessRegistration::new(
-                &process_id,
                 lash_core::ProcessInput::External {
                     metadata: serde_json::json!({"index": index}),
                 },
@@ -522,7 +503,8 @@ async fn measure_process_prune(
                     lash_core::OnParentEnd::Abandon,
                 ),
             ))
-            .await?;
+            .await?
+            .id;
         registry
             .complete_process(
                 &process_id,
@@ -613,10 +595,8 @@ mod store_hardening_tests {
             .await
             .expect("open a SQLite memory store set")
             .process_registry();
-        let unrelated_process_id = "perf-prune-unrelated";
-        registry
+        let unrelated_process_id = registry
             .register_process(lash_core::ProcessRegistration::new(
-                unrelated_process_id,
                 lash_core::ProcessInput::External {
                     metadata: serde_json::json!({}),
                 },
@@ -630,10 +610,11 @@ mod store_hardening_tests {
                 ),
             ))
             .await
-            .expect("register unrelated process");
+            .expect("register unrelated process")
+            .id;
         registry
             .complete_process(
-                &ProcessId::from(unrelated_process_id),
+                &unrelated_process_id,
                 lash_core::ProcessAwaitOutput::from_tool_output(
                     lash_core::ToolCallOutput::success(serde_json::json!({})),
                 ),

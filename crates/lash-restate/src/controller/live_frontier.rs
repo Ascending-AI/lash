@@ -17,9 +17,10 @@
 //! and the journal must not. A served-only start or sleep whose marker's
 //! closure runs is at the live frontier and refuses having acted on nothing;
 //! one whose marker is served was issued before, and replays. A served start
-//! goes on only when the registry already holds the row its marker names
-//! (FIG-3779 option 3): a marker recorded by an attempt that died before
-//! registering is not a recorded start, so it refuses and records nothing.
+//! goes on only when its registration was recorded or a retained process
+//! already holds its start key (FIG-3779 option 3, ADR 0107): a marker
+//! recorded by an attempt that died before registering is not a recorded
+//! start, so it refuses and records nothing.
 //!
 //! Every other process command still refuses up front when served only.
 
@@ -28,8 +29,7 @@ use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
 use lash_core::{
-    ProcessId, ProcessRegistry, RuntimeEffectControllerError, RuntimeEffectInvocation,
-    RuntimeErrorCode, ServedOnly,
+    RuntimeEffectControllerError, RuntimeEffectInvocation, RuntimeErrorCode, ServedOnly, StartKey,
 };
 use lash_sansio::sync::MutexExt as _;
 use restate_sdk::serde::Json;
@@ -61,37 +61,31 @@ pub(super) fn refuse_outside_a_run(
 }
 
 /// Journals a process start's frontier marker, recording the start's
-/// idempotency key, and answers whether the start may act.
+/// idempotency key, and answers whether the start may go on to its
+/// registration step.
 ///
 /// Every start passes it: one that is not served only goes on whether its
 /// marker ran or was served. A served-only start whose marker's closure runs
-/// is at the live frontier and refuses. One whose marker is served goes on
-/// only when `registry` already holds `process_id`'s row — the start was
-/// registered before the attempt that issued it died, so the idempotent
-/// re-registration and the workflow send keyed by the process id are that
-/// start, not a new one. With no row the attempt died between its marker and
-/// its registration: nothing was started, so the start refuses with the
-/// drift and records nothing.
+/// is at the live frontier and refuses. One whose marker is served goes on to
+/// its journaled registration step, which answers the rest: a recorded
+/// registration is that start and replays; a registration step that runs live
+/// goes on only when a retained process already holds the start's key (the
+/// attempt that issued it registered and died before the step journaled);
+/// with none, nothing was started and the start refuses there, having acted
+/// on nothing (FIG-3779 option 3, ADR 0107).
 pub(super) async fn pass_process_start_frontier<'ctx, C>(
     context: &C,
     invocation: &RuntimeEffectInvocation,
-    process_id: &ProcessId,
+    start_key: &StartKey,
     served_only: Option<&ServedOnly>,
-    registry: &dyn ProcessRegistry,
 ) -> Result<(), RuntimeEffectControllerError>
 where
     C: RestateControllerContext<'ctx> + ?Sized,
 {
     let mark = FrontierMark::ProcessStart {
-        process_id: process_id.clone(),
+        start_key: start_key.clone(),
     };
-    pass_frontier(context, invocation, mark, served_only).await?;
-    match served_only {
-        Some(served_only) if registry.get_process(process_id).await?.is_none() => {
-            Err(served_only.refuse())
-        }
-        _ => Ok(()),
-    }
+    pass_frontier(context, invocation, mark, served_only).await
 }
 
 /// Journals a timer's frontier marker: a served-only sleep whose marker's

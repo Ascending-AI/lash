@@ -25,9 +25,8 @@ mod tests {
         ProcessWorkObserver::new(registry)
     }
 
-    fn external_registration(process_id: &ProcessId, label: &str) -> ProcessRegistration {
+    fn external_registration(label: &str) -> ProcessRegistration {
         ProcessRegistration::new(
-            process_id,
             ProcessInput::External {
                 metadata: json!({ "label": label }),
             },
@@ -44,12 +43,12 @@ mod tests {
         registry: &Arc<dyn ProcessRegistry>,
         scope: &SessionScope,
         registration: ProcessRegistration,
-    ) {
-        let process_id = registration.id.clone();
-        registry
+    ) -> ProcessId {
+        let process_id = registry
             .register_process(registration)
             .await
-            .expect("register process");
+            .expect("register process")
+            .id;
         registry
             .add_observer(
                 &scope.session_id,
@@ -58,30 +57,27 @@ mod tests {
             )
             .await
             .expect("add process observer");
+        process_id
     }
 
     #[tokio::test]
     async fn snapshot_for_session_reads_observed_processes_and_events_as_epoch_ms() {
         let registry = memory_registry().await;
         let visible_scope = SessionScope::new("visible");
-        register_visible(
-            &registry,
-            &visible_scope,
-            external_registration(&ProcessId::from("visible-process"), "Visible"),
-        )
-        .await;
+        let visible_process_id =
+            register_visible(&registry, &visible_scope, external_registration("Visible")).await;
         register_visible(
             &registry,
             &SessionScope::new("other"),
-            external_registration(&ProcessId::from("hidden-process"), "Hidden"),
+            external_registration("Hidden"),
         )
         .await;
         registry
             .append_event(
-                &ProcessId::from("visible-process"),
+                &visible_process_id,
                 ProcessEventAppendRequest::cancel_requested(
                     &registry
-                        .resolve_process_ref(&ProcessId::from("visible-process"))
+                        .require_process_id(&visible_process_id)
                         .await
                         .expect("retained observed target"),
                     &crate::CancelRequest::new(
@@ -100,13 +96,7 @@ mod tests {
             .expect("snapshot");
 
         assert_eq!(snapshot.session_id, "visible");
-        assert_eq!(
-            snapshot.visible_processes,
-            vec![crate::ProcessRef::new(
-                "visible-process",
-                snapshot.items[0].process.incarnation,
-            )]
-        );
+        assert_eq!(snapshot.visible_processes, vec![visible_process_id.clone()]);
         assert_eq!(snapshot.items.len(), 1);
         assert_eq!(snapshot.items[0].events.len(), 2);
         assert_eq!(
@@ -145,11 +135,11 @@ mod tests {
     #[tokio::test]
     async fn work_item_retry_converges_after_a_record_event_tail_disagreement() {
         let registry = memory_registry().await;
-        let process_id = ProcessId::from("retry-converges");
-        registry
-            .register_process(external_registration(&process_id, "Retry converges"))
+        let retry_converges_record = registry
+            .register_process(external_registration("Retry converges"))
             .await
             .expect("register process");
+        let process_id = retry_converges_record.id.clone();
         let stale_record = registry
             .get_process(&process_id)
             .await
@@ -183,11 +173,11 @@ mod tests {
     #[tokio::test]
     async fn work_item_retry_surfaces_typed_mismatch_when_bound_is_exhausted() {
         let registry = Arc::new(ProcessRegistryFaults::new(memory_registry().await));
-        let process_id = ProcessId::from("retry-exhausted");
-        registry
-            .register_process(external_registration(&process_id, "Retry exhausted"))
+        let retry_exhausted_record = registry
+            .register_process(external_registration("Retry exhausted"))
             .await
             .expect("register process");
+        let process_id = retry_exhausted_record.id.clone();
         let stale_record = registry
             .get_process(&process_id)
             .await
@@ -228,10 +218,10 @@ mod tests {
     #[tokio::test]
     async fn runtime_snapshot_keeps_orphaned_processes_after_session_deletion() {
         let registry = memory_registry().await;
-        register_visible(
+        let surviving_process_id = register_visible(
             &registry,
             &SessionScope::new("deleted-session"),
-            external_registration(&ProcessId::from("surviving-process"), "Survivor"),
+            external_registration("Survivor"),
         )
         .await;
 
@@ -257,24 +247,26 @@ mod tests {
             .await
             .expect("runtime process snapshot");
         assert_eq!(runtime_items.len(), 1);
-        assert_eq!(runtime_items[0].process.process_id, "surviving-process");
+        assert_eq!(
+            runtime_items[0].process.process_id,
+            surviving_process_id.clone()
+        );
     }
 
     #[tokio::test]
     async fn list_batches_lease_reads_without_changing_mixed_results() {
         let registry = Arc::new(ProcessRegistryFaults::new(memory_registry().await));
+        let mut ids = std::collections::BTreeMap::new();
         for process_id in ["batch-leased", "batch-unleased", "batch-terminal"] {
-            registry
-                .register_process(external_registration(
-                    &ProcessId::from(process_id),
-                    process_id,
-                ))
+            let registered = registry
+                .register_process(external_registration(process_id))
                 .await
                 .expect("register batch observation fixture");
+            ids.insert(process_id, registered.id.clone());
         }
         registry
             .claim_process_lease(
-                &ProcessId::from("batch-leased"),
+                &ids["batch-leased"],
                 &crate::LeaseOwnerIdentity::opaque("observer", "one"),
                 60_000,
             )
@@ -284,7 +276,7 @@ mod tests {
             .expect("observed lease acquired");
         registry
             .complete_process(
-                &ProcessId::from("batch-terminal"),
+                &ids["batch-terminal"],
                 ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!({}))),
                 crate::ProcessCompletionAuthority::external_owner(),
             )
@@ -322,26 +314,16 @@ mod tests {
     async fn snapshot_for_session_sorts_work_by_updated_then_created_descending() {
         let registry = memory_registry().await;
         let scope = SessionScope::new("sort");
-        register_visible(
-            &registry,
-            &scope,
-            external_registration(&ProcessId::from("older"), "Older"),
-        )
-        .await;
+        let older_id = register_visible(&registry, &scope, external_registration("Older")).await;
         tokio::time::sleep(Duration::from_millis(2)).await;
-        register_visible(
-            &registry,
-            &scope,
-            external_registration(&ProcessId::from("newer"), "Newer"),
-        )
-        .await;
+        let newer_id = register_visible(&registry, &scope, external_registration("Newer")).await;
         tokio::time::sleep(Duration::from_millis(2)).await;
         registry
             .append_event(
-                &ProcessId::from("older"),
+                &older_id,
                 ProcessEventAppendRequest::cancel_requested(
                     &registry
-                        .resolve_process_ref(&ProcessId::from("older"))
+                        .require_process_id(&older_id)
                         .await
                         .expect("retained observed target"),
                     &crate::CancelRequest::new(
@@ -359,31 +341,23 @@ mod tests {
             .await
             .expect("snapshot");
 
-        assert_eq!(
-            snapshot
-                .visible_processes
-                .iter()
-                .map(|process| process.process_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["older", "newer"]
-        );
+        assert_eq!(snapshot.visible_processes, vec![older_id, newer_id]);
     }
 
     #[tokio::test]
     async fn observed_process_reports_terminal_status_and_error_messages() {
         let registry = memory_registry().await;
+        let mut ids = std::collections::BTreeMap::new();
         for process_id in ["failed", "cancelled"] {
-            registry
-                .register_process(external_registration(
-                    &ProcessId::from(process_id),
-                    process_id,
-                ))
+            let registered = registry
+                .register_process(external_registration(process_id))
                 .await
                 .expect("register");
+            ids.insert(process_id, registered.id.clone());
         }
         registry
             .complete_process(
-                &ProcessId::from("failed"),
+                &ids["failed"],
                 ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::failure(
                     crate::ToolFailure::runtime(
                         ToolFailureClass::External,
@@ -397,7 +371,7 @@ mod tests {
             .expect("fail process");
         registry
             .complete_process(
-                &ProcessId::from("cancelled"),
+                &ids["cancelled"],
                 ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
                     crate::ToolCancellation::runtime("cancelled intentionally"),
                 )),
@@ -408,12 +382,12 @@ mod tests {
 
         let observer = observer(Arc::clone(&registry));
         let failed = observer
-            .process(&ProcessId::from("failed"))
+            .process(&ids["failed"])
             .await
             .expect("read failed process")
             .expect("failed process");
         let cancelled = observer
-            .process(&ProcessId::from("cancelled"))
+            .process(&ids["cancelled"])
             .await
             .expect("read cancelled process")
             .expect("cancelled process");
@@ -444,12 +418,8 @@ mod tests {
     async fn observed_process_exposes_current_wait_state() {
         let registry = memory_registry().await;
         let scope = SessionScope::new("wait");
-        register_visible(
-            &registry,
-            &scope,
-            external_registration(&ProcessId::from("waiting-process"), "Waiting"),
-        )
-        .await;
+        let waiting_process_id =
+            register_visible(&registry, &scope, external_registration("Waiting")).await;
         let wait = WaitState {
             since_ms: 1234,
             kind: WaitKind::Signal {
@@ -460,13 +430,13 @@ mod tests {
             },
         };
         registry
-            .set_process_wait(&ProcessId::from("waiting-process"), wait.clone())
+            .set_process_wait(&waiting_process_id, wait.clone())
             .await
             .expect("set wait");
 
         let observer = observer(Arc::clone(&registry));
         let observed = observer
-            .process(&ProcessId::from("waiting-process"))
+            .process(&waiting_process_id)
             .await
             .expect("read waiting process")
             .expect("waiting process");
@@ -545,7 +515,8 @@ mod tests {
                 None,
             ),
         ];
-        for (process_id, input, kind, label, _child_session_id) in cases {
+        let mut ids = std::collections::BTreeMap::new();
+        for (case, input, kind, label, _child_session_id) in cases {
             let needs_env = matches!(
                 input,
                 ProcessInput::ToolCall { .. } | ProcessInput::Engine { .. }
@@ -555,7 +526,6 @@ mod tests {
                 _ => RecoveryContract::Rerunnable,
             };
             let mut registration = ProcessRegistration::new(
-                process_id,
                 input,
                 disposition,
                 ProcessProvenance::host(),
@@ -569,31 +539,35 @@ mod tests {
             ));
             if needs_env {
                 registration = registration.with_execution_env_ref(Some(
-                    ProcessExecutionEnvRef::new(format!("process-env:test:{process_id}")),
+                    ProcessExecutionEnvRef::new(format!("process-env:test:{case}")),
                 ));
             }
-            register_visible(&registry, &scope, registration).await;
+            ids.insert(
+                case,
+                register_visible(&registry, &scope, registration).await,
+            );
         }
 
         let snapshot = observer(Arc::clone(&registry))
             .snapshot_for_session("labels")
             .await
             .expect("snapshot");
-        let by_id = snapshot
+        let by_case = snapshot
             .items
             .iter()
-            .map(|item| (item.process.process_id.as_str(), item))
+            .map(|item| (item.process.process_id.clone(), item))
             .collect::<std::collections::BTreeMap<_, _>>();
+        let by_id = |case: &str| by_case[&ids[case]];
 
-        assert_eq!(by_id["tool"].label(), "files.read");
-        assert_eq!(by_id["engine"].label(), "remember");
-        assert_eq!(by_id["engine"].process.kind(), "test-engine");
-        assert_eq!(by_id["session"].label(), "researcher");
+        assert_eq!(by_id("tool").label(), "files.read");
+        assert_eq!(by_id("engine").label(), "remember");
+        assert_eq!(by_id("engine").process.kind(), "test-engine");
+        assert_eq!(by_id("session").label(), "researcher");
         assert_eq!(
-            by_id["session"].process.child_session_id.as_deref(),
+            by_id("session").process.child_session_id.as_deref(),
             Some("child-session")
         );
-        assert_eq!(by_id["external"].label(), "external job");
+        assert_eq!(by_id("external").label(), "external job");
     }
 
     #[tokio::test]
@@ -602,7 +576,7 @@ mod tests {
 
         assert!(
             observer(registry)
-                .process(&ProcessId::from("missing"))
+                .process(&crate::ProcessId::fixture("missing"))
                 .await
                 .expect("read missing process")
                 .is_none()

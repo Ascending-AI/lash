@@ -176,8 +176,7 @@ fn a_category_stop_carries_the_child_turn_blocking_issue() {
 fn failed_child_failure(stop: crate::TurnStop) -> crate::ToolFailure {
     let mut turn = crate::testing::mock_assembled_turn(&SessionId::from("failing-child"), "unused");
     turn.outcome = crate::TurnOutcome::Stopped(stop);
-    let registration = crate::ProcessRegistration::new(
-        "process:subagent:failing-child",
+    crate::ProcessRegistration::new(
         crate::ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
@@ -192,7 +191,7 @@ fn failed_child_failure(stop: crate::TurnStop) -> crate::ToolFailure {
         "precondition: the stop must fold to a failed process"
     );
     let output = output_from_process_turn(
-        &registration,
+        &crate::ProcessId::fixture("failing-child-process"),
         &SessionId::from("failing-child"),
         turn,
         state,
@@ -257,7 +256,7 @@ fn park_forever_definition() -> crate::ToolDefinition {
 async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
     let backend = crate::testing::memory_backend().await;
     let child_session_id = SessionId::from(format!("cancelled-{case}-subagent-child"));
-    let process_id = ProcessId::from(format!("process:subagent:cancelled-{case}"));
+    let process_id = crate::ProcessId::fixture(&format!("process:subagent:cancelled-{case}"));
     let factory = recording_factory(&backend);
     let backend = recording_backend(backend, &factory);
     let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
@@ -297,7 +296,7 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
         })
         .await
         .expect("materialize unrelated durable session");
-    let foreign_process_id = ProcessId::from(format!("process:subagent:foreign-{case}"));
+    let foreign_process_id = crate::ProcessId::fixture(&format!("process:subagent:foreign-{case}"));
     let foreign_plugin_init = runtime
         .session_state_service()
         .expect("session state")
@@ -312,8 +311,7 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
     .with_session_id(&foreign_session_id)
     .with_plugin_source(crate::SessionPluginSource::ParentFork)
     .with_plugin_init(foreign_plugin_init);
-    let foreign_registration = crate::ProcessRegistration::new(
-        &foreign_process_id,
+    crate::ProcessRegistration::new(
         crate::ProcessInput::SessionTurn {
             definition_key: "lash-subagent-session-turn:v1".to_string(),
             create_request: Box::new(foreign_create_request.clone()),
@@ -328,7 +326,7 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
     foreign_cancellation.cancel();
     let foreign_output = services
         .run_process_session_turn(
-            foreign_registration,
+            foreign_process_id.clone(),
             foreign_create_request,
             crate::TurnInput::text("must not run"),
             native_execution_write_authority(foreign_process_id.clone()),
@@ -366,22 +364,9 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
     .with_session_id(&child_session_id)
     .with_plugin_source(crate::SessionPluginSource::ParentFork)
     .with_plugin_init(plugin_init);
-    let registration = crate::ProcessRegistration::new(
-        &process_id,
-        crate::ProcessInput::SessionTurn {
-            definition_key: "lash-subagent-session-turn:v1".to_string(),
-            create_request: Box::new(create_request.clone()),
-            turn_input: Box::new(crate::TurnInput::text("park the child turn")),
-            output_contract: crate::ToolOutputContract::Static,
-        },
-        crate::RecoveryContract::Rerunnable,
-        crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
-    );
-    let replay_registration = registration.clone();
     let cancellation = tokio_util::sync::CancellationToken::new();
     let mut run = Box::pin(services.run_process_session_turn(
-        registration,
+        process_id.clone(),
         create_request.clone(),
         crate::TurnInput::text("park the child turn"),
         native_execution_write_authority(process_id.clone()),
@@ -462,7 +447,7 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
     // new and leaves the retained child alone.
     let replay = services
         .run_process_session_turn(
-            replay_registration,
+            process_id.clone(),
             create_request,
             crate::TurnInput::text("replayed cancelled child turn"),
             native_execution_write_authority(process_id.clone()),
@@ -507,14 +492,13 @@ struct ParkedSessionTurn {
     process_id: ProcessId,
     child_session_id: SessionId,
     create_request: crate::SessionCreateRequest,
-    registration: crate::ProcessRegistration,
     started: tokio::sync::mpsc::Receiver<()>,
 }
 
 async fn parked_session_turn(case: &str) -> ParkedSessionTurn {
     let backend = crate::testing::memory_backend().await;
     let child_session_id = SessionId::from(format!("settle-{case}-child"));
-    let process_id = ProcessId::from(format!("process:subagent:settle-{case}"));
+    let process_id = crate::ProcessId::fixture(&format!("process:subagent:settle-{case}"));
     let factory = recording_factory(&backend);
     let backend = recording_backend(backend, &factory);
     let host = crate::EmbeddedRuntimeHost::new(
@@ -564,18 +548,6 @@ async fn parked_session_turn(case: &str) -> ParkedSessionTurn {
     .with_session_id(&child_session_id)
     .with_plugin_source(crate::SessionPluginSource::ParentFork)
     .with_plugin_init(plugin_init);
-    let registration = crate::ProcessRegistration::new(
-        &process_id,
-        crate::ProcessInput::SessionTurn {
-            definition_key: "lash-subagent-session-turn:v1".to_string(),
-            create_request: Box::new(create_request.clone()),
-            turn_input: Box::new(crate::TurnInput::text("park the child turn")),
-            output_contract: crate::ToolOutputContract::Static,
-        },
-        crate::RecoveryContract::Rerunnable,
-        crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
-    );
     ParkedSessionTurn {
         runtime,
         services,
@@ -583,7 +555,6 @@ async fn parked_session_turn(case: &str) -> ParkedSessionTurn {
         process_id,
         child_session_id,
         create_request,
-        registration,
         started: started_rx,
     }
 }
@@ -602,13 +573,12 @@ async fn failed_final_child_commit_cancellation_stays_recoverable() {
         process_id,
         child_session_id,
         create_request,
-        registration,
         mut started,
         ..
     } = fixture;
     let cancellation = tokio_util::sync::CancellationToken::new();
     let mut run = Box::pin(services.run_process_session_turn(
-        registration.clone(),
+        process_id.clone(),
         create_request.clone(),
         crate::TurnInput::text("park the child turn"),
         native_execution_write_authority(process_id.clone()),
@@ -644,7 +614,7 @@ async fn failed_final_child_commit_cancellation_stays_recoverable() {
     replay_cancellation.cancel();
     let replay = services
         .run_process_session_turn(
-            registration,
+            process_id.clone(),
             create_request,
             crate::TurnInput::text("park the child turn"),
             native_execution_write_authority(process_id.clone()),
@@ -692,13 +662,12 @@ async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
         process_id,
         child_session_id,
         create_request,
-        registration,
         mut started,
         ..
     } = fixture;
     let cancellation = tokio_util::sync::CancellationToken::new();
     let mut run = Box::pin(services.run_process_session_turn(
-        registration.clone(),
+        process_id.clone(),
         create_request.clone(),
         crate::TurnInput::text("park the child turn"),
         native_execution_write_authority(process_id.clone()),
@@ -724,7 +693,7 @@ async fn crash_after_acceptance_redelivery_settles_retained_child_input() {
     replay_cancellation.cancel();
     let replay = services
         .run_process_session_turn(
-            registration,
+            process_id.clone(),
             create_request,
             crate::TurnInput::text("park the child turn"),
             native_execution_write_authority(process_id.clone()),
@@ -813,7 +782,7 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
         .await
         .expect("plugin init");
     let child_session_id = SessionId::from("panicking-child");
-    let process_id = ProcessId::from("process:subagent:panicking-child");
+    let process_id = crate::ProcessId::fixture("process:subagent:panicking-child");
     let create_request = crate::SessionCreateRequest::child_session(
         runtime.session_id(),
         crate::SessionStartPoint::Empty,
@@ -822,21 +791,9 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
     .with_session_id(&child_session_id)
     .with_plugin_source(crate::SessionPluginSource::ParentFork)
     .with_plugin_init(plugin_init);
-    let registration = crate::ProcessRegistration::new(
-        &process_id,
-        crate::ProcessInput::SessionTurn {
-            definition_key: "lash-subagent-session-turn:v1".to_string(),
-            create_request: Box::new(create_request.clone()),
-            turn_input: Box::new(crate::TurnInput::text("panic")),
-            output_contract: crate::ToolOutputContract::Static,
-        },
-        crate::RecoveryContract::Rerunnable,
-        crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
-    );
     let outcome = services
         .run_process_session_turn(
-            registration,
+            process_id.clone(),
             create_request,
             crate::TurnInput::text("panic"),
             native_execution_write_authority(process_id.clone()),
@@ -876,7 +833,7 @@ async fn child_turn_panic_is_typed_and_the_parent_remains_alive() {
 async fn spawned_child_runtime_does_not_outlive_the_process_run() {
     let backend = crate::testing::memory_backend().await;
     let child_session_id = SessionId::from("run-scoped-child");
-    let process_id = ProcessId::from("process:subagent:run-scoped-child");
+    let process_id = crate::ProcessId::fixture("process:subagent:run-scoped-child");
     let factory = recording_factory(&backend);
     let backend = recording_backend(backend, &factory);
     let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
@@ -914,22 +871,10 @@ async fn spawned_child_runtime_does_not_outlive_the_process_run() {
     .with_session_id(&child_session_id)
     .with_plugin_source(crate::SessionPluginSource::ParentFork)
     .with_plugin_init(plugin_init);
-    let registration = crate::ProcessRegistration::new(
-        &process_id,
-        crate::ProcessInput::SessionTurn {
-            definition_key: "lash-subagent-session-turn:v1".to_string(),
-            create_request: Box::new(create_request.clone()),
-            turn_input: Box::new(crate::TurnInput::text("run")),
-            output_contract: crate::ToolOutputContract::Static,
-        },
-        crate::RecoveryContract::Rerunnable,
-        crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
-    );
     let _ = crate::runtime::session_manager::take_spawned_child_runtimes();
     let output = services
         .run_process_session_turn(
-            registration,
+            process_id.clone(),
             create_request,
             crate::TurnInput::text("run"),
             native_execution_write_authority(process_id.clone()),
@@ -970,7 +915,7 @@ async fn spawned_child_runtime_does_not_outlive_the_process_run() {
 async fn redelivery_after_create_commit_reopens_child_and_runs_turn() {
     let backend = crate::testing::memory_backend().await;
     let child_session_id = SessionId::from("redelivered-child");
-    let process_id = ProcessId::from("process:subagent:redelivered-child");
+    let process_id = crate::ProcessId::fixture("process:subagent:redelivered-child");
     let factory = recording_factory(&backend);
     let backend = recording_backend(backend, &factory);
     let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
@@ -1025,21 +970,9 @@ async fn redelivery_after_create_commit_reopens_child_and_runs_turn() {
         .await
         .expect("durable child row, as a crashed attempt left it");
 
-    let registration = crate::ProcessRegistration::new(
-        &process_id,
-        crate::ProcessInput::SessionTurn {
-            definition_key: "lash-subagent-session-turn:v1".to_string(),
-            create_request: Box::new(create_request.clone()),
-            turn_input: Box::new(crate::TurnInput::text("run on redelivery")),
-            output_contract: crate::ToolOutputContract::Static,
-        },
-        crate::RecoveryContract::Rerunnable,
-        crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
-    );
     let output = services
         .run_process_session_turn(
-            registration,
+            process_id.clone(),
             create_request,
             crate::TurnInput::text("run on redelivery"),
             native_execution_write_authority(process_id.clone()),
@@ -1063,7 +996,7 @@ async fn redelivery_after_create_commit_reopens_child_and_runs_turn() {
 async fn redelivery_after_metadata_only_create_finishes_initialisation() {
     let backend = crate::testing::memory_backend().await;
     let child_session_id = SessionId::from("metadata-only-child");
-    let process_id = ProcessId::from("process:subagent:metadata-only-child");
+    let process_id = crate::ProcessId::fixture("process:subagent:metadata-only-child");
     let factory = recording_factory(&backend);
     let backend = recording_backend(backend, &factory);
     let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
@@ -1132,21 +1065,9 @@ async fn redelivery_after_metadata_only_create_finishes_initialisation() {
         "the fixture is a catalog row with no committed head"
     );
 
-    let registration = crate::ProcessRegistration::new(
-        &process_id,
-        crate::ProcessInput::SessionTurn {
-            definition_key: "lash-subagent-session-turn:v1".to_string(),
-            create_request: Box::new(create_request.clone()),
-            turn_input: Box::new(crate::TurnInput::text("run on redelivery")),
-            output_contract: crate::ToolOutputContract::Static,
-        },
-        crate::RecoveryContract::Rerunnable,
-        crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
-    );
     let output = services
         .run_process_session_turn(
-            registration,
+            process_id.clone(),
             create_request,
             crate::TurnInput::text("run on redelivery"),
             native_execution_write_authority(process_id.clone()),
@@ -1172,7 +1093,7 @@ async fn redelivery_after_metadata_only_create_finishes_initialisation() {
 async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
     let backend = crate::testing::memory_backend().await;
     let child_session_id = SessionId::from("snapshot-start-child");
-    let process_id = ProcessId::from("process:subagent:snapshot-start-child");
+    let process_id = crate::ProcessId::fixture("process:subagent:snapshot-start-child");
     let factory = recording_factory(&backend);
     let backend = recording_backend(backend, &factory);
     let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
@@ -1221,21 +1142,9 @@ async fn predecessor_snapshot_start_decodes_and_is_refused_terminally() {
         crate::SessionStartPoint::Snapshot { .. }
     ));
 
-    let registration = crate::ProcessRegistration::new(
-        &process_id,
-        crate::ProcessInput::SessionTurn {
-            definition_key: "lash-subagent-session-turn:v1".to_string(),
-            create_request: Box::new(predecessor_request.clone()),
-            turn_input: Box::new(crate::TurnInput::text("run")),
-            output_contract: crate::ToolOutputContract::Static,
-        },
-        crate::RecoveryContract::Rerunnable,
-        crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
-    );
     let output = services
         .run_process_session_turn(
-            registration,
+            process_id.clone(),
             predecessor_request,
             crate::TurnInput::text("run"),
             native_execution_write_authority(process_id.clone()),
@@ -1358,28 +1267,16 @@ async fn cancelled_session_turn_reacquires_budget_one_permit() {
                 .with_session_id("permit-child")
                 .with_plugin_source(crate::SessionPluginSource::ParentFork)
                 .with_plugin_init(plugin_init);
-                let registration = crate::ProcessRegistration::new(
-                    "permit-process",
-                    crate::ProcessInput::SessionTurn {
-                        definition_key: "lash-subagent-session-turn:v1".into(),
-                        create_request: Box::new(request.clone()),
-                        turn_input: Box::new(crate::TurnInput::text("park")),
-                        output_contract: crate::ToolOutputContract::Static,
-                    },
-                    crate::RecoveryContract::Rerunnable,
-                    crate::ProcessProvenance::host(),
-                    crate::ProcessLifecyclePolicy::new(
-                        crate::ParentScope::Host,
-                        crate::OnParentEnd::Abandon,
-                    ),
-                );
                 let cancellation = tokio_util::sync::CancellationToken::new();
                 let mut run = Box::pin(services.run_process_session_turn(
-                    registration,
+                    crate::ProcessId::fixture("permit-process"),
                     request,
                     crate::TurnInput::text("park"),
-                    native_execution_write_authority("permit-process"),
-                    host_process_scope(&runtime.host.core, "permit-process"),
+                    native_execution_write_authority(crate::ProcessId::fixture("permit-process")),
+                    host_process_scope(
+                        &runtime.host.core,
+                        &crate::ProcessId::fixture("permit-process"),
+                    ),
                     cancellation.clone(),
                 ));
                 tokio::select! {
@@ -1413,10 +1310,8 @@ async fn cancelled_session_turn_reacquires_budget_one_permit() {
 
 #[tokio::test]
 async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_result() {
-    let process_id = crate::ProcessId::from("process:child-turn-cancellation-evidence");
     let child_session_id = crate::SessionId::from("child-turn-cancellation-evidence");
     let registration = crate::ProcessRegistration::new(
-        process_id.clone(),
         crate::ProcessInput::External {
             metadata: serde_json::json!({"fixture": "child-turn-cancellation-evidence"}),
         },
@@ -1432,24 +1327,25 @@ async fn child_turn_cancellation_evidence_survives_runner_record_and_parent_resu
         mode: crate::TurnCancelMode::Immediate,
         honoured_after_step: None,
     };
+    let registry = crate::testing::memory_backend().await.process_registry();
+    let process_id = registry
+        .register_process(registration)
+        .await
+        .expect("register child-turn process")
+        .id;
     let mut turn = crate::testing::mock_assembled_turn(&child_session_id, "");
     turn.outcome = crate::TurnOutcome::Stopped(crate::TurnStop::Cancelled {
         evidence: evidence.clone(),
     });
 
     let runner_output = output_from_process_turn(
-        &registration,
+        &process_id,
         &child_session_id,
         turn,
         crate::ProcessStatus::Cancelled,
     );
     assert_child_turn_cancellation(&runner_output, &evidence);
 
-    let registry = crate::testing::memory_backend().await.process_registry();
-    registry
-        .register_process(registration)
-        .await
-        .expect("register child-turn process");
     let completion = registry
         .complete_process(
             &process_id,

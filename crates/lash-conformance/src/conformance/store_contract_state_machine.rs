@@ -157,6 +157,12 @@ impl StoreContractScenario {
     pub async fn apply(&mut self, operation: &StoreContractOp) -> Result<(), String> {
         apply_operation(&self.handles, &mut self.model, &mut self.shape, operation).await
     }
+
+    /// The process a generated operation on `index` addresses: the slot's
+    /// current run, or an id no registrar minted while the slot is unused.
+    pub fn slot_process_id(&self, index: u8) -> ProcessId {
+        self.model.slot_id(index)
+    }
 }
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -178,7 +184,7 @@ enum ProcessLifecycle {
         base: Box<ProcessRecord>,
         expected: Box<ProcessRecord>,
     },
-    /// Pruned to a tombstone; a later register may reuse the row.
+    /// Pruned to a tombstone; a later register of its slot starts a new run.
     Tombstoned,
 }
 
@@ -205,6 +211,9 @@ struct ExpectedQueuedWake {
 
 #[derive(Clone, Debug, Default)]
 struct ReferenceModel {
+    /// The id the registrar minted for each generated process slot's current
+    /// run. A slot re-registered after its run was pruned names a new run.
+    slot_ids: BTreeMap<u8, ProcessId>,
     processes: BTreeMap<ProcessId, ModelProcess>,
     wake_deliveries: BTreeMap<String, WakeDelivery>,
     live_wakes: BTreeMap<(SessionId, ProcessId), BTreeMap<u64, ExpectedQueuedWake>>,
@@ -215,6 +224,16 @@ struct ReferenceModel {
 }
 
 impl ReferenceModel {
+    /// The process a generated operation on `index` addresses: the slot's
+    /// current run, or an id no registrar minted while the slot is unused.
+    fn slot_id(&self, index: u8) -> ProcessId {
+        let slot = index % PROCESS_COUNT;
+        self.slot_ids
+            .get(&slot)
+            .cloned()
+            .unwrap_or_else(|| unregistered_slot_id(slot))
+    }
+
     fn process_mut(&mut self, id: &ProcessId) -> &mut ModelProcess {
         self.processes.entry(id.clone()).or_default()
     }
@@ -511,8 +530,15 @@ where
     law(make(seed, session_id.to_string()).await).await
 }
 
-fn process_id(index: u8) -> ProcessId {
-    ProcessId::from(format!("prop-process-{}", index % PROCESS_COUNT))
+/// The start key of a generated process slot: re-registering a retained run
+/// returns it, and a slot whose run was pruned starts a new one.
+fn slot_start_key(slot: u8) -> crate::StartKey {
+    crate::StartKey::for_host(crate::StartKeyOwner::HOST, format!("prop-process-{slot}"))
+}
+
+/// The id an operation names before its slot was ever registered.
+fn unregistered_slot_id(slot: u8) -> ProcessId {
+    crate::ProcessId::fixture(&format!("prop-process-{slot}"))
 }
 
 fn session_id(index: u8) -> SessionId {
@@ -528,13 +554,12 @@ fn disposition(index: u8) -> RecoveryContract {
 }
 
 fn registration(
-    process_id: &ProcessId,
+    label: &str,
     disposition: RecoveryContract,
     max_attempts: u32,
     wake_target: Option<SessionId>,
 ) -> ProcessRegistration {
     ProcessRegistration::new(
-        process_id,
         ProcessInput::Engine {
             kind: "store-contract-property".to_string(),
             payload: serde_json::Value::Null,
@@ -548,7 +573,7 @@ fn registration(
     )
     .with_max_attempts(Some(max_attempts))
     .with_execution_env_ref(Some(ProcessExecutionEnvRef::new(format!(
-        "process-env:{process_id}"
+        "process-env:{label}"
     ))))
     .with_extra_event_types([
         ProcessEventType {
@@ -617,22 +642,26 @@ async fn apply_operation(
             max_attempts,
             wake_target,
         } => {
-            let id = process_id(*process);
+            let slot = *process % PROCESS_COUNT;
             let target = wake_target.map(session_id);
             let result = handles
                 .registry
-                .register_process(registration(
-                    &id,
-                    disposition(*d),
-                    u32::from(*max_attempts),
-                    target.clone(),
-                ))
+                .register_process(
+                    registration(
+                        &format!("prop-process-{slot}"),
+                        disposition(*d),
+                        u32::from(*max_attempts),
+                        target.clone(),
+                    )
+                    .with_start_key(Some(slot_start_key(slot))),
+                )
                 .await;
             if let Ok(record) = result {
+                let id = record.id.clone();
+                model.slot_ids.insert(slot, id.clone());
                 let entry = model.process_mut(&id);
-                // The store permits registry-row reuse after prune. The wake layer separately
-                // rejects an unrecorded sequence at or below its surviving allocation floor.
-                // Keep this generated registry lifecycle to pin the narrower store behavior.
+                // The slot's start key returns its retained run; once that run
+                // is pruned the key starts a new run under a new id (ADR 0107).
                 if !entry.is_live() {
                     entry.install_fresh(record);
                     entry.wake_target = target;
@@ -647,7 +676,7 @@ async fn apply_operation(
             owner,
             attempt,
         } => {
-            let id = process_id(*process);
+            let id = model.slot_id(*process);
             let authority = invocation_authority(&id, *owner, u32::from(*attempt));
             let Some(started) = authority.invocation_started() else {
                 unreachable!()
@@ -669,7 +698,7 @@ async fn apply_operation(
             }
         }
         StoreContractOp::EnterWait { process, stale } => {
-            let id = process_id(*process);
+            let id = model.slot_id(*process);
             let authority = selected_authority(model, &id, *stale);
             let must_reject = *stale && has_current_authority(model, &id);
             let before = registry_snapshot(&handles.registry, &id).await;
@@ -697,7 +726,7 @@ async fn apply_operation(
             }
         }
         StoreContractOp::ClearWait { process, stale } => {
-            let id = process_id(*process);
+            let id = model.slot_id(*process);
             let authority = selected_authority(model, &id, *stale);
             let must_reject = *stale && has_current_authority(model, &id);
             let before = registry_snapshot(&handles.registry, &id).await;
@@ -726,7 +755,7 @@ async fn apply_operation(
             }
         }
         StoreContractOp::SetExternalRef { process, value } => {
-            let id = process_id(*process);
+            let id = model.slot_id(*process);
             let external_ref = ProcessExternalRef {
                 backend: "property".to_string(),
                 id: format!("external-{value}"),
@@ -752,7 +781,7 @@ async fn apply_operation(
             wake,
             stale,
         } => {
-            let id = process_id(*process);
+            let id = model.slot_id(*process);
             let (event_type, payload) = if *wake {
                 ("property.wake", serde_json::json!({"wake_input": value}))
             } else {
@@ -807,14 +836,14 @@ async fn apply_operation(
             }
         }
         StoreContractOp::CancelRequest { process, requester } => {
-            let id = process_id(*process);
-            if let Ok(process_ref) = handles.registry.resolve_process_ref(&id).await
+            let id = model.slot_id(*process);
+            if let Ok(process_id) = handles.registry.require_process_id(&id).await
                 && let Ok(appended) = handles
                     .registry
-                    .append_event_ref(
-                        &process_ref,
+                    .append_event(
+                        &process_id,
                         ProcessEventAppendRequest::cancel_requested(
-                            &process_ref,
+                            &process_id,
                             &lash_core::CancelRequest::new(
                                 lash_core::CancelOrigin::OperatorRequested,
                                 format!("actor:state-machine:{requester}"),
@@ -834,7 +863,7 @@ async fn apply_operation(
             process,
             disposition: terminal,
         } => {
-            let id = process_id(*process);
+            let id = model.slot_id(*process);
             let output = terminal_output(*terminal);
             if let Ok(Some(record)) = handles.registry.get_process(&id).await {
                 let authority = match record.disposition {
@@ -866,7 +895,7 @@ async fn apply_operation(
             }
         }
         StoreContractOp::AddObserver { process, session } => {
-            let id = process_id(*process);
+            let id = model.slot_id(*process);
             let session = session_id(*session);
             if handles
                 .registry
@@ -888,7 +917,7 @@ async fn apply_operation(
             }
         }
         StoreContractOp::RemoveObserver { process, session } => {
-            let id = process_id(*process);
+            let id = model.slot_id(*process);
             let session = session_id(*session);
             if handles
                 .registry
@@ -910,7 +939,7 @@ async fn apply_operation(
             }
         }
         StoreContractOp::Retarget { process, session } => {
-            let id = process_id(*process);
+            let id = model.slot_id(*process);
             let target = session.map(session_id);
             if handles
                 .registry
@@ -939,7 +968,7 @@ async fn apply_operation(
             }
         }
         StoreContractOp::ClaimLease { process, owner } => {
-            let id = process_id(*process);
+            let id = model.slot_id(*process);
             // A lease is authority over a retained registry row, so the store
             // must refuse a claim for a process it does not retain — never
             // registered, or already pruned to a tombstone. Backends that
@@ -984,7 +1013,7 @@ async fn apply_operation(
             }
         }
         StoreContractOp::ReleaseLease { process, stale } => {
-            let id = process_id(*process);
+            let id = model.slot_id(*process);
             let Some(leases) = model.processes.get(&id).map(|process| &process.leases) else {
                 return Ok(());
             };
@@ -1035,7 +1064,7 @@ async fn apply_operation(
             settle_wake(handles, model, *stale, WakeSettle::Defer).await?
         }
         StoreContractOp::EnqueueWake { process } => {
-            let process = process_id(*process);
+            let process = model.slot_id(*process);
             let key = (SessionId::from("prop-runtime-session"), process.clone());
             let sequence = model.next_wake_sequence.entry(key.clone()).or_insert(1);
             let wake = runtime_wake(&process, *sequence);
@@ -1436,16 +1465,16 @@ async fn assert_fold_law(
 async fn assert_replay_key_idempotency(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
-    let id = ProcessId::from("law-replay-key");
-    registry
+    let id = registry
         .register_process(registration(
-            &id,
+            "law-replay-key",
             RecoveryContract::ExternallyOwned,
             1,
             None,
         ))
         .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .id;
     let request =
         ProcessEventAppendRequest::new("property.signal", serde_json::json!({"value": 1}))
             .with_replay_key("law-replay-key:stable");
@@ -1501,16 +1530,16 @@ async fn assert_replay_key_idempotency(
 async fn assert_attempt_monotonicity_and_budget(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
-    let rerunnable = ProcessId::from("law-attempt-budget");
-    registry
+    let rerunnable = registry
         .register_process(registration(
-            &rerunnable,
+            "law-attempt-budget",
             RecoveryContract::Rerunnable,
             2,
             None,
         ))
         .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .id;
     for attempt in 1..=2 {
         let authority = invocation_authority(&rerunnable, attempt as u8, attempt);
         let started = authority.invocation_started().expect("bound invocation");
@@ -1541,16 +1570,16 @@ async fn assert_attempt_monotonicity_and_budget(
         "Attempt monotonicity / budget: max_attempts was not honored"
     );
 
-    let owner_bound = ProcessId::from("law-resume-only");
-    registry
+    let owner_bound = registry
         .register_process(registration(
-            &owner_bound,
+            "law-resume-only",
             RecoveryContract::OwnerBound,
             3,
             None,
         ))
         .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .id;
     let first_authority = invocation_authority(&owner_bound, 1, 1);
     registry
         .record_first_started_with_authority(
@@ -1587,11 +1616,16 @@ async fn assert_attempt_monotonicity_and_budget(
 async fn assert_stale_authority_non_mutation(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
-    let id = ProcessId::from("law-stale-authority");
-    registry
-        .register_process(registration(&id, RecoveryContract::Rerunnable, 3, None))
+    let id = registry
+        .register_process(registration(
+            "law-stale-authority",
+            RecoveryContract::Rerunnable,
+            3,
+            None,
+        ))
         .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .id;
     let current = invocation_authority(&id, 1, 1);
     registry
         .record_first_started_with_authority(
@@ -1638,16 +1672,16 @@ async fn assert_stale_authority_non_mutation(
 async fn assert_wake_group_order_and_claim_ownership(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
-    let id = ProcessId::from("law-wake-order");
-    registry
+    let id = registry
         .register_process(registration(
-            &id,
+            "law-wake-order",
             RecoveryContract::ExternallyOwned,
             1,
             Some(SessionId::from("law-wake-session")),
         ))
         .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .id;
     let mut sequences = Vec::new();
     for wake_input in 1..=2 {
         let result = registry
@@ -1720,7 +1754,7 @@ async fn assert_enqueued_wake_high_water_safety(
     runtime: &Arc<dyn RuntimePersistence>,
 ) -> Result<(), TestCaseError> {
     let session = SessionId::from("law-high-water");
-    let process = ProcessId::from("law-high-water-process");
+    let process = crate::ProcessId::fixture("law-high-water-process");
     // Consumption is intentionally not required to be contiguous: the public selected-batch
     // drain contracts safe out-of-order settlement. The production precondition is contiguous
     // enqueue, and the law is that MAX floor advancement never removes an already-enqueued lower
@@ -1904,17 +1938,24 @@ async fn assert_prune_reregister_wake_fence(
     handles: &StoreContractHandles,
 ) -> Result<(), TestCaseError> {
     let session = SessionId::from("law-prune-wake");
-    let process = ProcessId::from("law-prune-reregister-wake-process");
-    handles
+    let start_key = crate::StartKey::for_host(
+        crate::StartKeyOwner::HOST,
+        "law-prune-reregister-wake-process",
+    );
+    let process = handles
         .registry
-        .register_process(registration(
-            &process,
-            RecoveryContract::ExternallyOwned,
-            1,
-            Some(session.clone()),
-        ))
+        .register_process(
+            registration(
+                "law-prune-reregister-wake-process",
+                RecoveryContract::ExternallyOwned,
+                1,
+                Some(session.clone()),
+            )
+            .with_start_key(Some(start_key.clone())),
+        )
         .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .id;
     let original = handles
         .registry
         .append_event(
@@ -1929,7 +1970,6 @@ async fn assert_prune_reregister_wake_fence(
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .wake_delivery
         .ok_or_else(|| TestCaseError::fail("old incarnation did not materialize a wake"))?;
-    let original_sequence = original.sequence;
     let queued = handles
         .runtime
         .enqueue_queued_work(process_wake_batch_draft(original))
@@ -2017,20 +2057,31 @@ async fn assert_prune_reregister_wake_fence(
         .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::UpTo(terminal_cursor))
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    handles
+    // The same start key after prune starts a new run under a new id: the
+    // pruned run's wakes can never be confused with the new run's (ADR 0107).
+    let restarted = handles
         .registry
-        .register_process(registration(
-            &process,
-            RecoveryContract::ExternallyOwned,
-            1,
-            Some(session.clone()),
-        ))
+        .register_process(
+            registration(
+                "law-prune-reregister-wake-process",
+                RecoveryContract::ExternallyOwned,
+                1,
+                Some(session.clone()),
+            )
+            .with_start_key(Some(start_key)),
+        )
         .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .id;
+    prop_assert_ne!(
+        &restarted,
+        &process,
+        "prune/restart wake: the restarted run reused the pruned run's id"
+    );
     let replacement = handles
         .registry
         .append_event(
-            &process,
+            &restarted,
             ProcessEventAppendRequest::new(
                 "property.wake",
                 serde_json::json!({"wake_input": "new incarnation"}),
@@ -2041,7 +2092,11 @@ async fn assert_prune_reregister_wake_fence(
         .map_err(|error| TestCaseError::fail(error.to_string()))?
         .wake_delivery
         .ok_or_else(|| TestCaseError::fail("new incarnation did not materialize a wake"))?;
-    prop_assert!(replacement.sequence > original_sequence);
+    prop_assert_eq!(
+        &replacement.process_id,
+        &restarted,
+        "prune/restart wake: the new run's wake names the new run"
+    );
     let receipt = handles
         .runtime
         .enqueue_queued_work(process_wake_batch_draft(replacement))
@@ -2049,7 +2104,7 @@ async fn assert_prune_reregister_wake_fence(
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert!(
         receipt.enqueue_seq > 0,
-        "prune/re-register sender-floor wake was suppressed instead of enqueued"
+        "prune/restart wake was suppressed instead of enqueued"
     );
     Ok(())
 }
@@ -2057,18 +2112,16 @@ async fn assert_prune_reregister_wake_fence(
 async fn assert_prune_tombstone_watermark_safety(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
-    let id = ProcessId::from("law-prune-watermark");
-    let eligible_id = ProcessId::from("law-prune-watermark-eligible");
-    let live_id = ProcessId::from("law-prune-live-must-survive");
-    registry
+    let live_id = registry
         .register_process(registration(
-            &live_id,
+            "law-prune-live-must-survive",
             RecoveryContract::Rerunnable,
             3,
             None,
         ))
         .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .id;
     registry
         .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
         .await
@@ -2077,15 +2130,16 @@ async fn assert_prune_tombstone_watermark_safety(
         matches!(registry.get_process(&live_id).await, Ok(Some(_))),
         "Prune/tombstone/watermark safety: live process was pruned"
     );
-    registry
+    let eligible_id = registry
         .register_process(registration(
-            &eligible_id,
+            "law-prune-watermark-eligible",
             RecoveryContract::ExternallyOwned,
             1,
             None,
         ))
         .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .id;
     registry
         .complete_process(
             &eligible_id,
@@ -2096,15 +2150,16 @@ async fn assert_prune_tombstone_watermark_safety(
         )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
-    registry
+    let id = registry
         .register_process(registration(
-            &id,
+            "law-prune-watermark",
             RecoveryContract::ExternallyOwned,
             1,
             None,
         ))
         .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .id;
     let (_, before_terminal) = registry
         .processes_changed_since(ProcessChangeCursor::initial(), 1_000)
         .await
@@ -2198,24 +2253,27 @@ async fn assert_prune_tombstone_watermark_safety(
     Ok(())
 }
 
-/// Pin only the registry-row behavior accepted by the store surface.
-///
-/// This is not a claim that a reused process id is globally fresh: the receiver's
-/// allocation floor survives sender pruning, and the wake layer rejects an unrecorded
-/// rewound sequence even though the registry row itself is fresh.
+/// A run restarted under the same start key after its predecessor was pruned
+/// is a new process: a new id, a fresh event log, and a record its own
+/// baseline folds to, while the pruned run stays a tombstone that compacts
+/// independently of it (ADR 0107).
 async fn assert_prune_reregister_registry_state_is_fresh(
     registry: &Arc<dyn ProcessRegistry>,
 ) -> Result<(), TestCaseError> {
-    let id = ProcessId::from("law-prune-reregister");
-    registry
-        .register_process(registration(
-            &id,
-            RecoveryContract::ExternallyOwned,
-            1,
-            Some(SessionId::from("law-prune-reregister-old")),
-        ))
+    let start_key = crate::StartKey::for_host(crate::StartKeyOwner::HOST, "law-prune-reregister");
+    let id = registry
+        .register_process(
+            registration(
+                "law-prune-reregister",
+                RecoveryContract::ExternallyOwned,
+                1,
+                Some(SessionId::from("law-prune-reregister-old")),
+            )
+            .with_start_key(Some(start_key.clone())),
+        )
         .await
-        .map_err(|error| TestCaseError::fail(error.to_string()))?;
+        .map_err(|error| TestCaseError::fail(error.to_string()))?
+        .id;
     registry
         .append_event(
             &id,
@@ -2259,16 +2317,32 @@ async fn assert_prune_reregister_registry_state_is_fresh(
     acknowledge_pending_process_artifact_cleanup(registry.as_ref()).await;
 
     let fresh_base = registry
-        .register_process(registration(
-            &id,
-            RecoveryContract::Rerunnable,
-            3,
-            Some(SessionId::from("law-prune-reregister-new")),
-        ))
+        .register_process(
+            registration(
+                "law-prune-reregister",
+                RecoveryContract::Rerunnable,
+                3,
+                Some(SessionId::from("law-prune-reregister-new")),
+            )
+            .with_start_key(Some(start_key)),
+        )
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
+    let fresh_id = fresh_base.id.clone();
+    prop_assert_ne!(
+        &fresh_id,
+        &id,
+        "Prune/restart registry state: the restart reused the pruned run's id"
+    );
+    prop_assert!(
+        matches!(
+            registry.get_process(&id).await,
+            Err(crate::PluginError::ProcessNoLongerRetained { .. })
+        ),
+        "Prune/restart registry state: the restart revived the pruned run"
+    );
     let live = registry
-        .get_process(&id)
+        .get_process(&fresh_id)
         .await
         .map_err(|error| TestCaseError::fail(format!(
             "Prune/re-register registry state: fresh live record did not shadow stale tombstone: {error}"
@@ -2277,7 +2351,7 @@ async fn assert_prune_reregister_registry_state_is_fresh(
             TestCaseError::fail("Prune/re-register registry state: fresh live record was absent")
         })?;
     let fresh_events = registry
-        .full_event_window(&id, 0)
+        .full_event_window(&fresh_id, 0)
         .await
         .map_err(|error| TestCaseError::fail(error.to_string()))?;
     prop_assert!(
@@ -2302,8 +2376,8 @@ async fn assert_prune_reregister_registry_state_is_fresh(
         "Prune/re-register registry state: stale tombstone was not independently compactable"
     );
     prop_assert!(
-        matches!(registry.get_process(&id).await, Ok(Some(_))),
-        "Prune/re-register registry state: compacting the stale tombstone removed the re-registered row"
+        matches!(registry.get_process(&fresh_id).await, Ok(Some(_))),
+        "Prune/restart registry state: compacting the stale tombstone removed the restarted run"
     );
     Ok(())
 }
@@ -2325,7 +2399,6 @@ fn runtime_wake_for(
         wake_id: format!("wake:{process_id}:{sequence}"),
         target_session_id: session_id.clone(),
         process_id: process_id.clone(),
-        process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
         sequence,
         event_type: "property.wake".to_string(),
         event_invocation: RuntimeInvocation {

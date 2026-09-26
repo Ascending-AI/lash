@@ -119,7 +119,7 @@ impl RawDurableReader {
                     .collect();
                 let attachment_rows: Vec<AttachmentRow> = sqlx::query_as(
                     "SELECT attachment_id, canonical_uri, intent_at_ms, written_at_ms,
-                            committed_at_ms, owner_kind, owner_id, owner_incarnation
+                            committed_at_ms, owner_kind, owner_id
                      FROM lash_attachment_manifest
                      WHERE session_id = $1
                      ORDER BY attachment_id ASC",
@@ -139,7 +139,6 @@ impl RawDurableReader {
                             committed_at_epoch_ms,
                             owner_kind,
                             owner_id,
-                            owner_incarnation,
                         )| AttachmentManifestObservation {
                             attachment_id: AttachmentId::parse(attachment_id)
                                 .expect("valid attachment id"),
@@ -149,7 +148,6 @@ impl RawDurableReader {
                             committed: committed_at_epoch_ms.is_some(),
                             owner_kind: decode_attachment_owner_kind(owner_kind.as_deref()),
                             owner_id,
-                            owner_incarnation: owner_incarnation.map(|value| value as u64),
                         },
                     )
                     .collect();
@@ -444,7 +442,7 @@ pub(super) async fn read_sqlite_durable_state(
         let mut statement = connection
             .prepare(
                 "SELECT attachment_id, canonical_uri, intent_at_ms, written_at_ms,
-                        committed_at_ms, owner_kind, owner_id, owner_incarnation
+                        committed_at_ms, owner_kind, owner_id
                  FROM attachment_manifest
                  WHERE session_id = ?1
                  ORDER BY attachment_id ASC",
@@ -460,7 +458,6 @@ pub(super) async fn read_sqlite_durable_state(
                     row.get::<_, Option<i64>>(4)?,
                     row.get::<_, Option<String>>(5)?,
                     row.get::<_, Option<String>>(6)?,
-                    row.get::<_, Option<i64>>(7)?,
                 ))
             })
             .expect("read SQLite attachment manifest")
@@ -476,7 +473,6 @@ pub(super) async fn read_sqlite_durable_state(
                     committed_at_epoch_ms,
                     owner_kind,
                     owner_id,
-                    owner_incarnation,
                 )| AttachmentManifestObservation {
                     attachment_id: AttachmentId::parse(attachment_id).expect("valid attachment id"),
                     canonical_uri,
@@ -485,7 +481,6 @@ pub(super) async fn read_sqlite_durable_state(
                     committed: committed_at_epoch_ms.is_some(),
                     owner_kind: decode_attachment_owner_kind(owner_kind.as_deref()),
                     owner_id,
-                    owner_incarnation: owner_incarnation.map(|value| value as u64),
                 },
             )
             .collect()

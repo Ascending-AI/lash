@@ -264,7 +264,6 @@ async fn parent_relation_is_read_back_and_a_conflicting_rebind_is_refused() -> R
 async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> Result<()> {
     let owner = crate::testing::runtime_lease_owner();
     let session_id = "owner-services-preserved";
-    let process_id = lash_core::ProcessId::from("owner-services-process");
 
     let backend = memory_backend().await;
 
@@ -296,10 +295,9 @@ async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> 
     .build(owner)?;
 
     let session = source.session(session_id).open().await?;
-    source_registry
+    let process_id = source_registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(
-                &process_id,
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -312,7 +310,8 @@ async fn resume_addresses_the_parked_owner_registry_not_the_receiving_core() -> 
             ),
             &[lash_core::SessionId::from(session_id)],
         )
-        .await?;
+        .await?
+        .id;
     assert_eq!(
         session
             .admin()

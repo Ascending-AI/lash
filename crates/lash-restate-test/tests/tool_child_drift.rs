@@ -180,20 +180,19 @@ impl lash_core::facade_support::OrchestratingToolImplementation for OrchTool {
                 lash_core::ToolOutcome::ok(json!({ "replies": replies.len() }))
             }
             Body::StartsProcess => {
-                let started = lash_core::ProcessId::from(format!(
-                    "{}-started",
-                    context.tool_call_id().unwrap_or(ORCH)
-                ));
+                let start_key = format!("{}-started", context.tool_call_id().unwrap_or(ORCH));
                 match context
-                    .start_process(lash_core::ProcessStartRequest::external(
-                        started,
-                        lash_core::ProcessOriginator::host(),
-                        json!({ "lane": "drift" }),
-                        lash_core::ProcessLifecyclePolicy::new(
-                            lash_core::ParentScope::Host,
-                            lash_core::OnParentEnd::Abandon,
-                        ),
-                    ))
+                    .start_process(
+                        lash_core::ProcessStartRequest::external(
+                            lash_core::ProcessOriginator::host(),
+                            json!({ "lane": "drift" }),
+                            lash_core::ProcessLifecyclePolicy::new(
+                                lash_core::ParentScope::Host,
+                                lash_core::OnParentEnd::Abandon,
+                            ),
+                        )
+                        .with_host_start_key(start_key),
+                    )
                     .await
                 {
                     Ok(view) => lash_core::ToolOutcome::ok(json!({ "started": view.process_id })),
@@ -337,8 +336,7 @@ async fn start_turn(called: Called) -> Turn {
     let world = World::default();
     let first = deploy(&backend, &world, called, false).await;
     let admitted =
-        lash_core::AdmittedScope::unpinned(first.session.turn_scope(lash::TurnId::from(TURN)))
-            .expect("admit the turn scope");
+        lash_core::AdmittedScope::new(first.session.turn_scope(lash::TurnId::from(TURN)));
     let live = Arc::new(Mutex::new(Some(first)));
     let answer = Arc::new(Mutex::new(None));
     let attempt: lash_restate_test::HandlerAttempt = {
@@ -630,13 +628,15 @@ async fn a_drifted_orchestrating_child_starts_no_process() {
     let child = turn.redeploy_drifted_under_the_child().await;
     Turn::assert_parked_on_drift(&turn.park_with(2).await, ORCH);
     turn.assert_no_journal_mismatch(&child);
-    let started = lash_core::ProcessId::from("call-1-started");
     assert!(
         lash_core::StoreSet::process_registry(turn.backend.stores().as_ref())
-            .get_process(&started)
+            .list_processes(&lash_core::ProcessListFilter {
+                status: lash_core::ProcessStatusFilter::Any,
+                ..Default::default()
+            })
             .await
             .expect("read the registry")
-            .is_none(),
+            .is_empty(),
         "the drifted child started no process"
     );
     assert!(
@@ -644,7 +644,7 @@ async fn a_drifted_orchestrating_child_starts_no_process() {
             .server()
             .invocations()
             .iter()
-            .all(|view| !view.target.contains(started.as_str())),
+            .all(|view| !view.target.starts_with("LashProcessWorkflow/")),
         "the drifted child submitted no process workflow"
     );
 }

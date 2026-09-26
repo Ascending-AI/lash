@@ -5,20 +5,21 @@ use lash_sansio::SessionId;
 
 const SESSION: &str = "intent-ingress-session";
 const SCOPE: &str = "intent-ingress-turn";
-const PROCESS: &str = "intent-ingress-process";
 const EVENT: &str = "intent.ingress.realized";
 const SIGNAL: &str = "ingress-signal";
 
 /// The controller-owned (ordinal-addressed) tier: a memory backend whose
 /// effect host is a [`KeyJournalController`].
-async fn ingress_core() -> Result<(LashCore, Arc<dyn ProcessRegistry>)> {
+/// The core, its registry, and the id of the fixture process every emit,
+/// signal and cancel intent targets.
+async fn ingress_core() -> Result<(LashCore, Arc<dyn ProcessRegistry>, ProcessId)> {
     ingress_core_with_effect_host(Arc::new(KeyJournalController::default())).await
 }
 
 /// A memory backend with its effect host replaced by `effect_host`.
 async fn ingress_core_with_effect_host(
     effect_host: Arc<dyn lash_core::EffectHost>,
-) -> Result<(LashCore, Arc<dyn ProcessRegistry>)> {
+) -> Result<(LashCore, Arc<dyn ProcessRegistry>, ProcessId)> {
     ingress_core_over(memory_backend().await, Some(effect_host), None).await
 }
 
@@ -26,12 +27,11 @@ async fn ingress_core_over(
     backend: Arc<lash_sqlite_store::SqliteBackend>,
     effect_host: Option<Arc<dyn lash_core::EffectHost>>,
     process_env_store: Option<Arc<dyn lash_core::ProcessExecutionEnvStore>>,
-) -> Result<(LashCore, Arc<dyn ProcessRegistry>)> {
+) -> Result<(LashCore, Arc<dyn ProcessRegistry>, ProcessId)> {
     let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
-    registry
+    let process = registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(
-                PROCESS,
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -56,7 +56,8 @@ async fn ingress_core_over(
             ]),
             &[SessionId::from(SESSION.to_string())],
         )
-        .await?;
+        .await?
+        .id;
     let core = explicit_ephemeral_facets(LashCore::standard_builder(
         ingress_backend(backend.into(), effect_host, process_env_store),
         crate::TurnBudget::Unbounded,
@@ -66,7 +67,31 @@ async fn ingress_core_over(
     .plugin(lash_core::testing::process_engine_plugin_fixture())
     .build(crate::testing::runtime_lease_owner())?;
     let _session = core.session(SESSION).open().await?;
-    Ok((core, registry))
+    Ok((core, registry, process))
+}
+
+/// The id of the process a start intent registered, read off the handle its
+/// executed outcome answers.
+fn started_process_id(outcome: &crate::tools::ToolIntentIngressOutcome) -> ProcessId {
+    let crate::tools::ToolIntentIngressOutcome::Admitted {
+        outcome: lash_core::ToolIntentExecutionOutcome::Executed { result, .. },
+        ..
+    } = outcome
+    else {
+        panic!("the start executed: {outcome:?}");
+    };
+    lash_core::process_id_from_handle_json(result).expect("a start answers its process handle")
+}
+
+/// Every process the registry holds.
+async fn registered_process_count(registry: &Arc<dyn ProcessRegistry>) -> Result<usize> {
+    Ok(registry
+        .list_processes(&lash_core::ProcessListFilter {
+            status: lash_core::ProcessStatusFilter::Any,
+            ..lash_core::ProcessListFilter::default()
+        })
+        .await?
+        .len())
 }
 
 /// `backend`, with its effect host and process-env store replaced where
@@ -780,10 +805,10 @@ impl lash_core::RuntimeEffectController for AdmissionCrashController {
     }
 }
 
-fn emit_intent(session_id: &SessionId) -> lash_core::ToolIntent {
+fn emit_intent(session_id: &SessionId, process: &ProcessId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::EmitProcessEvent(lash_core::EmitProcessEventIntent {
         session_id: SessionId::from(session_id.to_string()),
-        process_id: ProcessId::from(PROCESS.to_string()),
+        process_id: process.clone(),
         event_type: EVENT.to_string(),
         payload: serde_json::json!({"law": "duplicate-submit"}),
     })
@@ -834,27 +859,30 @@ fn start_intent_with_env(session_id: &SessionId) -> lash_core::ToolIntent {
     }))
 }
 
-fn cancel_intent(session_id: &SessionId) -> lash_core::ToolIntent {
-    cancel_intent_for_target(session_id, PROCESS)
+fn cancel_intent(session_id: &SessionId, process: &ProcessId) -> lash_core::ToolIntent {
+    cancel_intent_for_target(session_id, process)
 }
 
-fn cancel_intent_for_target(session_id: &SessionId, target: &str) -> lash_core::ToolIntent {
+fn cancel_intent_for_target(session_id: &SessionId, target: &ProcessId) -> lash_core::ToolIntent {
     lash_core::ToolIntent::CancelProcess(lash_core::CancelProcessIntent {
         session_id: SessionId::from(session_id.to_string()),
-        process_id: ProcessId::from(target),
+        process_id: target.clone(),
     })
 }
 
 #[tokio::test]
 async fn duplicate_host_submit_returns_the_same_outcome_and_realizes_once() -> Result<()> {
-    let (core, registry) = ingress_core().await?;
+    let (core, registry, process) = ingress_core().await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("host-call", 0);
 
     let first = ingress
-        .submit(key.clone(), emit_intent(&SessionId::from(SESSION)))
+        .submit(
+            key.clone(),
+            emit_intent(&SessionId::from(SESSION), &process),
+        )
         .await;
-    let mut conflicting_duplicate = emit_intent(&SessionId::from(SESSION));
+    let mut conflicting_duplicate = emit_intent(&SessionId::from(SESSION), &process);
     let lash_core::ToolIntent::EmitProcessEvent(intent) = &mut conflicting_duplicate else {
         unreachable!("fixture is an event intent")
     };
@@ -888,9 +916,7 @@ async fn duplicate_host_submit_returns_the_same_outcome_and_realizes_once() -> R
         first_outcome,
         lash_core::ToolIntentExecutionOutcome::Executed { .. }
     ));
-    let events = registry
-        .full_event_window(&ProcessId::from(PROCESS), 0)
-        .await?;
+    let events = registry.full_event_window(&process, 0).await?;
     assert_eq!(
         events
             .iter()
@@ -904,7 +930,7 @@ async fn duplicate_host_submit_returns_the_same_outcome_and_realizes_once() -> R
 
 #[tokio::test]
 async fn identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking() -> Result<()> {
-    let (core, registry) = ingress_core().await?;
+    let (core, registry, process) = ingress_core().await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("kind-swap-start-emit", 0);
 
@@ -923,7 +949,7 @@ async fn identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking
     ));
 
     let second = ingress
-        .submit(key, emit_intent(&SessionId::from(SESSION)))
+        .submit(key, emit_intent(&SessionId::from(SESSION), &process))
         .await;
     assert!(matches!(
         second,
@@ -936,7 +962,7 @@ async fn identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking
     ));
     assert_eq!(
         registry
-            .full_event_window(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&process, 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -949,12 +975,15 @@ async fn identity_reused_from_start_to_emit_is_a_typed_refusal_without_panicking
 
 #[tokio::test]
 async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -> Result<()> {
-    let (core, registry) = ingress_core().await?;
+    let (core, registry, process) = ingress_core().await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("kind-swap-emit-cancel", 0);
 
     let first = ingress
-        .submit(key.clone(), emit_intent(&SessionId::from(SESSION)))
+        .submit(
+            key.clone(),
+            emit_intent(&SessionId::from(SESSION), &process),
+        )
         .await;
     assert!(matches!(
         first,
@@ -968,7 +997,7 @@ async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -
     ));
 
     let second = ingress
-        .submit(key, cancel_intent(&SessionId::from(SESSION)))
+        .submit(key, cancel_intent(&SessionId::from(SESSION), &process))
         .await;
     assert!(matches!(
         second,
@@ -981,7 +1010,7 @@ async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -
     ));
     assert_eq!(
         registry
-            .full_event_window(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&process, 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -991,7 +1020,7 @@ async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -
     );
     assert_eq!(
         registry
-            .full_event_window(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&process, 0)
             .await?
             .iter()
             .filter(|event| event.event_type == "process.cancel_requested")
@@ -1005,7 +1034,7 @@ async fn identity_reused_from_emit_to_cancel_cannot_fabricate_cancel_success() -
 #[tokio::test]
 async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -> Result<()> {
     let controller = Arc::new(KeyJournalController::default());
-    let (core, registry) =
+    let (core, registry, process) =
         ingress_core_with_effect_host(Arc::clone(&controller) as Arc<dyn lash_core::EffectHost>)
             .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
@@ -1024,7 +1053,7 @@ async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -
         );
 
     let outcome = ingress
-        .submit(key, emit_intent(&SessionId::from(SESSION)))
+        .submit(key, emit_intent(&SessionId::from(SESSION), &process))
         .await;
     assert!(matches!(
         outcome,
@@ -1037,7 +1066,7 @@ async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -
     ));
     assert_eq!(
         registry
-            .full_event_window(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&process, 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -1050,7 +1079,7 @@ async fn recorded_outcome_outside_intent_protocol_is_a_typed_ingress_refusal() -
 
 #[tokio::test]
 async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
-    let (core, registry) = ingress_core().await?;
+    let (core, registry, process) = ingress_core().await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let foreign_session =
         crate::tools::ToolIntentIngressKey::derive("foreign-session", SCOPE, "host-call", 0);
@@ -1059,7 +1088,10 @@ async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
 
     assert!(matches!(
         ingress
-            .submit(foreign_session, emit_intent(&SessionId::from(SESSION)))
+            .submit(
+                foreign_session,
+                emit_intent(&SessionId::from(SESSION), &process)
+            )
             .await,
         crate::tools::ToolIntentIngressOutcome::Refused {
             refusal: crate::tools::ToolIntentIngressRefusal::ForeignSession { .. }
@@ -1067,7 +1099,10 @@ async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
     ));
     assert!(matches!(
         ingress
-            .submit(foreign_turn, emit_intent(&SessionId::from(SESSION)))
+            .submit(
+                foreign_turn,
+                emit_intent(&SessionId::from(SESSION), &process)
+            )
             .await,
         crate::tools::ToolIntentIngressOutcome::Refused {
             refusal: crate::tools::ToolIntentIngressRefusal::ForeignExecutionScope { .. }
@@ -1075,7 +1110,7 @@ async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
     ));
     assert_eq!(
         registry
-            .full_event_window(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&process, 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -1087,7 +1122,7 @@ async fn foreign_session_and_turn_keys_are_typed_refusals() -> Result<()> {
 
 #[tokio::test]
 async fn malformed_key_is_a_typed_refusal_before_realization() -> Result<()> {
-    let (core, registry) = ingress_core().await?;
+    let (core, registry, process) = ingress_core().await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let mut malformed = serde_json::to_value(crate::tools::ToolIntentIngressKey::derive(
         SESSION,
@@ -1100,7 +1135,7 @@ async fn malformed_key_is_a_typed_refusal_before_realization() -> Result<()> {
 
     assert!(matches!(
         ingress
-            .submit(malformed, emit_intent(&SessionId::from(SESSION)))
+            .submit(malformed, emit_intent(&SessionId::from(SESSION), &process))
             .await,
         crate::tools::ToolIntentIngressOutcome::Refused {
             refusal: crate::tools::ToolIntentIngressRefusal::MalformedKey { .. }
@@ -1108,7 +1143,7 @@ async fn malformed_key_is_a_typed_refusal_before_realization() -> Result<()> {
     ));
     assert_eq!(
         registry
-            .full_event_window(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&process, 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -1251,7 +1286,7 @@ fn ingress_transport_fields_are_required_and_have_no_implicit_serde_defaults() {
 #[tokio::test]
 async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<()> {
     let controller = Arc::new(AdmissionCrashController::default());
-    let (core, registry) =
+    let (core, registry, process) =
         ingress_core_with_effect_host(Arc::clone(&controller) as Arc<dyn lash_core::EffectHost>)
             .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
@@ -1260,11 +1295,9 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
 
     let crashed_ingress = ingress.clone();
     let crashed_key = key.clone();
-    let crashed = tokio::spawn(async move {
-        crashed_ingress
-            .submit(crashed_key, emit_intent(&SessionId::from(SESSION)))
-            .await
-    });
+    let crashed_intent = emit_intent(&SessionId::from(SESSION), &process);
+    let crashed =
+        tokio::spawn(async move { crashed_ingress.submit(crashed_key, crashed_intent).await });
     controller.admitted.notified().await;
     assert_eq!(
         controller
@@ -1285,7 +1318,7 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
     );
     assert_eq!(controller.realizations.load(Ordering::SeqCst), 0);
 
-    let mut conflicting_redrive = emit_intent(&SessionId::from(SESSION));
+    let mut conflicting_redrive = emit_intent(&SessionId::from(SESSION), &process);
     let lash_core::ToolIntent::EmitProcessEvent(intent) = &mut conflicting_redrive else {
         unreachable!("fixture is an event intent")
     };
@@ -1311,7 +1344,7 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
     assert_eq!(controller.realizations.load(Ordering::SeqCst), 0);
     assert_eq!(
         registry
-            .full_event_window(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&process, 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -1321,7 +1354,7 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
     );
 
     let matching_redrive = ingress
-        .submit(key, emit_intent(&SessionId::from(SESSION)))
+        .submit(key, emit_intent(&SessionId::from(SESSION), &process))
         .await;
     assert!(
         matches!(
@@ -1336,7 +1369,7 @@ async fn crash_after_admission_redrives_to_exactly_one_realization() -> Result<(
     assert_eq!(controller.realizations.load(Ordering::SeqCst), 1);
     assert_eq!(
         registry
-            .full_event_window(&ProcessId::from(PROCESS), 0)
+            .full_event_window(&process, 0)
             .await?
             .iter()
             .filter(|event| event.event_type == EVENT)
@@ -1352,7 +1385,7 @@ async fn start_env_is_persisted_after_admission_and_matching_redrive_completes()
     let controller = Arc::new(AdmissionCrashController::default());
     let backend = memory_backend().await;
     let env_store = Arc::new(ProbeProcessEnvStore::over(backend.process_env_store()));
-    let (core, registry) = ingress_core_over(
+    let (core, registry, _process) = ingress_core_over(
         backend,
         Some(Arc::clone(&controller) as Arc<dyn lash_core::EffectHost>),
         Some(Arc::clone(&env_store) as Arc<dyn lash_core::ProcessExecutionEnvStore>),
@@ -1360,7 +1393,6 @@ async fn start_env_is_persisted_after_admission_and_matching_redrive_completes()
     .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("start-env-crash-redrive", 0);
-    let process_id = key.identity().replay_key.clone();
 
     let crashed_ingress = ingress.clone();
     let crashed_key = key.clone();
@@ -1398,11 +1430,11 @@ async fn start_env_is_persisted_after_admission_and_matching_redrive_completes()
         "matching start redrive must complete the admitted command: {redriven:?}"
     );
     assert_eq!(env_store.puts.load(Ordering::SeqCst), 1);
-    let process = registry
-        .get_process(&ProcessId::from(process_id))
+    let started = registry
+        .get_process(&started_process_id(&redriven))
         .await?
         .expect("redrive registers the process");
-    let env_ref = process
+    let env_ref = started
         .env_ref
         .expect("registered process keeps the env ref");
     assert!(
@@ -1420,7 +1452,7 @@ async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()>
     let backend = memory_backend().await;
     let env_store = Arc::new(ProbeProcessEnvStore::over(backend.process_env_store()));
     env_store.fail_put.store(true, Ordering::SeqCst);
-    let (core, registry) = ingress_core_over(
+    let (core, registry, _process) = ingress_core_over(
         backend,
         None,
         Some(Arc::clone(&env_store) as Arc<dyn lash_core::ProcessExecutionEnvStore>),
@@ -1428,7 +1460,6 @@ async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()>
     .await?;
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
     let key = ingress.key("start-env-store-error", 0);
-    let process_id = key.identity().replay_key.clone();
 
     let outcome = ingress
         .submit(
@@ -1447,11 +1478,10 @@ async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()>
             replayed: false,
         }
     ));
-    assert!(
-        registry
-            .get_process(&ProcessId::from(process_id.clone()))
-            .await?
-            .is_none()
+    assert_eq!(
+        registered_process_count(&registry).await?,
+        1,
+        "only the fixture process is registered"
     );
     // The failed put is a live fault, not a recorded outcome: a resubmission
     // of the same identity retries it, meets the same fault, and still
@@ -1473,11 +1503,10 @@ async fn start_env_store_error_is_typed_and_registers_no_process() -> Result<()>
         ),
         "{resubmitted:?}"
     );
-    assert!(
-        registry
-            .get_process(&ProcessId::from(process_id))
-            .await?
-            .is_none()
+    assert_eq!(
+        registered_process_count(&registry).await?,
+        1,
+        "only the fixture process is registered"
     );
     Ok(())
 }
@@ -1657,7 +1686,6 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
     let ingress = core.tool_intents(SESSION, lash_core::ExecutionScope::turn(SESSION, SCOPE))?;
 
     let unregistered_key = ingress.key("ingress-unregistered-engine", 0);
-    let unregistered_id = unregistered_key.identity().replay_key.clone();
     let refused = ingress
         .submit(
             unregistered_key,
@@ -1679,17 +1707,14 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
         ),
         other => panic!("unregistered engine kind must be refused, got {other:?}"),
     }
-    assert!(
-        registry
-            .get_process(&ProcessId::from(unregistered_id))
-            .await?
-            .is_none(),
+    assert_eq!(
+        registered_process_count(&registry).await?,
+        0,
         "a refused start must register nothing"
     );
 
     let payload = serde_json::json!({"program": "known"});
     let admitted_key = ingress.key("ingress-registered-engine", 0);
-    let admitted_id = admitted_key.identity().replay_key.clone();
     let admitted = ingress
         .submit(
             admitted_key,
@@ -1710,7 +1735,7 @@ async fn ingress_start_intent_crosses_the_engine_admission_gate() -> Result<()> 
         "a registered engine kind must still be admitted: {admitted:?}"
     );
     let started = registry
-        .get_process(&ProcessId::from(admitted_id))
+        .get_process(&started_process_id(&admitted))
         .await?
         .expect("admitted start registers its row");
     assert_eq!(
@@ -1740,7 +1765,6 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
         lash_core::ExecutionScope::turn(SESSION, "host-ingress-route"),
     )?;
     let ingress_key = ingress.key("environment-sensitive-host", 0);
-    let ingress_process_id = ProcessId::from(ingress_key.identity().replay_key.clone());
     let host_outcome = ingress
         .submit(
             ingress_key,
@@ -1758,7 +1782,7 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
         "host ingress must admit the environment-sensitive engine"
     );
     let ingress_identity = registry
-        .get_process(&ingress_process_id)
+        .get_process(&started_process_id(&host_outcome))
         .await?
         .expect("host ingress registers a process")
         .identity;
@@ -1785,12 +1809,15 @@ async fn equivalent_recorded_start_has_same_environment_sensitive_identity_acros
     )
     .await
     .map_err(lash_core::PluginError::from)?;
-    let [lash_core::ToolIntentExecutionOutcome::Executed { identity, .. }] = outcomes.as_slice()
+    let [lash_core::ToolIntentExecutionOutcome::Executed { result, .. }] = outcomes.as_slice()
     else {
         panic!("session recorded-intent route must execute: {outcomes:?}")
     };
     let session_identity = registry
-        .get_process(&ProcessId::from(identity.replay_key.clone()))
+        .get_process(
+            &lash_core::process_id_from_handle_json(result)
+                .expect("a start answers its process handle"),
+        )
         .await?
         .expect("session route registers a process")
         .identity;

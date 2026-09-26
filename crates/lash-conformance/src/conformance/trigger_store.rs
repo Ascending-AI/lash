@@ -321,12 +321,18 @@ async fn session_tombstone_and_receipts_follow_deleted_owner_and_last_delivery(
     .await;
 
     let reservation = &ingress.reservations[0];
+    let process_id = bind_fixture_process(
+        store.as_ref(),
+        reservation,
+        "dead-owner-retention-final-delivery",
+    )
+    .await;
     let report = store
         .reconcile_trigger_retention(
             &[crate::TriggerDeliveryRetentionCandidate {
                 occurrence_id: ingress.occurrence.occurrence_id,
                 subscription_id: reservation.subscription.subscription_id.clone(),
-                process_id: reservation.process_id.clone(),
+                process_id,
             }],
             &[SessionId::from(SESSION.to_string())],
         )
@@ -1112,9 +1118,11 @@ async fn reservations_execute_the_reserved_revision(store: Arc<dyn crate::Trigge
         second.reservations[0].subscription.target_label.as_deref(),
         Some("worker-v2")
     );
+    // Each occurrence's delivery starts its own process: the two deliveries
+    // derive distinct start keys, so no start of one can return the other's.
     assert_ne!(
-        first.reservations[0].process_id,
-        second.reservations[0].process_id
+        lash_core::facade_support::trigger_delivery_start_key(&first.reservations[0]),
+        lash_core::facade_support::trigger_delivery_start_key(&second.reservations[0])
     );
 }
 
@@ -1601,8 +1609,9 @@ async fn occurrence_and_reservations_are_atomic_and_idempotent(
     assert_eq!(first.reservations.len(), 1);
     assert_eq!(replay.reservations.len(), 1);
     assert_eq!(
-        first.reservations[0].process_id,
-        replay.reservations[0].process_id
+        lash_core::facade_support::trigger_delivery_start_key(&first.reservations[0]),
+        lash_core::facade_support::trigger_delivery_start_key(&replay.reservations[0]),
+        "a replayed ingest reserves the delivery its first ingest reserved"
     );
     assert_eq!(
         replay.reservations[0].reservation_status,
@@ -1702,10 +1711,12 @@ async fn matched_occurrence_waits_for_terminal_deliveries(store: Arc<dyn crate::
     );
 
     let reservation = &ingress.reservations[0];
+    let process_id =
+        bind_fixture_process(store.as_ref(), reservation, "matched-occurrence-delivery").await;
     let terminal_delivery = crate::TriggerDeliveryRetentionCandidate {
         occurrence_id: ingress.occurrence.occurrence_id.clone(),
         subscription_id: reservation.subscription.subscription_id.clone(),
-        process_id: reservation.process_id.clone(),
+        process_id,
     };
     assert_eq!(
         store
@@ -2248,4 +2259,27 @@ async fn hostile_trigger_namespaces(store: Arc<dyn crate::TriggerStore>) {
             .is_empty(),
         "hostile identifiers must not mutate subscription namespaces"
     );
+}
+
+/// Binds `reservation` to a fixture process, as the router does once its start
+/// registers (ADR 0107): a retention candidate names a delivery's bound process.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn bind_fixture_process(
+    store: &dyn crate::TriggerStore,
+    reservation: &crate::TriggerDeliveryReservation,
+    label: &str,
+) -> crate::ProcessId {
+    let process_id = crate::ProcessId::fixture(label);
+    store
+        .bind_delivery_process(
+            &reservation.occurrence.occurrence_id,
+            &reservation.subscription.subscription_id,
+            &process_id,
+        )
+        .await
+        .expect("bind the delivery's process");
+    process_id
 }

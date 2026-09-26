@@ -18,7 +18,7 @@ impl DurableProcessWorker {
             // already queued it — a second pass over the same row must not
             // relabel it as `Busy`.
             let externally_owned = record.disposition == RecoveryContract::ExternallyOwned;
-            let process_id = ProcessId::from(record.id.clone().to_string());
+            let process_id = record.id.clone();
             // A newer page's record replaces a retained rerun: the row may have
             // gained an Abandon Request or other execution-relevant state while
             // its prior attempt was still queued or finishing.

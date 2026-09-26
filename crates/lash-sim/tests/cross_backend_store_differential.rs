@@ -890,13 +890,12 @@ fn checkpoint_from_spec(
 /// process wake with a fixed `(process, sequence)` source, so a repeated
 /// enqueue in one sequence is the same idempotent source on every backend.
 fn claim_observability_wake(session_id: &SessionId) -> lash_core::runtime::ProcessWakeDelivery {
-    let process_id = || lash_core::runtime::ProcessId::from("differential-process");
+    let process_id = || lash_core::runtime::ProcessId::fixture("differential-process");
     lash_core::runtime::ProcessWakeDelivery {
         version: lash_core::runtime::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: "differential-process-wake-1".to_string(),
         target_session_id: session_id.clone(),
         process_id: process_id(),
-        process_incarnation: lash_core::runtime::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "process.wake".to_string(),
         event_invocation: lash_core::runtime::RuntimeInvocation {
@@ -939,9 +938,11 @@ fn differential_attachment_id() -> AttachmentId {
     AttachmentId::parse("differential-attachment").expect("valid attachment id")
 }
 
-/// Reusable process name and the registry-minted incarnation that qualifies it.
-const DIFFERENTIAL_PROCESS_OWNER_ID: &str = "differential-process-owner";
-const DIFFERENTIAL_PROCESS_OWNER_INCARNATION: u64 = 7;
+/// The process that owns the differential's process-scoped attachment. No
+/// registry row backs it: the manifest records its owner by id alone.
+fn differential_process_owner_id() -> lash_sansio::ProcessId {
+    lash_sansio::ProcessId::fixture("differential-process-owner")
+}
 
 #[expect(
     clippy::expect_used,
@@ -961,7 +962,6 @@ type AttachmentRow = (
     Option<i64>,
     Option<String>,
     Option<String>,
-    Option<i64>,
 );
 type LeaseRow = (
     Option<String>,
@@ -2300,6 +2300,17 @@ async fn runners_for_case_with_clock(
             surface: SurfaceScratch::default(),
         },
     ]
+}
+
+/// Two registrar mints that hand out the same ids in the same order, one per
+/// backend, so a differential compares rows the two registrars minted under
+/// the same id. The random start keeps a run clear of every earlier run's rows
+/// in the shared PostgreSQL database.
+fn paired_process_id_mints() -> (lash_core::ProcessIdMint, lash_core::ProcessIdMint) {
+    let start = fastrand::u64(1..1 << 40) << 16;
+    let mint =
+        || lash_core::ProcessIdMint::Sequential(Arc::new(std::sync::atomic::AtomicU64::new(start)));
+    (mint(), mint())
 }
 
 #[expect(

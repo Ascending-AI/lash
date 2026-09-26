@@ -1,6 +1,5 @@
 //! Cross-backend conformance for substrate-scoped process continuations.
 
-use lash_sansio::ProcessId;
 use pretty_assertions::assert_eq;
 use std::sync::Arc;
 
@@ -18,10 +17,8 @@ pub async fn process_continuation_store(
     registry: Arc<dyn ProcessRegistry>,
     store: Arc<dyn ProcessContinuationStore>,
 ) {
-    let process_id = "continuation-conformance";
-    registry
+    let continuation_conformance_record = registry
         .register_process(ProcessRegistration::new(
-            process_id,
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -34,6 +31,7 @@ pub async fn process_continuation_store(
         ))
         .await
         .expect("register continuation owner");
+    let process_id = continuation_conformance_record.id.clone();
     let handover = PersistedSegmentHandover {
         writer: String::new(),
         segment_ordinal: 1,
@@ -45,23 +43,23 @@ pub async fn process_continuation_store(
     };
 
     store
-        .put_segment_handover(&ProcessId::from(process_id), handover.clone())
+        .put_segment_handover(&process_id, handover.clone())
         .await
         .expect("persist handover");
     store
-        .put_segment_handover(&ProcessId::from(process_id), handover.clone())
+        .put_segment_handover(&process_id, handover.clone())
         .await
         .expect("identical replay is idempotent");
     assert_eq!(
         store
-            .get_segment_handover(&ProcessId::from(process_id), 1)
+            .get_segment_handover(&process_id, 1)
             .await
             .expect("read handover"),
         Some(handover.clone())
     );
     assert_eq!(
         store
-            .latest_segment_handover(&ProcessId::from(process_id))
+            .latest_segment_handover(&process_id)
             .await
             .expect("read latest handover"),
         Some(handover.clone())
@@ -71,7 +69,7 @@ pub async fn process_continuation_store(
     conflicting.handover.engine_state.push(4);
     assert!(
         store
-            .put_segment_handover(&ProcessId::from(process_id), conflicting)
+            .put_segment_handover(&process_id, conflicting)
             .await
             .is_err(),
         "same ordinal with different bytes must conflict"
@@ -89,18 +87,18 @@ pub async fn process_continuation_store(
         },
     };
     store
-        .put_segment_handover(&ProcessId::from(process_id), written.clone())
+        .put_segment_handover(&process_id, written.clone())
         .await
         .expect("persist the writer's handover");
     let mut rederived = written.clone();
     rederived.handover.engine_state.push(7);
     store
-        .put_segment_handover(&ProcessId::from(process_id), rederived.clone())
+        .put_segment_handover(&process_id, rederived.clone())
         .await
         .expect("the writer's own retried write is idempotent");
     assert_eq!(
         store
-            .get_segment_handover(&ProcessId::from(process_id), 2)
+            .get_segment_handover(&process_id, 2)
             .await
             .expect("read the writer's handover"),
         Some(written.clone()),
@@ -110,7 +108,7 @@ pub async fn process_continuation_store(
     other_writer.writer = "segment-nonce-b".to_string();
     assert!(
         store
-            .put_segment_handover(&ProcessId::from(process_id), other_writer)
+            .put_segment_handover(&process_id, other_writer)
             .await
             .is_err(),
         "another writer's handover at the same ordinal must conflict"
@@ -119,7 +117,7 @@ pub async fn process_continuation_store(
     // FIG-3588: a retained handover carries its segment's start marker,
     // written set-if-absent. The first nonce stays; a second write reads it
     // back unchanged, which is how a different execution learns it lost.
-    let segment = crate::ProcessSegmentKey::new(process_id, 1);
+    let segment = crate::ProcessSegmentKey::new(process_id.clone(), 1);
     assert_eq!(
         store
             .segment_start(&segment)
@@ -167,7 +165,7 @@ pub async fn process_continuation_store(
     assert!(
         store
             .mark_segment_started(
-                &crate::ProcessSegmentKey::new(process_id, 7),
+                &crate::ProcessSegmentKey::new(process_id.clone(), 7),
                 crate::SegmentStartMarker {
                     nonce: "nonce-unretained".to_string(),
                     started_at_ms: 30,
@@ -179,14 +177,14 @@ pub async fn process_continuation_store(
     );
     assert_eq!(
         store
-            .segment_start(&crate::ProcessSegmentKey::new(process_id, 7))
+            .segment_start(&crate::ProcessSegmentKey::new(process_id.clone(), 7))
             .await
             .expect("read an unretained segment"),
         None
     );
 
     store
-        .delete_segment_handovers(&ProcessId::from(process_id))
+        .delete_segment_handovers(&process_id)
         .await
         .expect("delete handovers");
     assert_eq!(
@@ -199,16 +197,14 @@ pub async fn process_continuation_store(
     );
     assert!(
         store
-            .latest_segment_handover(&ProcessId::from(process_id))
+            .latest_segment_handover(&process_id)
             .await
             .expect("read after delete")
             .is_none()
     );
 
-    let pruned_process_id = "pruned-continuation-conformance";
-    registry
+    let pruned_continuation_conformance_record = registry
         .register_process(ProcessRegistration::new(
-            pruned_process_id,
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -221,6 +217,7 @@ pub async fn process_continuation_store(
         ))
         .await
         .expect("register prunable continuation owner");
+    let pruned_process_id = pruned_continuation_conformance_record.id.clone();
     let pruned_handover = PersistedSegmentHandover {
         writer: String::new(),
         segment_ordinal: 1,
@@ -231,12 +228,12 @@ pub async fn process_continuation_store(
         },
     };
     store
-        .put_segment_handover(&ProcessId::from(pruned_process_id), pruned_handover)
+        .put_segment_handover(&pruned_process_id, pruned_handover)
         .await
         .expect("persist handover until terminal retention pruning");
     let terminal = registry
         .complete_process(
-            &ProcessId::from(pruned_process_id),
+            &pruned_process_id,
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
@@ -249,7 +246,7 @@ pub async fn process_continuation_store(
     // park it, and the retained handover stays the latest.
     let refused = store
         .put_segment_handover(
-            &ProcessId::from(pruned_process_id),
+            &pruned_process_id,
             PersistedSegmentHandover {
                 segment_ordinal: 2,
                 writer: String::new(),
@@ -270,7 +267,7 @@ pub async fn process_continuation_store(
     );
     assert_eq!(
         store
-            .latest_segment_handover(&ProcessId::from(pruned_process_id))
+            .latest_segment_handover(&pruned_process_id)
             .await
             .expect("read handover after the refused put")
             .map(|handover| handover.segment_ordinal),
@@ -279,7 +276,7 @@ pub async fn process_continuation_store(
     );
     // FIG-3819: an ended process starts no segment. The marker write is
     // refused typed in its own transaction and records nothing.
-    let pruned_segment = crate::ProcessSegmentKey::new(pruned_process_id, 1);
+    let pruned_segment = crate::ProcessSegmentKey::new(pruned_process_id.clone(), 1);
     let refused = store
         .mark_segment_started(
             &pruned_segment,
@@ -314,7 +311,7 @@ pub async fn process_continuation_store(
         .expect("prune terminal continuation owner");
     assert!(
         store
-            .latest_segment_handover(&ProcessId::from(pruned_process_id))
+            .latest_segment_handover(&pruned_process_id)
             .await
             .expect("read handover after terminal prune")
             .is_none(),
