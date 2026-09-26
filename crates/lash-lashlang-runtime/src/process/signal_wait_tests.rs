@@ -54,7 +54,11 @@ impl SignalWaitProcesses for RetainingSignalWaitProcesses {
         })
     }
 
-    async fn set_wait(&self, wait: lash_core::WaitState) -> Result<(), lash_core::PluginError> {
+    async fn set_wait(
+        &self,
+        wait: lash_core::WaitState,
+        _prelude: Vec<lash_core::ProcessEventAppendRequest>,
+    ) -> Result<(), lash_core::PluginError> {
         if self.terminal {
             return Err(lash_core::PluginError::Session(
                 "terminal process cannot enter a wait state".to_string(),
@@ -67,7 +71,10 @@ impl SignalWaitProcesses for RetainingSignalWaitProcesses {
         Ok(())
     }
 
-    async fn clear_wait(&self) -> Result<(), lash_core::PluginError> {
+    async fn clear_wait(
+        &self,
+        _prelude: Vec<lash_core::ProcessEventAppendRequest>,
+    ) -> Result<(), lash_core::PluginError> {
         if self.terminal {
             return Err(lash_core::PluginError::Session(
                 "terminal process cannot clear a wait state".to_string(),
@@ -89,15 +96,18 @@ impl SignalWaitProcesses for RetainingSignalWaitProcesses {
 async fn a_wait_write_refused_on_a_terminal_process_is_settled() {
     let processes = RetainingSignalWaitProcesses::new([]).terminal();
     let written = processes
-        .set_wait(lash_core::WaitState {
-            since_ms: 1,
-            kind: lash_core::WaitKind::Signal {
-                name: "go".to_string(),
-                event_type: "process.signal.go".to_string(),
-                key: "key".to_string(),
-                ordinal: 1,
+        .set_wait(
+            lash_core::WaitState {
+                since_ms: 1,
+                kind: lash_core::WaitKind::Signal {
+                    name: "go".to_string(),
+                    event_type: "process.signal.go".to_string(),
+                    key: "key".to_string(),
+                    ordinal: 1,
+                },
             },
-        })
+            Vec::new(),
+        )
         .await;
     assert!(
         written.is_err(),
@@ -106,7 +116,7 @@ async fn a_wait_write_refused_on_a_terminal_process_is_settled() {
     settle_wait_write(&processes, written)
         .await
         .expect("a refused wait on a terminal process is settled");
-    let cleared = SignalWaitProcesses::clear_wait(&processes).await;
+    let cleared = SignalWaitProcesses::clear_wait(&processes, Vec::new()).await;
     settle_wait_write(&processes, cleared)
         .await
         .expect("a refused clear on a terminal process is settled");
@@ -158,6 +168,7 @@ async fn establish_ready_wait(
         "signal.ready".to_string(),
         "process:signal-wait:signal.ready:1".to_string(),
         1,
+        Vec::new(),
     )
     .await
 }

@@ -379,6 +379,7 @@ pub async fn progress_after_a_rerun_clears_the_park_once(registry: Arc<dyn Proce
                     ordinal: 1,
                 },
             },
+            Vec::new(),
             &authority,
         )
         .await

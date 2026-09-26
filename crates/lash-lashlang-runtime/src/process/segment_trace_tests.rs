@@ -3,6 +3,7 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
+use super::EffectSummaryWriter;
 use super::{
     EXECUTION_BOUND_EXHAUSTION_LOUD, LASHLANG_SEGMENT_STATE_VERSION, LashlangProcessExecutionTrace,
     LashlangProcessTraceIdentity, LashlangSegmentState, LashlangSegmentStateError,
@@ -526,6 +527,7 @@ async fn capture_bytecode_v17_parked_loop_from_predecessor_writer() {
         started_process_ids: Vec::new(),
         child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
+        pending_summary: Vec::new(),
         effect_omissions: std::collections::BTreeMap::new(),
         outstanding_groups: Vec::new(),
     };
@@ -580,6 +582,7 @@ fn capture_vm_v10_segment_state_from_predecessor_writer() {
         started_process_ids: Vec::new(),
         child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
+        pending_summary: Vec::new(),
         effect_omissions: std::collections::BTreeMap::new(),
         outstanding_groups: Vec::new(),
     };
@@ -748,6 +751,10 @@ fn bytecode_v17_parked_loop_is_refused_before_continuation_restore() {
         .expect("the parked VM is an object")
         .remove("active_execution_elapsed");
     fixture["segment_state"]["effect_omissions"] = serde_json::json!({});
+    // The predecessor committed each summary occurrence as it was recorded;
+    // the current envelope carries the ones no boundary committed yet
+    // (FIG-3571).
+    fixture["segment_state"]["pending_summary"] = serde_json::json!([]);
     // The predecessor held no effect group across its boundary; the current
     // envelope states that explicitly (ADR 0099 §9).
     fixture["segment_state"]["outstanding_groups"] = serde_json::json!([]);
@@ -800,6 +807,7 @@ fn the_current_envelope_carries_no_dead_send_ordinal() {
         started_process_ids: Vec::new(),
         child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
+        pending_summary: Vec::new(),
         effect_omissions: std::collections::BTreeMap::new(),
         outstanding_groups: Vec::new(),
     };
@@ -808,6 +816,101 @@ fn the_current_envelope_carries_no_dead_send_ordinal() {
     assert!(
         wire.get("signal_send_sequence").is_none(),
         "the dead send ordinal must not be written: {wire}"
+    );
+}
+
+/// E5 (FIG-3571): the summary a boundary carries in segment state is bounded
+/// by construction, not by a flush schedule: however many times a run's
+/// effect nodes fire, at most the cap per node is ever pending, the rest are
+/// counts, and a successor restored from the encoded state keeps counting from
+/// it and commits what it inherited at its first boundary.
+#[test]
+fn a_segment_boundary_carries_at_most_the_cap_per_node_of_pending_summary() {
+    let cap = lash_core::PROCESS_EFFECT_OCCURRENCE_CAP;
+    let nodes = ["node:a", "node:b", "node:c"];
+    let occurrence = |node: &str, occurrence: u64| {
+        lash_core::ProcessEffectSummaryOccurrence::new(
+            node,
+            occurrence,
+            "tool:bounded",
+            lash_core::ProcessEffectOutcomeClass::Success,
+            None,
+            format!("run:{node}:{occurrence}"),
+        )
+    };
+    let writer = EffectSummaryWriter::default();
+    for fired in 1..=3 * cap {
+        for node in nodes {
+            writer.record(occurrence(node, fired));
+        }
+    }
+
+    let program = lashlang::testing::harness::try_compile_program(&finish_null())
+        .expect("compile the boundary program");
+    let mut state = lashlang::State::new();
+    let host = SegmentFixtureHost;
+    let environment = lashlang::ExecutionEnvironment::new(&host).foreground();
+    let mut vm = lashlang::Vm::from_state(&program, &mut state, &environment)
+        .expect("construct the boundary VM");
+    let encoded = serde_json::to_vec(&LashlangSegmentState {
+        version: LASHLANG_SEGMENT_STATE_VERSION,
+        vm: vm.suspend().expect("capture the boundary continuation"),
+        ordinals: ReplayOrdinalsState {
+            commands: crate::LashlangRunOrdinals::start(),
+            event_sequence: 0,
+            signal_wait_ordinals: Default::default(),
+        },
+        started_process_ids: Vec::new(),
+        child_max_attempts: std::num::NonZeroU32::new(5).expect("non-zero"),
+        incorporation_ledger: lash_core::session::IncorporationLedger::default(),
+        pending_summary: writer.pending(),
+        effect_omissions: writer.omissions(),
+        outstanding_groups: Vec::new(),
+    })
+    .expect("encode the boundary's segment state");
+    let decoded = decode_lashlang_segment_state(&encoded).expect("decode the segment state");
+    assert_eq!(
+        decoded.pending_summary.len() as u64,
+        cap * nodes.len() as u64,
+        "at most the cap per node is pending"
+    );
+    for node in nodes {
+        assert_eq!(
+            decoded
+                .pending_summary
+                .iter()
+                .filter(|pending| pending.node_id == node)
+                .map(|pending| pending.occurrence)
+                .collect::<Vec<_>>(),
+            (1..=cap).collect::<Vec<_>>(),
+            "{node} pends its first cap occurrences, in order"
+        );
+        assert_eq!(decoded.effect_omissions[node].success, 2 * cap);
+    }
+
+    // The successor keeps counting from the encoded state and commits what
+    // it inherited, then only the omission record is left for its terminal.
+    let successor = EffectSummaryWriter::restore(decoded.pending_summary, decoded.effect_omissions);
+    successor.record(occurrence("node:a", 3 * cap + 1));
+    let prelude = successor.prelude();
+    assert_eq!(prelude.requests.len() as u64, cap * nodes.len() as u64);
+    successor.settle(&prelude);
+    assert!(
+        successor.pending().is_empty(),
+        "a committed boundary drops what it carried"
+    );
+    let terminal = successor.terminal_prelude("run:omissions".to_string());
+    assert_eq!(
+        terminal.len(),
+        1,
+        "the terminal batch carries only the omission record"
+    );
+    assert_eq!(
+        lash_core::ProcessEffectOmissions::decode(terminal[0].payload.clone())
+            .expect("decode the omission record")
+            .nodes["node:a"]
+            .success,
+        2 * cap + 1
     );
 }
 
@@ -932,6 +1035,7 @@ fn a_resumed_segment_keeps_the_recorded_attempt_bound_across_a_host_default_chan
         started_process_ids: Vec::new(),
         child_max_attempts: recorded,
         incorporation_ledger: lash_core::session::IncorporationLedger::default(),
+        pending_summary: Vec::new(),
         effect_omissions: std::collections::BTreeMap::new(),
         outstanding_groups: Vec::new(),
     };

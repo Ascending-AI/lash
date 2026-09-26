@@ -211,20 +211,42 @@ contract.
 
 Effect result incorporation persists a bounded process summary per effect
 node. Each retained occurrence contains the runtime node id, occurrence,
-operation, outcome class and code, and replay key. Each node has a configurable
-occurrence cap and an `omitted` count. The summary contains no effect payload,
-timing, or attempt. Pure computations, branches, and iterations do not gain
-durable records.
+operation, outcome class and code, and replay key. Each node retains its first
+`PROCESS_EFFECT_OCCURRENCE_CAP` (8) occurrences; append-only replay keys make a
+last-N window impossible. Later occurrences are counted by outcome class in one
+omission record per run. Omission progress is keyed by the replay-stable
+occurrence number and carried in segment state, so a redrive or a resumed
+segment never counts an occurrence twice. The summary contains no effect
+payload, timing, or attempt. Pure computations, branches, and iterations do not
+gain durable records.
 
 Persistence runs through the recovery-aware result-incorporation path, not a
-`TraceSink` callback. The append key is the effect's stable logical identity.
-Re-incorporating a recorded result recovers the same event without executing
-the effect again or appending a duplicate. A different payload under the same
-key is a conflict. Normal process-event sequence allocation and transactional
-projection remain in
-`crates/lash-core-execution/src/runtime/process/validation.rs`. Process-event
-pages use the exact process-and-incarnation read already exposed as
-`ProcessRegistry::event_page_ref` in
+`TraceSink` callback. An incorporated occurrence stays pending in the run and
+commits at the run's next boundary, as the prelude of that boundary's own write
+and in its transaction: a wait's enter or clear, an event the body appends, or
+the terminal completion, whose batch is the pending occurrences, then the
+omission record, then the terminal event. Each such write is one atomic batch
+(`ProcessEventLog::append_events`, or the transition's own write) that folds
+every event as appending it alone would, rewrites the process record once and
+advances the change clock once, so a change-feed consumer sees one committed
+batch per boundary. There is no periodic flush: durable summaries become
+visible at boundaries, as a session's become visible at its turn commit, and
+live detail flows through the observation hub. A segment boundary commits
+nothing; the pending occurrences ride segment state, and the successor commits
+them with its first boundary. Pending entries are bounded by construction: at
+most the cap per node, whose ids are the compiled program's execution sites.
+
+The append key is the effect's stable logical identity. Re-committing a
+recorded occurrence is a replay-key no-op, without executing the effect again
+or appending a duplicate. A different payload under the same key is a conflict,
+and its batch commits nothing. A boundary write carrying a summary that fails
+is an incorporation failure, never a program error: the run stops and reports
+infrastructure, and its redrive rebuilds the same summary. On Restate the
+rebuild is journal replay within an invocation, and segment state across
+segments. Neither promises exactly-once external I/O before the journal
+settles. Normal process-event sequence allocation and transactional projection
+remain in `crates/lash-core-execution/src/runtime/process/validation.rs`.
+Process-event pages use `ProcessRegistry::event_page_after` in
 `crates/lash-core-execution/src/runtime/process/registry_concerns.rs`.
 
 ### R5: attempt is telemetry identity only

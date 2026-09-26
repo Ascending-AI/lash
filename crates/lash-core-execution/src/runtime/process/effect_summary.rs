@@ -16,23 +16,32 @@ pub const PROCESS_EVENT_VOCABULARY_VERSION: u32 = 1;
 
 /// Runtime-owned event recording one effect occurrence of one runtime node.
 ///
-/// Written only by the runtime, through execution-authority appends, when an
-/// effect result is incorporated. The append key is the effect's own replay
-/// key, so the replay row and the event name the same logical effect.
+/// Written only by the runtime, under its execution authority. The append key
+/// is the effect's own replay key, so the journaled effect and the event name
+/// the same logical effect.
 ///
-/// Recovery contract: the replay row and this event live in different stores
-/// and are not written in one transaction. A crash after the replay row
-/// commits and before this event is appended leaves the process claimable; the
-/// redrive re-incorporates the recorded result from the replay row, without
-/// re-running the effect, and appends the same record exactly once. A failed
-/// append is an incorporation failure: the segment aborts for redrive and the
-/// program never observes it. A different payload under the same key is
-/// refused.
+/// Recovery contract (ADR 0100 R4): an incorporated occurrence stays pending
+/// in the run and commits at the run's next boundary, as the prelude of that
+/// boundary's own write and in its transaction — a wait's enter or clear, an
+/// event the body appends, or the terminal completion. A segment boundary
+/// commits nothing: the pending occurrences ride segment state and the
+/// successor commits them with its first boundary. There is no periodic flush.
+/// The journal and this event live in different stores; a crash before a
+/// boundary commits loses nothing the journal cannot rebuild. On Restate the
+/// redrive replays the invocation's journal (and, across segments, restores
+/// segment state), re-derives the same pending occurrences without re-running
+/// their effects, and commits them once. Re-committing a written occurrence is
+/// a replay-key no-op; a different payload under the same key is refused and
+/// its batch commits nothing. A failed boundary write carrying a summary is an
+/// incorporation failure: the run aborts for redrive and the program never
+/// observes it. Nothing here promises exactly-once external I/O before the
+/// journal settles.
 pub const PROCESS_EFFECT_OUTCOME_EVENT_TYPE: &str = "process.effect_outcome";
 
 /// Runtime-owned event counting, per node and outcome class, the occurrences
 /// beyond [`PROCESS_EFFECT_OCCURRENCE_CAP`] that were not recorded one by one.
-/// Appended once, before the process's terminal event, under the same
+/// Committed once, as the penultimate event of the run's terminal batch (after
+/// its pending occurrences, before its terminal event), under the same
 /// recovery contract as [`PROCESS_EFFECT_OUTCOME_EVENT_TYPE`].
 pub const PROCESS_EFFECT_OMISSIONS_EVENT_TYPE: &str = "process.effect_omissions";
 

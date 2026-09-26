@@ -691,12 +691,15 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
         Ok(result)
     }
 
-    async fn append_event_with_authority(
+    async fn append_events(
         &self,
         process_id: &ProcessId,
-        request: ProcessEventAppendRequest,
+        requests: Vec<ProcessEventAppendRequest>,
         authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessEventAppendReceipt, PluginError> {
+    ) -> Result<Vec<ProcessEventAppendReceipt>, PluginError> {
+        if requests.is_empty() {
+            return Ok(Vec::new());
+        }
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
         let mut record = require_process_tx(&mut tx, process_id).await?;
         let now_ms = process_lease_now_epoch_ms_tx(&mut tx).await?;
@@ -709,16 +712,16 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
         // this one) use the injected clock. Decision-inert today — no fence or
         // retention predicate reads it — tracked as FIG-971.
         let occurred_at_ms = self.clock.timestamp_ms();
-        let result = append_process_event_tx(
+        let receipts = append_process_event_batch_tx(
             &mut tx,
             &mut record,
-            request,
+            requests,
             occurred_at_ms,
             self.wake_delivery_config,
         )
         .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
-        Ok(result)
+        Ok(receipts)
     }
 
     async fn event_page_after(

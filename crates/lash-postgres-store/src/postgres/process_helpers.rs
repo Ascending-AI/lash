@@ -171,18 +171,6 @@ pub(crate) async fn save_process_tx(
     Ok(())
 }
 
-pub(crate) async fn apply_process_replay_repair_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    record: &mut ProcessRecord,
-    repair_record: Option<ProcessRecord>,
-) -> Result<(), PluginError> {
-    if let Some(repaired) = repair_record {
-        *record = repaired;
-        save_process_tx(tx, record).await?;
-    }
-    Ok(())
-}
-
 pub(crate) async fn next_process_change_seq_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
 ) -> Result<u64, PluginError> {
@@ -256,6 +244,96 @@ pub(crate) enum ProcessEventAppendArm {
     Inserted,
 }
 
+/// A batch of process-event appends staged against one in-memory projection
+/// inside one transaction (FIG-3571), saved once by [`Self::commit`].
+#[derive(Default)]
+pub(crate) struct ProcessEventBatch {
+    record_changed: bool,
+}
+
+impl ProcessEventBatch {
+    /// Stage one preauthorized append of the batch.
+    pub(crate) async fn stage(
+        &mut self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        record: &mut ProcessRecord,
+        request: ProcessEventAppendRequest,
+        occurred_at_ms: u64,
+        wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
+    ) -> Result<ProcessEventAppendReceipt, PluginError> {
+        self.stage_arm(
+            tx,
+            record,
+            request,
+            occurred_at_ms,
+            wake_delivery_config,
+            ProcessEventWriteAuthorization::Preauthorized,
+        )
+        .await
+        .map(|(receipt, _)| receipt)
+    }
+
+    /// Stage one append of the batch under `authorization`, answering its
+    /// arm.
+    pub(crate) async fn stage_arm(
+        &mut self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        record: &mut ProcessRecord,
+        request: ProcessEventAppendRequest,
+        occurred_at_ms: u64,
+        wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
+        authorization: ProcessEventWriteAuthorization<'_>,
+    ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), PluginError> {
+        let (receipt, arm, record_changed) = stage_process_event_append_tx(
+            tx,
+            record,
+            request,
+            occurred_at_ms,
+            wake_delivery_config,
+            authorization,
+        )
+        .await?;
+        self.record_changed |= record_changed;
+        Ok((receipt, arm))
+    }
+
+    /// Save the process once if any staged append moved its projection.
+    pub(crate) async fn commit(
+        self,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        record: &ProcessRecord,
+    ) -> Result<(), PluginError> {
+        if self.record_changed {
+            save_process_tx(tx, record).await?;
+        }
+        Ok(())
+    }
+}
+
+/// Stage `requests` in order as one batch (FIG-3571): each goes through the
+/// append sequence against the in-memory projection, and the process is saved
+/// once, advancing the change clock once, when any of them moved it. The
+/// caller owns the transaction, so a refusal of any request commits none.
+pub(crate) async fn append_process_event_batch_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    record: &mut ProcessRecord,
+    requests: Vec<ProcessEventAppendRequest>,
+    occurred_at_ms: u64,
+    wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
+) -> Result<Vec<ProcessEventAppendReceipt>, PluginError> {
+    let mut batch = ProcessEventBatch::default();
+    let mut receipts = Vec::with_capacity(requests.len());
+    for request in requests {
+        receipts.push(
+            batch
+                .stage(tx, record, request, occurred_at_ms, wake_delivery_config)
+                .await?,
+        );
+    }
+    batch.commit(tx, record).await?;
+    Ok(receipts)
+}
+
 /// Where the write authority for one process-event append is settled.
 pub(crate) enum ProcessEventWriteAuthorization<'a> {
     /// The entry point authorized the write before the append sequence began.
@@ -265,19 +343,9 @@ pub(crate) enum ProcessEventWriteAuthorization<'a> {
     Lease(&'a ProcessLease),
 }
 
-/// The one process-event append sequence for the PostgreSQL store.
-///
-/// Every entry point runs these steps, in this order: replay-key lookup, wake
-/// session id, next sequence number, prepare, the replay-or-insert decision,
-/// the five-bind event insert, the process save, the parent-end retention, the
-/// wake-delivery insert, and the wake allocation floor. Entry points keep their
-/// own prologue, transaction lifetime and outcome mapping.
-///
-/// `occurred_at_ms` is the caller's clock and the only clock this function
-/// sees: each entry point keeps its own source (the injected store clock, or
-/// the sanctioned PostgreSQL lease clock), and this function never reads one.
-/// The `Lease` authorization compares that same value against the stored lease,
-/// exactly as the leased entry point did inline.
+/// One process-event append for the PostgreSQL store: the append sequence
+/// ([`stage_process_event_append_tx`]) followed by the process save when the
+/// append moved the projection.
 pub(crate) async fn apply_process_event_append_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     record: &mut ProcessRecord,
@@ -286,6 +354,46 @@ pub(crate) async fn apply_process_event_append_tx(
     wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
     authorization: ProcessEventWriteAuthorization<'_>,
 ) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm), PluginError> {
+    let (receipt, arm, record_changed) = stage_process_event_append_tx(
+        tx,
+        record,
+        request,
+        occurred_at_ms,
+        wake_delivery_config,
+        authorization,
+    )
+    .await?;
+    if record_changed {
+        save_process_tx(tx, record).await?;
+    }
+    Ok((receipt, arm))
+}
+
+/// The one process-event append sequence for the PostgreSQL store, short of
+/// the process save.
+///
+/// Every entry point runs these steps, in this order: replay-key lookup, wake
+/// session id, next sequence number, prepare, the replay-or-insert decision,
+/// the five-bind event insert, the projection update, the parent-end
+/// retention, the wake-delivery insert, and the wake allocation floor. The
+/// third value says whether the projection moved; the caller saves the
+/// process once it has: after this one append, or after the batch it belongs
+/// to. Entry points keep their own prologue, transaction lifetime and outcome
+/// mapping.
+///
+/// `occurred_at_ms` is the caller's clock and the only clock this function
+/// sees: each entry point keeps its own source (the injected store clock, or
+/// the sanctioned PostgreSQL lease clock), and this function never reads one.
+/// The `Lease` authorization compares that same value against the stored lease,
+/// exactly as the leased entry point did inline.
+async fn stage_process_event_append_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    record: &mut ProcessRecord,
+    request: ProcessEventAppendRequest,
+    occurred_at_ms: u64,
+    wake_delivery_config: lash_core_execution::WakeDeliveryConfig,
+    authorization: ProcessEventWriteAuthorization<'_>,
+) -> Result<(ProcessEventAppendReceipt, ProcessEventAppendArm, bool), PluginError> {
     let process_id = record.id.clone();
     let replay_lookup =
         if let Some(replay_key) = request.replay.as_ref().map(|replay| replay.key.as_str()) {
@@ -313,7 +421,10 @@ pub(crate) async fn apply_process_event_append_tx(
             ..
         } => {
             insert_wake_delivery_tx(tx, wake_delivery.as_ref(), wake_delivery_config).await?;
-            apply_process_replay_repair_tx(tx, record, repair_record).await?;
+            let repaired = repair_record.is_some();
+            if let Some(repaired) = repair_record {
+                *record = repaired;
+            }
             Ok((
                 ProcessEventAppendReceipt {
                     last_event_sequence: record.last_event_sequence,
@@ -322,6 +433,7 @@ pub(crate) async fn apply_process_event_append_tx(
                     wake_delivery,
                 },
                 ProcessEventAppendArm::Replayed,
+                repaired,
             ))
         }
         lash_core_execution::facade_support::ProcessEventAppendPlan::Insert {
@@ -365,7 +477,6 @@ pub(crate) async fn apply_process_event_append_tx(
                 &projected_record,
             );
             *record = projected_record;
-            save_process_tx(tx, record).await?;
             // The park feed rides the event's own transaction (FIG-3659
             // NOW-B): a park that opened or closed here is durable in the feed
             // exactly when the fact that moved it is.
@@ -398,6 +509,7 @@ pub(crate) async fn apply_process_event_append_tx(
                     wake_delivery,
                 },
                 ProcessEventAppendArm::Inserted,
+                true,
             ))
         }
     }

@@ -406,8 +406,11 @@ impl DurableProcessWorker {
         lease: &ProcessLease,
         process_id: &ProcessId,
         output: Box<ProcessAwaitOutput>,
+        prelude: Vec<crate::ProcessEventAppendRequest>,
     ) -> super::recovery::ProcessRecoveryOutcome {
-        let completion = self.complete_and_release(lease, process_id, *output).await;
+        let completion = self
+            .complete_and_release(lease, process_id, *output, prelude)
+            .await;
         let terminal_written = matches!(
             completion,
             Ok(()) | Err(ProcessRecoveryAttemptOutcome::AlreadyApplied { .. })

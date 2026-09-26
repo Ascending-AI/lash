@@ -1,7 +1,7 @@
 //! FIG-3464: the durable per-effect summary, rebuilt from paged
 //! `Processes::events` and checked against the effect replay rows, bounded on
 //! the write side, and recovered by redrive after a crash between the replay
-//! row and the summary append.
+//! rows and the terminal batch that commits the summary (FIG-3571).
 
 // FIG-2971: this file is test/tooling/host code; ambient fs/env/process
 // access is sanctioned here (the workspace clippy ban targets production
@@ -233,11 +233,11 @@ async fn start_process(
         .id
 }
 
-/// Drives a process whose effect-summary appends of kind `fault` "crash" on
-/// this host: the replay row is committed, the append is refused, the worker
-/// reports a retryable fault and leaves the row claimable, and the host dies.
-/// A fresh host over the same stores then recovers the process to its
-/// terminal state.
+/// Drives a process whose summary batch carrying kind `fault` "crashes" on
+/// this host: the replay rows are committed, the run's terminal batch is
+/// refused, the worker reports the deferred terminal write and leaves the row
+/// claimable, and the host dies. A fresh host over the same stores then
+/// recovers the process to its terminal state.
 async fn run_through_append_crash(
     backend: &SummaryBackend,
     start_key: &str,
@@ -249,14 +249,17 @@ async fn run_through_append_crash(
         .host("effect-summary-crashed", Some((fault, usize::MAX)))
         .await;
     let process_id = &start_process(&crashed, backend, start_key, program).await;
-    let worker_fault = wait_for_worker_fault(&crashed.sink, process_id).await;
+    let worker_fault = wait_for_terminal_write_fault(&crashed.sink, process_id).await;
     assert!(
         matches!(
             worker_fault,
-            lash_core::facade_support::ProcessWorkerFault::RecoveryRunFailed { ref error, .. }
-                if error.contains("injected crash before the")
+            lash_core::facade_support::ProcessWorkerFault::RecoveryBackendError {
+                operation: lash_core::facade_support::ProcessRecoveryOperation::WriteTerminal,
+                ref error,
+                ..
+            } if error.contains("injected crash before the")
         ),
-        "a failed effect-summary append is a retryable incorporation fault: {worker_fault:?}"
+        "a refused terminal batch defers the terminal write: {worker_fault:?}"
     );
     assert!(crashed.faults.as_ref().expect("fault decorator").injected() >= 1);
     let claimable = wait_for_process(&crashed.core, process_id, "claimable redrive", |process| {
@@ -291,6 +294,31 @@ async fn run_through_append_crash(
     .await;
     assert_eq!(settled.lifecycle, terminal, "{settled:?}");
     (recovered, process_id.clone())
+}
+
+/// The deferred terminal write a refused terminal batch reports.
+async fn wait_for_terminal_write_fault(
+    sink: &CollectingProcessEventSink,
+    process_id: &ProcessId,
+) -> lash_core::facade_support::ProcessWorkerFault {
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            if let Some(fault) = sink.faults().into_iter().find(|fault| {
+                matches!(
+                    fault,
+                    lash_core::facade_support::ProcessWorkerFault::RecoveryBackendError {
+                        process_id: fault_process_id,
+                        ..
+                    } if fault_process_id == process_id
+                )
+            }) {
+                return fault;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .expect("worker reports the deferred terminal write")
 }
 
 /// `value` with every spelling of `process_id` replaced by a placeholder: two
@@ -545,8 +573,9 @@ async fn effect_summary_is_bounded_on_the_write_side_and_a_redrive_rewrites_it_i
         "the durable log holds the capped occurrences and one omission record"
     );
 
-    // The omission record's append crashes; the redrive re-derives every
-    // count from the recorded effects and writes the identical record.
+    // The terminal batch carrying the omission record crashes; the redrive
+    // re-derives every count from the recorded effects and writes the
+    // identical record.
     let crash_dir = tempfile::tempdir().expect("crash tempdir");
     let crashed = SummaryBackend::Sqlite(crash_dir.path().to_path_buf());
     let (recovered, recovered_id) = run_through_append_crash(

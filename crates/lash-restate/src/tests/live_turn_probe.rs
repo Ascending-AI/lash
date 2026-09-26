@@ -453,6 +453,7 @@ impl ServedSegments {
                             "served_segment": "settled"
                         })),
                     )),
+                    prelude: Vec::new(),
                 }),
             ),
             Some(Ok(lash_conformance::ConformanceTurnEnd::Aborted(cause))) => (

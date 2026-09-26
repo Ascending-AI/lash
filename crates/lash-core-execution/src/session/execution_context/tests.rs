@@ -274,10 +274,10 @@ async fn execution_context_without_process_execution_returns_typed_error_from_ap
     let ctx = test_execution_context();
 
     let append_err = ctx
-        .append_process_event(crate::ProcessEventAppendRequest::new(
+        .append_process_events(vec![crate::ProcessEventAppendRequest::new(
             "test.event",
             serde_json::json!({}),
-        ))
+        )])
         .await
         .unwrap_err();
 

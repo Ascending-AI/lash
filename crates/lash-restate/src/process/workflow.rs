@@ -73,7 +73,12 @@ const RESUME_STEP: &str = "lash.segment.resume";
 /// stored outcome.
 #[derive(Debug)]
 pub(crate) enum TerminalProposal {
-    Output(Box<ProcessAwaitOutput>),
+    /// The runner's terminal and its terminal batch (FIG-3571), which the
+    /// completion step commits ahead of it in one transaction.
+    Output {
+        output: Box<ProcessAwaitOutput>,
+        prelude: Vec<lash_core::ProcessEventAppendRequest>,
+    },
     Abandoned {
         writer: AbandonWriter,
         owner: Option<lash_core::LeaseOwnerIdentity>,
@@ -404,6 +409,7 @@ where
                 }),
                 control: None,
             },
+            Vec::new(),
         )
         .await
         .map_err(handler_error_from_plugin)?;
@@ -456,7 +462,10 @@ where
             .complete_terminal_step(
                 context,
                 process_id,
-                TerminalProposal::Output(Box::new(failure.into_output())),
+                TerminalProposal::Output {
+                    output: Box::new(failure.into_output()),
+                    prelude: Vec::new(),
+                },
             )
             .await?;
         if signal == SegmentSignal::Unresolved {
@@ -535,9 +544,9 @@ where
             .run_json_or_retry_send::<Result<ProcessAwaitOutput, String>, _>(
                 COMPLETE_STEP.to_string(),
                 async move {
-                    let proposed = match proposal {
-                        TerminalProposal::Output(output) => *output,
-                        TerminalProposal::Abandoned { writer, owner } => {
+                    let (proposed, prelude) = match proposal {
+                        TerminalProposal::Output { output, prelude } => (*output, prelude),
+                        TerminalProposal::Abandoned { writer, owner } => (
                             ProcessAwaitOutput::Abandoned {
                                 evidence: Box::new(AbandonEvidence {
                                     writer,
@@ -545,10 +554,11 @@ where
                                     epoch_ms: restate_now_ms(),
                                 }),
                                 control: None,
-                            }
-                        }
+                            },
+                            Vec::new(),
+                        ),
                     };
-                    match complete_process_outcome(registry, process_id, proposed).await {
+                    match complete_process_outcome(registry, process_id, proposed, prelude).await {
                         Ok(stored) => Ok(Ok(stored)),
                         Err(error) => step_fault(error),
                     }
@@ -566,7 +576,7 @@ where
         process_id: &ProcessId,
         proposed: ProcessAwaitOutput,
     ) -> Result<ProcessAwaitOutput, PluginError> {
-        complete_process_outcome(&self.registry, process_id, proposed).await
+        complete_process_outcome(&self.registry, process_id, proposed, Vec::new()).await
     }
 
     /// [`run_registration`](Self::run_registration) for a test that drives a
@@ -604,9 +614,9 @@ where
                 Ok(lash_core::ProcessRunOutcome::SegmentBoundary(handover))
             }
             SegmentRunEnd::Terminal(proposal) => {
-                let proposed = match proposal {
-                    TerminalProposal::Output(output) => *output,
-                    TerminalProposal::Abandoned { writer, owner } => {
+                let (proposed, prelude) = match proposal {
+                    TerminalProposal::Output { output, prelude } => (*output, prelude),
+                    TerminalProposal::Abandoned { writer, owner } => (
                         ProcessAwaitOutput::Abandoned {
                             evidence: Box::new(AbandonEvidence {
                                 writer,
@@ -614,12 +624,14 @@ where
                                 epoch_ms: restate_now_ms(),
                             }),
                             control: None,
-                        }
-                    }
+                        },
+                        Vec::new(),
+                    ),
                 };
-                let stored = complete_process_outcome(&self.registry, &process_id, proposed)
-                    .await
-                    .map_err(handler_error_from_plugin)?;
+                let stored =
+                    complete_process_outcome(&self.registry, &process_id, proposed, prelude)
+                        .await
+                        .map_err(handler_error_from_plugin)?;
                 Ok(stored.into())
             }
         }
@@ -695,7 +707,7 @@ where
         // retained either way — lash never deletes a session because a
         // process was cancelled.
         let outcome = match outcome {
-            Ok(lash_core::ProcessRunOutcome::Terminal { output })
+            Ok(lash_core::ProcessRunOutcome::Terminal { output, prelude })
                 if requires_cancelled_session_turn
                     && output.terminal_status() != Some(lash_core::ProcessStatus::Cancelled) =>
             {
@@ -707,19 +719,23 @@ where
                 {
                     Ok(lash_core::ProcessRunOutcome::Terminal {
                         output: Box::new(cancelled_output(&process_id)),
+                        prelude,
                     })
                 } else {
-                    Ok(lash_core::ProcessRunOutcome::Terminal { output })
+                    Ok(lash_core::ProcessRunOutcome::Terminal { output, prelude })
                 }
             }
             outcome => outcome,
         };
         match outcome {
-            Ok(lash_core::ProcessRunOutcome::Terminal { output }) => {
+            Ok(lash_core::ProcessRunOutcome::Terminal { output, prelude }) => {
                 // The terminal append writes the ended parent scope's ledger
                 // row in the same store transaction; the sweep, not this
                 // handler, cancels the children.
-                Ok(SegmentRunEnd::Terminal(TerminalProposal::Output(output)))
+                Ok(SegmentRunEnd::Terminal(TerminalProposal::Output {
+                    output,
+                    prelude,
+                }))
             }
             Ok(lash_core::ProcessRunOutcome::SegmentBoundary(boundary)) => {
                 Ok(SegmentRunEnd::Boundary(boundary))
@@ -751,9 +767,12 @@ where
             ) => Err(handler_error_from_plugin(err)),
             // A failure retrying cannot fix without changing durable state
             // ends the process Failed, typed by its code.
-            Err(err) if err.is_terminal() => Ok(SegmentRunEnd::Terminal(TerminalProposal::Output(
-                Box::new(terminal_process_output(err)),
-            ))),
+            Err(err) if err.is_terminal() => {
+                Ok(SegmentRunEnd::Terminal(TerminalProposal::Output {
+                    output: Box::new(terminal_process_output(err)),
+                    prelude: Vec::new(),
+                }))
+            }
             // Any other runner failure is the host's infrastructure (an
             // unavailable store, a plugin the deployment could not wire),
             // never a producer outcome: the attempt fails retryably, so the
@@ -823,13 +842,19 @@ where
 
 /// Store `proposed` as the process's terminal, answering the outcome the
 /// registry kept: this one, or the one an earlier writer committed.
-async fn complete_process_outcome(
+pub(crate) async fn complete_process_outcome(
     registry: &Arc<dyn ProcessRegistry>,
     process_id: &ProcessId,
     proposed: ProcessAwaitOutput,
+    prelude: Vec<lash_core::ProcessEventAppendRequest>,
 ) -> Result<ProcessAwaitOutput, PluginError> {
     let completion = registry
-        .complete_process(process_id, proposed, workflow_key_authority(process_id))
+        .complete_process_with_prelude(
+            process_id,
+            proposed,
+            prelude,
+            workflow_key_authority(process_id),
+        )
         .await?;
     let record = match completion {
         lash_core::ProcessCompletionOutcome::Committed(record) => record,

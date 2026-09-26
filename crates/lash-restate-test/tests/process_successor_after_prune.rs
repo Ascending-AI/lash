@@ -127,6 +127,7 @@ impl lash_core::ProcessEngine for RecordingEngine {
                     "own_sessions_tombstoned": own_sessions_tombstoned,
                 })),
             )),
+            prelude: Vec::new(),
         })
     }
 }

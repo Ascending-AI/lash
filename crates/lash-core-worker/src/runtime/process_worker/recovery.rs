@@ -183,8 +183,9 @@ impl DurableProcessWorker {
         lease: &ProcessLease,
         process_id: &ProcessId,
         output: ProcessAwaitOutput,
+        prelude: Vec<crate::ProcessEventAppendRequest>,
     ) -> Result<(), ProcessRecoveryAttemptOutcome> {
-        self.complete_and_release_inner(lease, process_id, output)
+        self.complete_and_release_inner(lease, process_id, output, prelude)
             .await
     }
 
@@ -193,6 +194,7 @@ impl DurableProcessWorker {
         lease: &ProcessLease,
         process_id: &ProcessId,
         output: ProcessAwaitOutput,
+        prelude: Vec<crate::ProcessEventAppendRequest>,
     ) -> Result<(), ProcessRecoveryAttemptOutcome> {
         let fenced = match self
             .config
@@ -225,6 +227,36 @@ impl DurableProcessWorker {
                 return Err(error.into_public());
             }
         };
+        // The run's terminal batch (FIG-3571) commits under the renewed lease
+        // ahead of the terminal. This native tier writes it as its own batch
+        // rather than in the terminal's transaction: a crash between the two
+        // leaves the batch committed and the row claimable, and the rerun's
+        // batch is a replay-key no-op.
+        if !prelude.is_empty()
+            && let Err(err) = self
+                .config
+                .process_registry()
+                .append_events(
+                    process_id,
+                    prelude,
+                    &crate::ProcessExecutionWriteAuthority::lease(fenced.clone()),
+                )
+                .await
+        {
+            if matches!(&err, PluginError::ProcessLeaseSuperseded { .. }) {
+                self.recovery_lease_lost(process_id, ProcessRecoveryOperation::WriteTerminal, &err);
+                return Err(ProcessRecoveryAttemptOutcome::LeaseLost {
+                    operation: ProcessRecoveryOperation::WriteTerminal,
+                });
+            }
+            let error = self.recovery_backend_error(
+                process_id,
+                ProcessRecoveryOperation::WriteTerminal,
+                err,
+            );
+            let _ = self.release_or_log(&fenced).await;
+            return Err(error.into_public());
+        }
         match self
             .config
             .process_registry()

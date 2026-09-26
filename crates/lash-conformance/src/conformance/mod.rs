@@ -72,6 +72,7 @@ mod process_change_feed;
 mod process_change_horizon;
 mod process_continuation_store;
 mod process_event_append_arms;
+mod process_event_batch;
 mod process_filters;
 mod process_park_feed;
 mod process_prune_reclaim;

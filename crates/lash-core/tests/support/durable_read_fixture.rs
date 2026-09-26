@@ -986,6 +986,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .set_process_wait_with_authority(
             &waiting_process_id(),
             fixture_wait_state(),
+            Vec::new(),
             &ProcessExecutionWriteAuthority::lease(lease.clone()),
         )
         .await

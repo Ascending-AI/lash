@@ -403,13 +403,41 @@ pub trait ProcessEventLog: ProcessQuery {
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendReceipt, PluginError>;
 
-    /// Implementations validate `authority` and append in one atomic write.
+    /// Append one execution-owned event: a batch of one
+    /// ([`Self::append_events`]).
     async fn append_event_with_authority(
         &self,
         process_id: &ProcessId,
         request: ProcessEventAppendRequest,
         authority: &ProcessExecutionWriteAuthority,
-    ) -> Result<ProcessEventAppendReceipt, PluginError>;
+    ) -> Result<ProcessEventAppendReceipt, PluginError> {
+        self.append_events(process_id, vec![request], authority)
+            .await?
+            .pop()
+            .ok_or_else(|| {
+                PluginError::Session(format!(
+                    "process `{process_id}` answered a one-event append with no receipt"
+                ))
+            })
+    }
+
+    /// Append `requests`, in order, as one atomic batch under `authority`
+    /// (FIG-3571).
+    ///
+    /// Implementations validate `authority` once and run the whole batch in one
+    /// transaction: sequences are allocated in request order, each request
+    /// goes through the same append rules a single append does (the ADR 0046
+    /// fold, replay-key coalescing, the conflicting-payload refusal), the
+    /// process record is rewritten once and the change clock advances once.
+    /// A refusal of any request commits none of them. The receipts answer the
+    /// requests in order. An empty batch writes nothing and answers no
+    /// receipts.
+    async fn append_events(
+        &self,
+        process_id: &ProcessId,
+        requests: Vec<ProcessEventAppendRequest>,
+        authority: &ProcessExecutionWriteAuthority,
+    ) -> Result<Vec<ProcessEventAppendReceipt>, PluginError>;
 
     /// Read at most `limit` events of one process, strictly after
     /// `after_sequence`.
@@ -487,6 +515,24 @@ pub trait ProcessLifecycle: Send + Sync {
         &self,
         process_id: &ProcessId,
         await_output: ProcessAwaitOutput,
+        authority: ProcessCompletionAuthority,
+    ) -> Result<ProcessCompletionOutcome, PluginError> {
+        self.complete_process_with_prelude(process_id, await_output, Vec::new(), authority)
+            .await
+    }
+
+    /// [`Self::complete_process`] with the run's terminal batch (FIG-3571):
+    /// `prelude` (the run's still-pending effect-summary occurrences, then its
+    /// `process.effect_omissions` record) is appended ahead of the terminal
+    /// event in the same transaction, under the same append rules as
+    /// [`ProcessEventLog::append_events`], and the record is rewritten once.
+    /// A row that is already terminal answers its stored outcome and appends
+    /// nothing, so a replayed completion never writes its prelude twice.
+    async fn complete_process_with_prelude(
+        &self,
+        process_id: &ProcessId,
+        await_output: ProcessAwaitOutput,
+        prelude: Vec<ProcessEventAppendRequest>,
         authority: ProcessCompletionAuthority,
     ) -> Result<ProcessCompletionOutcome, PluginError>;
 
@@ -665,16 +711,25 @@ pub trait ProcessLifecycle: Send + Sync {
         process_id: &ProcessId,
     ) -> Result<ProcessRecord, PluginError>;
 
+    /// Enter `wait` (`process.waiting`) as a run boundary (FIG-3571): the
+    /// run's pending `prelude` is appended ahead of the transition in the same
+    /// transaction, under the same append rules as
+    /// [`ProcessEventLog::append_events`], and the record is rewritten once.
+    /// An unchanged wait still commits the prelude.
     async fn set_process_wait_with_authority(
         &self,
         process_id: &ProcessId,
         wait: WaitState,
+        prelude: Vec<ProcessEventAppendRequest>,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError>;
 
+    /// Leave the current wait (`process.resumed`) as a run boundary, with the
+    /// same `prelude` contract as [`Self::set_process_wait_with_authority`].
     async fn clear_process_wait_with_authority(
         &self,
         process_id: &ProcessId,
+        prelude: Vec<ProcessEventAppendRequest>,
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessRecord, PluginError>;
 

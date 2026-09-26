@@ -1368,12 +1368,14 @@ impl<'run> RuntimeExecutionContext<'run> {
         }
     }
 
-    /// Appends one replay-scoped process event for code-executor implementors and returns the
-    /// store-assigned sequence and any coordinated wake delivery.
-    pub async fn append_process_event(
+    /// Appends replay-scoped process events for code-executor implementors as
+    /// one atomic batch (FIG-3571), in order, and returns the stored events.
+    /// Each coordinated wake delivery the batch produced is enqueued after it
+    /// commits.
+    pub async fn append_process_events(
         &self,
-        request: crate::ProcessEventAppendRequest,
-    ) -> Result<crate::ProcessEvent, crate::PluginError> {
+        requests: Vec<crate::ProcessEventAppendRequest>,
+    ) -> Result<Vec<crate::ProcessEvent>, crate::PluginError> {
         let exec = self
             .process_execution
             .as_ref()
@@ -1382,27 +1384,31 @@ impl<'run> RuntimeExecutionContext<'run> {
             .event_context
             .as_ref()
             .ok_or_else(missing_process_execution_error)?;
-        let result = context
+        let receipts = context
             .process_work
             .registry()
-            .append_event_with_authority(
+            .append_events(
                 &exec.process_id,
-                request,
+                requests,
                 &context.execution_write_authority,
             )
             .await?;
-        crate::tool_provider::process_events::enqueue_wake_delivery(
-            std::sync::Arc::clone(context.process_work.registry()),
-            context.store.clone(),
-            context.session_store_factory.as_ref(),
-            result.wake_delivery,
-            Some(self.session_graph_service()),
-            Arc::clone(&context.queued_work),
-            context.process_wake_delivery_policy,
-            Arc::clone(&context.clock),
-        )
-        .await?;
-        Ok(result.event)
+        let mut events = Vec::with_capacity(receipts.len());
+        for receipt in receipts {
+            crate::tool_provider::process_events::enqueue_wake_delivery(
+                std::sync::Arc::clone(context.process_work.registry()),
+                context.store.clone(),
+                context.session_store_factory.as_ref(),
+                receipt.wake_delivery,
+                Some(self.session_graph_service()),
+                Arc::clone(&context.queued_work),
+                context.process_wake_delivery_policy,
+                Arc::clone(&context.clock),
+            )
+            .await?;
+            events.push(receipt.event);
+        }
+        Ok(events)
     }
 
     /// Waits for one named process signal for code-executor implementors through the durable
