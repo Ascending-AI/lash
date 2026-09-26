@@ -108,6 +108,7 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
         root_terminal: _,          // a turn root's end; no boundary carries one
         release_session_execution_lease: _, // transport authority
         config,
+        execution_config, // the root's view: the identity's config when present
         current_frame_node_id: _, // derived from the graph leaf
         graph,
         graph_base_leaf_node_id: _, // resident head fact, not request content
@@ -131,7 +132,7 @@ fn semantic_boundary_request_intent_encoding(commit: &RuntimeCommit) -> Result<S
     let projection = SemanticBoundaryRequestIntent {
         operation_key: &operation_key,
         session_id,
-        config,
+        config: execution_config.as_deref().unwrap_or(config),
         appended_payloads: graph.nodes().iter().map(|node| &node.payload).collect(),
         usage_deltas,
     };

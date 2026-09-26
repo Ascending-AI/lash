@@ -687,6 +687,7 @@ impl RuntimeCommit {
             root_terminal,
             release_session_execution_lease: _,
             config: _,
+            execution_config: _,
             current_frame_node_id: _,
             graph: _,
             graph_base_leaf_node_id: _,
@@ -868,6 +869,14 @@ impl RuntimeCommit {
         fleet_format: FleetFormat,
     ) -> Result<Self, StoreError> {
         let current_frame_node_id = graph.derive_current_frame_node_id(&state.session_graph);
+        let config = persisted_session_config_from_state(state);
+        let execution_config = state
+            .authority
+            .committed_config
+            .is_some()
+            .then(|| execution_session_config_from_state(state))
+            .filter(|execution| *execution != config)
+            .map(Box::new);
         Ok(Self {
             commit_budget,
             session_id: state.session_id.clone(),
@@ -876,7 +885,8 @@ impl RuntimeCommit {
             drive_fence: None,
             root_terminal: None,
             release_session_execution_lease: None,
-            config: persisted_session_config_from_state(state),
+            config,
+            execution_config,
             current_frame_node_id,
             graph,
             graph_base_leaf_node_id: state.session_graph.leaf_node_id.clone(),
