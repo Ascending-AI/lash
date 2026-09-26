@@ -188,8 +188,9 @@ async fn a_faulted_doubles_unbound_twin_sees_the_fault() {
         async fn claim_intent_application(
             &self,
             id: crate::store::ControlIntentId,
+            at_ms: u64,
         ) -> Result<crate::store::IntentApplication, crate::StoreError> {
-            self.inner.claim_intent_application(id).await
+            self.inner.claim_intent_application(id, at_ms).await
         }
 
         async fn acknowledge_intent(

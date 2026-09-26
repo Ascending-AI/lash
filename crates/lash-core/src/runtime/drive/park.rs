@@ -18,6 +18,23 @@ use crate::runtime::LashRuntime;
 use crate::{RuntimeError, StoreError, TurnId};
 
 impl LashRuntime {
+    /// The logical root a park of the running turn names, and so the root
+    /// whose park the turn's commit clears (D2 §1.3): the admitted root's,
+    /// when a drive runs one — the root a follow-on recovery ends, not the
+    /// recovery's admission name — else `scope_root`, the root the turn's
+    /// controller runs under, else the physical `turn` itself.
+    pub(in crate::runtime) fn park_root(
+        &self,
+        scope_root: Option<TurnId>,
+        turn: &TurnId,
+    ) -> TurnId {
+        self.drive_root
+            .as_ref()
+            .map(|run| run.root().clone())
+            .or(scope_root)
+            .unwrap_or_else(|| turn.clone())
+    }
+
     /// Record `root`'s park when its abort is a refusal that parks it
     /// (FIG-3586, FIG-3600).
     ///
@@ -37,6 +54,9 @@ impl LashRuntime {
         let Some(reason) = crate::store::ParkReason::of_error(err) else {
             return;
         };
+        // Under a drive the park names the admitted root's logical root,
+        // whatever name the aborting site knew it by.
+        let root = &self.park_root(Some(root.clone()), root);
         let Some(store) = self
             .session
             .as_ref()

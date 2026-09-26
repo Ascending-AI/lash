@@ -405,8 +405,9 @@ impl lash::persistence::ControlIntentStore for GatedSessionStoreFactory {
     async fn claim_intent_application(
         &self,
         id: lash::persistence::ControlIntentId,
+        at_ms: u64,
     ) -> Result<lash::persistence::IntentApplication, lash::persistence::StoreError> {
-        self.inner.claim_intent_application(id).await
+        self.inner.claim_intent_application(id, at_ms).await
     }
 
     async fn acknowledge_intent(

@@ -367,6 +367,7 @@ async fn commit_one_append(
             attachments.path().to_path_buf(),
         )),
         UNREACHABLE_RESTATE_INGRESS,
+        UNREACHABLE_RESTATE_INGRESS,
         lash_restate::RestateAuthorityId::new("version-bump-recreation")?,
     );
     let core = lash::LashCore::standard_builder(backend.into(), lash::TurnBudget::Unbounded)

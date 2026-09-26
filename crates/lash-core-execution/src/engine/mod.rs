@@ -66,7 +66,7 @@ pub use contracts::{
 pub use control::{
     EngineAck, EngineCursor, EnginePage, EngineParkRecorded, EngineRefusal, NoEngineControl,
     NoScopeClose, ParkReconcileReport, ParkRecoveryWriter, ParkTarget, RootRef, ScopeCloseSink,
-    SessionControlEngine, begin_session_close_replay_key,
+    SessionControlEngine, StalledExecution, begin_session_close_replay_key,
 };
 pub use drive::{
     DriveAbort, DriveLoop, DriveOutcome, DriveStop, RootOutcome, admission_body,
@@ -75,7 +75,8 @@ pub use drive::{
 };
 pub use groups::{DriveGroups, GroupClosed, GroupKey};
 pub use reconcile::{
-    DriveReconcileReport, ReconcileArm, ReconcileCursor, ReconcileFailure, ReconcileTick, SlotPass,
+    DriveReconcileReport, ReconcileArm, ReconcileCursor, ReconcileFailure, ReconcileTick,
+    ReconcileTicks, SlotPass,
 };
 
 #[cfg(test)]

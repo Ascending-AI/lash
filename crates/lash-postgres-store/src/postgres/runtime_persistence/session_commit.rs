@@ -327,8 +327,9 @@ impl SessionCommitStore for PostgresSessionStore {
         };
         planner.validate_node_derivation()?;
         {
-            // A turn's commit settles its park (FIG-3586) in the same round
-            // trip as its receipt read; another turn's commit leaves it.
+            // A root's commit settles its park (FIG-3586, FIG-3600 S7) in the
+            // same round trip as its receipt read, whichever of its physical
+            // turns committed; another root's commit leaves it.
             let prior = sqlx::query(
                 session_sql()
                     .turn_commits_postgres
@@ -337,13 +338,7 @@ impl SessionCommitStore for PostgresSessionStore {
             )
             .bind(commit.session_id.as_str())
             .bind(planner.operation_key())
-            .bind(
-                commit
-                    .turn_commit
-                    .operation
-                    .turn_id()
-                    .map(|turn_id| turn_id.as_str()),
-            )
+            .bind(commit.settled_park_root().map(|root| root.as_str()))
             .fetch_optional(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;

@@ -366,9 +366,11 @@ impl SessionCommitStore for Store {
                         fleet,
                     )?;
                     planner.validate_node_derivation()?;
-                    // A turn's commit settles its park (FIG-3586), in the
-                    // commit's transaction; another turn's commit leaves it.
-                    if let Some(turn_id) = commit.turn_commit.operation.turn_id() {
+                    // A root's commit settles its park (FIG-3586, FIG-3600
+                    // S7), in the commit's transaction, whichever of its
+                    // physical turns committed; another root's commit
+                    // leaves it.
+                    if let Some(turn_id) = commit.settled_park_root() {
                         let released: Option<(String, i64)> = tx
                             .query_row(
                                 crate::turn_ingress::turn_ingress_sql()

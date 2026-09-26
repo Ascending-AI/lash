@@ -264,6 +264,10 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
                     attach_ceiling_ms: 6 * 60 * 60 * 1_000,
                 },
             ),
+            lash_restate::RestateConnection::with_client(
+                restate_admin_url.clone(),
+                restate_http.clone(),
+            ),
             restate_authority_id.clone(),
         )
         .with_process_event_sink(Arc::clone(&process_event_sink)),

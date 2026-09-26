@@ -91,6 +91,7 @@ async fn backend_and_process_worker() -> (Arc<RestateEngine>, lash_core_worker::
         ) as Arc<dyn lash_core::StoreSet>,
         RestateConfig::new(
             "http://127.0.0.1:9",
+            "http://127.0.0.1:9",
             RestateAuthorityId::new("lash-restate-endpoint-builder").expect("valid authority"),
             lash_core::engine::BuildGeneration::for_test("bindings"),
         ),

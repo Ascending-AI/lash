@@ -193,7 +193,7 @@ impl AdmitDriveRunner {
             .map_err(|error| store_fault("pending follow-on read", error))?
         {
             return Ok(Some((
-                follow_on_root(&owed),
+                owed.recovery_root(),
                 AdmittedWork::FollowOn {
                     follow_on: owed.follow_on_turn_id,
                     attempts: owed.attempts,
@@ -272,16 +272,6 @@ pub(in crate::runtime) fn input_root(input: &crate::PendingTurnInput) -> TurnId 
             .as_deref()
             .unwrap_or_else(|| input.input_id.as_str()),
     )
-}
-
-/// The root that recovers `owed` at its current attempt count: one root per
-/// recovery, so a redrive of the recovery names the same root and a later
-/// recovery never reuses it.
-fn follow_on_root(owed: &crate::store::PendingFollowOn) -> TurnId {
-    TurnId::from(format!(
-        "follow-on:{}#{}",
-        owed.follow_on_turn_id, owed.attempts
-    ))
 }
 
 /// The root a fresh queued run is admitted under: named by its admission, so

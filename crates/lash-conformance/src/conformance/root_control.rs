@@ -14,6 +14,9 @@ use std::sync::{Arc, Mutex};
 struct Control {
     fail: AtomicBool,
     permanent: AtomicBool,
+    /// The engine resumes the root, then its reply is lost: the admin call
+    /// timed out after the server acted.
+    lose_resume_reply: AtomicBool,
     cancel_on_resume: Mutex<Option<(Arc<dyn crate::SessionStoreFactory>, RootIntentRequest)>>,
     events: Arc<Mutex<Vec<&'static str>>>,
 }
@@ -32,6 +35,11 @@ impl SessionControlEngine for Control {
                 .expect("concurrent cancel");
         }
         self.events.lock().expect("events").push("resume");
+        if self.lose_resume_reply.swap(false, Ordering::SeqCst) {
+            return Err(EngineRefusal::Retryable(
+                "the resume timed out after the engine acted".into(),
+            ));
+        }
         Ok(EngineAck::NothingHeld)
     }
     async fn release_root(
@@ -57,6 +65,16 @@ impl SessionControlEngine for Control {
         _: EnginePage,
     ) -> Result<ParkReconcileReport, EngineRefusal> {
         Ok(ParkReconcileReport::default())
+    }
+}
+/// The engine's live answer about one stalled execution.
+struct Execution {
+    stopped: bool,
+}
+#[async_trait::async_trait]
+impl StalledExecution for Execution {
+    async fn still_stopped(&self) -> Result<bool, EngineRefusal> {
+        Ok(self.stopped)
     }
 }
 struct Work(Arc<Control>);
@@ -195,6 +213,7 @@ impl Fixture {
             Work(Arc::new(Control {
                 fail: AtomicBool::new(fail_release),
                 permanent: AtomicBool::new(false),
+                lose_resume_reply: AtomicBool::new(false),
                 cancel_on_resume: Mutex::new(None),
                 events: events.clone(),
             })),
@@ -222,6 +241,66 @@ impl Fixture {
         .await
         .expect("apply intent")
     }
+    async fn reconcile(&self, work: &Work, close: &Close, tick: &str) -> ReconcileTick {
+        lash_core::runtime::drive::reconcile_once(
+            &lash_core::runtime::drive::ReconcileParts {
+                sessions: self.factory.as_ref(),
+                work,
+                scopes: close,
+                processes: None,
+                clock: self.parts.host.clock.as_ref(),
+            },
+            &ReconcileCursor::default(),
+            NonZeroUsize::MIN.saturating_add(63),
+            tick,
+        )
+        .await
+    }
+    async fn park(&self) -> Option<TurnPark> {
+        self.parts
+            .store
+            .load_turn_park(&self.parts.session_id)
+            .await
+            .expect("park read")
+    }
+    async fn intent_state(&self, id: ControlIntentId) -> ControlIntentState {
+        self.factory
+            .load_intent(id)
+            .await
+            .expect("intent read")
+            .expect("intent retained")
+            .state
+    }
+}
+
+/// A commit of `root`'s physical turn `turn` over `state` that ends the root,
+/// as the runtime writes it: the root's terminal evidence in the head
+/// transaction.
+fn root_final_commit(
+    state: &crate::RuntimeSessionState,
+    root: &TurnId,
+    turn: &TurnId,
+    ordinal: u32,
+) -> crate::RuntimeCommit {
+    let operation = crate::OperationId::turn(state.session_id.as_str(), turn.as_str(), "final");
+    let mut graph = state.pending_graph_commit();
+    graph
+        .derive_node_ids(&state.session_id, &operation)
+        .expect("nodes");
+    let mut commit = crate::RuntimeCommit::persisted_state_with_graph_commit_and_operation(
+        state,
+        graph,
+        &[],
+        operation,
+    )
+    .expect("commit");
+    commit.root_terminal = Some(Box::new(RootTerminalWrite {
+        root: root.clone(),
+        commit: TurnCommitId::new(root.clone(), ordinal),
+        turn: turn.clone(),
+        stop: None,
+    }));
+    commit
 }
 
 async fn drive(
@@ -560,7 +639,7 @@ pub async fn engine_refusals_are_retained_and_listed(
     prefix: &str,
     host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
-    _: Arc<dyn crate::ConformanceTurnRunner>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
     let f = Fixture::new(prefix, "retained-refusal", &host, &stores).await;
     let intent = f.verb(RootVerb::Cancel).await.expect("cancel");
@@ -587,6 +666,26 @@ pub async fn engine_refusals_are_retained_and_listed(
         .expect("operator list");
     assert!(
         matches!(&retained[0].state, ControlIntentState::Failed { last_error, retryable: false } if last_error.contains("permanent engine refusal"))
+    );
+    // A verb the engine refused for good is surfaced, never a wedge: its
+    // store half ended the root and raised the epoch, so the unreleased
+    // execution is fenced, and the session drives the next send.
+    assert!(!f.parts.epoch().await.control_pending);
+    // Reconciliation does not retry it, and closes the ended root's scope.
+    let report = f.reconcile(&work, &close, "after-refusal").await;
+    assert!(report.failures.is_empty(), "{:?}", report.failures);
+    assert!(report.intents.is_empty());
+    assert!(work.0.events.lock().expect("events").contains(&"close"));
+    let next = f
+        .parts
+        .enqueue("after-refusal", Some("after-refusal"))
+        .await;
+    let outcome = drive(&f, &runner, "after-refusal").await;
+    assert_eq!(outcome.stop, DriveStop::Idle);
+    assert_eq!(f.parts.calls(), 1, "the send behind the refused verb runs");
+    assert_eq!(
+        f.parts.applications().await,
+        vec![(next, TurnId::from("after-refusal"))]
     );
 }
 
@@ -675,6 +774,21 @@ pub async fn a_stale_redrive_is_fenced_by_a_later_cancel(
         ControlIntentState::Superseded { .. }
     ));
     let f = Fixture::new(prefix, "stale-redrive", &host, &stores).await;
+    // The fence the parked root's execution was sealed under.
+    let DriveEpochSeal::Sealed(fence) = f
+        .parts
+        .store
+        .seal_drive_epoch(
+            &f.parts.session_id,
+            &AdmissionId::new("parked-root#0"),
+            f.parts.epoch().await.epoch,
+            &RootStartNonce::new("parked-execution"),
+        )
+        .await
+        .expect("seal")
+    else {
+        panic!("the parked root's admission seals");
+    };
     let redrive = f.verb(RootVerb::Redrive).await.expect("redrive");
     let cancel = f
         .verb(RootVerb::Cancel)
@@ -697,6 +811,31 @@ pub async fn a_stale_redrive_is_fenced_by_a_later_cancel(
             .await,
         Err(crate::StoreError::RootAlreadyTerminal { .. })
     ));
+    // Nor can the stale execution commit: its fence is the one the cancel
+    // raised the epoch past.
+    let before = f
+        .parts
+        .store
+        .load_session_head_meta()
+        .await
+        .expect("head")
+        .map(|head| head.head_revision);
+    let mut zombie = root_final_commit(&f.parts.initial_state(), &f.root, &f.root, 0);
+    zombie.drive_fence = Some(Box::new(fence));
+    assert!(matches!(
+        f.parts.store.commit_runtime_state(zombie).await,
+        Err(crate::StoreError::StaleDriveFence { .. })
+    ));
+    assert_eq!(
+        f.parts
+            .store
+            .load_session_head_meta()
+            .await
+            .expect("head")
+            .map(|head| head.head_revision),
+        before,
+        "no commit lands after the cancel"
+    );
     assert_eq!(
         f.factory
             .root_terminal(&f.parts.session_id, &f.root)
@@ -822,7 +961,12 @@ pub async fn an_exhausted_root_parks_engine_retry_exhausted_via_reconcile_idempo
         message: "engine retries exhausted".into(),
     };
     let first = writer
-        .record_engine_park(&target, reason.clone(), EnginePark::new("held-invocation"))
+        .record_engine_park(
+            &target,
+            reason.clone(),
+            EnginePark::new("held-invocation"),
+            &Execution { stopped: true },
+        )
         .await
         .expect("recover");
     let EngineParkRecorded::Parked(id) = first else {
@@ -838,7 +982,12 @@ pub async fn an_exhausted_root_parks_engine_retry_exhausted_via_reconcile_idempo
     assert_eq!(before.engine, Some(EnginePark::new("held-invocation")));
     assert_eq!(
         writer
-            .record_engine_park(&target, reason, EnginePark::new("held-invocation"))
+            .record_engine_park(
+                &target,
+                reason,
+                EnginePark::new("held-invocation"),
+                &Execution { stopped: true },
+            )
             .await
             .expect("repeat"),
         EngineParkRecorded::AttachedToExisting(id)
@@ -944,5 +1093,218 @@ pub async fn a_diverged_root_parks_once_holds_claims_blocks_admission_and_comple
             .await
             .expect("park")
             .is_none()
+    );
+}
+
+/// B1: a root that parks on a later physical turn — a frame switch's
+/// follow-on turn — is still one root. The commit that ends it clears its
+/// park whichever physical turn committed, so the root is never parked and
+/// terminal at once: the verbs answer `NotParked` and nothing is left for a
+/// drain to count.
+pub async fn a_root_parked_on_a_later_physical_turn_is_cleared_by_its_commit(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    _: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let f = Fixture::new(prefix, "later-physical-park", &host, &stores).await;
+    let redrive = f.verb(RootVerb::Redrive).await.expect("redrive");
+    let (work, close) = f.control(false, false);
+    f.apply(&work, &close, &redrive).await;
+    let turn = QueuedRunPosition::derive_turn_id(&f.root, 1);
+    f.parts
+        .store
+        .commit_runtime_state(root_final_commit(
+            &f.parts.initial_state(),
+            &f.root,
+            &turn,
+            1,
+        ))
+        .await
+        .expect("the root's final commit on its second physical turn");
+    assert!(
+        f.factory
+            .root_terminal(&f.parts.session_id, &f.root)
+            .await
+            .expect("terminal")
+            .is_some()
+    );
+    assert_eq!(
+        f.park().await,
+        None,
+        "the root's commit clears its park whichever physical turn committed"
+    );
+    assert!(matches!(
+        f.verb(RootVerb::Cancel).await,
+        Err(RootIntentRefused::NotParked)
+    ));
+}
+
+/// H2: a redrive whose resume reached the engine but whose acknowledgement
+/// was lost is settled by the root running past it. When the root parks
+/// again, and when an operator then cancels it, reconciliation never resumes
+/// the root a second time: a store-terminal root is never resumed.
+pub async fn a_redrive_the_root_ran_past_is_never_applied_again(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    _: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let f = Fixture::new(prefix, "lapsed-redrive", &host, &stores).await;
+    let redrive = f.verb(RootVerb::Redrive).await.expect("redrive");
+    let (work, close) = f.control(false, false);
+    work.0.lose_resume_reply.store(true, Ordering::SeqCst);
+    assert!(matches!(
+        f.apply(&work, &close, &redrive).await,
+        ControlIntentState::Failed {
+            retryable: true,
+            ..
+        }
+    ));
+    // The resumed root runs, refuses again under the same build, re-parks.
+    let again = f
+        .parts
+        .store
+        .record_turn_park(&TurnParkWrite::refusal(
+            f.parts.session_id.clone(),
+            f.root.clone(),
+            f.park.reason.clone(),
+            3,
+        ))
+        .await
+        .expect("repark");
+    assert_eq!(again.resume_intent, None);
+    let cancel = f
+        .verb(RootVerb::Cancel)
+        .await
+        .expect("cancel the re-parked root");
+    let report = f.reconcile(&work, &close, "after-repark").await;
+    assert!(report.failures.is_empty(), "{:?}", report.failures);
+    let resumes = work
+        .0
+        .events
+        .lock()
+        .expect("events")
+        .iter()
+        .filter(|event| **event == "resume")
+        .count();
+    assert_eq!(
+        resumes, 1,
+        "a redrive the root ran past never resumes it again"
+    );
+    assert!(!f.intent_state(redrive.id).await.is_open());
+    assert!(matches!(
+        f.intent_state(cancel.id).await,
+        ControlIntentState::Acknowledged { .. }
+    ));
+}
+
+/// M3: a paused-execution listing read before a redrive resumed the root is
+/// stale. Recording the engine's park from it must not re-park the running
+/// root: the park keeps naming the redrive, so a cancel stays refused while
+/// the root runs.
+pub async fn a_stale_paused_listing_never_reparks_a_resumed_root(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    _: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let f = Fixture::new(prefix, "stale-listing", &host, &stores).await;
+    let redrive = f.verb(RootVerb::Redrive).await.expect("redrive");
+    let (work, close) = f.control(false, false);
+    assert!(matches!(
+        f.apply(&work, &close, &redrive).await,
+        ControlIntentState::Acknowledged { .. }
+    ));
+    let writer =
+        lash_core::drive::StoreParkRecovery::new(f.factory.as_ref(), f.parts.host.clock.as_ref());
+    let target = ParkTarget::Root {
+        session: f.parts.session_id.clone(),
+        root: f.root.clone(),
+    };
+    let exhausted = ParkReason::EngineRetryExhausted {
+        attempts: 8,
+        last_failure_code: None,
+        message: "listed before the resume".into(),
+    };
+    assert_eq!(
+        writer
+            .record_engine_park(
+                &target,
+                exhausted.clone(),
+                EnginePark::new("listed-before-resume"),
+                // The redrive resumed it after the listing: it runs.
+                &Execution { stopped: false },
+            )
+            .await
+            .expect("record from the stale listing"),
+        EngineParkRecorded::Redriven
+    );
+    let park = f.park().await.expect("still parked");
+    assert_eq!(
+        park.resume_intent,
+        Some(redrive.id),
+        "a stale listing never re-parks the running root"
+    );
+    assert_eq!(park.attempts, f.park.attempts);
+    assert!(matches!(
+        f.verb(RootVerb::Cancel).await,
+        Err(RootIntentRefused::Redriving { .. })
+    ));
+    // An execution the engine finds still stopped after the redrive
+    // resumed it stopped again: that re-parks the root, clearing the
+    // redrive, so the operator can act on it again.
+    let EngineParkRecorded::AttachedToExisting(id) = writer
+        .record_engine_park(
+            &target,
+            exhausted,
+            EnginePark::new("stopped-again"),
+            &Execution { stopped: true },
+        )
+        .await
+        .expect("record the stopped-again execution")
+    else {
+        panic!("the same park is re-parked");
+    };
+    assert_eq!(id, f.park.park_id);
+    let again = f.park().await.expect("re-parked");
+    assert_eq!(again.resume_intent, None);
+    assert_eq!(again.attempts, f.park.attempts + 1);
+    f.verb(RootVerb::Cancel)
+        .await
+        .expect("the re-parked root can be cancelled");
+}
+
+/// A parked session admits nothing until a verb resolves it, so the
+/// reconcile drive arm does not ask it to drive every tick. Once a cancel
+/// resolved the park and was acknowledged, a lost drive ask (a crash between
+/// the acknowledgement and its schedule) is re-asked by the next tick.
+pub async fn a_parked_session_is_asked_to_drive_only_once_its_park_resolves(
+    prefix: &str,
+    host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    _: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let f = Fixture::new(prefix, "parked-drive-ask", &host, &stores).await;
+    f.parts.enqueue("behind", Some("behind-root")).await;
+    let (work, close) = f.control(false, false);
+    let parked = f.reconcile(&work, &close, "parked").await;
+    assert!(parked.failures.is_empty(), "{:?}", parked.failures);
+    assert!(
+        !parked.drives.scheduled.contains(&f.parts.session_id),
+        "a parked session is not asked to drive"
+    );
+    let cancel = f.verb(RootVerb::Cancel).await.expect("cancel");
+    // The engine half ran and was acknowledged; the drive ask after it was
+    // lost with the process.
+    f.factory
+        .acknowledge_intent(cancel.id, 3)
+        .await
+        .expect("acknowledge");
+    let resolved = f.reconcile(&work, &close, "resolved").await;
+    assert!(resolved.failures.is_empty(), "{:?}", resolved.failures);
+    assert!(
+        resolved.drives.scheduled.contains(&f.parts.session_id),
+        "the resolved session's open send is asked again"
     );
 }

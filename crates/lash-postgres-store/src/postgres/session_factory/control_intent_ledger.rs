@@ -77,14 +77,35 @@ impl ControlIntentStore for PostgresSessionStoreFactory {
     async fn claim_intent_application(
         &self,
         id: ControlIntentId,
+        at_ms: u64,
     ) -> Result<IntentApplication, StoreError> {
-        self.rewrite_intent(id, |stored| {
-            let application = decide_intent_application(stored);
-            let rewritten = matches!(application, IntentApplication::Apply(_))
-                .then(|| application.intent().clone());
-            (rewritten, application)
-        })
-        .await
+        for _ in 0..INTENT_WRITE_ATTEMPTS {
+            let mut tx = self.pool.begin().await.map_err(store_sqlx_error)?;
+            let stored = load_intent_conn(&mut tx, id)
+                .await?
+                .ok_or(StoreError::ControlIntentUnknown { intent: id })?;
+            // A redrive is decided against the park it would resume, read
+            // under its row lock in this transaction.
+            let park = match stored.kind {
+                lash_core_execution::store::ControlIntentKind::Redrive { .. } => {
+                    crate::runtime_persistence::turn_park::turn_park_for_update(
+                        &mut tx,
+                        &stored.session_id,
+                    )
+                    .await?
+                }
+                _ => None,
+            };
+            let application = decide_intent_application(stored.clone(), park.as_ref(), at_ms);
+            if application.intent() != &stored
+                && !write_intent_state_conn(&mut tx, &stored, application.intent()).await?
+            {
+                continue;
+            }
+            tx.commit().await.map_err(store_sqlx_error)?;
+            return Ok(application);
+        }
+        Err(StoreError::Contended)
     }
 
     async fn acknowledge_intent(&self, id: ControlIntentId, at_ms: u64) -> Result<(), StoreError> {

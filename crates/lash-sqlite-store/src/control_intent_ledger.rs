@@ -115,14 +115,40 @@ impl ControlIntentStore for SqliteSessionStoreFactory {
     async fn claim_intent_application(
         &self,
         id: ControlIntentId,
+        at_ms: u64,
     ) -> Result<IntentApplication, StoreError> {
-        self.rewrite_intent(id, |stored| {
-            let application = decide_intent_application(stored);
-            let rewritten = matches!(application, IntentApplication::Apply(_))
-                .then(|| application.intent().clone());
-            (rewritten, application)
+        let Some(conn) = self.control_ledger().await? else {
+            return Err(StoreError::ControlIntentUnknown { intent: id });
+        };
+        conn.write_flow(move |tx| {
+            let outcome = (|| {
+                let stored = load_intent_conn(tx, id)?
+                    .ok_or(StoreError::ControlIntentUnknown { intent: id })?;
+                // A redrive is decided against the park it would resume, read
+                // in this transaction.
+                let park = match stored.kind {
+                    lash_core_execution::store::ControlIntentKind::Redrive { .. } => {
+                        crate::persistence::turn_park::turn_park_conn(tx, &stored.session_id)?
+                    }
+                    _ => None,
+                };
+                let application = decide_intent_application(stored.clone(), park.as_ref(), at_ms);
+                if application.intent() != &stored
+                    && !write_intent_state_conn(tx, &stored, application.intent())?
+                {
+                    // The write transaction is exclusive: nothing else can
+                    // move the row between the read and the write.
+                    return Err(StoreError::Contended);
+                }
+                Ok(application)
+            })();
+            Ok(match outcome {
+                Ok(answer) => TxOutcome::Commit(Ok(answer)),
+                Err(error) => TxOutcome::Rollback(Err(error)),
+            })
         })
         .await
+        .map_err(sqlite_error)?
     }
 
     async fn acknowledge_intent(&self, id: ControlIntentId, at_ms: u64) -> Result<(), StoreError> {

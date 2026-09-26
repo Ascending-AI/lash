@@ -106,6 +106,7 @@ impl AppState {
             &storage,
             Arc::new(s3_store_from_env()?),
             restate_ingress_url.clone(),
+            lash_restate_postgres_workers_e2e::restate_admin_url(),
             restate_authority_id.clone(),
         );
         let mock_provider_base_url = env("MOCK_PROVIDER_BASE_URL", "http://mock-provider:18001");

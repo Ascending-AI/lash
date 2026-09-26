@@ -319,6 +319,7 @@ const UNKNOWN_INTENT_SEQUENCE: u64 = 9_000_000_000_000_000_000;
 const CLOSE_AT_MS: u64 = 5_000;
 const CLOSE_FAILED_AT_MS: u64 = 6_000;
 const CLOSE_ACKNOWLEDGED_AT_MS: u64 = 7_000;
+const CLOSE_CLAIMED_AT_MS: u64 = 6_500;
 /// The aborted direct turn the sweep binds its drive claim to (FIG-3589).
 const SURFACE_ABORTED_TURN_ID: &str = "fig-3589-surface-aborted-turn";
 /// The queue drain the sweep admits, selects, settles and ends. Its scope is
@@ -1343,7 +1344,7 @@ impl BackendRunner {
             SurfaceMethod::ClaimIntentApplication { known } => {
                 let application = self
                     .factory()
-                    .claim_intent_application(self.case_intent(known))
+                    .claim_intent_application(self.case_intent(known), CLOSE_CLAIMED_AT_MS)
                     .await?;
                 let verdict = match &application {
                     lash_core::store::IntentApplication::Apply(_) => "apply",

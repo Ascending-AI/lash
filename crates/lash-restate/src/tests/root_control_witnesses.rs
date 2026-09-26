@@ -17,6 +17,9 @@ struct Driver {
     store: Arc<dyn lash_core::RuntimePersistence>,
     restored: AtomicBool,
     admission_fails: AtomicBool,
+    /// Admission names the root again after it ended: a store that has not
+    /// caught up with the root's release.
+    repeat_released: AtomicBool,
     commits: AtomicUsize,
 }
 fn fault() -> lash_core::RuntimeError {
@@ -39,12 +42,13 @@ impl SessionDriver for Driver {
         if self.admission_fails.load(Ordering::SeqCst) {
             return Err(DriveAbort::Retry(fault()));
         }
-        let root = if self
-            .store
-            .root_terminal(&self.session, &self.root)
-            .await
-            .expect("terminal")
-            .is_some()
+        let root = if !self.repeat_released.load(Ordering::SeqCst)
+            && self
+                .store
+                .root_terminal(&self.session, &self.root)
+                .await
+                .expect("terminal")
+                .is_some()
         {
             let next = self.next.lock().expect("next root").clone();
             let Some(next) = next else {
@@ -163,6 +167,7 @@ impl Fixture {
             store,
             restored: AtomicBool::new(false),
             admission_fails: AtomicBool::new(admission),
+            repeat_released: AtomicBool::new(false),
             commits: AtomicUsize::new(0),
         });
         let work = harness.session_work();
@@ -442,6 +447,9 @@ async fn crash_gaps(server: HarnessServer) {
                     .await
                     .expect("verb")
             };
+            // The build is restored: were the parked execution resumed
+            // rather than released, it would commit.
+            f.driver.restored.store(true, Ordering::SeqCst);
             let clock = lash_core::facade_support::SystemClock;
             let scopes = InterruptedClose {
                 interrupt: AtomicBool::new(gap == 2),
@@ -507,6 +515,23 @@ async fn crash_gaps(server: HarnessServer) {
                 [RootOutcome::Released { .. }]
             ));
             assert_eq!(outcome.stop, DriveStop::Idle);
+            assert_eq!(f.driver.commits.load(Ordering::SeqCst), 0);
+            // The release killed the parked execution: nothing is left for a
+            // stale resume to wake.
+            assert!(matches!(
+                f.work
+                    .control()
+                    .resume_root(
+                        &RootRef {
+                            session: f.driver.session.clone(),
+                            root: f.driver.root.clone(),
+                        },
+                        park.engine.as_ref(),
+                    )
+                    .await
+                    .expect("status read"),
+                EngineAck::NothingHeld
+            ));
             assert_eq!(f.driver.commits.load(Ordering::SeqCst), 0);
             assert!(
                 f.driver
@@ -587,4 +612,227 @@ async fn a_released_root_is_consumed_and_the_next_root_runs() {
 #[ignore = "requires the pinned live Restate server"]
 async fn live_a_released_root_is_consumed_and_the_next_root_runs() {
     released_then_next(HarnessServer::Live).await;
+}
+
+async fn released_then_repeated(server: HarnessServer) {
+    let f = Fixture::new(server, false).await;
+    f.reconcile_until(false).await;
+    let park = f
+        .driver
+        .store
+        .load_turn_park(&f.driver.session)
+        .await
+        .expect("park")
+        .expect("held");
+    let intent = f
+        .factory
+        .open_root_intent(
+            &RootIntentRequest {
+                session_id: f.driver.session.clone(),
+                root: f.driver.root.clone(),
+                park: park.park_id,
+                verb: RootVerb::Cancel,
+            },
+            8,
+        )
+        .await
+        .expect("cancel");
+    f.driver.repeat_released.store(true, Ordering::SeqCst);
+    f.driver.restored.store(true, Ordering::SeqCst);
+    lash_core::drive::apply_control_intent(
+        f.factory.as_ref(),
+        f.work.control().as_ref(),
+        &f.work,
+        &NoScopeClose,
+        &intent,
+        &lash_core::facade_support::SystemClock,
+    )
+    .await
+    .expect("release");
+    let outcome = f
+        .work
+        .attach_drive(&f.driver.session, DriveRequestId::new("initial"))
+        .await
+        .expect("drive");
+    assert!(
+        matches!(outcome.ran.as_slice(), [RootOutcome::Released { root }] if *root == f.driver.root),
+        "{:?}",
+        outcome.ran
+    );
+    assert_eq!(
+        outcome.stop,
+        DriveStop::RootAborted {
+            root: f.driver.root.clone()
+        },
+        "a released root admitted again stops the drive instead of spinning"
+    );
+    assert_eq!(f.driver.commits.load(Ordering::SeqCst), 0);
+    f.finish().await;
+}
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_released_root_admitted_again_stops_the_drive_root_aborted() {
+    released_then_repeated(HarnessServer::in_process()).await;
+}
+
+/// A park writer whose every write fails: a store that is down for one
+/// session while the engine's listing names it.
+struct FailingParkWriter;
+#[async_trait::async_trait]
+impl ParkRecoveryWriter for FailingParkWriter {
+    async fn record_engine_park(
+        &self,
+        _: &ParkTarget,
+        _: ParkReason,
+        _: EnginePark,
+        _: &dyn StalledExecution,
+    ) -> Result<EngineParkRecorded, lash_core::StoreError> {
+        Err(lash_core::StoreError::Backend(
+            "injected park write failure".into(),
+        ))
+    }
+}
+
+/// M2: one paused execution the pass cannot record never fails the page. The
+/// failure is reported for that execution and the cursor moves past it, so
+/// every later paused execution is still reached.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn one_failing_paused_execution_never_fails_the_park_page() {
+    let f = Fixture::new(HarnessServer::in_process(), false).await;
+    let admin = f.harness.admin_client();
+    let server = f.harness.server_double().expect("double");
+    let mut paused = Vec::new();
+    for _ in 0..2000 {
+        server.settle().await;
+        server.fire_next_timer();
+        paused = admin
+            .paused_work_page(None, NonZeroUsize::MIN)
+            .await
+            .expect("paused listing");
+        if !paused.is_empty() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    assert_eq!(paused.len(), 1, "the root's execution pauses");
+    let report = f
+        .work
+        .control()
+        .reconcile_parks(
+            &FailingParkWriter,
+            EnginePage {
+                after: None,
+                limit: NonZeroUsize::MIN,
+            },
+        )
+        .await
+        .expect("a failing execution never fails the page");
+    assert!(report.parked.is_empty());
+    assert!(
+        matches!(report.failed.as_slice(), [(execution, error)] if execution.as_str() == paused[0].id && error.contains("injected park write failure")),
+        "{:?}",
+        report.failed
+    );
+    assert_eq!(
+        report.next,
+        Some(EngineCursor::new(paused[0].id.clone())),
+        "the cursor moves past the failed execution"
+    );
+    f.finish().await;
+}
+
+#[derive(Default)]
+struct TickingDriver {
+    ticks: std::sync::Mutex<Vec<String>>,
+}
+#[async_trait::async_trait]
+impl SessionDriver for TickingDriver {
+    fn owns_reconciliation(&self) -> bool {
+        true
+    }
+    async fn reconcile(
+        &self,
+        cursor: &ReconcileCursor,
+        _: NonZeroUsize,
+        tick: &str,
+    ) -> Result<ReconcileCursor, lash_core::StoreError> {
+        self.ticks.lock().expect("ticks").push(tick.to_owned());
+        Ok(cursor.clone())
+    }
+    async fn drive(&self, _: DriveRequest) -> Result<DriveOutcome, DriveAbort> {
+        panic!("the recovery interval never drives")
+    }
+    async fn admit(
+        &self,
+        _: lash_core::ScopedEffectController<'_>,
+        _: &DriveRequest,
+        _: u32,
+    ) -> Result<AdmitVerdict, DriveAbort> {
+        panic!("the recovery interval never admits")
+    }
+    async fn run_root(
+        &self,
+        _: lash_core::ScopedEffectController<'_>,
+        _: Admitted,
+    ) -> Result<RootOutcome, DriveAbort> {
+        panic!("the recovery interval never runs a root")
+    }
+}
+
+/// A deployment's session work over an unreachable server: the recovery
+/// interval only calls the installed driver.
+fn detached_session_work() -> crate::RestateSessionWork {
+    crate::RestateSessionWork::new(
+        crate::RestateIngressClient::new(crate::RestateConnection::new("http://127.0.0.1:9")),
+        crate::RestateSessionDriverSlot::new(),
+        BuildGeneration::for_test("recovery-interval"),
+        Arc::new(NoEngineControl),
+    )
+}
+
+async fn first_tick(driver: &TickingDriver) -> String {
+    for _ in 0..500 {
+        if let Some(tick) = driver.ticks.lock().expect("ticks").first() {
+            return tick.clone();
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+    }
+    panic!("the recovery interval never ticked");
+}
+
+/// M1: a deployment runs one recovery interval however often its driver is
+/// installed.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_reinstalled_driver_runs_one_recovery_interval() {
+    let work = detached_session_work();
+    let driver = Arc::new(TickingDriver::default());
+    let installed = work.install_session_driver(driver.clone());
+    let reinstalled = work.install_session_driver(driver.clone());
+    first_tick(&driver).await;
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+    assert_eq!(
+        driver.ticks.lock().expect("ticks").len(),
+        1,
+        "a re-install of the live driver starts no second interval"
+    );
+    drop((installed, reinstalled));
+}
+
+/// M1: the drive asks a restarted process sends never reuse the previous
+/// run's request ids, which the engine would swallow as duplicates.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn recovery_tick_ids_are_unique_across_processes() {
+    let first = detached_session_work();
+    let driver = Arc::new(TickingDriver::default());
+    let installed = first.install_session_driver(driver.clone());
+    let first_id = first_tick(&driver).await;
+    // The process restarts: a new deployment's work and driver.
+    let restarted = detached_session_work();
+    let next_driver = Arc::new(TickingDriver::default());
+    let next = restarted.install_session_driver(next_driver.clone());
+    assert_ne!(
+        first_tick(&next_driver).await,
+        first_id,
+        "a restarted process's ticks never reuse the previous run's ids"
+    );
+    drop((installed, next));
 }

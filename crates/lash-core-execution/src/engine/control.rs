@@ -256,6 +256,24 @@ pub enum EngineParkRecorded {
     /// The target is gone (its session deleted, or the process pruned): the
     /// engine should release its execution.
     TargetGone,
+    /// A redrive owns the execution: it resumed it after the engine listed
+    /// it as stopped, or is about to. Nothing was written; a later pass
+    /// re-lists the execution if it stops again.
+    Redriven,
+}
+
+/// The engine's live view of the one stalled execution a
+/// [`ParkRecoveryWriter::record_engine_park`] call records.
+///
+/// An engine lists its stopped executions before the writer reads the
+/// target's park, so a redrive can resume an execution in between. When the
+/// park names a redrive that already resumed the execution, the writer asks
+/// again after that read: an execution still stopped then stopped again
+/// after the redrive, and one that is not is running.
+#[async_trait::async_trait]
+pub trait StalledExecution: Send + Sync {
+    /// Whether the execution is stopped now.
+    async fn still_stopped(&self) -> Result<bool, EngineRefusal>;
 }
 
 /// The park writer an engine's reconcile records stalled work through: the
@@ -269,11 +287,14 @@ pub enum EngineParkRecorded {
 #[async_trait::async_trait]
 pub trait ParkRecoveryWriter: Send + Sync {
     /// Park `target` for `reason`, carrying the engine's `engine` handle.
+    /// `execution` re-reads the stalled execution when a redrive may have
+    /// resumed it since the engine listed it.
     async fn record_engine_park(
         &self,
         target: &ParkTarget,
         reason: ParkReason,
         engine: EnginePark,
+        execution: &dyn StalledExecution,
     ) -> Result<EngineParkRecorded, StoreError>;
 }
 
@@ -291,6 +312,10 @@ pub struct ParkReconcileReport {
     pub resumed_drives: Vec<SessionId>,
     /// Stalled executions this pass left as they were.
     pub unchanged: usize,
+    /// Stalled executions this pass could not settle, each with why: one
+    /// failure never fails the page, and a later pass that reaches the
+    /// execution again retries it.
+    pub failed: Vec<(EngineCursor, String)>,
     /// Where the next pass resumes; `None` when this one read to the end.
     pub next: Option<EngineCursor>,
 }

@@ -82,7 +82,8 @@ mod restate_tests {
 
         let temp = tempfile::tempdir().expect("tempdir");
         let http = reqwest::Client::new();
-        let harness = live_restate_test_state(temp.path(), ingress_url.clone()).await;
+        let harness =
+            live_restate_test_state(temp.path(), ingress_url.clone(), admin_url.clone()).await;
         let state = harness.state.clone();
         let listener = tokio::net::TcpListener::bind(bind_addr)
             .await
@@ -406,6 +407,7 @@ mod restate_tests {
     async fn live_restate_test_state(
         data_dir: &Path,
         ingress_url: String,
+        admin_url: String,
     ) -> LiveRestateTestHarness {
         let app_db = Arc::new(Mutex::new(
             AppDb::open(&data_dir.join("app.db")).expect("open app db"),
@@ -444,6 +446,7 @@ finish("done via Restate E2E");
             Arc::new(stores),
             lash::restate::config(
                 ingress_url,
+                admin_url,
                 lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap(),
             ),
         ));

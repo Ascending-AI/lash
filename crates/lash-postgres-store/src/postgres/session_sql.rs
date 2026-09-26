@@ -606,12 +606,13 @@ lash_store_sql::statements! {
     /// `runtime_turn_commits` statements only PostgreSQL issues.
     pub(crate) struct TurnCommitPostgresStatements @ "turn_commit" {
         /// The receipt session `?1` recorded for operation key `?2`, read in
-        /// the round trip that settles turn `?3`'s park (FIG-3586) and logs
-        /// the `Unparked{TurnCommitted}` event at `?4` (FIG-3659): a turn's
-        /// commit clears its own park row inside the commit's transaction,
-        /// and another turn's commit leaves it. A `NULL` `?3`, an operation
-        /// that is no turn's, matches no park — and the `EXISTS` guard on the
-        /// clock bump means no event, no sequence burned.
+        /// the round trip that settles root `?3`'s park (FIG-3586, FIG-3600
+        /// S7) and logs the `Unparked{TurnCommitted}` event (FIG-3659): a
+        /// root's commit clears its park row inside the commit's transaction,
+        /// whichever of its physical turns committed, and another root's
+        /// commit leaves it. A `NULL` `?3`, an operation that is no turn's,
+        /// matches no park — and the `EXISTS` guard on the clock bump means
+        /// no event, no sequence burned.
         ///
         /// A data-modifying `WITH` runs whether or not the outer query reads
         /// it, so the clear and the feed append cost the commit no round trip

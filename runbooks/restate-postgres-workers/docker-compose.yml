@@ -91,6 +91,7 @@ services:
       LASH_E2E_FAIL_ONCE: "1"
       DATABASE_URL: postgres://lash:lash@postgres:5432/lash
       RESTATE_INGRESS_URL: http://restate:8080
+      RESTATE_ADMIN_URL: http://restate:9070
       RESTATE_AUTHORITY_ID: "${RESTATE_AUTHORITY_ID:?set a stable unique Restate authority id}"
       S3_ENDPOINT: http://s3:3900
       S3_BUCKET: ${LASH_S3_BUCKET:?run via the e2e script}
@@ -124,6 +125,7 @@ services:
       LASH_E2E_FAIL_ONCE: "1"
       DATABASE_URL: postgres://lash:lash@postgres:5432/lash
       RESTATE_INGRESS_URL: http://restate:8080
+      RESTATE_ADMIN_URL: http://restate:9070
       RESTATE_AUTHORITY_ID: "${RESTATE_AUTHORITY_ID:?set a stable unique Restate authority id}"
       S3_ENDPOINT: http://s3:3900
       S3_BUCKET: ${LASH_S3_BUCKET:?run via the e2e script}

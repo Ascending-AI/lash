@@ -1050,16 +1050,25 @@ pub mod restate {
 
     pub use lash_restate::*;
 
-    /// A [`RestateConfig`] stamped with this build's drain generation
-    /// (FIG-3795): [`crate::formats::build_generation`]'s answer, filled in
-    /// here because lash-restate cannot see the format manifest that derives
-    /// it. Deployments that serve journals are configured through this so the
-    /// generation the engine reports is the build's, not a caller's guess.
+    /// A [`RestateConfig`] reaching Restate's ingress at `connection` and its
+    /// admin API at `admin_connection`, stamped with this build's drain
+    /// generation (FIG-3795): [`crate::formats::build_generation`]'s answer,
+    /// filled in here because lash-restate cannot see the format manifest
+    /// that derives it. Deployments that serve journals are configured
+    /// through this so the generation the engine reports is the build's, not
+    /// a caller's guess. The admin API is required: parked-root verbs and
+    /// park recovery run through it.
     pub fn config(
         connection: impl Into<RestateConnection>,
+        admin_connection: impl Into<RestateConnection>,
         authority: RestateAuthorityId,
     ) -> RestateConfig {
-        RestateConfig::new(connection, authority, crate::formats::build_generation())
+        RestateConfig::new(
+            connection,
+            admin_connection,
+            authority,
+            crate::formats::build_generation(),
+        )
     }
 
     /// The durable-format rows this engine registers with the facade's

@@ -170,8 +170,9 @@ impl lash_core::store::ControlIntentStore for CountingSessionStoreFactory {
     async fn claim_intent_application(
         &self,
         id: lash_core::store::ControlIntentId,
+        at_ms: u64,
     ) -> std::result::Result<lash_core::store::IntentApplication, lash_core::StoreError> {
-        self.inner.claim_intent_application(id).await
+        self.inner.claim_intent_application(id, at_ms).await
     }
 
     async fn acknowledge_intent(
@@ -1094,8 +1095,9 @@ impl lash_core::store::ControlIntentStore for NoByIdLookupFactory {
     async fn claim_intent_application(
         &self,
         id: lash_core::store::ControlIntentId,
+        at_ms: u64,
     ) -> std::result::Result<lash_core::store::IntentApplication, lash_core::StoreError> {
-        self.inner.claim_intent_application(id).await
+        self.inner.claim_intent_application(id, at_ms).await
     }
 
     async fn acknowledge_intent(

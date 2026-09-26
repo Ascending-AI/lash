@@ -102,8 +102,9 @@ impl lash::persistence::ControlIntentStore for DelegatingFactory {
     async fn claim_intent_application(
         &self,
         id: lash::persistence::ControlIntentId,
+        at_ms: u64,
     ) -> std::result::Result<lash::persistence::IntentApplication, StoreError> {
-        self.inner.claim_intent_application(id).await
+        self.inner.claim_intent_application(id, at_ms).await
     }
 
     async fn acknowledge_intent(

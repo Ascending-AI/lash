@@ -768,6 +768,12 @@ impl LashRuntime {
             .is_some_and(|(_, terminal)| terminal.is_some());
         let mut prepared = prepared;
         prepared.turn_pipeline.set_drive_commit(drive_commit);
+        // The commit clears the park of the root the turn runs under, the
+        // same root an abort of the turn parks (D2 §1.3 P3).
+        prepared.turn_pipeline.set_park_root(self.park_root(
+            scoped_effect_controller.execution_scope().logical_root(),
+            &trace_turn_id,
+        ));
         let queued_work_completion_trace =
             commit_effects.claim_settlement.queued.completions.clone();
         let turn_input_completion_trace = commit_effects

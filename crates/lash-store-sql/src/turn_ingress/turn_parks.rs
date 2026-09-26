@@ -2,9 +2,10 @@
 //! FIG-3659), one row per session whose turn aborted on a refusal that parks
 //! it.
 //!
-//! A park is live exactly while its turn is: any commit of the session clears
-//! it in the commit's transaction, as does a cancel that withdraws the parked
-//! turn's last held work, a queued-run settlement, and the session's deletion.
+//! A park names a logical root and is live exactly while that root is: any
+//! commit of one of the root's physical turns clears it in the commit's
+//! transaction, as do an operator's cancel or fork of the root, a queued-run
+//! settlement, and the session's deletion.
 //! Every clear issues its delete with `RETURNING`, so the transition's feed
 //! event — written in the same transaction — names the park that closed.
 //!
@@ -88,9 +89,9 @@ crate::statements! {
              WHERE session_id = ?1
              RETURNING turn_id, park_id";
 
-        /// Clear session `?1`'s park when it is turn `?2`'s: that turn
-        /// committed, so it is no longer parked. The returned row feeds the
-        /// `Unparked{TurnCommitted}` event.
+        /// Clear session `?1`'s park when it is root `?2`'s: one of that
+        /// root's physical turns committed, so it is no longer parked. The
+        /// returned row feeds the `Unparked{TurnCommitted}` event.
         delete_for_turn_returning = "DELETE FROM turn_parks
              WHERE session_id = ?1 AND turn_id = ?2
              RETURNING turn_id, park_id";

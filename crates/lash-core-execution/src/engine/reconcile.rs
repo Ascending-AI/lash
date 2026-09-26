@@ -33,6 +33,42 @@ pub struct ReconcileCursor {
     pub scopes: Option<(SessionId, crate::TurnId)>,
 }
 
+/// The tick ids one run of an engine's recovery interval hands
+/// [`SessionDriver::reconcile`](crate::SessionDriver::reconcile):
+/// `{engine}:{run}:{sequence}`, where `run` is drawn fresh each time an
+/// interval starts.
+///
+/// A drive ask is named after its tick, and an engine dedupes asks by name
+/// across its whole history, not per process: a tick id a restarted process
+/// reused would name the asks of the previous run's tick, and the engine
+/// would swallow them while their rows strand. The per-run nonce keeps every
+/// process's ticks, and so its asks, distinct.
+#[derive(Debug)]
+pub struct ReconcileTicks {
+    engine: &'static str,
+    run: String,
+    sequence: u64,
+}
+
+impl ReconcileTicks {
+    /// A fresh run of `engine`'s recovery interval.
+    #[must_use]
+    pub fn start(engine: &'static str) -> Self {
+        Self {
+            engine,
+            run: uuid::Uuid::new_v4().simple().to_string(),
+            sequence: 0,
+        }
+    }
+
+    /// The next tick's id.
+    pub fn next_tick(&mut self) -> String {
+        let tick = format!("{}:{}:{}", self.engine, self.run, self.sequence);
+        self.sequence = self.sequence.wrapping_add(1);
+        tick
+    }
+}
+
 /// The arm of a tick a failure came from.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ReconcileArm {

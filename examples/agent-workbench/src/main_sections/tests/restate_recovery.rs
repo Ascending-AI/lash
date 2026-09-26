@@ -2069,6 +2069,8 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
         Arc::clone(&stores.stores),
         lash::restate::config(
             ingress_url,
+            std::env::var("RESTATE_ADMIN_URL")
+                .unwrap_or_else(|_| "http://127.0.0.1:19071".to_string()),
             lash_restate::RestateAuthorityId::new(
                 std::env::var("RESTATE_AUTHORITY_ID").expect("Restate authority id"),
             )

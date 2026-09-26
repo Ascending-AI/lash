@@ -1862,5 +1862,9 @@ mod root_control {
     (cancel_or_fork_of_a_redriving_root_is_refused, "s7b-5"),
     (an_intent_survives_a_crash_at_every_gap_and_reconcile_completes_it, "s7b-6"),
     (engine_refusals_are_retained_and_listed, "s7b-7"),
+    (a_root_parked_on_a_later_physical_turn_is_cleared_by_its_commit, "s7b-16"),
+    (a_redrive_the_root_ran_past_is_never_applied_again, "s7b-17"),
+    (a_stale_paused_listing_never_reparks_a_resumed_root, "s7b-18"),
+    (a_parked_session_is_asked_to_drive_only_once_its_park_resolves, "s7b-19"),
     ]);
 }

@@ -600,3 +600,84 @@ pub(super) async fn fig3542_a_redriven_recovery_raises_the_recorded_count_once()
         "the follow-on answered on the redrive"
     );
 }
+
+/// FIG-3848 (B1): a root whose frame switch committed owes its follow-on, and
+/// parks as that follow-on is recovered. The park names the logical root —
+/// the one the follow-on's commit ends — so when a redrive under a restored
+/// build recovers the follow-on and commits it, that commit clears the park:
+/// the root is never left parked and terminal at once.
+#[tokio::test]
+pub(super) async fn fig3848_a_parked_root_owing_a_follow_on_is_cleared_when_the_follow_on_commits()
+{
+    let mut owed_run = Box::pin(owed_follow_on(
+        "fig3848-parked",
+        &["the switched frame's task"],
+        vec![switch_reply(0), text_reply("follow-on answer")],
+        1,
+    ))
+    .await;
+    let follow_on = owed(&owed_run.store)
+        .await
+        .expect("the switch owes its follow-on");
+    let root = lash_core::store::QueuedRunPosition::split_turn_id(&follow_on.follow_on_turn_id).0;
+    assert_eq!(root, TurnId::from("fig3848-parked"));
+    assert_ne!(
+        follow_on.follow_on_turn_id, root,
+        "the follow-on is a later physical turn"
+    );
+    let session = SessionId::from("root");
+    let store: Arc<dyn lash_core::store::RuntimePersistence> = owed_run.store.clone();
+    let park = store
+        .record_turn_park(&lash_core::store::TurnParkWrite::refusal(
+            session.clone(),
+            root.clone(),
+            lash_core::store::ParkReason::ReplayDivergence {
+                message: "the follow-on diverged under another build".into(),
+            },
+            1_000,
+        ))
+        .await
+        .expect("the root parks as its follow-on is recovered");
+    let factory = owed_run.backend.session_store_factory();
+    let redrive = factory
+        .open_root_intent(
+            &lash_core::store::RootIntentRequest {
+                session_id: session.clone(),
+                root: root.clone(),
+                park: park.park_id,
+                verb: lash_core::store::RootVerb::Redrive,
+            },
+            1_000,
+        )
+        .await
+        .expect("redrive under the restored build");
+    lash_core::drive::apply_control_intent(
+        factory.as_ref(),
+        &lash_core::engine::NoEngineControl,
+        &lash_core::NoSessionWork::new(),
+        &lash_core::engine::NoScopeClose,
+        &redrive,
+        owed_run.clock.as_ref(),
+    )
+    .await
+    .expect("apply the redrive");
+
+    let outcome = drive(&mut owed_run, "fig3848-redrive")
+        .await
+        .expect("the redriven drive runs to its stop");
+    assert_eq!(outcome.stop, lash_core::engine::DriveStop::Idle);
+    assert_eq!(owed(&owed_run.store).await, None);
+    assert!(
+        factory
+            .root_terminal(&session, &root)
+            .await
+            .expect("read the root's terminal")
+            .is_some(),
+        "the follow-on's commit ends the root"
+    );
+    assert_eq!(
+        store.load_turn_park(&session).await.expect("read the park"),
+        None,
+        "the follow-on's commit clears the root's park"
+    );
+}

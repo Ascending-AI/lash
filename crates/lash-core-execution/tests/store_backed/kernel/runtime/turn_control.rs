@@ -205,6 +205,7 @@ mod tests {
         async fn claim_intent_application(
             &self,
             _id: crate::store::ControlIntentId,
+            _at_ms: u64,
         ) -> std::result::Result<crate::store::IntentApplication, crate::StoreError> {
             Err(crate::StoreError::UnsupportedStoreOperation {
                 operation: "ControlIntentStore::claim_intent_application",

@@ -156,7 +156,12 @@ pub struct StoredDriveEpoch {
     /// The `CloseSession` intent the session is closing under (FIG-3600 S7):
     /// a closing session admits nothing and seals nothing.
     pub closing: Option<super::ControlIntentId>,
-    /// An unacknowledged cancel or fork still owns release of the old execution.
+    /// A cancel or fork still owes its engine half — the release of the
+    /// root's old execution — and will retry it: it is pending, or failed and
+    /// retryable. The session admits nothing until the release lands. A verb
+    /// the engine refused for good owes nothing more and holds nothing back:
+    /// its store half already ended the root and raised the epoch past the
+    /// old execution's fence, so that execution can neither commit nor park.
     pub control_pending: bool,
 }
 

@@ -7,8 +7,9 @@
 //! operator already ended leaves nothing behind.
 
 use lash_core_execution::store::{
-    ControlIntentId, ParkEventKind, StoreError, StoredTurnParkHead, TurnPark, TurnParkWrite,
-    TurnParkWriteDecision, UnparkCause, decide_turn_park_write,
+    ControlIntent, ControlIntentId, ControlIntentState, ParkEventKind, StoreError,
+    StoredParkRedrive, StoredTurnParkHead, TurnPark, TurnParkWrite, TurnParkWriteDecision,
+    UnparkCause, decide_turn_park_write,
 };
 use lash_sansio::SessionId;
 use rusqlite::{Connection, OptionalExtension, params};
@@ -96,20 +97,29 @@ pub(crate) fn turn_park_conn(
     .transpose()
 }
 
-/// The head a park write is decided against: the stored park, and whether
-/// the redrive it names is still open.
-fn stored_head(conn: &Connection, park: &TurnPark) -> Result<StoredTurnParkHead, StoreError> {
-    let redrive_open = match park.resume_intent {
-        Some(intent) => crate::session_roots::load_intent_conn(conn, intent)?
-            .is_some_and(|intent| intent.state.is_open()),
-        None => false,
+/// The head a park write is decided against: the stored park, and the
+/// redrive it names as stored.
+fn stored_head(
+    conn: &Connection,
+    park: &TurnPark,
+) -> Result<(StoredTurnParkHead, Option<ControlIntent>), StoreError> {
+    let redrive = match park.resume_intent {
+        Some(intent) => crate::session_roots::load_intent_conn(conn, intent)?,
+        None => None,
     };
-    Ok(StoredTurnParkHead {
-        root: park.turn_id.clone(),
-        engine: park.engine.clone(),
-        redrive_open,
-        redrive_requested: park.resume_intent.is_some(),
-    })
+    Ok((
+        StoredTurnParkHead {
+            root: park.turn_id.clone(),
+            engine: park.engine.clone(),
+            redrive: park.resume_intent.map(|intent| StoredParkRedrive {
+                intent,
+                open: redrive
+                    .as_ref()
+                    .is_some_and(|redrive| redrive.state.is_open()),
+            }),
+        },
+        redrive,
+    ))
 }
 
 /// Record `write` on `conn` (inside the caller's transaction): refuse a
@@ -145,10 +155,13 @@ pub(crate) fn record_turn_park_conn(
         .retired_executable_generation_key()
         .map(str::to_string);
     let stored = turn_park_conn(conn, session_id)?;
-    let head = stored
-        .as_ref()
-        .map(|park| stored_head(conn, park))
-        .transpose()?;
+    let (head, redrive) = match stored.as_ref() {
+        Some(park) => {
+            let (head, redrive) = stored_head(conn, park)?;
+            (Some(head), redrive)
+        }
+        None => (None, None),
+    };
     match (decide_turn_park_write(head.as_ref(), write), stored) {
         (TurnParkWriteDecision::Unchanged, Some(park)) => return Ok(park),
         (TurnParkWriteDecision::AttachEngine, Some(mut park)) => {
@@ -177,6 +190,16 @@ pub(crate) fn record_turn_park_conn(
                 ],
             )
             .map_err(sqlite_error)?;
+            // The root ran past a redrive the park still named open: its
+            // resume reached the execution and only its acknowledgement was
+            // lost. Settle it here, so it never resumes the root again.
+            if let Some(open) = redrive.filter(|redrive| redrive.state.is_open()) {
+                let mut settled = open.clone();
+                settled.state = ControlIntentState::Acknowledged { at_ms: write.at_ms };
+                if !crate::session_roots::write_intent_state_conn(conn, &open, &settled)? {
+                    return Err(StoreError::Contended);
+                }
+            }
             park.reason = write.reason.clone();
             park.last_refused_ms = write.at_ms;
             park.attempts = park.attempts.saturating_add(1);

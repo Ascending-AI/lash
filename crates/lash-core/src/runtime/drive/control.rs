@@ -9,6 +9,24 @@
 //!
 //! It names no engine: the engine's part is a [`SessionControlEngine`], and
 //! the scope owner is a [`ScopeCloseSink`].
+//!
+//! **A failed engine half.** A retryable failure keeps the intent open:
+//! reconciliation re-applies it, and while a cancel or fork is open its
+//! session admits nothing, so the next root never runs beside the old
+//! execution it has yet to release. A permanent failure — the engine refused
+//! for good, or the root's evidence is missing — closes the intent
+//! `Failed { retryable: false }`: it is surfaced typed on the intent ledger
+//! for an operator, and it never wedges the session. Its store half already
+//! ended the root and raised the drive epoch past the old execution's fence,
+//! so that execution can neither commit nor park; the session drives its
+//! next root, and reconciliation closes the ended root's scope as it would
+//! an acknowledged verb's.
+//!
+//! **A redrive** applies only while the root's park still names it; the
+//! claim settles one the root ran past (see
+//! [`decide_intent_application`](crate::store::decide_intent_application)),
+//! and a cancel or fork supersedes every redrive of the root still open, so
+//! a redrive never resumes a root after it re-parked or ended.
 
 use crate::engine::{EngineRefusal, RootRef, ScopeCloseSink, SessionControlEngine};
 use crate::store::{
@@ -39,7 +57,10 @@ pub async fn apply_control_intent(
     intent: &ControlIntent,
     clock: &dyn Clock,
 ) -> Result<ControlIntentState, StoreError> {
-    let intent = match stores.claim_intent_application(intent.id).await? {
+    let intent = match stores
+        .claim_intent_application(intent.id, clock.timestamp_ms())
+        .await?
+    {
         IntentApplication::Apply(intent) => intent,
         IntentApplication::Superseded(intent) | IntentApplication::Done(intent) => {
             return Ok(intent.state);

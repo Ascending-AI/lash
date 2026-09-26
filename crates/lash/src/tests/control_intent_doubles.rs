@@ -89,6 +89,7 @@ impl lash_core::store::ControlIntentStore for ReusableStoreFactory {
     async fn claim_intent_application(
         &self,
         _id: lash_core::store::ControlIntentId,
+        _at_ms: u64,
     ) -> std::result::Result<lash_core::store::IntentApplication, lash_core::StoreError> {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
             operation: "ControlIntentStore::claim_intent_application",
@@ -142,6 +143,7 @@ impl lash_core::store::ControlIntentStore for RecordingStoreFactory {
     async fn claim_intent_application(
         &self,
         _id: lash_core::store::ControlIntentId,
+        _at_ms: u64,
     ) -> std::result::Result<lash_core::store::IntentApplication, lash_core::StoreError> {
         Err(lash_core::StoreError::UnsupportedStoreOperation {
             operation: "ControlIntentStore::claim_intent_application",
@@ -194,9 +196,11 @@ impl lash_core::store::ControlIntentStore for DeletingStoreFactory {
     async fn claim_intent_application(
         &self,
         id: lash_core::store::ControlIntentId,
+        at_ms: u64,
     ) -> std::result::Result<lash_core::store::IntentApplication, lash_core::StoreError> {
         self.intents.rewrite(id, |intent| {
-            let application = decide_intent_application(intent.clone());
+            // It keeps no parks: its intents are session closes.
+            let application = decide_intent_application(intent.clone(), None, at_ms);
             if let IntentApplication::Apply(applied) = &application {
                 *intent = applied.clone();
             }

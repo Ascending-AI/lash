@@ -236,15 +236,39 @@ impl IntentApplication {
     }
 }
 
-/// Decide a claim of an intent's application against its stored state:
-/// the new state and attempt count to write, if any, and the answer.
+/// Decide a claim of an intent's application at `at_ms` against its stored
+/// state and, for a redrive, the session's park `park` as the claim's
+/// transaction read it. The answer carries the intent as it is to be stored:
+/// a store writes it when it differs from `stored`.
+///
+/// A redrive applies only while its park still names it — the same root, the
+/// same park, and the park's `resume_intent` this redrive. Otherwise the root
+/// ran past it: it committed (the park is gone), or it parked again (a
+/// re-park clears `resume_intent`), so resuming now would wake an execution
+/// that already re-decided, or one the store has ended. Such a redrive is
+/// settled `Acknowledged` at `at_ms` without running and answered `Done`.
 #[must_use]
-pub fn decide_intent_application(stored: ControlIntent) -> IntentApplication {
+pub fn decide_intent_application(
+    stored: ControlIntent,
+    park: Option<&super::TurnPark>,
+    at_ms: u64,
+) -> IntentApplication {
     match stored.state {
         ControlIntentState::Pending
         | ControlIntentState::Failed {
             retryable: true, ..
         } => {
+            if let ControlIntentKind::Redrive { root, park: parked } = &stored.kind
+                && !park.is_some_and(|park| {
+                    park.turn_id == *root
+                        && park.park_id == *parked
+                        && park.resume_intent == Some(stored.id)
+                })
+            {
+                let mut settled = stored;
+                settled.state = ControlIntentState::Acknowledged { at_ms };
+                return IntentApplication::Done(settled);
+            }
             let mut claimed = stored;
             claimed.attempts = claimed.attempts.saturating_add(1);
             IntentApplication::Apply(claimed)
@@ -390,8 +414,10 @@ pub struct RootIntentPlan {
 
 /// Decide `request` against what its transaction read (D2 §1.4, §2): the
 /// park must be the root's and the one the caller saw; no other cancel or
-/// fork may be open; a cancel or fork supersedes a redrive that has not
-/// resumed the root yet and refuses one that has.
+/// fork may be open; a cancel or fork refuses while the redrive the park
+/// names has resumed the root, and otherwise supersedes every redrive of the
+/// root still open — the one the park names and any older one a re-park left
+/// behind — so no redrive can resume the root after it ends.
 ///
 /// # Errors
 /// The refusal the verb answers; nothing is written.
@@ -431,15 +457,30 @@ pub fn decide_root_intent(
     let redrive = facts.resume.filter(|intent| {
         intent.state.is_open() || matches!(intent.state, ControlIntentState::Acknowledged { .. })
     });
-    let supersede = match (request.verb, redrive) {
-        (_, None) => Vec::new(),
+    match (request.verb, redrive) {
         (RootVerb::Redrive, Some(redrive)) => {
             return Err(RootIntentRefused::Redriving { intent: redrive.id });
         }
-        (_, Some(redrive)) if redrive.state.is_open() => vec![redrive.clone()],
-        (_, Some(redrive)) => {
+        (_, Some(redrive)) if !redrive.state.is_open() => {
             return Err(RootIntentRefused::Redriving { intent: redrive.id });
         }
+        _ => {}
+    }
+    let supersede = if request.verb == RootVerb::Redrive {
+        Vec::new()
+    } else {
+        let mut open: Vec<ControlIntent> = facts
+            .open_verbs
+            .iter()
+            .filter(root_verb)
+            .filter(|intent| matches!(intent.kind, ControlIntentKind::Redrive { .. }))
+            .cloned()
+            .collect();
+        if let Some(named) = redrive.filter(|named| !open.iter().any(|o| o.id == named.id)) {
+            open.push(named.clone());
+        }
+        open.sort_by_key(|intent| intent.id);
+        open
     };
     Ok(RootIntentPlan {
         park: park.clone(),
@@ -490,12 +531,15 @@ pub trait ControlIntentStore: Send + Sync {
         at_ms: u64,
     ) -> Result<Option<ControlIntent>, super::StoreError>;
 
-    /// Claim the application of intent `id`'s engine half: re-read its state
-    /// in a transaction and count the attempt when it is open. An unknown id
-    /// is `StoreError::ControlIntentUnknown`.
+    /// Claim the application of intent `id`'s engine half at `at_ms`:
+    /// re-read its state, and for a redrive its session's park, in one
+    /// transaction, and write what [`decide_intent_application`] decides —
+    /// the attempt counted when it applies, or a redrive the root ran past
+    /// settled. An unknown id is `StoreError::ControlIntentUnknown`.
     async fn claim_intent_application(
         &self,
         id: ControlIntentId,
+        at_ms: u64,
     ) -> Result<IntentApplication, super::StoreError>;
 
     /// Acknowledge intent `id`'s engine half. A no-op once it is not open.
@@ -578,35 +622,134 @@ mod tests {
     #[test]
     fn an_open_intent_is_applied_with_its_attempt_counted_and_a_closed_one_is_not() {
         let IntentApplication::Apply(applied) =
-            decide_intent_application(intent(ControlIntentState::Pending))
+            decide_intent_application(intent(ControlIntentState::Pending), None, 7)
         else {
             panic!("a pending intent applies");
         };
         assert_eq!(applied.attempts, 1);
         assert!(matches!(
-            decide_intent_application(intent(ControlIntentState::Failed {
-                last_error: "x".into(),
-                retryable: true
-            })),
+            decide_intent_application(
+                intent(ControlIntentState::Failed {
+                    last_error: "x".into(),
+                    retryable: true
+                }),
+                None,
+                7
+            ),
             IntentApplication::Apply(_)
         ));
         assert!(matches!(
-            decide_intent_application(intent(ControlIntentState::Superseded {
-                by: ControlIntentId::from_sequence(9)
-            })),
+            decide_intent_application(
+                intent(ControlIntentState::Superseded {
+                    by: ControlIntentId::from_sequence(9)
+                }),
+                None,
+                7
+            ),
             IntentApplication::Superseded(_)
         ));
         assert!(matches!(
-            decide_intent_application(intent(ControlIntentState::Acknowledged { at_ms: 2 })),
+            decide_intent_application(
+                intent(ControlIntentState::Acknowledged { at_ms: 2 }),
+                None,
+                7
+            ),
             IntentApplication::Done(_)
         ));
         assert!(matches!(
-            decide_intent_application(intent(ControlIntentState::Failed {
-                last_error: "x".into(),
-                retryable: false
-            })),
+            decide_intent_application(
+                intent(ControlIntentState::Failed {
+                    last_error: "x".into(),
+                    retryable: false
+                }),
+                None,
+                7
+            ),
             IntentApplication::Done(_)
         ));
+    }
+
+    fn redrive(state: ControlIntentState) -> ControlIntent {
+        ControlIntent {
+            kind: ControlIntentKind::Redrive {
+                root: TurnId::from("r"),
+                park: super::super::ParkId::from_feed_sequence(3),
+            },
+            ..intent(state)
+        }
+    }
+
+    fn park(resume_intent: Option<u64>) -> super::super::TurnPark {
+        super::super::TurnPark {
+            session_id: SessionId::from("s"),
+            turn_id: TurnId::from("r"),
+            reason: super::super::ParkReason::ReplayDivergence {
+                message: "m".into(),
+            },
+            park_id: super::super::ParkId::from_feed_sequence(3),
+            since_ms: 1,
+            last_refused_ms: 1,
+            attempts: 1,
+            engine: None,
+            resume_intent: resume_intent.map(ControlIntentId::from_sequence),
+        }
+    }
+
+    /// H2 (FIG-3848): a redrive applies only while its park names it; one
+    /// the root ran past — the park gone, or re-parked without it — is
+    /// settled without resuming anything.
+    #[test]
+    fn a_redrive_applies_only_while_its_park_names_it() {
+        assert!(matches!(
+            decide_intent_application(
+                redrive(ControlIntentState::Pending),
+                Some(&park(Some(4))),
+                7
+            ),
+            IntentApplication::Apply(_)
+        ));
+        for stale in [None, Some(park(None)), Some(park(Some(9)))] {
+            let IntentApplication::Done(settled) = decide_intent_application(
+                redrive(ControlIntentState::Failed {
+                    last_error: "timed out".into(),
+                    retryable: true,
+                }),
+                stale.as_ref(),
+                7,
+            ) else {
+                panic!("a redrive its park does not name never applies");
+            };
+            assert_eq!(settled.state, ControlIntentState::Acknowledged { at_ms: 7 });
+            assert_eq!(settled.attempts, 0);
+        }
+    }
+
+    /// H2: a cancel or fork supersedes every open redrive of its root, not
+    /// only the one its park names.
+    #[test]
+    fn a_cancel_supersedes_every_open_redrive_of_its_root() {
+        let orphaned = redrive(ControlIntentState::Failed {
+            last_error: "timed out".into(),
+            retryable: true,
+        });
+        let request = RootIntentRequest {
+            session_id: SessionId::from("s"),
+            root: TurnId::from("r"),
+            park: super::super::ParkId::from_feed_sequence(3),
+            verb: RootVerb::Cancel,
+        };
+        let reparked = park(None);
+        let plan = decide_root_intent(
+            &request,
+            &RootIntentFacts {
+                closing: None,
+                park: Some(&reparked),
+                open_verbs: std::slice::from_ref(&orphaned),
+                resume: None,
+            },
+        )
+        .expect("cancel of a re-parked root");
+        assert_eq!(plan.supersede, vec![orphaned]);
     }
 
     #[test]

@@ -792,6 +792,7 @@ async fn commit_cas_livelock(
             session_execution_lease_fence: Some(holder.fence()),
             drive_fence: None,
             root_terminal: None,
+            park_root: None,
             release_session_execution_lease: None,
             config: state.config,
             execution_config: None,
