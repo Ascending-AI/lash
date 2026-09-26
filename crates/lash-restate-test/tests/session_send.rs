@@ -306,7 +306,11 @@ async fn withdraw_while_queued_vs_cancel_while_running() {
         .into_iter()
         .find_map(|view| {
             view.target
-                .strip_prefix(&format!("{TURN_DRIVER_SERVICE}/{}:", session_id.as_str()))
+                .strip_prefix(&format!(
+                    "{TURN_DRIVER_SERVICE}/{}:{}",
+                    session_id.as_str().len(),
+                    session_id.as_str()
+                ))
                 .and_then(|rest| rest.strip_suffix("/run"))
                 .map(str::to_owned)
         })

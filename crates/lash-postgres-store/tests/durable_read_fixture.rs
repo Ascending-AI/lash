@@ -183,6 +183,9 @@ const FOLLOW_ON_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const PROCESS_IDENTITY_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-129-5f42c383a/postgres-expected.json",
 ];
+const LOGICAL_ROOT_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-130-d2906696f/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -323,7 +326,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 139);
+    assert_eq!(PostgresStorage::schema_version(), 140);
     let fixture_database_url = fixture_database_url(&database_url);
     // The committed dump was captured at the previous component; advance it
     // the way a deployment does (FIG-3816).
@@ -636,11 +639,14 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
              ADD COLUMN IF NOT EXISTS drive_epoch BIGINT NOT NULL DEFAULT 0,
              ADD COLUMN IF NOT EXISTS drive_admission_id TEXT,
              ADD COLUMN IF NOT EXISTS drive_root_start TEXT,
-             ADD COLUMN IF NOT EXISTS admission_base_checkpoint_ref TEXT;",
+             ADD COLUMN IF NOT EXISTS admission_base_checkpoint_ref TEXT,
+             ADD COLUMN IF NOT EXISTS closing_intent BIGINT;",
     )
     .execute(&pool)
     .await
-    .expect("add the drive epoch and the admission base to the session metadata");
+    .expect(
+        "add the drive epoch, the admission base and the closing intent to the session metadata",
+    );
     // Component 128 (FIG-3659) reshapes the parked-turn row and adds the feed
     // clock and event tables. The refusal fixture's park row predates them,
     // so the park catalog is discarded and recreated from the authoritative
@@ -965,6 +971,9 @@ fn schema_table_ddl(table: &str) -> &'static str {
 /// The ingress table plus its three class-level indexes: `schema_table_ddl`
 /// stops at the CREATE TABLE's semicolon, and worker opens no longer backfill
 /// missing objects (FIG-3797), so the refresh must install the indexes itself.
+/// The span also carries the logical-root family (component 140, FIG-3600),
+/// which `schema.sql` declares between the ingress and the attachment
+/// manifest; every statement in it is `IF NOT EXISTS`.
 fn schema_session_ingress_ddl() -> &'static str {
     let ddl = PostgresStorage::schema_ddl();
     let start = ddl

@@ -150,6 +150,42 @@ impl lash_core::store::DriveEpochStore for CommitRetryStore {
 }
 
 #[async_trait::async_trait]
+impl lash_core::store::RootStore for CommitRetryStore {
+    async fn root_terminal(
+        &self,
+        session_id: &SessionId,
+        root: &lash_core::TurnId,
+    ) -> Result<Option<lash_core::store::RootTerminal>, lash_core::StoreError> {
+        self.inner.root_terminal(session_id, root).await
+    }
+
+    async fn root_of_input(
+        &self,
+        session_id: &SessionId,
+        input: &lash_core::InputId,
+    ) -> Result<Option<lash_core::TurnId>, lash_core::StoreError> {
+        self.inner.root_of_input(session_id, input).await
+    }
+
+    async fn root_binding(
+        &self,
+        session_id: &SessionId,
+        input: &lash_core::InputId,
+    ) -> Result<Option<lash_core::TurnId>, lash_core::StoreError> {
+        self.inner.root_binding(session_id, input).await
+    }
+
+    async fn bind_root_inputs(
+        &self,
+        session_id: &SessionId,
+        root: &lash_core::TurnId,
+        inputs: &[lash_core::InputId],
+    ) -> Result<(), lash_core::StoreError> {
+        self.inner.bind_root_inputs(session_id, root, inputs).await
+    }
+}
+
+#[async_trait::async_trait]
 impl lash_core::QueuedWorkStore for CommitRetryStore {
     async fn select_queued_run(
         &self,

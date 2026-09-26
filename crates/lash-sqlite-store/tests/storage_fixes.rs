@@ -584,7 +584,7 @@ async fn unsupported_schema_error_reports_real_versions() {
         let conn = rusqlite::Connection::open(&path).expect("open raw");
         // Create a user object and stamp a bogus, unsupported user_version so
         // the store's open path takes the reject branch.
-        conn.execute_batch("CREATE TABLE legacy (id INTEGER); PRAGMA user_version = 99;")
+        conn.execute_batch("CREATE TABLE legacy (id INTEGER); PRAGMA user_version = 1099;")
             .expect("seed legacy schema");
     }
 
@@ -593,12 +593,12 @@ async fn unsupported_schema_error_reports_real_versions() {
         Err(err) => err.to_string(),
     };
     assert!(
-        message.contains("99"),
-        "error must report the found version 99: {message}"
+        message.contains("1099"),
+        "error must report the found version 1099: {message}"
     );
     assert!(
-        message.contains("schema version 98"),
-        "error must report the real expected version 98: {message}"
+        message.contains("schema version 99"),
+        "error must report the real expected version 99: {message}"
     );
     assert!(
         !message.contains("version 1 only"),
@@ -634,7 +634,7 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
     let user_version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("read user_version");
-    assert_eq!(user_version, 98);
+    assert_eq!(user_version, 99);
     let payload_hash_not_null: i32 = conn
         .query_row(
             "SELECT \"notnull\" FROM pragma_table_info('usage_deltas')
@@ -758,7 +758,7 @@ async fn plugin_state_cutover_refuses_snapshot_predecessor_without_mutation() {
         Err(error) => error.to_string(),
     };
     assert!(
-        error.contains("schema version 98") && error.contains("version 51"),
+        error.contains("schema version 99") && error.contains("version 51"),
         "{error}"
     );
     let conn = rusqlite::Connection::open(&path).unwrap();

@@ -112,6 +112,20 @@ const SQLITE_RESIDUE_QUERIES: &[(&str, &str)] = &[
         "turn_parks",
         "SELECT * FROM turn_parks WHERE session_id = ?1",
     ),
+    // The logical-root family (FIG-3600 S7): a root's record and terminal
+    // evidence, its input bindings, and the session's control intents.
+    (
+        "session_roots",
+        "SELECT * FROM session_roots WHERE session_id = ?1",
+    ),
+    (
+        "session_root_inputs",
+        "SELECT * FROM session_root_inputs WHERE session_id = ?1",
+    ),
+    (
+        "control_intents",
+        "SELECT * FROM control_intents WHERE session_id = ?1",
+    ),
     (
         "pending_turn_inputs",
         "SELECT * FROM pending_turn_inputs WHERE session_id = ?1",
@@ -217,6 +231,18 @@ const POSTGRES_RESIDUE_QUERIES: &[(&str, &str)] = &[
     (
         "turn_parks",
         "SELECT to_jsonb(t)::text FROM lash_turn_parks t WHERE session_id = $1",
+    ),
+    (
+        "session_roots",
+        "SELECT to_jsonb(t)::text FROM lash_session_roots t WHERE session_id = $1",
+    ),
+    (
+        "session_root_inputs",
+        "SELECT to_jsonb(t)::text FROM lash_session_root_inputs t WHERE session_id = $1",
+    ),
+    (
+        "control_intents",
+        "SELECT to_jsonb(t)::text FROM lash_control_intents t WHERE session_id = $1",
     ),
     (
         "pending_turn_inputs",

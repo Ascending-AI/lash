@@ -28,7 +28,7 @@ const SCANNED_ROOTS: &[&str] = &[
 /// Files that legitimately spell the vocabulary, each for a reason that is not
 /// a query predicate.
 ///
-/// - The two schema files declare the durable `CHECK` vocabulary and its
+/// - The schema files declare the durable `CHECK` vocabulary and its
 ///   partial indexes. That surface is owned by FIG-2811 and is deliberately out
 ///   of scope here: `schema_congruence` matches these declarations as literal
 ///   text, so generating them would move the gate rather than satisfy it.
@@ -37,10 +37,15 @@ const SCANNED_ROOTS: &[&str] = &[
 /// - `schema/migrations.rs` carries that same DDL as the versioned migration
 ///   arms' executable statements — the `113 -> 114` arm's `ADD CONSTRAINT`
 ///   text is the `schema.sql` declaration verbatim, not a query predicate.
+/// - `migrate.rs` carries the `lash migrate` expand steps; the `0140` step
+///   creates the logical-root family exactly as `schema.sql` declares it,
+///   `CHECK` vocabulary included.
 const EXEMPT_FILES: &[&str] = &[
     "lash-sqlite-store/src/schema.rs",
+    "lash-sqlite-store/src/schema_fragments.rs",
     "lash-core/src/store_backend_support/required_constraints.rs",
     "lash-postgres-store/src/postgres/schema/migrations.rs",
+    "lash-postgres-store/src/postgres/migrate.rs",
 ];
 
 #[expect(

@@ -460,6 +460,14 @@ pub enum RuntimeEffectCommand {
     ResolveTurnConfig {
         root: crate::TurnId,
     },
+    /// Close a logical root's scope after its terminal evidence (FIG-3600
+    /// S7, FIG-3607 item 7). Recorded under the root's scope at
+    /// [`drive_close_root_replay_key`](crate::engine::drive_close_root_replay_key),
+    /// so a crash between the root's terminal commit and its close re-runs
+    /// the close; the session is the scope's.
+    CloseRootScope {
+        root: crate::TurnId,
+    },
     Checkpoint {
         checkpoint: CheckpointKind,
     },
@@ -559,6 +567,7 @@ impl RuntimeEffectCommand {
             Self::DrawRootStart { .. } => RuntimeEffectKind::DrawRootStart,
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
+            Self::CloseRootScope { .. } => RuntimeEffectKind::CloseRootScope,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
             Self::LoadExecutionEnv { .. } => RuntimeEffectKind::LoadExecutionEnv,
@@ -1215,6 +1224,10 @@ pub enum RuntimeEffectOutcome {
     ResolveTurnConfig {
         config: Box<crate::PersistedSessionConfig>,
     },
+    /// The terminal evidence of the root the close closed.
+    CloseRootScope {
+        terminal: Box<crate::store::RootTerminal>,
+    },
     Checkpoint {
         result: CheckpointOutcome,
         #[serde(default)]
@@ -1546,30 +1559,6 @@ impl RuntimeEffectOutcome {
         }
     }
 
-    pub fn into_accepted_turn_input(
-        self,
-    ) -> Result<crate::PendingTurnInput, RuntimeEffectControllerError> {
-        match self {
-            Self::AcceptTurnInput { accepted } => Ok(*accepted),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::AcceptTurnInput,
-                other.kind(),
-            )),
-        }
-    }
-
-    pub fn into_accepted_turn_input_drive(
-        self,
-    ) -> Result<crate::AcceptedTurnInputDrive, RuntimeEffectControllerError> {
-        match self {
-            Self::ClaimAcceptedTurnInput { drive } => Ok(drive),
-            other => Err(RuntimeEffectControllerError::wrong_outcome(
-                RuntimeEffectKind::ClaimAcceptedTurnInput,
-                other.kind(),
-            )),
-        }
-    }
-
     pub fn into_exec_code(
         self,
     ) -> Result<Result<ExecResponse, crate::ExecCodeFailure>, RuntimeEffectControllerError> {
@@ -1684,6 +1673,7 @@ impl RuntimeEffectOutcome {
             Self::DrawRootStart { .. } => RuntimeEffectKind::DrawRootStart,
             Self::SealDriveAdmission { .. } => RuntimeEffectKind::SealDriveAdmission,
             Self::ResolveTurnConfig { .. } => RuntimeEffectKind::ResolveTurnConfig,
+            Self::CloseRootScope { .. } => RuntimeEffectKind::CloseRootScope,
             Self::Checkpoint { .. } => RuntimeEffectKind::Checkpoint,
             Self::SyncExecutionEnvironment { .. } => RuntimeEffectKind::SyncExecutionEnvironment,
             Self::LoadExecutionEnv { .. } => RuntimeEffectKind::LoadExecutionEnv,

@@ -125,6 +125,22 @@ async fn a_faulted_doubles_unbound_twin_sees_the_fault() {
             self.inner.turn_park_feed(after, limit).await
         }
 
+        async fn root_terminal(
+            &self,
+            session_id: &crate::SessionId,
+            root: &crate::TurnId,
+        ) -> Result<Option<crate::store::RootTerminal>, crate::StoreError> {
+            self.inner.root_terminal(session_id, root).await
+        }
+
+        async fn list_open_control_intents(
+            &self,
+            after: Option<crate::store::ControlIntentId>,
+            limit: std::num::NonZeroUsize,
+        ) -> Result<Vec<crate::store::ControlIntent>, crate::StoreError> {
+            self.inner.list_open_control_intents(after, limit).await
+        }
+
         async fn compact_turn_park_feed(
             &self,
             through: crate::store::ParkFeedCursor,

@@ -650,7 +650,8 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
             | RuntimeEffectCommand::AdmitDrive { .. }
             | RuntimeEffectCommand::DrawRootStart { .. }
             | RuntimeEffectCommand::SealDriveAdmission { .. }
-            | RuntimeEffectCommand::ResolveTurnConfig { .. }) => {
+            | RuntimeEffectCommand::ResolveTurnConfig { .. }
+            | RuntimeEffectCommand::CloseRootScope { .. }) => {
                 local_executor
                     .execute(RuntimeEffectEnvelope::new(envelope.invocation, command))
                     .await

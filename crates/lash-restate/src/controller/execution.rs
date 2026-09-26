@@ -191,11 +191,13 @@ pub(crate) fn restate_effect_execution(
         // store: a store that did not answer is this attempt's fault, so the
         // step runs again, and only a verdict is ever recorded (FIG-3600).
         // A root's claim is the same: its re-admitted root would replay a
-        // recorded store fault on every later drive.
+        // recorded store fault on every later drive. So is a root's scope
+        // close: an owner that did not acknowledge it closes it again.
         command @ (RuntimeEffectCommand::LoadExecutionEnv { .. }
         | RuntimeEffectCommand::AdmitDrive { .. }
         | RuntimeEffectCommand::SealDriveAdmission { .. }
         | RuntimeEffectCommand::ClaimAcceptedTurnInput { .. }
+        | RuntimeEffectCommand::CloseRootScope { .. }
         | RuntimeEffectCommand::AssistantResponseHooks { .. }
         | RuntimeEffectCommand::SyncExecutionEnvironment
         | RuntimeEffectCommand::LlmCall { .. }) => RestateEffectExecution::JournaledRun {

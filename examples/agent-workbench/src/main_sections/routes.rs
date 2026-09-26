@@ -605,7 +605,7 @@ pub(crate) async fn add_account(
         "api.accounts.add",
         json!({ "slug": summary.slug, "authority": summary.authority }),
     );
-    enqueue_tool_catalog_refresh(&state, "account_added").await?;
+    Box::pin(enqueue_tool_catalog_refresh(&state, "account_added")).await?;
     state.push_message(
         "event",
         format!("connected mock account `{}`", summary.authority),
@@ -622,7 +622,7 @@ pub(crate) async fn delete_account(
         .remove_account(&slug)
         .map_err(AppError::not_found)?;
     state.trace("api.accounts.remove", json!({ "slug": slug }));
-    enqueue_tool_catalog_refresh(&state, "account_removed").await?;
+    Box::pin(enqueue_tool_catalog_refresh(&state, "account_removed")).await?;
     state.push_message("event", format!("removed mock account `inbox.{slug}`"));
     Ok(Json(CommandAccepted { accepted: true }))
 }
@@ -668,20 +668,17 @@ pub(crate) async fn enqueue_tool_catalog_refresh(
         .map_err(|error| {
             state.session_admission_error(&session_id, "mail.tool_catalog.refresh", error)
         })?;
-    let receipt = session
-        .admin()
-        .commands()
-        .refresh_tool_catalog(
+    let receipt = Box::pin(session.admin().commands().refresh_tool_catalog(
+        reason,
+        format!(
+            "workbench-refresh-tool-catalog:{}:{}:{}",
+            session_id,
             reason,
-            format!(
-                "workbench-refresh-tool-catalog:{}:{}:{}",
-                session_id,
-                reason,
-                uuid::Uuid::new_v4()
-            ),
-        )
-        .await
-        .map_err(AppError::runtime)?;
+            uuid::Uuid::new_v4()
+        ),
+    ))
+    .await
+    .map_err(AppError::runtime)?;
     session.close().await.map_err(AppError::session_open)?;
     state.trace_for_session(
         &session_id,

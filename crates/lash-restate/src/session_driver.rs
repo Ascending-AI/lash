@@ -103,7 +103,11 @@ use crate::{
 /// Generation 3 (FIG-3600 S7-A): `LashSession` reads a root's recorded
 /// outcome through `LashTurn`'s `outcome` handler when its `run` call ends
 /// without one.
-pub const LASH_SESSION_DRIVE_VERSION: u32 = 3;
+///
+/// Generation 4 (FIG-3600 S7-A): a journaled admission or drive stop that
+/// names a terminal root carries the root's terminal kind and, when a head
+/// commit ended it, that commit, in place of the commit alone.
+pub const LASH_SESSION_DRIVE_VERSION: u32 = 4;
 
 /// The drive handler's name on `LashSession`.
 const DRIVE_HANDLER: &str = "drive";
@@ -173,8 +177,46 @@ fn check_generation(
 
 /// The `LashTurn` workflow key of `root` in `session`: one workflow per
 /// logical root, so a replay of the session's drive re-calls the same root.
+///
+/// The key is `{len}:{session}{root}`, where `len` is the session id's length
+/// in bytes, so it parses back to exactly one `(session, root)` whatever
+/// either id contains ([`parse_turn_workflow_key`]): reconciliation maps a
+/// paused `LashTurn` invocation to its root by its key alone.
 pub(crate) fn turn_workflow_key(session: &SessionId, root: &lash_core::TurnId) -> String {
-    format!("{}:{}", session.as_str(), root.as_str())
+    format!(
+        "{}:{}{}",
+        session.as_str().len(),
+        session.as_str(),
+        root.as_str()
+    )
+}
+
+/// The `(session, root)` a [`turn_workflow_key`] names, or `None` for a key
+/// no build of this generation wrote.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "park reconciliation maps a paused LashTurn to its root by this parse (FIG-3600 S7-B)"
+    )
+)]
+pub(crate) fn parse_turn_workflow_key(key: &str) -> Option<(SessionId, lash_core::TurnId)> {
+    let (len, rest) = key.split_once(':')?;
+    if len.is_empty()
+        || !len.bytes().all(|byte| byte.is_ascii_digit())
+        || (len.len() > 1 && len.starts_with('0'))
+    {
+        return None;
+    }
+    let len = len.parse::<usize>().ok()?;
+    if !rest.is_char_boundary(len) {
+        return None;
+    }
+    let (session, root) = rest.split_at(len);
+    if session.is_empty() || root.is_empty() {
+        return None;
+    }
+    Some((SessionId::from(session), lash_core::TurnId::from(root)))
 }
 
 // ---------------------------------------------------------------------------
@@ -662,7 +704,9 @@ async fn drive_session_journal(
             AdmitVerdict::Idle => DriveStop::Idle,
             AdmitVerdict::Parked(park) => DriveStop::Parked(park),
             AdmitVerdict::SubstrateLost { root } => DriveStop::SubstrateLost { root },
-            AdmitVerdict::RootTerminal { root, by } => DriveStop::RootTerminal { root, by },
+            AdmitVerdict::RootTerminal { root, kind, commit } => {
+                DriveStop::RootTerminal { root, kind, commit }
+            }
         };
         return Ok(DriveOutcome { ran, stop });
     }
@@ -717,6 +761,48 @@ async fn run_root_journal(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// W5: the `LashTurn` key parses back to exactly the session and root
+    /// it was built from, whatever either id contains.
+    #[test]
+    fn a_turn_workflow_key_round_trips_any_session_and_root() {
+        let cases = [
+            ("s", "r"),
+            ("a:b", "c"),
+            ("a", "b:c"),
+            ("12:ab", ":x:"),
+            ("sess\u{e9}:\u{1f600}", "root:agent-frame:2"),
+            ("0", "0"),
+            (":", ":"),
+        ];
+        for (session, root) in cases {
+            let session = SessionId::from(session);
+            let root = lash_core::TurnId::from(root);
+            let key = turn_workflow_key(&session, &root);
+            assert_eq!(
+                parse_turn_workflow_key(&key),
+                Some((session.clone(), root.clone())),
+                "{key}"
+            );
+        }
+        assert_ne!(
+            turn_workflow_key(&SessionId::from("a:b"), &lash_core::TurnId::from("c")),
+            turn_workflow_key(&SessionId::from("a"), &lash_core::TurnId::from("b:c")),
+            "the pre-S7 `{{session}}:{{root}}` key was ambiguous here"
+        );
+        for malformed in [
+            "",
+            "s:r",
+            "3:ab",
+            "03:abcd",
+            "2:ab",
+            ":ab",
+            "x2:abc",
+            "1:\u{e9}x",
+        ] {
+            assert_eq!(parse_turn_workflow_key(malformed), None, "{malformed}");
+        }
+    }
 
     #[test]
     fn a_request_decodes_whatever_generation_it_carries() {

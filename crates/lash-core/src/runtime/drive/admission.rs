@@ -11,8 +11,8 @@
 use std::sync::Arc;
 
 use crate::engine::{
-    AdmissionId, AdmitRequest, AdmitVerdict, Admitted, AdmittedWork, DriveRequestId, ParkId,
-    ParkRef, SealVerdict,
+    AdmissionId, AdmitRequest, AdmitVerdict, Admitted, AdmittedWork, DriveRequestId, ParkRef,
+    SealVerdict,
 };
 use crate::runtime::effect::executor::RuntimeEffectLocalRunner;
 use crate::store::DriveEpochSeal;
@@ -109,13 +109,29 @@ impl AdmitDriveRunner {
             return Ok(AdmitVerdict::Parked(ParkRef {
                 session: session_id.clone(),
                 root: park.turn_id,
-                park: ParkId::new(park.park_id.to_string()),
+                park: park.park_id,
             }));
         }
 
         let Some((root, work)) = self.next_root().await? else {
             return Ok(AdmitVerdict::Idle);
         };
+        // A head input whose root already ended is answered from the root's
+        // evidence, never run again (ADR 0105 L-S6, FIG-3600 S7): acceptance
+        // keeps such an input out, so this is the defensive answer.
+        if matches!(work, AdmittedWork::Input { .. })
+            && let Some(terminal) = self
+                .store
+                .root_terminal(session_id, &root)
+                .await
+                .map_err(|error| store_fault("root terminal read", error))?
+        {
+            return Ok(AdmitVerdict::RootTerminal {
+                commit: terminal.commit().cloned(),
+                kind: terminal.kind,
+                root,
+            });
+        }
         let epoch = self
             .store
             .drive_epoch(session_id)
@@ -214,13 +230,23 @@ impl AdmitDriveRunner {
             .iter()
             .filter(|read| read.input.state == crate::TurnInputState::DeferredNextTurn)
             .min_by_key(|read| read.input.enqueue_seq);
-        Ok(head.map(|read| {
-            let root = match &read.status {
-                crate::PendingTurnInputReadStatus::TurnBound { turn_id, .. } => turn_id.clone(),
-                _ => input_root(&read.input),
-            };
-            (root, read.input.input_id.clone())
-        }))
+        let Some(head) = head else {
+            return Ok(None);
+        };
+        // A root the input is bound to drives it: the root whose claim took
+        // it, or the new root a fork bound it to (FIG-3600 S7). Then the turn
+        // an aborted execution bound it to (FIG-3589), then its host id.
+        let bound = self
+            .store
+            .root_binding(session_id, &head.input.input_id)
+            .await
+            .map_err(|error| store_fault("input root binding read", error))?;
+        let root = match (bound, &head.status) {
+            (Some(root), _) => root,
+            (None, crate::PendingTurnInputReadStatus::TurnBound { turn_id, .. }) => turn_id.clone(),
+            (None, _) => input_root(&head.input),
+        };
+        Ok(Some((root, head.input.input_id.clone())))
     }
 }
 

@@ -297,6 +297,12 @@ impl SessionCommitStore for PostgresSessionStore {
                 session_id: commit.session_id.clone(),
             });
         }
+        // A root's commit is fenced by the admission its root was sealed
+        // under: a successor's seal refuses it before anything is read or
+        // written (ADR 0105 §2).
+        if let Some(fence) = commit.drive_fence.as_ref() {
+            super::session_ingress::require_fence_tx(&mut tx, &commit.session_id, fence).await?;
+        }
         // Read without a lock for early validation and receipt replay. Before
         // mutating graph reachability, existing sessions lock and recheck this
         // revision so commit, maintenance, and deletion share one authority.
@@ -978,6 +984,15 @@ impl SessionCommitStore for PostgresSessionStore {
                 settle_run_members_tx(&mut tx, fence, &progress.scope).await?;
             }
             write_run_tx(&mut tx, &admission.advance(progress)?, false).await?;
+        }
+        // The root's final commit writes its terminal evidence in this
+        // transaction (FIG-3600 S7).
+        if let Some(write) = commit.root_terminal.as_deref().cloned() {
+            crate::session_roots::write_root_terminal_conn(
+                &mut tx,
+                &write.into_terminal(commit.session_id.clone(), plan.next_head_revision(), now),
+            )
+            .await?;
         }
         let mut result = plan.result(checkpoint_ref, manifest);
         result.turn_cancel_input_outcome = turn_cancel_input_outcome;

@@ -302,6 +302,15 @@ impl Store {
                         return Ok(next);
                     }
                     settle_run_members_conn(tx, &fence, &settlement.scope)?;
+                    // A failed or empty settlement ends the run's root without a
+                    // head commit: its evidence is written here (FIG-3600 S7).
+                    if let Some(terminal) = lash_core_execution::store::settled_queued_root_terminal(
+                        &fence.session_id,
+                        &settlement,
+                        clock.timestamp_ms(),
+                    ) {
+                        crate::session_roots::write_root_terminal_conn(tx, &terminal)?;
+                    }
                     // Settling the run settles the turn it had parked (FIG-3586).
                     let released: Option<(String, i64)> = tx
                         .query_row(

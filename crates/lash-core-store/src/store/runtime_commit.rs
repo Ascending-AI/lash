@@ -111,6 +111,23 @@ pub struct RuntimeCommit {
     /// matching lease row.
     #[serde(skip)]
     pub session_execution_lease_fence: Option<SessionExecutionLeaseAuthority>,
+    /// The drive fence of the admission this commit's root was sealed under
+    /// (ADR 0105 §2, FIG-3600 S7). A transaction predicate like the lease
+    /// fence, never commit content: the backend refuses the commit
+    /// [`StoreError::StaleDriveFence`](super::StoreError::StaleDriveFence)
+    /// unless it is still the session's current drive fence, checked in the
+    /// commit's own transaction before anything is written. `None` for a
+    /// commit no drive sealed (a runtime operation, a process-scoped turn).
+    #[serde(skip)]
+    pub drive_fence: Option<Box<super::DriveFence>>,
+    /// The logical root's terminal evidence, present exactly on the commit of
+    /// the root's final physical turn (FIG-3600 S7): written in this commit's
+    /// transaction, refused [`StoreError::RootAlreadyTerminal`](super::StoreError::RootAlreadyTerminal)
+    /// when the root already ended otherwise. An instruction to the store
+    /// derived from the turn it commits, never commit content: like the
+    /// fences, it is excluded from the commit's serialized form.
+    #[serde(skip)]
+    pub root_terminal: Option<Box<super::RootTerminalWrite>>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub release_session_execution_lease: Option<SessionExecutionLeaseAuthority>,
     pub config: crate::PersistedSessionConfig,

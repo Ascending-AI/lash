@@ -298,9 +298,7 @@ impl LashRuntime {
                 format!(
                     "queued work on session `{}` waits behind parked root `{}` (park {}); it \
                      is driven once that park is resolved",
-                    self.state.session_id,
-                    park.root,
-                    park.park.as_str()
+                    self.state.session_id, park.root, park.park
                 ),
             )),
             stop => Err(RuntimeError::new(
@@ -654,23 +652,24 @@ impl LashRuntime {
                 )
                 .into());
             }
+            let settlement = crate::store::QueuedRunCommit {
+                scope: selection.admission.scope.clone(),
+                expected_revision: selection.admission.revision,
+                progress: if anonymous_caller && selection.admission.can_forget_unworked() {
+                    crate::store::QueuedRunProgress::ForgetUnworked
+                } else {
+                    crate::store::QueuedRunProgress::Settle {
+                        terminal: crate::store::QueuedRunTerminal::Empty,
+                    }
+                },
+            };
             store
-                .settle_queued_run(
-                    &fence,
-                    crate::store::QueuedRunCommit {
-                        scope: selection.admission.scope.clone(),
-                        expected_revision: selection.admission.revision,
-                        progress: if anonymous_caller && selection.admission.can_forget_unworked() {
-                            crate::store::QueuedRunProgress::ForgetUnworked
-                        } else {
-                            crate::store::QueuedRunProgress::Settle {
-                                terminal: crate::store::QueuedRunTerminal::Empty,
-                            }
-                        },
-                    },
-                )
+                .settle_queued_run(&fence, settlement.clone())
                 .await
                 .map_err(super::runtime_error_from_store_commit)?;
+            if let Some(root) = self.drive_root.as_mut() {
+                root.mark_settled(&settlement);
+            }
             Box::pin(self.end_queue_drain(&selection.admission.scope, &lease, &store, false)).await;
             lease
                 .release_if_live()
@@ -923,7 +922,12 @@ impl LashRuntime {
         lease: &SessionExecutionLeaseGuard,
         settlement: crate::store::QueuedRunCommit,
     ) -> Result<crate::store::QueuedRunAdmission, crate::StoreError> {
-        let settled = store.settle_queued_run(&lease.fence(), settlement).await?;
+        let settled = store
+            .settle_queued_run(&lease.fence(), settlement.clone())
+            .await?;
+        if let Some(root) = self.drive_root.as_mut() {
+            root.mark_settled(&settlement);
+        }
         Box::pin(self.end_queue_drain(&settled.scope, lease, store, false)).await;
         Ok(settled)
     }

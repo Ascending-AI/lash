@@ -509,13 +509,7 @@ impl SessionCommitStore for Store {
                 let outcome: Result<RuntimeCommitReceipt, StoreError> = (|| {
                     let commit = planner.commit();
                     ensure_session_not_deleted_conn(tx, &commit.session_id)?;
-                    if let Some(fence) = commit.session_execution_lease_fence.as_ref()
-                    {
-                        ensure_session_execution_lease_conn(tx, &commit.session_id, fence, now)?;
-                    }
-if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none() {
-                        return Err(StoreError::SessionExecutionLeaseExpired { session_id: commit.session_id.clone() });
-                    }
+                    super::session_ingress::require_commit_fences_conn(tx, commit, now)?;
                     let existing =
                         try_load_session_head_meta_from_conn(tx, &commit.session_id)?;
                     planner.validate_session_binding(
@@ -1223,6 +1217,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                 }
                 write_run_conn(tx, &admission.advance(progress)?, false)?;
                     }
+                    crate::session_roots::write_commit_root_terminal_conn(tx, commit, plan.next_head_revision(), now)?;
                     let mut result = plan.result(
                         stored_checkpoint.checkpoint_ref,
                         stored_checkpoint.manifest,

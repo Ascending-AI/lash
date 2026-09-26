@@ -492,6 +492,16 @@ pub enum StoreError {
         fence_epoch: u64,
         current_epoch: u64,
     },
+    /// A terminal write named a logical root that already has a different
+    /// terminal. The stored terminal stands and nothing was written (ADR 0105
+    /// law L-S6): a later execution adopts it instead of ending the root
+    /// twice.
+    #[error("root `{root}` of session `{session_id}` is already terminal ({by:?})")]
+    RootAlreadyTerminal {
+        session_id: SessionId,
+        root: crate::TurnId,
+        by: Box<super::RootTerminalCause>,
+    },
     /// A drive-fenced storage operation found no `session_meta` row for its
     /// session, so the session has no drive epoch to fence against (ADR 0105
     /// §2). Nothing was written.
@@ -901,6 +911,7 @@ impl StoreError {
             Self::IngressSettlementRefused { .. } => "IngressSettlementRefused",
             Self::IngressTurnAddressUnknown { .. } => "IngressTurnAddressUnknown",
             Self::StaleDriveFence { .. } => "StaleDriveFence",
+            Self::RootAlreadyTerminal { .. } => "RootAlreadyTerminal",
             Self::DriveEpochUnavailable { .. } => "DriveEpochUnavailable",
             Self::DriveFenceSessionMismatch { .. } => "DriveFenceSessionMismatch",
             Self::IngressReservedSourceKey { .. } => "IngressReservedSourceKey",

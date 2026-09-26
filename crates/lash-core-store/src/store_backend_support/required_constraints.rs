@@ -923,12 +923,12 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         rendered(
             "turn_park_events",
             "ck_turn_park_events_kind",
-            "kind IN ('parked', 'unparked', 'cancelled')",
+            "kind IN ('parked', 'unparked', 'cancelled', 'redrive_requested')",
         ),
         rendered(
             "lash_turn_park_events",
             "ck_turn_park_events_kind",
-            "kind IN ('parked', 'unparked', 'cancelled')",
+            "kind IN ('parked', 'unparked', 'cancelled', 'redrive_requested')",
         ),
     ),
     expected_constraint(
@@ -997,6 +997,48 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
             "lash_process_park_events",
             "ck_process_park_events_parked_reason",
             "(kind = 'parked' AND reason_json IS NOT NULL AND cause IS NULL) OR (kind <> 'parked' AND reason_json IS NULL AND cause IS NOT NULL)",
+        ),
+    ),
+    // FIG-3600 S7's logical-root family: a root's terminal columns are set
+    // together or not at all, and a control intent's kind and state
+    // vocabularies.
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "session_roots",
+            "ck_session_roots_terminal",
+            "(terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL)",
+        ),
+        rendered(
+            "lash_session_roots",
+            "ck_session_roots_terminal",
+            "(terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL)",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "control_intents",
+            "ck_control_intents_kind",
+            "kind IN ('redrive', 'cancel', 'fork', 'close_session')",
+        ),
+        rendered(
+            "lash_control_intents",
+            "ck_control_intents_kind",
+            "kind IN ('redrive', 'cancel', 'fork', 'close_session')",
+        ),
+    ),
+    expected_constraint(
+        &[SqliteConstraintDatabase::DurableCore],
+        rendered(
+            "control_intents",
+            "ck_control_intents_state",
+            "state IN ('pending', 'acknowledged', 'superseded', 'failed_retryable', 'failed')",
+        ),
+        rendered(
+            "lash_control_intents",
+            "ck_control_intents_state",
+            "state IN ('pending', 'acknowledged', 'superseded', 'failed_retryable', 'failed')",
         ),
     ),
 ];

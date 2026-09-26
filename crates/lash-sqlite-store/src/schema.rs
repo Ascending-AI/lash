@@ -9,7 +9,9 @@
 //! 15-second `busy_timeout` (see `conn.rs`).
 
 use super::*;
-use crate::schema_fragments::{AWAIT_EVENT_TABLES, SCOPE_RETIREMENT_TABLE, SESSION_INGRESS_TABLE};
+use crate::schema_fragments::{
+    AWAIT_EVENT_TABLES, SCOPE_RETIREMENT_TABLE, SESSION_INGRESS_TABLE, SESSION_ROOTS_TABLES,
+};
 
 #[derive(Clone, Copy)]
 struct SqliteDatabaseDefinition {
@@ -73,7 +75,7 @@ impl SqliteDatabase {
             Self::DurableCore => SqliteDatabaseDefinition {
                 name: "durable core",
                 schema: SCHEMA,
-                fragments: &[SESSION_INGRESS_TABLE],
+                fragments: &[SESSION_INGRESS_TABLE, SESSION_ROOTS_TABLES],
                 version: SCHEMA_VERSION,
             },
             Self::ProcessRegistry => SqliteDatabaseDefinition {
@@ -267,6 +269,7 @@ CREATE TABLE IF NOT EXISTS session_meta (
     drive_admission_id                TEXT,
     drive_root_start                  TEXT,
     admission_base_checkpoint_ref     TEXT,
+    closing_intent                    INTEGER,
     CONSTRAINT ck_session_meta_relation_kind CHECK (relation_kind IN ('root', 'child', 'fork')),
     CONSTRAINT ck_session_meta_caused_by_kind CHECK (caused_by_kind IN ('turn', 'effect_address', 'tool_call', 'process', 'process_event', 'trigger_occurrence', 'session_node')),
     CONSTRAINT ck_session_meta_relation_family CHECK ((relation_kind = 'root' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'child' AND parent_session_id IS NOT NULL AND source_session_id IS NULL AND source_node_id IS NULL) OR (relation_kind = 'fork' AND parent_session_id IS NULL AND caused_by_kind IS NULL AND source_session_id IS NOT NULL AND source_node_id IS NOT NULL) OR (relation_kind IS NOT NULL AND NOT (relation_kind IN ('root', 'child', 'fork')))),
@@ -354,7 +357,9 @@ CREATE TABLE IF NOT EXISTS turn_parks (
     since_ms INTEGER NOT NULL,
     last_refused_ms INTEGER NOT NULL,
     attempts INTEGER NOT NULL CONSTRAINT ck_turn_parks_attempts CHECK (attempts >= 1),
-    park_executable_generation TEXT
+    park_executable_generation TEXT,
+    engine_ref TEXT,
+    resume_intent INTEGER
 );
 CREATE INDEX IF NOT EXISTS idx_turn_parks_since
     ON turn_parks(since_ms, session_id);
@@ -376,7 +381,7 @@ CREATE TABLE IF NOT EXISTS turn_park_events (
     session_id  TEXT NOT NULL,
     turn_id     TEXT NOT NULL,
     park_id     INTEGER NOT NULL,
-    kind        TEXT NOT NULL CONSTRAINT ck_turn_park_events_kind CHECK (kind IN ('parked', 'unparked', 'cancelled')),
+    kind        TEXT NOT NULL CONSTRAINT ck_turn_park_events_kind CHECK (kind IN ('parked', 'unparked', 'cancelled', 'redrive_requested')),
     cause       TEXT,
     reason_json TEXT,
     at_ms       INTEGER NOT NULL,
@@ -966,7 +971,14 @@ CREATE TABLE IF NOT EXISTS fleet_format (
 /// the durable `RuntimeErrorCode` vocabulary drops
 /// `process_incarnation_superseded`. A pre-98 database is rejected at open
 /// and recreated; it is not migrated.
-pub(crate) const SCHEMA_VERSION: i32 = 98;
+/// Bumped to 99 for FIG-3600 S7: the logical-root family. `session_roots`
+/// holds each admitted root and its terminal evidence, `session_root_inputs`
+/// binds an accepted input to its root, `control_intents` records operator
+/// verbs and session closes, `session_meta` gains `closing_intent`, a turn
+/// park gains `engine_ref` and `resume_intent`, and a park event may be
+/// `redrive_requested`. A pre-99 database is rejected at open and recreated;
+/// it is not migrated.
+pub(crate) const SCHEMA_VERSION: i32 = 99;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

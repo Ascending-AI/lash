@@ -482,8 +482,7 @@ impl SessionAdmin {
     ) -> Result<lash_core::facade_support::SessionCommandReceipt> {
         let idempotency_key = idempotency_key.into();
         self.with_writer(async |runtime: &mut LashRuntime| {
-            runtime
-                .submit_session_command(command, idempotency_key)
+            Box::pin(runtime.submit_session_command(command, idempotency_key))
                 .await
                 .map_err(Into::into)
         })

@@ -379,11 +379,13 @@ async fn external_process_port_composes_native_queued_port_and_drives_the_comman
         .cursor
         .as_str()
         .to_string();
-    session
-        .admin()
-        .commands()
-        .refresh_tool_catalog("native queue regression guard", "native-queue-refresh")
-        .await?;
+    Box::pin(
+        session
+            .admin()
+            .commands()
+            .refresh_tool_catalog("native queue regression guard", "native-queue-refresh"),
+    )
+    .await?;
     // The command drains asynchronously: the backend's in-process engine
     // drives the session and applies it (FIG-3600).
     let _ = cursor_before;

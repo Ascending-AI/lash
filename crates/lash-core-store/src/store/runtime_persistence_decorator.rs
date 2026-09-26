@@ -106,6 +106,12 @@ macro_rules! persistence_operations {
                 fn seal_drive_epoch(&self, session_id: &SessionId, admission: &AdmissionId, observed_epoch: u64, root_start: &RootStartNonce) -> Result<DriveEpochSeal, StoreError>;
                 fn drive_epoch(&self, session_id: &SessionId) -> Result<StoredDriveEpoch, StoreError>;
             }
+            RootStore {
+                fn root_terminal(&self, session_id: &SessionId, root: &crate::TurnId) -> Result<Option<RootTerminal>, StoreError>;
+                fn root_of_input(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
+                fn root_binding(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
+                fn bind_root_inputs(&self, session_id: &SessionId, root: &crate::TurnId, inputs: &[crate::InputId]) -> Result<(), StoreError>;
+            }
             StoreMaintenance {
                 fn vacuum(&self) -> MaintenanceResult<VacuumReport>;
                 fn gc_unreachable(&self) -> MaintenanceResult<GcReport>;

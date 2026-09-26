@@ -184,6 +184,35 @@ fn require_fence_conn(
     require_current_drive_fence(session_id, fence, &current)
 }
 
+/// Refuse `commit` unless every fence it presents is current, in its own
+/// transaction before anything is read or written: the execution lane it
+/// borrows (a queued run's commit must borrow one), and the drive fence of
+/// the admission its root was sealed under, which a successor's seal makes
+/// stale (ADR 0105 §2).
+pub(super) fn require_commit_fences_conn(
+    conn: &Connection,
+    commit: &lash_core_execution::store::RuntimeCommit,
+    now: u64,
+) -> Result<(), StoreError> {
+    if let Some(fence) = commit.session_execution_lease_fence.as_ref() {
+        super::claim_support::ensure_session_execution_lease_conn(
+            conn,
+            &commit.session_id,
+            fence,
+            now,
+        )?;
+    }
+    if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none() {
+        return Err(StoreError::SessionExecutionLeaseExpired {
+            session_id: commit.session_id.clone(),
+        });
+    }
+    match commit.drive_fence.as_ref() {
+        Some(fence) => require_fence_conn(conn, &commit.session_id, fence),
+        None => Ok(()),
+    }
+}
+
 /// Refuse `fence` unless it is current and `claim` belongs to its session.
 /// The fence is checked first, so a stale fence is refused as stale.
 fn require_claim_fence_conn(

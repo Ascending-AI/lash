@@ -119,3 +119,50 @@ CREATE INDEX IF NOT EXISTS idx_session_ingress_addressed
 CREATE INDEX IF NOT EXISTS idx_session_ingress_claim
     ON session_ingress(session_id, claim_id) WHERE claim_id IS NOT NULL;
 ";
+
+/// The logical-root family (FIG-3600 S7), carried by the durable core alone.
+///
+/// `session_roots` holds one row per `(session, root)` a drive admitted work
+/// under, with the root's terminal evidence once it has one: all four
+/// `terminal_*` columns are set together, exactly once. `session_root_inputs`
+/// binds each accepted input to the root that drives it. `control_intents`
+/// records an operator's verb or a session's close; a `close_session` row
+/// outlives its session as the deletion tombstone.
+pub(crate) const SESSION_ROOTS_TABLES: &str = "
+CREATE TABLE IF NOT EXISTS session_roots (
+    session_id              TEXT NOT NULL,
+    root                    TEXT NOT NULL,
+    terminal_kind           TEXT,
+    terminal_cause_json     TEXT,
+    terminal_head_revision  INTEGER,
+    terminal_at_ms          INTEGER,
+    PRIMARY KEY (session_id, root),
+    CONSTRAINT ck_session_roots_terminal CHECK ((terminal_kind IS NULL AND terminal_cause_json IS NULL AND terminal_head_revision IS NULL AND terminal_at_ms IS NULL) OR (terminal_kind IN ('answered', 'failed', 'cancelled') AND terminal_cause_json IS NOT NULL AND terminal_at_ms IS NOT NULL))
+);
+
+CREATE TABLE IF NOT EXISTS session_root_inputs (
+    session_id  TEXT NOT NULL,
+    input_id    TEXT NOT NULL,
+    root        TEXT NOT NULL,
+    PRIMARY KEY (session_id, input_id)
+);
+
+CREATE TABLE IF NOT EXISTS control_intents (
+    intent_id      INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id     TEXT NOT NULL,
+    format         INTEGER NOT NULL,
+    kind           TEXT NOT NULL CONSTRAINT ck_control_intents_kind CHECK (kind IN ('redrive', 'cancel', 'fork', 'close_session')),
+    kind_json      TEXT NOT NULL,
+    state          TEXT NOT NULL CONSTRAINT ck_control_intents_state CHECK (state IN ('pending', 'acknowledged', 'superseded', 'failed_retryable', 'failed')),
+    state_json     TEXT NOT NULL,
+    attempts       INTEGER NOT NULL,
+    created_at_ms  INTEGER NOT NULL,
+    engine_ref     TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_control_intents_open
+    ON control_intents(intent_id) WHERE state IN ('pending', 'failed_retryable');
+
+CREATE INDEX IF NOT EXISTS idx_control_intents_session
+    ON control_intents(session_id, kind);
+";

@@ -589,7 +589,14 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // delivery's start binds it. None of that is an expand step, so the migrate
 // catalog carries no 138→139 step: component-138 and older catalogs are
 // rejected and recreated.
-const SCHEMA_VERSION: i32 = 139;
+//
+// Version 140 (FIG-3600 S7) adds the logical-root family: the
+// `lash_session_roots`, `lash_session_root_inputs` and
+// `lash_control_intents` tables, `lash_session_meta.closing_intent`,
+// `lash_turn_parks.engine_ref` and `resume_intent`, and the
+// `redrive_requested` park-event kind. `lash migrate` carries a
+// component-139 catalog forward with the 0140 expand step.
+const SCHEMA_VERSION: i32 = 140;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
 ///
@@ -1396,6 +1403,8 @@ mod session_factory;
 mod session_ingress;
 #[path = "postgres/session_meta.rs"]
 mod session_meta;
+#[path = "postgres/session_roots.rs"]
+mod session_roots;
 #[path = "postgres/session_sql.rs"]
 mod session_sql;
 #[path = "postgres/support.rs"]

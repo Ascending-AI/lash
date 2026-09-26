@@ -36,9 +36,11 @@ pub use queued_run::{
     BeginQueuedRun, QueuedRunAdmission, QueuedRunCommit, QueuedRunMember, QueuedRunOrigin,
     QueuedRunPosition, QueuedRunProgress, QueuedRunRequest, QueuedRunTerminal, SelectedQueuedRun,
 };
+mod control_intent;
 mod drive_fence;
 mod realization;
 mod retention;
+mod root;
 pub mod runtime_commit;
 mod runtime_commit_plan;
 mod semantic_boundary;
@@ -82,6 +84,9 @@ pub use commit_identity::{
     decide_runtime_commit_receipt, derive_history_node_id,
 };
 pub use config_command_plan::{ConfigCommandPlan, plan_config_commands};
+pub use control_intent::{
+    CONTROL_INTENT_FORMAT, ControlIntent, ControlIntentId, ControlIntentKind, ControlIntentState,
+};
 pub use drive_fence::{
     AdmissionId, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence,
     InMemoryDriveEpochs, RootStartNonce, SessionHeadRef, StoredDriveEpoch, decide_drive_epoch_seal,
@@ -140,6 +145,12 @@ pub use retention::{
     FACADE_PLUGIN_COMMAND_OPERATION_TAG, FACADE_PLUGIN_TASK_OPERATION_TAG, FacadePluginOperation,
     PLUGIN_OPERATION_STATE_RECEIPT_KEY, RetentionBound, RetentionReport,
     is_facade_minted_operation_id, mint_facade_operation_id, plugin_operation_receipt_storage_key,
+};
+pub use root::{
+    InMemoryRootLedger, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
+    RootTerminalWrite, RootTerminalWriteDecision, StoredRootTerminal, TurnCommitId,
+    decide_root_terminal_write, root_binding_conflict, settled_queued_root_cause,
+    settled_queued_root_terminal,
 };
 pub use runtime_commit::{
     AppendRequestIdentity, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
@@ -657,6 +668,8 @@ impl RuntimeCommit {
             session_id: _,
             expected_head_revision: _,
             session_execution_lease_fence: _,
+            drive_fence: _,
+            root_terminal,
             release_session_execution_lease: _,
             config: _,
             current_frame_node_id: _,
@@ -689,7 +702,8 @@ impl RuntimeCommit {
                 && turn_cancel_closure_settlement.is_none()
                 && *adopted_intent_rows == 0
                 && failure_evidence.is_empty()
-                && committed_attachment_ids.is_empty(),
+                && committed_attachment_ids.is_empty()
+                && root_terminal.is_none(),
             "append-session-nodes constructor gained unrelated settlement side effects"
         );
     }
@@ -837,6 +851,8 @@ impl RuntimeCommit {
             session_id: state.session_id.clone(),
             expected_head_revision: state.head_revision,
             session_execution_lease_fence: None,
+            drive_fence: None,
+            root_terminal: None,
             release_session_execution_lease: None,
             config: persisted_session_config_from_state(state),
             current_frame_node_id,
@@ -2211,8 +2227,9 @@ pub trait StoreMaintenance: Send + Sync {
 /// attachment write-ahead manifest), [`TurnInputStore`] (pending turn-input
 /// lifecycle), [`QueuedWorkStore`] (queued-work ingress and claiming),
 /// [`SessionExecutionLeaseStore`] (single-writer execution lane),
-/// [`DriveEpochStore`] (the drive epoch a session drive's seal raises, FIG-3600)
-/// and [`StoreMaintenance`] (vacuum/GC). The segments share one transactional
+/// [`DriveEpochStore`] (the drive epoch a session drive's seal raises, FIG-3600),
+/// [`RootStore`] (logical roots' terminal evidence and input bindings, FIG-3600
+/// S7) and [`StoreMaintenance`] (vacuum/GC). The segments share one transactional
 /// domain: claims granted by the input and queue segments settle atomically in
 /// [`SessionCommitStore::commit_runtime_state`]. In-flight nondeterministic
 /// work belongs to the active [`EffectHost`](crate::EffectHost), not to the
@@ -2231,6 +2248,7 @@ pub trait RuntimePersistence:
     + SessionExecutionLeaseStore
     + QueuedWorkStore
     + DriveEpochStore
+    + RootStore
     + StoreMaintenance
 {
 }
@@ -2241,6 +2259,7 @@ impl<T> RuntimePersistence for T where
         + SessionExecutionLeaseStore
         + QueuedWorkStore
         + DriveEpochStore
+        + RootStore
         + StoreMaintenance
         + ?Sized
 {

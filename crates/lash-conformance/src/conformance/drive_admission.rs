@@ -29,15 +29,15 @@ use crate::admit;
 /// Everything a law's runtime is built from, shared by every run so each is
 /// the same session on the same store.
 #[derive(Clone)]
-struct DriveParts {
-    session_id: SessionId,
-    host: crate::RuntimeHostConfig,
-    store: Arc<dyn crate::RuntimePersistence>,
+pub(super) struct DriveParts {
+    pub(super) session_id: SessionId,
+    pub(super) host: crate::RuntimeHostConfig,
+    pub(super) store: Arc<dyn crate::RuntimePersistence>,
     calls: Arc<AtomicUsize>,
 }
 
 impl DriveParts {
-    async fn new(
+    pub(super) async fn new(
         prefix: &str,
         law: &str,
         effect_host: &Arc<dyn crate::EffectHost>,
@@ -85,15 +85,8 @@ impl DriveParts {
         reason = "conformance-law fixture: the law's runtime builds"
     )]
     async fn runtime(&self) -> crate::LashRuntime {
-        let mut policy = crate::testing::mock_session_policy();
-        policy.session_id = Some(self.session_id.clone());
-        let state = crate::RuntimeSessionState {
-            session_id: self.session_id.clone(),
-            policy: policy.clone(),
-            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
-                crate::TurnBudget::Unbounded,
-            ))
-        };
+        let state = self.initial_state();
+        let policy = state.policy.clone();
         Box::pin(
             crate::LashRuntime::builder(self.host.clone(), crate::testing::runtime_lease_owner())
                 .with_session_id(&self.session_id)
@@ -108,12 +101,30 @@ impl DriveParts {
         .expect("build the drive-admission conformance runtime")
     }
 
+    /// The session state every run of the law's runtime starts from.
+    pub(super) fn initial_state(&self) -> crate::RuntimeSessionState {
+        let mut policy = crate::testing::mock_session_policy();
+        policy.session_id = Some(self.session_id.clone());
+        crate::RuntimeSessionState {
+            session_id: self.session_id.clone(),
+            policy,
+            ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
+                crate::TurnBudget::Unbounded,
+            ))
+        }
+    }
+
+    /// How many model calls the law's runs made.
+    pub(super) fn calls(&self) -> usize {
+        self.calls.load(Ordering::SeqCst)
+    }
+
     /// Accept `text` as next-turn input, keyed by `host_id` when given.
     #[expect(
         clippy::expect_used,
         reason = "conformance-law fixture: the session store admits the row"
     )]
-    async fn enqueue(&self, text: &str, host_id: Option<&str>) -> crate::InputId {
+    pub(super) async fn enqueue(&self, text: &str, host_id: Option<&str>) -> crate::InputId {
         let mut draft = crate::PendingTurnInputDraft::new(
             self.session_id.clone(),
             crate::TurnInputIngress::next_turn(),
@@ -129,7 +140,7 @@ impl DriveParts {
             .input_id
     }
 
-    fn request(&self, id: &str) -> DriveRequest {
+    pub(super) fn request(&self, id: &str) -> DriveRequest {
         DriveRequest {
             session: self.session_id.clone(),
             request: DriveRequestId::new(id),
@@ -141,7 +152,7 @@ impl DriveParts {
         clippy::expect_used,
         reason = "conformance-law fixture: the store reads its own epoch"
     )]
-    async fn epoch(&self) -> crate::store::StoredDriveEpoch {
+    pub(super) async fn epoch(&self) -> crate::store::StoredDriveEpoch {
         self.store
             .drive_epoch(&self.session_id)
             .await
@@ -152,7 +163,7 @@ impl DriveParts {
         clippy::expect_used,
         reason = "conformance-law fixture: the store reads its applications"
     )]
-    async fn applications(&self) -> Vec<(crate::InputId, TurnId)> {
+    pub(super) async fn applications(&self) -> Vec<(crate::InputId, TurnId)> {
         self.store
             .list_turn_input_applications(&self.session_id)
             .await
@@ -169,7 +180,7 @@ impl DriveParts {
     clippy::expect_used,
     reason = "conformance-law fixture: the tier runs the step once"
 )]
-async fn on_tier<T, F>(
+pub(super) async fn on_tier<T, F>(
     runner: &Arc<dyn crate::ConformanceTurnRunner>,
     parts: &DriveParts,
     step: F,
@@ -209,7 +220,7 @@ where
     rx.recv().await.expect("the tier ran the law's step")
 }
 
-fn admitted(verdict: AdmitVerdict) -> Admitted {
+pub(super) fn admitted(verdict: AdmitVerdict) -> Admitted {
     match verdict {
         AdmitVerdict::Admit(admitted) => admitted,
         other => panic!("admission admits the pending root: {other:?}"),

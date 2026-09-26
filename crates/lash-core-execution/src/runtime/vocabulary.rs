@@ -531,6 +531,37 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
         through: crate::store::ParkFeedCursor,
     ) -> Result<(), crate::StoreError>;
 
+    /// The terminal evidence of logical root `root` in session `session_id`
+    /// (FIG-3607 item 8): how the root ended, or `None` while it has not.
+    ///
+    /// It answers without a live session and after the session is gone: a
+    /// deleted session's roots answer `Cancelled` with cause
+    /// [`SessionDeleted`](crate::store::RootTerminalCause::SessionDeleted),
+    /// read from the session's retained `CloseSession` intent. Once a root
+    /// answers `Some`, it always does.
+    ///
+    /// Required, with no default: a factory states its answer, and a
+    /// decorator forwards to the catalog it wraps. A factory with no root
+    /// ledger returns `StoreError::UnsupportedStoreOperation`, never `None`,
+    /// which would read as a root still running.
+    async fn root_terminal(
+        &self,
+        session_id: &SessionId,
+        root: &crate::TurnId,
+    ) -> Result<Option<crate::store::RootTerminal>, crate::StoreError>;
+
+    /// List the deployment's open control intents (pending, or failed and
+    /// retryable) strictly after `after`, in id order, at most `limit`
+    /// (FIG-3600 S7, ADR 0104 O4): what reconciliation re-applies, including
+    /// a deleted session's `CloseSession`.
+    ///
+    /// Required, with no default, like [`Self::root_terminal`].
+    async fn list_open_control_intents(
+        &self,
+        after: Option<crate::store::ControlIntentId>,
+        limit: std::num::NonZeroUsize,
+    ) -> Result<Vec<crate::store::ControlIntent>, crate::StoreError>;
+
     /// Open an existing session when only its durable routing identity is
     /// known, without creating one.
     ///

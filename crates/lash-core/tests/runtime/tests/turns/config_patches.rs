@@ -83,8 +83,8 @@ pub(super) async fn config_settlement_distinguishes_enqueue_rejection_from_durab
     let backend = memory_store_backend().await;
     let mut runtime = runtime_with_plugins(&backend, Vec::new(), mock_provider(Vec::new())).await;
     let original_model = runtime.session_policy().model.clone();
-    let outcome = runtime
-        .submit_apply_config_patch_with_idempotency_key(
+    let outcome = Box::pin(
+        runtime.submit_apply_config_patch_with_idempotency_key(
             lash_core::runtime::ApplyConfigPatch {
                 model: Some(
                     lash_core::ModelSpec::builder("must-not-publish")
@@ -95,9 +95,10 @@ pub(super) async fn config_settlement_distinguishes_enqueue_rejection_from_durab
                 ..lash_core::runtime::ApplyConfigPatch::default()
             },
             "",
-        )
-        .await
-        .expect("typed submission outcome");
+        ),
+    )
+    .await
+    .expect("typed submission outcome");
 
     let lash_core::runtime::SessionCommandSettlement::Rejected(rejection) = outcome else {
         panic!("empty idempotency key must be rejected before durable acceptance");
@@ -108,8 +109,8 @@ pub(super) async fn config_settlement_distinguishes_enqueue_rejection_from_durab
     );
     assert_eq!(runtime.session_policy().model, original_model);
 
-    let durable = runtime
-        .submit_apply_config_patch_with_idempotency_key(
+    let durable = Box::pin(
+        runtime.submit_apply_config_patch_with_idempotency_key(
             lash_core::runtime::ApplyConfigPatch {
                 model: Some(
                     lash_core::ModelSpec::builder("durable-inline")
@@ -120,9 +121,10 @@ pub(super) async fn config_settlement_distinguishes_enqueue_rejection_from_durab
                 ..lash_core::runtime::ApplyConfigPatch::default()
             },
             "durable-inline",
-        )
-        .await
-        .expect("durable settlement");
+        ),
+    )
+    .await
+    .expect("durable settlement");
     assert!(matches!(
         durable,
         lash_core::runtime::SessionCommandSettlement::Durable(_)
