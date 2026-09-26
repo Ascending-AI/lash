@@ -41,14 +41,12 @@ async fn the_live_stream_carries_one_user_row_per_input_through_settlement() {
         })
         .build()
         .into_handle();
-    let mut state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
-    let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
-    state.restate_ingress_url = restate_ingress_url;
+    let state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
     let session_id = state.current_session_id();
     let sent_text = "the send the operator typed";
     let injected_text = "the input injected mid-turn";
 
-    let _ = send_turn(
+    let Json(accepted) = send_turn(
         State(state.clone()),
         Query(SessionQuery::default()),
         Json(TurnRequest {
@@ -60,53 +58,15 @@ async fn the_live_stream_carries_one_user_row_per_input_through_settlement() {
     )
     .await
     .expect("send turn through the production handler");
-    let submitted = restate_requests
-        .recv()
-        .await
-        .expect("capture submitted Restate turn");
-    let turn_id = TurnId::from(
-        submitted
-            .pointer("/body/turn_id")
-            .and_then(Value::as_str)
-            .expect("submitted turn id")
-            .to_string(),
-    );
-
-    let run_state = state.clone();
-    let run_turn_id = turn_id.clone();
-    let run_session_id = session_id.clone();
-    let run_text = sent_text.to_string();
-    let turn = tokio::spawn(async move {
-        let session = run_state
-            .core
-            .session(run_session_id.to_string())
-            .open()
-            .await
-            .expect("open the submitted turn's session");
-        let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
-        let output = session
-            .turn(lash::TurnInput::text(run_text))
-            .turn_id(run_turn_id.clone())
-            .require_finish()
-            .expect("require finish")
-            .stream_to(&ChannelTurnEvents {
-                turn_state: Arc::clone(&turn_state),
-            })
-            .await
-            .expect("run the submitted turn");
-        crate::restate::record_turn_output(
-            &run_state,
-            &session,
-            &run_turn_id,
-            output,
-            turn_state,
-            "test.fig3206.completed",
-        )
-        .await
-        .expect("record the submitted turn output");
-        crate::restate::settle_workbench_turn(&run_state, &session.session_id(), &run_turn_id)
-            .await
-            .expect("settle the submitted turn");
+    let turn_id = started_turn_id(&accepted);
+    // The session's engine runs the turn; the send's follower settles it.
+    let turn = tokio::spawn({
+        let state = state.clone();
+        let session_id = session_id.clone();
+        let turn_id = turn_id.clone();
+        async move {
+            wait_for_turn_released(&state, &session_id, &turn_id, Duration::from_secs(30)).await;
+        }
     });
 
     assert_eq!(

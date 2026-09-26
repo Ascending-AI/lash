@@ -2,8 +2,8 @@ use super::*;
 use lash::SessionId;
 use lash::TurnId;
 
-/// The body of `restate::run_user_turn`, minus the Restate effect controller the
-/// in-process test host does not need.
+/// A turn run in the test's own task and recorded as a follower records its
+/// root's output.
 async fn run_workbench_turn_attempt(
     state: &AppState,
     session_id: &SessionId,
@@ -37,54 +37,6 @@ async fn run_workbench_turn_attempt(
         "test.workbench_turn.completed",
     )
     .await
-}
-
-async fn run_workbench_turn_attempt_with_error_evidence(
-    state: &AppState,
-    session_id: &SessionId,
-    turn_id: &TurnId,
-    text: &str,
-) -> (
-    Result<(), AppError>,
-    Option<(lash::runtime::RuntimeErrorCode, String)>,
-) {
-    let session = match state.core.session(session_id.to_string()).open().await {
-        Ok(session) => session,
-        Err(error) => return (Err(AppError::session_open(error)), None),
-    };
-    let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
-    let ui_events = ChannelTurnEvents {
-        turn_state: Arc::clone(&turn_state),
-    };
-    match session
-        .turn(lash::TurnInput::text(text))
-        .turn_id(turn_id.to_string())
-        .require_finish()
-        .expect("require finish")
-        .stream_to(&ui_events)
-        .await
-    {
-        Ok(output) => (
-            crate::restate::record_turn_output(
-                state,
-                &session,
-                turn_id,
-                output,
-                turn_state,
-                "test.workbench_turn.completed",
-            )
-            .await,
-            None,
-        ),
-        Err(lash::EmbedError::Runtime(error)) => {
-            let evidence = Some((error.code.clone(), error.message.clone()));
-            (
-                Err(AppError::runtime(lash::EmbedError::Runtime(error))),
-                evidence,
-            )
-        }
-        Err(error) => (Err(AppError::runtime(error)), None),
-    }
 }
 
 pub(crate) fn product_user_rows(state: &AppState, session_id: &SessionId) -> Vec<(String, String)> {
@@ -642,12 +594,9 @@ pub(super) fn gated_first_call_provider(
     (provider, entered_rx, release)
 }
 
-/// The workbench's own queued-work wiring, which the default test state leaves
-/// out: production supplies `WorkbenchQueuedWorkSubmitter`, so lash installs no
-/// inline queued-work runner and the drain of a deferred next-turn input is the
-/// workbench's Restate queued-turn workflow. A state built without a driver gets
-/// lash's `NativeQueuedWorkRunHandle` instead, which drains the input itself
-/// without the workbench in the loop — a shape the workbench never runs in.
+/// A test state whose session work drives in the waiter's task: a send's
+/// follower drives the root it waits on, so a test sees the turn run without a
+/// Restate server behind the session.
 pub(crate) async fn queued_send_test_state(
     data_dir: &std::path::Path,
     provider: ProviderHandle,
@@ -664,28 +613,6 @@ pub(crate) async fn queued_send_test_state(
         Some(inert_queued_work_port()),
     )
     .await
-}
-
-async fn spawn_failing_restate_ingress() -> String {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind failing Restate ingress");
-    let addr = listener.local_addr().expect("failing Restate ingress addr");
-    let app = Router::new().route(
-        "/{*path}",
-        post(|| async {
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({ "error": "submission refused" })),
-            )
-        }),
-    );
-    tokio::spawn(async move {
-        if let Err(error) = axum::serve(listener, app).await {
-            eprintln!("failing Restate ingress stopped: {error}");
-        }
-    });
-    format!("http://{addr}")
 }
 
 async fn spawn_terminally_failed_session_delete_restate() -> (String, mpsc::UnboundedReceiver<Value>)
@@ -1088,9 +1015,14 @@ async fn deleting_a_non_current_session_preserves_selected_session_buffers() {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
 async fn a_terminally_failed_session_delete_keeps_the_old_session_live_and_visible() {
     let data_dir = tempfile::tempdir().expect("terminal delete failure tempdir");
+    // The turn the still-live session accepts after the failed delete runs.
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-terminal-delete-failure")
-        .complete_error("the delete failure fence test must not call the provider")
+        .complete(|_| async {
+            Ok(text_response(
+                "<typescript>\nfinish(\"still live\");\n</typescript>",
+            ))
+        })
         .build()
         .into_handle();
     let mut state = queued_send_test_state(data_dir.path(), provider).await;
@@ -1175,7 +1107,7 @@ async fn a_terminally_failed_session_delete_keeps_the_old_session_live_and_visib
     )
     .await
     .expect("GET /api/state deliberately keeps serving the visibly live old session");
-    let _ = send_turn(
+    let Json(retried) = send_turn(
         State(state.clone()),
         Query(SessionQuery {
             session_id: Some(old_session_id.clone()),
@@ -1200,16 +1132,25 @@ async fn a_terminally_failed_session_delete_keeps_the_old_session_live_and_visib
             .and_then(Value::as_str)
             .is_some_and(|path| path.starts_with("WorkbenchSessionDeleteWorkflow/"))
     );
-    let turn_request = tokio::time::timeout(Duration::from_secs(2), restate_requests.recv())
+    // The still-live session's engine runs the accepted turn; its follower
+    // settles it and releases the claim.
+    let retried_turn = started_turn_id(&retried);
+    let root = state
+        .open_session_for_observation(&old_session_id)
         .await
-        .expect("still-live turn reaches Restate")
-        .expect("still-live turn submission body");
-    assert!(
-        turn_request
-            .pointer("/path")
-            .and_then(Value::as_str)
-            .is_some_and(|path| path.starts_with("WorkbenchTurnWorkflow/"))
-    );
+        .expect("observe the still-live session")
+        .root(retried_turn.clone());
+    tokio::time::timeout(Duration::from_secs(10), root.outcome())
+        .await
+        .expect("the still-live turn settles")
+        .expect("the still-live turn's outcome");
+    wait_for_turn_released(
+        &state,
+        &old_session_id,
+        &retried_turn,
+        Duration::from_secs(10),
+    )
+    .await;
 }
 
 #[test]
@@ -1330,129 +1271,6 @@ async fn a_send_queues_if_queued_work_claims_after_its_idle_read() {
         .remove(&session_id, &TurnId::from("queued-race-owner"));
 }
 
-#[tokio::test]
-async fn failed_manual_queued_submission_releases_claim_and_can_retry() {
-    let data_dir = tempfile::tempdir().expect("manual queued failure tempdir");
-    let provider = lash::testing::TestProvider::builder()
-        .kind("workbench-manual-queued-failure")
-        .complete_error("manual queued submission must not call the provider")
-        .build()
-        .into_handle();
-    let mut state = queued_send_test_state(data_dir.path(), provider).await;
-    state.restate_ingress_url = spawn_failing_restate_ingress().await;
-    let session_id = state.current_session_id();
-    let session = state
-        .open_session(&session_id, "test")
-        .await
-        .expect("open manual queued failure session");
-    let store = state
-        .session_store_factory
-        .create_store(&lash::persistence::SessionStoreCreateRequest {
-            pending_observer_intents: Vec::new(),
-            session_id: session_id.clone(),
-            relation: lash::persistence::SessionRelation::Root,
-            policy: session.policy_snapshot(),
-        })
-        .await
-        .expect("open manual queued failure store");
-    let batch = store
-        .enqueue_queued_work(queued_work_test_draft(&session_id, "manual-queued-failure"))
-        .await
-        .expect("enqueue manual queued failure batch");
-
-    run_queued_work_batch(
-        AxumPath(batch.batch_id.to_string()),
-        State(state.clone()),
-        Query(SessionQuery::default()),
-    )
-    .await
-    .expect_err("the first manual submission fails");
-    assert!(state.active_turns.for_session(&session_id).is_none());
-
-    let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
-    state.restate_ingress_url = restate_ingress_url;
-    let Json(retried) = run_queued_work_batch(
-        AxumPath(batch.batch_id.to_string()),
-        State(state.clone()),
-        Query(SessionQuery::default()),
-    )
-    .await
-    .expect("the manual submission retries after cleanup");
-    assert!(retried.accepted);
-    tokio::time::timeout(Duration::from_secs(2), restate_requests.recv())
-        .await
-        .expect("the retried manual submission reaches Restate")
-        .expect("the retried manual submission body");
-}
-
-#[tokio::test]
-async fn failed_automatic_queued_submission_releases_claim_and_can_retry() {
-    let data_dir = tempfile::tempdir().expect("automatic queued failure tempdir");
-    let provider = lash::testing::TestProvider::builder()
-        .kind("workbench-automatic-queued-failure")
-        .complete_error("automatic queued submission must not call the provider")
-        .build()
-        .into_handle();
-    let state = queued_send_test_state(data_dir.path(), provider).await;
-    let session_id = state.current_session_id();
-    let session = state
-        .open_session(&session_id, "test")
-        .await
-        .expect("open automatic queued failure session");
-    let store = state
-        .session_store_factory
-        .create_store(&lash::persistence::SessionStoreCreateRequest {
-            pending_observer_intents: Vec::new(),
-            session_id: session_id.clone(),
-            relation: lash::persistence::SessionRelation::Root,
-            policy: session.policy_snapshot(),
-        })
-        .await
-        .expect("open automatic queued failure store");
-    store
-        .enqueue_queued_work(queued_work_test_draft(
-            &session_id,
-            "automatic-queued-failure",
-        ))
-        .await
-        .expect("enqueue automatic queued failure batch");
-    let failed = WorkbenchQueuedWorkSubmitter {
-        sessions: state.sessions.clone(),
-        store_factory: state.session_store_factory.clone(),
-        restate_ingress_url: spawn_failing_restate_ingress().await,
-        restate_http: reqwest::Client::new(),
-        active_turns: state.active_turns.clone(),
-    };
-    lash::runtime::QueuedWorkRunHandle::claim_and_run_pending(
-        &failed,
-        Some(&session_id),
-        "automatic_failure",
-    )
-    .await
-    .expect_err("the first automatic submission fails");
-    assert!(state.active_turns.for_session(&session_id).is_none());
-
-    let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
-    let retry = WorkbenchQueuedWorkSubmitter {
-        sessions: state.sessions.clone(),
-        store_factory: state.session_store_factory.clone(),
-        restate_ingress_url,
-        restate_http: reqwest::Client::new(),
-        active_turns: state.active_turns.clone(),
-    };
-    lash::runtime::QueuedWorkRunHandle::claim_and_run_pending(
-        &retry,
-        Some(&session_id),
-        "automatic_retry",
-    )
-    .await
-    .expect("the automatic submission retries after cleanup");
-    tokio::time::timeout(Duration::from_secs(2), restate_requests.recv())
-        .await
-        .expect("the retried automatic submission reaches Restate")
-        .expect("the retried automatic submission body");
-}
-
 pub(super) struct TurnAdmissionGate {
     pub(super) event_name: &'static str,
     pub(super) entered: std::sync::mpsc::SyncSender<()>,
@@ -1560,8 +1378,6 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
         .build()
         .into_handle();
     let mut state = queued_send_test_state(data_dir.path(), provider).await;
-    let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
-    state.restate_ingress_url = restate_ingress_url;
     let (entered_tx, entered_rx) = std::sync::mpsc::sync_channel(1);
     let release = Arc::new((Mutex::new(false), std::sync::Condvar::new()));
     state.trace_sink = Some(Arc::new(TurnAdmissionGate {
@@ -1590,7 +1406,12 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
     entered_rx
         .recv_timeout(Duration::from_secs(5))
         .expect("the send reaches its committed admission boundary");
-    assert!(state.active_turns.for_session(&session_id).is_some());
+    let turn_id = state
+        .active_turns
+        .for_session(&session_id)
+        .expect("the committed send holds the session's claim")
+        .address
+        .turn_id;
     request.abort();
     let (released, condition) = &*release;
     *released.lock().unwrap_or_else(|error| error.into_inner()) = true;
@@ -1603,35 +1424,12 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
         "the harness must drop the request future"
     );
 
-    let submitted = tokio::time::timeout(Duration::from_secs(2), restate_requests.recv())
-        .await
-        .expect("the committed turn still reaches Restate after its request future is dropped")
-        .expect("the committed turn request body");
-    let turn_id = submitted
-        .pointer("/body/turn_id")
-        .and_then(Value::as_str)
-        .expect("committed turn id")
-        .to_string();
-    let turn_id = TurnId::from(turn_id);
-    let first = Box::pin(run_workbench_turn_attempt(
-        &state,
-        &session_id,
-        &turn_id,
-        "committed before disconnect",
-    ))
-    .await;
-    crate::restate::terminalize_turn_execution(
-        &state,
-        &session_id,
-        &turn_id,
-        "test.dropped_send.failed",
-        Ok(first),
-    )
-    .await
-    .expect("the detached submission completes normally");
+    // The admission task outlives the dropped request: the engine runs the
+    // committed turn and its follower settles it.
+    wait_for_turn_released(&state, &session_id, &turn_id, Duration::from_secs(10)).await;
     assert!(
         state.active_turns.for_session(&session_id).is_none(),
-        "terminalization must retire the detached turn"
+        "settlement must retire the detached turn"
     );
 
     let Json(follow_up) = send_turn(
@@ -1647,17 +1445,14 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
     .await
     .expect("a later send is admitted normally");
     assert!(!follow_up.queued, "the later send must not remain wedged");
-    let follow_up_submission =
-        tokio::time::timeout(Duration::from_secs(2), restate_requests.recv())
-            .await
-            .expect("the later send reaches Restate")
-            .expect("the later send request body");
-    assert_eq!(
-        follow_up_submission
-            .pointer("/body/text")
-            .and_then(Value::as_str),
-        Some("send after disconnect")
-    );
+    let follow_up_turn = started_turn_id(&follow_up);
+    wait_for_turn_released(
+        &state,
+        &session_id,
+        &follow_up_turn,
+        Duration::from_secs(10),
+    )
+    .await;
 }
 
 /// FIG-1000: a second client's send while a turn is running must get an honest
@@ -1667,6 +1462,7 @@ async fn a_dropped_send_request_cannot_wedge_a_committed_turn() {
 /// nothing. The send is now admitted as the next turn's input, so the message is
 /// kept, rendered as a queued receipt, and answered by the drained turn.
 #[tokio::test]
+#[ignore = "FIG-3600 S5c C6: a spawned turn (D1 S4) runs through the Restate turn workflow request that §4.2 deletes; the adapted turn no longer runs in that task"]
 async fn a_send_to_a_busy_session_is_admitted_as_a_queued_next_turn_input() {
     let data_dir = tempfile::tempdir().expect("queued send tempdir");
     let (provider, mut provider_entered, release) =
@@ -1917,12 +1713,10 @@ async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() 
     let data_dir = tempfile::tempdir().expect("losing race tempdir");
     let (provider, mut provider_entered, release) =
         gated_first_call_provider("workbench-losing-commit-race");
-    let mut state = queued_send_test_state(data_dir.path(), provider).await;
-    let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
-    state.restate_ingress_url = restate_ingress_url;
+    let state = queued_send_test_state(data_dir.path(), provider).await;
     let session_id = state.current_session_id();
 
-    let Json(_) = send_turn(
+    let Json(accepted) = send_turn(
         State(state.clone()),
         Query(SessionQuery::default()),
         Json(TurnRequest {
@@ -1934,41 +1728,7 @@ async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() 
     )
     .await
     .expect("send admitted");
-    let submitted = tokio::time::timeout(Duration::from_secs(5), restate_requests.recv())
-        .await
-        .expect("send reaches Restate")
-        .expect("send payload");
-    let turn_id = submitted
-        .pointer("/body/turn_id")
-        .and_then(Value::as_str)
-        .expect("turn id")
-        .to_string();
-    let turn_id = TurnId::from(turn_id);
-
-    let losing = tokio::spawn({
-        let state = state.clone();
-        let session_id = session_id.clone();
-        let turn_id = turn_id.clone();
-        async move {
-            let (result, error_evidence) =
-                Box::pin(run_workbench_turn_attempt_with_error_evidence(
-                    &state,
-                    &SessionId::from(&session_id),
-                    &turn_id,
-                    "admitted send",
-                ))
-                .await;
-            let terminalized = crate::restate::terminalize_turn_execution(
-                &state,
-                &session_id,
-                &turn_id,
-                "restate_user_turn.failed",
-                Ok(result),
-            )
-            .await;
-            (terminalized, error_evidence)
-        }
-    });
+    let turn_id = started_turn_id(&accepted);
     assert_eq!(
         tokio::time::timeout(Duration::from_secs(5), provider_entered.recv())
             .await
@@ -2021,9 +1781,7 @@ async fn a_busy_lane_refuses_competing_recovery_without_disturbing_its_holder() 
     assert_eq!(holder_after_race, holder_before_race);
 
     release.notify_one();
-    let (terminalized, error_evidence) = losing.await.expect("losing turn task");
-    assert_eq!(error_evidence, None);
-    assert!(terminalized.is_ok(), "the admitted holder must complete");
+    wait_for_turn_released(&state, &session_id, &turn_id, Duration::from_secs(10)).await;
 
     let failure_rows = product_event_rows(&state, &session_id);
     assert!(

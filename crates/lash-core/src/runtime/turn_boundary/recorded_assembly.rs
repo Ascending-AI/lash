@@ -300,7 +300,6 @@ fn render_outcome_for_output(outcome: &TurnOutcome) -> Option<String> {
             Some(render_final_value_for_output(value))
         }
         TurnOutcome::AgentFrameSwitch { .. }
-        | TurnOutcome::Queued { .. }
         | TurnOutcome::Stopped(
             TurnStop::Cancelled { .. }
             | TurnStop::Incomplete

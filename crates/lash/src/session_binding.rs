@@ -16,7 +16,10 @@ pub(crate) struct BoundSession {
     store: Arc<dyn RuntimePersistence>,
     effect_host: Arc<dyn EffectHost>,
     process: ProcessWorkWiring,
-    queued: Arc<dyn SessionWorkEngine>,
+    work: crate::core::HeldWork,
+    /// The owner core's open sessions: the core whose driver serves `work`
+    /// runs a drive on the runtime registered here.
+    residents: Arc<crate::core::residents::ResidentSessions>,
     backend: lash_core::Backend,
     attachment_store: Arc<lash_core::facade_support::SessionAttachmentStore>,
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
@@ -34,7 +37,8 @@ impl BoundSession {
         store: Arc<dyn RuntimePersistence>,
         env: &RuntimeEnvironment,
         process: ProcessWorkWiring,
-        queued: Arc<dyn SessionWorkEngine>,
+        work: crate::core::HeldWork,
+        residents: Arc<crate::core::residents::ResidentSessions>,
         catalog: Arc<dyn SessionStoreFactory>,
     ) -> Self {
         Self {
@@ -42,7 +46,8 @@ impl BoundSession {
             store,
             effect_host: Arc::clone(&env.core.control.effect_host),
             process,
-            queued,
+            work,
+            residents,
             backend: env.core.backend().clone(),
             attachment_store: Arc::clone(&env.core.durability.attachment_store),
             process_env_store: Arc::clone(&env.core.durability.process_env_store),
@@ -86,7 +91,30 @@ impl BoundSession {
     /// The owner-issued queued-work port. The binding-derived Durable Session
     /// wakes this port, never a core-level override.
     pub(crate) fn queued(&self) -> Arc<dyn SessionWorkEngine> {
-        Arc::clone(&self.queued)
+        self.work.engine() as Arc<dyn SessionWorkEngine>
+    }
+
+    /// The same port as [`queued`](Self::queued), with how a send waits on
+    /// its drive.
+    pub(crate) fn work(&self) -> crate::core::HeldWork {
+        self.work.clone()
+    }
+
+    /// Record `handle` as this session's open runtime with the owner core,
+    /// whose driver then runs the session's drives on it (FIG-3600 S5b). A
+    /// resumed session keeps its owner, so a resume registers here too.
+    pub(crate) fn register_resident(&self, handle: &lash_core::facade_support::RuntimeHandle) {
+        self.residents
+            .register(&self.session_id, handle, self.effect_host());
+    }
+
+    /// Withdraw `handle` from the owner core's open sessions and let a drive
+    /// running on it stop: a close or park then owns the runtime alone.
+    pub(crate) async fn release_resident(
+        &self,
+        handle: &lash_core::facade_support::RuntimeHandle,
+    ) -> bool {
+        self.residents.release(&self.session_id, handle).await
     }
 
     pub(crate) fn catalog(&self) -> Arc<dyn SessionStoreFactory> {
@@ -112,6 +140,6 @@ impl BoundSession {
         env.core.control.effect_host = self.effect_host();
         env.core.durability.attachment_store = Arc::clone(&self.attachment_store);
         env.core.durability.process_env_store = Arc::clone(&self.process_env_store);
-        env.with_work_ports(Some(self.process.clone()), Arc::clone(&self.queued))
+        env.with_work_ports(Some(self.process.clone()), self.queued())
     }
 }

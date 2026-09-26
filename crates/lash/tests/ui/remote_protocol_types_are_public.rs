@@ -6,7 +6,6 @@ fn main() {
     let request = lash::remote::Envelope::new(lash::remote::turn_input::RemoteTurnRequest {
         session_id: SessionId::from("session"),
         turn_id: TurnId::from("turn"),
-        idempotency_key: Some("session:turn".to_string()),
         input,
         tool_grants: Vec::new(),
         metadata: std::collections::HashMap::new(),

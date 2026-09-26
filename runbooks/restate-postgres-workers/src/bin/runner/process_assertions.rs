@@ -134,38 +134,29 @@ pub(super) async fn drive_durable_wait_index_scenarios(
     Ok(())
 }
 
-pub(super) async fn wait_for_queued_work(
-    storage: &PostgresStorage,
-    mock_provider_base_url: &str,
-    trace_dir: Option<PathBuf>,
-    ingress_url: &str,
-) -> Result<()> {
-    let backend = e2e_backend(
-        storage,
-        Arc::new(s3_store_from_env()?),
-        ingress_url.to_string(),
-        restate_authority_id()?,
-    );
-    let core = build_e2e_core(lash_restate_postgres_workers_e2e::E2eCoreConfig {
-        worker_id: "runner-queue-watch".to_string(),
-        storage: storage.clone(),
-        backend,
-        restate_ingress_url: ingress_url.to_string(),
-        restate_authority_id: restate_authority_id()?,
-        mock_provider_base_url: mock_provider_base_url.to_string(),
-        trace_dir,
-        fail_once: false,
-    })?;
-    let session = core.session(DEFAULT_SESSION_ID).open().await?;
-    let deadline = Instant::now() + Duration::from_secs(30);
+/// Wait until the engine has driven `expected` queued roots on the E2E
+/// session. A process wake is driven the moment it is enqueued, under its
+/// queued run's `drive-run:` root, so it never waits queued for a host.
+pub(super) async fn wait_for_driven_wakes(pool: &sqlx::PgPool, expected: usize) -> Result<()> {
+    let deadline = Instant::now() + Duration::from_secs(120);
+    let mut driven = Vec::new();
     while Instant::now() < deadline {
-        let queued = session.durable().queued_work().await?;
-        if !queued.is_empty() {
+        driven = driven_queued_roots(pool, DEFAULT_SESSION_ID).await?;
+        if driven.len() >= expected {
             return Ok(());
         }
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
-    anyhow::bail!("timed out waiting for queued process wake")
+    let queued: i64 =
+        sqlx::query_scalar("SELECT COUNT(*) FROM lash_queued_work_batches WHERE session_id = $1")
+            .bind(DEFAULT_SESSION_ID)
+            .fetch_one(pool)
+            .await
+            .context("count the E2E session's queued batches")?;
+    anyhow::bail!(
+        "timed out waiting for the engine to drive process wake {expected}: \
+         {queued} queued batches, driven queued roots {driven:?}"
+    )
 }
 
 pub(super) async fn wait_for_process_signal_wait(

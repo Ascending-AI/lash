@@ -4,454 +4,10 @@
 )]
 #![cfg(feature = "restate")]
 
-use lash::sync::MutexExt;
-use std::convert::Infallible;
-use std::sync::{Arc, Mutex};
-
-use axum::body::Body;
-use axum::http::{StatusCode, header};
-use axum::response::Response;
-use bytes::Bytes;
-use lash::observe::SessionCursor;
-use lash::rlm::RlmTurnBuilderExt as _;
-use lash::{TurnId, TurnInput, TurnOutput};
-use serde::{Deserialize, Serialize};
-use serde_json::json;
-use tokio::sync::mpsc;
-use tokio_stream::wrappers::ReceiverStream;
-
-use crate::db::{ChatMessage, ChatModelSelection};
-use crate::routes::{
-    ChannelTurnEvents, StreamItem, TurnAttempt, TurnPersistenceState, ZERO_MOVE_RETRIES,
-    assistant_text_for_persistence, model_spec_for_chat_selection,
-    run_turn_with_zero_move_recovery, spawn_live_replay_forwarder, wait_for_live_replay_flush,
-};
-use crate::state::{AppError, AppResult, AppStateData};
-
-#[cfg(feature = "restate")]
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct AgentServiceTurnWorkflowRequest {
-    turn_id: TurnId,
-    chat_id: String,
-    text: String,
-    model: String,
-    model_variant: Option<String>,
-}
-
-impl AgentServiceTurnWorkflowRequest {
-    fn new(
-        turn_id: TurnId,
-        chat_id: String,
-        text: String,
-        model: String,
-        model_variant: Option<String>,
-    ) -> Self {
-        Self {
-            turn_id,
-            chat_id,
-            text,
-            model,
-            model_variant,
-        }
-    }
-}
-
-#[cfg(feature = "restate")]
-#[restate_sdk::workflow]
-pub(crate) trait AgentServiceTurnWorkflow {
-    async fn run(
-        request: restate_sdk::serde::Json<AgentServiceTurnWorkflowRequest>,
-    ) -> restate_sdk::errors::HandlerResult<restate_sdk::serde::Json<()>>;
-}
-
-#[cfg(feature = "restate")]
-pub(crate) struct AgentServiceTurnWorkflowImpl {
-    state: AppStateData,
-}
-
-impl AgentServiceTurnWorkflowImpl {
-    pub(crate) fn new(state: AppStateData) -> Self {
-        Self { state }
-    }
-}
-
-#[cfg(feature = "restate")]
-impl AgentServiceTurnWorkflow for AgentServiceTurnWorkflowImpl {
-    async fn run(
-        &self,
-        ctx: restate_sdk::prelude::WorkflowContext<'_>,
-        restate_sdk::serde::Json(request): restate_sdk::serde::Json<
-            AgentServiceTurnWorkflowRequest,
-        >,
-    ) -> restate_sdk::errors::HandlerResult<restate_sdk::serde::Json<()>> {
-        let authority_id = self.state.restate_authority_id().cloned().ok_or_else(|| {
-            restate_sdk::errors::TerminalError::new("Restate authority id is not configured")
-        })?;
-        let controller = lash_restate::RestateRuntimeEffectController::new(ctx, authority_id);
-        let turn_id = request.turn_id.clone();
-        match run_restate_chat_turn_and_persist(self.state.clone(), request, &controller)
-            .await
-            .map_err(restate_sdk::errors::TerminalError::from_error)?
-        {
-            // A parked turn keeps its invocation's journal: the attempt fails
-            // retryably, never terminally (lash_restate::turn_service).
-            TurnAttempt::Parked => {
-                Err(lash_restate::parked_turn_failure(format!("turn {turn_id}")))
-            }
-            TurnAttempt::Completed | TurnAttempt::Failed => Ok(restate_sdk::serde::Json(())),
-        }
-    }
-}
-
-#[cfg(feature = "restate")]
-pub(crate) async fn send_message_restate(
-    state: AppStateData,
-    chat_id: String,
-    text: String,
-    user_message: ChatMessage,
-    model_selection: ChatModelSelection,
-) -> AppResult<Response> {
-    let turn_id = TurnId::from(uuid::Uuid::new_v4().to_string());
-    state
-        .with_db({
-            let turn_id = turn_id.clone();
-            let user_message = user_message.clone();
-            move |db| {
-                let item = StreamItem::Message {
-                    message: user_message,
-                };
-                db.insert_turn_event(&turn_id, &item)
-            }
-        })
-        .await?;
-
-    let turn_model = model_spec_for_chat_selection(&model_selection)?;
-    let replay_cursor = state
-        .open_session(&chat_id, turn_model.clone())
-        .await?
-        .observe()
-        .current_observation()
-        .cursor;
-
-    let request = AgentServiceTurnWorkflowRequest::new(
-        turn_id.clone(),
-        chat_id.clone(),
-        text,
-        model_selection.model,
-        model_selection.model_variant,
-    );
-    // The workflow id is the stable turn id. The app does not persist a
-    // finished/running work-item row; Restate owns in-flight replay and the
-    // app outbox stores only product-visible rows keyed by turn_id.
-    let ingress = state
-        .restate_ingress_url()
-        .map(str::to_string)
-        .ok_or_else(|| AppError::internal("Restate ingress URL is not configured"))?;
-    let url = format!(
-        "{}/AgentServiceTurnWorkflow/{}/run/send",
-        ingress.trim_end_matches('/'),
-        turn_id
-    );
-    let response = state
-        .restate_http()
-        .post(url)
-        .json(&request)
-        .send()
-        .await
-        .map_err(|err| AppError::internal(format!("Restate workflow submit failed: {err}")))?;
-    if !response.status().is_success() {
-        return Err(AppError::internal(format!(
-            "Restate workflow submit failed with status {}",
-            response.status()
-        )));
-    }
-
-    stream_turn_outbox(state, chat_id, turn_id, replay_cursor, turn_model).await
-}
-
-#[cfg(feature = "restate")]
-async fn stream_turn_outbox(
-    state: AppStateData,
-    chat_id: String,
-    turn_id: TurnId,
-    replay_cursor: SessionCursor,
-    model: lash::ModelSpec,
-) -> AppResult<Response> {
-    let (tx, rx) = mpsc::channel::<Result<Bytes, Infallible>>(64);
-    let (item_tx, mut item_rx) = mpsc::channel::<StreamItem>(64);
-    let replay_session = state.open_session(&chat_id, model).await?;
-    let mut replay = spawn_live_replay_forwarder(replay_session, replay_cursor, item_tx.clone());
-    let stream_turn_id = turn_id.clone();
-    tokio::spawn(async move {
-        let tx_for_replay = tx.clone();
-        tokio::spawn(async move {
-            while let Some(item) = item_rx.recv().await {
-                if write_stream_item(&tx_for_replay, &item).await.is_err() {
-                    break;
-                }
-            }
-        });
-        let mut last_id = 0_i64;
-        loop {
-            match state
-                .with_db({
-                    let turn_id = stream_turn_id.clone();
-                    move |db| db.list_turn_events_after(&turn_id, last_id)
-                })
-                .await
-            {
-                Ok(events) => {
-                    for event in events {
-                        last_id = event.id;
-                        let item = match serde_json::from_str::<StreamItem>(&event.item_json) {
-                            Ok(item) => item,
-                            Err(err) => {
-                                replay.abort();
-                                let mut line = json!({
-                                    "type": "error",
-                                    "message": format!("invalid turn event: {err}"),
-                                })
-                                .to_string();
-                                line.push('\n');
-                                let _ = tx.send(Ok(Bytes::from(line))).await;
-                                return;
-                            }
-                        };
-                        let is_done = item.is_done();
-                        let mut line = event.item_json;
-                        line.push('\n');
-                        if tx.send(Ok(Bytes::from(line))).await.is_err() {
-                            return;
-                        }
-                        if is_done {
-                            wait_for_live_replay_flush(&mut replay).await;
-                            return;
-                        }
-                    }
-                }
-                Err(err) => {
-                    replay.abort();
-                    let mut line = json!({
-                        "type": "error",
-                        "message": err.message,
-                    })
-                    .to_string();
-                    line.push('\n');
-                    let _ = tx.send(Ok(Bytes::from(line))).await;
-                    return;
-                }
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(150)).await;
-        }
-    });
-    Ok(Response::builder()
-        .status(StatusCode::OK)
-        .header(header::CONTENT_TYPE, "application/x-ndjson; charset=utf-8")
-        .header(header::CACHE_CONTROL, "no-store")
-        .header("x-lash-turn-id", turn_id.as_str())
-        .body(Body::from_stream(ReceiverStream::new(rx)))
-        .unwrap_or_else(|err| panic!("valid streaming response: {err}")))
-}
-
-async fn write_stream_item(
-    tx: &mpsc::Sender<Result<Bytes, Infallible>>,
-    item: &StreamItem,
-) -> Result<(), ()> {
-    let mut line = serde_json::to_string(item).unwrap_or_else(|err| {
-        json!({
-            "type": "error",
-            "message": err.to_string(),
-        })
-        .to_string()
-    });
-    line.push('\n');
-    tx.send(Ok(Bytes::from(line))).await.map_err(|_| ())
-}
-
-#[cfg(feature = "restate")]
-async fn run_restate_chat_turn_and_persist(
-    state: AppStateData,
-    request: AgentServiceTurnWorkflowRequest,
-    controller: &lash_restate::RestateRuntimeEffectController<
-        '_,
-        restate_sdk::prelude::WorkflowContext<'_>,
-    >,
-) -> AppResult<TurnAttempt> {
-    let turn_model = model_spec_for_chat_selection(&ChatModelSelection {
-        model: request.model.clone(),
-        model_variant: request.model_variant.clone(),
-    })?;
-    let chat_id = request.chat_id.clone();
-    let session = match state.open_lash_session(&chat_id, turn_model).await {
-        Ok(session) => session,
-        // A redrive the generation gate refused while a turn of this request
-        // is in flight parks it (FIG-3735): the zero-move re-prompts run under
-        // their own turn ids, so every one this request may have started is a
-        // candidate.
-        Err(error)
-            if state
-                .park_generation_refused_turn(
-                    &chat_id,
-                    std::iter::once(request.turn_id.clone()).chain(
-                        (1..=ZERO_MOVE_RETRIES)
-                            .map(|retry| zero_move_retry_turn_id(&request.turn_id, retry)),
-                    ),
-                    &error,
-                )
-                .await =>
-        {
-            return Ok(TurnAttempt::Parked);
-        }
-        Err(error) => return Err(error.into()),
-    };
-    state.record_tool_loss_notice(&chat_id, &session).await?;
-    // The outbox is keyed by the turn id the client is streaming, so every
-    // attempt writes to it even when a re-prompt runs under a fresh Lash turn.
-    let outbox_turn_id = request.turn_id.clone();
-
-    // A re-prompt runs under its own Lash turn id, derived from the workflow's
-    // rather than drawn at random: this closure runs inside the workflow body,
-    // which Restate replays, and a fresh v4 uuid would name a different turn on
-    // every replay.
-    let mut retries = 0_usize;
-    let retry_turn_id = {
-        let turn_id = request.turn_id.clone();
-        move || {
-            retries += 1;
-            zero_move_retry_turn_id(&turn_id, retries)
-        }
-    };
-
-    // A zero-move turn wedges the board in this mode exactly as it does in the
-    // local one, so the same host-level policy runs here (FIG-3181); only the
-    // plumbing passed in below is Restate's.
-    let attempt = run_turn_with_zero_move_recovery(
-        &state,
-        &chat_id,
-        request.text.clone(),
-        request.turn_id.clone(),
-        retry_turn_id,
-        |turn_input, attempt_turn_id| {
-            let state = state.clone();
-            let chat_id = chat_id.clone();
-            let outbox_turn_id = outbox_turn_id.clone();
-            let session = session.clone();
-            async move {
-                let turn_state = Arc::new(Mutex::new(TurnPersistenceState::default()));
-                let ui_events = ChannelTurnEvents::outbox(
-                    state.clone(),
-                    chat_id.clone(),
-                    outbox_turn_id.clone(),
-                    Arc::clone(&turn_state),
-                );
-                let output = session
-                    .turn(TurnInput::text(turn_input))
-                    .turn_id(attempt_turn_id.clone())
-                    .require_finish()?
-                    // Durable in-flight work crosses the EffectHost boundary;
-                    // the terminal product row below is derived from Lash's
-                    // TurnOutput.
-                    .stream_to_with_effects(&ui_events, controller)
-                    .await;
-                match output {
-                    Ok(output) => {
-                        let assistant_text = assistant_text_for_persistence(
-                            &TurnOutput {
-                                result: output,
-                                activities: Vec::new(),
-                            },
-                            turn_state.lock_recover().assistant_prose(),
-                        );
-                        let message = state
-                            .with_db({
-                                let chat_id = chat_id.clone();
-                                move |db| db.insert_message(&chat_id, "assistant", &assistant_text)
-                            })
-                            .await?;
-                        state
-                            .with_db({
-                                let turn_id = outbox_turn_id.clone();
-                                move |db| {
-                                    let item = StreamItem::Message { message };
-                                    db.insert_turn_event(&turn_id, &item)
-                                }
-                            })
-                            .await?;
-                        Ok(TurnAttempt::Completed)
-                    }
-                    // A parked turn records nothing: no error row, no Done.
-                    Err(err) if parks_turn(&err) => Ok(TurnAttempt::Parked),
-                    // So does an in-flight turn whose redrive the generation
-                    // gate refused at its claim (FIG-3735).
-                    Err(err)
-                        if state
-                            .park_generation_refused_turn(&chat_id, [attempt_turn_id.clone()], &err)
-                            .await =>
-                    {
-                        Ok(TurnAttempt::Parked)
-                    }
-                    Err(err) => {
-                        state
-                            .with_db({
-                                let turn_id = outbox_turn_id.clone();
-                                let message = err.to_string();
-                                move |db| {
-                                    let item = StreamItem::Error { message };
-                                    db.insert_turn_event(&turn_id, &item)
-                                }
-                            })
-                            .await?;
-                        Ok(TurnAttempt::Failed)
-                    }
-                }
-            }
-        },
-        |item| {
-            let state = state.clone();
-            let turn_id = outbox_turn_id.clone();
-            async move {
-                // A write failure here is not fatal to the turn: the Done row
-                // below reports a broken database to the caller.
-                let _ = state
-                    .with_db(move |db| db.insert_turn_event(&turn_id, &item))
-                    .await;
-            }
-        },
-    )
-    .await?;
-    if matches!(attempt, TurnAttempt::Parked) {
-        return Ok(attempt);
-    }
-
-    state
-        .with_db({
-            let turn_id = request.turn_id;
-            move |db| {
-                let item = StreamItem::Done;
-                db.insert_turn_event(&turn_id, &item)
-            }
-        })
-        .await?;
-    Ok(attempt)
-}
-
-/// The turn id of the `retry`th zero-move re-prompt of `turn_id`. It is
-/// derived, not drawn at random: the handler body that mints it is replayed.
-fn zero_move_retry_turn_id(turn_id: &TurnId, retry: usize) -> TurnId {
-    TurnId::from(format!("{turn_id}:zero-move-retry-{retry}"))
-}
-
-/// Whether `err` parked its turn: its park is written and its claims held.
-fn parks_turn(err: &lash::EmbedError) -> bool {
-    let cause = match err {
-        lash::EmbedError::Runtime(error) => error.turn_failure_cause(),
-        lash::EmbedError::Plugin(lash::plugins::PluginError::RuntimeEffectController(error)) => {
-            error.turn_failure_cause()
-        }
-        _ => return false,
-    };
-    cause == lash::runtime::TurnFailureCause::Parked
-}
+//! The Restate deployment's live end-to-end test. The service binds no turn
+//! workflow of its own: a chat message goes through the session's `send()`,
+//! and lash's `LashSession`/`LashTurn` services, bound by
+//! `RestateEngine::endpoint_builder`, drive the turn.
 
 #[cfg(test)]
 mod restate_tests {
@@ -459,7 +15,13 @@ mod restate_tests {
     use std::path::Path;
     use std::sync::Arc;
 
-    use super::*;
+    use std::sync::Mutex;
+
+    use axum::Json;
+    use axum::extract::{Path as AxumPath, State};
+    use lash::TurnId;
+    use serde_json::json;
+
     use crate::board::BoardState;
     use crate::db::AppDb;
     use crate::demo_plugin::{DemoPlugin, DemoPluginConfig};
@@ -468,8 +30,8 @@ mod restate_tests {
         AgentServiceEffectGroupWorkflowImpl, EffectGroupRunReport, EffectGroupRunTerminal,
         get_effect_group, run_effect_group,
     };
-    use crate::routes::settings;
-    use crate::state::AgentServiceDurability;
+    use crate::routes::{SendMessageRequest, send_message, settings};
+    use crate::state::{AgentServiceDurability, AppStateData};
     use axum::Router;
     use axum::routing::{get, post};
     use lash::direct::LlmOutputPart;
@@ -482,47 +44,6 @@ mod restate_tests {
     use lash_restate::RestateEffectHost;
 
     const STACK_BUDGET_BYTES: usize = 2 * 1024 * 1024;
-
-    #[test]
-    fn resume_stops_at_deserialized_done_item() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let mut db = AppDb::open(&temp.path().join("app.db")).expect("open db");
-        let chat = db
-            .create_chat("resume", "mock-model", None)
-            .expect("create chat");
-        let message = db
-            .insert_message(&chat.id, "assistant", "before done")
-            .expect("create message");
-        let turn_id = TurnId::from("turn-1");
-        db.insert_turn_event(&turn_id, &StreamItem::Message { message })
-            .expect("insert message event");
-        db.insert_turn_event(&turn_id, &StreamItem::Done)
-            .expect("insert done event");
-        db.insert_turn_event(
-            &turn_id,
-            &StreamItem::Error {
-                message: "after done".to_string(),
-            },
-        )
-        .expect("insert trailing event");
-
-        let events = db
-            .list_turn_events_after(&turn_id, 0)
-            .expect("list turn events");
-        let mut resumed = Vec::new();
-        for event in events {
-            let item: StreamItem =
-                serde_json::from_str(&event.item_json).expect("deserialize stored turn event");
-            let is_done = item.is_done();
-            resumed.push(item);
-            if is_done {
-                break;
-            }
-        }
-
-        assert_eq!(resumed.len(), 2);
-        assert!(matches!(resumed.last(), Some(StreamItem::Done)));
-    }
 
     #[test]
     #[ignore = "requires a running Restate server; set RESTATE_INGRESS_URL and run with --ignored"]
@@ -560,6 +81,7 @@ mod restate_tests {
             .unwrap_or_else(|_| format!("http://{bind_addr}"));
 
         let temp = tempfile::tempdir().expect("tempdir");
+        let http = reqwest::Client::new();
         let harness = live_restate_test_state(temp.path(), ingress_url.clone()).await;
         let state = harness.state.clone();
         let listener = tokio::net::TcpListener::bind(bind_addr)
@@ -574,10 +96,6 @@ mod restate_tests {
         let endpoint = harness
             .backend
             .endpoint_builder(harness.process_worker.clone())
-            .bind(lash_restate::turn_service(
-                AgentServiceTurnWorkflowImpl::new(state.clone()).serve(),
-                "run",
-            ))
             .bind(AgentServiceEffectGroupWorkflowImpl.serve())
             .build();
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel::<()>();
@@ -623,54 +141,45 @@ mod restate_tests {
             .with_db(|db| db.create_chat("Restate E2E", "mock-model", None))
             .await
             .expect("create chat");
-        state
-            .with_db({
-                let chat_id = chat.id.clone();
-                move |db| {
-                    db.upsert_chat_board(
-                        &chat_id,
-                        &BoardState {
-                            cells: vec![None; 9],
-                            turn: "O".to_string(),
-                        },
-                    )
-                }
-            })
-            .await
-            .expect("seed board");
-        let turn_id = TurnId::from(format!("agent-service-e2e-{}", uuid::Uuid::new_v4()));
-        let request = AgentServiceTurnWorkflowRequest::new(
-            turn_id.clone(),
-            chat.id.clone(),
-            "play the next move".to_string(),
-            "mock-model".to_string(),
-            None,
+        // The chat route itself: the session's `send()` takes the message and
+        // `LashSession` drives the turn in a Restate handler.
+        let request: SendMessageRequest = serde_json::from_value(json!({
+            "text": "play the next move",
+            "board": BoardState {
+                cells: vec![None; 9],
+                turn: "O".to_string(),
+            },
+            "model": null,
+            "model_variant": null,
+        }))
+        .expect("send-message request");
+        let response = tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            Box::pin(send_message(
+                State(state.clone()),
+                AxumPath(chat.id.clone()),
+                Json(request),
+            )),
+        )
+        .await
+        .expect("the chat route answers")
+        .expect("send message through the chat route");
+        let turn_id = TurnId::from(
+            response
+                .headers()
+                .get("x-lash-turn-id")
+                .expect("turn id response header")
+                .to_str()
+                .expect("turn id header text"),
         );
-        let submit = state
-            .restate_http()
-            .post(format!(
-                "{}/AgentServiceTurnWorkflow/{}/run/send",
-                ingress_url.trim_end_matches('/'),
-                turn_id
-            ))
-            .json(&request)
-            .send()
-            .await
-            .expect("submit workflow through Restate ingress");
-        assert!(
-            submit.status().is_success(),
-            "Restate workflow submit failed: {}",
-            submit.status()
-        );
-
-        wait_for_turn_done(&state, &turn_id).await;
-        let outbox_events = state
-            .with_db({
-                let turn_id = turn_id.clone();
-                move |db| db.list_turn_events_after(&turn_id, 0)
-            })
-            .await
-            .expect("list turn outbox events");
+        let body = tokio::time::timeout(
+            std::time::Duration::from_secs(60),
+            axum::body::to_bytes(response.into_body(), usize::MAX),
+        )
+        .await
+        .expect("the chat stream ends")
+        .expect("chat stream body");
+        let stream = String::from_utf8_lossy(&body).into_owned();
         let messages = state
             .with_db({
                 let chat_id = chat.id.clone();
@@ -681,13 +190,12 @@ mod restate_tests {
         assert!(
             messages.iter().any(|message| message.role() == "assistant"
                 && message.text().contains("done via Restate E2E")),
-            "assistant message was not persisted through Restate workflow; messages={messages:?}; outbox={outbox_events:?}"
+            "assistant message was not persisted through the Restate-driven turn {turn_id}; messages={messages:?}; stream={stream}"
         );
 
         let group_run_id = format!("agent-service-e2e-{}", uuid::Uuid::new_v4());
         let group_url = format!("http://{app_addr}/api/effect-groups/{group_run_id}");
-        let settings_response = state
-            .restate_http()
+        let settings_response = http
             .get(format!("http://{app_addr}/api/settings"))
             .send()
             .await
@@ -697,8 +205,7 @@ mod restate_tests {
             "agent-service settings preflight failed: {}",
             settings_response.status()
         );
-        let missing_response = state
-            .restate_http()
+        let missing_response = http
             .get(&group_url)
             .send()
             .await
@@ -714,8 +221,7 @@ mod restate_tests {
             "absent group response did not name the missing run: {missing_status} {missing_body}"
         );
 
-        let group_response = state
-            .restate_http()
+        let group_response = http
             .post(format!("http://{app_addr}/api/effect-groups"))
             .json(&json!({ "run_id": group_run_id.clone() }))
             .send()
@@ -749,8 +255,7 @@ mod restate_tests {
         assert_eq!(group_report.cancelled_losers, 2);
         assert!(group_report.group_terminal);
 
-        let durable_response = state
-            .restate_http()
+        let durable_response = http
             .get(&group_url)
             .send()
             .await
@@ -762,8 +267,7 @@ mod restate_tests {
             .expect("decode durable effect-group report");
         assert_eq!(durable_report, group_report);
 
-        let duplicate_response = state
-            .restate_http()
+        let duplicate_response = http
             .post(format!("http://{app_addr}/api/effect-groups"))
             .json(&json!({ "run_id": group_run_id }))
             .send()
@@ -780,8 +284,7 @@ mod restate_tests {
             "duplicate group response did not name the identity fence: {duplicate_status} {duplicate_body}"
         );
 
-        let unchanged_report: EffectGroupRunReport = state
-            .restate_http()
+        let unchanged_report: EffectGroupRunReport = http
             .get(&group_url)
             .send()
             .await
@@ -1000,7 +503,6 @@ finish("done via Restate E2E");
             None,
             AgentServiceDurability::Restate,
             std::env::var("RESTATE_INGRESS_URL").ok(),
-            Some(lash_restate::RestateAuthorityId::new("agent-service-restate-test").unwrap()),
         );
         LiveRestateTestHarness {
             state,
@@ -1044,39 +546,5 @@ finish("done via Restate E2E");
             response.status(),
             response.text().await.unwrap_or_default()
         );
-    }
-
-    async fn wait_for_turn_done(state: &AppStateData, turn_id: &TurnId) {
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
-        loop {
-            let events = state
-                .with_db({
-                    let turn_id = TurnId::from(turn_id.to_string());
-                    move |db| db.list_turn_events_after(&turn_id, 0)
-                })
-                .await
-                .expect("list turn events");
-            if events.iter().any(|event| {
-                serde_json::from_str::<StreamItem>(&event.item_json)
-                    .expect("stored turn event must deserialize")
-                    .is_done()
-            }) {
-                return;
-            }
-            if std::time::Instant::now() >= deadline {
-                let mut tail = events
-                    .iter()
-                    .rev()
-                    .take(8)
-                    .map(|event| (event.id, event.item_json.as_str()))
-                    .collect::<Vec<_>>();
-                tail.reverse();
-                panic!(
-                    "timed out waiting for Restate workflow turn outbox to finish; event_count={}; tail={tail:#?}",
-                    events.len(),
-                );
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-        }
     }
 }

@@ -57,11 +57,10 @@ fn workbench_lists_and_controls_individual_queued_batches() {
             uuid::Uuid::new_v4()
         ));
         std::fs::create_dir_all(&data_dir).expect("create queued-work controls dir");
-        let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
         let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
             lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.join("lash-sessions")),
         );
-        let mut state = recoverable_chat_test_state_with_dependencies(
+        let state = recoverable_chat_test_state_with_dependencies(
             &data_dir,
             16,
             lash::testing::TestProvider::builder()
@@ -74,7 +73,6 @@ fn workbench_lists_and_controls_individual_queued_batches() {
             Some(inert_queued_work_port()),
         )
         .await;
-        state.restate_ingress_url = restate_ingress_url;
         let session_id = state.current_session_id();
         let session = state
             .core
@@ -118,32 +116,6 @@ fn workbench_lists_and_controls_individual_queued_batches() {
             vec![first.batch_id.as_str(), second.batch_id.as_str()]
         );
 
-        let Json(run) = run_queued_work_batch(
-            AxumPath(second.batch_id.to_string()),
-            State(state.clone()),
-            Query(SessionQuery::default()),
-        )
-        .await
-        .expect("submit selected queued batch");
-        assert!(run.accepted);
-        assert_eq!(run.batch_id, second.batch_id);
-        let submitted = tokio::time::timeout(Duration::from_secs(1), restate_requests.recv())
-            .await
-            .expect("selected queued turn submission")
-            .expect("selected queued turn request body");
-        assert_eq!(
-            submitted
-                .pointer("/body/batch_ids/0")
-                .and_then(Value::as_str),
-            Some(second.batch_id.as_str()),
-            "removing TurnBuilder::batch_ids from the workbench must fail this contract"
-        );
-        assert_eq!(
-            submitted.pointer("/body/drain_id").and_then(Value::as_str),
-            Some(format!("workbench-queued-batch:{}", second.batch_id).as_str()),
-            "a selected batch must carry a stable drain idempotency key"
-        );
-
         let Json(cancelled) = cancel_queued_work_batch(
             AxumPath(first.batch_id.to_string()),
             State(state.clone()),
@@ -180,7 +152,8 @@ fn workbench_lists_and_controls_individual_queued_batches() {
         )));
 
         assert!(ui::INDEX_HTML.contains("id=\"queuedWorkList\""));
-        assert!(ui::INDEX_HTML.contains("Run only this queued-work batch now"));
+        // The engine drives every pending batch; the page only cancels one.
+        assert!(!ui::INDEX_HTML.contains("Run only this queued-work batch now"));
         assert!(ui::INDEX_HTML.contains("Cancel this pending queued-work batch"));
         let _ = std::fs::remove_dir_all(data_dir);
     });
@@ -446,17 +419,10 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             .await
             .expect("enqueue later receiver wake");
 
-        let later_request = restate::WorkbenchQueuedTurnWorkflowRequest {
-            turn_id: TurnId::from("workbench-targeted-later"),
-            session_id: session_id.clone(),
-            reason: "test_targeted_later".to_string(),
-            scope: restate::QueuedTurnScope::Selected {
-                batch_ids: vec![later.batch_id.to_string()],
-            },
-            drain_id: Some("workbench-targeted-later-drain".to_string()),
-        };
-        let later_output = later_request
-            .selected_queued_turn(&session, &[later.batch_id.to_string()])
+        let later_output = session
+            .queued_turn()
+            .batch_ids([later.batch_id.to_string()])
+            .drain_id("workbench-targeted-later-drain")
             .run()
             .await
             .expect("run only later workbench batch")
@@ -704,18 +670,11 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
         // queued. Widening an unmatched selection into an ordinary
         // drain-everything would run work nobody asked for, and the operator
         // would see it as the one batch they clicked.
-        let stale_selection = restate::WorkbenchQueuedTurnWorkflowRequest {
-            turn_id: TurnId::from("workbench-stale-selection"),
-            session_id: session_id.clone(),
-            reason: "test_stale_selection".to_string(),
-            scope: restate::QueuedTurnScope::Selected {
-                batch_ids: vec![later.batch_id.to_string()],
-            },
-            drain_id: Some("workbench-stale-selection-drain".to_string()),
-        };
         assert!(
-            stale_selection
-                .selected_queued_turn(&session, &[later.batch_id.to_string()])
+            session
+                .queued_turn()
+                .batch_ids([later.batch_id.to_string()])
+                .drain_id("workbench-stale-selection-drain")
                 .run()
                 .await
                 .expect("a selection naming an already-drained batch is a no-op, not an error")
@@ -736,18 +695,11 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
              ready work the operator did not select"
         );
 
-        let earlier_request = restate::WorkbenchQueuedTurnWorkflowRequest {
-            turn_id: TurnId::from("workbench-targeted-earlier"),
-            session_id: session_id.clone(),
-            reason: "test_targeted_earlier".to_string(),
-            scope: restate::QueuedTurnScope::Selected {
-                batch_ids: vec![earlier.batch_id.to_string()],
-            },
-            drain_id: Some("workbench-targeted-earlier-drain".to_string()),
-        };
         assert!(
-            earlier_request
-                .selected_queued_turn(&session, &[earlier.batch_id.to_string()])
+            session
+                .queued_turn()
+                .batch_ids([earlier.batch_id.to_string()])
+                .drain_id("workbench-targeted-earlier-drain")
                 .run()
                 .await
                 .expect("run earlier workbench batch after later")
@@ -794,18 +746,13 @@ fn targeted_workbench_drain_preserves_earlier_wake_and_absorbs_live_redelivery()
             .enqueue_queued_work(workbench_process_wake_draft(fourth_wake))
             .await
             .expect("enqueue ordinary-drain second wake");
-        let drain_all_output = restate::WorkbenchQueuedTurnWorkflowRequest {
-            turn_id: TurnId::from("workbench-drain-all"),
-            session_id: session_id.clone(),
-            reason: "test_drain_all".to_string(),
-            scope: restate::QueuedTurnScope::All,
-            drain_id: Some("workbench-drain-all-idempotency".to_string()),
-        }
-        .queued_turn(&session)
-        .run()
-        .await
-        .expect("run ordinary workbench drain")
-        .expect("ordinary workbench drain produced a turn");
+        let drain_all_output = session
+            .queued_turn()
+            .drain_id("workbench-drain-all-idempotency".to_string())
+            .run()
+            .await
+            .expect("run ordinary workbench drain")
+            .expect("ordinary workbench drain produced a turn");
         let drain_all_started = drain_all_output
             .activities
             .iter()
@@ -949,20 +896,15 @@ fn wake_turn_leaves_exactly_one_agent_reply_committed_and_rendered() {
         let turn_id = "workbench-queued-wake-single-reply";
         state.track_turn(&session_id, &TurnId::from(turn_id));
         let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
-        let output = restate::WorkbenchQueuedTurnWorkflowRequest {
-            turn_id: TurnId::from(turn_id.to_string()),
-            session_id: session_id.clone(),
-            reason: "test_wake_single_reply".to_string(),
-            scope: restate::QueuedTurnScope::All,
-            drain_id: Some(format!("{turn_id}-drain")),
-        }
-        .queued_turn(&session)
-        .stream_to(&ChannelTurnEvents {
-            turn_state: Arc::clone(&turn_state),
-        })
-        .await
-        .expect("run wake single-reply turn")
-        .expect("the wake batch produced a turn");
+        let output = session
+            .queued_turn()
+            .drain_id(format!("{turn_id}-drain"))
+            .stream_to(&ChannelTurnEvents {
+                turn_state: Arc::clone(&turn_state),
+            })
+            .await
+            .expect("run wake single-reply turn")
+            .expect("the wake batch produced a turn");
         assert!(
             matches!(
                 &output.outcome,
@@ -1327,20 +1269,15 @@ fn a_wake_turn_leaves_the_previous_reasoned_reply_rendered() {
         let wake_turn_id = "workbench-queued-wake-keeps-previous";
         state.track_turn(&session_id, &TurnId::from(wake_turn_id));
         let wake_turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
-        let wake_output = restate::WorkbenchQueuedTurnWorkflowRequest {
-            turn_id: TurnId::from(wake_turn_id.to_string()),
-            session_id: session_id.clone(),
-            reason: "test_wake_keeps_previous".to_string(),
-            scope: restate::QueuedTurnScope::All,
-            drain_id: Some(format!("{wake_turn_id}-drain")),
-        }
-        .queued_turn(&session)
-        .stream_to(&ChannelTurnEvents {
-            turn_state: Arc::clone(&wake_turn_state),
-        })
-        .await
-        .expect("run wake keeps-previous turn")
-        .expect("the wake batch produced a turn");
+        let wake_output = session
+            .queued_turn()
+            .drain_id(format!("{wake_turn_id}-drain"))
+            .stream_to(&ChannelTurnEvents {
+                turn_state: Arc::clone(&wake_turn_state),
+            })
+            .await
+            .expect("run wake keeps-previous turn")
+            .expect("the wake batch produced a turn");
         crate::restate::record_turn_output_with_durable_turn_id(
             &state,
             &session,

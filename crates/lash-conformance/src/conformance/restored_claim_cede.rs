@@ -490,17 +490,17 @@ async fn peer_is_refused(
     let scope = effect_host
         .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, turn_id)))
         .expect("scope the peer turn");
-    let queued = peer
+    let held = peer
         .stream_turn(
             direct_input(turn_id, "the peer's own input"),
             crate::TurnOptions::new(CancellationToken::new(), scope),
         )
         .await
-        .expect("the peer turn is answered as queued, not failed");
-    assert!(
-        matches!(queued.outcome, crate::TurnOutcome::Queued { .. }),
-        "the owed follow-on blocks the peer's claim: {:?}",
-        queued.outcome
+        .expect_err("the owed follow-on blocks the peer's claim");
+    assert_eq!(
+        held.code,
+        crate::RuntimeErrorCode::QueuedRunPending,
+        "the peer's input waits behind the follow-on: {held}"
     );
     until_lane_released(store).await;
 }

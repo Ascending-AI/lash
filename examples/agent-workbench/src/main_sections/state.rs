@@ -29,7 +29,6 @@ pub(crate) struct AppState {
     pub(crate) trace_sink: Option<Arc<dyn TraceSink>>,
     pub(crate) lashlang_execution: Arc<TraceLashlangGraphStore>,
     pub(crate) event_tx: SessionEventRegistry,
-    pub(crate) queued_work_driver: lash::runtime::NativeQueuedWork,
     pub(crate) restate_ingress_url: String,
     #[cfg_attr(not(test), allow(dead_code))]
     pub(crate) restate_admin_url: String,
@@ -341,14 +340,18 @@ pub(crate) struct TurnAccepted {
     pub(crate) queued: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) queued_input: Option<TurnInputReceipt>,
+    /// The turn a started send runs as.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) turn_id: Option<TurnId>,
 }
 
 impl TurnAccepted {
-    pub(crate) fn started() -> Self {
+    pub(crate) fn started(turn_id: TurnId) -> Self {
         Self {
             accepted: true,
             queued: false,
             queued_input: None,
+            turn_id: Some(turn_id),
         }
     }
 
@@ -357,6 +360,7 @@ impl TurnAccepted {
             accepted: true,
             queued: true,
             queued_input: Some(receipt),
+            turn_id: None,
         }
     }
 }
@@ -1130,139 +1134,14 @@ impl lash::process::ProcessEventSink for ChannelProcessEventSink {
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct WorkbenchQueuedWorkSubmitter {
-    pub(crate) sessions: WorkbenchSessions,
-    pub(crate) store_factory: Arc<dyn lash::persistence::SessionStoreFactory>,
-    pub(crate) restate_ingress_url: String,
-    pub(crate) restate_http: reqwest::Client,
-    pub(crate) active_turns: ActiveTurns,
-}
-
-#[async_trait]
-impl lash::runtime::QueuedWorkRunHandle for WorkbenchQueuedWorkSubmitter {
-    async fn run_queued_work(
-        &self,
-        request: lash::runtime::QueuedWorkRunRequest,
-    ) -> std::result::Result<(), lash::runtime::QueuedWorkRunError> {
-        let session_id = request
-            .session_id
-            .unwrap_or_else(|| self.sessions.current());
-        // A trigger process may finish while a foreground turn still owns this
-        // session's ingress. Its wake stays in the durable queued-work store;
-        // terminalization calls `claim_and_run_pending` again after releasing
-        // the lease, so submitting a competing queued turn here is both
-        // unnecessary and unsafe.
-        if self.active_turns.for_session(&session_id).is_some() {
-            return Ok(());
-        }
-        if !self
-            .has_queued_work(&session_id)
-            .await
-            .map_err(lash::runtime::QueuedWorkRunError::terminal)?
-        {
-            return Ok(());
-        }
-        let workflow_request = restate::WorkbenchQueuedTurnWorkflowRequest {
-            turn_id: TurnId::from(format!("{QUEUED_TURN_ID_PREFIX}{}", uuid::Uuid::new_v4())),
-            session_id: session_id.clone(),
-            reason: request.reason,
-            scope: restate::QueuedTurnScope::All,
-            drain_id: None,
-        };
-        let cleanup = ActiveTurnSubmissionGuard::queued_turn(
-            self.active_turns.clone(),
-            &session_id,
-            &workflow_request.turn_id,
-        );
-        if !self
-            .active_turns
-            .try_insert_for_idle_session(
-                &session_id,
-                &workflow_request.turn_id,
-                WorkbenchTurnKind::Queued,
-            )
-            .is_claimed()
-        {
-            cleanup.complete();
-            return Ok(());
-        }
-        let submission = tokio::spawn(submit_tracked_queued_turn(
-            cleanup,
-            self.restate_http.clone(),
-            self.restate_ingress_url.clone(),
-            workflow_request,
-        ));
-        match submission.await {
-            Ok(Ok(_)) => Ok(()),
-            Ok(Err(error)) => Err(lash::runtime::QueuedWorkRunError::transient(
-                PluginError::Session(error.to_string()),
-            )),
-            Err(error) => Err(lash::runtime::QueuedWorkRunError::transient(
-                PluginError::Session(format!("queued-turn submission task failed: {error}")),
-            )),
-        }
-    }
-}
-
-impl WorkbenchQueuedWorkSubmitter {
-    pub(crate) async fn has_queued_work(
-        &self,
-        session_id: &SessionId,
-    ) -> std::result::Result<bool, PluginError> {
-        let store = self
-            .store_factory
-            .create_store(&lash::persistence::SessionStoreCreateRequest {
-                pending_observer_intents: Vec::new(),
-                session_id: session_id.clone(),
-                relation: lash::persistence::SessionRelation::default(),
-                policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
-            })
-            .await
-            .map_err(lash::runtime::RuntimeEffectControllerError::from)?;
-        let queued = store
-            .list_queued_work(session_id)
-            .await
-            .map_err(lash::runtime::RuntimeEffectControllerError::from)?;
-        let next_turn_inputs = store
-            .list_pending_turn_inputs(session_id)
-            .await
-            .map_err(lash::runtime::RuntimeEffectControllerError::from)?
-            .into_iter()
-            .any(|read| {
-                matches!(
-                    read.input.ingress(),
-                    lash::persistence::TurnInputIngress::NextTurn
-                )
-            });
-        Ok(!queued.is_empty() || next_turn_inputs)
-    }
-}
-
-#[cfg(test)]
-pub(crate) struct NoopQueuedWorkRunHandle;
-
-#[cfg(test)]
-#[async_trait]
-impl lash::runtime::QueuedWorkRunHandle for NoopQueuedWorkRunHandle {
-    async fn run_queued_work(
-        &self,
-        _request: lash::runtime::QueuedWorkRunRequest,
-    ) -> std::result::Result<(), lash::runtime::QueuedWorkRunError> {
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-pub(crate) fn inert_queued_work() -> lash::runtime::NativeQueuedWork {
-    lash::runtime::NativeQueuedWork::new(Arc::new(NoopQueuedWorkRunHandle))
-}
-
+/// Session work with no background drive: a test drains queued work by hand,
+/// and a send still has its input driven, in the task that waits on it
+/// (FIG-3600 S5b).
 #[cfg(test)]
 pub(crate) fn inert_queued_work_port() -> Arc<dyn lash::runtime::SessionWorkEngine> {
-    Arc::new(lash::runtime::NativeQueuedWork::new(Arc::new(
-        NoopQueuedWorkRunHandle,
-    )))
+    Arc::new(lash::runtime::InlineSessionWork::new(
+        lash::formats::build_generation(),
+    ))
 }
 
 // Process work is now resolved through LashCore's substrate port.

@@ -175,13 +175,13 @@ pub(crate) async fn start_live_restate_cron_scenario(
     .await;
     let endpoint =
         LiveRestateEndpoint::start(&admin_url, state.clone(), backend, process_worker).await;
-    let turn_invocation_id = run_workbench_turn_via_restate(
+    let mut turn = run_workbench_turn_via_restate(
         &state,
         "Register the cron trigger used by this cancellation-path test.",
     )
     .await;
     wait_for_workbench_message(&state, "cron registered", Duration::from_secs(60)).await;
-    wait_for_restate_invocation_success(&state, &turn_invocation_id, Duration::from_secs(30)).await;
+    wait_for_workbench_turn_settled(&mut turn, Duration::from_secs(30)).await;
     wait_for_restate_cron_sync(&state, &trace_path, Duration::from_secs(30)).await;
     let cron_session_id = rotate_cron_session_out_of_current(&state);
     let cron_job_key = cron_job_key_for_session(&state, &cron_session_id);

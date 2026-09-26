@@ -345,8 +345,8 @@ on a session that already has one running. It admits the send as the next turn's
 input instead and says so: `{"accepted":true,"queued":true,"queued_input":{…}}`
 carries the same `TurnInputReceipt` `/api/turn/input` returns, and the same
 `turn_input` product event reaches every viewer, so a second client's message is
-held durably, rendered as a queued receipt, and answered by the queued-work drain
-as its own turn. No optimistic user row is published for it: the receipt is the
+held durably, rendered as a queued receipt, and answered as its own turn once the
+session's engine drives the next root over it. No optimistic user row is published for it: the receipt is the
 row, and the drained turn's committed message reconciles against it through
 `turn_input_applied`.
 

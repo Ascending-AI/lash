@@ -1485,29 +1485,86 @@ async fn one_send_renders_one_user_row_while_running_and_after_the_ui_row_is_rec
     );
 }
 
+/// An attachment store whose blobs vanish after the first read: the send's
+/// admission finds the attachment, then the turn input built for `send()`
+/// cannot, so the send is refused after its optimistic row was published.
+struct VanishingAttachmentStore {
+    inner: Arc<dyn lash::persistence::AttachmentStore>,
+    reads: std::sync::atomic::AtomicUsize,
+}
+
+#[async_trait::async_trait]
+impl lash::persistence::AttachmentStore for VanishingAttachmentStore {
+    fn persistence(&self) -> lash::persistence::AttachmentStorePersistence {
+        self.inner.persistence()
+    }
+
+    async fn put(
+        &self,
+        bytes: Vec<u8>,
+        meta: lash::attachments::AttachmentCreateMeta,
+    ) -> Result<lash::attachments::AttachmentRef, lash::persistence::AttachmentStoreError> {
+        self.inner.put(bytes, meta).await
+    }
+
+    async fn get(
+        &self,
+        id: &lash::attachments::AttachmentId,
+    ) -> Result<lash::persistence::StoredAttachment, lash::persistence::AttachmentStoreError> {
+        if self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+            return self.inner.get(id).await;
+        }
+        Err(lash::persistence::AttachmentStoreError::Backend {
+            operation: "get",
+            class: lash::persistence::AttachmentStoreFailureClass::Transient,
+            source: format!("scripted vanished attachment {id}").into(),
+        })
+    }
+
+    async fn delete(
+        &self,
+        id: &lash::attachments::AttachmentId,
+    ) -> Result<(), lash::persistence::AttachmentStoreError> {
+        self.inner.delete(id).await
+    }
+
+    async fn list(
+        &self,
+    ) -> Result<Vec<lash::persistence::StoredBlobRef>, lash::persistence::AttachmentStoreError>
+    {
+        self.inner.list().await
+    }
+
+    async fn head(
+        &self,
+        id: &lash::attachments::AttachmentId,
+    ) -> Result<Option<lash::persistence::StoredBlobRef>, lash::persistence::AttachmentStoreError>
+    {
+        self.inner.head(id).await
+    }
+}
+
 #[tokio::test]
 async fn submit_failure_retires_a_user_row_for_a_turn_that_never_commits() {
     let data_dir = tempfile::tempdir().expect("submit failure projection tempdir");
     let mut state = recoverable_chat_test_state(data_dir.path(), 16).await;
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind failing Restate ingress");
-    let addr = listener.local_addr().expect("failing Restate ingress addr");
-    let app = Router::new().route(
-        "/{*path}",
-        post(|| async {
-            (
-                StatusCode::SERVICE_UNAVAILABLE,
-                Json(json!({ "error": "submission refused" })),
-            )
-        }),
-    );
-    tokio::spawn(async move {
-        if let Err(err) = axum::serve(listener, app).await {
-            eprintln!("failing Restate ingress stopped: {err}");
-        }
+    let attachments = Arc::new(VanishingAttachmentStore {
+        inner: test_attachment_store(),
+        reads: std::sync::atomic::AtomicUsize::new(0),
     });
-    state.restate_ingress_url = format!("http://{addr}");
+    let attachment = attachments
+        .inner
+        .put(
+            b"not really a png".to_vec(),
+            lash::attachments::AttachmentCreateMeta::new(
+                lash::attachments::MediaType::parse("image/png").expect("png media type"),
+                None,
+                Some("vanishing.png".to_string()),
+            ),
+        )
+        .await
+        .expect("store the attachment the send names");
+    state.attachment_store = attachments;
     let never_committed = "optimistic row whose turn never commits";
 
     let _ = send_turn(
@@ -1517,11 +1574,11 @@ async fn submit_failure_retires_a_user_row_for_a_turn_that_never_commits() {
             text: never_committed.to_string(),
             model: Some("test-model".to_string()),
             model_variant: None,
-            attachment_id: None,
+            attachment_id: Some(attachment.id.to_string()),
         }),
     )
     .await
-    .expect_err("failing Restate submission must reject the send");
+    .expect_err("a send whose input cannot be built is refused");
 
     let Json(settled) = app_state(State(state), Query(SessionQuery::default()))
         .await
@@ -2123,13 +2180,11 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
         })
         .build()
         .into_handle();
-    let mut state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
-    let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
-    state.restate_ingress_url = restate_ingress_url;
+    let state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
     let session_id = state.current_session_id();
     let turn_text = "exercise the user-facing send path";
 
-    let _ = send_turn(
+    let Json(accepted) = send_turn(
         State(state.clone()),
         Query(SessionQuery::default()),
         Json(TurnRequest {
@@ -2141,50 +2196,14 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
     )
     .await
     .expect("send turn through the production handler");
-    let submitted = restate_requests
-        .recv()
-        .await
-        .expect("capture submitted Restate turn");
-    let turn_id = submitted
-        .pointer("/body/turn_id")
-        .and_then(Value::as_str)
-        .expect("submitted turn id")
-        .to_string();
-    let turn_id = TurnId::from(turn_id);
-
-    let run_state = state.clone();
-    let run_turn_id = turn_id.clone();
-    let turn = tokio::spawn(async move {
-        let session = run_state
-            .core
-            .session(session_id)
-            .open()
-            .await
-            .expect("open submitted turn session");
-        let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
-        let output = session
-            .turn(lash::TurnInput::text(turn_text))
-            .turn_id(run_turn_id.clone())
-            .require_finish()
-            .expect("require finish")
-            .stream_to(&ChannelTurnEvents {
-                turn_state: Arc::clone(&turn_state),
-            })
-            .await
-            .expect("run submitted turn");
-        crate::restate::record_turn_output(
-            &run_state,
-            &session,
-            &run_turn_id,
-            output,
-            turn_state,
-            "test.send_turn.completed",
-        )
-        .await
-        .expect("record submitted turn output");
-        crate::restate::settle_workbench_turn(&run_state, &session.session_id(), &run_turn_id)
-            .await
-            .expect("settle submitted turn");
+    let turn_id = started_turn_id(&accepted);
+    // The session's engine runs the turn; the send's follower settles it.
+    let turn = tokio::spawn({
+        let state = state.clone();
+        let turn_id = turn_id.clone();
+        async move {
+            wait_for_turn_released(&state, &session_id, &turn_id, Duration::from_secs(30)).await;
+        }
     });
 
     assert_eq!(

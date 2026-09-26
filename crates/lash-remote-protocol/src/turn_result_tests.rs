@@ -15,17 +15,40 @@ fn remote_turn_status_projects_explicit_stopped_outcome_as_failed() {
 }
 
 #[test]
-fn remote_turn_status_projects_queued_outcome_as_queued_on_the_wire() {
-    let outcome = RemoteTurnOutcome::Queued { ahead: 3 };
-    assert_eq!(RemoteTurnStatus::from(&outcome), RemoteTurnStatus::Queued);
+fn remote_turn_status_names_a_parked_root_and_refuses_the_retired_queued_tag() {
+    let parked = RemoteTurnStatus::Parked {
+        root: TurnId::from("root"),
+        park_id: 7,
+        reason: RemoteTurnParkReason {
+            code: "binding_drift".to_string(),
+            message: "tool `search` changed".to_string(),
+        },
+        since_ms: 1_000,
+        attempts: 2,
+    };
+    let wire = serde_json::json!({
+        "type": "parked",
+        "root": "root",
+        "park_id": 7,
+        "reason": { "code": "binding_drift", "message": "tool `search` changed" },
+        "since_ms": 1_000,
+        "attempts": 2,
+    });
+    assert_eq!(serde_json::to_value(&parked).expect("encode parked"), wire);
     assert_eq!(
-        serde_json::to_value(&outcome).expect("encode queued outcome"),
-        serde_json::json!({"type": "queued", "ahead": 3})
+        serde_json::from_value::<RemoteTurnStatus>(wire).expect("decode parked"),
+        parked
     );
     assert_eq!(
-        serde_json::to_value(RemoteTurnStatus::Queued).expect("encode queued status"),
-        serde_json::json!("queued")
+        serde_json::to_value(RemoteTurnStatus::Answered).expect("encode answered"),
+        serde_json::json!({"type": "answered"})
     );
+    // Window 100 retired the queued outcome and status: no turn answers
+    // "queued" once the engine drives every accepted input.
+    serde_json::from_value::<RemoteTurnStatus>(serde_json::json!({"type": "queued"}))
+        .expect_err("queued is no longer a remote turn status");
+    serde_json::from_value::<RemoteTurnOutcome>(serde_json::json!({"type": "queued", "ahead": 3}))
+        .expect_err("queued is no longer a remote turn outcome");
 }
 
 #[test]
@@ -33,8 +56,9 @@ fn remote_turn_status_no_longer_accepts_in_progress_on_the_wire() {
     // Version 44 removed the variant; a version 43 peer can still emit the
     // literal, so pin that the decoder and the published schema both refuse
     // it rather than mapping it onto a terminal status.
-    let error = serde_json::from_value::<RemoteTurnStatus>(serde_json::json!("in_progress"))
-        .expect_err("in_progress is no longer a remote turn status");
+    let error =
+        serde_json::from_value::<RemoteTurnStatus>(serde_json::json!({"type": "in_progress"}))
+            .expect_err("in_progress is no longer a remote turn status");
     assert!(
         error.to_string().contains("in_progress"),
         "decoder must name the refused value: {error}"

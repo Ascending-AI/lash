@@ -1561,13 +1561,16 @@ pub trait TurnInputStore: Send + Sync {
     /// Unlike live observation replay, this surface is not retention-window
     /// dependent. Implementations return settled applications in durable
     /// commit order so a host can reconcile admission identity after a gap.
+    ///
+    /// The default refuses as an unsupported operation: a store that keeps
+    /// no application records cannot answer which turn applied an input.
     async fn list_turn_input_applications(
         &self,
         _session_id: &SessionId,
     ) -> Result<Vec<crate::TurnInputApplication>, StoreError> {
-        Err(StoreError::Backend(
-            "turn input application reconciliation is not implemented by this store".to_string(),
-        ))
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "list_turn_input_applications",
+        })
     }
 
     /// Cancel an unclaimed pending user input by id.

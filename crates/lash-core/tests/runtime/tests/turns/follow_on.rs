@@ -442,8 +442,9 @@ async fn drive(
 
 /// FIG-3542, FIG-3600: the session drive recovers a follow-on the head owes
 /// at admission, as a root of its own, before the input waiting behind it.
-/// A direct turn that meets the owed follow-on runs nothing and is answered
-/// queued; the drive then answers its input after the follow-on, each once.
+/// A direct turn that meets the owed follow-on runs nothing and answers the
+/// typed `QueuedRunPending` hold; the drive then answers its input after the
+/// follow-on, each once.
 #[tokio::test]
 pub(super) async fn fig3542_the_session_drive_recovers_an_owed_follow_on_before_the_input_behind_it()
  {
@@ -476,11 +477,11 @@ pub(super) async fn fig3542_the_session_drive_recovers_an_owed_follow_on_before_
             ),
         )
         .await
-        .expect("the direct turn is answered, not failed");
-    assert!(
-        matches!(held.outcome, TurnOutcome::Queued { ahead: 0 }),
-        "a direct turn never recovers the follow-on: {:?}",
-        held.outcome
+        .expect_err("a direct turn never recovers the follow-on");
+    assert_eq!(
+        held.code,
+        lash_core::RuntimeErrorCode::QueuedRunPending,
+        "the direct turn waits behind the follow-on: {held:?}"
     );
     assert_eq!(owed_run.requests.lock_recover().len(), 1);
     assert_eq!(owed(&owed_run.store).await, Some(follow_on.clone()));

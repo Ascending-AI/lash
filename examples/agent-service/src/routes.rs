@@ -15,7 +15,7 @@ use axum::response::{Html, Response};
 use bytes::Bytes;
 use futures_util::StreamExt;
 use lash::observe::{RemoteSessionObservationStreamItem, SessionCursor};
-use lash::rlm::RlmTurnBuilderExt as _;
+use lash::rlm::RlmSendBuilderExt as _;
 use lash::{
     LashSession, TurnActivity, TurnActivitySink, TurnCancelOutcome, TurnCancelRequest, TurnEvent,
     TurnInput, TurnOutput,
@@ -32,10 +32,6 @@ use tokio_stream::wrappers::ReceiverStream;
 
 use crate::board::{BoardState, agent_owes_move};
 use crate::db::{ChatBranchPoint, ChatMessage, ChatModelSelection, ChatSummary};
-#[cfg(feature = "restate")]
-use crate::restate::send_message_restate;
-#[cfg(feature = "restate")]
-use crate::state::AgentServiceDurability;
 use crate::state::{AppError, AppResult, AppStateData};
 use crate::ui::INDEX_HTML;
 
@@ -118,13 +114,6 @@ pub(crate) enum StreamItem {
         message: String,
     },
     Done,
-}
-
-impl StreamItem {
-    #[cfg(feature = "restate")]
-    pub(crate) fn is_done(&self) -> bool {
-        matches!(self, Self::Done)
-    }
 }
 
 pub(crate) async fn index() -> Html<&'static str> {
@@ -370,22 +359,13 @@ pub(crate) async fn send_message(
         })
         .await?;
 
-    #[cfg(feature = "restate")]
-    if state.durability() == AgentServiceDurability::Restate {
-        return Box::pin(send_message_restate(
-            state,
-            chat_id,
-            text,
-            user_message,
-            model_selection,
-        ))
-        .await;
-    }
-
+    // One path in every durability mode: the chat's session takes the input
+    // through `send()`, and the session's engine drives the turn -- in process
+    // for the local store, in a Restate handler for the Restate deployment.
     let turn_model = model_spec_for_chat_selection(&model_selection)?;
     let session = state.open_session(&chat_id, turn_model).await?;
     let replay_cursor = session.observe().current_observation().cursor;
-    let turn_id = TurnId::from(format!("agent-service-local-turn:{}", uuid::Uuid::new_v4()));
+    let turn_id = TurnId::from(format!("agent-service-turn:{}", uuid::Uuid::new_v4()));
     let (tx, rx) = mpsc::channel::<StreamItem>(64);
     let mut replay = spawn_live_replay_forwarder(session.clone(), replay_cursor, tx.clone());
     let run_state = state.clone();
@@ -397,15 +377,14 @@ pub(crate) async fn send_message(
             })
             .await;
         // A turn can finish without ever calling `board.play`, which wedges the
-        // round for good (FIG-3181). The recovery policy is one helper both
-        // send paths run; this path supplies only the local plumbing.
+        // round for good (FIG-3181); the recovery policy is its own helper.
         let emit_tx = tx.clone();
         let attempt = run_turn_with_zero_move_recovery(
             &run_state,
             &chat_id,
             text,
             task_turn_id,
-            || TurnId::from(format!("agent-service-local-turn:{}", uuid::Uuid::new_v4())),
+            || TurnId::from(format!("agent-service-turn:{}", uuid::Uuid::new_v4())),
             |turn_input, turn_id| {
                 let session = session.clone();
                 let run_state = run_state.clone();
@@ -417,13 +396,16 @@ pub(crate) async fn send_message(
                         run_state.clone(),
                         chat_id.clone(),
                         Arc::clone(&turn_state),
+                        Some(tx.clone()),
                     );
                     let turn = session
-                        .turn(TurnInput::text(turn_input))
-                        .turn_id(turn_id)
+                        .send(TurnInput::text(turn_input))
+                        .id(turn_id)
                         .require_finish();
+                    // A root that parked or was withdrawn answers `NotSettled`,
+                    // reported below like any other turn error.
                     let turn = match turn {
-                        Ok(turn) => turn.stream_to(&ui_events).await.map(|result| TurnOutput {
+                        Ok(turn) => turn.output_into(&ui_events).await.map(|result| TurnOutput {
                             result,
                             activities: Vec::new(),
                         }),
@@ -477,7 +459,7 @@ pub(crate) async fn send_message(
             Ok(TurnAttempt::Completed) => wait_for_live_replay_flush(&mut replay).await,
             // The turn's own error is already on the stream. This path reports
             // in band and never hands the helper an error to propagate.
-            Ok(TurnAttempt::Failed | TurnAttempt::Parked) | Err(_) => replay.abort(),
+            Ok(TurnAttempt::Failed) | Err(_) => replay.abort(),
         }
         let _ = tx.send(StreamItem::Done).await;
     });
@@ -543,7 +525,9 @@ pub(crate) async fn cancel_turn(
 pub(crate) struct ChannelTurnEvents {
     state: AppStateData,
     chat_id: String,
-    turn_id: Option<TurnId>,
+    /// Where a failed persistence write is reported, when a client streams
+    /// the turn.
+    errors: Option<mpsc::Sender<StreamItem>>,
     turn_state: Arc<Mutex<TurnPersistenceState>>,
 }
 
@@ -567,37 +551,19 @@ impl ChannelTurnEvents {
         state: AppStateData,
         chat_id: String,
         turn_state: Arc<Mutex<TurnPersistenceState>>,
+        errors: Option<mpsc::Sender<StreamItem>>,
     ) -> Self {
         Self {
             state,
             chat_id,
-            turn_id: None,
-            turn_state,
-        }
-    }
-
-    #[cfg(feature = "restate")]
-    pub(crate) fn outbox(
-        state: AppStateData,
-        chat_id: String,
-        turn_id: TurnId,
-        turn_state: Arc<Mutex<TurnPersistenceState>>,
-    ) -> Self {
-        Self {
-            state,
-            chat_id,
-            turn_id: Some(turn_id),
+            errors,
             turn_state,
         }
     }
 
     async fn emit_error(&self, message: String) {
-        if let Some(turn_id) = self.turn_id.clone() {
-            let item = StreamItem::Error { message };
-            let _ = self
-                .state
-                .with_db(move |db| db.insert_turn_event(&turn_id, &item))
-                .await;
+        if let Some(errors) = &self.errors {
+            let _ = errors.send(StreamItem::Error { message }).await;
         }
     }
 
@@ -927,14 +893,6 @@ pub(crate) enum TurnAttempt {
     /// The turn itself failed. The runner has already reported the error, so
     /// the loop stops rather than spending a re-prompt on a broken turn.
     Failed,
-    /// The turn parked (a durable replay divergence): nothing is recorded and
-    /// its durable handler keeps the journal for a restored deployment to
-    /// finish. The loop stops.
-    #[cfg_attr(
-        not(feature = "restate"),
-        expect(dead_code, reason = "only a durable Restate turn parks")
-    )]
-    Parked,
 }
 
 /// An agent can finish a turn without ever calling `board.play`. `play()` is
@@ -942,9 +900,8 @@ pub(crate) enum TurnAttempt {
 /// every cell while `turn != "X"`, so an unguarded zero-move turn wedges the
 /// round for good (FIG-3181). This is the entire recovery policy -- one nudge,
 /// then forfeit the move and hand the board back -- and it belongs to the host,
-/// not to one of its durability modes: the local and Restate send paths both
-/// run this function and differ only in how a turn executes (`run_turn`) and
-/// how a stream item reaches the client (`emit`).
+/// not to a durability mode: the session's engine runs each turn (`run_turn`)
+/// and the route streams each item (`emit`).
 pub(crate) async fn run_turn_with_zero_move_recovery<N, R, RF, E, EF>(
     state: &AppStateData,
     chat_id: &str,
@@ -966,7 +923,7 @@ where
     for attempt in 0..=ZERO_MOVE_RETRIES {
         match run_turn(turn_input, turn_id).await? {
             TurnAttempt::Completed => {}
-            stopped @ (TurnAttempt::Failed | TurnAttempt::Parked) => return Ok(stopped),
+            TurnAttempt::Failed => return Ok(TurnAttempt::Failed),
         }
         if !agent_still_owes_move(state, chat_id).await {
             break;
@@ -1291,16 +1248,9 @@ mod zero_move_turn_tests {
         );
     }
 
-    /// The recovery is host policy, not local-mode plumbing: it lives in one
-    /// helper that the local and Restate send paths both call, so this drives
-    /// that helper directly with a turn runner that never plays.
-    ///
-    /// The Restate path cannot be driven end to end in a cheap unit test —
-    /// `run_restate_chat_turn_and_persist` needs a `RestateRuntimeEffectController`
-    /// borrowed from a live `WorkflowContext`, which only exists inside a real
-    /// workflow invocation, and the crate's one such test is `#[ignore]`d behind
-    /// a running Restate server. What both paths share is this function, and
-    /// this is the test of it.
+    /// The recovery is host policy, not durability plumbing: it lives in one
+    /// helper the send route calls, so this drives that helper directly with a
+    /// turn runner that never plays.
     #[tokio::test]
     async fn the_zero_move_policy_is_one_shared_bounded_loop() {
         let temp = tempfile::tempdir().expect("tempdir");
@@ -1453,7 +1403,6 @@ finish("done through route");
             "mock-model".to_string(),
             None,
             AgentServiceDurability::Local,
-            None,
             None,
         );
         let chat = state

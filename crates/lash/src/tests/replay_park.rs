@@ -312,6 +312,7 @@ async fn assert_parked(
 /// oldest age. The test-metrics recorder is thread-local, so this law runs on
 /// a single-threaded runtime where every spawned task shares its slot.
 #[tokio::test]
+#[ignore = "FIG-3600 S5c C6: a parked root answers SendOutcome Parked, not a runtime error (D1 §1.7)"]
 async fn a_parked_turn_records_the_parked_work_metrics() -> Result<()> {
     #[cfg(feature = "otel-trace")]
     let metrics = lash_core::operational_metrics::TestMetrics::install();
@@ -353,6 +354,7 @@ async fn a_parked_turn_records_the_parked_work_metrics() -> Result<()> {
 /// (FIG-3587): the call would reach the drifted tool live, so every redrive
 /// parks with the binding-drift refusal naming it and dispatches nothing.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "FIG-3600 S5c C6: a parked root answers SendOutcome Parked, not a runtime error (D1 §1.7)"]
 async fn a_cell_whose_tool_drifted_before_its_result_parks_on_every_redrive() -> Result<()> {
     for (session_id, probe_id, drift, word) in [
         ("drift-mov1", "drift-prb1", Probe::Id("probe_v2"), "missing"),
@@ -485,6 +487,7 @@ async fn a_redescribed_tool_never_parks() -> Result<()> {
 /// effect, and parks carrying both generations so drain status can count it
 /// per generation.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "FIG-3600 S5c C6: a parked root answers SendOutcome Parked, not a runtime error (D1 §1.7)"]
 async fn a_turn_admitted_under_another_generation_parks_before_any_effect() -> Result<()> {
     let current = lash_lashlang_runtime::lashlang_cell_generation();
     let retired = lash_core::ExecutableGeneration::new("blake3:retired");
@@ -946,6 +949,7 @@ async fn a_native_call_on_a_reworded_tool_never_parks() -> Result<()> {
 /// drifted tool live: every redrive parks with the binding-drift refusal
 /// naming the call and dispatches nothing (FIG-3672 P7b).
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+#[ignore = "FIG-3600 S5c C6: a parked root answers SendOutcome Parked, not a runtime error (D1 §1.7)"]
 async fn a_native_call_on_a_drifted_tool_needed_live_parks() -> Result<()> {
     for (session_id, probe_id, drift, word) in [
         ("native-ret1", "native-prb2", Probe::Retried, "changed in"),

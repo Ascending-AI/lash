@@ -53,7 +53,7 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() 
         a_path.display()
     );
 
-    let (invocation_a, _) = submit_workbench_turn_via_restate(
+    let (turn_a, _) = submit_workbench_turn_via_restate(
         &harness_a.state,
         "journal fixture A process registration before a transport retry",
     )
@@ -65,6 +65,8 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() 
         Some(()),
         "fixture A must reach the provider gate after journaling its process registration"
     );
+    let invocation_a =
+        lash_turn_invocation(&harness_a.state, &turn_a, Duration::from_secs(20)).await;
     let process_id = wait_for_running_process(
         &harness_a.state,
         "immutable_deployment_probe",
@@ -121,6 +123,9 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() 
     // original storage clients. Retire those clients before rebuilding A so
     // the restart models one host generation rather than two live owners of
     // the same SQLite session store.
+    // The follower is part of that host generation: it goes with it, and the
+    // rebuilt host takes the turn up from its active-turn ledger.
+    turn_a.follower.abort();
     drop(harness_a.state);
     drop(harness_a.process_env_store);
     drop(harness_a.trace_path);
@@ -192,10 +197,11 @@ async fn live_restate_retry_keeps_the_admitted_deployment_configuration_inner() 
             "distinct fixture configurations require distinct Restate deployments"
         );
     }
-    let invocation_b =
+    let mut turn_b =
         run_workbench_turn_via_restate(&harness_b.state, "route new work to fixture B").await;
-    wait_for_restate_invocation_success(&harness_b.state, &invocation_b, Duration::from_secs(20))
-        .await;
+    wait_for_workbench_turn_settled(&mut turn_b, Duration::from_secs(20)).await;
+    let invocation_b =
+        lash_turn_invocation(&harness_b.state, &turn_b, Duration::from_secs(20)).await;
     wait_for_workbench_message(
         &harness_b.state,
         "fixture B completed",

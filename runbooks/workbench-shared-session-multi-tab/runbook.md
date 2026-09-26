@@ -349,10 +349,9 @@ if it does, that is the shared `turn_input` product event and is equally correct
 which happened rather than gating on it. Screenshot `04-queued-midturn-both.png`.
 
 Now let A's turn settle and **click nothing else**. The runtime drains the deferred input
-itself: `has_queued_work` counts pending `NextTurn` inputs, so after the active turn
-terminalizes and releases the lease, `claim_and_run_pending` submits a `workbench-queued-`
-turn (`WorkbenchQueuedWorkSubmitter` in
-[`state.rs`](../../examples/agent-workbench/src/main_sections/state.rs)). Gate that turn's
+itself: the input was enqueued as pending `NextTurn` work, and once the active root
+settles, the session's engine drives the next root over it. The workbench submits
+nothing. Gate that turn's
 `turn_completed`, then idle, then the settle gate. Require:
 
 - the queued input committed as a `User` message and rendered as a `.message.user` row in

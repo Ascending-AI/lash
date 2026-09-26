@@ -79,16 +79,44 @@ pub(crate) struct TurnCancelRegistry {
 #[derive(Default)]
 struct TurnCancelRegistryInner {
     next_id: u64,
-    active: BTreeMap<u64, LocalTurnStop>,
+    active: BTreeMap<u64, RegisteredTurn>,
+}
+
+/// One turn the registry can stop.
+enum RegisteredTurn {
+    /// A turn running inline in its caller's future (the non-adapted
+    /// `advanced()` and queued paths, until S5d).
+    Inline(LocalTurnStop),
+    /// A sent input the engine drives: stopped by cancelling the input.
+    Sent {
+        parts: crate::send::SendParts,
+        input: lash_core::InputId,
+    },
 }
 
 impl TurnCancelRegistry {
     /// The guard removes the entry when the turn finishes, however it finishes.
     fn register(&self, stop: LocalTurnStop) -> TurnCancelGuard {
+        self.insert(RegisteredTurn::Inline(stop))
+    }
+
+    /// Register a sent input until its handle is dropped (FIG-3600, D1 §2.3).
+    pub(crate) fn register_send(
+        &self,
+        parts: &crate::send::SendParts,
+        input: &lash_core::InputId,
+    ) -> TurnCancelGuard {
+        self.insert(RegisteredTurn::Sent {
+            parts: parts.clone(),
+            input: input.clone(),
+        })
+    }
+
+    fn insert(&self, turn: RegisteredTurn) -> TurnCancelGuard {
         let mut inner = self.inner.lock_recover();
         let id = inner.next_id;
         inner.next_id += 1;
-        inner.active.insert(id, stop);
+        inner.active.insert(id, turn);
         TurnCancelGuard {
             registry: Arc::clone(&self.inner),
             id,
@@ -107,8 +135,16 @@ impl TurnCancelRegistry {
         mode: TurnCancelMode,
     ) -> usize {
         let inner = self.inner.lock_recover();
-        for stop in inner.active.values() {
-            stop.request(mode, origin.clone());
+        for turn in inner.active.values() {
+            match turn {
+                RegisteredTurn::Inline(stop) => stop.request(mode, origin.clone()),
+                RegisteredTurn::Sent { parts, input } => crate::send::spawn_registry_cancel(
+                    parts.clone(),
+                    input.clone(),
+                    origin.clone(),
+                    mode,
+                ),
+            }
         }
         inner.active.len()
     }
@@ -151,9 +187,16 @@ impl<'run> EffectBinding<'run> {
 }
 
 /// Builder for configuring turn.
+///
+/// `run`, `stream_to` and `stream` are adapted over
+/// [`LashSession::send`](crate::LashSession::send) (FIG-3600 S5b): the input
+/// is accepted durably and the session's engine drives it. The `advanced()`
+/// and `*_with_effects` entries keep their inline drive until S5d deletes
+/// this builder.
 pub struct TurnBuilder {
+    pub(crate) session: crate::LashSession,
+    pub(crate) cancel_token: Option<HostCancel>,
     pub(crate) runtime: RuntimeHandle,
-    pub(crate) effect_host: Arc<dyn EffectHost>,
     pub(crate) input: TurnInput,
     pub(crate) stop: LocalTurnStop,
     pub(crate) cancels: TurnCancelRegistry,
@@ -171,13 +214,15 @@ impl TurnBuilder {
     /// [`cancel_with_origin`](Self::cancel_with_origin) when the origin is
     /// known.
     pub fn cancel(mut self, cancel: CancellationToken) -> Self {
-        self.stop = LocalTurnStop::from_token(cancel, None);
+        self.stop = LocalTurnStop::from_token(cancel.clone(), None);
+        self.cancel_token = Some((cancel, None));
         self
     }
 
     /// Lash records the value without interpreting it.
     pub fn cancel_with_origin(mut self, cancel: CancellationToken, origin: Option<String>) -> Self {
-        self.stop = LocalTurnStop::from_token(cancel, origin);
+        self.stop = LocalTurnStop::from_token(cancel.clone(), origin.clone());
+        self.cancel_token = Some((cancel, origin));
         self
     }
 
@@ -228,17 +273,25 @@ impl TurnBuilder {
         self
     }
 
-    /// Accept this turn's input durably, drive it, and collect its activity.
-    ///
-    /// Convenience over [`stream_to`](Self::stream_to), which documents what one
-    /// acceptance commit then one drive means for a host.
+    /// Accept this turn's input durably and wait for its settled turn:
+    /// [`send(input).output()`](crate::SendBuilder::output).
     pub async fn run(self) -> Result<TurnOutput> {
-        let collector = RunActivityCollector::default();
-        let result = self.stream_to(&collector).await?;
-        Ok(TurnOutput {
-            result,
-            activities: collector.into_activities(),
-        })
+        let (send, cancel) = self.into_send()?;
+        Box::pin(run_adapted(send, cancel, None)).await
+    }
+
+    /// The send this builder adapts to, and the host cancel token it races.
+    /// A per-turn prompt cannot cross durable acceptance, so the send refuses
+    /// it before accepting anything.
+    fn into_send(self) -> Result<(crate::SendBuilder, Option<HostCancel>)> {
+        let mut send = self.session.send(self.input);
+        if let Some(id) = self.turn_id {
+            send = send.id(id);
+        }
+        if let Some(options) = self.protocol_turn_options {
+            send = send.protocol_turn_options(options);
+        }
+        Ok((send, self.cancel_token))
     }
 
     pub async fn run_with_effects(
@@ -271,14 +324,29 @@ impl TurnBuilder {
     ///   submission supplies its own with
     ///   [`EnqueueTurnBuilder::id`](crate::EnqueueTurnBuilder::id).
     pub async fn stream_to(self, events: &dyn TurnActivitySink) -> Result<TurnReport> {
-        let effect_host = Arc::clone(&self.effect_host);
-        self.stream_to_with_binding(events, EffectBinding::Host(effect_host.as_ref()))
-            .await
+        let (send, cancel) = self.into_send()?;
+        Ok(Box::pin(run_adapted(send, cancel, Some(events)))
+            .await?
+            .result)
     }
 
+    /// Accept the input and stream its activity; the turn is driven as soon
+    /// as the stream is made, and [`TurnStream::finish`] answers its report.
+    /// An acceptance refusal surfaces from `finish`.
     pub fn stream(self) -> Result<TurnStream> {
-        let effect_host = Arc::clone(&self.effect_host);
-        self.stream_with_effect_host(effect_host.as_ref())
+        let (tx, rx) = mpsc::channel(64);
+        let adapted = self.into_send();
+        let completion = tokio::spawn(async move {
+            let (send, cancel) = adapted?;
+            let sink = ChannelTurnActivitySink { tx };
+            Ok(Box::pin(run_adapted(send, cancel, Some(&sink)))
+                .await?
+                .result)
+        });
+        Ok(TurnStream {
+            activities: rx,
+            completion,
+        })
     }
 
     /// Access lower-level turn execution that bypasses the semantic
@@ -355,14 +423,6 @@ impl TurnBuilder {
         .await
     }
 
-    fn stream_with_effect_host(self, effect_host: &dyn EffectHost) -> Result<TurnStream> {
-        let turn_id = self.resolved_turn_id(None).unwrap_or_else(fresh_turn_id);
-        let scoped_effect_controller = effect_host
-            .scoped_static(lash_core::AdmittedScope::new(self.turn_scope(&turn_id)))?
-            .ok_or(EmbedError::StaticTurnStreamRequiresStaticEffectHost)?;
-        self.stream_with_scope(scoped_effect_controller, Some(turn_id))
-    }
-
     fn stream_with_scope(
         self,
         scoped_effect_controller: ScopedEffectController<'static>,
@@ -387,6 +447,42 @@ impl TurnBuilder {
             completion,
         })
     }
+}
+
+/// A host's cancel token for an adapted turn, and the origin it records.
+type HostCancel = (CancellationToken, Option<String>);
+
+/// Drive an adapted turn over its send: accept, then settle, racing the
+/// host's cancel token when it has one. A fired token asks once for the
+/// input's cancel and keeps waiting: the turn answers Cancelled, as the
+/// inline turn did.
+async fn run_adapted(
+    send: crate::SendBuilder,
+    cancel: Option<HostCancel>,
+    sink: Option<&dyn TurnActivitySink>,
+) -> Result<TurnOutput> {
+    let handle = send.await?;
+    let canceller = handle.cancel();
+    let settle = async move {
+        match sink {
+            Some(sink) => handle.output_into_collecting(sink).await,
+            None => handle.output().await,
+        }
+    };
+    let Some((token, origin)) = cancel else {
+        return settle.await;
+    };
+    tokio::pin!(settle);
+    tokio::select! {
+        output = &mut settle => return output,
+        () = token.cancelled() => {}
+    }
+    let canceller = match origin {
+        Some(origin) => canceller.origin(origin),
+        None => canceller,
+    };
+    canceller.await?;
+    settle.await
 }
 
 /// Lower-level turn execution that exposes the raw runtime event stream.
@@ -915,7 +1011,7 @@ impl AdvancedQueuedTurn {
     }
 }
 
-fn fresh_turn_id() -> TurnId {
+pub(crate) fn fresh_turn_id() -> TurnId {
     TurnId::from(
         lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string())
             .0
@@ -944,10 +1040,8 @@ pub(crate) async fn stream_next_queued_prepared_assembled(
 ) -> Result<QueuedTurnDrain<AssembledTurn>> {
     let writer_handle = runtime.writer();
     let mut writer = writer_handle.lock().await;
-    let observation_sink = SessionObservationTurnActivitySink {
-        runtime: runtime.clone(),
-        live: sinks.turn_events(),
-    };
+    let observation_sink =
+        SessionObservationTurnActivitySink::new(runtime.clone(), sinks.turn_events());
     let mut opts = QueuedTurnOptions::new(CancellationToken::new(), source)
         .with_turn_events(&observation_sink)
         .with_local_stop(stop);
@@ -968,19 +1062,20 @@ pub(crate) async fn drive_session_observed(
 ) -> std::result::Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
     let writer_handle = runtime.writer();
     let mut writer = writer_handle.lock().await;
-    let observation_sink = SessionObservationTurnActivitySink {
-        runtime: runtime.clone(),
-        live: None,
-    };
+    let observation_sink = SessionObservationTurnActivitySink::new(runtime.clone(), None);
     let sinks = lash_core::drive::DriveSinks {
         events: &lash_core::runtime::NoopEventSink,
         turn_events: &observation_sink,
         local_stop: LocalTurnStop::default(),
     };
     let outcome =
-        lash_core::drive::drive_session_with(&mut writer, controller, request, sinks).await;
+        lash_core::drive::drive_session_reporting(&mut writer, controller, request, sinks).await;
     runtime.publish_from(&writer);
-    outcome
+    let (outcome, roots) = outcome?;
+    for root in roots {
+        crate::send::deposit_settled_root(&request.session, root);
+    }
+    Ok(outcome)
 }
 
 /// One recorded admission of `request` on `runtime`'s session (FIG-3600).
@@ -1006,19 +1101,21 @@ pub(crate) async fn run_admitted_root_observed(
 ) -> std::result::Result<lash_core::engine::RootOutcome, lash_core::engine::DriveAbort> {
     let writer_handle = runtime.writer();
     let mut writer = writer_handle.lock().await;
-    let observation_sink = SessionObservationTurnActivitySink {
-        runtime: runtime.clone(),
-        live: None,
-    };
+    let session = admitted.session().clone();
+    let observation_sink = SessionObservationTurnActivitySink::new(runtime.clone(), None);
     let sinks = lash_core::drive::DriveSinks {
         events: &lash_core::runtime::NoopEventSink,
         turn_events: &observation_sink,
         local_stop: LocalTurnStop::default(),
     };
-    let outcome =
-        lash_core::drive::run_admitted_root_with(&mut writer, controller, admitted, sinks).await;
+    let report =
+        lash_core::drive::run_admitted_root_reporting(&mut writer, controller, admitted, sinks)
+            .await;
     runtime.publish_from(&writer);
-    outcome
+    let report = report?;
+    let outcome = report.outcome.clone();
+    crate::send::deposit_settled_root(&session, report);
+    Ok(outcome)
 }
 
 pub(crate) async fn stream_selected_queued_prepared_turn(
@@ -1048,10 +1145,8 @@ pub(crate) async fn stream_selected_queued_prepared_assembled(
 ) -> Result<SelectedQueuedWorkDrainOutcome<AssembledTurn>> {
     let writer_handle = runtime.writer();
     let mut writer = writer_handle.lock().await;
-    let observation_sink = SessionObservationTurnActivitySink {
-        runtime: runtime.clone(),
-        live: sinks.turn_events(),
-    };
+    let observation_sink =
+        SessionObservationTurnActivitySink::new(runtime.clone(), sinks.turn_events());
     let mut opts = QueuedTurnOptions::new(CancellationToken::new(), source)
         .with_turn_events(&observation_sink)
         .with_local_stop(stop);
@@ -1096,9 +1191,24 @@ fn turn_options<'a>(
     opts.with_turn_events(turn_events)
 }
 
+/// Records every turn activity on the session's observation, addressed to
+/// the physical turn that produced it, so a send handle can adopt the
+/// activity of its input's root (FIG-3600 S5b). An activity published
+/// without a turn is addressed to the last turn this sink saw.
 struct SessionObservationTurnActivitySink<'a> {
     runtime: RuntimeHandle,
     live: Option<&'a dyn TurnActivitySink>,
+    current_turn: StdMutex<Option<TurnId>>,
+}
+
+impl<'a> SessionObservationTurnActivitySink<'a> {
+    fn new(runtime: RuntimeHandle, live: Option<&'a dyn TurnActivitySink>) -> Self {
+        Self {
+            runtime,
+            live,
+            current_turn: StdMutex::new(None),
+        }
+    }
 }
 
 #[async_trait]
@@ -1108,13 +1218,16 @@ impl TurnActivitySink for SessionObservationTurnActivitySink<'_> {
     }
 
     async fn emit(&self, activity: TurnActivity) {
-        self.runtime.record_turn_activity(None, activity.clone());
+        let current = self.current_turn.lock_recover().clone();
+        self.runtime
+            .record_turn_activity(current.as_ref(), activity.clone());
         if let Some(live) = self.live {
             live.emit(activity).await;
         }
     }
 
     async fn emit_for_turn(&self, turn_id: &TurnId, activity: TurnActivity) {
+        *self.current_turn.lock_recover() = Some(turn_id.clone());
         self.runtime
             .record_turn_activity(Some(turn_id), activity.clone());
         if let Some(live) = self.live {
@@ -1189,10 +1302,8 @@ pub(crate) async fn stream_prepared_agent_frame_run(
             .await
             .map_err(EmbedError::Session)?;
     }
-    let observation_sink = SessionObservationTurnActivitySink {
-        runtime: runtime.clone(),
-        live: sinks.turn_events(),
-    };
+    let observation_sink =
+        SessionObservationTurnActivitySink::new(runtime.clone(), sinks.turn_events());
     let turn = Box::pin(writer.stream_turn_with_agent_frames(
         input,
         turn_options(
@@ -1255,10 +1366,32 @@ pub struct TurnReport {
         skip_serializing_if = "lash_core::TurnCancelInputOutcome::is_empty"
     )]
     pub cancel_input_outcome: lash_core::TurnCancelInputOutcome,
+    /// Where this report was assembled: from the turn as it ran in this
+    /// process, or rebuilt from the session's durable state after it ran
+    /// elsewhere.
+    #[serde(default)]
+    pub source: ReportSource,
+}
+
+/// Where a [`TurnReport`] came from.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReportSource {
+    /// Assembled from the turn as it ran in this process: every field is the
+    /// turn's own account.
+    #[default]
+    Live,
+    /// Rebuilt from the session's durable state because the turn ran in
+    /// another process (or its live report was no longer held): the outcome,
+    /// the session state after it and the acceptance are the store's; the
+    /// per-turn ledgers (usage, calls, tool records, execution metrics) are
+    /// empty here and are read from the session's usage report and
+    /// observation instead.
+    Durable,
 }
 
 impl TurnReport {
-    fn from_assembled(turn: lash_core::facade_support::AssembledTurn) -> Self {
+    pub(crate) fn from_assembled(turn: lash_core::facade_support::AssembledTurn) -> Self {
         // Keep this exhaustive so adding a core turn-result field forces the
         // facade projection to be reviewed alongside the remote projection.
         let lash_core::facade_support::AssembledTurn {
@@ -1288,7 +1421,17 @@ impl TurnReport {
             errors,
             acceptance: turn_input_acceptance,
             cancel_input_outcome: turn_cancel_input_outcome,
+            source: ReportSource::Live,
         }
+    }
+
+    /// The four-way status of the settled turn this report describes:
+    /// [`Answered`](crate::TurnStatus::Answered),
+    /// [`Failed`](crate::TurnStatus::Failed) or
+    /// [`Cancelled`](crate::TurnStatus::Cancelled). A report exists only for
+    /// a settled turn, so it is never [`Parked`](crate::TurnStatus::Parked).
+    pub fn status(&self) -> crate::TurnStatus {
+        crate::send::status_of_outcome(&self.outcome)
     }
 
     /// Durable cancellation evidence, present exactly when this turn was
@@ -1340,26 +1483,11 @@ impl TurnReport {
         }
     }
 
-    /// A queued call is a success: the input is durably admitted and will be
-    /// answered in order ([`Self::queued_ahead`]).
     pub fn is_success(&self) -> bool {
         matches!(
             self.outcome,
-            TurnOutcome::Finished(_)
-                | TurnOutcome::AgentFrameSwitch { .. }
-                | TurnOutcome::Queued { .. }
+            TurnOutcome::Finished(_) | TurnOutcome::AgentFrameSwitch { .. }
         )
-    }
-
-    /// How many earlier inputs the accepted input waits behind, when this call
-    /// ran no turn because the input sits past one claim's bound. The
-    /// queued-work drain answers it in arrival order; resubmitting would admit
-    /// the words a second time. `None` for a turn that ran.
-    pub fn queued_ahead(&self) -> Option<u64> {
-        match self.outcome {
-            TurnOutcome::Queued { ahead } => Some(ahead),
-            _ => None,
-        }
     }
 
     /// Returns whether the turn stopped because the assembled context
@@ -1387,6 +1515,11 @@ pub struct TurnOutput {
 }
 
 impl TurnOutput {
+    /// See [`TurnReport::status`].
+    pub fn status(&self) -> crate::TurnStatus {
+        self.result.status()
+    }
+
     pub fn assistant_message(&self) -> Option<&str> {
         self.result.assistant_message()
     }
@@ -1482,23 +1615,5 @@ pub fn message_role(message: &Message) -> &'static str {
         MessageRole::Assistant => "assistant",
         MessageRole::System => "system",
         MessageRole::Event => "event",
-    }
-}
-
-#[cfg(test)]
-mod queued_report_tests {
-    use super::{TurnOutcome, TurnReport};
-
-    #[test]
-    fn a_queued_report_is_a_success_that_names_its_queue_position() {
-        let mut turn = lash_core::testing::mock_assembled_turn(
-            &lash_core::SessionId::from("queued-session"),
-            "",
-        );
-        turn.outcome = TurnOutcome::Queued { ahead: 3 };
-        let report = TurnReport::from_assembled(turn);
-        assert!(report.is_success(), "a queued call is not a failure");
-        assert_eq!(report.queued_ahead(), Some(3));
-        assert_eq!(report.assistant_message(), None);
     }
 }

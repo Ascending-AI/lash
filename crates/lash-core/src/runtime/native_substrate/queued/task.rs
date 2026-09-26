@@ -10,6 +10,7 @@ use std::time::Duration;
 use crate::runtime::{WorkerSlotKind, WorkerSlotPermit};
 
 use super::NativeQueuedWorkInner;
+use super::drive_ledger::RunEnd;
 use super::scheduler::{
     QueuedWorkDemand, QueuedWorkExecutionDispatcherGuard, QueuedWorkExecutionTaskCompletion,
 };
@@ -18,6 +19,24 @@ use super::types::{
     QueuedWorkWakeContended, QueuedWorkWakeFailure, QueuedWorkWakeOutcome,
     bounded_multiplicative_jitter,
 };
+
+/// The runtime error a failed run carries, whatever the run handle wrapped
+/// it in.
+fn run_error(error: QueuedWorkRunError) -> crate::RuntimeError {
+    match error.error {
+        crate::PluginError::Runtime(error) => error,
+        other => crate::RuntimeError::new(crate::RuntimeErrorCode::QueuedWork, other.to_string()),
+    }
+}
+
+impl RunEnd {
+    fn shut_down() -> Self {
+        Self::Refused(crate::RuntimeError::new(
+            crate::RuntimeErrorCode::SessionWorkUnavailable,
+            "the in-process session-work engine shut down before the drive ran",
+        ))
+    }
+}
 
 pub(super) struct QueuedWorkTaskDriver {
     pub(super) inner: Arc<NativeQueuedWorkInner>,
@@ -174,7 +193,9 @@ impl QueuedWorkTaskDriver {
                 let test_dispatch = driver.inner.test_dispatch.clone();
                 let run = async move {
                     let _completion = completion;
-                    match (permit, scheduler.slots.as_ref()) {
+                    let session_id = demand.session_id.clone();
+                    let inner = Arc::clone(&driver.inner);
+                    let (upto, end) = match (permit, scheduler.slots.as_ref()) {
                         (Some(permit), Some(slots)) => {
                             crate::runtime::process_permit::scope_queued_work_execution_permit(
                                 Arc::clone(slots),
@@ -182,10 +203,13 @@ impl QueuedWorkTaskDriver {
                                 Arc::clone(&scheduler.changed),
                                 driver.run_demand(demand),
                             )
-                            .await;
+                            .await
                         }
                         (None, None) => driver.run_demand(demand).await,
                         _ => unreachable!("queued-work admission permit matches scheduler mode"),
+                    };
+                    if let Some(session_id) = session_id {
+                        inner.drives.complete(&session_id, upto, end);
                     }
                 };
                 #[cfg(test)]
@@ -250,18 +274,25 @@ impl QueuedWorkTaskDriver {
         clippy::expect_used,
         reason = "a retrying disposition carries its delay"
     )]
-    pub(super) async fn run_demand(&self, mut demand: QueuedWorkDemand) {
+    /// Run one demand to its end: answers the asks its last attempt saw
+    /// (the drive ledger's `requested` count when that attempt began) and
+    /// how the run ended.
+    pub(super) async fn run_demand(&self, mut demand: QueuedWorkDemand) -> (u64, RunEnd) {
         let work_cadence = self.inner.work_cadence.clone();
         let mut retry_state = RetryState::Progress { pass: 1 };
         loop {
             let reason = demand.reason();
+            let upto = demand
+                .session_id
+                .as_ref()
+                .map_or(0, |session_id| self.inner.drives.requested(session_id));
             let result = self.run_attempt(&demand, &reason, retry_state.pass()).await;
             match result {
-                None => return,
+                None => return (upto, RunEnd::shut_down()),
                 Some(Ok(
                     QueuedWorkRunAttemptOutcome::Idle | QueuedWorkRunAttemptOutcome::Complete,
                 )) => {
-                    return;
+                    return (upto, RunEnd::Drove);
                 }
                 Some(Ok(QueuedWorkRunAttemptOutcome::Progress)) => {
                     retry_state = RetryState::Progress {
@@ -326,7 +357,7 @@ impl QueuedWorkTaskDriver {
                         ))
                         .await
                     {
-                        return;
+                        return (upto, RunEnd::shut_down());
                     }
                     retry_state.advance_backoff(work_cadence.retry_max);
                     self.merge_rerun(&mut demand);
@@ -392,7 +423,7 @@ impl QueuedWorkTaskDriver {
                                 event = "queued_work.wake_terminal",
                                 "queued-work wake stopped after a terminal failure"
                             );
-                            return;
+                            return (upto, RunEnd::Refused(run_error(err)));
                         }
                         QueuedWorkWakeOutcome::Exhausted => {
                             tracing::warn!(
@@ -404,14 +435,14 @@ impl QueuedWorkTaskDriver {
                                 event = "queued_work.wake_exhausted",
                                 "queued-work wake exhausted its retry budget"
                             );
-                            return;
+                            return (upto, RunEnd::Retry(run_error(err)));
                         }
                     }
                     if !self
                         .wait_for_retry(retry_after.expect("retrying disposition has a delay"))
                         .await
                     {
-                        return;
+                        return (upto, RunEnd::shut_down());
                     }
                     retry_state.advance_backoff(work_cadence.retry_max);
                     self.merge_rerun(&mut demand);

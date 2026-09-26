@@ -377,12 +377,12 @@ pub(super) async fn post_commit_restore_failure_is_a_diagnostic_and_forces_reloa
             handler.scoped(),
         )
         .await
-        .expect("next use reloads durable resident state");
+        .expect_err("the next direct turn waits behind the owed follow-on");
     handler.close().await.expect("close the turn's handler");
-    assert!(
-        matches!(held.outcome, TurnOutcome::Queued { .. }),
-        "{:?}",
-        held.outcome
+    assert_eq!(
+        held.code,
+        lash_core::RuntimeErrorCode::QueuedRunPending,
+        "{held}"
     );
     assert_eq!(
         *runtime.resident_session.validity(),

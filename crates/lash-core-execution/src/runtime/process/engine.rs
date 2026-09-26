@@ -781,9 +781,36 @@ pub struct ProcessEngineRegistry {
     admissions: Arc<BTreeMap<String, ProcessEngineAdmission>>,
 }
 
+/// A [`ProcessEngineRegistry`] held weakly: it keeps no engine alive.
+#[derive(Clone)]
+pub struct WeakProcessEngineRegistry {
+    engines: std::sync::Weak<BTreeMap<String, Arc<dyn ProcessEngine>>>,
+    admissions: std::sync::Weak<BTreeMap<String, ProcessEngineAdmission>>,
+}
+
+impl WeakProcessEngineRegistry {
+    /// The registry, while some holder keeps it alive.
+    #[must_use]
+    pub fn upgrade(&self) -> Option<ProcessEngineRegistry> {
+        Some(ProcessEngineRegistry {
+            engines: self.engines.upgrade()?,
+            admissions: self.admissions.upgrade()?,
+        })
+    }
+}
+
 impl ProcessEngineRegistry {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// This registry, held weakly.
+    #[must_use]
+    pub fn downgrade(&self) -> WeakProcessEngineRegistry {
+        WeakProcessEngineRegistry {
+            engines: Arc::downgrade(&self.engines),
+            admissions: Arc::downgrade(&self.admissions),
+        }
     }
 
     pub fn with_registration(self, registration: ProcessEngineRegistration) -> Self {

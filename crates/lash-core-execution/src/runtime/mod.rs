@@ -90,7 +90,7 @@ pub use lash_core_ids::execution_permit::{
     ensure_process_execution_permit, release_process_execution_permit_while,
 };
 pub use native_substrate::{
-    NativeProcessAdmissionDriver, NativeProcessWork, NativeSubstrateConfig,
+    InlineSessionWork, NativeProcessAdmissionDriver, NativeProcessWork, NativeSubstrateConfig,
     NativeSubstrateConfigError, NoSessionWork, ProcessTerminalWait, ProcessWorkSubstrate,
     ProcessWorkWiring, SessionDriver, SessionWorkEngine, WakeDeliveryDriveReport,
     WakeDeliveryDriver, WorkCadencePolicy, WorkerSweepPolicy,
@@ -140,7 +140,7 @@ pub use process::{
     StoreRealization, UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind,
     WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
     WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason, WatchedRegistry, allocate_process_event_sequence,
+    WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry, allocate_process_event_sequence,
     apply_process_event_projection, apply_process_status_projection,
     artifact_owner_is_permanently_retired, artifact_staging_owner_edge_is_missing,
     check_retained_start, current_epoch_ms, ensure_process_lease_schema_version,

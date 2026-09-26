@@ -42,8 +42,8 @@ pub(crate) fn spawn_owned_restate_endpoint(
 }
 
 /// The workbench's Restate endpoint: lash's own services come from the
-/// backend, and the workbench binds only its turn, trigger, session and cron
-/// workflows beside them.
+/// backend, and `LashSession` among them drives every turn; the workbench
+/// binds only its trigger, session and cron workflows beside them.
 fn endpoint(
     state: AppState,
     backend: Arc<crate::WorkbenchRestateBackend>,
@@ -51,14 +51,6 @@ fn endpoint(
 ) -> Endpoint {
     backend
         .endpoint_builder(process_worker)
-        .bind(lash_restate::turn_service(
-            WorkbenchTurnWorkflowImpl::new(state.clone()).serve(),
-            "run",
-        ))
-        .bind(lash_restate::turn_service(
-            WorkbenchQueuedTurnWorkflowImpl::new(state.clone()).serve(),
-            "run",
-        ))
         .bind(WorkbenchButtonTriggerWorkflowImpl::new(state.clone()).serve())
         .bind(WorkbenchMailReceivedWorkflowImpl::new(state.clone()).serve())
         .bind(WorkbenchSessionDeleteWorkflowImpl::new(state.clone()).serve())

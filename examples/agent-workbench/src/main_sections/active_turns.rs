@@ -2,16 +2,11 @@ use super::*;
 use lash::SessionId;
 use lash::TurnId;
 
-/// Which Restate workflow owns a claimed turn.
+/// Who claimed a turn.
 ///
-/// The workbench submits a turn to one of two workflows and has always known
-/// which at submission time. It used to throw that away and re-derive it later
-/// by sniffing a `workbench-queued-` prefix off the turn id, with a wildcard
-/// `else` — so any id that reached the registry without either prefix was
-/// probed as a *user* workflow, and the probe is what decides whether a
-/// pending-terminal cancel keeps or drops a live routing claim. The kind now
-/// travels with the claim. Turn ids keep their prefixes because they are
-/// useful in traces; they are no longer load-bearing.
+/// The kind travels with the claim rather than being re-derived from the
+/// turn id's prefix. Turn ids keep their prefixes because they are useful in
+/// traces; they are not load-bearing.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub(crate) enum WorkbenchTurnKind {
@@ -22,14 +17,6 @@ pub(crate) enum WorkbenchTurnKind {
 }
 
 impl WorkbenchTurnKind {
-    /// The Restate workflow that runs this kind of turn.
-    pub(crate) fn workflow_name(self) -> &'static str {
-        match self {
-            Self::User => "WorkbenchTurnWorkflow",
-            Self::Queued => "WorkbenchQueuedTurnWorkflow",
-        }
-    }
-
     /// Recover a kind for a turn restored from an active-turns file written
     /// before the kind was persisted.
     ///
@@ -93,6 +80,9 @@ pub(crate) struct ActiveTurn {
 pub(crate) struct ActiveTurns {
     inner: Arc<Mutex<ActiveTurnLedger>>,
     pub(crate) path: Option<Arc<PathBuf>>,
+    /// The roots this process follows to settlement, and the sessions it
+    /// watches for roots its engine starts on its own. In-process only.
+    pub(crate) follows: crate::restate::RootFollows,
 }
 
 #[derive(Default)]
@@ -124,6 +114,7 @@ pub(crate) enum ActiveTurnClaim {
 }
 
 impl ActiveTurnClaim {
+    #[cfg(test)]
     pub(crate) fn is_claimed(self) -> bool {
         matches!(self, Self::Claimed)
     }
@@ -135,16 +126,15 @@ pub(crate) struct ActiveTurnPrompt {
     pub(crate) attachment_id: Option<String>,
 }
 
-/// Cleans up an active-turn claim unless its work-driver submission completes.
+/// Cleans up a user turn's active-turn claim unless its `send()` is accepted.
 ///
 /// This guard lives inside the detached admission task. It therefore runs when
-/// submission returns an error, the task is cancelled during runtime shutdown,
-/// or the task unwinds after a panic. User-turn admission also retires its
-/// optimistic row and publishes the terminal failure expected by the browser;
-/// queued turns have no optimistic row, so they only release their claim.
+/// the send returns an error, the task is cancelled during runtime shutdown,
+/// or the task unwinds after a panic: it releases the claim, retires the
+/// optimistic row and publishes the terminal failure the browser expects.
 pub(crate) struct ActiveTurnSubmissionGuard {
     pub(crate) active_turns: ActiveTurns,
-    pub(crate) failure_publisher: Option<AppState>,
+    pub(crate) failure_publisher: AppState,
     pub(crate) session_id: SessionId,
     pub(crate) turn_id: TurnId,
     pub(crate) armed: bool,
@@ -154,21 +144,7 @@ impl ActiveTurnSubmissionGuard {
     pub(crate) fn user_turn(state: &AppState, session_id: &SessionId, turn_id: &TurnId) -> Self {
         Self {
             active_turns: state.active_turns.clone(),
-            failure_publisher: Some(state.clone()),
-            session_id: session_id.clone(),
-            turn_id: TurnId::from(turn_id.to_string()),
-            armed: true,
-        }
-    }
-
-    pub(crate) fn queued_turn(
-        active_turns: ActiveTurns,
-        session_id: &SessionId,
-        turn_id: &TurnId,
-    ) -> Self {
-        Self {
-            active_turns,
-            failure_publisher: None,
+            failure_publisher: state.clone(),
             session_id: session_id.clone(),
             turn_id: TurnId::from(turn_id.to_string()),
             armed: true,
@@ -189,12 +165,11 @@ impl Drop for ActiveTurnSubmissionGuard {
         let removal = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
             self.active_turns.remove(&self.session_id, &self.turn_id);
         }));
-        let publication = self.failure_publisher.as_ref().map(|state| {
-            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                state.publish_turn_failed(&self.session_id, &self.turn_id);
-            }))
-        });
-        let cleanup_panic = removal.err().or_else(|| publication.and_then(Result::err));
+        let publication = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            self.failure_publisher
+                .publish_turn_failed(&self.session_id, &self.turn_id);
+        }));
+        let cleanup_panic = removal.err().or_else(|| publication.err());
         if let Some(payload) = cleanup_panic {
             if already_panicking {
                 eprintln!("turn admission cleanup panicked while preserving the original panic");
@@ -291,6 +266,7 @@ impl ActiveTurns {
                 retirements: BTreeMap::new(),
             })),
             path: Some(Arc::new(path)),
+            follows: crate::restate::RootFollows::default(),
         };
         active.persist();
         Ok(active)
@@ -330,6 +306,7 @@ impl ActiveTurns {
         self.persist_snapshot(&ledger.turns);
     }
 
+    #[cfg(test)]
     pub(crate) fn try_insert_for_idle_session(
         &self,
         session_id: &SessionId,
@@ -401,8 +378,22 @@ impl ActiveTurns {
             .is_some_and(|slot| slot.turn_id == *turn_id)
     }
 
-    /// The session's claimed turn, with the workflow that owns it and the
-    /// prompt the page is waiting on, read together under one lock.
+    /// Every session's claimed turn.
+    pub(crate) fn snapshot(&self) -> Vec<ActiveTurn> {
+        self.inner
+            .lock_recover()
+            .turns
+            .iter()
+            .map(|(session_id, slot)| ActiveTurn {
+                address: lash::TurnAddress::new(session_id, &slot.turn_id),
+                kind: slot.kind,
+                prompt: slot.prompt.clone(),
+            })
+            .collect()
+    }
+
+    /// The session's claimed turn, with who claimed it and the prompt the
+    /// page is waiting on, read together under one lock.
     pub(crate) fn for_session(&self, session_id: &SessionId) -> Option<ActiveTurn> {
         self.inner
             .lock_recover()

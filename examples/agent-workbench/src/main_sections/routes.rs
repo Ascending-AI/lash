@@ -220,12 +220,15 @@ pub(crate) async fn retrieve_attachment(
         .map_err(|err| AppError::internal(format!("build attachment response: {err}")))
 }
 
-pub(crate) async fn commit_and_submit_user_turn(
+/// Show the user's row, hand the input to the session's `send()`, and follow
+/// the root it starts. The claim passes to the follower, which releases it
+/// once the root is settled on the page.
+pub(crate) async fn commit_and_start_user_turn(
     state: AppState,
     cleanup: ActiveTurnSubmissionGuard,
-    request: restate::WorkbenchTurnWorkflowRequest,
+    request: restate::UserTurnRequest,
     chat_attachments: Vec<ChatAttachment>,
-) -> Result<lash_restate::RestateInvocationId, AppError> {
+) -> Result<tokio::task::JoinHandle<restate::TurnSettlement>, AppError> {
     state.push_message_with_id_and_attachments_for_session(
         &request.session_id,
         workbench_turn_user_message_id(&request.turn_id),
@@ -238,21 +241,9 @@ pub(crate) async fn commit_and_submit_user_turn(
         "api.turn.admission_committed",
         json!({ "turn_id": request.turn_id }),
     );
-    let invocation_id = restate::submit_user_turn(&state, request).await?;
+    let follower = restate::start_user_turn(&state, request).await?;
     cleanup.complete();
-    Ok(invocation_id)
-}
-
-pub(crate) async fn submit_tracked_queued_turn(
-    cleanup: ActiveTurnSubmissionGuard,
-    restate_http: reqwest::Client,
-    restate_ingress_url: String,
-    request: restate::WorkbenchQueuedTurnWorkflowRequest,
-) -> Result<lash_restate::RestateInvocationId, AppError> {
-    let invocation_id =
-        restate::submit_queued_turn_request(&restate_http, &restate_ingress_url, &request).await?;
-    cleanup.complete();
-    Ok(invocation_id)
+    Ok(follower)
 }
 
 pub(crate) async fn send_turn(
@@ -321,8 +312,8 @@ pub(crate) async fn send_turn(
     // send that arrives while a turn is running cannot start one, and answering
     // `accepted` while starting a doomed turn is a lie the browser then renders
     // (FIG-1000). Admit it as the next turn's input instead: the message is held
-    // durably, every viewer sees a queued receipt, and the queued-work drain
-    // that runs at terminalization answers it as its own turn.
+    // durably, every viewer sees a queued receipt, and the session's engine
+    // answers it as its own turn once the running one settles.
     //
     // The initial read selects the ordinary busy path without opening a runtime
     // session. The atomic reservation below rechecks after that open, closing
@@ -376,21 +367,25 @@ pub(crate) async fn send_turn(
             return Err(state.retirement_fence_refusal(&session_id, "api.turn", retirement));
         }
     }
-    tokio::spawn(commit_and_submit_user_turn(
-        state,
-        cleanup,
-        restate::WorkbenchTurnWorkflowRequest {
-            turn_id,
-            session_id: session_id.clone(),
-            text,
-            model: ModelSelection::from_spec(&turn_model),
-            attachment_id,
-        },
-        chat_attachments,
-    ))
-    .await
-    .map_err(|error| AppError::internal(format!("turn admission task failed: {error}")))??;
-    Ok(Json(TurnAccepted::started()))
+    // The follower settles the turn on its own; the route answers once the
+    // input is accepted.
+    drop(
+        tokio::spawn(commit_and_start_user_turn(
+            state,
+            cleanup,
+            restate::UserTurnRequest {
+                turn_id: turn_id.clone(),
+                session_id: session_id.clone(),
+                text,
+                model: ModelSelection::from_spec(&turn_model),
+                attachment_id,
+            },
+            chat_attachments,
+        ))
+        .await
+        .map_err(|error| AppError::internal(format!("turn admission task failed: {error}")))??,
+    );
+    Ok(Json(TurnAccepted::started(turn_id)))
 }
 
 pub(crate) async fn button_trigger(
@@ -520,7 +515,7 @@ pub(crate) async fn set_trigger_enabled(
     let registration = lash::triggers::TriggerRegistration::from(&receipt.record_snapshot);
     // Do not gate this sync on `changed`: redundant mutations reconcile stale Restate state.
     // A sync failure leaves the mutation durable and Restate stale; the next sync reconciles.
-    restate::sync_cron_jobs_after_trigger_mutation(
+    Box::pin(restate::sync_cron_jobs_after_trigger_mutation(
         &state,
         &session_id,
         if request.enabled {
@@ -529,7 +524,7 @@ pub(crate) async fn set_trigger_enabled(
             "trigger_disabled"
         },
         &receipt.record_snapshot,
-    )
+    ))
     .await?;
     Ok(Json(TriggerMutationResponse {
         changed,
@@ -991,95 +986,6 @@ pub(crate) async fn list_queued_work(
             .await
             .map_err(AppError::internal)?,
     ))
-}
-
-pub(crate) async fn run_queued_work_batch(
-    AxumPath(batch_id): AxumPath<String>,
-    State(state): State<AppState>,
-    Query(query): Query<SessionQuery>,
-) -> Result<Json<QueuedWorkBatchAction>, AppError> {
-    let session_id = state.admit_session(&query, "api.queued_work.run").await?;
-    state
-        .authorization
-        .authorize(WorkbenchAuthorizationAction::ManageQueuedWork {
-            session_id: session_id.clone(),
-        })?;
-    if state.active_turns.for_session(&session_id).is_some() {
-        return Err(AppError::conflict(
-            "queued work cannot be run while this session has an active turn",
-        ));
-    }
-    let session = state
-        .open_session(&session_id, "api.queued_work.run")
-        .await
-        .map_err(|error| {
-            state.session_admission_error(&session_id, "api.queued_work.run", error)
-        })?;
-    if !session
-        .durable()
-        .queued_work()
-        .await
-        .map_err(AppError::internal)?
-        .iter()
-        .any(|batch| batch.batch_id == batch_id)
-    {
-        return Err(AppError::not_found(format!(
-            "queued-work batch `{batch_id}` is not pending"
-        )));
-    }
-
-    let turn_id = TurnId::from(format!("{QUEUED_TURN_ID_PREFIX}{}", uuid::Uuid::new_v4()));
-    let request = restate::WorkbenchQueuedTurnWorkflowRequest {
-        turn_id: turn_id.clone(),
-        session_id: session_id.clone(),
-        reason: "workbench_manual_batch_run".to_string(),
-        scope: restate::QueuedTurnScope::Selected {
-            batch_ids: vec![batch_id.clone()],
-        },
-        drain_id: Some(format!("workbench-queued-batch:{batch_id}")),
-    };
-    let cleanup =
-        ActiveTurnSubmissionGuard::queued_turn(state.active_turns.clone(), &session_id, &turn_id);
-    match state.active_turns.try_insert_for_idle_session(
-        &session_id,
-        &turn_id,
-        WorkbenchTurnKind::Queued,
-    ) {
-        ActiveTurnClaim::Claimed => {}
-        ActiveTurnClaim::Busy => {
-            cleanup.complete();
-            return Err(AppError::conflict(
-                "queued work cannot be run while this session has an active turn",
-            ));
-        }
-        ActiveTurnClaim::Refused(retirement) => {
-            cleanup.complete();
-            return Err(state.retirement_fence_refusal(
-                &session_id,
-                "api.queued_work.run",
-                retirement,
-            ));
-        }
-    }
-    tokio::spawn(submit_tracked_queued_turn(
-        cleanup,
-        state.restate_http.clone(),
-        state.restate_ingress_url.clone(),
-        request,
-    ))
-    .await
-    .map_err(|error| {
-        AppError::internal(format!("queued-turn submission task failed: {error}"))
-    })??;
-    state.trace_for_session(
-        &session_id,
-        "api.queued_work.run_submitted",
-        json!({ "batch_id": batch_id, "turn_id": turn_id }),
-    );
-    Ok(Json(QueuedWorkBatchAction {
-        accepted: true,
-        batch_id,
-    }))
 }
 
 pub(crate) async fn cancel_queued_work_batch(

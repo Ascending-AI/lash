@@ -154,7 +154,7 @@ impl SessionBuilder {
         let (state, reopened_persisted_config) = self
             .load_or_default_state(&policy, Some(resolved.store.as_ref()))
             .await?;
-        Box::pin(self.open_resolved(state, resolved, reopened_persisted_config)).await
+        Box::pin(self.open_resolved(state, resolved, reopened_persisted_config, true)).await
     }
 
     async fn reconcile_process_observer_intents(
@@ -187,12 +187,13 @@ impl SessionBuilder {
     /// non-creating seam, at most once per handle. The session id must already be
     /// known; see [`DurableSession`] for the typed refusals.
     pub async fn durable(self) -> Result<DurableSession> {
-        let queued = self.core.substrate_slot.ports().await.queued_port();
+        let work = self.core.held_work().await;
         let live_replay_store = Arc::clone(&self.core.live_replay_store);
         Ok(DurableSession::from_catalog(
             self.session_id,
             Arc::clone(&self.core.store_factory),
-            queued,
+            work,
+            Arc::clone(&self.core.env.core.control.effect_host),
             live_replay_store,
         ))
     }
@@ -216,11 +217,12 @@ impl SessionBuilder {
     pub async fn create(self) -> Result<DurableSession> {
         let policy = self.session_policy();
         let resolved = self.create_store(&policy).await?;
-        let queued = self.core.substrate_slot.ports().await.queued_port();
+        let work = self.core.held_work().await;
         Ok(DurableSession::from_binding(
             self.session_id,
             resolved.store,
-            queued,
+            work,
+            Arc::clone(&self.core.env.core.control.effect_host),
             Arc::clone(&self.core.live_replay_store),
             resolved.catalog,
         ))
@@ -229,7 +231,24 @@ impl SessionBuilder {
     /// This is for advanced hosts that already own a complete state snapshot.
     /// Normal embedders should use [`Self::open`] to resume according to Lash's
     /// durable history.
-    pub async fn open_with_state(self, mut state: RuntimeSessionState) -> Result<LashSession> {
+    pub async fn open_with_state(self, state: RuntimeSessionState) -> Result<LashSession> {
+        self.open_supplied_state(state, true).await
+    }
+
+    /// [`open_with_state`](Self::open_with_state) for a reader: the core's
+    /// drives never run on this runtime. A host that loads a head without the
+    /// session's lease to project or watch it opens it this way, so the
+    /// session's turns keep running on an admitted open, or on one the
+    /// engine opens itself, and never on the reader's snapshot.
+    pub async fn observe_with_state(self, state: RuntimeSessionState) -> Result<LashSession> {
+        self.open_supplied_state(state, false).await
+    }
+
+    async fn open_supplied_state(
+        self,
+        mut state: RuntimeSessionState,
+        resident: bool,
+    ) -> Result<LashSession> {
         let policy = self.session_policy();
         let resolved = self.create_store(&policy).await?;
         self.reconcile_process_observer_intents(Some(resolved.store.as_ref()))
@@ -253,7 +272,7 @@ impl SessionBuilder {
             self.spec.generation.as_ref(),
             Some(&supplied_generation),
         )?;
-        Box::pin(self.open_resolved(state, resolved, None)).await
+        Box::pin(self.open_resolved(state, resolved, None, resident)).await
     }
 
     fn session_policy(&self) -> SessionPolicy {
@@ -327,6 +346,7 @@ impl SessionBuilder {
         state: RuntimeSessionState,
         resolved: ResolvedSessionStore,
         reopened_persisted_config: Option<lash_core::PersistedSessionConfig>,
+        resident: bool,
     ) -> Result<LashSession> {
         let policy = state.effective_policy().clone();
         let session_id = state.session_id.clone();
@@ -374,7 +394,11 @@ impl SessionBuilder {
                 Arc::clone(&resolved.store),
                 &env,
                 ports.process.clone(),
-                ports.queued_port(),
+                crate::core::HeldWork::new(
+                    Arc::clone(&ports.queued),
+                    Arc::clone(&self.core.drive_lifetime),
+                ),
+                Arc::clone(&self.core.residents),
                 resolved.catalog,
             )
             .holding_tool_child_context_source(Arc::clone(&self.core.tool_child_context_source)),
@@ -415,6 +439,9 @@ impl SessionBuilder {
             Arc::clone(&self.core.live_replay_store),
         );
         let process_lifecycle_route = self.core.process_lifecycle_feed.register(&handle);
+        if resident {
+            binding.register_resident(&handle);
+        }
         let recorded_parent_session_id =
             crate::session::recorded_parent_session_id(binding.store().as_ref()).await?;
         Ok(LashSession {
@@ -703,7 +730,7 @@ impl LashSession {
     /// To keep a handle for later resumption instead of discarding the session,
     /// use [`park`](Self::park).
     pub async fn close(self) -> Result<()> {
-        let runtime = self.into_owned_runtime()?;
+        let runtime = self.into_owned_runtime().await?;
         runtime.unregister_plugin_session()?;
         // Reuse the core parking primitive to flush + release the lease,
         // discarding the returned handle: close does not resume.
@@ -734,7 +761,7 @@ impl LashSession {
     ///   error rather than a silent partial flush.
     pub async fn park(self) -> Result<ParkedSession> {
         let binding = Arc::clone(&self.binding);
-        let runtime = self.into_owned_runtime()?;
+        let runtime = self.into_owned_runtime().await?;
         // We now own the runtime exclusively; release the in-memory plugin
         // session registration before flushing and dropping it.
         runtime.unregister_plugin_session()?;
@@ -750,17 +777,32 @@ impl LashSession {
     /// Fails with [`EmbedError::SessionStillInUse`] when another live handle
     /// (a cloned session or an in-flight turn) shares the runtime, so
     /// consuming operations never proceed on a still-shared runtime.
-    fn into_owned_runtime(self) -> Result<LashRuntime> {
-        let LashSession { runtime, .. } = self;
+    ///
+    /// The core's session driver runs drives on an open session's runtime, so
+    /// the session is first withdrawn from the drives and a drive already
+    /// running on it is let stop; a failed take lends it to them again.
+    async fn into_owned_runtime(self) -> Result<LashRuntime> {
+        let LashSession {
+            runtime, binding, ..
+        } = self;
+        let was_resident = binding.release_resident(&runtime).await;
+        let weak = runtime.downgrade();
         // `writer()` clones the shared `Arc<Mutex<LashRuntime>>`; dropping the
         // handle then leaves this clone as the sole strong reference iff no
         // other handle exists, so `try_unwrap` doubles as the exclusive-owner
         // check.
         let writer = runtime.writer();
         drop(runtime);
-        Arc::try_unwrap(writer)
-            .map(|mutex| mutex.into_inner())
-            .map_err(|_| EmbedError::SessionStillInUse)
+        match Arc::try_unwrap(writer) {
+            Ok(mutex) => Ok(mutex.into_inner()),
+            Err(writer) => {
+                drop(writer);
+                if was_resident && let Some(handle) = weak.upgrade() {
+                    binding.register_resident(&handle);
+                }
+                Err(EmbedError::SessionStillInUse)
+            }
+        }
     }
 
     pub fn session_id(&self) -> SessionId {
@@ -811,14 +853,44 @@ impl LashSession {
 
     pub fn turn(&self, input: TurnInput) -> TurnBuilder {
         TurnBuilder {
+            session: self.clone(),
+            cancel_token: None,
             runtime: self.runtime.clone(),
-            effect_host: self.binding.effect_host(),
             input,
             stop: lash_core::LocalTurnStop::default(),
             cancels: self.turn_cancels.clone(),
             protocol_turn_options: None,
             turn_id: None,
         }
+    }
+
+    /// Accept `input` durably and ask the engine to drive the session: the
+    /// one way a turn starts (FIG-3600).
+    ///
+    /// Awaiting the builder commits the acceptance and yields a
+    /// [`SendHandle`](crate::SendHandle); `send(input).output().await` is the
+    /// one-call form. The turn runs on the session's engine, not in the
+    /// caller's future: dropping the handle stops nothing.
+    pub fn send(&self, input: TurnInput) -> crate::SendBuilder {
+        crate::SendBuilder::new(crate::send::SendTarget::Live(self.clone()), input)
+    }
+
+    /// Re-attach to an input accepted earlier: after a restart, or from
+    /// another handle. Never commits anything.
+    pub fn attach(&self, input_id: lash_core::InputId) -> crate::SendHandle {
+        crate::send::attach(crate::send::SendTarget::Live(self.clone()), input_id)
+    }
+
+    /// Re-await a logical root: after a park verb, or by the host id a send
+    /// named.
+    pub fn root(&self, root: impl Into<TurnId>) -> crate::RootHandle {
+        crate::send::root(crate::send::SendTarget::Live(self.clone()), root.into())
+    }
+
+    /// Withdraw a queued input, or cooperatively cancel a running root
+    /// (ADR 0039).
+    pub fn cancel(&self, target: crate::CancelTarget) -> crate::CancelBuilder {
+        crate::CancelBuilder::new(crate::send::SendTarget::Live(self.clone()), target)
     }
 
     pub fn queued_turn(&self) -> QueuedTurnBuilder {
@@ -1055,7 +1127,8 @@ impl LashSession {
         DurableSession::from_binding(
             SessionId::from(self.runtime.observe().session_id()),
             self.binding.store(),
-            self.binding.queued(),
+            self.binding.work(),
+            self.binding.effect_host(),
             Arc::clone(&self.runtime.live_replay_store),
             self.binding.catalog(),
         )

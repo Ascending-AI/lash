@@ -561,7 +561,6 @@ finish("snapshot cursor");
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(16),
-        queued_work_driver: inert_queued_work(),
         restate_ingress_url: "http://127.0.0.1:8080".to_string(),
         restate_admin_url: "http://127.0.0.1:9070".to_string(),
         restate_http: reqwest::Client::new(),
@@ -709,7 +708,6 @@ async fn turn_cancel_route_requests_first_party_turn_cancellation_inner() {
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx,
-        queued_work_driver: inert_queued_work(),
         restate_ingress_url: "http://127.0.0.1:8080".to_string(),
         restate_admin_url: "http://127.0.0.1:9070".to_string(),
         restate_http: reqwest::Client::new(),
@@ -966,7 +964,6 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(1024),
-        queued_work_driver: inert_queued_work(),
         restate_ingress_url: "http://127.0.0.1:8080".to_string(),
         restate_admin_url: "http://127.0.0.1:9070".to_string(),
         restate_http: reqwest::Client::new(),
@@ -1140,7 +1137,6 @@ async fn button_trigger_occurrence_is_finishted_to_restate_workflow_inner() {
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx,
-        queued_work_driver: inert_queued_work(),
         restate_ingress_url,
         restate_admin_url: "http://127.0.0.1:9070".to_string(),
         restate_http: reqwest::Client::new(),
@@ -1428,33 +1424,182 @@ async fn live_restate_cron_queued_turn_sync_cancel_path_end_to_end_inner() {
     scenario.shutdown().await;
 }
 
-async fn run_workbench_turn_via_restate(
-    state: &AppState,
-    text: &str,
-) -> lash_restate::RestateInvocationId {
+/// A turn a live scenario started the way the chat route does: through the
+/// session's `send()`, followed to its settlement on the page.
+struct WorkbenchTurn {
+    session_id: SessionId,
+    turn_id: TurnId,
+    follower: tokio::task::JoinHandle<restate::TurnSettlement>,
+}
+
+async fn run_workbench_turn_via_restate(state: &AppState, text: &str) -> WorkbenchTurn {
     state.push_message("user", text);
+    let session_id = state.current_session_id();
     let turn_id = TurnId::from(format!("workbench-turn-{}", uuid::Uuid::new_v4()));
-    let request = restate::WorkbenchTurnWorkflowRequest {
-        turn_id: turn_id.clone(),
-        session_id: state.current_session_id(),
-        text: text.to_string(),
-        model: state.selected_model(),
-        attachment_id: None,
-    };
-    let invocation_id = tokio::time::timeout(
+    // The route claims the session before it sends; so does this.
+    state.track_turn_prompt(&session_id, &turn_id, text.to_string(), None);
+    let follower = tokio::time::timeout(
         Duration::from_secs(60),
-        restate::submit_user_turn(state, request),
+        restate::start_user_turn(
+            state,
+            restate::UserTurnRequest {
+                turn_id: turn_id.clone(),
+                session_id: session_id.clone(),
+                text: text.to_string(),
+                model: state.selected_model(),
+                attachment_id: None,
+            },
+        ),
     )
     .await
-    .expect("Restate-backed workbench turn timed out")
-    .expect("finish Restate-backed workbench turn");
-    state.track_turn_prompt(
-        &state.current_session_id(),
-        &turn_id,
-        text.to_string(),
-        None,
+    .expect("workbench turn acceptance timed out")
+    .expect("accept workbench turn");
+    WorkbenchTurn {
+        session_id,
+        turn_id,
+        follower,
+    }
+}
+
+/// Wait for the turn's follower to settle it on the page; a turn whose
+/// terminalization recorded a failure fails the scenario.
+async fn wait_for_workbench_turn_settled(turn: &mut WorkbenchTurn, timeout: Duration) {
+    let settlement = tokio::time::timeout(timeout, &mut turn.follower)
+        .await
+        .unwrap_or_else(|_| panic!("turn {} did not settle within {timeout:?}", turn.turn_id))
+        .expect("join the turn follower");
+    if let Err(error) = settlement {
+        panic!("turn {} settled as a failure: {error}", turn.turn_id);
+    }
+}
+
+/// Wait for the turn's follower to settle it as a failure, and answer the
+/// failure its terminalization recorded.
+async fn wait_for_workbench_turn_failed(turn: &mut WorkbenchTurn, timeout: Duration) -> String {
+    let settlement = tokio::time::timeout(timeout, &mut turn.follower)
+        .await
+        .unwrap_or_else(|_| panic!("turn {} did not settle within {timeout:?}", turn.turn_id))
+        .expect("join the turn follower");
+    settlement.expect_err("the turn must settle as a failure")
+}
+
+/// The turn a started `/api/turn` send runs as.
+pub(super) fn started_turn_id(accepted: &TurnAccepted) -> TurnId {
+    assert!(
+        !accepted.queued,
+        "the send was queued, not started: {accepted:?}"
     );
-    invocation_id
+    accepted
+        .turn_id
+        .clone()
+        .expect("a started send names its turn")
+}
+
+/// Wait until the send's follower settles `turn_id` and releases the
+/// session's claim on it.
+pub(super) async fn wait_for_turn_released(
+    state: &AppState,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+    timeout: Duration,
+) {
+    let deadline = tokio::time::Instant::now() + timeout;
+    while state
+        .active_turns
+        .for_session(session_id)
+        .is_some_and(|active| active.address.turn_id == *turn_id)
+    {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "turn {turn_id} was not settled within {timeout:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(25)).await;
+    }
+}
+
+/// The Restate invocation of the turn's `LashTurn`, once the session's engine
+/// admitted its root.
+async fn lash_turn_invocation(
+    state: &AppState,
+    turn: &WorkbenchTurn,
+    timeout: Duration,
+) -> lash_restate::RestateInvocationId {
+    lash_turn_invocation_at(
+        &state.restate_admin_url,
+        &lash::TurnAddress::new(&turn.session_id, &turn.turn_id),
+        timeout,
+    )
+    .await
+}
+
+/// [`lash_turn_invocation`] for a caller holding only the admin URL.
+pub(super) async fn lash_turn_invocation_at(
+    admin_url: &str,
+    address: &lash::TurnAddress,
+    timeout: Duration,
+) -> lash_restate::RestateInvocationId {
+    let admin =
+        lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::new(admin_url));
+    let key = lash_restate::turn_workflow_key(&address.session_id, &address.turn_id);
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        if let Some(status) = admin
+            .workflow_invocation_status("LashTurn", &key, "run")
+            .await
+            .expect("query the LashTurn invocation")
+        {
+            return lash_restate::RestateInvocationId::new(status.id);
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the engine admitted no LashTurn for {key} within {timeout:?}"
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+}
+
+/// Wait until the engine runs nothing on `session_id`: no `LashSession`
+/// drive and no `LashTurn` of the session is still in flight. A drive's last
+/// admission pass opens the session after its root committed, and a drive
+/// the host's own open contended retries, so a test that counts every claim
+/// on the session waits for this before it counts.
+pub(super) async fn wait_for_session_engine_idle(
+    admin_url: &str,
+    session_id: &SessionId,
+    timeout: Duration,
+) {
+    #[derive(serde::Deserialize)]
+    struct InFlight {
+        target: String,
+        status: String,
+    }
+    let admin =
+        lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::new(admin_url));
+    let session = session_id.as_str().replace('\'', "''");
+    let query = format!(
+        "SELECT target, status FROM sys_invocation WHERE status <> 'completed' AND \
+         ((target_service_name = 'LashSession' AND target_service_key = '{session}') OR \
+         (target_service_name = 'LashTurn' AND target_service_key LIKE '%:{session}%'))"
+    );
+    let deadline = std::time::Instant::now() + timeout;
+    loop {
+        let in_flight = admin
+            .query_json::<InFlight>(&query)
+            .await
+            .expect("query the session's in-flight engine invocations");
+        if in_flight.is_empty() {
+            return;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the engine still runs on {session_id} after {timeout:?}: {:?}",
+            in_flight
+                .iter()
+                .map(|row| format!("{} {}", row.target, row.status))
+                .collect::<Vec<_>>()
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
 async fn wait_for_restate_invocation_success(
@@ -1613,14 +1758,6 @@ async fn live_workbench_restate_state_with_provider_and_database(
         .expect("model spec");
     let model = with_workbench_model_capability(model);
     let restate_http = reqwest::Client::new();
-    let queued_run_handle = Arc::new(WorkbenchQueuedWorkSubmitter {
-        sessions: sessions.clone(),
-        store_factory: Arc::clone(&core_store_factory),
-        restate_ingress_url: restate_ingress_url.clone(),
-        restate_http: restate_http.clone(),
-        active_turns: active_turns.clone(),
-    });
-    let queued_work_driver = lash::runtime::NativeQueuedWork::new(queued_run_handle);
     let backend = Arc::new(lash_restate::RestateEngine::new(
         store_set,
         lash::restate::config(
@@ -1689,7 +1826,6 @@ async fn live_workbench_restate_state_with_provider_and_database(
         trace_sink: Some(trace_sink),
         lashlang_execution,
         event_tx,
-        queued_work_driver: queued_work_driver.clone(),
         restate_ingress_url,
         restate_admin_url: std::env::var("RESTATE_ADMIN_URL")
             .unwrap_or_else(|_| "http://127.0.0.1:19071".to_string()),
@@ -1700,6 +1836,9 @@ async fn live_workbench_restate_state_with_provider_and_database(
         authorization: WorkbenchAuthorization::allow_all(),
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
+    // As the host's bootstrap does: follow the turns a previous incarnation
+    // over this data directory was following.
+    Box::pin(restate::resume_turn_followers(&state)).await;
     LiveWorkbenchRestateHarness {
         state,
         process_worker,
@@ -1841,10 +1980,9 @@ async fn persisted_trigger_route_fires_after_reopening_sqlite_artifact_store_inn
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
-/// Stand-in for the Restate queued-turn workflow: drains an enqueued
-/// command batch in-process. The test cores' effect host permits
-/// foreground drains; in production the same drain runs inside a Restate
-/// handler context (`restate::run_queued_turn`).
+/// Drains an enqueued command batch in-process. The test cores' effect host
+/// permits foreground drains; in production the session's engine drives the
+/// same batch inside its `LashSession` handler.
 async fn drain_refresh_batch(state: &AppState, receipt: &lash::SessionCommandReceipt) {
     let session = state
         .core
@@ -1868,7 +2006,6 @@ mod queued_work_tests;
 #[cfg(test)]
 #[path = "tests/session_isolation.rs"]
 mod session_isolation_tests;
-pub(crate) use queued_work_tests::queued_work_test_draft;
 fn test_workbench_core(backend: Arc<lash_sqlite_store::SqliteBackend>) -> LashCore {
     let provider = trigger_registration_provider();
     let model = test_model();
@@ -2041,8 +2178,6 @@ pub(crate) use session_open_admission_tests::{
     register_session_open_admission_gate, registered_session_open_admission_gates,
     unregister_session_open_admission_gate,
 };
-
-pub(crate) use session_open_admission_tests::arm_registered_session_open_admission_gate;
 
 pub(crate) use recoverable_chat_tests::recoverable_chat_test_state_with_store_factory_and_trigger_store;
 

@@ -618,7 +618,7 @@ async fn run_once_inner(
                         "runtime-perf-ingress-projection-{}",
                         lash_core::TurnActivityId::new(uuid::Uuid::new_v4().to_string()).0
                     ));
-                    let (turn, duration) = runtime_perf_timed(
+                    let (turn, duration) = Box::pin(runtime_perf_timed(
                         scenario,
                         turn_index,
                         "run_turn",
@@ -629,7 +629,7 @@ async fn run_once_inner(
                             cancel,
                             &format!("runtime-perf-ingress-projection-{}", turn_index + 1),
                         ),
-                    )
+                    ))
                     .await?;
                     extra_phase_profile.insert(
                         "turn_input_ingress.enqueue_to_claim_to_projection".to_string(),

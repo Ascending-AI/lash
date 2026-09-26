@@ -198,20 +198,6 @@ pub(crate) fn register_session_open_admission_gate(gate: Arc<SessionOpenAdmissio
         .insert(gate.session_id.clone(), gate);
 }
 
-pub(crate) fn arm_registered_session_open_admission_gate(session_id: &SessionId, reason: &str) {
-    if reason != "queued_turn" {
-        return;
-    }
-    if let Some(gate) = registered_session_open_admission_gates()
-        .lock()
-        .unwrap_or_else(|error| error.into_inner())
-        .get(session_id)
-        .cloned()
-    {
-        gate.arm();
-    }
-}
-
 pub(crate) fn unregister_session_open_admission_gate(session_id: &SessionId) {
     registered_session_open_admission_gates()
         .lock()

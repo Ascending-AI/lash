@@ -294,7 +294,6 @@ impl LashRuntime {
             self.host.core.clock.as_ref(),
         );
 
-        let stopwatch = TurnStopwatch::start(self.host.core.clock.as_ref());
         // The accepted row is driven by the session drive, in arrival order:
         // any root admitted ahead of it runs first, and the drive stops once
         // the root that drove this row has run. The request is named by the
@@ -346,8 +345,8 @@ impl LashRuntime {
             }
             // A follow-on the head owes blocks every other claim (ADR 0101
             // §3, FIG-3542), so the accepted row stays pending behind it: no
-            // turn runs, and the call reports that as an outcome. The drive
-            // that recovers the follow-on answers the row after it.
+            // turn runs. The drive that recovers the follow-on answers the row
+            // after it; a send's handle waits for that (FIG-3600).
             if let Some(ahead) = Box::pin(self.queued_behind_pending_follow_on(
                 &store,
                 &accepted_id,
@@ -356,29 +355,14 @@ impl LashRuntime {
             .await
             .map_err(aborted)?
             {
-                let mut queued = crate::AssembledTurn {
-                    state: self.export_state(),
-                    outcome: crate::TurnOutcome::Queued { ahead },
-                    assistant_output: crate::AssistantOutput {
-                        safe_text: String::new(),
-                        raw_text: String::new(),
-                        state: crate::OutputState::EmptyOutput,
-                    },
-                    execution: crate::TurnExecutionMetrics::default(),
-                    token_usage: crate::TokenUsage::default(),
-                    llm_calls: Vec::new(),
-                    tool_calls: Vec::new(),
-                    omitted: None,
-                    failure_evidence: Vec::new(),
-                    errors: Vec::new(),
-                    turn_input_acceptance: Some(acceptance.clone()),
-                    turn_cancel_input_outcome: Default::default(),
-                };
-                stopwatch.stamp(&mut queued, self.host.core.clock.as_ref());
-                return Ok(AgentFrameRun {
-                    turns: vec![queued],
-                    acceptance: Some(acceptance),
-                });
+                return Err(aborted(RuntimeError::new(
+                    RuntimeErrorCode::QueuedRunPending,
+                    format!(
+                        "accepted turn input `{accepted_id}` waits behind the follow-on the \
+                         session head owes, with {ahead} earlier inputs ahead of it; the drive \
+                         that recovers the follow-on answers it"
+                    ),
+                )));
             }
             return Err(aborted(RuntimeError::new(
                 RuntimeErrorCode::AcceptedTurnInputCeded,

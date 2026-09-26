@@ -4,8 +4,8 @@ use lash::TurnId;
 
 /// One turn through the workbench's own session-opening path.
 ///
-/// Deliberately `state.session_builder(...)`, which is what `run_user_turn` and
-/// every route use — opening `state.core.session(...)` directly would bypass
+/// Deliberately `state.session_builder(...)`, which is what `start_user_turn`
+/// and every route use — opening `state.core.session(...)` directly would bypass
 /// the very code this file exists to test.
 pub(crate) async fn run_turn_through_the_workbench_open_path(
     state: &AppState,

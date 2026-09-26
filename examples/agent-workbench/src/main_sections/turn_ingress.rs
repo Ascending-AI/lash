@@ -23,6 +23,8 @@ pub(crate) async fn enqueue_turn_input(
         .authorize(WorkbenchAuthorizationAction::EnqueueTurnInput {
             session_id: session_id.clone(),
         })?;
+    // A next-turn input is a root the engine starts on its own.
+    restate::watch_session_roots(&state, &session_id);
     let ingress = match request.ingress {
         TurnInputIngressRequest::ActiveTurn => {
             let Some(active) = state.active_turns.for_session(&session_id) else {
@@ -64,6 +66,7 @@ pub(crate) async fn admit_queued_send(
         .authorize(WorkbenchAuthorizationAction::EnqueueTurnInput {
             session_id: session_id.clone(),
         })?;
+    restate::watch_session_roots(state, session_id);
     let mut input = lash::TurnInput::text(text.clone());
     if let Some(attachment_bytes) = attachment_bytes {
         input = input.with_attachment(lash::direct::AttachmentSource::inline(

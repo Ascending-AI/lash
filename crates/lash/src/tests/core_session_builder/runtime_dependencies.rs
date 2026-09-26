@@ -1539,6 +1539,7 @@ fn explicit_cadence_constructor_rejects_zero_poll_delay_directly() {
             Arc::new(RejectedCadenceRunHandle),
             1,
             work_cadence,
+            CancellationToken::new(),
         )
     else {
         panic!("explicit-cadence construction must reject zero-delay polling");

@@ -20,6 +20,22 @@ pub(crate) fn memory_trigger_store() -> Arc<lash_sqlite_store::SqliteTriggerStor
     })
 }
 
+/// The Restate double a workbench test runs on (FIG-3600 S5c): lash-restate's
+/// engine and services over a fresh SQLite memory store set, connected to an
+/// in-process server double. The twin of `test_file_backend`.
+///
+/// Keep the returned double alive to the end of the test (FIG-3723); hand
+/// `double.lash_backend()` to the core.
+#[allow(
+    dead_code,
+    reason = "a PREP-F twin the S5c batches move their fixtures onto"
+)]
+pub(crate) async fn test_double_backend(seed: u64) -> lash_restate_test::RestateTestBackend {
+    lash_restate_test::backend(seed, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("build the Restate double")
+}
+
 /// A backend with its effect host layered or its process work replaced,
 /// every other port its own, for a test that observes the effect boundary or
 /// the process-event sink.
