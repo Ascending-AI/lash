@@ -1177,11 +1177,16 @@ def validate(root: Path) -> tuple[dict[str, Package], dict[str, Any]]:
     for name in lane_names:
         if not bazel_lanes.get(name):
             failures.append(f"coverage lane has no Bazel targets: {name}")
-    for aggregate in ("//:feature_lanes", "//:feature_lane_tests"):
+    for aggregate in (
+        "//:feature_lanes",
+        "//:feature_lane_tests",
+        "//:feature_lane_clippy",
+    ):
         if aggregate not in feature_job:
             failures.append(f"feature-lanes does not build {aggregate}")
-    # The lanes are dispatch-only, and a dispatch is a trusted event: the
-    # pull-request and merge-group boards do not compile the lane graph.
+    # The lane compile and clippy run on every trusted event whose diff can
+    # move a Rust build; only the lane tests keep a path gate on pull
+    # requests. Either way the job needs the pool's credentials.
     if (
         "needs.plan.outputs.bazel_trusted == 'true'" not in feature_job
         and "github.event_name == 'workflow_dispatch'" not in feature_job

@@ -1325,10 +1325,6 @@ def apply_event_deferrals(needs: dict, event: str, trusted: bool = True) -> dict
         for job in ci_plan.WORKERS_E2E_JOBS:
             needs[job]["result"] = "skipped"
         needs["postgres-store"]["result"] = "skipped"
-        # The feature lanes run on a pull request only when the diff
-        # touches feature-gated code.
-        if needs["plan"]["outputs"].get("feature_lanes") != "true":
-            needs[ci_plan.FEATURE_LANES_JOB]["result"] = "skipped"
     return needs
 
 
@@ -2282,14 +2278,17 @@ class DispatchOnlyJobTests(unittest.TestCase):
 
 
 class FeatureLanesTests(unittest.TestCase):
-    """Every trusted event proves that every feature variant compiles.
+    """Every trusted Rust event proves that every feature variant compiles.
 
     #1979 merged a `lash-remote-protocol` variant that did not compile while
-    `feature-lanes` ran on workflow_dispatch alone (FIG-3572). The fast
-    pull-request board keeps the job only for diffs that touch feature-gated
-    code -- lane membership covers nearly every package, so a lane compile
-    proves nothing an ungated diff can move. The condition is spelled out by
-    hand rather than read from the plan module.
+    `feature-lanes` ran on workflow_dispatch alone (FIG-3572), and #2285
+    broke the slack-clone live-E2E variant through a public engine API
+    change whose diff touched no feature-gated file: a lane break comes from
+    anywhere upstream, so the pull-request compile cannot wait on a path
+    rule. `feature_lanes` gates only the lane TEST steps on a pull request --
+    lane membership covers nearly every package, so lane tests on every Rust
+    diff would pay for proof an ungated diff cannot move. The conditions are
+    spelled out by hand rather than read from the plan module.
     """
 
     def board(
@@ -2311,24 +2310,40 @@ class FeatureLanesTests(unittest.TestCase):
             for job in ci_plan.BAZEL_TEST_JOBS:
                 needs[job]["result"] = "skipped"
         needs[ci_plan.FEATURE_LANES_JOB]["result"] = (
-            "success"
-            if trusted and rust and (event != "pull_request" or gated)
-            else "skipped"
+            "success" if trusted and rust else "skipped"
         )
         return needs
 
-    def test_the_job_runs_on_trusted_events_and_gated_pull_requests(self) -> None:
+    def test_the_job_compiles_on_every_trusted_rust_event(self) -> None:
         job = yaml.safe_load(CI_WORKFLOW.read_text())["jobs"]["feature-lanes"]
         self.assertEqual(
             "needs.plan.outputs.bazel_trusted == 'true'"
-            " && needs.plan.outputs.rust == 'true'"
-            " && (github.event_name != 'pull_request'"
-            " || needs.plan.outputs.feature_lanes == 'true')",
+            " && needs.plan.outputs.rust == 'true'",
             " ".join(job["if"].split()),
         )
         self.assertNotIn("feature-lanes", ci_plan.DISPATCH_ONLY_JOBS)
-        steps = [step.get("name") for step in job["steps"]]
-        self.assertIn("Compile every feature lane", steps)
+        steps = {step.get("name"): step for step in job["steps"]}
+        compile_step = steps["Compile every feature lane"]
+        self.assertNotIn("if", compile_step)
+        self.assertIn("//:feature_lanes //:feature_lane_clippy", compile_step["run"])
+
+    def test_the_lane_test_steps_keep_the_pull_request_path_gate(self) -> None:
+        steps = {
+            step.get("name"): step
+            for step in yaml.safe_load(CI_WORKFLOW.read_text())["jobs"][
+                "feature-lanes"
+            ]["steps"]
+        }
+        for name in (
+            "Run the executable feature lanes",
+            "Hold the feature-lane test-case floors",
+        ):
+            with self.subTest(step=name):
+                self.assertEqual(
+                    "github.event_name != 'pull_request'"
+                    " || needs.plan.outputs.feature_lanes == 'true'",
+                    " ".join(steps[name]["if"].split()),
+                )
 
     def test_a_trusted_rust_event_requires_success(self) -> None:
         for event in ("pull_request", "merge_group", "workflow_dispatch"):
@@ -2343,13 +2358,14 @@ class FeatureLanesTests(unittest.TestCase):
                         ci_plan.evaluate_conclusion(needs, event),
                     )
 
-    def test_an_ungated_pull_request_skips_the_lanes(self) -> None:
+    def test_an_ungated_pull_request_still_compiles_the_lanes(self) -> None:
+        """#2285's diff touched no gated file; the compile must not wait for one."""
         needs = self.board("pull_request", gated=False)
-        self.assertEqual("skipped", needs["feature-lanes"]["result"])
+        self.assertEqual("success", needs["feature-lanes"]["result"])
         self.assertEqual(
             [], ci_plan.evaluate_conclusion(needs, "pull_request")
         )
-        for result in ("success", "failure", "cancelled"):
+        for result in ("skipped", "failure", "cancelled"):
             with self.subTest(result=result):
                 trial = self.board("pull_request", gated=False)
                 trial["feature-lanes"]["result"] = result
