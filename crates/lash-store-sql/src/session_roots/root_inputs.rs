@@ -18,6 +18,23 @@ crate::statements! {
         /// The root input `?2` of session `?1` is bound to.
         select_root = "SELECT root FROM session_root_inputs WHERE session_id = ?1 AND input_id = ?2";
 
+        /// The open input rows root `?2` of session `?1` holds, in their
+        /// order: the rows bound to it, and the rows an aborted execution of
+        /// it bound its claim to (FIG-3589). Each with its claim identity.
+        select_held_by_root = "SELECT pti.input_id, pti.claim_id, pti.claim_token
+             FROM pending_turn_inputs pti
+             WHERE pti.session_id = ?1
+               AND {{nonterminal_turn_input_state(pti.state)}}
+               AND (pti.claim_bound_turn_id = ?2
+                    OR pti.input_id IN (
+                        SELECT sri.input_id FROM session_root_inputs sri
+                        WHERE sri.session_id = ?1 AND sri.root = ?2))
+             ORDER BY pti.enqueue_seq";
+
+        /// Rebind every input of root `?2` in session `?1` to root `?3`: a
+        /// fork hands the inputs a parked root held to its new root.
+        rebind = "UPDATE session_root_inputs SET root = ?3 WHERE session_id = ?1 AND root = ?2";
+
         /// Every binding of session `?1`: its deletion.
         delete_by_session = "DELETE FROM session_root_inputs WHERE session_id = ?1";
     }

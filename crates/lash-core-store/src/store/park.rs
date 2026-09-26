@@ -488,7 +488,7 @@ pub enum UnparkCause {
 }
 
 /// What ended a park by cancelling the work it held.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 #[non_exhaustive]
 pub enum ParkCancelCause {
@@ -500,6 +500,19 @@ pub enum ParkCancelCause {
     ProcessCancelled {
         /// The origin of the cancel request it recorded, when it recorded one.
         origin: Option<lash_sansio::CancelOrigin>,
+    },
+    /// An operator cancelled the parked root (its `Cancel` intent).
+    Operator {
+        /// The intent that cancelled it.
+        intent: super::ControlIntentId,
+    },
+    /// An operator forked the parked root: its held inputs now drive
+    /// `new_root` (`None` for a queued root, whose next admission mints it).
+    Forked {
+        /// The intent that forked it.
+        intent: super::ControlIntentId,
+        /// The root the held inputs drive under.
+        new_root: Option<TurnId>,
     },
 }
 
@@ -524,6 +537,12 @@ pub enum ParkEventKind {
     Cancelled {
         /// What cancelled the park.
         cause: ParkCancelCause,
+    },
+    /// An operator asked to redrive the parked root; the park stays until
+    /// the resumed root commits or parks again.
+    RedriveRequested {
+        /// The redrive's intent.
+        intent: super::ControlIntentId,
     },
 }
 
@@ -559,7 +578,8 @@ impl UnparkCause {
 }
 
 impl ParkCancelCause {
-    /// The stored `cause` column value; see [`UnparkCause::encode`].
+    /// The stored `cause` column value; see [`UnparkCause::encode`]. A
+    /// payload-carrying cause stores its JSON body.
     pub fn encode(&self) -> String {
         encode_cause(self)
     }
@@ -573,6 +593,7 @@ impl ParkEventKind {
             Self::Parked { .. } => "parked",
             Self::Unparked { .. } => "unparked",
             Self::Cancelled { .. } => "cancelled",
+            Self::RedriveRequested { .. } => "redrive_requested",
         }
     }
 
@@ -587,6 +608,7 @@ impl ParkEventKind {
             ),
             Self::Unparked { cause } => (Some(cause.encode()), None),
             Self::Cancelled { cause } => (Some(cause.encode()), None),
+            Self::RedriveRequested { intent } => (Some(intent.to_string()), None),
         }
     }
 
@@ -629,6 +651,16 @@ impl ParkEventKind {
                     cause: decode_cause(cause).ok_or_else(|| {
                         corrupt(format!("cancelled event cause `{cause}` is unknown"))
                     })?,
+                })
+            }
+            "redrive_requested" => {
+                let intent = cause
+                    .and_then(|cause| cause.parse::<u64>().ok())
+                    .ok_or_else(|| {
+                        corrupt("redrive_requested event carries no intent".to_string())
+                    })?;
+                Ok(Self::RedriveRequested {
+                    intent: super::ControlIntentId::from_sequence(intent),
                 })
             }
             other => Err(corrupt(format!("park event kind `{other}` is unknown"))),
