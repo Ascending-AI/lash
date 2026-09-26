@@ -45,6 +45,9 @@ pub(crate) use model_clamp::ModelGenerationClamp;
 /// The session drive (FIG-3600): admission as recorded steps, then the
 /// admitted root's turns.
 pub use runtime::drive;
+/// A session's durable close, the point of no return of its deletion
+/// (FIG-3600 S7).
+pub use runtime::session_close;
 /// Re-exported so every `RuntimeEffectController` implementation can spell
 /// `await_next_settlement`'s cancellation parameter without taking a direct
 /// `tokio-util` dependency of its own (FIG-2266).

@@ -164,6 +164,37 @@ macro_rules! drive_admission_tests {
     };
 }
 
+/// Register the session-close laws L-D1..L-D4 (FIG-3600 S7, FIG-3607 item
+/// 7): a deletion's refusals come before its recorded `BeginSessionClose`
+/// step, the close ends every open root `SessionDeleted` and raises the drive
+/// epoch, its engine half is retained on failure, and its `CloseSession`
+/// intent outlives the session as the tombstone its roots are answered from.
+/// The fixture is the admitted-head one; a tier with a
+/// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) runs the close
+/// inside the engine's `SessionDelete` handler.
+#[macro_export]
+macro_rules! session_close_tests {
+    ($fixture:block) => {
+        $crate::session_close_tests!(@laws $fixture; [
+            (session_delete_closes_active_and_parked_roots_as_session_deleted, "session-close-roots"),
+            (a_refused_deletion_closes_nothing, "session-close-refused"),
+            (the_close_intent_is_idempotent_retained_on_failure_and_survives_deletion, "session-close-retained"),
+            (a_root_commit_racing_a_close_is_refused_stale_fence, "session-close-fence"),
+        ]);
+    };
+    (@laws $fixture:block; [$(($law:ident, $label:literal)),* $(,)?]) => {
+        $($crate::session_close_tests!(@one $fixture; ($law, $label));)*
+    };
+    (@one $fixture:block; ($law:ident, $label:literal)) => {
+        #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+        async fn $law() {
+            let (_guard, prefix, host, stores, runner) = $fixture;
+            $crate::registration_macro_support::$law(prefix, host, stores, runner).await;
+            $crate::law_receipt::record(module_path!(), stringify!($law), $label);
+        }
+    };
+}
+
 /// Register the segment re-drive law (FIG-3547): a re-drive never
 /// re-executes a recorded effect, an unrecorded one runs once more under the
 /// same identity, and a segment whose engine lost its record ends

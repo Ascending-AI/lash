@@ -149,7 +149,23 @@ impl ProcessLocalExecution {
                 ))
             }
             ProcessCommand::DeleteSession { session_id } => {
-                let report = registry.delete_session_process_state(&session_id).await?;
+                // A session's deletion runs this after its close, the point
+                // of no return (FIG-3600 S7, Q10): a retryable registry fault
+                // is this attempt's, never the step's recorded outcome, so a
+                // retried deletion runs it again instead of replaying the
+                // failure, as the Restate process step does.
+                let report = registry
+                    .delete_session_process_state(&session_id)
+                    .await
+                    .map_err(|error| {
+                        let retryable = error.is_retryable();
+                        let fault = RuntimeEffectControllerError::from(error);
+                        if retryable {
+                            fault.retryable_uncommitted_derivation()
+                        } else {
+                            fault
+                        }
+                    })?;
                 Ok((
                     ProcessEffectOutcome::DeleteSession { report },
                     crate::StoreRealization::Realized,
