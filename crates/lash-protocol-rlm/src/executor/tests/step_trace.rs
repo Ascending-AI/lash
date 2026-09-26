@@ -1,5 +1,7 @@
 use super::*;
 
+const SEED: u64 = 0x5_2c02;
+
 #[derive(Default)]
 struct StepSink {
     records: Mutex<Vec<lash_core::facade_support::TraceRecord>>,
@@ -66,9 +68,18 @@ async fn run_step_with_sink(
     cancellation: Option<lash_core::CancellationToken>,
 ) -> ExecResponse {
     let executions = Arc::new(AtomicUsize::new(0));
+    let double =
+        crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::turn(
+            lash_core::SessionId::from("trace-session"),
+            lash_core::TurnId::from("trace-turn"),
+        ))
+        .await
+        .expect("open the cell's handler");
     let mut ctx =
         lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
-            crate::testing::memory_backend_ports().await,
+            crate::testing::double_ports(&double, &handler),
             Arc::new(BindingRecordingDeferredProvider {
                 executions: executions.clone(),
                 observed_bindings: Default::default(),
@@ -105,6 +116,7 @@ async fn run_step_with_sink(
         },
     )
     .await;
+    handler.close().await.expect("close the cell's handler");
     assert_eq!(executions.load(Ordering::SeqCst), 0);
     response
 }

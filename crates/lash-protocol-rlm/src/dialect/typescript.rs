@@ -698,6 +698,8 @@ mod tests {
     use crate::projection::RlmProjectedBindings;
     use lash_core::ExecRequest;
     use lash_core::plugin::ToolCatalogContext;
+
+    const SEED: u64 = 0x5_2c04;
     use lash_lashlang_runtime::{ToolBinding, ToolDefinitionBindingExt};
 
     #[test]
@@ -1145,11 +1147,18 @@ mod tests {
                     },
                 );
                 let mut session = dialect.create_session();
+                let double =
+                    crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default())
+                        .await;
+                let handler = double
+                    .open_handler(crate::testing::default_cell_scope())
+                    .await
+                    .expect("open the cell's handler");
                 let response = session
                     .execute(
-                        lash_core::testing::code_execution_context(
-                            crate::testing::memory_backend_ports().await,
-                        ),
+                        lash_core::testing::code_execution_context(crate::testing::double_ports(
+                            &double, &handler,
+                        )),
                         ExecRequest {
                             language: "typescript".to_string(),
                             code: "const answer: number = 40 + 2; finish(answer);".to_string(),
@@ -1158,6 +1167,7 @@ mod tests {
                     )
                     .await
                     .expect("execute typescript");
+                handler.close().await.expect("close the cell's handler");
 
                 assert_eq!(response.error, None);
                 assert_eq!(response.terminal_finish, Some(serde_json::json!(42)));

@@ -116,8 +116,11 @@ pub(crate) async fn fresh_memory_artifact_store() -> lashlang::LashlangArtifacts
     lashlang::LashlangArtifacts::of_backend(&memory_backend().await.into())
 }
 
-/// The ports of a fresh memory backend: the host a cell's effects journal
-/// on, its process-exec-env store and attachment port, and its clock.
+/// The ports of a fresh SQLite memory backend: the host a cell's effects
+/// journal on, its process-exec-env store and attachment port, and its clock.
+/// Only the laws of the SQLite engine's own journal (a cold reopen of its
+/// effect controller, an injected fault in its journal) run on it; every other
+/// cell runs on [`double_ports`].
 pub(crate) async fn memory_backend_ports() -> lash_core::testing::TestExecutionPorts<'static> {
     lash_core::testing::TestExecutionPorts::of(&memory_backend().await.into())
 }
@@ -147,9 +150,9 @@ pub(crate) fn double_ports<'h>(
     lash_core::testing::TestExecutionPorts::lent(&double.lash_backend(), handler.scoped())
 }
 
-/// The twin of [`ports_over_host`] on the server double: [`double_ports`]
-/// with `layer` in front of the double's host and of the controller
-/// `handler` lends, for a law that observes or perturbs the effect seam.
+/// [`double_ports`] with `layer` in front of the double's host and of the
+/// controller `handler` lends, for a law that observes or perturbs the effect
+/// seam.
 pub(crate) fn double_ports_over_layer<'h>(
     double: &lash_restate_test::RestateTestBackend,
     handler: &'h lash_restate_test::OpenHandler,
@@ -168,24 +171,13 @@ pub(crate) fn double_ports_over_layer<'h>(
     }
 }
 
-/// A fresh memory backend's process registry, for a trigger router whose
+/// A fresh memory store set's process registry, for a trigger router whose
 /// deliveries no law inspects.
 pub(crate) async fn memory_process_registry() -> Arc<dyn lash_core::ProcessRegistry> {
-    memory_backend().await.process_registry()
+    lash_core::StoreSet::process_registry(memory_store_set().await.as_ref())
 }
 
-/// A fresh memory backend's trigger store.
+/// A fresh memory store set's trigger store.
 pub(crate) async fn memory_trigger_store() -> Arc<dyn lash_core::TriggerStore> {
-    memory_backend().await.trigger_store()
-}
-
-/// Ports over a host the test built itself (a capturing or faulting layer),
-/// with a fresh memory backend's process-exec-env store beside it.
-pub(crate) async fn ports_over_host(
-    effect_host: Arc<dyn lash_core::EffectHost>,
-) -> lash_core::testing::TestExecutionPorts<'static> {
-    lash_core::testing::TestExecutionPorts::over_host(
-        effect_host,
-        memory_backend().await.process_env_store(),
-    )
+    lash_core::StoreSet::trigger_store(memory_store_set().await.as_ref())
 }

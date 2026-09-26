@@ -2,6 +2,8 @@ use super::*;
 
 use lashlang::testing::ast_builders as b;
 
+const SEED: u64 = 0x5_2c05;
+
 /// `finish { <name>: <expr>, .. }` — the shape every projection witness reads
 /// its bindings back with. ADR 0096 retired the Lashlang front-end, so these
 /// cells state their AST; the source each stood for is kept at the call site.
@@ -427,11 +429,17 @@ pub(super) fn restored_projection_degradation_fixture()
 pub(super) fn one_dead_projection_degrades_only_its_binding_and_errors_by_name_at_touch() {
     block_on(async {
         let (mut state, registry) = restored_projection_degradation_fixture();
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
         let response = execute_code_unbounded_for_tests(
             &mut state,
-            lash_core::testing::code_execution_context(
-                crate::testing::memory_backend_ports().await,
-            ),
+            lash_core::testing::code_execution_context(crate::testing::double_ports(
+                &double, &handler,
+            )),
             ExecRequest {
                 language: "typescript".to_string(),
                 code: "console.log(healthy);\nconsole.log(dead);\nfinish(ordinary);".to_string(),
@@ -444,6 +452,7 @@ pub(super) fn one_dead_projection_degrades_only_its_binding_and_errors_by_name_a
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
 
         // Only the dead binding degrades: the healthy one still renders.
         assert_eq!(response.degraded_bindings.len(), 1);
@@ -503,11 +512,17 @@ pub(super) fn strict_host_policy_can_abort_on_the_degraded_binding_list() {
 
     block_on(async {
         let (mut state, registry) = restored_projection_degradation_fixture();
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
         let response = execute_code_unbounded_for_tests(
             &mut state,
-            lash_core::testing::code_execution_context(
-                crate::testing::memory_backend_ports().await,
-            ),
+            lash_core::testing::code_execution_context(crate::testing::double_ports(
+                &double, &handler,
+            )),
             ExecRequest {
                 language: "typescript".to_string(),
                 code: "finish(healthy);".to_string(),
@@ -520,6 +535,7 @@ pub(super) fn strict_host_policy_can_abort_on_the_degraded_binding_list() {
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
 
         let error = strict_host_policy(&response.degraded_bindings)
             .expect_err("strict host policy must reject degraded setup");
@@ -1093,9 +1109,15 @@ pub(super) fn many_short_bindings_stay_inline_and_hold_the_per_commit_floor() {
 pub(super) fn bound_variables_prompt_renders_live_globals_after_execution() {
     block_on(async {
         let mut state = RlmExecutionState::new();
-        let ctx = lash_core::testing::code_execution_context(
-            crate::testing::memory_backend_ports().await,
-        );
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
+        let ctx = lash_core::testing::code_execution_context(crate::testing::double_ports(
+            &double, &handler,
+        ));
         let response = execute_code_unbounded_for_tests(
             &mut state,
             ctx,
@@ -1115,6 +1137,7 @@ pub(super) fn bound_variables_prompt_renders_live_globals_after_execution() {
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
         assert_eq!(response.error, None);
 
         let globals = state.bound_variable_values(&BTreeSet::new());
@@ -1138,9 +1161,15 @@ pub(super) fn bound_variables_prompt_renders_live_globals_after_execution() {
 pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
     block_on(async {
         let mut state = RlmExecutionState::new();
-        let ctx = lash_core::testing::code_execution_context(
-            crate::testing::memory_backend_ports().await,
-        );
+        let double =
+            crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+        let handler = double
+            .open_handler(crate::testing::default_cell_scope())
+            .await
+            .expect("open the cell's handler");
+        let ctx = lash_core::testing::code_execution_context(crate::testing::double_ports(
+            &double, &handler,
+        ));
         // Same constructs the runtime-perf `rlm_globals` scenario seeds:
         // a large record and a large list that exceed the inline budget.
         let code = r#"let big_map: Record<string, unknown> = {};
@@ -1171,6 +1200,7 @@ pub(super) fn bound_variables_prompt_degrades_large_live_globals() {
             RlmLashlangExecutionTraceConfig::default(),
         )
         .await;
+        handler.close().await.expect("close the cell's handler");
         assert_eq!(response.error, None);
 
         let globals = state.bound_variable_values(&BTreeSet::new());

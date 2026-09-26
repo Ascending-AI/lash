@@ -12,9 +12,16 @@
 
 use super::*;
 
-async fn context() -> lash_core::RuntimeExecutionContext<'static> {
+const SEED: u64 = 0x5_2c07;
+
+/// The cell context over the controller `handler`, open on `double` for the
+/// L11 turn, lends.
+fn context<'h>(
+    double: &lash_restate_test::RestateTestBackend,
+    handler: &'h lash_restate_test::OpenHandler,
+) -> lash_core::RuntimeExecutionContext<'h> {
     lash_core::testing::code_execution_context_with_tool_provider_catalog_and_invocation(
-        crate::testing::memory_backend_ports().await,
+        crate::testing::double_ports(double, handler),
         Arc::new(BindingRecordingDeferredProvider {
             executions: Arc::new(std::sync::atomic::AtomicUsize::new(0)),
             observed_bindings: Arc::new(std::sync::Mutex::new(Vec::new())),
@@ -32,13 +39,25 @@ async fn context() -> lash_core::RuntimeExecutionContext<'static> {
     )
 }
 
+/// Runs `code` as one cell in a handler of its own on a fresh double.
 async fn run(state: &mut RlmExecutionState, code: &str) -> lash_core::ExecResponse {
-    run_in(state, context().await, code).await
+    let double =
+        crate::testing::kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let handler = double
+        .open_handler(lash_core::AdmittedScope::turn(
+            lash_core::SessionId::from("fig3571-l11"),
+            lash_core::TurnId::from("turn-1"),
+        ))
+        .await
+        .expect("open the cell's handler");
+    let response = run_in(state, context(&double, &handler), code).await;
+    handler.close().await.expect("close the cell's handler");
+    response
 }
 
 async fn run_in(
     state: &mut RlmExecutionState,
-    context: lash_core::RuntimeExecutionContext<'static>,
+    context: lash_core::RuntimeExecutionContext<'_>,
     code: &str,
 ) -> lash_core::ExecResponse {
     execute_code_with_channel_and_bounds(
