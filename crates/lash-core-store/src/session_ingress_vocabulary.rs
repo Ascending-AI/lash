@@ -622,6 +622,22 @@ pub enum IngressCancelReason {
     HostWithdrawn { selector: IngressWithdrawSelector },
 }
 
+/// A typed refusal of a config command's route change (FIG-3541).
+///
+/// Route validation is the only post-admission failure a config patch can
+/// meet: a patch that clears its revision check still does not apply when the
+/// provider/model route it would move the head to is not usable. The code is
+/// recorded verbatim on the refused command's tombstone, on the turn-lane
+/// rows its window turns back, and surfaces on the command's settlement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ConfigRefusalCode {
+    /// No provider binding answers the patch's route.
+    ProviderRouteUnknown,
+    /// The route exists but carries no usable credentials.
+    ProviderCredentialsMissing,
+}
+
 /// The closed cause every tombstone carries (ADR 0101 §8).
 #[derive(Clone, Debug, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "cause", rename_all = "snake_case")]
@@ -633,18 +649,32 @@ pub enum IngressTerminalCause {
     /// An `ApplyConfigPatch` refused because the session's config revision had
     /// moved past the one it was written against (ADR 0101 §12).
     StaleConfigRevision { base: u64, head: u64 },
+    /// Route validation refused a config command (on a `SessionCommand` row
+    /// the command was seen and settled, so the row is `completed`), or the
+    /// input/wake was queued in the command's refused window and turned back
+    /// (`Input`/`ProcessWake` rows are `cancelled`) — FIG-3541, HoS
+    /// decision 68.
+    Refused { code: ConfigRefusalCode },
     /// Withdrawn or dropped without delivery.
     Cancelled { reason: IngressCancelReason },
 }
 
 impl IngressTerminalCause {
-    /// The terminal state this cause puts a row in.
+    /// The terminal state this cause puts a row of `kind` in.
+    ///
+    /// `Refused` is the one kind-aware cause: a refused command was seen and
+    /// settled (completed), while an input or wake inside its window was
+    /// turned back without delivery (cancelled).
     #[must_use]
-    pub const fn state(&self) -> IngressState {
+    pub const fn state(&self, kind: IngressKind) -> IngressState {
         match self {
             Self::Delivered | Self::Applied | Self::StaleConfigRevision { .. } => {
                 IngressState::Completed
             }
+            Self::Refused { .. } => match kind {
+                IngressKind::SessionCommand => IngressState::Completed,
+                IngressKind::Input | IngressKind::ProcessWake => IngressState::Cancelled,
+            },
             Self::Cancelled { .. } => IngressState::Cancelled,
         }
     }
@@ -696,7 +726,7 @@ impl IngressItem {
             &self.terminal_cause,
             self.terminal_at_ms,
         ) {
-            (true, Some(cause), Some(_)) if cause.state() == self.state => Ok(()),
+            (true, Some(cause), Some(_)) if cause.state(self.kind()) == self.state => Ok(()),
             (false, None, None) => Ok(()),
             _ => Err(format!(
                 "ingress item `{}` has state `{}` with terminal cause {:?} at {:?}",

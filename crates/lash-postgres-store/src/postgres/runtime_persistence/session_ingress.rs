@@ -26,7 +26,7 @@ use lash_core_execution::store::{
     IngressClaim, IngressClaimIdentity, IngressClaimPolicy, IngressClaimSettlement,
     IngressEnqueueOutcome, IngressItem, IngressItemDraft, IngressItemId, IngressItemRead,
     IngressLane, IngressReadStatus, IngressReclaimOutcome, IngressSettlementIntent,
-    IngressSettlementReceipt, IngressSuffixWithdrawOutcome, IngressTerminalCause,
+    IngressSettlementReceipt, IngressState, IngressSuffixWithdrawOutcome, IngressTerminalCause,
     IngressUndeliveredDisposition, IngressWithdrawOutcome, IngressWithdrawReceipt,
     IngressWithdrawSelector, IngressWithdrawTarget, SessionIngressStore, StoredDriveEpoch,
     decide_drive_epoch_seal, require_current_drive_fence,
@@ -365,6 +365,7 @@ async fn tombstone_tx(
     observed: &[SessionIngressStoredRow],
     item_id: &IngressItemId,
     cause: &IngressTerminalCause,
+    state: IngressState,
     now: u64,
 ) -> Result<u64, StoreError> {
     let cause_json = encode_ingress_terminal_cause(cause)?;
@@ -382,14 +383,14 @@ async fn tombstone_tx(
                 .bind(item_id.as_str())
                 .bind(claim.claim_id)
                 .bind(claim.claim_token)
-                .bind(cause.state().as_str())
+                .bind(state.as_str())
                 .bind(cause_json)
                 .bind(now)
         }
         None => sqlx::query(sql.tombstone_unclaimed.sql())
             .bind(session_id.as_str())
             .bind(item_id.as_str())
-            .bind(cause.state().as_str())
+            .bind(state.as_str())
             .bind(cause_json)
             .bind(now),
     };
@@ -432,7 +433,7 @@ pub(crate) async fn apply_session_ingress_settlement_tx(
             }
         }
     }
-    let addressed = match &settlement.intent {
+    let covered = match &settlement.intent {
         IngressSettlementIntent::Turn {
             cancel: Some(cancel),
             ..
@@ -444,6 +445,18 @@ pub(crate) async fn apply_session_ingress_settlement_tx(
                 .await
                 .map_err(store_sqlx_error)?,
         )?,
+        // A drain that refused a config command settles the turn-lane rows its
+        // windows cover in the same transaction (FIG-3541, HoS decision 68).
+        IngressSettlementIntent::Commands {
+            refused_windows, ..
+        } if !refused_windows.is_empty() => decode_rows(
+            sqlx::query(ingress_sql().shared.select_open_in_lane.sql())
+                .bind(session_id.as_str())
+                .bind(IngressLane::Turn.as_str())
+                .fetch_all(&mut **tx)
+                .await
+                .map_err(store_sqlx_error)?,
+        )?,
         IngressSettlementIntent::Turn { cancel: None, .. }
         | IngressSettlementIntent::Commands { .. } => Vec::new(),
     };
@@ -451,21 +464,26 @@ pub(crate) async fn apply_session_ingress_settlement_tx(
         .iter()
         .map(SessionIngressStoredRow::settlement_row)
         .collect::<Vec<_>>();
-    let addressed_rows = addressed
+    let covered_rows = covered
         .iter()
         .map(SessionIngressStoredRow::settlement_row)
         .collect::<Vec<_>>();
-    let plan = plan_ingress_settlement(settlement, fence, &observed_rows, &addressed_rows)?;
-    // The planned writes reach named rows and the addressed rows a cancel
-    // disposes of; each is written through the claim it was observed with.
-    for row in addressed {
+    let plan = plan_ingress_settlement(settlement, fence, &observed_rows, &covered_rows)?;
+    // The planned writes reach named rows and the covered rows a cancel or a
+    // refused window disposes of; each is written through the claim it was
+    // observed with.
+    for row in covered {
         push_distinct(&mut observed, row);
     }
     for write in &plan.writes {
         let (item_id, changed) = match write {
-            IngressRowSettlement::Complete { item_id, cause } => (
+            IngressRowSettlement::Complete {
                 item_id,
-                tombstone_tx(tx, session_id, &observed, item_id, cause, now).await?,
+                cause,
+                state,
+            } => (
+                item_id,
+                tombstone_tx(tx, session_id, &observed, item_id, cause, *state, now).await?,
             ),
             IngressRowSettlement::Drop { item_id, reason } => {
                 let cause = IngressTerminalCause::Cancelled {
@@ -473,7 +491,16 @@ pub(crate) async fn apply_session_ingress_settlement_tx(
                 };
                 (
                     item_id,
-                    tombstone_tx(tx, session_id, &observed, item_id, &cause, now).await?,
+                    tombstone_tx(
+                        tx,
+                        session_id,
+                        &observed,
+                        item_id,
+                        &cause,
+                        IngressState::Cancelled,
+                        now,
+                    )
+                    .await?,
                 )
             }
             IngressRowSettlement::Release { item_id } => {
@@ -545,7 +572,7 @@ async fn withdraw_row_tx(
             let changed = sqlx::query(ingress_sql().shared.tombstone_unclaimed.sql())
                 .bind(row.item.session_id.as_str())
                 .bind(row.item.item_id.as_str())
-                .bind(cause.state().as_str())
+                .bind(cause.state(row.item.kind()).as_str())
                 .bind(encode_ingress_terminal_cause(&cause)?)
                 .bind(sql_counter_value("session_ingress_terminal_at_ms", now)?)
                 .execute(&mut **tx)

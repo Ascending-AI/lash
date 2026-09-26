@@ -29,6 +29,22 @@ macro_rules! session_ingress_tests {
             (the_drive_epoch_seal_is_idempotent_per_admission, "ingress-drive-epoch-seal"),
             (a_turn_cancel_reaches_rows_an_interrupted_claim_holds, "ingress-cancel-interrupted-hold"),
             (concurrent_seals_serialize, "ingress-concurrent-seals"),
+            (session_command_replay_after_settlement_is_not_reapplied, "config-replay"),
+            (
+                config_revision_advances_once_per_applied_patch_and_never_otherwise,
+                "config-revision"
+            ),
+            (
+                coalesced_patches_apply_in_seq_order_against_a_running_revision,
+                "config-coalescing"
+            ),
+            (a_recomputed_patch_under_a_used_key_is_a_conflict, "config-key-conflict"),
+            (pre_contract_head_and_patch_are_refused_typed, "config-pre-contract"),
+            (a_refused_command_refuses_only_its_window, "config-refused-window"),
+            (
+                a_refused_command_without_a_successor_refuses_to_the_lane_tail,
+                "config-refused-tail"
+            ),
         ]);
     };
     (@catalogue $fixture:block; [$(( $law:ident, $label:literal )),* $(,)?]) => {

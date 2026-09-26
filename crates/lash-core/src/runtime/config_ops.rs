@@ -156,6 +156,14 @@ impl LashRuntime {
             super::SessionCommandSettlement::Cancelled(receipt) => {
                 Err(SessionError::SessionCommandCancelled(receipt))
             }
+            super::SessionCommandSettlement::Stale { base, head } => {
+                Err(SessionError::Protocol(format!(
+                    "session config command was written against config revision {base}, but the running revision is {head}: the command settled without applying"
+                )))
+            }
+            super::SessionCommandSettlement::Refused { code } => Err(SessionError::Protocol(
+                format!("session config command refused at the drain: {code:?}"),
+            )),
         }
     }
 
