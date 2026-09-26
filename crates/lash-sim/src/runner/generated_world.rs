@@ -1056,6 +1056,23 @@ impl GeneratedRuntimeWorld {
         let turn_session = session.clone();
         let turn_events: Arc<dyn lash::TurnActivitySink> = events.clone();
         let prompt = format!("await {suspend_kind_label} completion");
+        // The session's own engine serves its drive, so its server is the
+        // one that sees the send's ask.
+        let drive_engine = turn_engine.clone();
+        let server = drive_engine.restate().server();
+        let drive_prefix = format!(
+            "{}/{}/",
+            lash_restate_test::SESSION_DRIVER_SERVICE,
+            session.session_id()
+        );
+        let session_drives = || {
+            server
+                .invocations()
+                .iter()
+                .filter(|view| view.target.starts_with(&drive_prefix))
+                .count()
+        };
+        let drives_before = session_drives();
         let turn_id = format!("{session_alias}:suspend-turn");
         let handle = tokio::spawn(async move {
             turn_engine
@@ -1071,24 +1088,20 @@ impl GeneratedRuntimeWorld {
                 .map(|output| output.result)
                 .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))
         });
-        // The spawned turn asks its handler `run` on its first poll, over the
-        // same wall-clock accept every outside request crosses. Two turns
-        // opened by near boundaries land that request in whichever outside
-        // pass their connect happened to reach, so one seed's grant order
-        // moved with TCP timing (FIG-3600). Waiting until the server
-        // registered this turn's `run` pins its arrival to the boundary's
-        // own order — the same pinning the provider turn's first-gate wait
-        // gives a provider task.
-        let run_target = format!(":{session_alias}job-");
-        let server = self.engine.restate().server();
+        // The spawned turn's send asks the engine to drive its session on its
+        // first poll, over the same wall-clock accept every outside request
+        // crosses. Two turns opened by near boundaries land that ask in
+        // whichever outside pass their connect happened to reach, so one
+        // seed's grant order moved with TCP timing (FIG-3600). Waiting until
+        // the server registered this session's drive pins its arrival to the
+        // boundary's own order — the same pinning the provider turn's
+        // first-gate wait gives a provider task.
         let mut polls = 0_u32;
-        while !server.invocations().iter().any(|view| {
-            view.target.starts_with("LashTestHandlerHost/") && view.target.contains(&run_target)
-        }) {
+        while session_drives() <= drives_before {
             polls += 1;
             if polls > 100_000 {
                 return Err(FixedScriptRunnerError::Assertion(format!(
-                    "suspend ingress `{session_alias}`: the spawned turn's `run` invocation never reached the server"
+                    "suspend ingress `{session_alias}`: the spawned turn's session drive never reached the server"
                 )));
             }
             tokio::task::yield_now().await;
