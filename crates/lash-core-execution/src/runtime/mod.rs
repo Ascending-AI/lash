@@ -6,14 +6,10 @@ pub mod effect;
 pub mod host;
 #[cfg(feature = "testing")]
 pub use lash_core_store::input_normalization as io;
-#[cfg(not(feature = "testing"))]
-pub(crate) use lash_core_store::input_normalization as io;
 pub mod native_substrate;
 pub mod process;
 #[cfg(feature = "testing")]
 pub use lash_core_effect::session_execution_lease;
-#[cfg(not(feature = "testing"))]
-pub(crate) use lash_core_effect::session_execution_lease;
 pub(crate) use lash_core_store::queued_drain_policy;
 use lash_core_store::session_catalog;
 pub use lash_core_store::session_state as state;
@@ -190,8 +186,6 @@ pub use turn_control::{
 };
 #[cfg(feature = "testing")]
 pub use turn_queue::SessionCommandSettlement;
-#[cfg(not(feature = "testing"))]
-pub(crate) use turn_queue::SessionCommandSettlement;
 pub use turn_queue::SessionCommandSettlementHandle;
 pub use turn_queue::{
     DeliveryPolicy, PROCESS_WAKE_MERGE_KEY, ProcessWakeSource, QueuedCheckpointWork,
@@ -227,6 +221,7 @@ pub use lash_core_store::runtime_error::{
 
 pub use crate::direct_completion_client::DirectCompletionClient;
 
+#[cfg(feature = "testing")]
 mod normalized_item {
     pub use lash_core_store::input_normalization::NormalizedItem;
 }
@@ -235,5 +230,3 @@ mod normalized_item {
 // is the seam that lets them, and the non-testing public surface is unchanged.
 #[cfg(feature = "testing")]
 pub use normalized_item::NormalizedItem;
-#[cfg(not(feature = "testing"))]
-pub(crate) use normalized_item::NormalizedItem;

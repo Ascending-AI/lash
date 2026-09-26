@@ -15,17 +15,24 @@
 use super::*;
 use lash_core_execution::store::session_ingress_plan::{
     IngressClaimAttempt, IngressClaimCandidate, IngressClaimPlan, IngressReclaimDecision,
-    IngressRowSettlement, IngressWithdrawDecision, plan_command_claim, plan_ingress_settlement,
-    plan_reclaim, plan_turn_claim, plan_withdrawal,
+    IngressWithdrawDecision, plan_command_claim, plan_reclaim, plan_turn_claim, plan_withdrawal,
+};
+#[cfg(any(test, feature = "testing"))]
+use lash_core_execution::store::session_ingress_plan::{
+    IngressRowSettlement, plan_ingress_settlement,
 };
 use lash_core_execution::store::{
     AdmissionId, ClaimMode, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence,
-    IngressClaim, IngressClaimPolicy, IngressClaimSettlement, IngressEnqueueOutcome, IngressItem,
-    IngressItemDraft, IngressItemRead, IngressLane, IngressReadStatus, IngressReclaimOutcome,
-    IngressSettlementIntent, IngressSettlementReceipt, IngressState, IngressSuffixWithdrawOutcome,
-    IngressTerminalCause, IngressUndeliveredDisposition, IngressWithdrawOutcome,
+    IngressClaim, IngressClaimPolicy, IngressEnqueueOutcome, IngressItemDraft, IngressItemRead,
+    IngressLane, IngressReadStatus, IngressReclaimOutcome, IngressState,
+    IngressSuffixWithdrawOutcome, IngressTerminalCause, IngressWithdrawOutcome,
     IngressWithdrawReceipt, IngressWithdrawSelector, IngressWithdrawTarget, SessionIngressStore,
     StoredDriveEpoch, decide_drive_epoch_seal, require_current_drive_fence,
+};
+#[cfg(any(test, feature = "testing"))]
+use lash_core_execution::store::{
+    IngressClaimSettlement, IngressItem, IngressSettlementIntent, IngressSettlementReceipt,
+    IngressUndeliveredDisposition,
 };
 use lash_core_execution::store_backend_support::{
     SessionIngressAdmission, SessionIngressAdmissionFacts, SessionIngressInsert,
@@ -188,6 +195,7 @@ fn require_claim_fence_conn(
 }
 
 /// Push `row` unless a row with its item id is already in `rows`.
+#[cfg(any(test, feature = "testing"))]
 fn push_distinct(rows: &mut Vec<SessionIngressStoredRow>, row: SessionIngressStoredRow) {
     if !rows
         .iter()
@@ -327,6 +335,7 @@ fn tombstone_state(state: IngressState) -> &'static str {
 /// Execute one settlement inside the caller's transaction (ADR 0101 §7, §9,
 /// §10, §12). The commit path runs this beside the head write; every wake
 /// terminal raises its floor here, in the same transaction.
+#[cfg(any(test, feature = "testing"))]
 pub(crate) fn apply_session_ingress_settlement_conn(
     conn: &Connection,
     fence: &DriveFence,
@@ -462,6 +471,7 @@ pub(crate) fn apply_session_ingress_settlement_conn(
     Ok(IngressSettlementReceipt { affected })
 }
 
+#[cfg(any(test, feature = "testing"))]
 fn claim_of(
     observed: &[SessionIngressStoredRow],
     item_id: &lash_core_execution::store::IngressItemId,
@@ -480,6 +490,7 @@ fn claim_of(
 
 /// Tombstone one row a settlement moves: through the claim it was observed
 /// with when it holds one, else as the open row the cancel observed.
+#[cfg(any(test, feature = "testing"))]
 fn tombstone_conn(
     conn: &Connection,
     session_id: &SessionId,
@@ -596,6 +607,7 @@ fn target_row_conn(
 }
 
 /// Every row of `session_id`, tombstones included, for conformance probes.
+#[cfg(any(test, feature = "testing"))]
 pub(crate) fn session_ingress_rows_conn(
     conn: &Connection,
     session_id: &SessionId,

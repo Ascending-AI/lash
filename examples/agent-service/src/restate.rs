@@ -250,7 +250,7 @@ async fn stream_turn_outbox(
         .header(header::CACHE_CONTROL, "no-store")
         .header("x-lash-turn-id", turn_id.as_str())
         .body(Body::from_stream(ReceiverStream::new(rx)))
-        .expect("valid streaming response"))
+        .unwrap_or_else(|err| panic!("valid streaming response: {err}")))
 }
 
 async fn write_stream_item(
@@ -453,7 +453,7 @@ fn parks_turn(err: &lash::EmbedError) -> bool {
     cause == lash::runtime::TurnFailureCause::Parked
 }
 
-#[cfg(all(test, feature = "restate"))]
+#[cfg(test)]
 mod restate_tests {
     use std::net::SocketAddr;
     use std::path::Path;

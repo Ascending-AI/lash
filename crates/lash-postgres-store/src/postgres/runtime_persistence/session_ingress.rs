@@ -18,18 +18,24 @@
 use super::*;
 use lash_core_execution::store::session_ingress_plan::{
     IngressClaimAttempt, IngressClaimCandidate, IngressClaimPlan, IngressReclaimDecision,
-    IngressRowSettlement, IngressWithdrawDecision, plan_command_claim, plan_ingress_settlement,
-    plan_reclaim, plan_turn_claim, plan_withdrawal,
+    IngressWithdrawDecision, plan_command_claim, plan_reclaim, plan_turn_claim, plan_withdrawal,
+};
+#[cfg(any(test, feature = "testing"))]
+use lash_core_execution::store::session_ingress_plan::{
+    IngressRowSettlement, plan_ingress_settlement,
 };
 use lash_core_execution::store::{
     AdmissionId, ClaimMode, DriveEpochSeal, DriveEpochSealDecision, DriveEpochStore, DriveFence,
-    IngressClaim, IngressClaimIdentity, IngressClaimPolicy, IngressClaimSettlement,
-    IngressEnqueueOutcome, IngressItem, IngressItemDraft, IngressItemId, IngressItemRead,
-    IngressLane, IngressReadStatus, IngressReclaimOutcome, IngressSettlementIntent,
-    IngressSettlementReceipt, IngressState, IngressSuffixWithdrawOutcome, IngressTerminalCause,
-    IngressUndeliveredDisposition, IngressWithdrawOutcome, IngressWithdrawReceipt,
-    IngressWithdrawSelector, IngressWithdrawTarget, SessionIngressStore, StoredDriveEpoch,
-    decide_drive_epoch_seal, require_current_drive_fence,
+    IngressClaim, IngressClaimPolicy, IngressEnqueueOutcome, IngressItemDraft, IngressItemRead,
+    IngressLane, IngressReadStatus, IngressReclaimOutcome, IngressSuffixWithdrawOutcome,
+    IngressTerminalCause, IngressWithdrawOutcome, IngressWithdrawReceipt, IngressWithdrawSelector,
+    IngressWithdrawTarget, SessionIngressStore, StoredDriveEpoch, decide_drive_epoch_seal,
+    require_current_drive_fence,
+};
+#[cfg(any(test, feature = "testing"))]
+use lash_core_execution::store::{
+    IngressClaimIdentity, IngressClaimSettlement, IngressItem, IngressItemId,
+    IngressSettlementIntent, IngressSettlementReceipt, IngressState, IngressUndeliveredDisposition,
 };
 use lash_core_execution::store_backend_support::{
     SessionIngressAdmission, SessionIngressAdmissionFacts, SessionIngressInsert,
@@ -216,6 +222,7 @@ async fn require_claim_fence_tx(
 }
 
 /// Push `row` unless a row with its item id is already in `rows`.
+#[cfg(any(test, feature = "testing"))]
 fn push_distinct(rows: &mut Vec<SessionIngressStoredRow>, row: SessionIngressStoredRow) {
     if !rows
         .iter()
@@ -341,6 +348,7 @@ async fn install_claim_tx(
     Ok(())
 }
 
+#[cfg(any(test, feature = "testing"))]
 fn claim_of(
     observed: &[SessionIngressStoredRow],
     item_id: &IngressItemId,
@@ -359,6 +367,7 @@ fn claim_of(
 
 /// Tombstone one row a settlement moves: through the claim it was observed
 /// with when it holds one, else as the open row the cancel observed.
+#[cfg(any(test, feature = "testing"))]
 async fn tombstone_tx(
     tx: &mut PgTx<'_>,
     session_id: &SessionId,
@@ -405,6 +414,7 @@ async fn tombstone_tx(
 /// holds the session history lock (ADR 0101 §7, §9, §10, §12). The commit
 /// path runs this beside the head write; every wake terminal raises its
 /// floor here, in the same transaction.
+#[cfg(any(test, feature = "testing"))]
 pub(crate) async fn apply_session_ingress_settlement_tx(
     tx: &mut PgTx<'_>,
     fence: &DriveFence,
@@ -611,6 +621,7 @@ async fn target_row_tx(
 }
 
 /// Every row of `session_id`, tombstones included, for conformance probes.
+#[cfg(any(test, feature = "testing"))]
 pub(crate) async fn session_ingress_rows_tx(
     tx: &mut PgTx<'_>,
     session_id: &SessionId,
@@ -674,6 +685,7 @@ impl PostgresSessionStore {
 
     /// Execute one settlement in a transaction of its own, for the
     /// conformance seam.
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) async fn settle_session_ingress(
         &self,
         fence: &DriveFence,
@@ -690,6 +702,7 @@ impl PostgresSessionStore {
     }
 
     /// Every row of `session_id`, for the conformance seam.
+    #[cfg(any(test, feature = "testing"))]
     pub(crate) async fn session_ingress_rows(
         &self,
         session_id: &SessionId,

@@ -45,9 +45,12 @@ impl<'run> RuntimeEffectControllerHandle<'run> {
         }
     }
 
-    #[expect(
-        clippy::expect_used,
-        reason = "the shared handle was built from a valid admitted scope"
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        expect(
+            clippy::expect_used,
+            reason = "the shared handle was built from a valid admitted scope"
+        )
     )]
     pub fn scoped(&self) -> ScopedEffectController<'_> {
         match self {
@@ -67,9 +70,12 @@ impl<'run> RuntimeEffectControllerHandle<'run> {
 
     /// This handle serving one replayed language command: every journal
     /// write made through it asks `guard` first (FIG-3586).
-    #[expect(
-        clippy::expect_used,
-        reason = "the shared handle was built from a valid admitted scope"
+    #[cfg_attr(
+        any(test, feature = "testing"),
+        expect(
+            clippy::expect_used,
+            reason = "the shared handle was built from a valid admitted scope"
+        )
     )]
     pub fn with_journal_guard(
         &self,

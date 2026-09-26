@@ -287,6 +287,7 @@ pub(crate) fn trigger_sql() -> &'static TriggerSql {
 /// The rendered listing statement `filter`'s shape is served by, for the
 /// conformance assertion that the owner filter is pushed into SQL rather than
 /// applied in Rust.
+#[cfg(any(test, feature = "testing"))]
 pub(crate) fn subscription_list_sql(filter: &TriggerSubscriptionFilter) -> &'static str {
     trigger_sql()
         .subscription

@@ -300,7 +300,7 @@ async fn async_main() -> anyhow_like::Result<()> {
                         restate_ingress_url.clone(),
                         restate_authority_id
                             .clone()
-                            .expect("Restate authority configured"),
+                            .unwrap_or_else(|| panic!("Restate authority configured")),
                     ),
                 ));
                 // Restate-backed turns pass a handler-scoped controller per
@@ -413,8 +413,9 @@ async fn async_main() -> anyhow_like::Result<()> {
         let restate_ingress_url =
             (durability == AgentServiceDurability::Restate).then_some(restate_ingress_url);
         #[cfg(feature = "restate")]
-        let restate_authority_id = (durability == AgentServiceDurability::Restate)
-            .then_some(restate_authority_id.expect("Restate authority configured"));
+        let restate_authority_id = (durability == AgentServiceDurability::Restate).then_some(
+            restate_authority_id.unwrap_or_else(|| panic!("Restate authority configured")),
+        );
         #[cfg(feature = "restate")]
         let state = AppStateData::from_shared_db(
             core,
@@ -445,7 +446,10 @@ async fn async_main() -> anyhow_like::Result<()> {
             // Lash's own services come from the backend; the service binds
             // only its turn and effect-group demo workflows beside them.
             let endpoint = restate_backend
-                .endpoint_builder(process_worker.expect("process worker configured for Restate"))
+                .endpoint_builder(
+                    process_worker
+                        .unwrap_or_else(|| panic!("process worker configured for Restate")),
+                )
                 .bind(lash_restate::turn_service(
                     AgentServiceTurnWorkflowImpl::new(state.clone()).serve(),
                     "run",

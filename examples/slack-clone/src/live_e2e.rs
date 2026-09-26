@@ -36,7 +36,7 @@ mod host_shutdown_tests;
 #[path = "../../shared/shutdown_marker.rs"]
 mod shutdown_marker;
 
-use core_builders::{echo_tools, model_spec, provider, rlm_core, standard_core};
+use core_builders::{StandardCoreSpec, echo_tools, model_spec, provider, rlm_core, standard_core};
 
 pub const DEFAULT_RLM_MODEL: &str = "anthropic/claude-sonnet-5";
 pub const DEFAULT_STANDARD_MODEL: &str = "deepseek/deepseek-v4-flash-0731";
@@ -527,8 +527,9 @@ fn maximum_provider_calls() -> usize {
 }
 
 fn worst_case_spend_usd(output_tokens: usize) -> f64 {
-    let rlm = price_for(DEFAULT_RLM_MODEL).expect("default RLM model is priced");
-    let standard = price_for(DEFAULT_STANDARD_MODEL).expect("default standard model is priced");
+    let rlm = price_for(DEFAULT_RLM_MODEL).unwrap_or_else(|| panic!("default RLM model is priced"));
+    let standard = price_for(DEFAULT_STANDARD_MODEL)
+        .unwrap_or_else(|| panic!("default standard model is priced"));
     maximum_rlm_calls() as f64
         * (MAX_INPUT_TOKENS_PER_CALL as f64
             * rlm.input_usd_per_token.max(rlm.cache_write_usd_per_token)
@@ -542,8 +543,9 @@ fn worst_case_spend_usd(output_tokens: usize) -> f64 {
 }
 
 fn derived_output_token_cap(max_spend_usd: f64) -> Result<usize> {
-    let rlm = price_for(DEFAULT_RLM_MODEL).expect("default RLM model is priced");
-    let standard = price_for(DEFAULT_STANDARD_MODEL).expect("default standard model is priced");
+    let rlm = price_for(DEFAULT_RLM_MODEL).unwrap_or_else(|| panic!("default RLM model is priced"));
+    let standard = price_for(DEFAULT_STANDARD_MODEL)
+        .unwrap_or_else(|| panic!("default standard model is priced"));
     let input_reserve = maximum_rlm_calls() as f64
         * MAX_INPUT_TOKENS_PER_CALL as f64
         * rlm.input_usd_per_token.max(rlm.cache_write_usd_per_token)
@@ -689,12 +691,14 @@ async fn run_smoke_probes(
     let stream_core = standard_core(
         provider(config, ledger),
         model_spec(&config.rlm_model, config.output_token_cap).map_err(FailureReason::harness)?,
-        config.output_token_cap,
-        SMOKE_RLM_CALL_BUDGET,
-        "Answer with exactly STREAM_OK.",
-        None,
-        smoke_dir.join("stream.trace.jsonl"),
-        None,
+        StandardCoreSpec {
+            output_cap: config.output_token_cap,
+            turn_budget: SMOKE_RLM_CALL_BUDGET,
+            instructions: "Answer with exactly STREAM_OK.",
+            tools: None,
+            trace_path: smoke_dir.join("stream.trace.jsonl"),
+            shutdown_witness: None,
+        },
     )
     .await
     .map_err(FailureReason::harness)?;
@@ -720,12 +724,15 @@ async fn run_smoke_probes(
         provider(config, ledger),
         model_spec(&config.standard_model, config.output_token_cap)
             .map_err(FailureReason::harness)?,
-        config.output_token_cap,
-        SMOKE_STANDARD_CALL_BUDGET,
-        "Call structural_echo exactly once with value TOOL_OK, then report completion.",
-        Some(echo_tools()),
-        smoke_dir.join("tool.trace.jsonl"),
-        None,
+        StandardCoreSpec {
+            output_cap: config.output_token_cap,
+            turn_budget: SMOKE_STANDARD_CALL_BUDGET,
+            instructions:
+                "Call structural_echo exactly once with value TOOL_OK, then report completion.",
+            tools: Some(echo_tools()),
+            trace_path: smoke_dir.join("tool.trace.jsonl"),
+            shutdown_witness: None,
+        },
     )
     .await
     .map_err(FailureReason::harness)?;
@@ -1085,17 +1092,19 @@ async fn run_attempt(
     let standard = match standard_core(
         provider(config, ledger),
         standard_model,
-        config.output_token_cap,
-        MAX_MODEL_TURNS_PER_SESSION_TURN,
-        SWAP_INSTRUCTIONS,
-        Some(swap_tools(
-            "Agent B",
-            &channel,
-            Arc::clone(&api),
-            Arc::clone(&state),
-        )),
-        attempt_dir.join("standard.trace.jsonl"),
-        None,
+        StandardCoreSpec {
+            output_cap: config.output_token_cap,
+            turn_budget: MAX_MODEL_TURNS_PER_SESSION_TURN,
+            instructions: SWAP_INSTRUCTIONS,
+            tools: Some(swap_tools(
+                "Agent B",
+                &channel,
+                Arc::clone(&api),
+                Arc::clone(&state),
+            )),
+            trace_path: attempt_dir.join("standard.trace.jsonl"),
+            shutdown_witness: None,
+        },
     )
     .await
     {

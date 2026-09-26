@@ -27,6 +27,7 @@ pub(crate) const SCHEMA_ADVISORY_LOCK_KEY: (i32, i32) = (715421, 907001);
 /// renderer rewrites a table name wherever the token appears, so registering
 /// it would rewrite that column too. Provisioning owns the stamp; the schema
 /// artifacts are the ownership gate's declared home for it.
+#[cfg(feature = "testing")]
 pub(crate) const SELECT_COMPONENT_VERSION: &str =
     "SELECT version FROM lash_schema_versions WHERE component = $1";
 

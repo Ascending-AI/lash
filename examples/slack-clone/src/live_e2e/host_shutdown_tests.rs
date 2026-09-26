@@ -126,12 +126,14 @@ async fn smoke_stream_timeout_drains_full_channel_before_factory_shutdown() {
     let core = standard_core(
         provider,
         model_spec(DEFAULT_STANDARD_MODEL, 128).expect("model metadata"),
-        128,
-        2,
-        "Exercise activity-channel backpressure.",
-        Some(tools),
-        temp.path().join("trace.jsonl"),
-        Some(witness),
+        StandardCoreSpec {
+            output_cap: 128,
+            turn_budget: 2,
+            instructions: "Exercise activity-channel backpressure.",
+            tools: Some(tools),
+            trace_path: temp.path().join("trace.jsonl"),
+            shutdown_witness: Some(witness),
+        },
     )
     .await
     .expect("build core");

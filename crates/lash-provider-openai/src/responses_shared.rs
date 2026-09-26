@@ -1072,6 +1072,7 @@ impl ResponsesStreamState {
         self.streamed_item_content_received = true;
     }
 
+    #[cfg(any(test, feature = "testing"))]
     pub fn full_text(&self) -> String {
         lash_core::facade_support::visible_response_text_from_parts(&self.parts)
     }

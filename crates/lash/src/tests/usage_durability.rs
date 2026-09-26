@@ -42,7 +42,6 @@ fn reconciled(input_tokens: i64) -> ReconciledUsage {
 
 /// A provider whose streamed attempt announces a generation id and then never
 /// returns, so the abort drain seals it as billed-but-unreported.
-#[cfg(feature = "rlm")]
 fn aborting_provider(
     kind: &'static str,
     generation_ids: Vec<Option<&'static str>>,
@@ -90,12 +89,10 @@ fn aborting_provider(
         .into_handle()
 }
 
-#[cfg(feature = "rlm")]
 async fn usage_durability_core(provider: ProviderHandle) -> Result<LashCore> {
     Ok(usage_durability_core_with_store(provider).await?.0)
 }
 
-#[cfg(feature = "rlm")]
 async fn usage_durability_core_with_store(
     provider: ProviderHandle,
 ) -> Result<(LashCore, Arc<lash_sqlite_store::SqliteSessionStoreFactory>)> {
@@ -114,7 +111,6 @@ async fn usage_durability_core_with_store(
 /// The defect this closes: before the fix both store read paths rebuilt every
 /// ledger row with a defaulted disposition and nothing repopulated the pending
 /// registry, so reopening a session turned a billed call into a free one.
-#[cfg(feature = "rlm")]
 #[test]
 fn unreported_holes_survive_close_and_reopen_with_their_attribution() -> Result<()> {
     run_async_test_on_stack_budget("fig2765-hole-survives-reopen", || async {
@@ -181,7 +177,6 @@ fn unreported_holes_survive_close_and_reopen_with_their_attribution() -> Result<
 /// pending ledger, and park's flush predicate ignored that ledger, so closing a
 /// session immediately after a successful reconciliation dropped the recovered
 /// charge on the floor.
-#[cfg(feature = "rlm")]
 #[test]
 fn a_correction_survives_close_and_repeat_reconciliation_is_a_no_op() -> Result<()> {
     run_async_test_on_stack_budget("fig2765-correction-survives-close", || async {
@@ -239,7 +234,6 @@ fn a_correction_survives_close_and_repeat_reconciliation_is_a_no_op() -> Result<
 /// The defect this closes: `reconcile_unreported_usage` took the pending vector
 /// with `mem::take` before its first await, so dropping the future erased every
 /// attempt it had not reached while the durable holes stayed open.
-#[cfg(feature = "rlm")]
 #[test]
 fn dropping_a_reconciliation_future_keeps_unfinished_attempts_registered() -> Result<()> {
     run_async_test_on_stack_budget("fig2765-cancel-reconciliation", || async {
@@ -372,7 +366,6 @@ fn dropping_a_reconciliation_future_keeps_unfinished_attempts_registered() -> Re
 /// Park stays a durable no-op when nothing is pending — including when the
 /// session carries durable unresolved holes, which are already committed — and
 /// commits exactly once when a correction is waiting.
-#[cfg(feature = "rlm")]
 #[test]
 fn park_commits_for_a_pending_correction_and_stays_a_no_op_otherwise() -> Result<()> {
     run_async_test_on_stack_budget("fig2765-park-head-revision", || async {
