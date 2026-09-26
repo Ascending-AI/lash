@@ -618,7 +618,6 @@ fn checkpoint_pending_exec(
             calls: Vec::new(),
             printed_images: Vec::new(),
             error: None,
-            duration_ms: 1,
             degraded_bindings: Vec::new(),
             terminal_finish: Some(serde_json::json!("runtime perf benchmark ok")),
         }),
@@ -691,7 +690,6 @@ fn completed_checkpoint_tool(index: usize, call: PendingToolCall) -> CompletedTo
             &output,
         ),
         output,
-        duration_ms: 1,
         intent_outcomes: Vec::new(),
         replay: call.replay,
     }

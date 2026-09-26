@@ -85,7 +85,6 @@ async fn batch_overflow_rows_come_from_the_parsed_specs_in_input_order() {
             "index": 0,
             "tool": "batch",
             "success": false,
-            "duration_ms": 0,
             "error": "Tool 'batch' is not allowed inside batch"
         })
     );
@@ -95,7 +94,6 @@ async fn batch_overflow_rows_come_from_the_parsed_specs_in_input_order() {
             "index": 1,
             "tool": "ghost",
             "success": false,
-            "duration_ms": 0,
             "error": "Tool 'ghost' is unavailable in this session"
         })
     );
@@ -114,8 +112,7 @@ async fn batch_overflow_rows_come_from_the_parsed_specs_in_input_order() {
                 "index": index,
                 "tool": tool,
                 "success": false,
-                "duration_ms": 0,
-                "error": "Maximum of 25 tool calls allowed in batch"
+                    "error": "Maximum of 25 tool calls allowed in batch"
             })
         );
     }

@@ -152,76 +152,16 @@ where
     }
 }
 
-/// An [`ObservationSink`] that delivers observations onto unbounded channels,
-/// for hosts and fixtures that consume [`SessionStreamEvent`](crate::SessionStreamEvent)s
-/// and [`TurnActivity`](crate::TurnActivity)s on `mpsc` receivers. The channels
-/// are unbounded on purpose: observation never waits on a receiver. An
-/// activity's id derives from `(key, ordinal)`, the same derivation the turn
-/// observer applies.
-pub struct ChannelObservationSink {
-    session_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::SessionStreamEvent>>,
-    activity_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::TurnActivity>>,
-}
-
-impl ChannelObservationSink {
-    pub fn new(
-        session_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::SessionStreamEvent>>,
-        activity_tx: Option<tokio::sync::mpsc::UnboundedSender<crate::TurnActivity>>,
-    ) -> Arc<Self> {
-        Arc::new(Self {
-            session_tx,
-            activity_tx,
-        })
-    }
-}
-
-impl ObservationSink for ChannelObservationSink {
-    fn observe(&self, observation: DriveObservation) {
-        let DriveObservation {
-            key,
-            ordinal,
-            event,
-        } = observation;
-        match event {
-            super::context::ObservedEvent::Session(event) => {
-                if let Some(tx) = &self.session_tx {
-                    let _ = tx.send(event);
-                }
-            }
-            super::context::ObservedEvent::Activity {
-                correlation_id,
-                event,
-            } => {
-                if let Some(tx) = &self.activity_tx {
-                    let id = crate::TurnActivityId::new(format!("{key}#{ordinal}"));
-                    let _ = tx.send(crate::TurnActivity {
-                        correlation_id: correlation_id.unwrap_or_else(|| id.clone()),
-                        id,
-                        event,
-                    });
-                }
-            }
-            super::context::ObservedEvent::RecordedSession(event) => {
-                if let Some(tx) = &self.session_tx {
-                    let _ = tx.send(event);
-                }
-            }
-            super::context::ObservedEvent::RecordedActivity(activity) => {
-                if let Some(tx) = &self.activity_tx {
-                    let _ = tx.send(activity);
-                }
-            }
-        }
-    }
-}
-
 /// The drive-side emitter a step body publishes through: one cursor per
 /// effect body or drive step, keyed by that body's replay key, minting the
 /// ordinal sequence itself (ADR 0105 §1).
 ///
-/// A cursor is owned locally — there is no shared counter — so two bodies
-/// keyed alike emit the same ordinals and a replay deduplicates them by
-/// `(key, ordinal)`.
+/// A cursor is owned locally — there is no shared counter. The
+/// `(key, ordinal)` pairs it mints are *stable identities*: a replay or a
+/// re-executed live body (a retried `LlmCall`, a re-attempted group child)
+/// re-derives the same ids, and a sink MAY deduplicate on them. Nothing
+/// deduplicates today — a retried body may re-emit different content under
+/// the same ids — and whether a sink dedupes is FIG-3753's call.
 #[derive(Debug, Clone)]
 pub struct ObservationCursor {
     key: super::context::ReplayKey,

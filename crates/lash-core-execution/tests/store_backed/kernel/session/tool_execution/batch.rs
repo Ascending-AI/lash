@@ -109,6 +109,7 @@ mod tests {
                 "direct completions are unavailable in this test context",
             ),
             parent_invocation: None,
+            observation_call_key: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -246,7 +247,7 @@ mod tests {
         );
         let context = batch_failure_context(
             Arc::new(BatchFailureEffectController),
-            crate::engine::ChannelObservationSink::new(None, Some(turn_tx)),
+            crate::testing::ChannelObservationSink::new(None, Some(turn_tx)),
         )
         .with_tracing(Some(tracing));
 
@@ -376,7 +377,7 @@ mod tests {
     async fn start_event_transcript_preserves_stream_trace_activity_order() {
         let (event_tx, event_rx) = tokio::sync::mpsc::unbounded_channel();
         let (turn_tx, turn_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (context, _) = granted_call_context(crate::engine::ChannelObservationSink::new(
+        let (context, _) = granted_call_context(crate::testing::ChannelObservationSink::new(
             Some(event_tx),
             Some(turn_tx),
         ))
@@ -396,6 +397,7 @@ mod tests {
 
         crate::emit_tool_call_started(
             &context,
+            "test:start-order",
             "start-order",
             "granted_orchestration_probe",
             serde_json::json!({ "probe": true }),
@@ -556,6 +558,7 @@ mod tests {
                 "direct completions are unavailable in this test context",
             ),
             parent_invocation: None,
+            observation_call_key: None,
             execution_env_spec: crate::ProcessExecutionEnvSpec::new(
                 crate::PluginOptions::default(),
                 crate::SessionPolicy::new(crate::TurnBudget::Unbounded),

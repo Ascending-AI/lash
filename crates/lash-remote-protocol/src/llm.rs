@@ -295,8 +295,6 @@ pub enum RemoteProviderReplayDropReason {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteAttemptRecord {
     pub ordinal: u32,
-    pub started_at_ms: u64,
-    pub duration_ms: u64,
     pub outcome: RemoteAttemptOutcome,
     pub protocol_position: RemoteProtocolPosition,
     pub retry_budget_consumed: bool,

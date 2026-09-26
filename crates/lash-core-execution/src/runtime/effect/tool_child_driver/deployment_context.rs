@@ -135,8 +135,11 @@ impl std::fmt::Debug for DeploymentToolChildContext {
 /// await — every `observe` pushes into a bounded
 /// [`RecordedChildStreamBuilder`] in program order, and [`Self::finish`]
 /// hands the stream back once the child's drive has returned. A session
-/// event's projected activity is recorded ahead of it, in the same order and
-/// with the same `{key}#{ordinal}` id the live opener's observer publishes.
+/// event is recorded raw: its projected activity is emitted where the
+/// settlement is incorporated, the way a live opener's forwarder projects
+/// it, so the stream never stores a payload twice. An activity the child
+/// observed is recorded with the `{key}#{ordinal}` id the observation
+/// minted — the same id a live opener's observer would publish.
 pub(super) struct ChildStreamRecorder {
     stream: std::sync::Mutex<RecordedChildStreamBuilder>,
 }
@@ -170,13 +173,9 @@ impl crate::engine::ObservationSink for ChildStreamRecorder {
         let mut stream = self.stream.lock_recover();
         match event {
             crate::engine::ObservedEvent::Session(event) => {
-                if let Some(projected) = crate::engine::activity_projection(&event) {
-                    stream.push_activity(&crate::TurnActivity {
-                        id: id.clone(),
-                        correlation_id: id,
-                        event: projected,
-                    });
-                }
+                // Raw, unprojected: the projection is emitted where the
+                // settlement is incorporated, so the recorded stream holds
+                // each payload once.
                 stream.push_session(&event);
             }
             crate::engine::ObservedEvent::Activity {

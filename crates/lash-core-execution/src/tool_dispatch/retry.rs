@@ -159,13 +159,12 @@ pub(crate) async fn normalized_outcome(
     tool_name: String,
     args: serde_json::Value,
     result: ToolOutcome,
-    duration_ms: u64,
 ) -> ToolDispatchOutcome {
     let output = Box::pin(normalize_tool_result_attachments(
         context, &tool_name, result,
     ))
     .await;
-    super::context::outcome(tool_name, args, output, duration_ms)
+    super::context::outcome(tool_name, args, output)
 }
 
 async fn normalize_tool_result_attachments(
@@ -292,7 +291,7 @@ pub(crate) async fn settle_completed_pending_tool_call(
         duration_ms,
     )
     .await;
-    let mut outcome = normalized_outcome(context, tool_name, args, result, duration_ms).await;
+    let mut outcome = normalized_outcome(context, tool_name, args, result).await;
     let mut attempts = attempts;
     attempts.push(crate::trace::trace_tool_attempt(
         attempts

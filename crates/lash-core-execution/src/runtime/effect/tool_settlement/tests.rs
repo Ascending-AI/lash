@@ -18,8 +18,6 @@ fn attempt_with(
 ) -> crate::AttemptRecord {
     crate::AttemptRecord {
         ordinal,
-        started_at: 0,
-        duration: std::time::Duration::ZERO,
         outcome,
         protocol_position: crate::ProtocolPosition::ResponseObserved,
         retry_budget_consumed: false,

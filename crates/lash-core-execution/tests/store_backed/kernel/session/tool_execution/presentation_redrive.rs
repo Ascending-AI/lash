@@ -37,15 +37,15 @@ fn turn_context(
         .into_runtime()
 }
 
-/// The settled call, with the duration this pass observed.
-fn settled(duration_ms: u64) -> crate::tool_dispatch::ToolDispatchOutcome {
+/// The settled call. Its duration lives on the observation argument, never in
+/// the record.
+fn settled() -> crate::tool_dispatch::ToolDispatchOutcome {
     crate::tool_dispatch::ToolDispatchOutcome {
         record: crate::ToolCallRecord {
             call_id: Some(CALL_ID.to_string()),
             tool: "slow".to_string(),
             args: json!({}),
             output: crate::ToolCallOutput::success(json!({ "slow": "result" })),
-            duration_ms,
         },
         attempts: Vec::new(),
         intents: crate::ToolIntents::default(),
@@ -61,12 +61,12 @@ async fn a_redriven_call_replays_its_presentation_whatever_its_duration() {
 
     // The live pass: the call took 46 ms.
     let live = turn_context(&backend)
-        .complete_tool_call(CALL_ID.to_string(), None, settled(46))
+        .complete_tool_call(CALL_ID.to_string(), None, settled(), "test:call", 46)
         .await
         .expect("the live call presents");
     // The redrive: the journaled attempt is served at once.
     let redriven = turn_context(&backend)
-        .complete_tool_call(CALL_ID.to_string(), None, settled(2))
+        .complete_tool_call(CALL_ID.to_string(), None, settled(), "test:call", 2)
         .await
         .expect("the redriven call is served its recorded presentation");
 

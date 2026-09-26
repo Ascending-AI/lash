@@ -667,11 +667,11 @@ async fn host_effect_ledger_observes_a_settled_pending_call_under_its_call_id() 
     let completed = execution
         .pending_completion_dispatch_outcome(
             "pending-call",
+            "test:pending-call",
             pending.tool_name,
             pending.args,
             crate::Resolution::Ok(serde_json::json!({ "done": true })),
             None,
-            pending.duration_ms,
             pending.attempts,
             pending.captures,
             pending.triggers,

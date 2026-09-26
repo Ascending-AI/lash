@@ -285,6 +285,7 @@ impl OpenerDeployment {
                 Ok(canned.clone())
             }),
             parent_invocation: Some(self.parent_invocation.clone()),
+            observation_call_key: None,
             execution_env_spec: self.env_spec.clone(),
             session_id: self.session_id.clone(),
             agent_frame_id: self.agent_frame_id.clone(),
@@ -404,6 +405,8 @@ fn axis_value(
         // --- Fresh: the child mints its own buffers; nothing to differ. ---
         RebindField::CheckpointMessages => "fresh".to_string(),
         RebindField::TriggerOutcomes => "fresh".to_string(),
+        // A rebind clears the lent call key; emissions key the calls they name.
+        RebindField::ObservationCallKey => "cleared".to_string(),
     }
 }
 
@@ -607,8 +610,6 @@ fn canned_completion(tag: &'static str, input: i64, output: i64) -> DirectComple
             replay_drops: Vec::new(),
             attempts: vec![AttemptRecord {
                 ordinal: 1,
-                started_at: 0,
-                duration: Duration::ZERO,
                 outcome: AttemptOutcome::Completed,
                 protocol_position: ProtocolPosition::ResponseObserved,
                 retry_budget_consumed: false,

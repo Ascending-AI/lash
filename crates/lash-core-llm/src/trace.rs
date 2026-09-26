@@ -69,7 +69,6 @@ pub fn trace_llm_attempts(record: Option<&crate::LlmCallRecord>) -> Option<Vec<T
                     crate::AttemptOutcome::Aborted => TraceRetryAttemptOutcome::Aborted,
                     crate::AttemptOutcome::Interrupted => TraceRetryAttemptOutcome::Interrupted,
                 },
-                duration_ms: attempt.duration.as_millis().try_into().unwrap_or(u64::MAX),
                 reason: trace_llm_attempt_reason(attempt),
                 delay_ms: attempt
                     .retry_decision

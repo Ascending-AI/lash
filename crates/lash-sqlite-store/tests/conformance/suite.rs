@@ -2003,7 +2003,6 @@ async fn sqlite_effect_controller_replays_a_non_empty_recorded_intent_batch() {
                 output: lash_core_execution::ToolCallOutput::success(serde_json::json!({
                     "provider": "done"
                 })),
-                duration_ms: 7,
             }),
             intents: lash_core_execution::ToolIntents::v3(vec![
                 lash_core_execution::ToolIntent::EmitProcessEvent(

@@ -361,8 +361,6 @@ fn remote_turn_result_json_round_trips() {
         replay_drops: Vec::new(),
         attempts: vec![RemoteAttemptRecord {
             ordinal: 1,
-            started_at_ms: 7,
-            duration_ms: 9,
             outcome: RemoteAttemptOutcome::Interrupted,
             protocol_position: RemoteProtocolPosition::OutputStarted,
             retry_budget_consumed: true,
@@ -411,7 +409,6 @@ fn remote_turn_result_json_round_trips() {
             tool_name: "demo".to_string(),
             args: serde_json::json!({"x": 1}),
             outcome: RemoteToolCallOutcome::Success(serde_json::json!({"ok": true})),
-            duration_ms: 5,
         }],
         llm_calls: vec![call_record.clone()],
         issues: Vec::new(),
@@ -450,8 +447,6 @@ fn remote_turn_result_json_round_trips() {
         value.pointer("/llm_calls/0/attempts/0"),
         Some(&serde_json::json!({
             "ordinal": 1,
-            "started_at_ms": 7,
-            "duration_ms": 9,
             "outcome": "interrupted",
             "protocol_position": "output_started",
             "retry_budget_consumed": true,

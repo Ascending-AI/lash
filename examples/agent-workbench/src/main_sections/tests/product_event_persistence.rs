@@ -201,8 +201,6 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
                 attempts: vec![
                     lash::remote::llm::RemoteAttemptRecord {
                         ordinal: 1,
-                        started_at_ms: 10,
-                        duration_ms: 3,
                         outcome: RemoteAttemptOutcome::Aborted,
                         protocol_position: RemoteProtocolPosition::ResponseObserved,
                         retry_budget_consumed: false,
@@ -245,8 +243,6 @@ fn persisted_attempt_rows_round_trip_non_default_outcomes_positions_and_facts() 
                     },
                     lash::remote::llm::RemoteAttemptRecord {
                         ordinal: 2,
-                        started_at_ms: 20,
-                        duration_ms: 4,
                         outcome: RemoteAttemptOutcome::Interrupted,
                         protocol_position: RemoteProtocolPosition::OutputStarted,
                         retry_budget_consumed: true,

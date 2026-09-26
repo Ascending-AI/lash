@@ -1369,6 +1369,9 @@ impl RuntimeEffectLocalRunner for LocalPreparedToolAttemptEffectRunner<'_> {
         };
         let mut dispatch = (*self.dispatch).clone();
         dispatch.parent_invocation = Some(envelope.invocation.clone().into_runtime_invocation());
+        // The attempt's invocation is now the observation base; an inherited
+        // per-call key would key every retry of it under the caller's lane.
+        dispatch.observation_call_key = None;
         dispatch.direct_completions = dispatch
             .direct_completions
             .with_tool_attempt_parent_invocation(

@@ -657,7 +657,6 @@ impl lash_core::testing::EffectLayer for RecordingEffectController {
                     calls: Vec::new(),
                     printed_images: Vec::new(),
                     error: None,
-                    duration_ms: 0,
                     degraded_bindings: Vec::new(),
                     terminal_finish: Some(serde_json::json!("ok")),
                 })),

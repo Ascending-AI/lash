@@ -134,7 +134,7 @@ impl Telemetry {
                     "call_index":index, "attempt_index":attempt.ordinal,
                     "decision": if completed { decisions.get(response_index).map(String::as_str).unwrap_or(if standard { "standard_tools_or_prose" } else { "empty_or_unclassified" }) } else { "transport_retry_or_failure" },
                     "tokens":attempt.usage.as_ref().map(|usage| serde_json::json!({"input":usage.input_tokens,"output":usage.output_tokens,"cache_read":usage.cache_read_input_tokens,"cache_write":usage.cache_write_input_tokens})),
-                    "wall_ms":attempt.duration.as_millis(),
+                    "wall_ms":transport.and_then(|r| r.get("request_ms")).cloned().unwrap_or(serde_json::Value::Null),
                     "cost": transport.map(|r| r["cost"].clone()).unwrap_or_else(|| serde_json::json!(0)),
                     "request_ms":transport.and_then(|r| r.get("request_ms")),
                     "retry_decision":attempt.retry_decision, "protocol_position":attempt.protocol_position,

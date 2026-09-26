@@ -797,7 +797,7 @@ impl LashRuntime {
         self.mark_phase_end(CommittedTurn::RUNTIME_PHASE);
         self.mark_phase_begin(PostCommitDelivery::RUNTIME_PHASE);
 
-        emit_session_events_to_sink(observer, delivery.events).await;
+        emit_session_events(observer, delivery.events);
         observer.published().await;
         publish_terminal_after_commit(
             turn_control,

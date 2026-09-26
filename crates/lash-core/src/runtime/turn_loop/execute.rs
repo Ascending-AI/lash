@@ -425,7 +425,7 @@ impl LashRuntime {
         for event in &prepared.events {
             recorded_assembly.record(event);
         }
-        emit_session_events_to_sink(observer, std::mem::take(&mut prepared.events)).await;
+        emit_session_events(observer, std::mem::take(&mut prepared.events));
         if prepared.abort.is_some() {
             return Box::pin(self.finish_prepared_turn_abort(PreparedTurnAbortContext {
                 prepared,

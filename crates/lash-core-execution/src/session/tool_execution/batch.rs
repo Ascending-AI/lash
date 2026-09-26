@@ -49,16 +49,22 @@ impl RuntimeExecutionContext<'_> {
     /// manifest and runs the tool's preparation. A call refused or completed
     /// during preparation has already settled — it belongs to the immediate
     /// prefix ahead of every dispatched settlement (ADR 0099 §10 L5).
+    ///
+    /// `batch_id` plus `index` and the call id are the call's observation-lane
+    /// material while it has no invocation of its own (ADR 0105 §1).
     pub(super) async fn prepare_tool_leaf(
         &self,
+        batch_id: &str,
         index: usize,
         mut call: ToolInvocation,
     ) -> ToolLeafPreparation {
+        let leaf_started = self.dispatch.clock.now();
         let context = call
             .issuing_language_node_id
             .clone()
             .map(|node_id| self.clone().with_issuing_language_node_id(node_id))
             .unwrap_or_else(|| self.clone());
+        let call_key = format!("{batch_id}:{index}:{}", call.id);
         let authorization = ToolCallAuthorization::from_invocation(&mut call);
         let Some(manifest) = authorization.resolve_manifest(self.dispatch.as_ref()) else {
             let outcome = ToolDispatchOutcome {
@@ -71,7 +77,6 @@ impl RuntimeExecutionContext<'_> {
                         "tool_unavailable",
                         format!("Tool id `{}` is unavailable in this session", call.tool_id),
                     )),
-                    duration_ms: 0,
                 },
                 attempts: Vec::new(),
                 intents: crate::ToolIntents::default(),
@@ -79,8 +84,22 @@ impl RuntimeExecutionContext<'_> {
                 captures: Vec::new(),
                 triggers: Vec::new(),
             };
+            // The call never ran; the Completed observation reports the
+            // preparation window it actually spent in.
             let completed = context
-                .complete_language_tool_call(call.id, None, outcome, true)
+                .complete_language_tool_call(
+                    call.id,
+                    None,
+                    outcome,
+                    true,
+                    &call_key,
+                    context
+                        .dispatch
+                        .clock
+                        .now()
+                        .saturating_duration_since(leaf_started)
+                        .as_millis() as u64,
+                )
                 .await;
             return ToolLeafPreparation::Completed(Box::new(
                 ToolInvocationReply::from_output(completed.completed.output)
@@ -93,8 +112,12 @@ impl RuntimeExecutionContext<'_> {
             args: call.args,
             replay: None,
         };
+        // The leaf's own key namespaces the prepare's directive lanes —
+        // `observation_keyed` qualifies it under this dispatch's base, which
+        // for a nested batch is the opener call's invocation (ADR 0105 §1).
+        let keyed_dispatch = self.dispatch.observation_keyed(&call_key);
         match authorization
-            .prepare(self.dispatch.as_ref(), pending, call.id.clone())
+            .prepare(&keyed_dispatch, pending, call.id.clone())
             .await
         {
             ToolPreparationOutcome::Prepared(prepared) => {
@@ -107,7 +130,19 @@ impl RuntimeExecutionContext<'_> {
             }
             ToolPreparationOutcome::Completed(outcome) => {
                 let completed = context
-                    .complete_language_tool_call(call.id, None, *outcome, true)
+                    .complete_language_tool_call(
+                        call.id,
+                        None,
+                        *outcome,
+                        true,
+                        &call_key,
+                        context
+                            .dispatch
+                            .clock
+                            .now()
+                            .saturating_duration_since(leaf_started)
+                            .as_millis() as u64,
+                    )
                     .await;
                 ToolLeafPreparation::Completed(Box::new(
                     ToolInvocationReply::from_output(completed.completed.output)
@@ -199,7 +234,7 @@ impl RuntimeExecutionContext<'_> {
         let mut settled_during_preparation = Vec::new();
 
         for (index, call) in calls.into_iter().enumerate() {
-            match self.prepare_tool_leaf(index, call).await {
+            match self.prepare_tool_leaf(&batch_id, index, call).await {
                 ToolLeafPreparation::Prepared(entry) => prepared_entries.push(*entry),
                 ToolLeafPreparation::Completed(reply) => {
                     replies[index] = Some(*reply);

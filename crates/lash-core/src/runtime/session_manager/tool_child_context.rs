@@ -46,6 +46,7 @@ impl RuntimeSessionServices {
             effect_controller,
             direct_completions,
             parent_invocation: None,
+            observation_call_key: None,
             execution_env_spec,
             session_id: self.current.session_id.clone(),
             agent_frame_id: state.current_frame_node_id.clone().ok_or_else(|| {

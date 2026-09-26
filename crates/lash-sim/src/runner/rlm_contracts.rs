@@ -344,9 +344,7 @@ fn rlm_exec_result_no_tool_call_replay_execution() -> Result<Value, FixedScriptR
                     "read_file",
                     json!({ "path": "foo" }),
                     lash_core::ToolCallOutput::success(json!("contents")),
-                    7,
                 )],
-                7,
             )),
         ],
     )
@@ -387,9 +385,7 @@ fn rlm_exec_tool_control_frame_switch_terminal_execution() -> Result<Value, Fixe
                             task: Some("continue".to_string()),
                         },
                     ),
-                    3,
                 )],
-                3,
             )),
             RlmContractStep::Checkpoint,
         ],
@@ -424,9 +420,7 @@ fn rlm_exec_tool_control_fail_terminal_execution() -> Result<Value, FixedScriptR
                             ),
                         },
                     ),
-                    3,
                 )],
-                3,
             )),
             RlmContractStep::Checkpoint,
         ],
@@ -827,7 +821,6 @@ fn rlm_exec_response(
         error: error.map(|message| {
             lash_core::CellFailure::new(lash_core::CellFailureKind::Program, message)
         }),
-        duration_ms: 1,
         degraded_bindings: Vec::new(),
         terminal_finish,
     }
@@ -838,7 +831,6 @@ fn rlm_exec_response_with_tool_calls(
     error: Option<&str>,
     terminal_finish: Option<Value>,
     tool_calls: Vec<lash_core::ToolCallRecord>,
-    duration_ms: u64,
 ) -> lash_core::ExecResponse {
     let calls = tool_calls
         .into_iter()
@@ -865,7 +857,6 @@ fn rlm_exec_response_with_tool_calls(
         error: error.map(|message| {
             lash_core::CellFailure::new(lash_core::CellFailureKind::Program, message)
         }),
-        duration_ms,
         degraded_bindings: Vec::new(),
         terminal_finish,
     }
@@ -876,14 +867,12 @@ fn rlm_tool_call_record(
     tool: &str,
     args: Value,
     output: lash_core::ToolCallOutput,
-    duration_ms: u64,
 ) -> lash_core::ToolCallRecord {
     lash_core::ToolCallRecord {
         call_id: Some(call_id.to_string()),
         tool: tool.to_string(),
         args,
         output,
-        duration_ms,
     }
 }
 

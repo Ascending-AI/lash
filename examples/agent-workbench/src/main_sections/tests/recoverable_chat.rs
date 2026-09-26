@@ -1119,8 +1119,6 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
         attempts: vec![
             lash::remote::llm::RemoteAttemptRecord {
                 ordinal: 1,
-                started_at_ms: 7,
-                duration_ms: 3,
                 outcome: lash::remote::llm::RemoteAttemptOutcome::Failed,
                 protocol_position: lash::remote::llm::RemoteProtocolPosition::NoResponse,
                 retry_budget_consumed: true,
@@ -1163,8 +1161,6 @@ fn settled_product_reconciliation_keeps_the_cursor_monotonic() {
             },
             lash::remote::llm::RemoteAttemptRecord {
                 ordinal: 2,
-                started_at_ms: 11,
-                duration_ms: 2,
                 outcome: lash::remote::llm::RemoteAttemptOutcome::Completed,
                 protocol_position: lash::remote::llm::RemoteProtocolPosition::TerminalObserved,
                 retry_budget_consumed: true,

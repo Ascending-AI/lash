@@ -4,7 +4,11 @@ pub struct BatchResultRow {
     pub index: usize,
     pub tool: String,
     pub success: bool,
-    pub duration_ms: u64,
+    /// Rows journaled before durations left recorded content still carry this
+    /// field; `deny_unknown_fields` would otherwise refuse them. It decodes
+    /// and discards — never read, never re-emitted.
+    #[serde(rename = "duration_ms", default, skip_serializing)]
+    legacy_duration_ms: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<serde_json::Value>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -12,33 +16,23 @@ pub struct BatchResultRow {
 }
 
 impl BatchResultRow {
-    pub fn success(
-        index: usize,
-        tool: impl Into<String>,
-        duration_ms: u64,
-        result: serde_json::Value,
-    ) -> Self {
+    pub fn success(index: usize, tool: impl Into<String>, result: serde_json::Value) -> Self {
         Self {
             index,
             tool: tool.into(),
             success: true,
-            duration_ms,
+            legacy_duration_ms: None,
             result: Some(result),
             error: None,
         }
     }
 
-    pub fn failure(
-        index: usize,
-        tool: impl Into<String>,
-        duration_ms: u64,
-        error: serde_json::Value,
-    ) -> Self {
+    pub fn failure(index: usize, tool: impl Into<String>, error: serde_json::Value) -> Self {
         Self {
             index,
             tool: tool.into(),
             success: false,
-            duration_ms,
+            legacy_duration_ms: None,
             result: None,
             error: Some(error),
         }
@@ -62,27 +56,12 @@ mod tests {
         let missing_tool = serde_json::from_value::<BatchResultRow>(serde_json::json!({
             "index": 0,
             "success": true,
-            "duration_ms": 0,
             "result": "ok"
         }))
         .expect_err("row without tool must fail");
         assert!(
             missing_tool.to_string().contains("missing field `tool`"),
             "{missing_tool}"
-        );
-
-        let missing_duration = serde_json::from_value::<BatchResultRow>(serde_json::json!({
-            "index": 0,
-            "tool": "probe",
-            "success": true,
-            "result": "ok"
-        }))
-        .expect_err("row without duration_ms must fail");
-        assert!(
-            missing_duration
-                .to_string()
-                .contains("missing field `duration_ms`"),
-            "{missing_duration}"
         );
     }
 }

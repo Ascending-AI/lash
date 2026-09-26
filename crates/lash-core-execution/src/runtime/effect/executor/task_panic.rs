@@ -25,7 +25,6 @@ pub(super) fn map_effect_task_join(
                         "tool_panicked",
                         message,
                     )),
-                    duration_ms: 0,
                 }),
                 intents: crate::ToolIntents::default(),
             }),

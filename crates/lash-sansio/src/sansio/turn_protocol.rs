@@ -28,7 +28,6 @@ pub struct CompletedToolCall {
     pub args: Value,
     pub output: ToolCallOutput,
     pub model_return: ModelToolReturn,
-    pub duration_ms: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub intent_outcomes: Vec<crate::ToolIntentExecutionOutcome>,
     /// See [`PendingToolCall::replay`].

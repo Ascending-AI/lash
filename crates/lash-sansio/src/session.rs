@@ -173,7 +173,6 @@ pub struct ExecResponse {
     pub calls: Vec<ExecutedCall>,
     pub printed_images: Vec<AttachmentRef>,
     pub error: Option<CellFailure>,
-    pub duration_ms: u64,
     /// Bindings that could not be restored to a live host reference during
     /// executor setup. The executor leaves each binding loudly unavailable;
     /// the host decides whether to warn, repair, or abort.
@@ -245,7 +244,6 @@ mod tests {
         let response: ExecResponse = serde_json::from_value(legacy_json)
             .expect("legacy ExecResponse payload with images field should decode");
         assert_eq!(response.observations[0].text, "step output");
-        assert_eq!(response.duration_ms, 42);
     }
 
     #[test]

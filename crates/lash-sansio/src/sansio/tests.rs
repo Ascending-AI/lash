@@ -251,7 +251,6 @@ fn empty_exec_response() -> crate::ExecResponse {
         calls: Vec::new(),
         printed_images: Vec::new(),
         error: None,
-        duration_ms: 0,
         degraded_bindings: Vec::new(),
         terminal_finish: None,
     }
@@ -274,7 +273,6 @@ fn completed_tool(
             parts: vec![ModelToolReturnPart::text(format!("{tool_name} result"))],
             attachment_notices: Vec::new(),
         },
-        duration_ms: 1,
         intent_outcomes: Vec::new(),
         replay: None,
     }

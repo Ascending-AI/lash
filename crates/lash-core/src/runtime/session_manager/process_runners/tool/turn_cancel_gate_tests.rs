@@ -262,7 +262,6 @@ async fn runner_side_deferred_await_inside_a_process_body_attaches_no_turn_cance
         args: serde_json::json!({}),
         key,
         pending: crate::PendingCompletion::default(),
-        duration_ms: 0,
         attempts: Vec::new(),
         captures: Vec::new(),
         triggers: Vec::new(),

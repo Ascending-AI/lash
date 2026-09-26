@@ -470,11 +470,11 @@ async fn deferred_completion_after_hook_attachment_is_normalized_before_recordin
     let outcome = execution
         .pending_completion_dispatch_outcome(
             "deferred-attachment-call",
+            "test:deferred-attachment-call",
             "deferred_attachment_probe".to_string(),
             json!({ "value": "valid" }),
             crate::Resolution::Ok(json!({ "completed": true })),
             None,
-            17,
             Vec::new(),
             Vec::new(),
             Vec::new(),

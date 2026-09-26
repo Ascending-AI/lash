@@ -500,6 +500,7 @@ async fn fig790_process_await_context(
             "direct completions are unavailable in this test context",
         ),
         parent_invocation: None,
+        observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),

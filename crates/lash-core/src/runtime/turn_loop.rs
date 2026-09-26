@@ -283,11 +283,16 @@ pub(in crate::runtime) fn turn_observation_cursor(
     turn_id: &TurnId,
     lane: &str,
 ) -> crate::engine::ObservationCursor {
-    let scope = scoped_effect_controller
-        .execution_scope()
+    let execution_scope = scoped_effect_controller.execution_scope();
+    debug_assert!(
+        execution_scope.journal_identity().is_ok(),
+        "turn observation lanes require the scope's journal identity, but scope `{}` names none",
+        execution_scope.id(),
+    );
+    let scope = execution_scope
         .journal_identity()
         .map(|identity| identity.key().to_owned())
-        .unwrap_or_else(|_| "turn".to_string());
+        .unwrap_or_else(|_| format!("turn:{}", execution_scope.id()));
     crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new(format!(
         "{scope}:{turn_id}:{lane}"
     )))

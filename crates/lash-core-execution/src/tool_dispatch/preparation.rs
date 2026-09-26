@@ -86,7 +86,6 @@ pub async fn prepare_tool_call_with_context(
                     "tool_unavailable",
                     "Tool is unavailable in this session",
                 ),
-                0,
             )
             .await,
         );
@@ -206,7 +205,6 @@ async fn prepare_authorized_tool_call_with_context(
                         "before_tool_call_failed",
                         err.to_string(),
                     ),
-                    0,
                 )
                 .await,
             );
@@ -216,9 +214,7 @@ async fn prepare_authorized_tool_call_with_context(
     let applied = apply_before_tool_directives(context, args, directives).await;
     args = applied.args;
     if let Some(result) = applied.short_circuit {
-        return completed_preparation(
-            normalized_outcome(context, tool_name, args, result, 0).await,
-        );
+        return completed_preparation(normalized_outcome(context, tool_name, args, result).await);
     }
     if let Err(err) = validate_tool_input(&contract, &args) {
         return completed_preparation(
@@ -227,7 +223,6 @@ async fn prepare_authorized_tool_call_with_context(
                 tool_name,
                 args,
                 runtime_failure(ToolFailureClass::InvalidRequest, "invalid_tool_args", err),
-                0,
             )
             .await,
         );
@@ -280,7 +275,6 @@ async fn prepare_authorized_tool_call_with_context(
                         prepared.tool_id, prepared.tool_name, manifest.id
                     ),
                 ),
-                0,
             )
             .await,
         ),
@@ -297,12 +291,11 @@ async fn prepare_authorized_tool_call_with_context(
                         prepared.tool_name, prepared.tool_id, manifest.name
                     ),
                 ),
-                0,
             )
             .await,
         ),
         Err(result) => {
-            completed_preparation(normalized_outcome(context, tool_name, args, result, 0).await)
+            completed_preparation(normalized_outcome(context, tool_name, args, result).await)
         }
     }
 }

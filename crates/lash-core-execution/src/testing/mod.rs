@@ -32,6 +32,8 @@ pub mod trace_capture;
 pub mod execution_context_builder;
 #[cfg(feature = "testing")]
 pub mod kernel_internals;
+#[cfg(any(test, feature = "testing"))]
+pub mod observation_sink;
 pub mod sansio_transcript;
 pub mod tool_fixtures;
 mod trigger_context;
@@ -42,6 +44,8 @@ pub use crate::runtime::process::{
     ProcessRegistryFaults, RegistrationHoldPoint, WorklistPagePause, WorklistPageRead,
 };
 pub use execution_context_builder::*;
+#[cfg(any(test, feature = "testing"))]
+pub use observation_sink::ChannelObservationSink;
 pub use tool_fixtures::{FIXTURE_ECHO_TOOL, FixtureTools, fixture_echo_definition};
 pub use trigger_context::*;
 
@@ -1319,7 +1323,7 @@ pub async fn coordinate_tool_provider_with_services(
                 tool_name: outcome.record.tool.clone(),
                 args: outcome.record.args.clone(),
                 output: outcome.record.output.clone(),
-                duration_ms: outcome.record.duration_ms,
+                duration_ms: 0,
                 artifacts: std::sync::Arc::new(
                     crate::runtime::effect::SessionPresentationArtifacts::new(
                         std::sync::Arc::clone(&dispatch.attachment_store),
@@ -1357,7 +1361,6 @@ pub async fn coordinate_tool_provider_with_services(
             args: outcome.record.args,
             output: outcome.record.output,
             model_return,
-            duration_ms: outcome.record.duration_ms,
             intent_outcomes: outcome.intent_outcomes,
             replay: call.replay,
         },

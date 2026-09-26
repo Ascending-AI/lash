@@ -95,6 +95,7 @@ mod tests {
                 "direct completions are unavailable in this test context",
             ),
             parent_invocation: None,
+            observation_call_key: None,
             execution_env_spec: spec(),
             session_id: SessionId::from(SESSION),
             agent_frame_id: FrameNodeId::new("frame").expect("a valid frame id"),

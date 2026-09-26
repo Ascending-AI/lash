@@ -80,7 +80,10 @@ impl RuntimeExecutionContext<'_> {
             args: args.clone(),
             replay: None,
         };
-        let prepared_call = match self.prepare_tool_call(pending_call).await {
+        let prepared_call = match self
+            .prepare_tool_call(pending_call, &format!("handle:{call_id}"))
+            .await
+        {
             ToolPreparationOutcome::Prepared(prepared) => *prepared,
             ToolPreparationOutcome::Completed(outcome) => {
                 let mut record = outcome.record;
@@ -121,17 +124,8 @@ impl RuntimeExecutionContext<'_> {
             tool: prepared_call.tool_name,
             args: prepared_call.args,
             output: ToolCallOutput::success(handle_value.clone()),
-            duration_ms: 0,
         };
         ToolInvocationReply::success(handle_value).with_record(record)
-    }
-
-    fn elapsed_ms(&self, started: std::time::Instant) -> u64 {
-        self.dispatch
-            .clock
-            .now()
-            .duration_since(started)
-            .as_millis() as u64
     }
 
     fn recorded_process_reply(
@@ -139,14 +133,12 @@ impl RuntimeExecutionContext<'_> {
         tool: impl Into<String>,
         args: serde_json::Value,
         output: ToolCallOutput,
-        duration_ms: u64,
     ) -> ToolInvocationReply {
         let record = ToolCallRecord {
             call_id: Some(call_id),
             tool: tool.into(),
             args,
             output: output.clone(),
-            duration_ms,
         };
         ToolInvocationReply::from_output(output).with_record(record)
     }
@@ -156,10 +148,9 @@ impl RuntimeExecutionContext<'_> {
         tool: &'static str,
         args: serde_json::Value,
         message: impl Into<String>,
-        duration_ms: u64,
     ) -> ToolInvocationReply {
         let output = ToolInvocationReply::error(json!(message.into())).output;
-        Self::recorded_process_reply(call_id, tool, args, output, duration_ms)
+        Self::recorded_process_reply(call_id, tool, args, output)
     }
 
     pub(crate) async fn await_process_handle(
@@ -167,28 +158,15 @@ impl RuntimeExecutionContext<'_> {
         call_id: String,
         handle: serde_json::Value,
     ) -> ToolInvocationReply {
-        let started = self.dispatch.clock.now();
         let args = json!({ "handle": handle.clone() });
         let process_ref = match Self::parse_process_handle(&handle) {
             Ok(parsed) => parsed,
             Err(err) => {
-                return Self::recorded_process_error(
-                    call_id,
-                    "await_process",
-                    args,
-                    err,
-                    self.elapsed_ms(started),
-                );
+                return Self::recorded_process_error(call_id, "await_process", args, err);
             }
         };
         if let Err(err) = self.authorize_handle(&process_ref).await {
-            return Self::recorded_process_error(
-                call_id,
-                "await_process",
-                args,
-                err.to_string(),
-                self.elapsed_ms(started),
-            );
+            return Self::recorded_process_error(call_id, "await_process", args, err.to_string());
         }
         let output = self
             .await_process_with_cancellation(
@@ -197,7 +175,6 @@ impl RuntimeExecutionContext<'_> {
                 self.cancellation_token.clone(),
             )
             .await;
-        let duration_ms = self.elapsed_ms(started);
         let output = match output {
             Ok(output) => output.into_tool_output(),
             Err(crate::PluginError::RuntimeEffectController(err)) => {
@@ -211,7 +188,6 @@ impl RuntimeExecutionContext<'_> {
             "await_process".to_string(),
             args,
             ToolOutcome::from_output(output),
-            duration_ms,
         )
         .await;
         outcome.record.call_id = Some(call_id);
@@ -225,7 +201,6 @@ impl RuntimeExecutionContext<'_> {
         signal_name: String,
         payload: serde_json::Value,
     ) -> ToolInvocationReply {
-        let started = self.dispatch.clock.now();
         let args = json!({
             "handle": handle.clone(),
             "signal_name": signal_name.clone(),
@@ -234,23 +209,11 @@ impl RuntimeExecutionContext<'_> {
         let process_ref = match Self::parse_process_handle(&handle) {
             Ok(parsed) => parsed,
             Err(err) => {
-                return Self::recorded_process_error(
-                    call_id,
-                    "signal_process",
-                    args,
-                    err,
-                    self.elapsed_ms(started),
-                );
+                return Self::recorded_process_error(call_id, "signal_process", args, err);
             }
         };
         if let Err(err) = self.authorize_handle(&process_ref).await {
-            return Self::recorded_process_error(
-                call_id,
-                "signal_process",
-                args,
-                err.to_string(),
-                self.elapsed_ms(started),
-            );
+            return Self::recorded_process_error(call_id, "signal_process", args, err.to_string());
         }
         let signal_id = format!("process-{call_id}");
         let result = self
@@ -272,13 +235,7 @@ impl RuntimeExecutionContext<'_> {
             })),
             Err(err) => ToolInvocationReply::error(json!(format!("signal failed: {err}"))).output,
         };
-        Self::recorded_process_reply(
-            call_id,
-            "signal_process",
-            args,
-            output,
-            self.elapsed_ms(started),
-        )
+        Self::recorded_process_reply(call_id, "signal_process", args, output)
     }
 
     pub(crate) async fn cancel_process_handle(
@@ -286,28 +243,15 @@ impl RuntimeExecutionContext<'_> {
         call_id: String,
         handle: serde_json::Value,
     ) -> ToolInvocationReply {
-        let started = self.dispatch.clock.now();
         let args = json!({ "handle": handle.clone() });
         let process_ref = match Self::parse_process_handle(&handle) {
             Ok(parsed) => parsed,
             Err(err) => {
-                return Self::recorded_process_error(
-                    call_id,
-                    "cancel_process",
-                    args,
-                    err,
-                    self.elapsed_ms(started),
-                );
+                return Self::recorded_process_error(call_id, "cancel_process", args, err);
             }
         };
         if let Err(err) = self.authorize_handle(&process_ref).await {
-            return Self::recorded_process_error(
-                call_id,
-                "cancel_process",
-                args,
-                err.to_string(),
-                self.elapsed_ms(started),
-            );
+            return Self::recorded_process_error(call_id, "cancel_process", args, err.to_string());
         }
         let result = self
             .dispatch
@@ -322,12 +266,6 @@ impl RuntimeExecutionContext<'_> {
             Ok(status) => ToolCallOutput::success(Self::process_status_value(&status)),
             Err(err) => ToolInvocationReply::error(json!(format!("cancel failed: {err}"))).output,
         };
-        Self::recorded_process_reply(
-            call_id,
-            "cancel_process",
-            args,
-            output,
-            self.elapsed_ms(started),
-        )
+        Self::recorded_process_reply(call_id, "cancel_process", args, output)
     }
 }

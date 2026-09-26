@@ -48,7 +48,6 @@ crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  active_nodes: std::sync
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  let mut seen = HashSet::new();  |  1  # IO57
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  seen: &'a mut HashSet<String>,  |  1  # IO57
 crates/lash-protocol-rlm/src/executor/host_bridge.rs  |  use std::collections::{BTreeMap, HashSet};  |  1  # UNMAPPED
-crates/lash-protocol-rlm/src/executor/mod.rs  |  let start = std::time::Instant::now();  |  1  # UNMAPPED
 crates/lash-protocol-rlm/src/projection/bindings.rs  |  let key = uuid::Uuid::new_v4().to_string();  |  1  # CR23
 crates/lash-protocol-rlm/src/projection/context.rs  |  ) -> HashSet<usize> {  |  1  # UNMAPPED
 crates/lash-protocol-rlm/src/projection/context.rs  |  chronological_indices: HashMap<usize, usize>,  |  1  # UNMAPPED

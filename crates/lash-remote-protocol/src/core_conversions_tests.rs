@@ -1050,8 +1050,6 @@ fn remote_turn_result_maps_core_semantics() {
         replay_drops: Vec::new(),
         attempts: vec![lash_core::AttemptRecord {
             ordinal: 1,
-            started_at: 1_700_000_000_000,
-            duration: std::time::Duration::from_millis(12),
             outcome: lash_core::AttemptOutcome::Completed,
             protocol_position: lash_core::ProtocolPosition::TerminalObserved,
             retry_budget_consumed: false,
@@ -1107,7 +1105,6 @@ fn remote_turn_result_maps_core_semantics() {
             tool: "lookup".to_string(),
             args: serde_json::json!({ "key": "value" }),
             output: lash_core::ToolCallOutput::success(serde_json::json!({ "ok": true })),
-            duration_ms: 7,
         }],
         omitted: None,
         failure_evidence: Vec::new(),
@@ -1203,8 +1200,6 @@ fn synthetic_terminal_call_record(
         replay_drops: Vec::new(),
         attempts: vec![lash_core::AttemptRecord {
             ordinal: 1,
-            started_at: 1_700_000_000_000,
-            duration: std::time::Duration::ZERO,
             outcome,
             protocol_position: lash_core::ProtocolPosition::NoResponse,
             retry_budget_consumed,
@@ -1322,8 +1317,6 @@ fn core_diagnostics_do_not_cross_the_public_remote_projection() {
         replay_drops: Vec::new(),
         attempts: vec![lash_core::AttemptRecord {
             ordinal: 1,
-            started_at: 0,
-            duration: std::time::Duration::ZERO,
             outcome: lash_core::AttemptOutcome::Failed,
             protocol_position: lash_core::ProtocolPosition::NoResponse,
             retry_budget_consumed: true,

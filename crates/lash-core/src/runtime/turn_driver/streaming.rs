@@ -288,8 +288,6 @@ impl RuntimeTurnDriver<'_> {
         let mut stream_evidence = crate::LlmStreamEvidence::default();
         let mut abort_requested = false;
         let mut block_raw_text = std::collections::HashMap::new();
-        let attempt_started_at = self.host.core.clock.timestamp_ms();
-        let attempt_started = self.host.core.clock.now();
         let mut plugin_reasoning_blocks = 0u64;
         let mut completed_part_index = 0usize;
         let mut reasoning_publication = ReasoningPublicationState::default();
@@ -310,11 +308,27 @@ impl RuntimeTurnDriver<'_> {
             abort_requested: &mut abort_requested,
             block_raw_text: &mut block_raw_text,
         };
+        debug_assert!(
+            invocation.replay_key().is_some(),
+            "an llm call's stream observations require the call invocation's replay key"
+        );
+        let stream_base = invocation
+            .replay_key()
+            .map(str::to_owned)
+            .unwrap_or_else(|| {
+                let scope = self.scoped_effect_controller.execution_scope();
+                format!(
+                    "{}:llm-call",
+                    scope
+                        .journal_identity()
+                        .map(|identity| identity.key().to_owned())
+                        .unwrap_or_else(|_| format!("scope:{}", scope.id()))
+                )
+            });
         let mut host_forwarder = ProviderHostForwarder::new(
             event_tx,
             crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new(format!(
-                "{}:stream",
-                invocation.replay_key().unwrap_or("llm-call"),
+                "{stream_base}:stream"
             ))),
         );
         let mut call_record = None;
@@ -331,12 +345,6 @@ impl RuntimeTurnDriver<'_> {
                     );
                     call_record = Some(crate::provider::synthetic_terminal_call_record(
                         call_id.clone(),
-                        attempt_started_at,
-                        self.host
-                            .core
-                            .clock
-                            .now()
-                            .saturating_duration_since(attempt_started),
                         crate::AttemptOutcome::Aborted,
                         &failure,
                         true,
@@ -413,12 +421,6 @@ impl RuntimeTurnDriver<'_> {
                                         stream_state.stream_accumulator,
                                         stream_state.streamed_usage.clone(),
                                         stream_state.stream_evidence,
-                                        attempt_started_at,
-                                        self.host
-                                            .core
-                                            .clock
-                                            .now()
-                                            .saturating_duration_since(attempt_started),
                                         completion_sideband.replay_drops(),
                                     );
                                     break Ok(resp);
@@ -429,12 +431,6 @@ impl RuntimeTurnDriver<'_> {
                             stream_state.stream_accumulator,
                             stream_state.streamed_usage.clone(),
                             stream_state.stream_evidence,
-                            attempt_started_at,
-                            self.host
-                                .core
-                                .clock
-                                .now()
-                                .saturating_duration_since(attempt_started),
                             completion_sideband.replay_drops(),
                         );
                         let mut resp = resp;
@@ -472,8 +468,6 @@ impl RuntimeTurnDriver<'_> {
                                 replay_drops: completion_sideband.replay_drops(),
                                 attempts: vec![crate::AttemptRecord {
                                     ordinal: 1,
-                                    started_at: self.host.core.clock.timestamp_ms(),
-                                    duration: std::time::Duration::ZERO,
                                     outcome: crate::AttemptOutcome::Failed,
                                     protocol_position: crate::ProtocolPosition::NoResponse,
                                     retry_budget_consumed: true,
@@ -522,12 +516,6 @@ impl RuntimeTurnDriver<'_> {
                             );
                             call_record = Some(crate::provider::synthetic_terminal_call_record(
                                 call_id.clone(),
-                                attempt_started_at,
-                                self.host
-                                    .core
-                                    .clock
-                                    .now()
-                                    .saturating_duration_since(attempt_started),
                                 crate::AttemptOutcome::Interrupted,
                                 &failure,
                                 true,
@@ -1493,8 +1481,6 @@ mod clamp_report_tests {
     fn attempt(generation_disposition: Option<crate::GenerationReceipt>) -> crate::AttemptRecord {
         crate::AttemptRecord {
             ordinal: 1,
-            started_at: 0,
-            duration: std::time::Duration::ZERO,
             outcome: crate::AttemptOutcome::Completed,
             protocol_position: crate::ProtocolPosition::OutputStarted,
             retry_budget_consumed: false,
@@ -1541,8 +1527,6 @@ mod clamp_report_tests {
         });
         let mut call_record = call_record(vec![crate::AttemptRecord {
             ordinal: 1,
-            started_at: 0,
-            duration: std::time::Duration::ZERO,
             outcome: crate::AttemptOutcome::Failed,
             protocol_position: crate::ProtocolPosition::OutputStarted,
             retry_budget_consumed: true,

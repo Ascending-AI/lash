@@ -312,7 +312,6 @@ fn tool_attempt_outcome(
                 tool: call_id.to_string(),
                 args: serde_json::json!({}),
                 output,
-                duration_ms: 0,
             }),
             intents: crate::ToolIntents::default(),
         }),

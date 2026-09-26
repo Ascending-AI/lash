@@ -267,14 +267,12 @@ impl From<lash_core::ToolCallRecord> for RemoteToolCallRecord {
             tool,
             args,
             output,
-            duration_ms,
         } = value;
         Self {
             call_id,
             tool_name: tool,
             args,
             outcome: output.into(),
-            duration_ms,
         }
     }
 }

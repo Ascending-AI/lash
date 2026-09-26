@@ -123,6 +123,18 @@ pub struct ToolDispatchContext<'run> {
     pub effect_controller: crate::runtime::RuntimeEffectControllerHandle<'run>,
     pub direct_completions: crate::DirectCompletionClient<'run>,
     pub parent_invocation: Option<crate::RuntimeInvocation>,
+    /// The resolved key one call's observation lanes are emitted under
+    /// (ADR 0105 §1): when set it *replaces* the resolved base — the
+    /// invocation the dispatch serves or the scope's journal identity — so a
+    /// call that shares its dispatch's base with siblings still mints
+    /// distinct `(key, ordinal)` identities when a model repeats a `call_id`.
+    /// Install through [`Self::observation_keyed`], which qualifies caller
+    /// material under this dispatch's base; a group child passes its own
+    /// `{group}:child:{position}` replay key verbatim, and the
+    /// turn-dispatched protocol path passes `{iteration}:{index}:{call_id}`.
+    /// `None` everywhere else: a dispatch that serves one call — an attempt's,
+    /// a command's — already keys uniquely through `parent_invocation`.
+    pub observation_call_key: Option<String>,
     pub execution_env_spec: crate::ProcessExecutionEnvSpec,
     pub session_id: SessionId,
     pub agent_frame_id: crate::FrameNodeId,
@@ -178,20 +190,55 @@ impl ToolDispatchContext<'_> {
         {
             return key.to_owned();
         }
-        self.effect_controller
-            .scoped()
-            .execution_scope()
+        let scoped = self.effect_controller.scoped();
+        let scope = scoped.execution_scope();
+        debug_assert!(
+            scope.journal_identity().is_ok(),
+            "dispatch on scope `{}` names no journal identity for its observation base",
+            scope.id(),
+        );
+        scope
             .journal_identity()
             .map(|identity| identity.key().to_owned())
-            .unwrap_or_else(|_| format!("dispatch:{}", self.session_id))
+            .unwrap_or_else(|_| format!("dispatch:{}:{}", scope.id(), self.session_id))
+    }
+
+    /// This dispatch with one call's observation key installed:
+    /// `material` qualified under this dispatch's *resolved* key — its
+    /// installed call key when it carries one, else its base — so sibling
+    /// calls that share a base mint distinct lanes, and a call nested inside
+    /// an orchestrating body's own keyed call nests under it rather than
+    /// colliding with a sibling of the outer call. Pass the call's own
+    /// effect-invocation replay key where it has one — a group child's
+    /// `{group}:child:{position}` envelope, a command's key — else positional
+    /// material the caller can prove unique: `{iteration}:{index}:{call_id}`
+    /// on the turn-dispatched protocol path, `{batch_id}:{index}:{call_id}`
+    /// inside a batch, `{index}:{call_id}` inside a nested orchestration.
+    /// Buffers and services stay shared; only emissions re-key.
+    pub fn observation_keyed(&self, call_material: impl Into<String>) -> Self {
+        let mut keyed = self.clone();
+        keyed.observation_call_key = Some(format!(
+            "{}:call:{}",
+            self.observation_call_key
+                .clone()
+                .unwrap_or_else(|| self.observation_base_key()),
+            call_material.into()
+        ));
+        keyed
     }
 
     /// A fresh observation cursor for one emission lane of this dispatch —
-    /// `lane` keeps sibling lanes distinct under one base key.
+    /// `lane` keeps sibling lanes distinct under one base key. A dispatch
+    /// carrying a per-call key ([`Self::observation_keyed`]) resolves it
+    /// instead of the base, so every lane the call emits — directive folds,
+    /// stream events, activities — lands under the call's own key.
     pub fn observation_cursor(&self, lane: &str) -> crate::engine::ObservationCursor {
+        let base = self
+            .observation_call_key
+            .clone()
+            .unwrap_or_else(|| self.observation_base_key());
         crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new(format!(
-            "{}:{lane}",
-            self.observation_base_key()
+            "{base}:{lane}"
         )))
     }
 
@@ -215,7 +262,7 @@ impl ToolDispatchContext<'_> {
 /// vocabulary changes: the list is the contract every tool-child driver rebinds
 /// a lent opener context against, so an edit that slips by unnoticed is a field
 /// a child can inherit under the wrong opener's authority.
-pub const TOOL_CHILD_REBIND_VERSION: u16 = 3;
+pub const TOOL_CHILD_REBIND_VERSION: u16 = 4;
 
 /// Where a tool child's value for one [`ToolDispatchContext`] field comes from
 /// (ADR 0099 section 3).
@@ -259,6 +306,7 @@ pub enum RebindField {
     EffectController,
     DirectCompletions,
     ParentInvocation,
+    ObservationCallKey,
     ExecutionEnvSpec,
     SessionId,
     AgentFrameId,
@@ -290,6 +338,7 @@ impl RebindField {
             Self::EffectController => "effect_controller",
             Self::DirectCompletions => "direct_completions",
             Self::ParentInvocation => "parent_invocation",
+            Self::ObservationCallKey => "observation_call_key",
             Self::ExecutionEnvSpec => "execution_env_spec",
             Self::SessionId => "session_id",
             Self::AgentFrameId => "agent_frame_id",
@@ -322,8 +371,12 @@ impl RebindField {
             | Self::AgentFrameId => RebindDisposition::Rebound,
             // Facts that ride the child's own outcome: a buffer the opener
             // filled would smuggle the opener's pending facts into the child's
-            // settlement.
-            Self::CheckpointMessages | Self::TriggerOutcomes => RebindDisposition::Fresh,
+            // settlement. The observation call key is likewise call-scoped —
+            // inherited, it would key the child's lanes under a call that is
+            // not theirs.
+            Self::CheckpointMessages | Self::TriggerOutcomes | Self::ObservationCallKey => {
+                RebindDisposition::Fresh
+            }
             // Everything else is deployment wiring and live channels, which
             // section 3 puts on the lent side of the split.
             Self::Plugins
@@ -366,6 +419,7 @@ pub const REBIND_FIELDS: &[RebindField] = &[
     RebindField::EffectController,
     RebindField::DirectCompletions,
     RebindField::ParentInvocation,
+    RebindField::ObservationCallKey,
     RebindField::ExecutionEnvSpec,
     RebindField::SessionId,
     RebindField::AgentFrameId,
@@ -401,6 +455,7 @@ impl<'run> ToolDispatchContext<'run> {
             effect_controller: self.effect_controller.to_static()?,
             direct_completions: self.direct_completions.to_static()?,
             parent_invocation: self.parent_invocation.clone(),
+            observation_call_key: self.observation_call_key.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
             session_id: self.session_id.clone(),
             agent_frame_id: self.agent_frame_id.clone(),
@@ -452,6 +507,7 @@ impl<'run> ToolDispatchContext<'run> {
                 crate::runtime::RuntimeEffectControllerHandle::borrowed(controller),
             ),
             parent_invocation: self.parent_invocation.clone(),
+            observation_call_key: self.observation_call_key.clone(),
             execution_env_spec: self.execution_env_spec.clone(),
             session_id: self.session_id.clone(),
             agent_frame_id: self.agent_frame_id.clone(),
@@ -494,7 +550,6 @@ pub struct PendingToolDispatchOutcome {
     pub args: serde_json::Value,
     pub key: crate::AwaitEventKey,
     pub pending: crate::PendingCompletion,
-    pub duration_ms: u64,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub attempts: Vec<lash_trace::TraceRetryAttempt>,
     /// Captures collected from the attempts that ran before this call parked,
@@ -526,14 +581,12 @@ pub(super) fn outcome(
     tool_name: String,
     args: serde_json::Value,
     result: super::retry::NormalizedToolOutput,
-    duration_ms: u64,
 ) -> ToolDispatchOutcome {
     let record = ToolCallRecord {
         call_id: None,
         tool: tool_name,
         args,
         output: result.into_output(),
-        duration_ms,
     };
     ToolDispatchOutcome {
         record,

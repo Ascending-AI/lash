@@ -201,7 +201,7 @@ impl PossessionWorld {
         );
         opener
             .context
-            .complete_tool_call(call_id, None, outcome)
+            .complete_tool_call(call_id.clone(), None, outcome, &call_id, 0)
             .await
             .expect("the call presents");
         self.realized.insert(child_id, opener_name);
@@ -232,7 +232,7 @@ impl PossessionWorld {
         );
         opener
             .context
-            .complete_tool_call(call_id, None, outcome)
+            .complete_tool_call(call_id.clone(), None, outcome, &call_id, 0)
             .await
             .expect("the call presents");
         self.assert_conservation(&format!("{opener_name} refused-start {child}"))
@@ -257,7 +257,7 @@ impl PossessionWorld {
         );
         opener
             .context
-            .complete_tool_call(call_id, None, outcome)
+            .complete_tool_call(call_id.clone(), None, outcome, &call_id, 0)
             .await
             .expect("the call presents");
         self.assert_conservation(&format!("{opener_name} protocol-refused"))
@@ -295,7 +295,7 @@ impl PossessionWorld {
         );
         opener
             .context
-            .complete_tool_call(call_id, None, outcome)
+            .complete_tool_call(call_id.clone(), None, outcome, &call_id, 0)
             .await
             .expect("the call presents");
         self.assert_conservation(&format!("{opener_name} signal-echo on {victim}"))
@@ -496,7 +496,6 @@ fn settled_outcome(
             tool: "sim-tool".to_string(),
             args: serde_json::Value::Null,
             output: ToolCallOutput::success(output),
-            duration_ms: 0,
         },
         attempts: Vec::new(),
         intents: ToolIntents::default(),

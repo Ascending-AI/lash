@@ -49,7 +49,6 @@ fn completed_continue_as_effect_fixture() -> (RuntimeEffectEnvelope, RuntimeEffe
                     initial_nodes: Vec::new(),
                     task: Some("continue after redrive".to_string()),
                 }),
-                duration_ms: 4,
             }),
             intents: lash_core_execution::ToolIntents::v3(Vec::new()),
         }),

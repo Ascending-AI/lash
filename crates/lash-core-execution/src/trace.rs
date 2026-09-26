@@ -662,7 +662,6 @@ pub(crate) fn trace_tool_attempt(
     TraceRetryAttempt {
         ordinal,
         outcome,
-        duration_ms: record.duration_ms,
         reason,
         delay_ms,
         execution_evidence: None,
@@ -966,8 +965,6 @@ mod span_identity_tests {
             attempts: vec![
                 crate::AttemptRecord {
                     ordinal: 1,
-                    started_at: 1_000,
-                    duration: std::time::Duration::from_millis(12),
                     outcome: crate::AttemptOutcome::Failed,
                     protocol_position: crate::ProtocolPosition::ResponseObserved,
                     retry_budget_consumed: true,
@@ -992,8 +989,6 @@ mod span_identity_tests {
                 },
                 crate::AttemptRecord {
                     ordinal: 2,
-                    started_at: 1_262,
-                    duration: std::time::Duration::from_millis(20),
                     outcome: crate::AttemptOutcome::Completed,
                     protocol_position: crate::ProtocolPosition::TerminalObserved,
                     retry_budget_consumed: true,

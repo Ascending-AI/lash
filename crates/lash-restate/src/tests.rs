@@ -1512,7 +1512,6 @@ impl Fig1126PendingToolRedrive for Fig1126PendingToolRedriveImpl {
                         launch: Box::new(lash_core::ToolAttemptLaunch::Pending {
                             key: Box::new(key),
                             pending: lash_core::PendingCompletion::new(),
-                            duration_ms: 0,
                         }),
                         triggers: Vec::new(),
                         capture: None,

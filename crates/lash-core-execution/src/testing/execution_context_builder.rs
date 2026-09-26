@@ -498,6 +498,7 @@ impl<'run> TestExecutionContextBuilder<'run> {
                 )
             }),
             parent_invocation: self.dispatch_parent_invocation,
+            observation_call_key: None,
             execution_env_spec: self.execution_env_spec.clone(),
             session_id: self.session_id,
             agent_frame_id: crate::FrameNodeId::new("test-frame")

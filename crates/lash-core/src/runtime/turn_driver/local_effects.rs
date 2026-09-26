@@ -137,11 +137,21 @@ impl RuntimeEffectLocalRunner for LocalTurnEffectRunner {
     }
 }
 
+/// The observation cursor an effect body emits through: keyed by the body's
+/// own invocation, under the `:body` lane, so its ids can never collide with
+/// the main driver's turn cursor (ADR 0105 §1).
+fn body_observation_cursor(body_replay_key: &str) -> crate::engine::ObservationCursor {
+    crate::engine::ObservationCursor::new(crate::engine::ReplayKey::new(format!(
+        "{body_replay_key}:body"
+    )))
+}
+
 pub(super) fn turn_effect_executor(
     driver: &mut RuntimeTurnDriver<'_>,
     machine: &crate::TurnMachine,
     event_tx: TurnObserver,
     scoped_effect_controller: ScopedEffectController<'static>,
+    body_replay_key: &str,
 ) -> crate::RuntimeEffectLocalExecutor<'static> {
     let replay_trace = crate::runtime::effect::RuntimeEffectReplayTrace::for_divergence(
         driver.host.core.tracing.trace_sink.as_ref(),
@@ -190,7 +200,10 @@ pub(super) fn turn_effect_executor(
         opener_state: driver.opener_state.clone(),
         turn_cancel: driver.turn_cancel.clone(),
         children_stop: driver.children_stop.clone(),
-        turn_observations: driver.turn_observations.clone(),
+        // The body's own lane, keyed by the effect invocation it runs: the
+        // turn cursor is the main driver's alone, and cloning it would put
+        // body and driver emissions on colliding {key}#{ordinal} ids.
+        turn_observations: body_observation_cursor(body_replay_key),
     };
     crate::RuntimeEffectLocalExecutor::owned_runner(
         Box::new(LocalTurnEffectRunner {
@@ -201,4 +214,76 @@ pub(super) fn turn_effect_executor(
         }),
         replay_trace,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Records the `(key, ordinal)` identity of every emitted observation.
+    #[derive(Default)]
+    struct ObservationIds(std::sync::Mutex<Vec<String>>);
+
+    impl crate::engine::ObservationSink for ObservationIds {
+        fn observe(&self, observation: crate::engine::DriveObservation) {
+            self.0
+                .lock()
+                .expect("observation ids")
+                .push(format!("{}#{}", observation.key, observation.ordinal));
+        }
+    }
+
+    /// A checkpoint body emits on its own `{invocation replay key}:body` lane
+    /// while the main driver keeps the turn cursor: a body emission followed
+    /// by a driver emission must mint distinct ids even at the same ordinal
+    /// (ADR 0105 §1).
+    #[tokio::test]
+    async fn a_checkpoint_body_and_the_driver_mint_distinct_observation_ids() {
+        let backend = crate::testing::memory_backend().await;
+        let scoped = backend
+            .effect_host()
+            .scoped_static(crate::AdmittedScope::turn(
+                crate::SessionId::from("session"),
+                crate::TurnId::from("turn"),
+            ))
+            .expect("admit the turn scope")
+            .expect("the backend host lends a static controller");
+        let turn_id = crate::TurnId::from("turn");
+        let session_id = crate::SessionId::from("session");
+
+        let mut driver_cursor =
+            crate::runtime::turn_loop::turn_observation_cursor(&scoped, &turn_id, "drive");
+        let body_invocation = crate::runtime::causal::turn_effect_invocation(
+            scoped.execution_scope(),
+            &session_id,
+            &turn_id,
+            0,
+            0,
+            crate::sansio::EffectId(0),
+            RuntimeEffectKind::Checkpoint,
+        );
+        let mut body_cursor = body_observation_cursor(body_invocation.replay_key());
+
+        let sink = ObservationIds::default();
+        let event = || {
+            crate::engine::ObservedEvent::Session(crate::SessionStreamEvent::Message {
+                text: "marker".to_string(),
+                kind: "test".to_string(),
+            })
+        };
+        body_cursor.observe(&sink, event());
+        driver_cursor.observe(&sink, event());
+
+        let ids = sink.0.lock().expect("observation ids").clone();
+        assert_eq!(ids.len(), 2);
+        assert_eq!(
+            ids[0],
+            format!("{}:body#0", body_invocation.replay_key()),
+            "the body's lane is keyed by its own effect invocation"
+        );
+        assert_ne!(
+            ids[0], ids[1],
+            "a body emission and a driver emission at ordinal 0 would collide if the body cloned the turn cursor"
+        );
+    }
 }

@@ -112,7 +112,6 @@ impl ProtocolDriverHandle<lash_core::HostTurnProtocol> for NativeDriver {
         actions.push(DriverAction::Emit(SessionStreamEvent::LlmResponse {
             protocol_iteration: ctx.protocol_iteration(),
             content: prose.clone(),
-            duration_ms: 0,
         }));
         let action = super::tool::normalize(&parts);
         if matches!(action, super::tool::NativeAction::ProseOnly) && prose.trim().is_empty() {
@@ -604,7 +603,6 @@ fn tool_call_event(record: ToolCallRecord) -> SessionStreamEvent {
         name: record.tool,
         args: record.args,
         output: record.output,
-        duration_ms: record.duration_ms,
     }
 }
 
@@ -656,7 +654,6 @@ fn bounded_tool_call_record(record: &ToolCallRecord) -> ToolCallRecord {
         tool: record.tool.clone(),
         args: record.args.clone(),
         output: bounded_tool_call_output(&record.output),
-        duration_ms: record.duration_ms,
     }
 }
 

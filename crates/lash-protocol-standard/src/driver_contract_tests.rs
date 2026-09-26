@@ -128,7 +128,6 @@ fn completed_call(
             )],
             attachment_notices: Vec::new(),
         },
-        duration_ms: 1,
         intent_outcomes: Vec::new(),
         replay: None,
     }

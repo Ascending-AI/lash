@@ -664,7 +664,6 @@ pub enum TraceRlmStepOutcome {
 pub struct TraceRetryAttempt {
     pub ordinal: u32,
     pub outcome: TraceRetryAttemptOutcome,
-    pub duration_ms: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reason: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -974,7 +973,6 @@ pub enum TraceToolCallStatus {
 pub struct TraceExecToolCall {
     pub call_id: Option<String>,
     pub name: String,
-    pub duration_ms: u64,
     pub status: TraceToolCallStatus,
 }
 

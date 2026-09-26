@@ -346,7 +346,6 @@ fn assembler_derives_tool_failure_from_assembled_records() {
             "tool_error",
             serde_json::json!({"error": true}).to_string(),
         )),
-        duration_ms: 1,
     });
     assembler.record(&SessionStreamEvent::Error {
         message: "tool failed".to_string(),
@@ -401,7 +400,6 @@ fn assembler_treats_any_non_success_record_as_tool_failure() {
         output: lash_core::ToolCallOutput::cancelled(lash_core::ToolCancellation::runtime(
             "tool cancelled",
         )),
-        duration_ms: 1,
     });
     assembler.record(&SessionStreamEvent::Error {
         message: "runtime also reported a blocking issue".to_string(),
@@ -428,7 +426,6 @@ fn assembler_classifies_failure_omitted_beyond_128_call_horizon() {
             name: "successful_tool".to_string(),
             args: serde_json::json!({ "index": index }),
             output: lash_core::ToolCallOutput::success(serde_json::json!(index)),
-            duration_ms: 1,
         });
     }
     assembler.record(&SessionStreamEvent::ToolCallsOmitted {

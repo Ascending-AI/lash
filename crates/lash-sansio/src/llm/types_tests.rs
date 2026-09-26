@@ -380,8 +380,6 @@ fn attempt_contract_round_trips_closed_outcomes_and_preserves_optional_zero() {
             replay_drops: Vec::new(),
             attempts: vec![AttemptRecord {
                 ordinal: 1,
-                started_at: 42,
-                duration: std::time::Duration::from_millis(7),
                 outcome,
                 protocol_position: position,
                 retry_budget_consumed: true,
@@ -469,7 +467,14 @@ fn legacy_attempt_records_decode_as_reported_and_reported_stays_elided() {
     });
     let record: AttemptRecord = serde_json::from_value(legacy.clone()).expect("legacy attempt");
     assert_eq!(record.usage_disposition, AttemptUsageDisposition::Reported);
-    assert_eq!(serde_json::to_value(&record).expect("encode"), legacy);
+    // Sealed timing fields decode but are dropped on re-encode: recorded
+    // content carries no wall-clock measurements.
+    let mut stripped = legacy.clone();
+    stripped
+        .as_object_mut()
+        .expect("legacy object")
+        .retain(|key, _| key != "started_at" && key != "duration");
+    assert_eq!(serde_json::to_value(&record).expect("encode"), stripped);
 
     let mut aborted = record.clone();
     aborted.usage_disposition = AttemptUsageDisposition::UnreportedAfterAbort;

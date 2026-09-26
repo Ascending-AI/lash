@@ -348,7 +348,6 @@ mod tests {
             completed.output.status(),
             lash_sansio::ToolCallStatus::Cancelled
         );
-        assert_eq!(completed.duration_ms, 0);
     }
 }
 
@@ -424,7 +423,6 @@ fn cancelled_completed_tool_call(
             attachment_notices: Vec::new(),
         },
         output,
-        duration_ms: 0,
         intent_outcomes: Vec::new(),
         replay,
     }
@@ -562,16 +560,24 @@ mod turn_cancel_gate_tests;
 mod scalar_presentation_tests;
 
 impl RuntimeExecutionContext<'_> {
+    /// `call_key` is the material the call's observation lanes key under —
+    /// the call's own effect-invocation replay key where it has one (a group
+    /// child's `{group}:child:{position}`, a command's key), else the
+    /// caller's positional material (`{iteration}:{index}:{call_id}` on the
+    /// protocol path, `{batch_id}:{index}:{call_id}` in a batch) — qualified
+    /// against this context's observation base (ADR 0105 §1).
     pub(crate) fn emit_tool_call_started(
         &self,
+        call_key: &str,
         call_id: &str,
         name: &str,
         args: serde_json::Value,
         activity_id: TurnActivityId,
     ) {
-        let mut cursor = self.observation_cursor(&format!("tool:{call_id}:start"));
+        let context = self.with_call_observation_key(self.call_observation_key(call_key));
+        let mut cursor = context.observation_cursor(&format!("tool:{call_id}:start"));
         cursor.observe(
-            self.dispatch.observer.as_ref(),
+            context.dispatch.observer.as_ref(),
             crate::engine::ObservedEvent::Session(SessionStreamEvent::ToolCallStart {
                 call_id: Some(call_id.to_string()),
                 name: name.to_string(),
@@ -580,7 +586,7 @@ impl RuntimeExecutionContext<'_> {
         );
         self.emit_tool_call_started_trace(call_id, name, &args);
         cursor.observe(
-            self.dispatch.observer.as_ref(),
+            context.dispatch.observer.as_ref(),
             crate::engine::ObservedEvent::Activity {
                 correlation_id: Some(activity_id),
                 event: TurnEvent::ToolCallStarted {
@@ -594,12 +600,17 @@ impl RuntimeExecutionContext<'_> {
         );
     }
 
+    /// `call_key` is the material the call's observation lanes key under —
+    /// `{iteration}:{index}:{call_id}` on the turn-dispatched protocol path —
+    /// qualified against this context's observation base (ADR 0105 §1).
     pub async fn prepare_tool_call(
         &self,
         pending: crate::sansio::PendingToolCall,
+        call_key: &str,
     ) -> ToolPreparationOutcome {
         let call_id = Some(pending.call_id.clone());
-        prepare_tool_call_with_context(self.dispatch.as_ref(), pending, call_id).await
+        let context = self.with_call_observation_key(self.call_observation_key(call_key));
+        prepare_tool_call_with_context(context.dispatch.as_ref(), pending, call_id).await
     }
 
     /// Prepares a call on a tool of the turn's recorded surface whose live
@@ -610,10 +621,12 @@ impl RuntimeExecutionContext<'_> {
         &self,
         binding: &crate::ToolExecutionGrant,
         pending: crate::sansio::PendingToolCall,
+        call_key: &str,
     ) -> ToolPreparationOutcome {
         let call_id = Some(pending.call_id.clone());
+        let context = self.with_call_observation_key(self.call_observation_key(call_key));
         crate::tool_dispatch::prepare_recorded_tool_call_with_context(
-            self.dispatch.as_ref(),
+            context.dispatch.as_ref(),
             binding,
             pending,
             call_id,
@@ -647,6 +660,9 @@ impl RuntimeExecutionContext<'_> {
     ) -> Result<crate::ToolAttemptEffectOutcome, crate::RuntimeEffectControllerError> {
         let mut attempt_dispatch = (*self.dispatch).clone();
         attempt_dispatch.parent_invocation = Some(attempt_invocation.clone());
+        // The attempt's invocation is now the observation base; an inherited
+        // per-call key would key every retry of it under the caller's lane.
+        attempt_dispatch.observation_call_key = None;
         attempt_dispatch.direct_completions = attempt_dispatch
             .direct_completions
             .with_tool_attempt_parent_invocation(attempt_invocation.clone())
@@ -740,12 +756,18 @@ impl RuntimeExecutionContext<'_> {
     /// presentation to show. The error is returned rather than turned into
     /// the tool's model-facing result, so a divergence parks the turn like any
     /// other recorded effect's (FIG-3587) and the model is shown nothing.
+    /// `call_key` is the material the call's observation lanes key under; see
+    /// [`Self::emit_tool_call_started`].
     pub async fn complete_tool_call(
         &self,
         call_id: String,
         replay: Option<crate::llm::types::ProviderReplayMeta>,
         outcome: ToolDispatchOutcome,
+        call_key: &str,
+        duration_ms: u64,
     ) -> Result<CompletedProtocolToolCall, crate::RuntimeEffectControllerError> {
+        let context = self.with_call_observation_key(self.call_observation_key(call_key));
+        let this = &context;
         let tool_correlation_id = tool_activity_id(&call_id);
         let attempts = outcome.attempts.clone();
         let mut output = outcome.record.output.clone();
@@ -785,7 +807,7 @@ impl RuntimeExecutionContext<'_> {
                         std::sync::Arc::new(settlement.clone()),
                         std::sync::Arc::clone(&self.dispatch.attachment_store),
                         self.attachment_acceptance().clone(),
-                        outcome.record.duration_ms,
+                        duration_ms,
                     ),
                 )
                 .await
@@ -817,13 +839,13 @@ impl RuntimeExecutionContext<'_> {
                 )));
         }
         {
-            let mut cursor = self.observation_cursor(&format!("tool:{call_id}:intents"));
+            let mut cursor = this.observation_cursor(&format!("tool:{call_id}:intents"));
             for intent_outcome in &outcome.intent_outcomes {
                 model_return.parts.push(crate::ModelToolReturnPart::text(
                     intent_outcome.model_addendum(),
                 ));
                 cursor.observe(
-                    self.dispatch.observer.as_ref(),
+                    this.dispatch.observer.as_ref(),
                     crate::engine::ObservedEvent::Activity {
                         correlation_id: Some(tool_correlation_id.clone()),
                         event: TurnEvent::ToolIntentOutcome {
@@ -840,9 +862,8 @@ impl RuntimeExecutionContext<'_> {
             tool: outcome.record.tool.clone(),
             args: outcome.record.args.clone(),
             output: output.clone(),
-            duration_ms: outcome.record.duration_ms,
         };
-        self.emit_tool_call_completed(&record, &attempts);
+        this.emit_tool_call_completed(call_key, &record, &attempts, duration_ms);
         Ok(CompletedProtocolToolCall {
             completed: crate::sansio::CompletedToolCall {
                 call_id,
@@ -850,7 +871,6 @@ impl RuntimeExecutionContext<'_> {
                 args: outcome.record.args,
                 output,
                 model_return,
-                duration_ms: outcome.record.duration_ms,
                 intent_outcomes: outcome.intent_outcomes,
                 replay,
             },
@@ -858,18 +878,26 @@ impl RuntimeExecutionContext<'_> {
         })
     }
 
+    /// `call_key` is the material the call's observation lanes key under; see
+    /// [`Self::emit_tool_call_started`]. `duration_ms` is the measured
+    /// wall-clock the caller observed for the call — an observation-only
+    /// value: recorded content carries no durations, so it arrives on this
+    /// path rather than on the record (FIG-3696).
     fn emit_tool_call_completed(
         &self,
+        call_key: &str,
         record: &ToolCallRecord,
         attempts: &[lash_trace::TraceRetryAttempt],
+        duration_ms: u64,
     ) {
-        self.emit_tool_call_completed_trace(record, attempts);
-        let mut cursor = self.observation_cursor(&format!(
+        self.emit_tool_call_completed_trace(record, attempts, duration_ms);
+        let context = self.with_call_observation_key(self.call_observation_key(call_key));
+        let mut cursor = context.observation_cursor(&format!(
             "tool:{}:complete",
             record.call_id.as_deref().unwrap_or_default()
         ));
         cursor.observe(
-            self.dispatch.observer.as_ref(),
+            context.dispatch.observer.as_ref(),
             crate::engine::ObservedEvent::Activity {
                 correlation_id: Some(tool_activity_id(
                     record.call_id.as_deref().unwrap_or_default(),
@@ -879,7 +907,7 @@ impl RuntimeExecutionContext<'_> {
                     name: record.tool.clone(),
                     args: record.args.clone(),
                     output: record.output.clone(),
-                    duration_ms: record.duration_ms,
+                    duration_ms,
                     graph_key: self.code_block_graph_key(),
                     parent_call_id: self.batch_parent_call_id(),
                 },
@@ -887,19 +915,27 @@ impl RuntimeExecutionContext<'_> {
         );
     }
 
+    /// `call_key` is the material the call's observation lanes key under —
+    /// `{iteration}:{index}:{call_id}` on the turn-dispatched protocol path;
+    /// see [`Self::emit_tool_call_started`]. `duration_ms` is the caller's
+    /// measured window for the call; it rides the observation only.
     pub async fn complete_undispatched_tool_call(
         &self,
         call_id: String,
         replay: Option<crate::llm::types::ProviderReplayMeta>,
         outcome: ToolDispatchOutcome,
+        call_key: &str,
+        duration_ms: u64,
     ) -> Result<CompletedProtocolToolCall, crate::RuntimeEffectControllerError> {
         self.emit_tool_call_started(
+            call_key,
             &call_id,
             &outcome.record.tool,
             outcome.record.args.clone(),
             tool_activity_id(&call_id),
         );
-        self.complete_tool_call(call_id, replay, outcome).await
+        self.complete_tool_call(call_id, replay, outcome, call_key, duration_ms)
+            .await
     }
 
     /// The completion a language runtime's call answers when a controller
@@ -913,6 +949,8 @@ impl RuntimeExecutionContext<'_> {
         tool: String,
         args: serde_json::Value,
         error: crate::RuntimeEffectControllerError,
+        call_key: &str,
+        duration_ms: u64,
     ) -> CompletedProtocolToolCall {
         self.record_nested_effect_error(error.clone());
         let output = ToolCallOutput::failure(ToolFailure::runtime(
@@ -925,9 +963,8 @@ impl RuntimeExecutionContext<'_> {
             tool: tool.clone(),
             args: args.clone(),
             output: output.clone(),
-            duration_ms: 0,
         };
-        self.emit_tool_call_completed(&record, &[]);
+        self.emit_tool_call_completed(call_key, &record, &[], duration_ms);
         CompletedProtocolToolCall {
             completed: crate::sansio::CompletedToolCall {
                 model_return: ModelToolReturn::from_output(call_id.clone(), tool.clone(), &output),
@@ -935,7 +972,6 @@ impl RuntimeExecutionContext<'_> {
                 tool_name: tool,
                 args,
                 output,
-                duration_ms: 0,
                 intent_outcomes: Vec::new(),
                 replay: None,
             },
@@ -945,12 +981,16 @@ impl RuntimeExecutionContext<'_> {
 
     /// [`Self::complete_tool_call`] for a language runtime's call, whose
     /// presentation failure stops the run instead of reaching its caller.
+    /// `call_key` is the material the call's observation lanes key under; see
+    /// [`Self::emit_tool_call_started`].
     async fn complete_language_tool_call(
         &self,
         call_id: String,
         replay: Option<crate::llm::types::ProviderReplayMeta>,
         outcome: ToolDispatchOutcome,
         undispatched: bool,
+        call_key: &str,
+        duration_ms: u64,
     ) -> CompletedProtocolToolCall {
         let (tool, args) = (outcome.record.tool.clone(), outcome.record.args.clone());
         // A run that already recorded a nested effect error aborts: this call
@@ -958,52 +998,82 @@ impl RuntimeExecutionContext<'_> {
         // was refused, a sibling's divergence — so it presents and journals
         // nothing of its own (FIG-3679).
         if let Some(error) = self.peek_nested_effect_error() {
-            return self.refused_completion(call_id, tool, args, error).await;
+            return self
+                .refused_completion(call_id, tool, args, error, call_key, duration_ms)
+                .await;
         }
         // Boxed: the presentation future would otherwise inflate every
         // language runtime's call future past clippy's large-future bound.
         let completed = if undispatched {
-            Box::pin(self.complete_undispatched_tool_call(call_id.clone(), replay, outcome)).await
+            Box::pin(self.complete_undispatched_tool_call(
+                call_id.clone(),
+                replay,
+                outcome,
+                call_key,
+                duration_ms,
+            ))
+            .await
         } else {
-            Box::pin(self.complete_tool_call(call_id.clone(), replay, outcome)).await
+            Box::pin(self.complete_tool_call(
+                call_id.clone(),
+                replay,
+                outcome,
+                call_key,
+                duration_ms,
+            ))
+            .await
         };
         match completed {
             Ok(completed) => completed,
-            Err(error) => Box::pin(self.refused_completion(call_id, tool, args, error)).await,
+            Err(error) => {
+                Box::pin(self.refused_completion(call_id, tool, args, error, call_key, duration_ms))
+                    .await
+            }
         }
     }
 
+    /// `call_key` is the material the call's observation lanes key under; see
+    /// [`Self::emit_tool_call_started`].
     pub async fn report_undispatched_tool_call(
         &self,
         completed: &crate::sansio::CompletedToolCall,
+        call_key: &str,
     ) {
         self.emit_tool_call_started(
+            call_key,
             &completed.call_id,
             &completed.tool_name,
             completed.args.clone(),
             tool_activity_id(&completed.call_id),
         );
+        // The call completed host-side; no measured window exists on this
+        // path, so the observation reports 0 rather than a live clock read
+        // made long after the work ran (FIG-3696).
         self.emit_tool_call_completed(
+            call_key,
             &ToolCallRecord {
                 call_id: Some(completed.call_id.clone()),
                 tool: completed.tool_name.clone(),
                 args: completed.args.clone(),
                 output: completed.output.clone(),
-                duration_ms: completed.duration_ms,
             },
             &[],
+            0,
         );
     }
 
+    /// `call_key` is the material the settled call's observation lanes key
+    /// under — its await's journaled invocation replay key; see
+    /// [`Self::emit_tool_call_started`].
     #[allow(clippy::too_many_arguments)]
     pub async fn pending_completion_dispatch_outcome(
         &self,
         call_id: &str,
+        call_key: &str,
         tool_name: String,
         args: serde_json::Value,
         resolution: crate::Resolution,
         resolver: Option<&crate::PendingResolver>,
-        duration_ms: u64,
         attempts: Vec<lash_trace::TraceRetryAttempt>,
         mut captures: Vec<crate::runtime::ToolAttemptCapture>,
         mut triggers: Vec<crate::tool_dispatch::ToolTriggerEffectOutcome>,
@@ -1011,8 +1081,12 @@ impl RuntimeExecutionContext<'_> {
         // The resume's own producers — the after-tool hook's directives —
         // write into buffers fresh to this resume, so what they commit is
         // captured into the outcome rather than into a buffer a sibling
-        // attempt may still be writing into.
+        // attempt may still be writing into. The hook's duration input is an
+        // observation of this resume's window: the journaled pending row
+        // carries no clock facts (FIG-3696).
+        let settle_started = self.dispatch.clock.now();
         let mut resumed_dispatch = (*self.dispatch).clone();
+        resumed_dispatch.observation_call_key = Some(self.call_observation_key(call_key));
         resumed_dispatch.checkpoint_messages =
             crate::tool_dispatch::CheckpointMessageBuffer::default();
         resumed_dispatch.trigger_outcomes =
@@ -1029,7 +1103,11 @@ impl RuntimeExecutionContext<'_> {
             args,
             resolution,
             resolver,
-            duration_ms,
+            self.dispatch
+                .clock
+                .now()
+                .saturating_duration_since(settle_started)
+                .as_millis() as u64,
             attempts,
         )
         .await;
@@ -1085,6 +1163,10 @@ impl RuntimeExecutionContext<'_> {
             format!("{parent_effect_id}:{replay_suffix}"),
             replay_suffix,
         );
+        // The await's journaled invocation is the settled call's observation
+        // key: unique per (parent, call id) and re-derived identically on a
+        // redrive (ADR 0105 §1).
+        let call_key = invocation.replay_key().to_owned();
         // Arm before parking, never after: the resolver the call named is what
         // makes the wait finishable, and this runs on the redrive too, because
         // the recorded attempt body that named it does not re-run.
@@ -1144,7 +1226,6 @@ impl RuntimeExecutionContext<'_> {
                         "pending_tool_completion_failed",
                         err.to_string(),
                     )),
-                    duration_ms: pending.duration_ms,
                 };
                 let mut attempts = pending.attempts;
                 attempts.push(crate::trace::trace_tool_attempt(
@@ -1169,11 +1250,11 @@ impl RuntimeExecutionContext<'_> {
         Ok(self
             .pending_completion_dispatch_outcome(
                 call_id,
+                &call_key,
                 pending.tool_name,
                 pending.args,
                 resolution,
                 resolver.as_ref(),
-                pending.duration_ms,
                 pending.attempts,
                 pending.captures,
                 pending.triggers,
@@ -1209,7 +1290,6 @@ impl RuntimeExecutionContext<'_> {
                 "pending_tool_resolver_unarmed",
                 format!("the declared resolver for this call could not be armed: {error}"),
             )),
-            duration_ms: pending.duration_ms,
         };
         ToolDispatchOutcome {
             record,
@@ -1321,6 +1401,24 @@ impl RuntimeExecutionContext<'_> {
     ) -> CompletedProtocolToolCall {
         let replay = None;
         let tool_correlation_id = tool_activity_id(&call_id);
+        // The observed duration is this live window: measured here, carried
+        // only onto the Completed observation — the recorded outcome holds no
+        // wall-clock fields (FIG-3696).
+        let call_started = self.dispatch.clock.now();
+        let elapsed_ms = |this: &Self| {
+            this.dispatch
+                .clock
+                .now()
+                .saturating_duration_since(call_started)
+                .as_millis() as u64
+        };
+        // The command's replay key is the call's own effect-invocation key:
+        // every lane this call emits keys under it (ADR 0105 §1), so a model
+        // repeating a `call_id` across commands mints distinct observations.
+        let call_key = command
+            .replay_key()
+            .map(str::to_owned)
+            .unwrap_or_else(|| format!("command:{call_id}"));
         let Some(manifest) = authorization.resolve_manifest(self.dispatch.as_ref()) else {
             let tool_id = authorization.tool_id();
             let outcome = ToolDispatchOutcome {
@@ -1333,7 +1431,6 @@ impl RuntimeExecutionContext<'_> {
                         "tool_unavailable",
                         format!("Tool id `{tool_id}` is unavailable in this session"),
                     )),
-                    duration_ms: 0,
                 },
                 attempts: Vec::new(),
                 intents: crate::ToolIntents::default(),
@@ -1342,10 +1439,18 @@ impl RuntimeExecutionContext<'_> {
                 triggers: Vec::new(),
             };
             return self
-                .complete_language_tool_call(call_id, replay, outcome, true)
+                .complete_language_tool_call(
+                    call_id,
+                    replay,
+                    outcome,
+                    true,
+                    &call_key,
+                    elapsed_ms(self),
+                )
                 .await;
         };
         self.emit_tool_call_started(
+            &call_key,
             &call_id,
             &manifest.name,
             args.clone(),
@@ -1355,6 +1460,7 @@ impl RuntimeExecutionContext<'_> {
         let parent_invocation = Some(command.clone());
         let mut dispatch = (*self.dispatch).clone();
         dispatch.parent_invocation = parent_invocation.clone();
+        dispatch.observation_call_key = None;
         let pending = crate::sansio::PendingToolCall {
             call_id: call_id.clone(),
             tool_name: manifest.name.clone(),
@@ -1461,7 +1567,16 @@ impl RuntimeExecutionContext<'_> {
                 {
                     Ok(outcome) => outcome,
                     Err(error) => {
-                        return self.refused_completion(call_id, tool, args, error).await;
+                        return self
+                            .refused_completion(
+                                call_id,
+                                tool,
+                                args,
+                                error,
+                                &call_key,
+                                elapsed_ms(self),
+                            )
+                            .await;
                     }
                 }
             }
@@ -1475,14 +1590,23 @@ impl RuntimeExecutionContext<'_> {
                         "runtime_effect_controller".to_string(),
                         serde_json::Value::Null,
                         error,
+                        &call_key,
+                        elapsed_ms(self),
                     )
                     .await;
             }
         };
         outcome.record.call_id = Some(call_id.clone());
 
-        self.complete_language_tool_call(call_id, replay, outcome, false)
-            .await
+        self.complete_language_tool_call(
+            call_id,
+            replay,
+            outcome,
+            false,
+            &call_key,
+            elapsed_ms(self),
+        )
+        .await
     }
 
     /// Delivers a named signal and JSON payload to a deferred tool handle for code-executor

@@ -655,7 +655,7 @@ async fn project_batch_child_value(
             tool_name: row.tool.clone(),
             args: child_args,
             output: lash_core::ToolCallOutput::success(child_value.clone()),
-            duration_ms: row.duration_ms,
+            duration_ms: 0,
             artifacts: Arc::clone(&ctx.artifacts),
         };
         let parts = Box::pin(project_model_parts(budget, retain_full_output, &child_ctx)).await?;
@@ -669,10 +669,6 @@ async fn project_batch_child_value(
     projected.insert("index".to_string(), serde_json::json!(row.index));
     projected.insert("tool".to_string(), serde_json::json!(row.tool));
     projected.insert("success".to_string(), serde_json::json!(row.success));
-    projected.insert(
-        "duration_ms".to_string(),
-        serde_json::json!(row.duration_ms),
-    );
     projected.insert(
         if row.success {
             "result".to_string()

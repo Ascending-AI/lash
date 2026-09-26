@@ -75,14 +75,12 @@ impl RecordedTurnAssembly {
                 name,
                 args,
                 output,
-                duration_ms,
             } => {
                 self.tool_calls.push(ToolCallRecord {
                     call_id: call_id.clone(),
                     tool: name.clone(),
                     args: args.clone(),
                     output: output.clone(),
-                    duration_ms: *duration_ms,
                 });
             }
             SessionStreamEvent::ToolCallsOmitted { summary } => {

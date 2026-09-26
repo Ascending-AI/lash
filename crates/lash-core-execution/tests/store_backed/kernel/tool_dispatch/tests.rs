@@ -822,6 +822,7 @@ async fn strict_mcp_dispatch_context(executed: Arc<AtomicUsize>) -> ToolDispatch
             "direct completions are unavailable in this test context",
         ),
         parent_invocation: None,
+        observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -920,6 +921,7 @@ async fn dispatch_context() -> ToolDispatchContext<'static> {
             "direct completions are unavailable in this test context",
         ),
         parent_invocation: None,
+        observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -978,6 +980,7 @@ async fn projection_policy_dispatch_context(
             "direct completions are unavailable in this test context",
         ),
         parent_invocation: None,
+        observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -1147,6 +1150,7 @@ async fn pinned_contract_dispatch_context(
             "direct completions are unavailable in this test context",
         ),
         parent_invocation: None,
+        observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -1219,6 +1223,7 @@ async fn authority_hidden_dispatch_context(
             "direct completions are unavailable in this test context",
         ),
         parent_invocation: None,
+        observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -1264,6 +1269,7 @@ async fn exact_dispatch_context_with_plugins(
             "direct completions are unavailable in this test context",
         ),
         parent_invocation: None,
+        observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -1391,6 +1397,7 @@ async fn pending_dispatch_context(
             "direct completions are unavailable in this test context",
         ),
         parent_invocation: None,
+        observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -1445,6 +1452,7 @@ async fn parallel_dispatch_context(
             "direct completions are unavailable in this test context",
         ),
         parent_invocation: None,
+        observation_call_key: None,
         execution_env_spec: crate::ProcessExecutionEnvSpec::new(
             crate::PluginOptions::default(),
             crate::SessionPolicy::new(crate::TurnBudget::Unbounded),
@@ -1602,11 +1610,11 @@ async fn retry_ladder_survives_a_later_pending_completion() {
     let completed = execution
         .pending_completion_dispatch_outcome(
             "pending-call",
+            "test:pending-call",
             pending.tool_name,
             pending.args,
             crate::Resolution::Ok(serde_json::json!({ "done": true })),
             None,
-            pending.duration_ms,
             pending.attempts,
             pending.captures,
             pending.triggers,
@@ -1918,6 +1926,7 @@ async fn safe_retry_policy_retries_safe_failure_and_stops_on_success() {
         &outcome.record,
         &outcome.attempts,
         None,
+        7,
         &crate::facade_support::SystemClock,
     );
     let emitted: lash_trace::TraceRecord =

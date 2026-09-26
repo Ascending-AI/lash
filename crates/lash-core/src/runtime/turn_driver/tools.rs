@@ -19,8 +19,12 @@ impl RuntimeTurnDriver<'_> {
                 ));
             }
         };
-        for call in &completed {
-            context.report_undispatched_tool_call(call).await;
+        for (index, call) in completed.iter().enumerate() {
+            // No invocation exists on this presentation path: the lane keys
+            // on the protocol iteration, the call's index and its id, so a
+            // repeated call id still mints a unique key (ADR 0105 §1).
+            let call_key = format!("{protocol_iteration}:{index}:{}", call.call_id);
+            context.report_undispatched_tool_call(call, &call_key).await;
         }
         Ok(())
     }
@@ -50,19 +54,25 @@ impl RuntimeTurnDriver<'_> {
         for (index, call) in calls.into_iter().enumerate() {
             let call_id = call.call_id.clone();
             let replay = call.replay.clone();
+            // The turn-dispatched protocol path holds no invocation: key each
+            // call's observation lanes on the iteration, its index within it
+            // and the call id, so a call id the model repeats across
+            // iterations or frames mints distinct observations (ADR 0105 §1).
+            let call_key = format!("{}:{index}:{call_id}", machine.protocol_iteration());
             // A call on a tool that drifted from the turn's recorded surface
             // is prepared under its recorded definition, so the child it
             // forms is the one the journal recorded. The child judges its own
             // tool where it runs and is served only from its journal
             // (FIG-3725).
             let drift = self.recorded_surface_drift(&prepare_context, &call.tool_name)?;
+            let prepare_started = prepare_context.dispatch().clock.now();
             let preparation = match &drift {
                 Some(drift) => {
                     prepare_context
-                        .prepare_recorded_tool_call(&drift.recorded_binding(), call)
+                        .prepare_recorded_tool_call(&drift.recorded_binding(), call, &call_key)
                         .await
                 }
-                None => prepare_context.prepare_tool_call(call).await,
+                None => prepare_context.prepare_tool_call(call, &call_key).await,
             };
             match preparation {
                 crate::tool_dispatch::ToolPreparationOutcome::Prepared(prepared) => {
@@ -70,7 +80,18 @@ impl RuntimeTurnDriver<'_> {
                 }
                 crate::tool_dispatch::ToolPreparationOutcome::Completed(outcome) => {
                     let completed = prepare_context
-                        .complete_undispatched_tool_call(call_id.clone(), replay, *outcome)
+                        .complete_undispatched_tool_call(
+                            call_id.clone(),
+                            replay,
+                            *outcome,
+                            &call_key,
+                            prepare_context
+                                .dispatch()
+                                .clock
+                                .now()
+                                .duration_since(prepare_started)
+                                .as_millis() as u64,
+                        )
                         .await?
                         .completed;
                     results[index] = Some(completed);
