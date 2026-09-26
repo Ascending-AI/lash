@@ -1,9 +1,12 @@
-use super::effect::{RecordingEffectController, host_with_effect_recorder, scoped_test_turn};
+use super::effect::{RecordingEffectController, host_with_effect_recorder};
 use super::*;
 
-#[tokio::test]
+const SEED: u64 = 0x5_f508;
+
+#[tokio::test(flavor = "multi_thread")]
 async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let gate = Arc::new((
         tokio::sync::Notify::new(),
         tokio::sync::Notify::new(),
@@ -72,6 +75,18 @@ async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
     )
     .await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("hook-error-surfacing"),
+        ))
+        .await
+        .expect("open the turn's handler");
+    let scoped = lash_core::testing::LayeredEffectHost::layer_scoped(
+        handler.scoped(),
+        Arc::new(recorder.clone()),
+    )
+    .expect("layer the lent controller with the recorder");
     let turn = runtime
         .run_turn_assembled(
             TurnInput {
@@ -84,10 +99,11 @@ async fn lifecycle_hook_concurrency_rejection_is_host_observable() {
                 turn_context: lash_core::TurnContext::default(),
             },
             CancellationToken::new(),
-            scoped_test_turn(&backend, &recorder, &TurnId::from("hook-error-surfacing")),
+            scoped,
         )
         .await
         .expect("turn remains committed despite an observer-hook failure");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(turn.errors.iter().any(|issue| {
         issue.kind == lash_core::TurnFailureKind::Plugin

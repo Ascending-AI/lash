@@ -1,8 +1,11 @@
 use super::*;
 
-#[tokio::test]
+const SEED: u64 = 0x5_f501;
+
+#[tokio::test(flavor = "multi_thread")]
 async fn custom_provider_can_establish_a_no_summary_response_before_execution_evidence() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let provider = TestProvider::builder()
         .kind("no-summary-response")
         .requires_streaming(true)
@@ -31,18 +34,22 @@ async fn custom_provider_can_establish_a_no_summary_response_before_execution_ev
         .build();
     let mut runtime = standard_runtime_with_transport(&backend, provider).await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("no-summary-response-establishment"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput::text("observe a response without summary metadata"),
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("no-summary-response-establishment"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("completed response after establishment returns an assembled turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(matches!(turn.outcome, TurnOutcome::Finished(_)));
     let attempt = &turn.llm_calls[0].attempts[0];
@@ -56,9 +63,10 @@ async fn custom_provider_can_establish_a_no_summary_response_before_execution_ev
     }));
 }
 
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn attempt_reset_clears_response_establishment_before_later_evidence() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 1, lash_restate_test::ServerConfig::default()).await;
+    let backend = double.lash_backend();
     let provider = mock_provider(vec![MockCall {
         stream_events: vec![
             LlmStreamEvent::Evidence(lash_core::LlmStreamEvidence {
@@ -91,18 +99,22 @@ async fn attempt_reset_clears_response_establishment_before_later_evidence() {
     }]);
     let mut runtime = standard_runtime_with_transport(&backend, provider).await;
 
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("response-establishment-attempt-reset"),
+        ))
+        .await
+        .expect("open the turn's handler");
     let turn = runtime
         .run_turn_assembled(
             TurnInput::text("reset response evidence"),
             CancellationToken::new(),
-            backend_turn_scope(
-                &backend,
-                &SessionId::from("root"),
-                &TurnId::from("response-establishment-attempt-reset"),
-            ),
+            handler.scoped(),
         )
         .await
         .expect("protocol evidence failure returns an assembled turn");
+    handler.close().await.expect("close the turn's handler");
 
     assert!(matches!(turn.outcome, TurnOutcome::Stopped(_)));
     assert!(turn.errors.iter().any(|error| {
@@ -113,28 +125,30 @@ async fn attempt_reset_clears_response_establishment_before_later_evidence() {
 /// Collects the host-visible `TurnEvent`s for one streamed turn driven by a
 /// scripted provider call.
 async fn drive_streamed_turn(
-    backend: &lash_core::Backend,
+    double: &lash_restate_test::RestateTestBackend,
     call: MockCall,
 ) -> (Vec<TurnActivity>, Vec<SessionStreamEvent>) {
-    let mut runtime = standard_runtime_with_transport(backend, mock_provider(vec![call])).await;
+    let backend = double.lash_backend();
+    let mut runtime = standard_runtime_with_transport(&backend, mock_provider(vec![call])).await;
     let activities = RecordingTurnEvents::default();
     let events = RecordingSink::default();
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            SessionId::from("root"),
+            TurnId::from("stream-evidence-turn"),
+        ))
+        .await
+        .expect("open the turn's handler");
     runtime
         .stream_turn(
             TurnInput::text("drive the scripted stream"),
-            TurnOptions::new(
-                CancellationToken::new(),
-                backend_turn_scope(
-                    backend,
-                    &SessionId::from("root"),
-                    &TurnId::from("stream-evidence-turn"),
-                ),
-            )
-            .with_events(&events)
-            .with_turn_events(&activities),
+            TurnOptions::new(CancellationToken::new(), handler.scoped())
+                .with_events(&events)
+                .with_turn_events(&activities),
         )
         .await
         .expect("scripted stream completes the turn");
+    handler.close().await.expect("close the turn's handler");
     (activities.snapshot(), events.snapshot())
 }
 
@@ -182,11 +196,11 @@ fn block(id: &str) -> lash_core::llm::types::StreamBlockIdentity {
 /// Regression for FIG-3371 review: a `TextBlockEnd` whose text does not
 /// extend the streamed deltas is an authoritative correction — the block
 /// must seal with the provider's text, not the stale accumulated deltas.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn text_block_completion_seals_authoritative_correction() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 2, lash_restate_test::ServerConfig::default()).await;
     let (activities, _) = Box::pin(drive_streamed_turn(
-        &backend,
+        &double,
         text_block_call(
             vec![
                 LlmStreamEvent::TextBlockStart {
@@ -213,11 +227,11 @@ async fn text_block_completion_seals_authoritative_correction() {
 /// A `TextBlockEnd` that extends the streamed prefix forwards only the
 /// unseen tail — replaying the whole authoritative text through a stateful
 /// plugin transform would double-feed the already-seen prefix.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn text_block_completion_forwards_only_the_unseen_tail() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 3, lash_restate_test::ServerConfig::default()).await;
     let (activities, _) = Box::pin(drive_streamed_turn(
-        &backend,
+        &double,
         text_block_call(
             vec![
                 LlmStreamEvent::TextBlockStart {
@@ -244,11 +258,11 @@ async fn text_block_completion_forwards_only_the_unseen_tail() {
 /// A zero-delta block (started and immediately ended with the full text,
 /// the OpenAI final-message reconciliation shape) publishes the whole
 /// authoritative text as one delta before sealing.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn text_block_completion_without_deltas_publishes_full_text() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 4, lash_restate_test::ServerConfig::default()).await;
     let (activities, _) = Box::pin(drive_streamed_turn(
-        &backend,
+        &double,
         text_block_call(
             vec![
                 LlmStreamEvent::TextBlockStart {
@@ -271,11 +285,11 @@ async fn text_block_completion_without_deltas_publishes_full_text() {
 /// Regression for FIG-3371 review: reasoning that stayed in the durable
 /// response but never streamed must not republish to the host when the
 /// provider policy hides thinking.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn unstreamed_reasoning_is_not_republished_while_thinking_is_hidden() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 5, lash_restate_test::ServerConfig::default()).await;
     let (activities, events) = Box::pin(drive_streamed_turn(
-        &backend,
+        &double,
         MockCall {
             stream_events: vec![],
             response: Ok(LlmResponse {
@@ -332,11 +346,11 @@ async fn unstreamed_reasoning_is_not_republished_while_thinking_is_hidden() {
 /// The same reasoning-only payload republishes as a complete block when the
 /// provider policy exposes thinking — the gate is `LlmResponse::expose_thinking`,
 /// not the absence of reasoning parts.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn unstreamed_reasoning_republishes_when_thinking_is_exposed() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 6, lash_restate_test::ServerConfig::default()).await;
     let (activities, _) = Box::pin(drive_streamed_turn(
-        &backend,
+        &double,
         MockCall {
             stream_events: vec![],
             response: Ok(LlmResponse {
@@ -382,11 +396,11 @@ async fn unstreamed_reasoning_republishes_when_thinking_is_exposed() {
 /// per-part identities as the streaming lane — one bare `TextDelta` with a
 /// shared `completed:{iter}:text` block fused every part into one
 /// anonymous block.
-#[tokio::test]
+#[tokio::test(flavor = "multi_thread")]
 async fn unstreamed_response_publishes_block_lifecycle_per_text_part() {
-    let backend = memory_backend().await;
+    let double = kernel_double(SEED + 7, lash_restate_test::ServerConfig::default()).await;
     let (_, events) = Box::pin(drive_streamed_turn(
-        &backend,
+        &double,
         MockCall {
             stream_events: vec![],
             response: Ok(LlmResponse {
