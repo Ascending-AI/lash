@@ -1374,6 +1374,8 @@ SCRIPT_PROOFS = {
     "scripts/ci_plan.py": "scripts/test_ci_plan.py",
     "scripts/drive-determinism-allowlist.count": "scripts/test_check_substrate_boundary.py",
     "scripts/drive-determinism-allowlist.txt": "scripts/test_check_substrate_boundary.py",
+    "scripts/drive-store-allowlist.count": "scripts/test_check_substrate_boundary.py",
+    "scripts/drive-store-allowlist.txt": "scripts/test_check_substrate_boundary.py",
     "tools/bazel/test_batch_runner.sh": "scripts/test_test_batch_runner.py",
     "tools/bazel/junit_xml.py": "scripts/test_test_xml.py",
     "tools/bazel/test_xml_runner.sh": "scripts/test_test_xml.py",

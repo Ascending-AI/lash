@@ -327,7 +327,7 @@ fi
 #
 # The inventory's "R/ handler code outside ctx.run closures" is approximated by
 # a path filter on the Restate handler modules -- controller/, effect_group{.rs,/},
-# process/ and durable_wait.rs -- because a line lint cannot tell handler code
+# process/, durable_wait.rs and session_driver.rs -- because a line lint cannot tell handler code
 # from a ctx.run closure body. That over-catches legal recorded bodies; those
 # sites are simply allowlisted like the rest.
 #
@@ -369,32 +369,44 @@ drive_paths=(
   crates/lash-restate/src/effect_group.rs
   crates/lash-restate/src/process
   crates/lash-restate/src/durable_wait.rs
+  crates/lash-restate/src/session_driver.rs
 )
 
 drive_forbidden='tokio::(spawn|select|join|sync::|time::|task::|task_local!)|use[[:space:]]+tokio::\{[^}]*\b(spawn|select|join|sync|time|task)|futures::(future::)?join_all|(^|[^[:alnum:]_])(Instant::now|SystemTime|SystemClock|Uuid::new_v4|block_on)([^[:alnum:]_]|$)|(^|[^[:alnum:]_])rand::|dyn[[:space:]]+Future[^;]{0,160}\+[[:space:]]*Send|(^|[^[:alnum:]_])(HashMap|HashSet)([^[:alnum:]_]|$)'
 drive_allowlist=scripts/drive-determinism-allowlist.txt
 
+# Rule 6 — drive store-call ratchet (FIG-3824).
+#
+# A drive decision taken on live store state a replay cannot read back
+# diverges the journal. Store calls inside a recorded step's body are legal
+# (the step's output is what a replay reads), but a line lint cannot tell a
+# step body from the drive code around it, so every direct call to a
+# persistence-trait method in the session drive is pinned, tagged with where
+# it runs: `RECORDED` for a call inside a recorded step's body, a ticket id
+# for one the drive still makes outside any step. The scope is the session
+# drive only -- the kernel's drive modules and the Restate session driver:
+#
+#   crates/lash-core/src/runtime/drive{.rs,/**}
+#   crates/lash-restate/src/session_driver.rs
+#
+# The pattern names the methods of the traits `RuntimePersistence` composes
+# and the session store factory's opener, called as methods. It sees direct
+# calls only: a helper the drive calls that reaches the store itself is
+# pinned where it is defined, if at all, not here. Entries use the rule-5
+# format in scripts/drive-store-allowlist.txt, capped by its count file.
+drive_store_paths=(
+  crates/lash-core/src/runtime/drive.rs
+  crates/lash-core/src/runtime/drive
+  crates/lash-restate/src/session_driver.rs
+)
+drive_store_methods='abandon_ingress_claim|abandon_queued_work_claims?|abandon_turn_input_claims?|admit_and_bind_session|admit_session_state|authorize_turn_cancel_closure|begin_or_resume_queued_run|bind_turn_input_claim(_of_receipt)?|cancel_pending_turn_inputs?|cancel_pending_turn_input_suffix|cancel_queued_work_batch|claim_active_turn_inputs|claim_checkpoint_work|claim_leading_ready_session_command|claim_next_turn_inputs|claim_ready_queued_work(_by_batch_ids)?|claim_session_commands|claim_turn_items|commit_runtime_state|committed_turn_exists|drain_end_exists|drive_epoch|enqueue_ingress_item|enqueue_pending_turn_input|enqueue_queued_work(_with_outcome)?|get_session_execution_lease|list_ingress_items|list_pending_queued_work|list_pending_turn_inputs|list_queued_work|list_turn_input_applications|load_pending_follow_on|load_session|load_session_at|load_session_head_meta|load_session_meta|load_turn_park|open_existing_store_by_id|orphaned_active_turn_ids|pending_queued_run|pending_session_work_ordering|pending_turn_cancel_closure_pins|pending_turn_cancel_closures|queued_run|queued_work_batch_completed|raise_pending_follow_on_attempts|read_session_state_version|reclaim_ingress_claim|reclaim_turn_bound_inputs|reconcile_turn_cancel_winner|record_turn_cancel_request|record_turn_park|release_session_execution_lease|renew_session_execution_lease|repair_orphaned_active_turn_inputs|retain_admission_base|save_session_meta|seal_drive_epoch|select_queued_run|settle_queued_run|try_claim_session_execution_lease(_with_token)?|turn_cancel_request(_intent)?|turn_is_committed|vacuum_session_ingress|validate_turn_cancellation_binding|withdraw_ingress_items|withdraw_ingress_suffix'
+drive_store_forbidden="\\.(${drive_store_methods})[[:space:]]*(::<[^>]*>)?\\("
+drive_store_allowlist=scripts/drive-store-allowlist.txt
+
 # Always grep -E, never ripgrep: the two engines disagree on these patterns,
 # and CI runners do not all carry ripgrep, so one engine keeps the allowlist
 # identical everywhere.
-drive_search_status=0
-# Scan only the drive paths that exist: a tree may predate a newer drive
-# module, and a missing path must not read as a failed search.
-drive_existing=()
-for drive_path in "${drive_paths[@]}"; do
-  [[ -e $drive_path ]] && drive_existing+=("$drive_path")
-done
-if ((${#drive_existing[@]})); then
-  grep -rEn --include='*.rs' "$drive_forbidden" "${drive_existing[@]}" >"$tmp_dir/rule5.raw" 2>/dev/null || drive_search_status=$?
-else
-  : >"$tmp_dir/rule5.raw"
-fi
-if [[ $drive_search_status -gt 1 ]]; then
-  echo "substrate boundary check failed: drive determinism search exited $drive_search_status" >&2
-  failed=1
-fi
-sort -u -o "$tmp_dir/rule5.raw" "$tmp_dir/rule5.raw" 2>/dev/null || true
-
+#
 # A hit's key is (file, normalized line text): trimmed, with every internal
 # whitespace run collapsed to one space, so edits that move or reindent the
 # line keep it pinned. The allowlist's `  |  ` and `  # ` separators use a
@@ -407,99 +419,133 @@ drive_normalize() {
   printf '%s' "$text"
 }
 
-declare -A drive_allowed=()
-if [[ -f $drive_allowlist ]]; then
-  while IFS= read -r entry || [[ -n $entry ]]; do
-    [[ $entry == \#* || -z ${entry//[[:space:]]/} ]] && continue
-    body=${entry%%  # *}
-    allowed_file=${body%%  |  *}
-    allowed_rest=${body#*  |  }
-    allowed_text=${allowed_rest%%  |  *}
-    allowed_count=${allowed_rest##*  |  }
-    if [[ $body != *'  |  '* || $allowed_rest != *'  |  '* || -z $allowed_file \
-      || -z $allowed_text || ! $allowed_count =~ ^[0-9]+$ ]]; then
-      echo "substrate boundary check failed: malformed allowlist entry: $entry" >&2
-      failed=1
-      continue
-    fi
-    drive_allowed["$allowed_file|$allowed_text"]=$allowed_count
-  done <"$drive_allowlist"
-else
-  echo "substrate boundary check failed: $drive_allowlist is missing" >&2
-  failed=1
-fi
-
-declare -A drive_seen=()
-: >"$tmp_dir/rule5.hits"
-while IFS=: read -r file line source; do
-  [[ -n "$file" ]] || continue
-  if [[ $file =~ $test_path_regex ]]; then
-    continue
-  fi
-  if [[ $(line_in_test_region "$file" "$line") == 1 ]]; then
-    continue
-  fi
-  printf '%s:%s:%s\n' "$file" "$line" "$source" >>"$tmp_dir/rule5.hits"
-  key="$file|$(drive_normalize "$source")"
-  drive_seen[$key]=$(( ${drive_seen[$key]:-0} + 1 ))
-done <"$tmp_dir/rule5.raw"
-
-if [[ ${DRIVE_DETERMINISM_REGENERATE:-0} == 1 ]]; then
-  # Rewrite the allowlist from the current tree, keeping each surviving
-  # entry's inventory tag; new keys are tagged UNMAPPED.
-  declare -A drive_tags=()
-  while IFS= read -r entry || [[ -n $entry ]]; do
-    [[ $entry == \#* || -z ${entry//[[:space:]]/} || $entry != *'  # '* ]] && continue
-    body=${entry%%  # *}
-    tag=${entry#*  # }
-    tfile=${body%%  |  *}; trest=${body#*  |  }; ttext=${trest%%  |  *}
-    drive_tags["$tfile|$ttext"]=$tag
-  done < <(grep -v '^#' "$drive_allowlist" 2>/dev/null || true)
-  header=$(grep '^#' "$drive_allowlist" 2>/dev/null || true)
-  total=0
-  {
-    [[ -n $header ]] && printf '%s\n' "$header"
-    for key in "${!drive_seen[@]}"; do
-      printf '%s  |  %s  |  %s  # %s\n' "${key%%|*}" "${key#*|}" "${drive_seen[$key]}" "${drive_tags[$key]:-UNMAPPED}"
-    done | LC_ALL=C sort
-  } >"$drive_allowlist.new"
-  for key in "${!drive_seen[@]}"; do total=$(( total + drive_seen[$key] )); done
-  mv "$drive_allowlist.new" "$drive_allowlist"
-  printf '%s\n' "$total" >scripts/drive-determinism-allowlist.count
-  echo "regenerated $drive_allowlist: ${#drive_seen[@]} entries, $total occurrences"
-  exit 0
-fi
-
-declare -A drive_bad=()
-if [[ ${#drive_seen[@]} -gt 0 ]]; then
-  for key in "${!drive_seen[@]}"; do
-    if [[ ${drive_seen[$key]} -gt ${drive_allowed[$key]:-0} ]]; then
-      drive_bad[$key]=1
-    fi
+# ratchet_rule <rule> <what> <pattern> <allowlist> <path>...
+#
+# Scans the paths that exist for <pattern> outside test code and checks every
+# hit against <allowlist> (and its `.count` cap, which the ratchet test
+# reads). With DRIVE_DETERMINISM_REGENERATE=1 it rewrites the allowlist from
+# the tree instead, keeping each surviving entry's tag.
+ratchet_rule() {
+  local rule=$1 what=$2 pattern=$3 allowlist=$4
+  shift 4
+  local count_file=${allowlist%.txt}.count
+  local raw="$tmp_dir/rule$rule.raw" hits="$tmp_dir/rule$rule.hits"
+  local search_status=0 existing=() path entry body file line source key
+  local allowed_file allowed_rest allowed_text allowed_count
+  # Scan only the paths that exist: a tree may predate a newer drive module,
+  # and a missing path must not read as a failed search.
+  for path in "$@"; do
+    [[ -e $path ]] && existing+=("$path")
   done
-fi
-if [[ ${#drive_bad[@]} -gt 0 ]]; then
+  if ((${#existing[@]})); then
+    # -H: a single file argument would otherwise print hits without a path.
+    grep -rEHn --include='*.rs' "$pattern" "${existing[@]}" >"$raw" 2>/dev/null || search_status=$?
+  else
+    : >"$raw"
+  fi
+  if [[ $search_status -gt 1 ]]; then
+    echo "substrate boundary check failed: $what search exited $search_status" >&2
+    failed=1
+  fi
+  sort -u -o "$raw" "$raw" 2>/dev/null || true
+
+  local -A allowed=()
+  if [[ -f $allowlist ]]; then
+    while IFS= read -r entry || [[ -n $entry ]]; do
+      [[ $entry == \#* || -z ${entry//[[:space:]]/} ]] && continue
+      body=${entry%%  # *}
+      allowed_file=${body%%  |  *}
+      allowed_rest=${body#*  |  }
+      allowed_text=${allowed_rest%%  |  *}
+      allowed_count=${allowed_rest##*  |  }
+      if [[ $body != *'  |  '* || $allowed_rest != *'  |  '* || -z $allowed_file \
+        || -z $allowed_text || ! $allowed_count =~ ^[0-9]+$ ]]; then
+        echo "substrate boundary check failed: malformed allowlist entry: $entry" >&2
+        failed=1
+        continue
+      fi
+      allowed["$allowed_file|$allowed_text"]=$allowed_count
+    done <"$allowlist"
+  else
+    echo "substrate boundary check failed: $allowlist is missing" >&2
+    failed=1
+  fi
+
+  local -A seen=()
+  : >"$hits"
   while IFS=: read -r file line source; do
     [[ -n "$file" ]] || continue
-    key="$file|$(drive_normalize "$source")"
-    if [[ -n ${drive_bad[$key]+x} ]]; then
-      printf '%s:%s:%s\n' "$file" "$line" "$source" >&2
+    if [[ $file =~ $test_path_regex ]]; then
+      continue
     fi
-  done <"$tmp_dir/rule5.hits"
-  echo "substrate boundary rule 5 failed: nondeterministic facility found in drive code" >&2
-  echo "  (new sites belong behind a recorded step; if one is deliberate, pin it in $drive_allowlist with its inventory id)" >&2
-  failed=1
-fi
-if [[ ${#drive_allowed[@]} -gt 0 ]]; then
-  for key in "${!drive_allowed[@]}"; do
-    actual=${drive_seen[$key]:-0}
-    if [[ $actual -lt ${drive_allowed[$key]} ]]; then
+    if [[ $(line_in_test_region "$file" "$line") == 1 ]]; then
+      continue
+    fi
+    printf '%s:%s:%s\n' "$file" "$line" "$source" >>"$hits"
+    key="$file|$(drive_normalize "$source")"
+    seen[$key]=$(( ${seen[$key]:-0} + 1 ))
+  done <"$raw"
+
+  if [[ ${DRIVE_DETERMINISM_REGENERATE:-0} == 1 ]]; then
+    # Rewrite the allowlist from the current tree, keeping each surviving
+    # entry's tag; new keys are tagged UNMAPPED.
+    local -A tags=()
+    local tag tfile trest ttext header total=0
+    while IFS= read -r entry || [[ -n $entry ]]; do
+      [[ $entry == \#* || -z ${entry//[[:space:]]/} || $entry != *'  # '* ]] && continue
+      body=${entry%%  # *}
+      tag=${entry#*  # }
+      tfile=${body%%  |  *}; trest=${body#*  |  }; ttext=${trest%%  |  *}
+      tags["$tfile|$ttext"]=$tag
+    done < <(grep -v '^#' "$allowlist" 2>/dev/null || true)
+    header=$(grep '^#' "$allowlist" 2>/dev/null || true)
+    {
+      [[ -n $header ]] && printf '%s\n' "$header"
+      for key in "${!seen[@]}"; do
+        printf '%s  |  %s  |  %s  # %s\n' "${key%%|*}" "${key#*|}" "${seen[$key]}" "${tags[$key]:-UNMAPPED}"
+      done | LC_ALL=C sort
+    } >"$allowlist.new"
+    for key in "${!seen[@]}"; do total=$(( total + seen[$key] )); done
+    mv "$allowlist.new" "$allowlist"
+    printf '%s\n' "$total" >"$count_file"
+    echo "regenerated $allowlist: ${#seen[@]} entries, $total occurrences"
+    return
+  fi
+
+  local -A bad=()
+  for key in "${!seen[@]}"; do
+    if [[ ${seen[$key]} -gt ${allowed[$key]:-0} ]]; then
+      bad[$key]=1
+    fi
+  done
+  if [[ ${#bad[@]} -gt 0 ]]; then
+    while IFS=: read -r file line source; do
+      [[ -n "$file" ]] || continue
+      key="$file|$(drive_normalize "$source")"
+      if [[ -n ${bad[$key]+x} ]]; then
+        printf '%s:%s:%s\n' "$file" "$line" "$source" >&2
+      fi
+    done <"$hits"
+    echo "substrate boundary rule $rule failed: $what found in drive code" >&2
+    echo "  (new sites belong behind a recorded step; if one is deliberate, pin it in $allowlist with its id)" >&2
+    failed=1
+  fi
+  local actual stale_file stale_text
+  for key in "${!allowed[@]}"; do
+    actual=${seen[$key]:-0}
+    if [[ $actual -lt ${allowed[$key]} ]]; then
       stale_file=${key%%|*}
       stale_text=${key#*|}
-      echo "substrate boundary rule 5 failed: stale allowlist entry $stale_file  |  $stale_text  |  ${drive_allowed[$key]} (occurs $actual time(s)); remove or decrement it" >&2
+      echo "substrate boundary rule $rule failed: stale allowlist entry $stale_file  |  $stale_text  |  ${allowed[$key]} (occurs $actual time(s)); remove or decrement it" >&2
       failed=1
     fi
   done
+}
+
+ratchet_rule 5 "nondeterministic facility" "$drive_forbidden" "$drive_allowlist" "${drive_paths[@]}"
+ratchet_rule 6 "unpinned store call" "$drive_store_forbidden" "$drive_store_allowlist" "${drive_store_paths[@]}"
+if [[ ${DRIVE_DETERMINISM_REGENERATE:-0} == 1 ]]; then
+  exit 0
 fi
 
 if [[ $failed -ne 0 ]]; then

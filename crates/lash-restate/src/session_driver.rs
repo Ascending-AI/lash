@@ -25,7 +25,15 @@
 //!   its journal is kept for a restored build.
 //!
 //! The kernel owns what a drive admits and how a root runs; these handlers
-//! only give each step its journal. The core installs its
+//! only give each step its journal. They journal the kernel's recorded steps
+//! and nothing else, so what the kernel does between those steps is not
+//! journaled either: a root still reads live store state ahead of its
+//! claim and while adopting its admitted head (the orphaned-input repair,
+//! `committed_turn_exists`, the pending inputs), and a replay re-evaluates
+//! those reads under the session execution lease rather than reading them
+//! back (FIG-3824). Rule 6 of `scripts/check-substrate-boundary.sh` pins
+//! every direct store call in the session drive, tagged by whether a
+//! recorded step makes it. The core installs its
 //! [`SessionDriver`] on the engine ([`SessionWorkEngine::install_session_driver`]),
 //! and both handlers read it from the deployment's
 //! [`RestateSessionDriverSlot`], so a host wires nothing.
@@ -117,8 +125,9 @@ pub struct RestateTurnDriveRequest {
     /// (ADR 0106 §1). Unstamped, it is `None`.
     #[serde(default)]
     pub sender_generation: Option<BuildGeneration>,
-    /// The recorded admission the root runs under. The root replays from its
-    /// recorded base, never from the live head.
+    /// The recorded admission the root runs under. The root runs on the head
+    /// its recorded claim was admitted on, and a replay reads that claim back;
+    /// adopting that head still reads live store state (FIG-3824).
     pub admitted: Admitted,
 }
 
