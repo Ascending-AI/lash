@@ -463,15 +463,17 @@ CREATE INDEX IF NOT EXISTS idx_lash_session_ingress_claim
     ON lash_session_ingress(session_id, claim_id) WHERE claim_id IS NOT NULL;
 
 -- The logical-root family (FIG-3600 S7). `lash_session_roots` holds one row
--- per (session, root) a drive admitted work under, with the root's terminal
--- evidence once it has one: the `terminal_*` columns are set together,
--- exactly once. `lash_session_root_inputs` binds each accepted input to the
+-- per (session, root) a drive admitted work under, with the exact result of
+-- an input root's claim, committed in the claim's own transaction, and the
+-- root's terminal evidence once it has one: the `terminal_*` columns are set
+-- together, exactly once. `lash_session_root_inputs` binds each accepted input to the
 -- root that drives it. `lash_control_intents` records an operator's verb or a
 -- session's close; a `close_session` row outlives its session as the
 -- deletion tombstone.
 CREATE TABLE IF NOT EXISTS lash_session_roots (
     session_id TEXT NOT NULL,
     root TEXT NOT NULL,
+    claim_result_json TEXT,
     terminal_kind TEXT,
     terminal_cause_json TEXT,
     terminal_head_revision BIGINT,

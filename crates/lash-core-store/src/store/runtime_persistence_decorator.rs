@@ -107,6 +107,7 @@ macro_rules! persistence_operations {
                 fn drive_epoch(&self, session_id: &SessionId) -> Result<StoredDriveEpoch, StoreError>;
             }
             RootStore {
+                fn claim_root_inputs(&self, request: &RootInputClaimRequest) -> Result<Option<crate::turn_input_vocabulary::AcceptedTurnInputDrive>, StoreError>;
                 fn root_terminal(&self, session_id: &SessionId, root: &crate::TurnId) -> Result<Option<RootTerminal>, StoreError>;
                 fn root_of_input(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;
                 fn root_binding(&self, session_id: &SessionId, input: &crate::InputId) -> Result<Option<crate::TurnId>, StoreError>;

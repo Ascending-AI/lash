@@ -1147,6 +1147,7 @@ table lash_session_root_inputs
   column session_id text not-null
   primary-key (session_id, input_id)
 table lash_session_roots
+  column claim_result_json text nullable
   column root text not-null
   column session_id text not-null
   column terminal_at_ms bigint nullable

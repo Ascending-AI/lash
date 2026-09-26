@@ -1,5 +1,109 @@
 use super::*;
 
+/// Commit the root's exact claim result in the claim transaction.
+pub(crate) async fn claim_root_inputs_postgres(
+    store: &crate::PostgresSessionStore,
+    request: &lash_core_execution::store::RootInputClaimRequest,
+) -> Result<Option<lash_core_execution::AcceptedTurnInputDrive>, StoreError> {
+    let mut connection = acquire_runtime_connection(&store.pool).await?;
+    let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+    #[cfg(any(test, feature = "testing"))]
+    store
+        .set_transaction_lease_clock_for_testing(&mut tx)
+        .await?;
+    ensure_session_execution_lease_tx(&mut tx, &request.session_id, &request.lease).await?;
+    let roots = crate::session_roots::session_roots_sql();
+    let existing: Option<Option<String>> =
+        sqlx::query_scalar(roots.roots.select_claim_result.sql())
+            .bind(request.session_id.as_str())
+            .bind(request.root.as_str())
+            .bind(request.head.as_str())
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    if let Some(Some(json)) = existing {
+        let drive = serde_json::from_str(&json).map_err(|error| StoreError::StoredDataCorrupt {
+            record_kind: "RootClaimResult",
+            message: error.to_string(),
+        })?;
+        tx.commit().await.map_err(store_sqlx_error)?;
+        return Ok(Some(drive));
+    }
+    let claim = match claim_pending_turn_inputs_postgres_tx(
+        &mut tx,
+        &request.session_id,
+        &request.lease,
+        &request.owner,
+        request.max_inputs,
+        lash_core_execution::TurnInputClaimMode::NextTurn,
+    )
+    .await?
+    {
+        ClaimTransactionOutcome::Commit(Some(claim)) => claim,
+        ClaimTransactionOutcome::Commit(None) => {
+            tx.commit().await.map_err(store_sqlx_error)?;
+            return Ok(None);
+        }
+        ClaimTransactionOutcome::Rollback(_) => {
+            tx.rollback().await.map_err(store_sqlx_error)?;
+            return Ok(None);
+        }
+    };
+    if !claim
+        .inputs
+        .iter()
+        .any(|input| input.input_id == request.head)
+    {
+        tx.rollback().await.map_err(store_sqlx_error)?;
+        return Ok(None);
+    }
+    let mut base = request.base.clone();
+    base.generation =
+        read_session_state_version_tx(&mut tx, &request.session_id, true, store.fleet_format)
+            .await?;
+    sqlx::query(session_sql().meta.retain_admission_base.sql())
+        .bind(request.session_id.as_str())
+        .bind(base.checkpoint.as_ref().map(|blob_ref| blob_ref.as_str()))
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?;
+    let inputs = claim
+        .inputs
+        .iter()
+        .map(|input| input.input_id.clone())
+        .collect::<Vec<_>>();
+    crate::session_roots::bind_root_inputs_conn(
+        &mut tx,
+        &request.session_id,
+        &request.root,
+        &inputs,
+    )
+    .await?;
+    let drive = lash_core_execution::AcceptedTurnInputDrive::Claimed {
+        claim: Box::new(claim),
+        base,
+        turn_index: request.turn_index,
+        generation: request.generation.clone(),
+    };
+    let json =
+        serde_json::to_string(&drive).map_err(|error| StoreError::Backend(error.to_string()))?;
+    let changed = sqlx::query(roots.roots.write_claim_result.sql())
+        .bind(request.session_id.as_str())
+        .bind(request.root.as_str())
+        .bind(json)
+        .execute(&mut *tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .rows_affected();
+    if changed != 1 {
+        return Err(StoreError::Backend(
+            "root claim result was already recorded".into(),
+        ));
+    }
+    tx.commit().await.map_err(store_sqlx_error)?;
+    Ok(Some(drive))
+}
+
 pub(super) enum ClaimTransactionOutcome<T> {
     Commit(T),
     Rollback(T),

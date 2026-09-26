@@ -25,12 +25,12 @@ crates/lash-core/src/runtime/drive/admission.rs  |  let stored_epoch = match sel
 crates/lash-core/src/runtime/drive/reconcile.rs  |  let Some(store) = sessions.open_existing_store_by_id(session).await? else {  |  1  # RECONCILE
 crates/lash-core/src/runtime/drive/reconcile.rs  |  let batches = store.list_pending_queued_work(session).await?;  |  1  # RECONCILE
 crates/lash-core/src/runtime/drive/reconcile.rs  |  let inputs = store.list_pending_turn_inputs(session).await?;  |  1  # RECONCILE
-crates/lash-core/src/runtime/drive/root.rs  |  .claim_next_turn_inputs(&self.session_id, &self.fence, &self.owner, self.max_inputs)  |  1  # RECORDED
+crates/lash-core/src/runtime/drive/root.rs  |  if let Some(drive) = self.store.claim_root_inputs(&request).await? {  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/root.rs  |  .committed_turn_exists(turn_id)  |  1  # FIG-3824
 crates/lash-core/src/runtime/drive/root.rs  |  .list_pending_turn_inputs(&self.session_id)  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/root.rs  |  .list_pending_turn_inputs(&self.state.session_id)  |  1  # FIG-3824
 crates/lash-core/src/runtime/drive/root.rs  |  .reclaim_turn_bound_inputs(&self.session_id, &self.fence, &self.owner, &self.root)  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/root.rs  |  generation: self.store.read_session_state_version().await?,  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/root.rs  |  if let Err(release) = self.store.abandon_turn_input_claim(&claim).await {  |  1  # RECORDED
-crates/lash-core/src/runtime/drive/root.rs  |  self.store.abandon_turn_input_claim(&claim).await?;  |  2  # RECORDED
+crates/lash-core/src/runtime/drive/root.rs  |  self.store.abandon_turn_input_claim(&claim).await?;  |  1  # RECORDED
 crates/lash-core/src/runtime/drive/root.rs  |  self.store.retain_admission_base(&self.fence, &base).await?;  |  1  # RECORDED

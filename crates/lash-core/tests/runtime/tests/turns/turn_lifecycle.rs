@@ -1815,6 +1815,23 @@ impl lash_core::store::RuntimePersistenceDecorator for ForeignClaimBeforeDriveSt
         self.inner.as_ref()
     }
 
+    async fn claim_root_inputs(
+        &self,
+        request: &lash_core::store::RootInputClaimRequest,
+    ) -> Result<Option<lash_core::AcceptedTurnInputDrive>, lash_core::StoreError> {
+        let foreign =
+            lash_core::LeaseOwnerIdentity::opaque("foreign-driver", "foreign-incarnation");
+        lash_core::store::TurnInputStore::claim_next_turn_inputs(
+            self.inner.as_ref(),
+            &request.session_id,
+            &request.lease,
+            &foreign,
+            request.max_inputs,
+        )
+        .await?;
+        self.inner.claim_root_inputs(request).await
+    }
+
     async fn claim_next_turn_inputs(
         &self,
         session_id: &SessionId,

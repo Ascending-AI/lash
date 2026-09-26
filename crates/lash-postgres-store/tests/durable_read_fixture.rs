@@ -750,6 +750,11 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     .execute(&pool)
     .await
     .expect("stamp the refusal fixture with the current component generation");
+    // A root's row records its claim result (FIG-3840).
+    sqlx::query("ALTER TABLE lash_session_roots ADD COLUMN IF NOT EXISTS claim_result_json TEXT")
+        .execute(&pool)
+        .await
+        .expect("add the root claim-result column to the refusal fixture");
     upgrade_prior_fixture_frame_identity(&pool).await;
     refresh_prior_fixture_node_bodies(&pool).await;
     sqlx::query("UPDATE lash_session_meta SET session_state_version = $1")

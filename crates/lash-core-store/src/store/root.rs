@@ -22,8 +22,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::StoreError;
 use super::control_intent::ControlIntentId;
+use super::{SessionHeadRef, StoreError};
 use crate::{InputId, RuntimeErrorCode, SessionId, TurnId};
 use lash_sansio::TurnStop;
 
@@ -367,6 +367,33 @@ impl RootTerminal {
 /// bindings of accepted inputs to the roots that drive them.
 #[async_trait::async_trait]
 pub trait RootStore: Send + Sync {
+    /// Claim the next-turn prefix an input root drives, in one transaction
+    /// fenced by `request.lease` (FIG-3840).
+    ///
+    /// The first call claims up to `request.max_inputs` accepted rows. When
+    /// the claim reaches `request.head`, the same transaction reads the
+    /// session's state generation into the base, retains that base, binds
+    /// the rows to `request.root` and records the resulting
+    /// [`Claimed`](crate::turn_input_vocabulary::AcceptedTurnInputDrive::Claimed)
+    /// drive with the root. A claim that misses the head takes nothing and
+    /// returns `None`, as does an empty queue.
+    ///
+    /// While the head is undelivered, every later call for the same root,
+    /// under any lease generation, returns the recorded drive unchanged and
+    /// claims nothing: a worker that dies between this commit and the
+    /// journal's record of its outcome leaves its successor exactly the
+    /// composition, base and generation it committed, never a prefix
+    /// recomputed over inputs that arrived since. Once the head is settled,
+    /// cancelled or pruned the record is not replayed, and the call claims
+    /// nothing and returns `None`.
+    async fn claim_root_inputs(
+        &self,
+        _request: &RootInputClaimRequest,
+    ) -> Result<Option<crate::turn_input_vocabulary::AcceptedTurnInputDrive>, StoreError> {
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "claim_root_inputs",
+        })
+    }
     /// The terminal evidence of `root` in `session_id`, if it has any.
     async fn root_terminal(
         &self,
@@ -399,6 +426,23 @@ pub trait RootStore: Send + Sync {
         root: &TurnId,
         inputs: &[InputId],
     ) -> Result<(), StoreError>;
+}
+
+/// A root's claim request ([`RootStore::claim_root_inputs`]). `base` is the
+/// resident head the root is admitted on; the store replaces its
+/// `generation` with the durable state generation it reads inside the claim
+/// transaction. `turn_index` and `generation` are recorded as given.
+#[derive(Clone, Debug)]
+pub struct RootInputClaimRequest {
+    pub session_id: SessionId,
+    pub lease: crate::SessionExecutionLeaseAuthority,
+    pub owner: crate::LeaseOwnerIdentity,
+    pub root: TurnId,
+    pub head: InputId,
+    pub max_inputs: usize,
+    pub base: SessionHeadRef,
+    pub turn_index: u64,
+    pub generation: Option<crate::executable_generation::ExecutableGeneration>,
 }
 
 /// An in-memory root ledger for store doubles that keep no SQL rows. It

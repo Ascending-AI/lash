@@ -276,6 +276,13 @@ impl RecordingStore {
 
 #[async_trait::async_trait]
 impl RuntimePersistenceDecorator for RecordingStore {
+    async fn claim_root_inputs(
+        &self,
+        request: &crate::store::RootInputClaimRequest,
+    ) -> Result<Option<crate::AcceptedTurnInputDrive>, StoreError> {
+        self.run_claim_hook();
+        self.inner.claim_root_inputs(request).await
+    }
     fn inner(&self) -> &(dyn RuntimePersistence + '_) {
         self.inner.as_ref()
     }
