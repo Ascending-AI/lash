@@ -19,8 +19,8 @@ pub(super) fn leaf_bearing_rlm_append_stale_branch_rolls_back_projection() -> Re
             .open()
             .await?;
         session
-            .turn(TurnInput::text("commit leaf-bearing state"))
-            .run()
+            .send(TurnInput::text("commit leaf-bearing state"))
+            .output()
             .await?;
 
         let execution_before = session
@@ -776,9 +776,9 @@ pub(super) async fn natural_rlm_completion_emits_no_terminal_output() -> Result<
     let events = Arc::new(RecordingEvents::default());
 
     let result = session
-        .turn(TurnInput::text("answer directly"))
+        .send(TurnInput::text("answer directly"))
         .allow_prose_or_finish()?
-        .stream_to(events.as_ref())
+        .output_into(events.as_ref())
         .await?;
 
     assert!(matches!(
@@ -821,9 +821,9 @@ pub(super) async fn finish_required_rlm_completion_emits_terminal_output() -> Re
     let events = Arc::new(RecordingEvents::default());
 
     let result = session
-        .turn(TurnInput::text("finish"))
+        .send(TurnInput::text("finish"))
         .require_finish()?
-        .stream_to(events.as_ref())
+        .output_into(events.as_ref())
         .await?;
 
     assert!(matches!(
@@ -862,8 +862,8 @@ pub(super) async fn rlm_failed_code_emits_failed_code_completion_without_fake_to
     let events = RecordingEvents::default();
 
     let _result = session
-        .turn(TurnInput::text("bad code"))
-        .stream_to(&events)
+        .send(TurnInput::text("bad code"))
+        .output_into(&events)
         .await?;
 
     let events = events.snapshot().await;
@@ -1240,9 +1240,12 @@ pub(super) async fn cancel_running_turns_after_step_stops_at_the_step_boundary()
     let session = core.session("stop-after-step").open().await?;
     let stopper = session.clone();
 
-    let stream = session
-        .turn(TurnInput::text("use the tool, then stop"))
-        .stream()?;
+    let handle = session
+        .send(TurnInput::text("use the tool, then stop"))
+        .await?;
+    // This core runs no session work: a waiter drives the input in its own
+    // task, so the events follower is what starts the turn.
+    let mut events = handle.events();
     started.notified().await;
     assert_eq!(
         stopper.cancel_running_turns_with_origin_and_mode(
@@ -1254,7 +1257,10 @@ pub(super) async fn cancel_running_turns_after_step_stops_at_the_step_boundary()
     released.store(true, Ordering::SeqCst);
     release.notify_one();
 
-    let result = stream.finish().await?;
+    // Drain the follower to its end: it settles with the live turn report
+    // and leaves that answer on the handle, which output() then returns.
+    while let Some(_activity) = events.next_activity().await {}
+    let result = handle.output().await?.result;
     let evidence = match &result.outcome {
         TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { evidence }) => {
             evidence.clone()
@@ -1300,9 +1306,10 @@ pub(super) async fn host_escalates_a_local_after_step_stop_to_an_immediate_abort
     let session = core.session("escalate-after-step").open().await?;
     let stopper = session.clone();
 
-    let stream = session
-        .turn(TurnInput::text("hang, then escalate"))
-        .stream()?;
+    let handle = session.send(TurnInput::text("hang, then escalate")).await?;
+    // This core runs no session work: a waiter drives the input in its own
+    // task, so the events follower is what starts the turn.
+    let _events = handle.events();
     started.notified().await;
     assert_eq!(
         stopper.cancel_running_turns_with_mode(crate::TurnCancelMode::AfterStep),
@@ -1322,7 +1329,7 @@ pub(super) async fn host_escalates_a_local_after_step_stop_to_an_immediate_abort
         "escalation aborts the still-running turn"
     );
 
-    let result = stream.finish().await?;
+    let result = handle.output().await?.result;
     let evidence = match &result.outcome {
         TurnOutcome::Stopped(lash_core::facade_support::TurnStop::Cancelled { evidence }) => {
             evidence.clone()

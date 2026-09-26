@@ -213,9 +213,9 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
         ("standard-compaction-same-parent-two", "second request"),
     ] {
         session
-            .turn(TurnInput::text(text))
-            .turn_id(turn_id)
-            .run()
+            .send(TurnInput::text(text))
+            .id(turn_id)
+            .output()
             .await?;
     }
     let execution_scope = match scope_kind {
@@ -495,17 +495,17 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
     let session = core.session(session_id).open().await?;
 
     session
-        .turn(TurnInput::text("first request"))
-        .turn_id("standard-compaction-first")
-        .run()
+        .send(TurnInput::text("first request"))
+        .id("standard-compaction-first")
+        .output()
         .await?;
     let (durable_leaf_before_threshold, max_generation_before_threshold) =
         sqlite_head_and_max_generation(store_factory.as_ref(), &SessionId::from(session_id));
 
     session
-        .turn(TurnInput::text("threshold request"))
-        .turn_id("standard-compaction-threshold")
-        .run()
+        .send(TurnInput::text("threshold request"))
+        .id("standard-compaction-threshold")
+        .output()
         .await?;
 
     let conn = rusqlite::Connection::open(store_factory.catalog_uri())
@@ -610,9 +610,9 @@ async fn standard_compaction_threshold_turn_commits_from_durable_leaf_and_unbloc
     .build(crate::testing::runtime_lease_owner())?;
     let reopened_session = reopened_core.session(session_id).open().await?;
     reopened_session
-        .turn(TurnInput::text("continue after compaction"))
-        .turn_id("standard-compaction-reopened")
-        .run()
+        .send(TurnInput::text("continue after compaction"))
+        .id("standard-compaction-reopened")
+        .output()
         .await?;
     let conn = rusqlite::Connection::open(store_factory.catalog_uri())
         .expect("reopen SQLite session catalog");
@@ -656,14 +656,14 @@ async fn compaction_accepts_parent_turn_authority() -> Result<()> {
     let session = core.session(session_id).open().await?;
 
     session
-        .turn(TurnInput::text("first request"))
-        .turn_id("standard-compaction-parent-one")
-        .run()
+        .send(TurnInput::text("first request"))
+        .id("standard-compaction-parent-one")
+        .output()
         .await?;
     session
-        .turn(TurnInput::text("second request"))
-        .turn_id("standard-compaction-parent-two")
-        .run()
+        .send(TurnInput::text("second request"))
+        .id("standard-compaction-parent-two")
+        .output()
         .await?;
     let parent_scope = effect_host
         .scoped_static(lash_core::AdmittedScope::turn(
@@ -730,9 +730,9 @@ async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_paren
         ("standard-compaction-repeat-two", "second request"),
     ] {
         session
-            .turn(TurnInput::text(text))
-            .turn_id(turn_id)
-            .run()
+            .send(TurnInput::text(text))
+            .id(turn_id)
+            .output()
             .await?;
     }
     assert!(
@@ -750,9 +750,9 @@ async fn repeated_compactions_under_one_shared_scope_use_distinct_physical_paren
         ("standard-compaction-repeat-four", "fourth request"),
     ] {
         session
-            .turn(TurnInput::text(text))
-            .turn_id(turn_id)
-            .run()
+            .send(TurnInput::text(text))
+            .id(turn_id)
+            .output()
             .await?;
     }
     assert!(
@@ -802,14 +802,14 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
     let session = core.session(session_id).open().await?;
 
     session
-        .turn(TurnInput::text("remember this image").with_attachment(
+        .send(TurnInput::text("remember this image").with_attachment(
             lash_core::AttachmentSource::inline(
                 lash_core::MediaType::parse("image/png").expect("image media type"),
                 vec![1, 2, 3],
             ),
         ))
-        .turn_id("attachment-prune-first")
-        .run()
+        .id("attachment-prune-first")
+        .output()
         .await?;
     // The turn's input is admitted durably before it drives (ADR 0069), so its
     // committed message is addressed by the acceptance it came from rather than
@@ -827,9 +827,9 @@ async fn attachment_pruning_never_rewrites_the_durable_message() -> Result<()> {
             .expect("first turn input is durable");
     let first_input_message_id = original_durable_message.id.clone();
     session
-        .turn(TurnInput::text("trigger ephemeral pruning"))
-        .turn_id("attachment-prune-second")
-        .run()
+        .send(TurnInput::text("trigger ephemeral pruning"))
+        .id("attachment-prune-second")
+        .output()
         .await?;
 
     let durable_message = sqlite_messages(store_factory.as_ref(), &SessionId::from(session_id))
@@ -920,9 +920,9 @@ async fn before_turn_plugin_messages_remain_durable_across_threshold_turns() -> 
 
     for ordinal in 0..=THRESHOLD_TURNS {
         session
-            .turn(TurnInput::text(format!("request {ordinal}")))
-            .turn_id(format!("plugin-injection-{ordinal}"))
-            .run()
+            .send(TurnInput::text(format!("request {ordinal}")))
+            .id(format!("plugin-injection-{ordinal}"))
+            .output()
             .await?;
     }
 
@@ -982,18 +982,18 @@ async fn standard_compaction_threshold_continue_as_extends_the_pre_switch_durabl
     let session = core.session(session_id).open().await?;
 
     let primed = session
-        .turn(TurnInput::text("prime durable history"))
-        .turn_id("standard-compaction-rlm-first")
-        .run()
+        .send(TurnInput::text("prime durable history"))
+        .id("standard-compaction-rlm-first")
+        .output()
         .await?;
     assert_eq!(primed.final_value(), Some(&serde_json::json!("primed")));
     let (durable_leaf_before_switch, max_generation_before_switch) =
         sqlite_head_and_max_generation(store_factory.as_ref(), &SessionId::from(session_id));
 
     let continued = session
-        .turn(TurnInput::text("cross the threshold and continue"))
-        .turn_id("standard-compaction-rlm-threshold")
-        .run()
+        .send(TurnInput::text("cross the threshold and continue"))
+        .id("standard-compaction-rlm-threshold")
+        .output()
         .await?;
     assert_eq!(
         continued.final_value(),
@@ -1101,9 +1101,9 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     session
-        .turn(TurnInput::text("first request"))
-        .turn_id("enqueue-first")
-        .run()
+        .send(TurnInput::text("first request"))
+        .id("enqueue-first")
+        .output()
         .await?;
     assert!(
         session
@@ -1144,9 +1144,9 @@ async fn after_turn_enqueue_resident_next_turn_commits_from_durable_leaf() -> Re
     );
 
     session
-        .turn(TurnInput::text("second request"))
-        .turn_id("enqueue-second")
-        .run()
+        .send(TurnInput::text("second request"))
+        .id("enqueue-second")
+        .output()
         .await?;
     let next = sqlite_node_rows(store_factory.as_ref(), &SessionId::from(session_id))
         .into_iter()
@@ -1238,18 +1238,18 @@ async fn mid_turn_graph_append_never_replicates_the_read_tail_durably() -> Resul
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     session
-        .turn(TurnInput::text("first request"))
-        .turn_id("append-first")
-        .run()
+        .send(TurnInput::text("first request"))
+        .id("append-first")
+        .output()
         .await?;
     let (durable_leaf_before_second, _) =
         sqlite_head_and_max_generation(store_factory.as_ref(), &SessionId::from(session_id));
     // Second turn: the checkpoint hook appends through the in-turn graph service while the
     // durable read tail already holds two messages.
     session
-        .turn(TurnInput::text("second request"))
-        .turn_id("append-second")
-        .run()
+        .send(TurnInput::text("second request"))
+        .id("append-second")
+        .output()
         .await?;
     assert!(
         appended.load(std::sync::atomic::Ordering::SeqCst),
@@ -1377,9 +1377,9 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
     // Before the fix this turn failed its own final commit:
     // `store head revision conflict: expected 0, actual 1`.
     session
-        .turn(TurnInput::text("first request"))
-        .turn_id("same-turn-first")
-        .run()
+        .send(TurnInput::text("first request"))
+        .id("same-turn-first")
+        .output()
         .await?;
     let draft_node_ids = draft_node_ids.lock().expect("draft ids").clone();
     assert_eq!(draft_node_ids.len(), 1, "the hook appended exactly once");
@@ -1441,9 +1441,9 @@ async fn in_turn_graph_append_on_an_empty_durable_tail_commits_with_the_turn() -
     );
 
     session
-        .turn(TurnInput::text("second request"))
-        .turn_id("same-turn-second")
-        .run()
+        .send(TurnInput::text("second request"))
+        .id("same-turn-second")
+        .output()
         .await?;
     let next = sqlite_node_rows(store_factory.as_ref(), &SessionId::from(session_id))
         .into_iter()
@@ -1502,9 +1502,9 @@ async fn after_turn_enqueue_persists_the_reply_exactly_once() -> Result<()> {
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     session
-        .turn(TurnInput::text("first request"))
-        .turn_id("enqueue-once")
-        .run()
+        .send(TurnInput::text("first request"))
+        .id("enqueue-once")
+        .output()
         .await?;
 
     let durable = sqlite_messages(store_factory.as_ref(), &SessionId::from(session_id));
@@ -1755,14 +1755,14 @@ async fn admin_compaction_commit_failure_rolls_back_resident_state_and_settles_o
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session(session_id).open().await?;
     session
-        .turn(TurnInput::text("first request"))
-        .turn_id("standard-compaction-commit-failure-one")
-        .run()
+        .send(TurnInput::text("first request"))
+        .id("standard-compaction-commit-failure-one")
+        .output()
         .await?;
     session
-        .turn(TurnInput::text("second request"))
-        .turn_id("standard-compaction-commit-failure-two")
-        .run()
+        .send(TurnInput::text("second request"))
+        .id("standard-compaction-commit-failure-two")
+        .output()
         .await?;
     let shared_scope = effect_host
         .scoped_static(lash_core::AdmittedScope::runtime_operation(
