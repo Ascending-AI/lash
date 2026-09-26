@@ -731,7 +731,7 @@ pub(super) async fn drive_break_glass_scenario(
     report_workflow_progress(&break_glass.workflow_id, "admin-kill-requested");
     wait_for_invocation_terminal(&admin, &invocation_id).await?;
     admin
-        .kill_invocation_for_test_cleanup(&workflow_invocation)
+        .kill_invocation(&workflow_invocation)
         .await
         .context("kill the break-glass workflow's waiter")?;
     wait_for_invocation_terminal(&admin, &workflow_invocation).await?;
