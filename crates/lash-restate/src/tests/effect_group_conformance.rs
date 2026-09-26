@@ -784,6 +784,30 @@ impl LiveConformanceHarness {
         )
     }
 
+    /// The endpoint's ingress connection: a law sends to the same Restate
+    /// the endpoint's handlers serve.
+    pub(super) fn connection(&self) -> RestateConnection {
+        self.connection.clone()
+    }
+
+    /// A Restate backend over the endpoint's own store set: the process
+    /// registry the endpoint's `LashProcessWorkflow` writes into, and a
+    /// process port that delivers to the workflows it runs.
+    pub(super) fn law_backend(&self) -> lash_core::Backend {
+        lash_core::Backend::new(Arc::new(crate::RestateEngine::new(
+            Arc::new(self.stores.clone()),
+            crate::RestateConfig::new(
+                self.connection.clone(),
+                self.admin_connection(),
+                // The endpoint's own authority: a law's runtime binds
+                // turn-control under it, so it must match what the probe's
+                // controller was admitted with.
+                crate::RestateAuthorityId::new("lash-restate-tests").expect("valid authority"),
+                lash_core::engine::BuildGeneration::for_test("parent-end-laws"),
+            ),
+        )))
+    }
+
     /// The in-process server double this harness runs on, if it runs on one.
     pub(super) fn server_double(&self) -> Option<lash_restate_test::RestateTestServer> {
         match &self.admin {

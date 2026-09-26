@@ -64,6 +64,9 @@ const CANCEL_CHILD_TURN_STEP: &str = "lash.process.cancel.child-turn";
 /// The journal name of the step that retires the handovers a segment no
 /// longer needs.
 const RETIRE_STEP: &str = "lash.segment.retire";
+/// The journal name of the step that applies an ended process's parent-end
+/// plan: the step right after its terminal completion (FIG-3822).
+const PARENT_END_STEP: &str = "lash.process.parent-end";
 /// The handover a later segment resumes from, read once and journaled, so a
 /// redrive replays the runner from the recorded handover even after the
 /// segment retired it (FIG-3809).
@@ -204,9 +207,46 @@ pub(crate) struct LashProcessWorkflowImpl<R> {
     segment_effect_budget: super::SegmentEffectBudget,
     retry_max_attempts: u64,
     cancel_ingress: Option<RestateIngressClient>,
+    /// The port an ended process's parent-end application delivers its
+    /// children's cancels through (FIG-3822).
+    parent_end_delivery: Arc<dyn lash_core::ProcessWorkSubstrate>,
     authority_id: crate::RestateAuthorityId,
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
     trace_context: lash_trace::TraceContext,
+}
+
+/// The parent-end delivery of a test workflow with no ingress: the registry
+/// request the application records is what the test reads.
+#[cfg(test)]
+struct RegistryReadCancel;
+
+#[cfg(test)]
+#[async_trait::async_trait]
+impl lash_core::ProcessWorkSubstrate for RegistryReadCancel {
+    async fn admit_pending_processes(
+        &self,
+        _reason: &str,
+    ) -> Result<lash_core::facade_support::ProcessAdmissionReport, PluginError> {
+        Ok(lash_core::facade_support::ProcessAdmissionReport::default())
+    }
+
+    async fn await_process_terminal(
+        &self,
+        process_id: &ProcessId,
+    ) -> Result<lash_core::ProcessTerminalWait, PluginError> {
+        Err(PluginError::Session(format!(
+            "a test workflow's parent-end delivery does not await process `{process_id}`"
+        )))
+    }
+
+    async fn deliver_cancel(
+        &self,
+        _process_id: &ProcessId,
+        _request: &lash_core::CancelRequest,
+        _delivery_key: &str,
+    ) -> Result<(), PluginError> {
+        Ok(())
+    }
 }
 
 impl<R> LashProcessWorkflowImpl<R> {
@@ -220,11 +260,17 @@ impl<R> LashProcessWorkflowImpl<R> {
         cancel_ingress: RestateIngressClient,
         authority_id: crate::RestateAuthorityId,
     ) -> Self {
+        let parent_end_delivery = Arc::new(super::RestateProcessIngressRunner::over_ingress(
+            cancel_ingress.clone(),
+            Arc::clone(&registry),
+            Arc::clone(&continuations),
+        ));
         Self::new_inner(
             runner,
             registry,
             continuations,
             Some(cancel_ingress),
+            parent_end_delivery,
             authority_id,
         )
     }
@@ -235,11 +281,15 @@ impl<R> LashProcessWorkflowImpl<R> {
         registry: Arc<dyn ProcessRegistry>,
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
     ) -> Self {
+        // No ingress: a child's cancel is the registry request its test
+        // reads.
+        let parent_end_delivery = Arc::new(RegistryReadCancel);
         Self::new_inner(
             runner,
             registry,
             continuations,
             None,
+            parent_end_delivery,
             crate::RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
         )
     }
@@ -249,6 +299,7 @@ impl<R> LashProcessWorkflowImpl<R> {
         registry: Arc<dyn ProcessRegistry>,
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
         cancel_ingress: Option<RestateIngressClient>,
+        parent_end_delivery: Arc<dyn lash_core::ProcessWorkSubstrate>,
         authority_id: crate::RestateAuthorityId,
     ) -> Self {
         Self {
@@ -258,6 +309,7 @@ impl<R> LashProcessWorkflowImpl<R> {
             segment_effect_budget: Arc::new(|_| 10_000),
             retry_max_attempts: super::PROCESS_HANDLER_MAX_ATTEMPTS,
             cancel_ingress,
+            parent_end_delivery,
             authority_id,
             trace_sink: None,
             trace_context: lash_trace::TraceContext::default(),
@@ -566,7 +618,53 @@ where
             )
             .await
             .map_err(HandlerError::from)?;
-        stored.map_err(|refusal| TerminalError::new(refusal).into())
+        let stored = stored.map_err(|refusal| HandlerError::from(TerminalError::new(refusal)))?;
+        self.apply_parent_end_step(journal, process_id).await?;
+        Ok(stored)
+    }
+
+    /// Apply the plan the terminal completion recorded in its own
+    /// transaction, as the next journaled step of the same execution
+    /// (FIG-3822): a crash between the two replays the completion and runs
+    /// this step. The application is idempotent, so a retried body delivers
+    /// each child's cancel once. A plan this step cannot apply stays pending
+    /// for the reconcile pass; the process's own terminal is already stored,
+    /// so the refusal never fails the segment.
+    async fn apply_parent_end_step(
+        &self,
+        journal: &WorkflowContext<'_>,
+        process_id: &ProcessId,
+    ) -> Result<(), HandlerError> {
+        let registry = &self.registry;
+        let delivery = &self.parent_end_delivery;
+        let parent = lash_core::ScopeId::process(process_id.clone());
+        let Json(applied) = journal
+            .run_json_or_retry_send::<Result<u32, String>, _>(
+                PARENT_END_STEP.to_string(),
+                async move {
+                    match lash_core::apply_parent_end_plan(
+                        registry.as_ref(),
+                        delivery.as_ref(),
+                        &parent,
+                        restate_now_ms(),
+                    )
+                    .await
+                    {
+                        Ok(application) => Ok(Ok(application.delivered)),
+                        Err(error) => step_fault(error),
+                    }
+                },
+            )
+            .await
+            .map_err(HandlerError::from)?;
+        if let Err(refusal) = applied {
+            tracing::warn!(
+                process_id = process_id.as_str(),
+                refusal = %refusal,
+                "process parent-end plan stays pending for the reconcile pass"
+            );
+        }
+        Ok(())
     }
 
     /// Store `proposed` directly, as the completion step's body does.

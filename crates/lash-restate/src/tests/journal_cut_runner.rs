@@ -299,6 +299,15 @@ mod served_only_outside_a_run {
         ) -> Result<lash_core::ProcessTerminalWait, lash_core::PluginError> {
             panic!("unexpected terminal wait for {process_id}")
         }
+
+        async fn deliver_cancel(
+            &self,
+            _process_id: &ProcessId,
+            _request: &lash_core::CancelRequest,
+            _key: &str,
+        ) -> Result<(), lash_core::PluginError> {
+            Ok(())
+        }
     }
 
     /// What the effects answered: the process start's result, the sleep's

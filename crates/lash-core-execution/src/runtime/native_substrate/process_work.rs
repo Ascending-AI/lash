@@ -101,4 +101,16 @@ impl ProcessWorkSubstrate for NativeProcessWork {
             .await
             .map(ProcessTerminalWait::Terminal)
     }
+
+    async fn deliver_cancel(
+        &self,
+        _process_id: &crate::ProcessId,
+        _request: &crate::CancelRequest,
+        _key: &str,
+    ) -> Result<(), PluginError> {
+        // A native execution watches the registry for its cancel request;
+        // `apply_parent_end_plan` records that request right after this call,
+        // which is the delivery itself.
+        Ok(())
+    }
 }

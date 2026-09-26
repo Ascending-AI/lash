@@ -9,18 +9,6 @@ mod closure_lifecycle;
 #[path = "restate_recovery/immutable_deployment.rs"]
 mod immutable_deployment;
 
-fn complete_full_process_event_page(
-    outcome: lash::process::ObservedProcessEventReadOutcome,
-) -> Vec<lash::process::ObservedProcessEvent> {
-    match outcome {
-        lash::process::ProcessEventReadOutcome::Retained(lash::process::ProcessEventPage {
-            events: lash::process::ProcessEventPageEvents::Full(events),
-            more: lash::process::ProcessEventPageMore::Complete,
-        }) => events,
-        _ => panic!("expected one complete full process-event page"),
-    }
-}
-
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
 fn live_restate_process_llm_query_with_typed_output_succeeds() {
@@ -577,17 +565,17 @@ fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle() {
 
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
-fn live_restate_processes_outlive_session_delete_and_cancel_globally() {
+fn live_restate_session_delete_ends_until_children_through_parent_end() {
     run_async_test_on_stack_budget_multi_thread("workbench-process-lifecycle-e2e", 4, || {
-        live_restate_processes_outlive_session_delete_and_cancel_globally_inner()
+        live_restate_session_delete_ends_until_children_through_parent_end_inner()
     });
 }
 
 #[test]
 #[ignore = "requires a running Restate server; use `just agent-workbench-restate-e2e`"]
-fn live_restate_session_delete_revokes_process_await_without_cancelling_process() {
+fn live_restate_session_delete_revokes_process_await_and_cancels_process() {
     run_async_test_on_stack_budget_multi_thread("workbench-revoked-process-await", 4, || {
-        live_restate_session_delete_revokes_process_await_without_cancelling_process_inner()
+        live_restate_session_delete_revokes_process_await_and_cancels_process_inner()
     });
 }
 
@@ -1125,12 +1113,15 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
     harness.shutdown(data_dir).await;
 }
 
-/// How long the surviving process sleeps before it settles.
+/// How long the session-bound process sleeps: long enough that the session
+/// delete lands while it is still running.
 const REVOKED_PROCESS_AWAIT_SLEEP: Duration = Duration::from_secs(90);
-/// Slack past the process's own sleep for it to wake, settle and publish.
+/// Slack past the process's own sleep for it to wake, settle and publish. The
+/// bound only has to outlast the delete's own settle window once FIG-3822
+/// cancels the process: it terminalizes far inside this deadline.
 const REVOKED_PROCESS_AWAIT_SETTLE_MARGIN: Duration = Duration::from_secs(45);
 
-async fn live_restate_session_delete_revokes_process_await_without_cancelling_process_inner() {
+async fn live_restate_session_delete_revokes_process_await_and_cancels_process_inner() {
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
@@ -1146,11 +1137,11 @@ async fn live_restate_session_delete_revokes_process_await_without_cancelling_pr
         .complete(|_| async {
             Ok(text_response(&format!(
                 r#"<typescript>
-const survive_revocation = async () => {{
+const session_bound = async () => {{
   await sleep({sleep_ms});
   return "survived session deletion";
 }};
-const handle = await processes.start({{ definition: survive_revocation, label: "survive_revocation" }});
+const handle = await processes.start({{ definition: session_bound, label: "session_bound" }});
 finish(await handle);
 </typescript>"#,
                 sleep_ms = REVOKED_PROCESS_AWAIT_SLEEP.as_millis(),
@@ -1188,18 +1179,14 @@ finish(await handle);
         Duration::from_secs(90),
     )
     .await;
-    let process_id = wait_for_running_process(
-        &harness.state,
-        "survive_revocation",
-        Duration::from_secs(20),
-    )
-    .await;
+    let process_id =
+        wait_for_running_process(&harness.state, "session_bound", Duration::from_secs(20)).await;
     // The process was already sleeping when it was seen running, so its own
-    // sleep bounds when it settles. How soon the session delete lands is
-    // Restate's business: on its default inactivity timeout the turn reads as
-    // suspended after about a minute, and with every await suspending it does
-    // at once, so the terminal deadline must come from the process, not from
-    // the turn.
+    // sleep bounds when it settles if nothing cancels it. How soon the
+    // session delete lands is Restate's business: on its default inactivity
+    // timeout the turn reads as suspended after about a minute, and with
+    // every await suspending it does at once, so the terminal deadline must
+    // come from the process, not from the turn.
     let process_settles_by = tokio::time::Instant::now()
         + REVOKED_PROCESS_AWAIT_SLEEP
         + REVOKED_PROCESS_AWAIT_SETTLE_MARGIN;
@@ -1221,7 +1208,11 @@ finish(await handle);
         Duration::from_secs(20),
     )
     .await;
-    let immediately_after_delete = harness
+    // The delete closes the session scope, whose parent-end plan cancels
+    // every process living `Until` it (FIG-3822): by the time the delete
+    // workflow reports success the child's cancel request is recorded, and
+    // its Restate workflow has the delivery on its cancel promise.
+    harness
         .state
         .process_observer
         .clone()
@@ -1229,28 +1220,8 @@ finish(await handle);
         .await
         .expect("read process immediately after session revocation")
         .expect("session revocation keeps its process record");
-    assert!(
-        !immediately_after_delete.terminal(),
-        "session revocation must leave the independently sleeping process live"
-    );
-    let immediate_events = complete_full_process_event_page(
-        harness
-            .state
-            .process_observer
-            .first_event_page(
-                &process_id.clone(),
-                std::num::NonZeroUsize::new(4_096).expect("non-zero test page size"),
-                lash::process::ProcessEventQueryMode::Full,
-            )
-            .await
-            .expect("read process events immediately after session revocation"),
-    );
-    assert!(
-        !immediate_events
-            .iter()
-            .any(|event| event.event_type == "process.cancel_requested"),
-        "session revocation immediately emitted a process cancel: {immediate_events:#?}"
-    );
+    let observed_after_delete =
+        wait_for_cancel_request(&harness.state, &process_id.clone(), Duration::from_secs(20)).await;
 
     let turn_failure = wait_for_workbench_turn_failed(&mut turn, Duration::from_secs(20)).await;
     // Re-baselined for FIG-2358: the revoked turn resumes while the delete
@@ -1271,34 +1242,22 @@ finish(await handle);
             .await_output(&process_id.clone()),
     )
     .await
-    .expect("revoked session must not stop the independent process")
-    .expect("attach surviving process terminal");
+    .expect("parent-end cancel never reached the session-bound process")
+    .expect("attach cancelled process terminal");
     assert!(
         matches!(
             &process_terminal,
             lash::process::ProcessAwaitOutput::Settled { output }
-                if output.is_success()
-                    && output.value_for_projection() == json!("survived session deletion")
+                if !output.is_success()
+                    && output.value_for_projection()["source"] == "cancellation"
         ),
-        "session revocation changed the process terminal: {process_terminal:#?}"
+        "session delete did not cancel its Until-session process: {process_terminal:#?}"
     );
-    let events = complete_full_process_event_page(
-        harness
-            .state
-            .process_observer
-            .first_event_page(
-                &process_id,
-                std::num::NonZeroUsize::new(4_096).expect("non-zero test page size"),
-                lash::process::ProcessEventQueryMode::Full,
-            )
-            .await
-            .expect("read surviving process events"),
-    );
-    assert!(
-        !events
-            .iter()
-            .any(|event| event.event_type == "process.cancel_requested"),
-        "session revocation emitted a process cancel: {events:#?}"
+    // The registry keeps the first request, so the session end's delivery is
+    // exactly once: its requester is the ended session scope's storage id.
+    assert_parent_end_request(
+        &observed_after_delete,
+        &lash::process::ScopeId::session(deleted_session_id.clone()),
     );
     assert!(
         harness
@@ -1309,7 +1268,7 @@ finish(await handle);
         "deleted-session settlement left a routed foreground turn"
     );
     println!(
-        "workbench revoked-process-await gate passed: typed-SessionDeleted; no-process-cancel; process-survived"
+        "workbench revoked-process-await gate passed: typed-SessionDeleted; parent-end-cancel-once; process-cancelled"
     );
     endpoint
         .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
@@ -1317,7 +1276,7 @@ finish(await handle);
     let _ = std::fs::remove_dir_all(data_dir);
 }
 
-async fn live_restate_processes_outlive_session_delete_and_cancel_globally_inner() {
+async fn live_restate_session_delete_ends_until_children_through_parent_end_inner() {
     let ingress_url = std::env::var("RESTATE_INGRESS_URL")
         .expect("RESTATE_INGRESS_URL must be set by the workbench Restate E2E recipe");
     let admin_url =
@@ -1328,21 +1287,25 @@ async fn live_restate_processes_outlive_session_delete_and_cancel_globally_inner
     ));
     std::fs::create_dir_all(&data_dir).expect("create process lifecycle E2E data dir");
 
+    // Both children sleep far past the delete's settle window so the session
+    // end lands while they are live: the delete closes the session scope and
+    // the parent-end plan it applies cancels every `Until(session)` child
+    // (FIG-3822).
     let provider = lash::testing::TestProvider::builder()
         .kind("workbench-process-lifecycle-e2e")
         .complete(|_| async {
             Ok(text_response(
                 r#"<typescript>
-const survivor = async () => {
-  await sleep(8000);
-  return "survived session deletion";
-};
-const cancellable = async () => {
+const child_a = async () => {
   await sleep(60000);
-  return "cancellation failed";
+  return "first child survived";
 };
-const survivor_handle = await processes.start({ definition: survivor, label: "survivor" });
-const cancellable_handle = await processes.start({ definition: cancellable, label: "cancellable" });
+const child_b = async () => {
+  await sleep(90000);
+  return "second child survived";
+};
+const child_a_handle = await processes.start({ definition: child_a, label: "child_a" });
+const child_b_handle = await processes.start({ definition: child_b, label: "child_b" });
 finish("started lifecycle gates");
 </typescript>"#,
             ))
@@ -1369,9 +1332,9 @@ finish("started lifecycle gates");
     let mut turn =
         run_workbench_turn_via_restate(&harness.state, "start process lifecycle gates").await;
     wait_for_workbench_turn_settled(&mut turn, Duration::from_secs(30)).await;
-    let (survivor_id, cancellable_id) = wait_for_named_running_processes(
+    let (child_a_id, child_b_id) = wait_for_named_running_processes(
         &harness.state,
-        &["survivor", "cancellable"],
+        &["child_a", "child_b"],
         Duration::from_secs(20),
     )
     .await;
@@ -1394,92 +1357,38 @@ finish("started lifecycle gates");
     )
     .await;
 
-    let Json(work_after_delete) =
-        list_work(State(harness.state.clone()), Query(SessionQuery::default()))
-            .await
-            .expect("list runtime work after session deletion");
-    for process_id in [&survivor_id, &cancellable_id] {
+    // Each `Until(session)` child carries the session end's one cancel
+    // request — its requester is the ended session scope — and terminalizes
+    // with the cancellation outcome.
+    for process_id in [&child_a_id, &child_b_id] {
+        let observed =
+            wait_for_cancel_request(&harness.state, &process_id.clone(), Duration::from_secs(20))
+                .await;
+        assert_parent_end_request(
+            &observed,
+            &lash::process::ScopeId::session(deleted_session_id.clone()),
+        );
+        let terminal = tokio::time::timeout(
+            Duration::from_secs(30),
+            harness
+                .state
+                .core
+                .processes()
+                .await_output(&process_id.clone()),
+        )
+        .await
+        .expect("parent-end cancel never reached the child")
+        .expect("await parent-end-cancelled child");
         assert!(
-            work_after_delete
-                .iter()
-                .any(|item| item.process.process_id == *process_id && !item.process.terminal),
-            "work rail lost live process {process_id} after deleting {deleted_session_id}: {work_after_delete:#?}"
+            matches!(
+                &terminal,
+                lash::process::ProcessAwaitOutput::Settled { output }
+                    if !output.is_success()
+                        && output.value_for_projection()["source"] == "cancellation"
+            ),
+            "session delete did not cancel its Until-session child: {terminal:#?}"
         );
     }
-
-    let Json(cancel_receipt) = cancel_work(
-        AxumPath(cancellable_id.to_string()),
-        State(harness.state.clone()),
-    )
-    .await
-    .expect("cancel orphaned process through work API");
-    assert!(cancel_receipt.accepted);
-    wait_for_process_event(
-        &harness.state,
-        &cancellable_id.clone(),
-        "process.cancel_requested",
-        Duration::from_secs(20),
-    )
-    .await;
-    let cancelled = tokio::time::timeout(
-        Duration::from_secs(20),
-        harness
-            .state
-            .core
-            .processes()
-            .await_output(&cancellable_id.clone()),
-    )
-    .await
-    .expect("cancelled process terminal timeout")
-    .expect("await cancelled process");
-    assert!(
-        matches!(
-            cancelled,
-            lash::process::ProcessAwaitOutput::Settled { ref output }
-                if !output.is_success()
-                    && output.value_for_projection()["source"] == "cancellation"
-        ),
-        "process cancellation settled with the wrong outcome: {cancelled:#?}"
-    );
-
-    let survived = tokio::time::timeout(
-        Duration::from_secs(20),
-        harness
-            .state
-            .core
-            .processes()
-            .await_output(&survivor_id.clone()),
-    )
-    .await
-    .expect("surviving process terminal timeout")
-    .expect("await surviving process");
-    assert!(
-        matches!(
-            &survived,
-            lash::process::ProcessAwaitOutput::Settled { output }
-                if output.is_success()
-                    && output.value_for_projection() == json!("survived session deletion")
-        ),
-        "session-independent process did not complete successfully: {survived:#?}"
-    );
-    let Json(terminal_work) =
-        list_work(State(harness.state.clone()), Query(SessionQuery::default()))
-            .await
-            .expect("list terminal runtime work");
-    assert!(terminal_work.iter().any(|item| {
-        item.process.process_id == survivor_id
-            && item.process.terminal
-            && item.process.lifecycle == lash::process::ProcessStatus::Completed
-    }));
-    assert!(terminal_work.iter().any(|item| {
-        item.process.process_id == cancellable_id
-            && item.process.terminal
-            && item.process.lifecycle == lash::process::ProcessStatus::Cancelled
-            && item
-                .events
-                .iter()
-                .any(|event| event.event_type == "process.cancel_requested")
-    }));
     endpoint
         .stop_after_producers_closed_and_drained(&harness.state, Duration::from_secs(30))
         .await;
@@ -1550,34 +1459,51 @@ async fn wait_for_named_running_processes(
     }
 }
 
-async fn wait_for_process_event(
+/// Poll the observed record until its first cancel request is recorded. The
+/// record is the durable fact a parent-end plan writes: the registry keeps the
+/// first request, so a second delivery never changes it.
+async fn wait_for_cancel_request(
     state: &AppState,
     process_id: &ProcessId,
-    event_type: &str,
     timeout: Duration,
-) {
+) -> lash::process::ObservedProcess {
     let deadline = tokio::time::Instant::now() + timeout;
     loop {
-        let events = complete_full_process_event_page(
-            state
-                .process_observer
-                .first_event_page(
-                    process_id,
-                    std::num::NonZeroUsize::new(4_096).expect("non-zero test page size"),
-                    lash::process::ProcessEventQueryMode::Full,
-                )
-                .await
-                .expect("read process events"),
-        );
-        if events.iter().any(|event| event.event_type == event_type) {
-            return;
+        let observed = state
+            .process_observer
+            .clone()
+            .process(&process_id.clone())
+            .await
+            .expect("read process record")
+            .expect("record kept");
+        if observed.cancel_request.is_some() {
+            return observed;
         }
         assert!(
             tokio::time::Instant::now() < deadline,
-            "timed out waiting for {event_type} on {process_id}; events={events:#?}"
+            "timed out waiting for a cancel request on {process_id}; record={observed:#?}"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
+}
+
+/// The one cancel request a parent end leaves names the ended scope as its
+/// requester (ADR 0094).
+fn assert_parent_end_request(
+    observed: &lash::process::ObservedProcess,
+    ended: &lash::process::ScopeId,
+) {
+    let request = observed.cancel_request.as_ref().unwrap_or_else(|| {
+        panic!(
+            "no cancel request on {}: {observed:#?}",
+            observed.process_id
+        )
+    });
+    assert_eq!(
+        request.requester,
+        ended.storage_id(),
+        "cancel request did not come from the ended scope: {request:#?}"
+    );
 }
 
 async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_inner() {

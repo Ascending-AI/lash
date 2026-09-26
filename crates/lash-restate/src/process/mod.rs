@@ -463,6 +463,22 @@ impl RestateProcessIngressRunner {
         }
     }
 
+    /// A runner over an ingress client the caller already holds: the process
+    /// workflow's, to deliver its ended scope's cancels (FIG-3822).
+    pub(crate) fn over_ingress(
+        ingress: RestateIngressClient,
+        registry: Arc<dyn ProcessRegistry>,
+        continuations: Arc<dyn lash_core::ProcessContinuationStore>,
+    ) -> Self {
+        Self {
+            ingress,
+            registry,
+            continuations,
+            event_sink: None,
+            park_reconciler: ParkReconciler::default(),
+        }
+    }
+
     fn with_park_reconciler(mut self, reconciler: ParkReconciler) -> Self {
         self.park_reconciler = reconciler;
         self
@@ -844,6 +860,48 @@ impl ProcessWorkSubstrate for RestateProcessIngressRunner {
         )
         .await
     }
+
+    /// A one-way send to the process's `cancel` handler under
+    /// `delivery_key`: the handler journals the registry request and
+    /// resolves the cancel promise its segment watches (FIG-3673), and
+    /// routes the request to a later segment itself. A repeat of the key
+    /// names the first invocation; past the engine's dedupe window the
+    /// handler is idempotent anyway, since the same origin and requester is
+    /// a no-op and a resolved promise stays resolved.
+    async fn deliver_cancel(
+        &self,
+        process_id: &ProcessId,
+        request: &lash_core::CancelRequest,
+        delivery_key: &str,
+    ) -> Result<(), PluginError> {
+        deliver_process_cancel(&self.ingress, process_id, request, delivery_key).await
+    }
+}
+
+/// Send `request` to `process`'s `cancel` handler under `delivery_key`
+/// ([`ProcessWorkSubstrate::deliver_cancel`] on Restate).
+pub(crate) async fn deliver_process_cancel(
+    ingress: &RestateIngressClient,
+    process_id: &ProcessId,
+    request: &lash_core::CancelRequest,
+    delivery_key: &str,
+) -> Result<(), PluginError> {
+    ingress
+        .send_workflow_json_idempotent(
+            crate::LashService::ProcessWorkflow.name(),
+            &process_segment_workflow_key(process_id, 0),
+            "cancel",
+            &RestateProcessCancelRequest::new(process_id.clone(), request.clone()),
+            delivery_key,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|error| {
+            PluginError::Runtime(lash_core::RuntimeError::new(
+                lash_core::RuntimeErrorCode::EngineProcessCancel,
+                format!("parent-end cancel delivery to process `{process_id}` failed: {error}"),
+            ))
+        })
 }
 
 /// Bundled Restate process deployment wiring for a Lash core.
