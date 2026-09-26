@@ -1,9 +1,11 @@
-//! The facade test catalogs keep no control-intent ledger: each refuses it,
-//! so a session deletion over one fails closed instead of deleting a
-//! session whose roots nothing closed.
+//! The facade test catalogs' control-intent ledgers. The deletion fixture
+//! keeps one in memory; the others keep none and refuse it, so a session
+//! deletion over one fails closed instead of deleting a session whose roots
+//! nothing closed.
 
 use super::{DeletingStoreFactory, RecordingStoreFactory, ReusableStoreFactory};
 use lash_core::SessionId;
+use lash_sansio::sync::MutexExt as _;
 
 #[async_trait::async_trait]
 impl lash_core::store::ControlIntentStore for ReusableStoreFactory {
@@ -115,51 +117,44 @@ impl lash_core::store::ControlIntentStore for RecordingStoreFactory {
 impl lash_core::store::ControlIntentStore for DeletingStoreFactory {
     async fn begin_session_close(
         &self,
-        _session_id: &SessionId,
-        _at_ms: u64,
+        session_id: &SessionId,
+        at_ms: u64,
     ) -> std::result::Result<Option<lash_core::store::ControlIntent>, lash_core::StoreError> {
-        Err(lash_core::StoreError::UnsupportedStoreOperation {
-            operation: "ControlIntentStore::begin_session_close",
-        })
+        let exists = self.stores.lock_recover().contains_key(session_id);
+        Ok(self
+            .intents
+            .begin_session_close(session_id, exists, Vec::new(), at_ms))
     }
 
     async fn claim_intent_application(
         &self,
-        _id: lash_core::store::ControlIntentId,
+        id: lash_core::store::ControlIntentId,
     ) -> std::result::Result<lash_core::store::IntentApplication, lash_core::StoreError> {
-        Err(lash_core::StoreError::UnsupportedStoreOperation {
-            operation: "ControlIntentStore::claim_intent_application",
-        })
+        self.intents.claim(id)
     }
 
     async fn acknowledge_intent(
         &self,
-        _id: lash_core::store::ControlIntentId,
-        _at_ms: u64,
+        id: lash_core::store::ControlIntentId,
+        at_ms: u64,
     ) -> std::result::Result<(), lash_core::StoreError> {
-        Err(lash_core::StoreError::UnsupportedStoreOperation {
-            operation: "ControlIntentStore::acknowledge_intent",
-        })
+        self.intents.acknowledge(id, at_ms)
     }
 
     async fn record_intent_failure(
         &self,
-        _id: lash_core::store::ControlIntentId,
-        _error: &str,
-        _retryable: bool,
+        id: lash_core::store::ControlIntentId,
+        error: &str,
+        retryable: bool,
         _at_ms: u64,
     ) -> std::result::Result<lash_core::store::ControlIntent, lash_core::StoreError> {
-        Err(lash_core::StoreError::UnsupportedStoreOperation {
-            operation: "ControlIntentStore::record_intent_failure",
-        })
+        self.intents.fail(id, error, retryable)
     }
 
     async fn load_intent(
         &self,
-        _id: lash_core::store::ControlIntentId,
+        id: lash_core::store::ControlIntentId,
     ) -> std::result::Result<Option<lash_core::store::ControlIntent>, lash_core::StoreError> {
-        Err(lash_core::StoreError::UnsupportedStoreOperation {
-            operation: "ControlIntentStore::load_intent",
-        })
+        Ok(self.intents.load(id))
     }
 }

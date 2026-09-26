@@ -273,7 +273,17 @@ crate::TurnFailureCause::Outcome,
                 ))
             }
             ProcessCommand::DeleteSession { session_id } => {
-                let report = registry.delete_session_process_state(&session_id).await?;
+                // A session's deletion runs this after its close, the point
+                // of no return (FIG-3600 S7, Q10): it refuses nothing, and a
+                // registry that did not answer is this attempt's fault, never
+                // the step's recorded outcome, so a retried deletion runs it
+                // again instead of replaying the failure.
+                let report = registry
+                    .delete_session_process_state(&session_id)
+                    .await
+                    .map_err(|error| {
+                        RuntimeEffectControllerError::from(error).retryable_uncommitted_derivation()
+                    })?;
                 Ok((
                     ProcessEffectOutcome::DeleteSession { report },
                     crate::StoreRealization::Realized,

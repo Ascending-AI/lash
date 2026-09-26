@@ -37,7 +37,9 @@ mod control;
 mod reconcile;
 mod root;
 
-pub use control::apply_control_intent;
+pub use control::{
+    SessionCloseError, SessionCloseServices, SessionClosed, apply_control_intent, close_session,
+};
 pub use reconcile::{ReconcileReport, reconcile_drive_request, reconcile_session_work};
 
 use std::sync::Arc;

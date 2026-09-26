@@ -22,6 +22,8 @@ pub(crate) struct BoundSession {
     process_env_store: Arc<dyn lash_core::ProcessExecutionEnvStore>,
     process_engines: lash_core::ProcessEngineRegistry,
     catalog: Arc<dyn SessionStoreFactory>,
+    scope_close: Arc<dyn lash_core::engine::ScopeCloseSink>,
+    clock: Arc<dyn lash_core::Clock>,
     /// The core's tool-child context source (FIG-3712), held for as long as
     /// the session is: the backend's host holds it weakly, and a session
     /// whose core was dropped still has children to rebuild.
@@ -48,6 +50,8 @@ impl BoundSession {
             process_env_store: Arc::clone(&env.core.durability.process_env_store),
             process_engines: env.core.process_engines.clone(),
             catalog,
+            scope_close: Arc::clone(&env.core.control.scope_close),
+            clock: Arc::clone(&env.core.clock),
             tool_child_context_source: None,
         }
     }
@@ -101,6 +105,11 @@ impl BoundSession {
             Some(self.backend.trigger_store()),
             Arc::clone(&self.process_env_store),
             self.process_engines.clone(),
+            lash_core::drive::SessionCloseServices {
+                work: self.queued(),
+                scopes: Arc::clone(&self.scope_close),
+                clock: Arc::clone(&self.clock),
+            },
         )
     }
 

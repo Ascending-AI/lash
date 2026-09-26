@@ -82,6 +82,11 @@ pub const DEFAULT_ABORT_DRAIN_GRACE: std::time::Duration = std::time::Duration::
 #[derive(Clone)]
 pub struct RuntimeControlConfig {
     pub effect_host: Arc<dyn EffectHost>,
+    /// The owner of lifetime scopes a root's end and a session's close report
+    /// to (FIG-3607 item 7). [`NoScopeClose`](crate::engine::NoScopeClose)
+    /// until the process registry's scope-close adapter is installed here
+    /// (FIG-3607 PR-2).
+    pub scope_close: Arc<dyn crate::engine::ScopeCloseSink>,
     pub termination: TerminationPolicy,
     /// How long a protocol-owned stream abort (a protocol boundary that ends
     /// the model's turn under ADR 0036's no-wire-stop rule) keeps draining the
@@ -214,6 +219,7 @@ impl RuntimeHostConfig {
                 termination: TerminationPolicy::default(),
                 abort_drain_grace: DEFAULT_ABORT_DRAIN_GRACE,
                 effect_host,
+                scope_close: Arc::new(crate::engine::NoScopeClose),
                 process_wake_delivery_policy: crate::DeliveryPolicy::EarliestSafeBoundary,
                 lease_timings: crate::LeaseTimings::default(),
                 process_tool_visibility_filter: None,

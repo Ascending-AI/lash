@@ -1319,6 +1319,7 @@ struct DeletingStoreFactory {
     delete_failure: std::sync::Mutex<
         Option<lash_core::MaintenanceFailure<lash_core::SessionBlobReclaimReport>>,
     >,
+    intents: lash_core::store::InMemoryControlIntents,
 }
 
 impl DeletingStoreFactory {
@@ -2423,8 +2424,8 @@ async fn snapshot_store_reports_the_holder_a_claim_displaces() {
     .await;
 }
 
-#[path = "tests/refusing_control_intents.rs"]
-mod refusing_control_intents;
+#[path = "tests/control_intent_doubles.rs"]
+mod control_intent_doubles;
 #[path = "tests/root_stores.rs"]
 mod root_stores;
 #[path = "tests/snapshot_store_lease.rs"]

@@ -379,6 +379,128 @@ pub trait ControlIntentStore: Send + Sync {
     ) -> Result<Option<ControlIntent>, super::StoreError>;
 }
 
+/// A control-intent ledger held in memory, for store doubles that keep no
+/// SQL rows. It decides every write with the same deciders a SQL backend
+/// runs inside its transaction.
+#[derive(Debug, Default)]
+pub struct InMemoryControlIntents {
+    state: std::sync::Mutex<std::collections::BTreeMap<ControlIntentId, ControlIntent>>,
+}
+
+impl InMemoryControlIntents {
+    fn state(
+        &self,
+    ) -> std::sync::MutexGuard<'_, std::collections::BTreeMap<ControlIntentId, ControlIntent>> {
+        self.state
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// [`ControlIntentStore::begin_session_close`] over this ledger: the
+    /// session's kept `CloseSession` intent, else a new one closing `roots`
+    /// when the session `exists`, else `None`.
+    pub fn begin_session_close(
+        &self,
+        session_id: &SessionId,
+        exists: bool,
+        roots: Vec<TurnId>,
+        at_ms: u64,
+    ) -> Option<ControlIntent> {
+        let mut state = self.state();
+        if let Some(intent) = state.values().find(|intent| {
+            intent.session_id == *session_id
+                && matches!(intent.kind, ControlIntentKind::CloseSession { .. })
+        }) {
+            return Some(intent.clone());
+        }
+        if !exists {
+            return None;
+        }
+        let id = ControlIntentId::from_sequence(
+            state
+                .keys()
+                .next_back()
+                .map_or(1, |last| last.sequence().saturating_add(1)),
+        );
+        let intent = ControlIntent {
+            id,
+            session_id: session_id.clone(),
+            format: CONTROL_INTENT_FORMAT,
+            kind: ControlIntentKind::CloseSession { roots },
+            state: ControlIntentState::Pending,
+            attempts: 0,
+            created_at_ms: at_ms,
+            engine: None,
+        };
+        state.insert(id, intent.clone());
+        Some(intent)
+    }
+
+    fn rewrite<T>(
+        &self,
+        id: ControlIntentId,
+        write: impl FnOnce(&mut ControlIntent) -> T,
+    ) -> Result<T, super::StoreError> {
+        let mut state = self.state();
+        let intent = state
+            .get_mut(&id)
+            .ok_or(super::StoreError::ControlIntentUnknown { intent: id })?;
+        Ok(write(intent))
+    }
+
+    /// [`ControlIntentStore::claim_intent_application`] over this ledger.
+    pub fn claim(&self, id: ControlIntentId) -> Result<IntentApplication, super::StoreError> {
+        self.rewrite(id, |intent| {
+            let application = decide_intent_application(intent.clone());
+            if let IntentApplication::Apply(applied) = &application {
+                *intent = applied.clone();
+            }
+            application
+        })
+    }
+
+    /// [`ControlIntentStore::acknowledge_intent`] over this ledger.
+    pub fn acknowledge(&self, id: ControlIntentId, at_ms: u64) -> Result<(), super::StoreError> {
+        self.rewrite(id, |intent| {
+            if let Some(state) = decide_intent_acknowledgement(&intent.state, at_ms) {
+                intent.state = state;
+            }
+        })
+    }
+
+    /// [`ControlIntentStore::record_intent_failure`] over this ledger.
+    pub fn fail(
+        &self,
+        id: ControlIntentId,
+        error: &str,
+        retryable: bool,
+    ) -> Result<ControlIntent, super::StoreError> {
+        self.rewrite(id, |intent| {
+            if let Some(state) = decide_intent_failure(&intent.state, error, retryable) {
+                intent.state = state;
+            }
+            intent.clone()
+        })
+    }
+
+    /// [`ControlIntentStore::load_intent`] over this ledger.
+    #[must_use]
+    pub fn load(&self, id: ControlIntentId) -> Option<ControlIntent> {
+        self.state().get(&id).cloned()
+    }
+
+    /// `SessionStoreFactory::list_open_control_intents` over this ledger.
+    #[must_use]
+    pub fn open_after(&self, after: Option<ControlIntentId>, limit: usize) -> Vec<ControlIntent> {
+        self.state()
+            .values()
+            .filter(|intent| after.is_none_or(|after| intent.id > after) && intent.state.is_open())
+            .take(limit)
+            .cloned()
+            .collect()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
