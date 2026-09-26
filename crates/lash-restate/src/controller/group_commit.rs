@@ -45,7 +45,7 @@ where
         .scope_group_child_membership(index_key, commit.replay_key.clone())
         .await
         .map_err(|error| {
-            effect_group_engine_error("LashDurableWaitRegistry/group_child_membership", error)
+            effect_group_engine_error("LashDurableWaitIndex/group_child_membership", error)
         })?
     else {
         return Ok(Outcome::Ungrouped);
@@ -58,7 +58,7 @@ where
             },
         )
         .await
-        .map_err(|error| effect_group_engine_error("EffectGroupState/commit_child", error))?;
+        .map_err(|error| effect_group_engine_error("EffectGroupIndex/commit_child", error))?;
     Ok(match response {
         EffectGroupCommitChildResponse::Committed { commit_seq, .. } => Outcome::Committed {
             group_key,
@@ -108,7 +108,7 @@ where
     let (wait_scope, positions) = match context
         .effect_group_drain_blockers(group_key.to_string(), commit_seq)
         .await
-        .map_err(|error| effect_group_engine_error("EffectGroupState/drain_blockers", error))?
+        .map_err(|error| effect_group_engine_error("EffectGroupIndex/drain_blockers", error))?
     {
         EffectGroupDrainBlockersResponse::Admitted => return Ok(()),
         EffectGroupDrainBlockersResponse::Blocked {

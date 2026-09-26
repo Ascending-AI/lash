@@ -1203,7 +1203,7 @@ pub(super) async fn restate_workflows_and_wait_index_bind_with_required_handlers
     }));
     assert_eq!(
         wait_index_discovery.name.to_string(),
-        "LashDurableWaitRegistry"
+        "LashDurableWaitIndex"
     );
     for required in ["register", "settle", "resolve", "cancel_all", "revoke_all"] {
         assert!(

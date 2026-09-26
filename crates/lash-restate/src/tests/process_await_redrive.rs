@@ -1672,7 +1672,7 @@ pub(super) async fn durable_wait_index_rejects_an_inconsistent_key_preimage_befo
 
     let output = invoke_endpoint_body(
         &endpoint,
-        "LashDurableWaitRegistry",
+        "LashDurableWaitIndex",
         "register",
         fig1943_invocation_with_state(
             &object_key,
@@ -1698,6 +1698,144 @@ pub(super) async fn durable_wait_index_rejects_an_inconsistent_key_preimage_befo
         "terminal error must name the key-preimage inconsistency"
     );
     assert!(state.is_empty(), "terminal rejection must not write state");
+}
+
+/// FIG-3814: a wait-registry object a pre-stamp deployment left refuses typed
+/// at the stamped-state gate, before any write. Each seed is exactly what
+/// that deployment wrote: the `wait-index/v2/identity-epoch` marker (refused
+/// by name whatever its bytes), an unstamped metadata row, and a wait row of
+/// raw non-JSON bytes.
+#[tokio::test]
+pub(super) async fn pre_stamp_wait_registry_state_refuses_typed_before_any_write() {
+    let endpoint = Endpoint::builder()
+        .bind(LashDurableWaitRegistryImpl.serve())
+        .build();
+    let object_key = "fig3814-session";
+    let key = restate_await_event_key(
+        &durable_turn_scope(object_key, "fig3814-turn"), // gitleaks:allow -- synthetic workflow/turn identity fixture
+        AwaitEventWaitIdentity::tool_completion("fig3814-tool-wait"),
+    )
+    .expect("derive FIG-3814 wait key");
+
+    for (name, seeded) in [
+        (
+            "identity-epoch",
+            BTreeMap::from([("wait-index/v2/identity-epoch".to_string(), b"6".to_vec())]),
+        ),
+        (
+            "unstamped-metadata",
+            BTreeMap::from([(
+                crate::durable_wait::DURABLE_WAIT_INDEX_METADATA_KEY.to_string(),
+                serde_json::to_vec(&serde_json::json!({
+                    "revoked": false,
+                    "awakeables": []
+                }))
+                .expect("encode unstamped metadata"),
+            )]),
+        ),
+        (
+            "raw-bytes",
+            BTreeMap::from([(
+                "wait-index/v2/wait/raw".to_string(),
+                vec![0xff, 0x00, 0x13, 0x37],
+            )]),
+        ),
+    ] {
+        let mut state = seeded;
+        let before = state.clone();
+        let output = invoke_endpoint_body(
+            &endpoint,
+            "LashDurableWaitIndex",
+            "register",
+            fig1943_invocation_with_state(
+                object_key,
+                &RestateDurableWaitIndexRequest { key: key.clone() },
+                &state,
+            ),
+        )
+        .await
+        .expect("invoke register against pre-stamp state");
+        let message = restate_output_failure_message(&output)
+            .or_else(|| restate_error_message(&output))
+            .unwrap_or_else(|| panic!("{name}: pre-stamp state must fail the invocation"));
+        let typed = crate::object_state::stored_format_error_in(&message)
+            .unwrap_or_else(|| panic!("{name}: the refusal is typed: {message}"));
+        assert_eq!(
+            typed.code,
+            lash_core::RuntimeErrorCode::EngineObjectStateFormatUnsupported
+        );
+        fig1943_apply_state_commands(&mut state, &output);
+        assert_eq!(state, before, "{name}: the refusal writes no state");
+    }
+}
+
+/// FIG-3814: the payload object's pre-stamp rows — the raw payload bytes and
+/// the bare `retired` bool — refuse typed before a write lands beside them,
+/// on the exclusive handlers through the object gate and on the shared read
+/// through the stamped decode.
+#[tokio::test]
+pub(super) async fn pre_stamp_effect_group_payload_state_refuses_typed_before_any_write() {
+    let endpoint = Endpoint::builder()
+        .bind(crate::effect_group::EffectGroupPayload)
+        .build();
+    let object_key = "fig3814-group-payload";
+    let raw_payload = vec![0xff_u8, 0x00, 0x13, 0x37];
+    let put = EffectGroupPayloadPutRequest {
+        bytes: b"fig3814-payload".to_vec(),
+    };
+
+    for (name, handler, input, seeded) in [
+        // `put` meets raw pre-stamp payload bytes at the stamped read.
+        (
+            "put-raw-payload",
+            "put",
+            serde_json::to_value(&put).expect("encode put request"),
+            BTreeMap::from([("effect-group/v1/payload".to_string(), raw_payload.clone())]),
+        ),
+        // `retire` writes nothing beside raw pre-stamp bytes.
+        (
+            "retire-raw-payload",
+            "retire",
+            serde_json::Value::Null,
+            BTreeMap::from([("effect-group/v1/payload".to_string(), raw_payload.clone())]),
+        ),
+        // The shared read meets the pre-stamp bare `retired` bool.
+        (
+            "get-bare-retired",
+            "get",
+            serde_json::Value::Null,
+            BTreeMap::from([("effect-group/v1/retired".to_string(), b"true".to_vec())]),
+        ),
+        // `delete_bytes` clears nothing beside an unstamped marker.
+        (
+            "delete-unstamped-retired",
+            "delete_bytes",
+            serde_json::Value::Null,
+            BTreeMap::from([("effect-group/v1/retired".to_string(), b"true".to_vec())]),
+        ),
+    ] {
+        let mut state = seeded;
+        let before = state.clone();
+        let output = invoke_endpoint_body(
+            &endpoint,
+            "EffectGroupPayload",
+            handler,
+            fig1943_invocation_with_state(object_key, &input, &state),
+        )
+        .await
+        .expect("invoke the payload handler against pre-stamp state");
+        let message = restate_output_failure_message(&output)
+            .or_else(|| restate_error_message(&output))
+            .unwrap_or_else(|| panic!("{name}: pre-stamp state must fail the invocation"));
+        let typed = crate::object_state::stored_format_error_in(&message)
+            .unwrap_or_else(|| panic!("{name}: the refusal is typed: {message}"));
+        assert_eq!(
+            typed.code,
+            lash_core::RuntimeErrorCode::EngineObjectStateFormatUnsupported
+        );
+        fig1943_apply_state_commands(&mut state, &output);
+        assert_eq!(state, before, "{name}: the refusal writes no state");
+    }
 }
 
 #[test]
@@ -1741,7 +1879,7 @@ pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
 
     let registered = invoke_endpoint_body(
         &endpoint,
-        "LashDurableWaitRegistry",
+        "LashDurableWaitIndex",
         "register",
         fig1943_invocation_with_state(
             object_key,
@@ -1769,7 +1907,7 @@ pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
     let terminal = Resolution::Ok(serde_json::json!({ "tool_result": "complete" }));
     let resolved = invoke_endpoint_body_with_json_call_responses(
         &endpoint,
-        "LashDurableWaitRegistry",
+        "LashDurableWaitIndex",
         "resolve",
         fig1943_invocation_with_state(
             object_key,
@@ -1791,7 +1929,7 @@ pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
 
     let cancelled = invoke_endpoint_body_with_json_call_responses(
         &endpoint,
-        "LashDurableWaitRegistry",
+        "LashDurableWaitIndex",
         "cancel_all",
         fig1943_invocation_with_state(object_key, &(), &state),
         vec![
@@ -1807,7 +1945,7 @@ pub(super) async fn fig1943_cancel_all_mirrors_the_workflow_terminal_verdict() {
 
     let reregistered = invoke_endpoint_body(
         &endpoint,
-        "LashDurableWaitRegistry",
+        "LashDurableWaitIndex",
         "register",
         fig1943_invocation_with_state(object_key, &RestateDurableWaitIndexRequest { key }, &state),
     )
@@ -1829,7 +1967,7 @@ pub(super) async fn outstanding_wait_read_is_pure_and_filters_retained_control_t
 
     let mint_probe = invoke_endpoint_body(
         &endpoint,
-        "LashDurableWaitRegistry",
+        "LashDurableWaitIndex",
         "is_revoked",
         fig1943_invocation_with_state(object_key, &(), &state),
     )
@@ -1845,7 +1983,7 @@ pub(super) async fn outstanding_wait_read_is_pure_and_filters_retained_control_t
 
     let unknown = invoke_endpoint_body(
         &endpoint,
-        "LashDurableWaitRegistry",
+        "LashDurableWaitIndex",
         "outstanding",
         fig1943_invocation_with_state(object_key, &(), &state),
     )
@@ -1869,7 +2007,7 @@ pub(super) async fn outstanding_wait_read_is_pure_and_filters_retained_control_t
     .expect("derive FIG-2946 control key");
     let registered = invoke_endpoint_body(
         &endpoint,
-        "LashDurableWaitRegistry",
+        "LashDurableWaitIndex",
         "register",
         fig1943_invocation_with_state(
             object_key,
@@ -1885,7 +2023,7 @@ pub(super) async fn outstanding_wait_read_is_pure_and_filters_retained_control_t
 
     let pending = invoke_endpoint_body(
         &endpoint,
-        "LashDurableWaitRegistry",
+        "LashDurableWaitIndex",
         "outstanding",
         fig1943_invocation_with_state(object_key, &(), &state),
     )
@@ -1898,7 +2036,7 @@ pub(super) async fn outstanding_wait_read_is_pure_and_filters_retained_control_t
 
     let settled = invoke_endpoint_body(
         &endpoint,
-        "LashDurableWaitRegistry",
+        "LashDurableWaitIndex",
         "settle",
         fig1943_invocation_with_state(
             object_key,
@@ -1919,7 +2057,7 @@ pub(super) async fn outstanding_wait_read_is_pure_and_filters_retained_control_t
 
     let terminal = invoke_endpoint_body(
         &endpoint,
-        "LashDurableWaitRegistry",
+        "LashDurableWaitIndex",
         "outstanding",
         fig1943_invocation_with_state(object_key, &(), &state),
     )

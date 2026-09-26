@@ -513,7 +513,7 @@ fn store_index(ctx: &ObjectContext<'_>, record: EffectGroupStateRecord) {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct EffectGroupState;
 
-#[restate_sdk::object(name = "EffectGroupState")]
+#[restate_sdk::object(name = "EffectGroupIndex")]
 impl EffectGroupState {
     #[handler]
     async fn probe(

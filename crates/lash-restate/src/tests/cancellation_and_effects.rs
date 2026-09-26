@@ -1034,7 +1034,7 @@ pub(super) async fn restate_effect_host_checks_revocation_then_awaits_resolution
     assert!(
         requests[0]
             .url
-            .contains("/LashDurableWaitRegistry/single-call-session/")
+            .contains("/LashDurableWaitIndex/single-call-session/")
             && requests[0].url.ends_with("/is_revoked"),
         "durable wait must check the session tombstone first: {}",
         requests[0].url

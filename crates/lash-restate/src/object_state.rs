@@ -53,7 +53,10 @@ pub(crate) struct StoredValueFormats {
 }
 
 /// Read and decode one stamped object-state value, or `None` when the key
-/// carries no state.
+/// carries no state. The read is raw bytes: a value written before the
+/// envelope — a payload's bare bytes, a bare bool, unstamped JSON — fails
+/// closed as the typed "unstamped" refusal instead of trapping in the SDK's
+/// deserialization and retrying.
 pub(crate) async fn get_stamped<'ctx, T>(
     ctx: &ObjectContext<'ctx>,
     key: &'ctx str,
@@ -62,9 +65,9 @@ pub(crate) async fn get_stamped<'ctx, T>(
 where
     T: DeserializeOwned + 'static,
 {
-    ctx.get::<Json<serde_json::Value>>(key)
+    ctx.get::<Vec<u8>>(key)
         .await?
-        .map(|Json(raw)| decode_stamped_value(key, raw, formats))
+        .map(|bytes| decode_stamped_bytes(key, &bytes, formats))
         .transpose()
 }
 
@@ -77,10 +80,60 @@ pub(crate) async fn get_stamped_shared<'ctx, T>(
 where
     T: DeserializeOwned + 'static,
 {
-    ctx.get::<Json<serde_json::Value>>(key)
+    ctx.get::<Vec<u8>>(key)
         .await?
-        .map(|Json(raw)| decode_stamped_value(key, raw, formats))
+        .map(|bytes| decode_stamped_bytes(key, &bytes, formats))
         .transpose()
+}
+
+/// Refuse an object that carries any value without the stamped envelope — the
+/// object-level gate for a family that must never write beside pre-stamp
+/// state (an old identity marker, or a row written before the envelope
+/// existed). `retired_keys` name markers a pre-stamp deployment wrote that
+/// must refuse even when their bytes happen to look stamped. A fresh object
+/// holds no keys and passes; the per-key reads that follow decide whether
+/// each stamp is one this build reads.
+pub(crate) async fn gate_stamped_object_state(
+    ctx: &ObjectContext<'_>,
+    formats: &StoredValueFormats,
+    retired_keys: &[&'static str],
+) -> Result<(), TerminalError> {
+    for key in ctx.get_keys().await? {
+        if retired_keys.contains(&key.as_str()) {
+            return Err(stored_format_terminal(&key, None, formats));
+        }
+        if let Some(bytes) = ctx.get::<Vec<u8>>(&key).await?
+            && !carries_format_stamp(&bytes)
+        {
+            return Err(stored_format_terminal(&key, None, formats));
+        }
+    }
+    Ok(())
+}
+
+/// Whether `bytes` carry a format stamp at all. The version dispatch that
+/// follows decides whether the stamp is one this build reads.
+fn carries_format_stamp(bytes: &[u8]) -> bool {
+    serde_json::from_slice::<serde_json::Value>(bytes)
+        .ok()
+        .is_some_and(|raw| {
+            raw.get(FORMAT_FIELD)
+                .and_then(serde_json::Value::as_u64)
+                .is_some()
+        })
+}
+
+/// Decode one raw object-state value: bytes that are not JSON predate the
+/// envelope and are the typed "unstamped" refusal, never an SDK
+/// deserialization trap.
+fn decode_stamped_bytes<T: DeserializeOwned>(
+    key: &str,
+    bytes: &[u8],
+    formats: &StoredValueFormats,
+) -> Result<T, TerminalError> {
+    let raw = serde_json::from_slice::<serde_json::Value>(bytes)
+        .map_err(|_| stored_format_terminal(key, None, formats))?;
+    decode_stamped_value(key, raw, formats)
 }
 
 /// Write one stamped object-state value under the family's current format.
@@ -158,7 +211,7 @@ pub(crate) fn stored_format_error(
     )
 }
 
-fn stored_format_terminal(
+pub(crate) fn stored_format_terminal(
     key: &str,
     stamped: Option<u64>,
     formats: &StoredValueFormats,

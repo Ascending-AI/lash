@@ -84,7 +84,7 @@ where
     /// The group-child-bound twin of
     /// [`scoped_effect_controller`](Self::scoped_effect_controller) (ADR 0099
     /// §4, FIG-3470): every effect the returned controller serves is admitted
-    /// through `EffectGroupState/admit_semantic` under `binding`'s recorded
+    /// through `EffectGroupIndex/admit_semantic` under `binding`'s recorded
     /// child before its `ctx.run`, so a nested admission minted under a
     /// cancel-decided child refuses at the serialized index rather than
     /// executing under ambient authority.

@@ -320,7 +320,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 136);
+    assert_eq!(PostgresStorage::schema_version(), 137);
     let fixture_database_url = fixture_database_url(&database_url);
     // The committed dump was captured at the previous component; advance it
     // the way a deployment does (FIG-3816).

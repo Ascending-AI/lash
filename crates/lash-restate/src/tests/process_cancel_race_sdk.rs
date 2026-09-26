@@ -235,7 +235,7 @@ async fn assert_both_orders(wait: &str) {
                 .iter()
                 .map(|call| (call.service.as_str(), call.handler.as_str()))
                 .collect::<Vec<_>>(),
-            vec![("LashDurableWaitRegistry", "resolve")],
+            vec![("LashDurableWaitIndex", "resolve")],
             "event: the lost event wait is released"
         ),
         "process" => {

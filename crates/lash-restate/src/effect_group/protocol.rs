@@ -15,6 +15,10 @@ use super::*;
 /// stored record's format is [`EFFECT_GROUP_STATE_FORMAT_VERSION`] — a wire
 /// move that does not move the record bumps this alone.
 ///
+/// No request field carries it: the wire's check is the format registry,
+/// whose serde-shape guard fails a wire-shape edit that does not bump this
+/// constant.
+///
 /// 2: the close and the retirement release their cancel-decided wait
 /// children's waits, and admission answers such a child `CancelDecided`
 /// (FIG-3630).
@@ -22,13 +26,18 @@ use super::*;
 /// refuses a caller's read of a group closed to it (FIG-3676).
 /// 4: a recorded settlement ends the child's cancel wait as `Settled`, which
 /// the child's dispatch invocation reads as no cancel (FIG-3709).
-pub const EFFECT_GROUP_WIRE_VERSION: u32 = 4;
+/// 5: the open request's shape carries the opener's admitted scope
+/// (FIG-3780).
+pub const EFFECT_GROUP_WIRE_VERSION: u32 = 5;
 
 /// The version of what the dispatch workflow journals: its
 /// `EffectGroupDispatchRequest` input and the `ctx.run` outputs a replay
 /// trusts. A replayed journal belongs to the generation that wrote it, so
 /// this is a drain surface, not a stamped one.
-pub const EFFECT_GROUP_DISPATCH_JOURNAL_VERSION: u32 = 4;
+///
+/// 5: the journaled child request's shape carries the opener's admitted
+/// scope (FIG-3780).
+pub const EFFECT_GROUP_DISPATCH_JOURNAL_VERSION: u32 = 5;
 
 /// The stored format the group index's retained record stamps into its
 /// object-state envelope. Bump it when the record's stored shape changes;
@@ -76,8 +85,23 @@ mod tests {
     fn record_state(format: Option<u16>) -> serde_json::Value {
         let body = serde_json::to_value(EffectGroupStateRecord {
             shape_digest: "shape-digest".to_owned(),
-            lifecycle: EffectGroupLifecycle::Retired {
-                cleanup: EffectGroupCleanup::Complete,
+            lifecycle: EffectGroupLifecycle::Preparing {
+                dispatch: EffectGroupDispatchState::Unadopted,
+                live: EffectGroupStateLiveRecord {
+                    shape: EffectGroupShape {
+                        wake: lash_core::GroupWakePolicy::All,
+                        loser_disposition: LoserPolicy::RunToCompletion,
+                        replay_keys: vec!["child-0".to_owned()],
+                        wait_scope: ExecutionScope::runtime_operation("group"),
+                        membership: vec!["{}".to_owned()],
+                        opener: lash_core::AdmittedScope::turn("session", "turn"),
+                    },
+                    next_rank: 0,
+                    next_commit_seq: 0,
+                    commit_states: BTreeMap::new(),
+                    settlements: BTreeMap::new(),
+                    settled_positions: BTreeMap::new(),
+                },
             },
         })
         .expect("serialize an index record");

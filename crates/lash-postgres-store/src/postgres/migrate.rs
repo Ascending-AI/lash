@@ -77,7 +77,8 @@ struct ExpandMigration {
 /// adds `lash_sessions.pending_follow_on_json`, the frame-handoff follow-on a
 /// session head carries, and becomes 135 (FIG-3542); the third adds
 /// `lash_fleet_format`, the deployment's fleet-format row, and becomes 136
-/// (FIG-3796). Newer schema generations append to this list; steps are never
+/// (FIG-3796); the fourth restamps 136 to 137 on a vocabulary-only change
+/// (FIG-3814). Newer schema generations append to this list; steps are never
 /// removed or edited — the ledger names them permanently.
 static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
     ExpandMigration {
@@ -97,6 +98,12 @@ static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
         from_version: 135,
         to_version: 136,
         statements: FLEET_FORMAT_TABLE_DDL,
+    },
+    ExpandMigration {
+        id: "0137-runtime-error-vocabulary",
+        from_version: 136,
+        to_version: 137,
+        statements: "-- component 137 (FIG-3814): vocabulary-only change; nothing to apply.",
     },
 ];
 

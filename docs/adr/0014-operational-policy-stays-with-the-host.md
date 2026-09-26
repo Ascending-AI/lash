@@ -95,7 +95,7 @@ same boundary discipline keeps drain policy inside the host.
   reuse it) resolves every outstanding wait for the session as `Cancelled`
   while leaving the session usable. Restate deployments bind
   `LashDurableWaitWorkflow` for exact-address promise resolution and
-  `LashDurableWaitRegistry` for the durable session-to-wait index. `cancel_all`
+  `LashDurableWaitIndex` for the durable session-to-wait index. `cancel_all`
   drains the current index while permitting later registration; `revoke_all`
   drains it and persists a tombstone so session deletion also rejects future
   waits. All execution scopes use the exact workflow address, while scopes

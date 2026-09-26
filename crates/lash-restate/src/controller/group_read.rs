@@ -39,7 +39,7 @@ where
             },
         )
         .await
-        .map_err(|error| effect_group_engine_error("EffectGroupState/read_rank", error))?;
+        .map_err(|error| effect_group_engine_error("EffectGroupIndex/read_rank", error))?;
     let (record, child_replay_key) = match read {
         EffectGroupReadRankResponse::Settled {
             settlement,

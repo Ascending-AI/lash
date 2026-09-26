@@ -52,6 +52,7 @@ impl EffectGroupPayload {
         ctx: ObjectContext<'_>,
         Json(request): Json<EffectGroupPayloadPutRequest>,
     ) -> HandlerResult<Json<EffectGroupPayloadPutResponse>> {
+        object_state::gate_stamped_object_state(&ctx, &EFFECT_GROUP_PAYLOAD_FORMATS, &[]).await?;
         if object_state::get_stamped::<bool>(
             &ctx,
             PAYLOAD_RETIRED_KEY,
@@ -115,6 +116,7 @@ impl EffectGroupPayload {
 
     #[handler]
     async fn retire(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {
+        object_state::gate_stamped_object_state(&ctx, &EFFECT_GROUP_PAYLOAD_FORMATS, &[]).await?;
         object_state::set_stamped(
             &ctx,
             PAYLOAD_RETIRED_KEY,
@@ -126,6 +128,7 @@ impl EffectGroupPayload {
 
     #[handler]
     async fn delete_bytes(&self, ctx: ObjectContext<'_>) -> HandlerResult<Json<()>> {
+        object_state::gate_stamped_object_state(&ctx, &EFFECT_GROUP_PAYLOAD_FORMATS, &[]).await?;
         ctx.clear(PAYLOAD_STATE_KEY);
         Ok(Json(()))
     }

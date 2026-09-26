@@ -62,13 +62,13 @@ lash_services! {
     /// Exact-address promises and deadline timers for every await-event key.
     DurableWaitWorkflow => "LashDurableWaitWorkflow",
     /// The per-scope registry that cancels, revokes and fences a scope's waits.
-    DurableWaitRegistry => "LashDurableWaitRegistry",
+    DurableWaitRegistry => "LashDurableWaitIndex",
     /// The segment runner a process submission starts and awaits.
     ProcessWorkflow => "LashProcessWorkflow",
     /// Arms a process terminal for a caller parked on it.
     ProcessAttach => "LashProcessAttach",
     /// An effect group's lifecycle and settlement rank.
-    EffectGroupState => "EffectGroupState",
+    EffectGroupState => "EffectGroupIndex",
     /// An effect group's successful result bytes.
     EffectGroupPayload => "EffectGroupPayload",
     /// Sends an effect group's children and runs each one.

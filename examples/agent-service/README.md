@@ -147,9 +147,9 @@ workflow creates a `RestateRuntimeEffectController` and calls
 The stable chat/session id and turn id keep Restate replay and Lash final
 commit addressed to the same operation.
 
-Among the Lash-owned services are the effect-group ones: `EffectGroupState`,
+Among the Lash-owned services are the effect-group ones: `EffectGroupIndex`,
 `EffectGroupPayload`, `EffectGroupDispatch`, `LashDurableWaitWorkflow`, and
-`LashDurableWaitRegistry`. The worked HTTP path
+`LashDurableWaitIndex`. The worked HTTP path
 runs a three-child deadline group with one short sleep and two long sleeps. It
 returns the first completed settlement at rank 1, closes under `Cancel`, and
 then reads all durable ranks so the cancelled losers are visible without a

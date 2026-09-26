@@ -556,7 +556,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     {
         Box::pin(async {
             Err(TerminalError::new(
-                "EffectGroupState/probe is not registered",
+                "EffectGroupIndex/probe is not registered",
             ))
         })
     }
@@ -586,7 +586,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     {
         Box::pin(async {
             Err(TerminalError::new(
-                "EffectGroupState/open is not registered",
+                "EffectGroupIndex/open is not registered",
             ))
         })
     }
@@ -617,7 +617,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     {
         Box::pin(async {
             Err(TerminalError::new(
-                "EffectGroupState/read_rank is not registered",
+                "EffectGroupIndex/read_rank is not registered",
             ))
         })
     }
@@ -650,7 +650,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     {
         Box::pin(async {
             Err(TerminalError::new(
-                "EffectGroupState/close is not registered",
+                "EffectGroupIndex/close is not registered",
             ))
         })
     }
@@ -666,7 +666,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     where
         'ctx: 'run,
     {
-        unregistered_group_index("LashDurableWaitRegistry/group_child_membership")
+        unregistered_group_index("LashDurableWaitIndex/group_child_membership")
     }
 
     /// The §4 boundary decision for one group child's final record.
@@ -684,7 +684,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     where
         'ctx: 'run,
     {
-        unregistered_group_index("EffectGroupState/commit_child")
+        unregistered_group_index("EffectGroupIndex/commit_child")
     }
 
     /// §4's admission fence for one recorded group child (FIG-3470): the
@@ -704,7 +704,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     where
         'ctx: 'run,
     {
-        unregistered_group_index("EffectGroupState/admit_semantic")
+        unregistered_group_index("EffectGroupIndex/admit_semantic")
     }
 
     /// The lower-commit siblings that still owe their settlement seats — the
@@ -723,7 +723,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     where
         'ctx: 'run,
     {
-        unregistered_group_index("EffectGroupState/drain_blockers")
+        unregistered_group_index("EffectGroupIndex/drain_blockers")
     }
 
     /// Await an effect group's wait (its readiness or one of its ranks),

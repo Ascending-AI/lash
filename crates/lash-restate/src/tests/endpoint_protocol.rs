@@ -454,7 +454,7 @@ pub(super) fn durable_wait_index_call_response(
     service: &str,
     handler: &str,
 ) -> Option<serde_json::Value> {
-    if service != "LashDurableWaitRegistry" {
+    if service != "LashDurableWaitIndex" {
         return None;
     }
     match handler {

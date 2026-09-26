@@ -859,7 +859,7 @@ impl RestateEffectHostController {
                 "probe",
             )
             .await
-            .map_err(|error| ingress_group_error("EffectGroupState/probe", error))?;
+            .map_err(|error| ingress_group_error("EffectGroupIndex/probe", error))?;
         // Opener liveness is this process's to judge; the endpoint's is routing.
         let local = self.group_executors.get().and_then(|executors| {
             (group.children().iter()).position(|child| executors.executor_for(child).is_none())
@@ -900,7 +900,7 @@ impl RestateEffectHostController {
                 },
             )
             .await
-            .map_err(|error| ingress_group_error("EffectGroupState/open", error))?;
+            .map_err(|error| ingress_group_error("EffectGroupIndex/open", error))?;
         match opened {
             EffectGroupOpenResponse::OpenedFresh | EffectGroupOpenResponse::ReopenedPreparing => {
                 ingress
@@ -1061,7 +1061,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                 },
             )
             .await
-            .map_err(|error| ingress_group_error("EffectGroupState/read_rank", error))?;
+            .map_err(|error| ingress_group_error("EffectGroupIndex/read_rank", error))?;
         if matches!(read, EffectGroupReadRankResponse::NotSettled) {
             let scope = ExecutionScope::runtime_operation(handle.group_key());
             let request = rank_wait_request(&scope, handle.group_key(), rank)?;
@@ -1119,7 +1119,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                     },
                 )
                 .await
-                .map_err(|error| ingress_group_error("EffectGroupState/read_rank", error))?;
+                .map_err(|error| ingress_group_error("EffectGroupIndex/read_rank", error))?;
         }
         let record = match read {
             EffectGroupReadRankResponse::Settled { settlement, .. } => settlement,
@@ -1203,7 +1203,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                 },
             )
             .await
-            .map_err(|error| ingress_group_error("EffectGroupState/read_rank", error))?;
+            .map_err(|error| ingress_group_error("EffectGroupIndex/read_rank", error))?;
         let (record, child_replay_key) = match read {
             EffectGroupReadRankResponse::Settled {
                 settlement,
@@ -1275,7 +1275,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                 &EffectGroupCloseRequest { disposition },
             )
             .await
-            .map_err(|error| ingress_group_error("EffectGroupState/close", error))?;
+            .map_err(|error| ingress_group_error("EffectGroupIndex/close", error))?;
         match response {
             EffectGroupCloseResponse::Closed | EffectGroupCloseResponse::AlreadyClosed => Ok(()),
             EffectGroupCloseResponse::WidenRefused => Err(group_shape_error(format!(
@@ -1326,7 +1326,7 @@ impl RuntimeEffectController for RestateEffectHostController {
             )
             .await
             .map_err(|error| {
-                ingress_group_error("LashDurableWaitRegistry/group_child_membership", error)
+                ingress_group_error("LashDurableWaitIndex/group_child_membership", error)
             })?;
         let Some(group_key) = membership else {
             return Ok(Outcome::Ungrouped);
@@ -1341,7 +1341,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                 },
             )
             .await
-            .map_err(|error| ingress_group_error("EffectGroupState/commit_child", error))?;
+            .map_err(|error| ingress_group_error("EffectGroupIndex/commit_child", error))?;
         Ok(match response {
             crate::effect_group::EffectGroupCommitChildResponse::Committed {
                 commit_seq, ..
@@ -1398,7 +1398,7 @@ impl RuntimeEffectController for RestateEffectHostController {
                 &crate::effect_group::EffectGroupDrainBlockersRequest { commit_seq },
             )
             .await
-            .map_err(|error| ingress_group_error("EffectGroupState/drain_blockers", error))?
+            .map_err(|error| ingress_group_error("EffectGroupIndex/drain_blockers", error))?
         {
             crate::effect_group::EffectGroupDrainBlockersResponse::Admitted => return Ok(()),
             crate::effect_group::EffectGroupDrainBlockersResponse::Blocked {
@@ -1481,7 +1481,7 @@ mod tests {
     fn service_call_error(status: u16) -> crate::RestateHttpError {
         crate::RestateHttpError::Status {
             operation: "Restate object call",
-            url: "https://restate.invalid/EffectGroupState/group/probe".to_string(),
+            url: "https://restate.invalid/EffectGroupIndex/group/probe".to_string(),
             status,
             body: "not found".to_string(),
         }
@@ -1489,15 +1489,15 @@ mod tests {
 
     #[test]
     fn effect_group_ingress_404_is_restate_service_unregistered() {
-        let error = ingress_group_error("EffectGroupState/probe", service_call_error(404));
+        let error = ingress_group_error("EffectGroupIndex/probe", service_call_error(404));
 
         assert_eq!(error.code, RuntimeErrorCode::EngineServiceUnregistered);
-        assert!(error.message.contains("EffectGroupState/probe"));
+        assert!(error.message.contains("EffectGroupIndex/probe"));
     }
 
     #[test]
     fn effect_group_ingress_non_registration_failure_stays_a_shape_error() {
-        let error = ingress_group_error("EffectGroupState/probe", service_call_error(503));
+        let error = ingress_group_error("EffectGroupIndex/probe", service_call_error(503));
 
         assert_eq!(error.code, RuntimeErrorCode::RuntimeEffectGroupShape);
     }

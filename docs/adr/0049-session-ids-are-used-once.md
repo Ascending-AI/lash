@@ -150,7 +150,7 @@ journal file's leftovers — rows under any fence, and journal-file process
 fences of ids the registry already holds — before the first admission.
 
 The fence and the registry can also be two different stores. The in-process
-host keeps a fence set, and Restate keeps a per-scope `LashDurableWaitRegistry`
+host keeps a fence set, and Restate keeps a per-scope `LashDurableWaitIndex`
 object that is revoked on retirement. Both bind to the registry
 (`ProcessRegistrar::bind_effect_host`, done by `LashCore::build`), and the
 binding runs both ways: the registry reinstates the host's fence from the same
@@ -179,10 +179,10 @@ terms of ADR 0023.
 
 Quiescence is measured on durable ground: an executing effect and a live
 child of an open effect group count as live on every host, and on Restate
-both are entries of the scope's `LashDurableWaitRegistry` (`begin_effect` /
+both are entries of the scope's `LashDurableWaitIndex` (`begin_effect` /
 `end_effect` around every scoped effect the handler-side controller runs,
 `record_group` when a group opens; a recorded group is live while its
-`EffectGroupState` reports unsettled children). Memory waits are not durable:
+`EffectGroupIndex` reports unsettled children). Memory waits are not durable:
 a wait whose waiter was dropped before resolution stays a live entry in every
 durable index and refuses retirement there, but the in-process host has no
 record of a dropped waiter and retires the scope. That is the one

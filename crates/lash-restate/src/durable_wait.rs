@@ -144,6 +144,10 @@ pub(crate) const DURABLE_WAIT_REGISTRY_FORMATS: StoredValueFormats = StoredValue
     upcast_n1: &[],
 };
 pub(crate) const DURABLE_WAIT_INDEX_METADATA_KEY: &str = "wait-index/v2/metadata";
+/// State keys a pre-stamp deployment wrote that mark the object as one this
+/// build must refuse before any effect — the deleted identity-epoch marker
+/// refuses by name whatever its bytes look like.
+const RETIRED_DURABLE_WAIT_STATE_KEYS: &[&str] = &["wait-index/v2/identity-epoch"];
 const DURABLE_WAIT_INDEX_WAIT_PREFIX: &str = "wait-index/v2/wait/";
 const DURABLE_WAIT_INDEX_RESOLUTION_PREFIX: &str = "wait-index/v2/resolution/";
 /// An effect executing under the scope inside a handler, keyed by replay
@@ -337,7 +341,7 @@ pub struct RestateDurableWaitResolveRequest {
     pub resolution: Resolution,
 }
 
-/// What `LashDurableWaitRegistry/resolve` answers: the promise's first-writer
+/// What `LashDurableWaitIndex/resolve` answers: the promise's first-writer
 /// outcome, or the typed refusal a completion delivered to a cancel-decided
 /// group child's key earns (ADR 0099 §4, W17).
 ///
@@ -765,8 +769,8 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
         // A workflow that wakes after a deployment upgrade replays the old
         // registration command, so this settle call is the first new command
         // a previously parked invocation can execute. Fully parked v2
-        // invocations never reach it; the module and migration docs therefore
-        // require a pre-cutover drain/purge rather than claiming self-healing.
+        // invocations never reach it; pre-stamp object state is instead
+        // refused typed at the registry's stamped-state gate.
         let settle = ctx
             .object_client::<LashDurableWaitRegistryClient>(index_key)
             .settle(Json(RestateDurableWaitSettleRequest {
@@ -811,7 +815,11 @@ impl LashDurableWaitWorkflow for LashDurableWaitWorkflowImpl {
 ///
 /// Object serialization makes registration, cancellation, and revocation atomic for one
 /// session.
+// The registered service keeps its `LashDurableWaitIndex` name (FIG-3814):
+// the trait flavor of the object macro takes the name from `#[name]`, not
+// from the macro's own arguments.
 #[restate_sdk::object]
+#[name = "LashDurableWaitIndex"]
 pub trait LashDurableWaitRegistry {
     async fn is_revoked(request: Json<()>) -> HandlerResult<Json<bool>>;
     /// Read registered waits that have no retained terminal.
@@ -973,10 +981,19 @@ pub(crate) fn durable_wait_address_from_state_key(
 /// Restate object state is not part of an invocation's replayed journal: these
 /// index handlers are short-lived single calls, so changing their command
 /// sequence does not alter an in-flight multi-call journal. Object state does,
-/// however, survive a deployment upgrade.
+/// however, survive a deployment upgrade, so a pre-stamp object — one holding
+/// the old `wait-index/v2/identity-epoch` marker or any value without the
+/// envelope's format stamp — is refused typed before this write can plant
+/// fresh metadata beside it.
 async fn load_durable_wait_index_metadata(
     ctx: &ObjectContext<'_>,
 ) -> Result<RestateDurableWaitIndexMetadata, TerminalError> {
+    object_state::gate_stamped_object_state(
+        ctx,
+        &DURABLE_WAIT_REGISTRY_FORMATS,
+        RETIRED_DURABLE_WAIT_STATE_KEYS,
+    )
+    .await?;
     if let Some(metadata) = object_state::get_stamped::<RestateDurableWaitIndexMetadata>(
         ctx,
         DURABLE_WAIT_INDEX_METADATA_KEY,
@@ -1004,6 +1021,12 @@ async fn load_durable_wait_index_metadata(
 async fn read_durable_wait_index_metadata(
     ctx: &ObjectContext<'_>,
 ) -> Result<Option<RestateDurableWaitIndexMetadata>, TerminalError> {
+    object_state::gate_stamped_object_state(
+        ctx,
+        &DURABLE_WAIT_REGISTRY_FORMATS,
+        RETIRED_DURABLE_WAIT_STATE_KEYS,
+    )
+    .await?;
     if let Some(metadata) = object_state::get_stamped::<RestateDurableWaitIndexMetadata>(
         ctx,
         DURABLE_WAIT_INDEX_METADATA_KEY,

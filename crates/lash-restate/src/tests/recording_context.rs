@@ -476,7 +476,7 @@ impl<'ctx> RestateControllerContext<'ctx> for Arc<RecordingContext> {
     {
         let answer = self.group_rank_read.lock_recover().clone();
         Box::pin(async move {
-            answer.ok_or_else(|| TerminalError::new("EffectGroupState/read_rank is not registered"))
+            answer.ok_or_else(|| TerminalError::new("EffectGroupIndex/read_rank is not registered"))
         })
     }
 
