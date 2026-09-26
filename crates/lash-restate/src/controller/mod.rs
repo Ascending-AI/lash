@@ -25,6 +25,7 @@ use turn_cancel_request::{
     restate_group_turn_cancel_wait_request, restate_process_turn_cancel_wait_request,
 };
 
+use lash_core::facade_support::trace_context_for_runtime_effect_invocation;
 use std::fmt;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex, Weak};
@@ -348,7 +349,8 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
             return;
         };
         let context = if let Some(invocation) = invocation {
-            let context = trace_context_for_invocation(&trace.base_context, invocation);
+            let context =
+                trace_context_for_runtime_effect_invocation(trace.base_context.clone(), invocation);
             *trace
                 .current_context
                 .lock()
@@ -378,19 +380,9 @@ impl<'ctx, C> RestateRuntimeEffectController<'ctx, C> {
             .current_context
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(
-            trace_context_for_invocation(&trace.base_context, invocation),
+            trace_context_for_runtime_effect_invocation(trace.base_context.clone(), invocation),
         );
     }
-}
-
-fn trace_context_for_invocation(
-    base_context: &lash_trace::TraceContext,
-    invocation: &RuntimeEffectInvocation,
-) -> lash_trace::TraceContext {
-    lash_core::facade_support::trace_context_for_runtime_effect_invocation(
-        base_context.clone(),
-        invocation,
-    )
 }
 
 impl<C> fmt::Debug for RestateRuntimeEffectController<'_, C> {
@@ -734,6 +726,13 @@ impl<'ctx, C> RuntimeEffectController for RestateRuntimeEffectController<'ctx, C
 where
     C: RestateControllerContext<'ctx>,
 {
+    fn scoped_for<'run>(
+        &'run self,
+        admitted: lash_core::AdmittedScope,
+    ) -> Option<Result<lash_core::ScopedEffectController<'run>, RuntimeError>> {
+        Some(self.scoped_effect_controller(admitted))
+    }
+
     fn owns_commit_backpressure(&self) -> bool {
         true
     }
@@ -1715,8 +1714,10 @@ mod identity_trace_tests {
             address: parent_address.clone(),
         }));
 
-        let caused =
-            trace_context_for_invocation(&lash_trace::TraceContext::default(), &invocation);
+        let caused = trace_context_for_runtime_effect_invocation(
+            lash_trace::TraceContext::default(),
+            &invocation,
+        );
         assert_eq!(
             caused.parent_graph_node_id.as_deref(),
             Some(parent_address.graph_key().as_str())
@@ -1727,7 +1728,7 @@ mod identity_trace_tests {
             run_id: Some("restate-host-run".to_string()),
             ..Default::default()
         };
-        let explicit = trace_context_for_invocation(&explicit, &invocation);
+        let explicit = trace_context_for_runtime_effect_invocation(explicit.clone(), &invocation);
         assert_eq!(
             explicit.parent_graph_node_id.as_deref(),
             Some("host:explicit-parent")

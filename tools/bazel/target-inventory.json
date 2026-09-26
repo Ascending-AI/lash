@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 174,
+  "cargo_target_count": 175,
   "feature_lane_units": [
     {
       "features": [
@@ -16519,7 +16519,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 233,
+  "generated_label_count": 234,
   "packages": [
     {
       "declared_features": [
@@ -18199,6 +18199,12 @@
           "tags": []
         },
         {
+          "cargo": "handler_controller_turn",
+          "kind": "test",
+          "label": "//crates/lash-restate-test:handler_controller_turn__test",
+          "tags": []
+        },
+        {
           "cargo": "process_crash_replay",
           "kind": "test",
           "label": "//crates/lash-restate-test:process_crash_replay__test",
@@ -18259,6 +18265,7 @@
           "//crates/lash-restate-test:admission_invariant__test",
           "//crates/lash-restate-test:drop__test",
           "//crates/lash-restate-test:follow_on_crash_replay__test",
+          "//crates/lash-restate-test:handler_controller_turn__test",
           "//crates/lash-restate-test:lash-restate-test__unit_test",
           "//crates/lash-restate-test:process_crash_replay__test",
           "//crates/lash-restate-test:server_semantics__test",
