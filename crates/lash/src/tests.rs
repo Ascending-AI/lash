@@ -212,6 +212,8 @@ impl SnapshotStore {
 
 lash_core::impl_noop_attachment_manifest!(SnapshotStore);
 
+lash_core::impl_current_fleet_format!(SnapshotStore);
+
 #[async_trait]
 impl lash_core::SessionCommitStore for SnapshotStore {
     async fn raise_pending_follow_on_attempts(
@@ -826,6 +828,8 @@ struct BoundSessionStore {
 }
 
 lash_core::impl_noop_attachment_manifest!(BoundSessionStore);
+
+lash_core::impl_current_fleet_format!(BoundSessionStore);
 
 #[async_trait]
 impl lash_core::SessionCommitStore for BoundSessionStore {
@@ -2379,7 +2383,7 @@ mod harness;
 pub(crate) use harness::{
     DecoratedBackend, backend_work_facets_with_budget, explicit_ephemeral_facets,
     explicit_ephemeral_facets_with_backend_work, explicit_ephemeral_facets_with_budget,
-    memory_backend, memory_backend_with_clock, mock_model_spec, model_spec,
+    memory_backend, memory_backend_with_clock, mock_model_spec, model_spec, restate_double,
     run_async_test_on_stack_budget, run_async_test_on_stack_size, sqlite_queued_run_count,
     sqlite_queued_work_claims, sqlite_turn_input_states,
 };
@@ -2404,6 +2408,7 @@ mod rebuild_conformance;
 mod replay_park;
 #[cfg(feature = "rlm")]
 mod rlm_restore_idempotence;
+mod send_handle;
 #[cfg(feature = "rlm")]
 mod stack_budget;
 mod standard_compaction_persistence;

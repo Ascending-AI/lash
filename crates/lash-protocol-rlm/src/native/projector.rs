@@ -53,6 +53,7 @@ pub(crate) fn build_rlm_preamble_with_dialect(
         tool_names_fingerprint,
         execution_prompt: Arc::from(execution),
         prompt_contributions,
+        writer_formats: input.writer_formats,
     }
 }
 

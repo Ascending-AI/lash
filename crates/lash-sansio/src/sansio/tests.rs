@@ -42,6 +42,7 @@ fn test_config(protocol_driver: Arc<dyn ProtocolDriverHandle>) -> TurnMachineCon
         agent_frame_id: "test-frame".to_string(),
         turn_id: TurnId::from("test-turn"),
         emit_llm_trace: false,
+        writer_formats: crate::build_newest_writer_formats(),
         termination: (),
     }
 }

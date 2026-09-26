@@ -492,6 +492,7 @@ jobs:
           python3 scripts/test_check_substrate_boundary.py
           python3 scripts/test_check_law_execution_receipts.py
           python3 scripts/test_check_test_shard_coverage.py
+          python3 scripts/test_check_writer_stamps.py
           python3 scripts/test_check_transcript_diff.py
           python3 scripts/test_toolchain_canary.py
           python3 scripts/test_main_ci_policy.py
@@ -1484,6 +1485,9 @@ jobs:
       - name: Check upgrade-path declarations
         run: python3 scripts/check_upgrade_paths.py
 
+      - name: Check fleet-format writer stamps
+        run: python3 scripts/check_writer_stamps.py
+
   unicode-tests:
     name: Test deferred Unicode suites
     runs-on: ubuntu-24.04
@@ -1807,7 +1811,10 @@ jobs:
         with:
           node-version: 25.2.1
 
+      # The test bounds each session itself (a hung session fails naming its
+      # seed); this step budget bounds the compile plus the ~3-minute run.
       - name: Run generated TypeScript sessions against Node
+        timeout-minutes: 30
         run: |
           set -euo pipefail
           start=$(( 1000000 + (GITHUB_RUN_ID % 1000000) * 1000 ))

@@ -555,14 +555,6 @@ pub enum TurnOutcome {
         initial_nodes: Vec<SessionAppendNode>,
     },
     Stopped(TurnStop),
-    /// No turn ran: the direct turn's accepted input sits behind `ahead`
-    /// earlier admissions, more than one claim absorbs, so it stays queued in
-    /// arrival order and the queued-work drain answers it (ADR 0069 §6).
-    /// Nothing was dropped and nothing was committed; retrying would admit
-    /// the words a second time.
-    Queued {
-        ahead: u64,
-    },
 }
 
 impl TurnOutcome {

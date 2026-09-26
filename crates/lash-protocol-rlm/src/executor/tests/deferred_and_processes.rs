@@ -472,12 +472,12 @@ pub(super) fn deferred_resolution_record_is_scoped_to_the_exec_code_link() {
 
         let snapshot = hydrate_snapshot(
             state
-                .snapshot_execution_state()
+                .snapshot_execution_state(lash_core::FleetFormat::current())
                 .expect("snapshot components"),
         );
         let mut restored = RlmExecutionState::new();
         restored
-            .restore_execution_state(&snapshot)
+            .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
             .expect("restore");
 
         // Same stable link: both positive and negative outcomes survive the

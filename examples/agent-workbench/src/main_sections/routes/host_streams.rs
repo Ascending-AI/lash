@@ -102,8 +102,7 @@ pub(crate) async fn session_observations_with_shutdown(
         .authorize(WorkbenchAuthorizationAction::Observe {
             session_id: session_id.clone(),
         })?;
-    let session = state
-        .open_session_for_observation(&session_id)
+    let session = Box::pin(state.open_session_for_observation(&session_id))
         .await
         .map_err(|error| state.session_admission_error(&session_id, "api.observations", error))?;
     let cursor = match query

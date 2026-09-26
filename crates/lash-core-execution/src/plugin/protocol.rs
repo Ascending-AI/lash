@@ -140,17 +140,28 @@ impl ProtocolSessionRestoreView {
 /// internals.
 pub struct ProtocolSessionContext<'a> {
     session_id: &'a SessionId,
+    fleet_format: crate::FleetFormat,
 }
 
 impl<'a> ProtocolSessionContext<'a> {
-    pub fn new(_session: &'a mut crate::Session, session_id: &'a SessionId) -> Self {
-        Self { session_id }
+    pub fn new(session: &'a mut crate::Session, session_id: &'a SessionId) -> Self {
+        Self {
+            session_id,
+            fleet_format: session.fleet_format(),
+        }
     }
 
     /// ID of the session being initialized/restored. Equivalent to the
     /// `session_id` previously passed as a separate argument.
     pub fn session_id(&self) -> &str {
         self.session_id
+    }
+
+    /// The `F` the bound session's store recorded (FIG-3796): protocol
+    /// plugins stamp durable envelopes at `F`'s writer version, never the bare
+    /// build constant.
+    pub fn fleet_format(&self) -> crate::FleetFormat {
+        self.fleet_format
     }
 }
 
@@ -205,11 +216,21 @@ pub enum ProtocolLlmCallAction {
 /// runtime internals.
 pub struct ProtocolRuntimeContext<'a> {
     options: &'a mut crate::ProtocolTurnOptions,
+    /// The `F` the bound session's store recorded: options a materialization
+    /// records here are published durably, so the setters restamp them with
+    /// the fleet's writer version (FIG-3796).
+    fleet_format: crate::FleetFormat,
 }
 
 impl<'a> ProtocolRuntimeContext<'a> {
-    pub fn new(options: &'a mut crate::ProtocolTurnOptions) -> Self {
-        Self { options }
+    pub fn new(
+        options: &'a mut crate::ProtocolTurnOptions,
+        fleet_format: crate::FleetFormat,
+    ) -> Self {
+        Self {
+            options,
+            fleet_format,
+        }
     }
 
     /// The durable protocol turn options currently recorded on the session.
@@ -227,13 +248,13 @@ impl<'a> ProtocolRuntimeContext<'a> {
     /// commit before any queued command work. Mid-run changes go through the
     /// commanded `LashRuntime::set_protocol_turn_options` write instead.
     pub fn set_protocol_turn_options(&mut self, options: crate::ProtocolTurnOptions) {
-        *self.options = options;
+        *self.options = options.restamped_for_fleet(self.fleet_format);
     }
 
     /// Record the durable protocol turn options this materialization resolved, mirrored to
     /// **every** agent frame.
     pub fn set_protocol_turn_options_all_frames(&mut self, options: crate::ProtocolTurnOptions) {
-        *self.options = options;
+        *self.options = options.restamped_for_fleet(self.fleet_format);
     }
 }
 
@@ -375,7 +396,8 @@ mod tests {
             serde_json::json!({ "termination": "initial" }),
         );
         {
-            let mut context = ProtocolRuntimeContext::new(&mut options);
+            let mut context =
+                ProtocolRuntimeContext::new(&mut options, crate::FleetFormat::current());
             assert_eq!(
                 context.protocol_turn_options().payload,
                 serde_json::json!({ "termination": "initial" })

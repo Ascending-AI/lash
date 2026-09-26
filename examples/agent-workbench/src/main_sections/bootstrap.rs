@@ -244,15 +244,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         process_event_tx,
         worker_fault_tx,
     )) as Arc<dyn lash::process::ProcessEventSink>;
-    let queued_run_handle = Arc::new(WorkbenchQueuedWorkSubmitter {
-        sessions: sessions.clone(),
-        store_factory: Arc::clone(&core_store_factory),
-        restate_ingress_url: restate_ingress_url.clone(),
-        restate_http: restate_http.clone(),
-        active_turns: active_turns.clone(),
-    });
-    let queued_work_driver = lash::runtime::NativeQueuedWork::new(queued_run_handle);
-
     // One Restate backend over the store set: the engine host journals the
     // turns' effects, runs the background processes, whose appended events
     // reach the sink best-effort after their durable write, and drives each
@@ -399,7 +390,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             trace_sink: Some(Arc::clone(&trace_sink)),
             lashlang_execution,
             event_tx,
-            queued_work_driver,
             restate_ingress_url,
             restate_admin_url,
             restate_http,
@@ -410,6 +400,10 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
             approvals,
         };
         reconcile_decided_approvals(&state).await;
+        // The turns a previous incarnation was following are settled by the
+        // session's engine whoever follows them; this process takes them up.
+        restate::resume_turn_followers(&state).await;
+        restate::watch_session_roots(&state, &state.current_session_id());
         emit_workbench_trace(
             &state.trace_sink,
             None,
@@ -506,10 +500,6 @@ pub(crate) async fn async_main() -> AnyhowResult<()> {
         .route(
             "/api/queued-work/{batch_id}",
             delete(cancel_queued_work_batch),
-        )
-        .route(
-            "/api/queued-work/{batch_id}/run",
-            post(run_queued_work_batch),
         )
         .route("/api/work/{process_id}/cancel", post(cancel_work))
         .route("/api/work/{process_id}/await", get(await_work))

@@ -1,9 +1,10 @@
 {
   "seed": 74,
   "probe": [
-    "beta",
+    "alpha",
     "delta",
     "field",
+    "gamma",
     "i",
     "item",
     "key",
@@ -27,9 +28,10 @@
           "false 12 true"
         ],
         "probes": {
-          "beta": "unbound",
+          "alpha": "unbound",
           "delta": "unbound",
           "field": "unbound",
+          "gamma": "unbound",
           "i": "unbound",
           "item": "unbound",
           "key": "unbound",
@@ -52,9 +54,10 @@
         "outcome": "rejected",
         "prints": [],
         "probes": {
-          "beta": "unbound",
+          "alpha": "unbound",
           "delta": "unbound",
           "field": "unbound",
+          "gamma": "unbound",
           "i": "unbound",
           "item": "unbound",
           "key": "unbound",
@@ -78,9 +81,10 @@
           "{\"b\":[49],\"g\":0,\"f\":0} {\"b\":[49],\"g\":0,\"f\":0}"
         ],
         "probes": {
-          "beta": "unbound",
+          "alpha": "unbound",
           "delta": "unbound",
           "field": "unbound",
+          "gamma": "unbound",
           "i": "unbound",
           "item": "unbound",
           "key": "unbound",
@@ -97,7 +101,7 @@
       }
     },
     {
-      "source": "const omega = (item) => { const scaled = ((true && true) ? 10 : 11); return 12; };\nconsole.log(omega(phi?.g));\nconst delta = new URLSearchParams({ q: 'a b', r: '+' });\nphi.f += 10;\nlet turn1 = 0;\ndo {\n  turn1++;\n  for (const [key, value] of delta) {\n    console.info(key);\n    let psi = /a(b*)/g;\n    if (false) { break; }\n  }\n  for (let i = 0; i < 3; i++) {\n    const psi = { ...{ c: delta.toString() }, a: [], e: true };\n  }\n} while (turn1 < 3);\n{\n  let turn2 = 0;\n  while (turn2 < 3) {\n    turn2++;\n    phi.h = true;\n  }\n  for (const field in phi) {\n    console.log(field);\n    const beta = { ...{ c: [(3 * 7)] } };\n  }\n}\n",
+      "source": "const omega = (item) => { const scaled = ((true && true) ? 10 : 11); return 12; };\nconsole.log(omega(phi?.g));\nconst delta = new URLSearchParams({ q: 'a b', r: '+' });\nphi.f += 10;\nlet turn1 = 0;\ndo {\n  turn1++;\n  for (const [key, value] of delta) {\n    console.info(key);\n    let gamma = /a(b*)/g;\n    if (false) { break; }\n  }\n  for (let i = 0; i < 3; i++) {\n    const psi = { ...{ c: delta.toString() }, a: [], e: true };\n  }\n} while (turn1 < 3);\n{\n  let turn2 = 0;\n  while (turn2 < 3) {\n    turn2++;\n    phi.h = true;\n  }\n  for (const field in phi) {\n    console.log(field);\n    const alpha = { ...{ c: [(3 * 7)] } };\n  }\n}\n",
       "node": {
         "outcome": "normal",
         "prints": [
@@ -114,9 +118,10 @@
           "h"
         ],
         "probes": {
-          "beta": "unbound",
+          "alpha": "unbound",
           "delta": "object {}",
           "field": "unbound",
+          "gamma": "unbound",
           "i": "unbound",
           "item": "unbound",
           "key": "unbound",

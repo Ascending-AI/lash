@@ -19,6 +19,12 @@ impl CommitRetryStore {
 
 lash_core::impl_noop_attachment_manifest!(CommitRetryStore);
 
+impl lash_core::FleetFormatStore for CommitRetryStore {
+    fn fleet_format(&self) -> lash_core::FleetFormat {
+        self.inner.fleet_format()
+    }
+}
+
 // Pass-through wrapper over the shared in-memory recovery store; every
 // segment delegates to `inner`.
 #[async_trait::async_trait]

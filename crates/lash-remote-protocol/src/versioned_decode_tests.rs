@@ -64,7 +64,6 @@ fn streamed_turn_request() -> RemoteTurnRequest {
     RemoteTurnRequest {
         session_id: SessionId::from("session-stream"),
         turn_id: TurnId::from("turn-stream"),
-        idempotency_key: None,
         input: streamed_turn_input(),
         tool_grants: Vec::new(),
         metadata: std::collections::HashMap::new(),

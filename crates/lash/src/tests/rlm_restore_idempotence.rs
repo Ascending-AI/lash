@@ -183,8 +183,12 @@ fn snapshot_globals(
         };
         (global.as_str(), body)
     });
-    let (reloaded, _) = lashlang::State::from_durable_parts(&root.state_header, fragments)
-        .expect("reload the persisted globals");
+    let (reloaded, _) = lashlang::State::from_durable_parts(
+        &root.state_header,
+        fragments,
+        lash_core::FleetFormat::current(),
+    )
+    .expect("reload the persisted globals");
     let value = root
         .globals
         .contains_key(name)
@@ -550,11 +554,11 @@ async fn run_owed_follow_on(
             turn_scope(runtime, &TurnId::from(held_turn)),
         )
         .await
-        .unwrap_or_else(|error| panic!("{label}: the held turn is admitted: {error:?}"));
-    assert!(
-        matches!(held.outcome, TurnOutcome::Queued { .. }),
-        "{label}: a direct turn waits behind the owed follow-on: {:?}",
-        held.outcome
+        .expect_err("the held turn waits behind the owed follow-on");
+    assert_eq!(
+        held.code,
+        lash_core::RuntimeErrorCode::QueuedRunPending,
+        "{label}: a direct turn waits behind the owed follow-on: {held}"
     );
     let view = runtime
         .read_view()
@@ -1439,7 +1443,7 @@ async fn next_commit_after(backend: &Backend, rolled_back_append: bool) -> NextC
         .count();
     let refs = commit
         .checkpoint
-        .manifest()
+        .manifest(lash_core::FleetFormat::current())
         .expect("manifest")
         .components
         .into_iter()

@@ -82,9 +82,12 @@ impl ProcessEffectSummaryOccurrence {
         outcome_class: ProcessEffectOutcomeClass,
         code: Option<lash_sansio::FailureCode>,
         replay_key: impl Into<String>,
+        fleet_format: crate::FleetFormat,
     ) -> Self {
         Self {
-            vocabulary_version: PROCESS_EVENT_VOCABULARY_VERSION,
+            vocabulary_version: fleet_format.writer_version(lash_core_store::surface_format!(
+                PROCESS_EVENT_VOCABULARY_VERSION
+            )),
             node_id: node_id.into(),
             occurrence,
             operation: operation.into(),
@@ -100,8 +103,33 @@ impl ProcessEffectSummaryOccurrence {
         (1..=PROCESS_EFFECT_OCCURRENCE_CAP).contains(&occurrence)
     }
 
-    pub fn decode(payload: serde_json::Value) -> Result<Self, ProcessEffectSummaryError> {
-        require_vocabulary_version(&payload)?;
+    /// `fleet_format` is the `F` the bound store recorded: the payload admits
+    /// the pair `{fleet's writer version, this build's newest}` — ADR 0106 §2's
+    /// `[N-1, N]` window (FIG-3796) — and an admitted older payload climbs to
+    /// the newest through the surface's `RecordUpcaster` hooks.
+    pub fn decode(
+        mut payload: serde_json::Value,
+        fleet_format: crate::FleetFormat,
+    ) -> Result<Self, ProcessEffectSummaryError> {
+        let window = fleet_format.read_window(lash_core_store::surface_format!(
+            PROCESS_EVENT_VOCABULARY_VERSION
+        ));
+        let version = require_vocabulary_version(&payload, window)?;
+        if version != window.newest() {
+            lash_core_store::store::upcast_json_record(
+                "process effect outcome",
+                lash_core_store::surface_format!(PROCESS_EVENT_VOCABULARY_VERSION),
+                version,
+                window.newest(),
+                &mut payload,
+            )
+            .map_err(
+                |_| ProcessEffectSummaryError::UnsupportedVocabularyVersion {
+                    expected: window.newest(),
+                    actual: u64::from(version),
+                },
+            )?;
+        }
         let outcome: Self =
             serde_json::from_value(payload).map_err(ProcessEffectSummaryError::InvalidPayload)?;
         if !Self::is_within_cap(outcome.occurrence) {
@@ -156,16 +184,44 @@ pub struct ProcessEffectOmissions {
 }
 
 impl ProcessEffectOmissions {
-    pub fn new(nodes: BTreeMap<String, ProcessEffectOmittedCounts>) -> Self {
+    pub fn new(
+        nodes: BTreeMap<String, ProcessEffectOmittedCounts>,
+        fleet_format: crate::FleetFormat,
+    ) -> Self {
         Self {
-            vocabulary_version: PROCESS_EVENT_VOCABULARY_VERSION,
+            vocabulary_version: fleet_format.writer_version(lash_core_store::surface_format!(
+                PROCESS_EVENT_VOCABULARY_VERSION
+            )),
             occurrence_cap: PROCESS_EFFECT_OCCURRENCE_CAP,
             nodes,
         }
     }
 
-    pub fn decode(payload: serde_json::Value) -> Result<Self, ProcessEffectSummaryError> {
-        require_vocabulary_version(&payload)?;
+    /// The fleet-window counterpart of
+    /// [`ProcessEffectSummaryOccurrence::decode`].
+    pub fn decode(
+        mut payload: serde_json::Value,
+        fleet_format: crate::FleetFormat,
+    ) -> Result<Self, ProcessEffectSummaryError> {
+        let window = fleet_format.read_window(lash_core_store::surface_format!(
+            PROCESS_EVENT_VOCABULARY_VERSION
+        ));
+        let version = require_vocabulary_version(&payload, window)?;
+        if version != window.newest() {
+            lash_core_store::store::upcast_json_record(
+                "process effect omissions",
+                lash_core_store::surface_format!(PROCESS_EVENT_VOCABULARY_VERSION),
+                version,
+                window.newest(),
+                &mut payload,
+            )
+            .map_err(
+                |_| ProcessEffectSummaryError::UnsupportedVocabularyVersion {
+                    expected: window.newest(),
+                    actual: u64::from(version),
+                },
+            )?;
+        }
         let omissions: Self =
             serde_json::from_value(payload).map_err(ProcessEffectSummaryError::InvalidPayload)?;
         if omissions.occurrence_cap != PROCESS_EFFECT_OCCURRENCE_CAP {
@@ -194,19 +250,26 @@ impl ProcessEffectOmissions {
 
 fn require_vocabulary_version(
     payload: &serde_json::Value,
-) -> Result<(), ProcessEffectSummaryError> {
+    window: lash_core_store::store::ReadWindow,
+) -> Result<u32, ProcessEffectSummaryError> {
     let version = payload
         .as_object()
         .and_then(|object| object.get("vocabulary_version"))
         .and_then(serde_json::Value::as_u64)
         .ok_or(ProcessEffectSummaryError::MissingVocabularyVersion)?;
-    if version != u64::from(PROCESS_EVENT_VOCABULARY_VERSION) {
-        return Err(ProcessEffectSummaryError::UnsupportedVocabularyVersion {
-            expected: PROCESS_EVENT_VOCABULARY_VERSION,
+    let version = u32::try_from(version).map_err(|_| {
+        ProcessEffectSummaryError::UnsupportedVocabularyVersion {
+            expected: window.newest(),
             actual: version,
+        }
+    })?;
+    if !window.admits(version) {
+        return Err(ProcessEffectSummaryError::UnsupportedVocabularyVersion {
+            expected: window.newest(),
+            actual: u64::from(version),
         });
     }
-    Ok(())
+    Ok(version)
 }
 
 #[expect(
@@ -266,15 +329,18 @@ impl ProcessEffectSummary {
 
     /// Folds one event of the process's log, as a page of
     /// `Processes::events` or the registry returns it. Events of other kinds
-    /// are ignored.
+    /// are ignored. `fleet_format` is the `F` the bound store recorded: the
+    /// payload's read window comes from it (FIG-3796).
     pub fn fold_event(
         &mut self,
         event_type: &str,
         payload: &serde_json::Value,
+        fleet_format: crate::FleetFormat,
     ) -> Result<(), ProcessEffectSummaryError> {
         match event_type {
             PROCESS_EFFECT_OUTCOME_EVENT_TYPE => {
-                let outcome = ProcessEffectSummaryOccurrence::decode(payload.clone())?;
+                let outcome =
+                    ProcessEffectSummaryOccurrence::decode(payload.clone(), fleet_format)?;
                 let node = self.node_entry(&outcome.node_id);
                 let position = node
                     .occurrences
@@ -282,7 +348,7 @@ impl ProcessEffectSummary {
                 node.occurrences.insert(position, outcome);
             }
             PROCESS_EFFECT_OMISSIONS_EVENT_TYPE => {
-                let omissions = ProcessEffectOmissions::decode(payload.clone())?;
+                let omissions = ProcessEffectOmissions::decode(payload.clone(), fleet_format)?;
                 for (node_id, counts) in omissions.nodes {
                     self.node_entry(&node_id).omitted = counts;
                 }

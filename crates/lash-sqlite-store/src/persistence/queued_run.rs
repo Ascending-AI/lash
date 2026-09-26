@@ -184,6 +184,7 @@ impl Store {
         request.validate(fence)?;
         let fence = fence.clone();
         let clock = self.clock.clone();
+        let fleet = self.fleet_format();
         self.conn
             .write_flow(move |tx| {
                 let outcome = (|| {
@@ -211,8 +212,9 @@ impl Store {
                         }
                         return Ok(resumed);
                     }
-                    let actual = try_load_session_head_meta_from_conn(tx, &request.session_id)?
-                        .map_or(0, |head| head.head_revision);
+                    let actual =
+                        try_load_session_head_meta_from_conn(tx, &request.session_id, fleet)?
+                            .map_or(0, |head| head.head_revision);
                     if actual != request.expected_head_revision {
                         return Err(StoreError::HeadRevisionConflict {
                             expected: request.expected_head_revision,

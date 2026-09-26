@@ -173,7 +173,7 @@ async fn run_attachment_usage_gate(
 
     let runtime_window_start_ms = lash::runtime::ClockWallTime::timestamp_ms(system_clock.as_ref());
     let turn_id = TurnId::from(format!("attachment-usage-gate-{}", uuid::Uuid::new_v4()));
-    let request = restate::WorkbenchTurnWorkflowRequest {
+    let request = restate::UserTurnRequest {
         turn_id: turn_id.clone(),
         session_id: session_id.clone(),
         text: "Describe the attached PNG briefly.".to_string(),
@@ -365,7 +365,6 @@ fn attachment_usage_gate_state(
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(16),
-        queued_work_driver: inert_queued_work(),
         restate_ingress_url: "http://127.0.0.1:8080".to_string(),
         restate_admin_url: "http://127.0.0.1:9070".to_string(),
         restate_http: reqwest::Client::new(),

@@ -70,6 +70,7 @@ pub struct WorkflowGraphProjector<'a> {
     source_identity: Option<String>,
     spans: BTreeMap<AstPath, Span>,
     analysis: Option<&'a WorkflowLinkAnalysis>,
+    fleet_format: lash_core_execution::FleetFormat,
 }
 
 impl<'a> WorkflowGraphProjector<'a> {
@@ -79,7 +80,16 @@ impl<'a> WorkflowGraphProjector<'a> {
             source_identity: None,
             spans: BTreeMap::new(),
             analysis: None,
+            fleet_format: lash_core_execution::FleetFormat::current(),
         }
+    }
+
+    /// The `F` the bound writer's store recorded: a projector standing a
+    /// document up for a durable write stamps `F`'s writer versions for the
+    /// graph and facet surfaces (FIG-3796), never the bare build constants.
+    pub fn with_fleet_format(mut self, fleet_format: lash_core_execution::FleetFormat) -> Self {
+        self.fleet_format = fleet_format;
+        self
     }
 
     /// The admitted definition identity the projected document names.
@@ -105,6 +115,7 @@ impl<'a> WorkflowGraphProjector<'a> {
         let session = Session {
             projector: self,
             text,
+            fleet_format: self.fleet_format,
         };
         session.project()
     }
@@ -113,6 +124,7 @@ impl<'a> WorkflowGraphProjector<'a> {
 struct Session<'p, 'a> {
     projector: &'p WorkflowGraphProjector<'a>,
     text: &'p dyn WorkflowStatementText,
+    fleet_format: lash_core_execution::FleetFormat,
 }
 
 impl Session<'_, '_> {
@@ -150,12 +162,18 @@ impl Session<'_, '_> {
             &mut versions,
         );
         WorkflowGraph {
-            schema_version: WORKFLOW_GRAPH_SCHEMA_VERSION,
+            schema_version: self
+                .fleet_format
+                .writer_version(lash_core_execution::surface_format!(
+                    WORKFLOW_GRAPH_SCHEMA_VERSION
+                )),
             source_identity: self.projector.source_identity.clone(),
-            facet_schema_version: self
-                .projector
-                .analysis
-                .map(|_| WORKFLOW_TYPE_FACET_SCHEMA_VERSION),
+            facet_schema_version: self.projector.analysis.map(|_| {
+                self.fleet_format
+                    .writer_version(lash_core_execution::surface_format!(
+                        WORKFLOW_TYPE_FACET_SCHEMA_VERSION
+                    ))
+            }),
             declarations,
             main,
         }

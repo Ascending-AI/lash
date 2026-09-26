@@ -771,6 +771,7 @@ async fn acquire_durable(
         Err(error) => return Err(error),
     };
     let high_water = record.last_event_sequence;
+    let fleet_format = registry.fleet_format();
     let mut summary = ProcessEffectSummary::default();
     let mut completeness = ProcessDurableCompleteness::Complete;
     let mut after = 0;
@@ -807,7 +808,7 @@ async fn acquire_durable(
                 break 'pages;
             }
             if summary
-                .fold_event(&event.event_type, &event.payload)
+                .fold_event(&event.event_type, &event.payload, fleet_format)
                 .is_err()
             {
                 completeness = ProcessDurableCompleteness::Incomplete {

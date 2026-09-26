@@ -568,12 +568,12 @@ pub(super) fn cancelled_execution_reaches_the_stop_classifier() {
 
             let snapshot = hydrate_snapshot(
                 state
-                    .snapshot_execution_state()
+                    .snapshot_execution_state(lash_core::FleetFormat::current())
                     .expect("snapshot after cancelled cell"),
             );
             let mut restored = RlmExecutionState::for_engine(language);
             restored
-                .restore_execution_state(&snapshot)
+                .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
                 .expect("cold restore after cancelled cell");
             assert!(
                 restored.rlm.globals().get("survives").is_some(),
@@ -730,12 +730,12 @@ pub(super) fn late_cancellation_settlement_rolls_back_only_the_uncommitted_cell(
 
             let snapshot = hydrate_snapshot(
                 state
-                    .snapshot_execution_state()
+                    .snapshot_execution_state(lash_core::FleetFormat::current())
                     .expect("snapshot after late cancellation"),
             );
             let mut restored = RlmExecutionState::for_engine(language);
             restored
-                .restore_execution_state(&snapshot)
+                .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
                 .expect("cold restore after late cancellation");
             assert!(restored.rlm.globals().get(tail_binding).is_none());
             assert!(restored.rlm.globals().get("survives").is_some());
@@ -784,7 +784,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                 handler.close().await.expect("close the cell's handler");
                 assert_eq!(first.error, None, "{language}: large first cell");
                 let first_snapshot = state
-                    .snapshot_execution_state()
+                    .snapshot_execution_state(lash_core::FleetFormat::current())
                     .expect("large first-cell snapshot");
                 let first_hydration = hydrate_snapshot(first_snapshot);
                 if acknowledge_first_capture {
@@ -822,7 +822,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                 state.cancel_code_execution();
 
                 let final_snapshot = state
-                    .snapshot_execution_state()
+                    .snapshot_execution_state(lash_core::FleetFormat::current())
                     .expect("snapshot after late cancellation");
                 let final_hydration = if acknowledge_first_capture {
                     hydrate_snapshot_against(final_snapshot, &first_hydration)
@@ -831,7 +831,7 @@ pub(super) fn late_cancellation_preserves_staged_and_acknowledged_large_leaf_boo
                 };
                 let mut restored = RlmExecutionState::for_engine(language);
                 restored
-                    .restore_execution_state(&final_hydration)
+                    .restore_execution_state(&final_hydration, lash_core::FleetFormat::current())
                     .expect("cold restore after late cancellation");
                 assert!(restored.rlm.globals().get("survives").is_some());
                 assert!(restored.rlm.globals().get(tail_binding).is_none());

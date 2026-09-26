@@ -104,6 +104,19 @@ pub(in crate::runtime) struct CurrentSessionCapability {
     turn_phase_probe: Option<Arc<dyn RuntimeTurnPhaseProbe>>,
 }
 
+impl CurrentSessionCapability {
+    /// The fleet-format generation this capability's durable writers emit —
+    /// the `F` the bound session's store recorded (FIG-3796). A capability
+    /// holding no store writes nothing durable, so the build's own generation
+    /// is the only honest answer it can give.
+    pub(in crate::runtime) fn fleet_format(&self) -> crate::FleetFormat {
+        self.store
+            .as_ref()
+            .map(|store| crate::FleetFormatStore::fleet_format(store.as_ref()))
+            .unwrap_or_else(crate::FleetFormat::current)
+    }
+}
+
 #[derive(Clone)]
 pub(in crate::runtime) struct UsageCapability {
     /// Session-scoped token cost ledger shared with the parent

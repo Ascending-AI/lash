@@ -132,7 +132,8 @@ impl Store {
         blob_ref: &BlobRef,
     ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
         let connection = Connection::open(path).map_err(sqlite_error)?;
-        Self::get_checkpoint_conn(&connection, blob_ref)
+        let fleet = crate::fleet_format::recorded_or_current(&connection).map_err(sqlite_error)?;
+        Self::get_checkpoint_conn(&connection, blob_ref, fleet)
     }
 
     pub(crate) fn insert_artifact_blob_conn(
@@ -207,9 +208,10 @@ impl Store {
         conn: &Connection,
         checkpoint: &HydratedSessionCheckpoint,
         profile: BuiltinBlobProfile,
+        fleet_format: lash_core_execution::FleetFormat,
     ) -> Result<StoredSessionCheckpoint, StoreError> {
         Self::validate_checkpoint_component_refs_conn(conn, checkpoint)?;
-        let manifest = checkpoint.manifest()?;
+        let manifest = checkpoint.manifest(fleet_format)?;
         for (key, descriptor) in &manifest.components {
             let component =
                 checkpoint
@@ -373,15 +375,18 @@ impl Store {
         bytes.map(|bytes| decode_artifact_blob(&bytes)).transpose()
     }
 
+    /// `fleet` is the store's recorded `F`: the manifest and its component
+    /// encodings admit the `[N-1, N]` reader window `F` names (FIG-3796).
     pub(crate) fn get_checkpoint_conn(
         conn: &Connection,
         blob_ref: &BlobRef,
+        fleet: lash_core_execution::FleetFormat,
     ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
         let Some(bytes) = Self::get_blob_conn(conn, blob_ref)? else {
             return Ok(None);
         };
-        let record = decode_checkpoint(&bytes)?;
-        record.validate_component_encoding_versions()?;
+        let record = decode_checkpoint_for_fleet(&bytes, fleet)?;
+        record.validate_component_encoding_versions_for_fleet(fleet)?;
         let bodies = Self::checkpoint_component_bodies_conn(conn, &record)?;
         let mut components = std::collections::BTreeMap::new();
         for (key, descriptor) in &record.components {
@@ -480,12 +485,15 @@ impl Store {
     ) -> Result<StoredSessionCheckpoint, StoreError> {
         let checkpoint = checkpoint.clone();
         let profile = self.options.blob_profile;
+        let self_fleet = self.fleet_format;
         self.conn
             .write_flow(move |tx| {
-                Ok(match Self::put_checkpoint_conn(tx, &checkpoint, profile) {
-                    Ok(stored) => TxOutcome::Commit(Ok(stored)),
-                    Err(error) => TxOutcome::Rollback(Err(error)),
-                })
+                Ok(
+                    match Self::put_checkpoint_conn(tx, &checkpoint, profile, self_fleet) {
+                        Ok(stored) => TxOutcome::Commit(Ok(stored)),
+                        Err(error) => TxOutcome::Rollback(Err(error)),
+                    },
+                )
             })
             .await
             .map_err(sqlite_error)?
@@ -496,9 +504,10 @@ impl Store {
         blob_ref: &BlobRef,
     ) -> Result<Option<HydratedSessionCheckpoint>, StoreError> {
         let blob_ref = blob_ref.clone();
+        let fleet = self.fleet_format;
         self.conn
             .call(move |conn| {
-                Self::get_checkpoint_conn(conn, &blob_ref).map_err(sqlite_conversion_error)
+                Self::get_checkpoint_conn(conn, &blob_ref, fleet).map_err(sqlite_conversion_error)
             })
             .await
             .map_err(sqlite_error)

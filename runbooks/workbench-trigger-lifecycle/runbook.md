@@ -12,15 +12,14 @@ over that turn's ingress.
 
 **Mid-turn contract.** Trigger occurrence dispatch and its durable process may run while
 the session has a foreground turn. Any resulting session wake is durable queued work; it
-must not submit a competing turn while that foreground turn owns ingress. The host may
-claim that queued work at either legal boundary: `active_turn_checkpoint` while the
-foreground turn still owns ingress, or `idle` after terminalization releases ingress. An
+must not submit a competing turn while that foreground turn owns ingress. The session's
+engine claims that queued work at either legal boundary: `active_turn_checkpoint` while
+the foreground turn still owns ingress, or `idle` once that root settles. An
 `active_turn_checkpoint` claim is part of the current turn; an `idle` claim starts the
-next turn. The implementation seam is `WorkbenchQueuedWorkSubmitter::run_queued_work` in
-[`state.rs`](../../examples/agent-workbench/src/main_sections/state.rs), with the release
-and re-claim in `terminalize_turn_execution` in
-[`restate.rs`](../../examples/agent-workbench/src/restate.rs). The deterministic companion
-gate is
+next root. The workbench submits nothing itself: the wake is scheduled by lash, and the
+page's active-turn claim is released by `terminalize_turn_execution` in
+[`restate.rs`](../../examples/agent-workbench/src/restate.rs) once the followed root
+settles. The deterministic companion gate is
 `tests::button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_turn` in
 [`trigger_lifecycle.rs`](../../examples/agent-workbench/src/main_sections/tests/trigger_lifecycle.rs).
 

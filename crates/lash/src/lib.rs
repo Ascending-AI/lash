@@ -61,6 +61,7 @@ pub mod scenario_contracts;
 pub mod sync {
     pub use lash_core::sync::*;
 }
+mod send;
 mod session;
 mod session_binding;
 mod session_lease;
@@ -79,7 +80,7 @@ pub use crate::admin::{
 };
 pub use crate::core::{DeploymentDrainStatus, LashCore, LashCoreBuilder, SessionDeleteReport};
 pub use crate::durable_session::{DurableSession, EnqueueTurnBuilder};
-pub use crate::error::{EmbedError, Result, SelectedQueuedWorkDrainRefusalCause};
+pub use crate::error::{EmbedError, Result, SelectedQueuedWorkDrainRefusalCause, SendError};
 pub use crate::parked_work::{
     ParkedKinds, ParkedWork, ParkedWorkCursor, ParkedWorkEvent, ParkedWorkEventPage,
     ParkedWorkEventsCursor, ParkedWorkPage, ParkedWorkQuery, ParkedWorkRecord, ParkedWorkRef,
@@ -87,12 +88,16 @@ pub use crate::parked_work::{
 };
 pub use crate::plugin_binding::PluginBinding;
 pub use crate::prompt_layer::PromptLayerSink;
+pub use crate::send::{
+    CancelBuilder, CancelReceipt, CancelTarget, ParkedTurn, RootHandle, SendBuilder, SendHandle,
+    SendOutcome, TurnEvents, TurnStatus,
+};
 pub use crate::session::{LashSession, ObservableSession, ParkedSession, SessionBuilder};
 pub use crate::tool_catalog::{ToolCatalogMiss, ToolCatalogView};
 pub use crate::turn::queued_drain::{EmptyQueuedDrainReason, QueuedTurnDrain};
 pub use crate::turn::{
-    QueuedTurnBuilder, SelectedQueuedTurnBuilder, TurnActivityFanout, TurnBuilder, TurnOutput,
-    TurnReport, TurnStream, message_role, message_text,
+    QueuedTurnBuilder, ReportSource, SelectedQueuedTurnBuilder, TurnActivityFanout, TurnBuilder,
+    TurnOutput, TurnReport, TurnStream, message_role, message_text,
 };
 /// Re-exported so implementors of `#[async_trait]` facade traits (for example
 /// [`tools::StaticToolExecute`]) apply the macro without carrying their own
@@ -155,14 +160,14 @@ pub mod prelude {
         DurableSession, EmbedError, EnqueueTurnBuilder, InputItem, LashCore, LashCoreBuilder,
         LashSession, ModelLimits, ModelLimitsError, ModelSpec, ModelSpecBuilder, NoProgressBudget,
         ObservableSession, ParkedSession, PendingTurnInputCancelOutcome, PluginBinding,
-        PluginOperations, PluginStack, PromptLayerSink, QueuedTurnBuilder, Result, SessionBuilder,
-        SessionCommand, SessionCommandAdmin, SessionCommandReceipt, SessionConfigPatch,
-        SessionCreateRequest, SessionDeleteReport, SessionListFilter, SessionRelationKind,
-        SessionSpec, SessionStartPoint, SessionSummary, SessionTriggerAdmin, ToolAdmin,
-        TurnActivity, TurnActivityFanout, TurnActivityId, TurnActivitySink, TurnBudget,
-        TurnBuilder, TurnCause, TurnEvent, TurnExecutionMetrics, TurnFinish, TurnInput,
-        TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport, TurnStop, TurnStream,
-        message_role, message_text,
+        PluginOperations, PluginStack, PromptLayerSink, QueuedTurnBuilder, Result, SendBuilder,
+        SendHandle, SendOutcome, SessionBuilder, SessionCommand, SessionCommandAdmin,
+        SessionCommandReceipt, SessionConfigPatch, SessionCreateRequest, SessionDeleteReport,
+        SessionListFilter, SessionRelationKind, SessionSpec, SessionStartPoint, SessionSummary,
+        SessionTriggerAdmin, ToolAdmin, TurnActivity, TurnActivityFanout, TurnActivityId,
+        TurnActivitySink, TurnBudget, TurnBuilder, TurnCause, TurnEvent, TurnExecutionMetrics,
+        TurnFinish, TurnInput, TurnInputAcceptanceReceipt, TurnOutcome, TurnOutput, TurnReport,
+        TurnStatus, TurnStop, TurnStream, message_role, message_text,
     };
 }
 
@@ -411,9 +416,9 @@ pub mod persistence {
     pub use lash_core::{
         BlobRef, CURRENT_SESSION_STATE_VERSION, DurableItem, DurablePayload, DurableScan,
         DurableScanPage, DurableSurface, ExecutedCall, ExecutedCallOutcome, ExecutedCallRecord,
-        FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, GcReport, LeaseClaimNonce,
-        LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal, MaintenanceReport,
-        MaintenanceResult, MaintenanceStop, MaintenanceSweep,
+        FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, FleetFormatStore, GcReport,
+        LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure, MaintenanceRefusal,
+        MaintenanceReport, MaintenanceResult, MaintenanceStop, MaintenanceSweep,
         OLDEST_SUPPORTED_SESSION_STATE_VERSION, PersistedSessionConfig, PersistedTurnState,
         ProtocolEvent, QueuedWorkStore, RetentionBound, RetentionReport, RuntimePersistence,
         ScanCoverage, SessionAdmission, SessionBinding, SessionBlobReclaimReport,
@@ -745,7 +750,8 @@ pub mod remote {
             RemoteAssistantOutput, RemoteAssistantOutputState, RemoteCausalRef,
             RemoteToolCallOutcome, RemoteToolCallRecord, RemoteTurnExecutionMetrics,
             RemoteTurnFinish, RemoteTurnIssue, RemoteTurnIssueSeverity, RemoteTurnOutcome,
-            RemoteTurnReport, RemoteTurnStatus, RemoteTurnStop, RemoteTurnUsageReport,
+            RemoteTurnParkReason, RemoteTurnReport, RemoteTurnStatus, RemoteTurnStop,
+            RemoteTurnUsageReport,
         };
     }
 
@@ -906,8 +912,8 @@ pub mod runtime {
         AssistantStreamHookState, AwaitEventResolver, CheckpointClaimSet, CompletionKeyPreparation,
         DEFAULT_QUEUED_WORK_EXECUTION_CONCURRENCY, DirectCompletionClient, EffectAddress,
         EffectGroupHandle, EffectGroupMembership, EmbeddedRuntimeHost, EventSink, ExecutionScope,
-        GroupExecutors, GroupSettlement, GroupWakePolicy, LashRuntime, LlmRequestSpec,
-        LlmStreamRecord, LoserPolicy, NativeQueuedWork, NativeSubstrateConfig,
+        GroupExecutors, GroupSettlement, GroupWakePolicy, InlineSessionWork, LashRuntime,
+        LlmRequestSpec, LlmStreamRecord, LoserPolicy, NativeQueuedWork, NativeSubstrateConfig,
         NativeSubstrateConfigError, NoSessionWork, NoopEventSink, NoopTurnActivitySink,
         ProcessCommand, ProcessEffectOutcome, QueuedLaneAcquisition, QueuedLaneAttempt,
         QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, QueuedWorkExecutionConcurrencyError,

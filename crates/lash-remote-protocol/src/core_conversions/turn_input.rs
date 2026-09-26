@@ -105,7 +105,6 @@ impl TryFrom<RemoteTurnInput> for lash_core::TurnInput {
             items,
             protocol_turn_options,
             trace_turn_id,
-            prompt_layer,
         } = value;
         let mut input = lash_core::TurnInput::items(
             items
@@ -115,9 +114,6 @@ impl TryFrom<RemoteTurnInput> for lash_core::TurnInput {
         );
         input.protocol_turn_options = protocol_turn_options.map(Into::into);
         input.trace_turn_id = trace_turn_id;
-        if let Some(prompt_layer) = prompt_layer {
-            input.turn_context.set_prompt_layer(prompt_layer.into());
-        }
         Ok(input)
     }
 }
@@ -128,14 +124,11 @@ impl TryFrom<RemoteTurnRequest> for lash_core::TurnInput {
     fn try_from(value: RemoteTurnRequest) -> Result<Self, Self::Error> {
         value.validate()?;
         // Identity/routing fields are consumed by the transport layer, not the
-        // core turn input; tool grants are applied separately.
-        // `idempotency_key` in particular is a host-transport key: admission
-        // dedup is the host's `source_key`, so the field must not reach core
-        // (see `RemoteTurnRequest::idempotency_key`).
+        // core turn input; tool grants are applied separately. `turn_id` is
+        // the send's id, which the transport passes beside the input.
         let RemoteTurnRequest {
             session_id: _,
             turn_id: _,
-            idempotency_key: _,
             input,
             tool_grants: _,
             metadata: _,
@@ -168,8 +161,14 @@ impl TryFrom<lash_core::TurnInput> for RemoteTurnInput {
                 turn_context.live_plugin_input_ids()
             )));
         }
-        let prompt_layer = (!turn_context.prompt_layer().is_empty())
-            .then(|| RemotePromptLayer::from(turn_context.prompt_layer().clone()));
+        // A per-turn prompt layer lives in the process-local turn context and
+        // cannot survive durable acceptance; the replacement is the session's
+        // prompt configuration (FIG-3600).
+        if !turn_context.prompt_layer().is_empty() {
+            return Err(RemoteProtocolError::NonRemoteSafeTurnInput(
+                "per-turn prompt layers cannot cross a remote boundary".to_string(),
+            ));
+        }
         Ok(Self {
             items: items
                 .into_iter()
@@ -177,7 +176,6 @@ impl TryFrom<lash_core::TurnInput> for RemoteTurnInput {
                 .collect::<Result<Vec<_>, _>>()?,
             protocol_turn_options: protocol_turn_options.map(Into::into),
             trace_turn_id,
-            prompt_layer,
         })
     }
 }

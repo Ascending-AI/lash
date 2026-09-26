@@ -1593,45 +1593,30 @@ pub(super) async fn capture_tool_intent_journal_corpus_from_real_endpoint_interr
         &[],
     )
     .expect("capture the completed-attempt journal prefix");
-    let second_interruption = invoke_endpoint_body(
-        &endpoint,
-        "ToolIntentCorpusReplay",
-        "run",
-        mid_drain.clone(),
-    )
-    .await
-    .expect("interrupt at the intent command run");
+    // The signal records its append before it resolves (FIG-3827): the
+    // handler next journals that step, then the resolution call, then the
+    // settled outcome. Each prefix stacks the commands every interruption
+    // added, completing the runs they proposed and, once answered, the call.
     let call_completion = serde_json::to_value(ResolveOutcome::Accepted)
         .expect("serialize durable-wait resolution outcome");
-    let mid_intent = encode_captured_run_and_interrupted_call_replay(
-        TOOL_INTENT_CORPUS_KEY,
-        &(),
-        &first_interruption,
-        &second_interruption,
-        None,
-    )
-    .expect("capture pending intent-command journal");
-    let progressed = encode_captured_run_and_interrupted_call_replay(
-        TOOL_INTENT_CORPUS_KEY,
-        &(),
-        &first_interruption,
-        &second_interruption,
-        Some(call_completion.clone()),
-    )
-    .expect("complete the intent's nested durable-wait call");
-    let third_interruption =
-        invoke_endpoint_body(&endpoint, "ToolIntentCorpusReplay", "run", progressed)
-            .await
-            .expect("interrupt while recording the settled intent outcome");
-    let full = encode_completed_intent_drain_replay(
-        TOOL_INTENT_CORPUS_KEY,
-        &(),
-        &first_interruption,
-        &second_interruption,
-        &third_interruption,
-        call_completion,
-    )
-    .expect("capture completed intent-command journal");
+    let stack = |outputs: &[&[u8]], answer_call: bool| {
+        encode_recorded_commands_replay(TOOL_INTENT_CORPUS_KEY, &(), outputs, |command| {
+            (answer_call && command.message_type == 0x040D).then(|| call_completion.clone())
+        })
+        .expect("stack the captured journal prefix")
+    };
+    let interrupt = |body| invoke_endpoint_body(&endpoint, "ToolIntentCorpusReplay", "run", body);
+    let append = interrupt(mid_drain.clone())
+        .await
+        .expect("interrupt at the append step");
+    let call = interrupt(stack(&[&first_interruption, &append], false))
+        .await
+        .expect("interrupt at the signal's resolution call");
+    let mid_intent = stack(&[&first_interruption, &append, &call], false);
+    let outcome = interrupt(stack(&[&first_interruption, &append, &call], true))
+        .await
+        .expect("interrupt while recording the settled intent outcome");
+    let full = stack(&[&first_interruption, &append, &call, &outcome], true);
 
     let captures = [
         (
@@ -1867,14 +1852,21 @@ impl ReplayableRecordingContext {
 }
 
 /// A journaled step that is not a recorded effect: a process command's
-/// journaled fact (a cancel admission, an await's existence guard, a process
-/// wait step, or a start's registration, compensation and external reference,
-/// ADR 0107), or the frontier marker a process start or a sleep journals
+/// journaled fact (a cancel admission, an await's or attach's existence
+/// guard, a process wait step, a start's registration, compensation and
+/// external reference, ADR 0107, or a command's recorded store work,
+/// FIG-3827), or the frontier marker a process start or a sleep journals
 /// before it acts (FIG-3779).
 fn is_process_command_journal_fact(effect_name: &str) -> bool {
     [
         ".process-cancel-admission:v1",
         ".process-await-guard:v1",
+        ".process-attach-guard:v1",
+        ".process-signal-append:v1",
+        ".process-list:v1",
+        ".process-transfer:v1",
+        ".process-delete-session:v1",
+        ".process-emit-event:v1",
         ".process-start-register:v1",
         ".process-start-compensate:v1",
         ".process-start-external-ref:v1",

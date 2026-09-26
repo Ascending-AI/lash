@@ -371,6 +371,7 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
                 self.session_store_clock(),
                 None,
                 None,
+                lash_core_execution::FleetFormat::writable_range(),
                 #[cfg(feature = "testing")]
                 self.fault_injector.clone(),
             )
@@ -889,6 +890,7 @@ impl lash_core_execution::AttachmentRootSet for SqliteSessionStoreFactory {
             Arc::clone(&self.clock),
             self.process_registry.as_ref(),
             self.turn_cancel_closure_owner_binding(),
+            lash_core_execution::FleetFormat::writable_range(),
             #[cfg(feature = "testing")]
             self.fault_injector.clone(),
         )

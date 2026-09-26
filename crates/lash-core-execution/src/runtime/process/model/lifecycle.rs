@@ -161,9 +161,14 @@ impl ParentScope {
     /// express (a pruned parent process's row, a future arm), and its
     /// explicit version is what makes an incompatible row a refusal instead
     /// of a reinterpretation.
-    pub fn storage_payload(&self) -> Result<String, serde_json::Error> {
+    pub fn storage_payload(
+        &self,
+        fleet_format: crate::FleetFormat,
+    ) -> Result<String, serde_json::Error> {
         serde_json::to_string(&ParentScopeStoragePayload {
-            version: PARENT_SCOPE_STORAGE_PAYLOAD_VERSION,
+            version: fleet_format.writer_version(lash_core_store::surface_format!(
+                PARENT_SCOPE_STORAGE_PAYLOAD_VERSION
+            )) as u16,
             scope: self.clone(),
         })
     }
@@ -182,21 +187,46 @@ impl ParentScope {
     ///
     /// [`ParentScopeStorageError::Malformed`] for undecodable bytes,
     /// [`ParentScopeStorageError::UnsupportedVersion`] for a decodable
-    /// payload at another version, and
+    /// payload outside the read window `fleet_format` records — the pair
+    /// `{fleet's writer version, this build's newest}` (FIG-3796, ADR 0106
+    /// §2), where an admitted older payload climbs to the newest through the
+    /// surface's `RecordUpcaster` hooks — and
     /// [`ParentScopeStorageError::ProjectionMismatch`] when the typed scope
     /// and the index columns disagree.
     pub fn from_storage_columns(
         kind: &str,
         id: Option<&str>,
         payload: &str,
+        fleet_format: crate::FleetFormat,
     ) -> Result<Self, ParentScopeStorageError> {
-        let decoded: ParentScopeStoragePayload = serde_json::from_str(payload)
+        let surface = lash_core_store::surface_format!(PARENT_SCOPE_STORAGE_PAYLOAD_VERSION);
+        let window = fleet_format.read_window(surface);
+        let mut value: serde_json::Value = serde_json::from_str(payload)
             .map_err(|error| ParentScopeStorageError::Malformed(error.to_string()))?;
-        if decoded.version != PARENT_SCOPE_STORAGE_PAYLOAD_VERSION {
-            return Err(ParentScopeStorageError::UnsupportedVersion {
-                found: decoded.version,
-            });
+        let found = value
+            .get("version")
+            .and_then(serde_json::Value::as_u64)
+            .and_then(|version| u16::try_from(version).ok())
+            .ok_or_else(|| {
+                ParentScopeStorageError::Malformed(
+                    "parent scope payload carries no u16 version".to_string(),
+                )
+            })?;
+        if !window.admits(u32::from(found)) {
+            return Err(ParentScopeStorageError::UnsupportedVersion { found });
         }
+        if u32::from(found) != window.newest() {
+            lash_core_store::store::upcast_json_record(
+                "parent scope payload",
+                surface,
+                u32::from(found),
+                window.newest(),
+                &mut value,
+            )
+            .map_err(|error| ParentScopeStorageError::Malformed(error.to_string()))?;
+        }
+        let decoded: ParentScopeStoragePayload = serde_json::from_value(value)
+            .map_err(|error| ParentScopeStorageError::Malformed(error.to_string()))?;
         let scope = decoded.scope;
         if scope.storage_kind() != kind || scope.storage_id().as_deref() != id {
             return Err(ParentScopeStorageError::ProjectionMismatch {
@@ -583,11 +613,14 @@ mod tests {
     #[test]
     fn a_parent_scope_round_trips_through_its_versioned_payload() {
         for scope in [turn_scope(), process_scope(), ParentScope::Host] {
-            let payload = scope.storage_payload().expect("encode the payload");
+            let payload = scope
+                .storage_payload(crate::FleetFormat::current())
+                .expect("encode the payload");
             let decoded = ParentScope::from_storage_columns(
                 scope.storage_kind(),
                 scope.storage_id().as_deref(),
                 &payload,
+                crate::FleetFormat::current(),
             )
             .expect("the payload is the authority the projection agrees with");
             assert_eq!(decoded, scope);
@@ -614,8 +647,13 @@ mod tests {
             "turn_id": "t",
         })
         .to_string();
-        let error = ParentScope::from_storage_columns("turn", Some("s/t"), &old_shape)
-            .expect_err("an old-shape payload must not silently decode");
+        let error = ParentScope::from_storage_columns(
+            "turn",
+            Some("s/t"),
+            &old_shape,
+            crate::FleetFormat::current(),
+        )
+        .expect_err("an old-shape payload must not silently decode");
         assert!(
             matches!(error, ParentScopeStorageError::Malformed(_)),
             "old payloads refuse as malformed, not migrated: {error}"
@@ -630,8 +668,13 @@ mod tests {
             "scope": { "kind": "host" },
         })
         .to_string();
-        let error = ParentScope::from_storage_columns("host", None, &payload)
-            .expect_err("a newer payload version must refuse");
+        let error = ParentScope::from_storage_columns(
+            "host",
+            None,
+            &payload,
+            crate::FleetFormat::current(),
+        )
+        .expect_err("a newer payload version must refuse");
         assert_eq!(
             error,
             ParentScopeStorageError::UnsupportedVersion {
@@ -644,19 +687,27 @@ mod tests {
     /// projection this build would have written for the same scope.
     #[test]
     fn a_payload_that_disagrees_with_its_projection_is_refused() {
-        let payload = turn_scope().storage_payload().expect("encode a turn");
+        let payload = turn_scope()
+            .storage_payload(crate::FleetFormat::current())
+            .expect("encode a turn");
         let error = ParentScope::from_storage_columns(
             "turn",
             process_scope().storage_id().as_deref(),
             &payload,
+            crate::FleetFormat::current(),
         )
         .expect_err("a mismatched projection must refuse");
         assert!(
             matches!(error, ParentScopeStorageError::ProjectionMismatch { .. }),
             "{error}"
         );
-        let error = ParentScope::from_storage_columns("process", Some("s/t"), &payload)
-            .expect_err("a mismatched kind must refuse");
+        let error = ParentScope::from_storage_columns(
+            "process",
+            Some("s/t"),
+            &payload,
+            crate::FleetFormat::current(),
+        )
+        .expect_err("a mismatched kind must refuse");
         assert!(
             matches!(error, ParentScopeStorageError::ProjectionMismatch { .. }),
             "{error}"

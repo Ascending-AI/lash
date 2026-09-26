@@ -1,9 +1,24 @@
 //! Durable protocol turn options carried on the session head.
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct ProtocolTurnOptions {
     pub payload: serde_json::Value,
+    /// The durable stamp this value emits when a session body serializes it:
+    /// the protocol turn-options surface's writer version (FIG-3796). Values
+    /// minted outside a fleet-aware site carry this build's newest version;
+    /// values decoded from durable bytes carry the version that was recorded;
+    /// writers bound to a store restamp through [`Self::restamped_for_fleet`].
+    schema_version: u32,
 }
+
+impl PartialEq for ProtocolTurnOptions {
+    /// Two options carry the same durable fact when their payloads agree; the
+    /// stamped schema version is write metadata, not part of the options.
+    fn eq(&self, other: &Self) -> bool {
+        self.payload == other.payload
+    }
+}
+impl Eq for ProtocolTurnOptions {}
 
 /// Wire mirror of [`ProtocolTurnOptions`] used only for its schemars shape.
 /// The manual serde impls below keep validation total; the schema records the
@@ -52,10 +67,11 @@ impl<'de> serde::Deserialize<'de> for ProtocolTurnOptions {
         }
 
         let wire = ProtocolTurnOptionsWire::deserialize(deserializer)?;
-        parse_protocol_turn_options_schema_version(wire.schema_version)
+        let schema_version = parse_protocol_turn_options_schema_version(wire.schema_version)
             .map_err(serde::de::Error::custom)?;
         Ok(Self {
             payload: wire.payload,
+            schema_version,
         })
     }
 }
@@ -68,11 +84,31 @@ impl ProtocolTurnOptions {
     pub fn empty() -> Self {
         Self {
             payload: serde_json::Value::Object(serde_json::Map::new()),
+            schema_version: PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION,
         }
     }
 
     pub fn from_payload(payload: serde_json::Value) -> Self {
-        Self { payload }
+        Self {
+            payload,
+            schema_version: PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION,
+        }
+    }
+
+    /// The durable stamp this value emits when serialized.
+    pub fn schema_version(&self) -> u32 {
+        self.schema_version
+    }
+
+    /// The same options restamped with `fleet_format`'s writer version for the
+    /// protocol turn-options surface (FIG-3796): writers bound to a store pass
+    /// their store's recorded `F`, never the bare build constant.
+    pub fn restamped_for_fleet(&self, fleet_format: crate::store::FleetFormat) -> Self {
+        Self {
+            payload: self.payload.clone(),
+            schema_version: fleet_format
+                .writer_version(crate::surface_format!(PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION)),
+        }
     }
 
     /// Reports empty only for an empty JSON object so protocol implementors do not confuse scalar,
@@ -90,9 +126,7 @@ impl ProtocolTurnOptions {
     where
         T: serde::Serialize,
     {
-        Ok(Self {
-            payload: serde_json::to_value(value)?,
-        })
+        Ok(Self::from_payload(serde_json::to_value(value)?))
     }
 }
 impl ProtocolTurnOptions {
@@ -111,6 +145,7 @@ impl facade_ops::ProtocolTurnOptionsFacadeOps for ProtocolTurnOptions {
                 payload.extend(overrides.clone());
                 Self {
                     payload: serde_json::Value::Object(payload),
+                    schema_version: self.schema_version,
                 }
             }
             _ => override_options.clone(),
@@ -137,9 +172,11 @@ pub enum ProtocolTurnOptionsError {
     Decode(#[source] serde_json::Error),
 }
 
-/// Emits the persisted wire shape for [`ProtocolTurnOptions`]: the schema version is stamped from
-/// the constant rather than carried in memory, so this body is the sole definition of the emitted
-/// field names, their order, and the stamped version's type. It is a named free function so the
+/// Emits the persisted wire shape for [`ProtocolTurnOptions`]: the stamped
+/// schema version is carried on the value so a writer can restamp it with the
+/// fleet format's writer version before the body serializes (FIG-3796), and
+/// this body is the sole definition of the emitted field names, their order,
+/// and the stamped version's type. It is a named free function so the
 /// version-bump guard can cover it by symbol.
 fn serialize_protocol_turn_options<S>(
     options: &ProtocolTurnOptions,
@@ -150,7 +187,7 @@ where
 {
     use serde::ser::SerializeStruct;
     let mut state = serializer.serialize_struct("ProtocolTurnOptions", 2)?;
-    state.serialize_field("schema_version", &PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION)?;
+    state.serialize_field("schema_version", &options.schema_version)?;
     state.serialize_field("payload", &options.payload)?;
     state.end()
 }
@@ -183,7 +220,18 @@ fn ensure_protocol_turn_options_schema_version(
     actual: u32,
 ) -> Result<(), ProtocolTurnOptionsError> {
     let expected = PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION;
-    if actual == expected {
+    // The serde path cannot consult a store's `F`, so the envelope admits the
+    // build's newest version plus any recorded version an upcaster chain can
+    // lift to it — the fleetless leg of the `[N-1, N]` reader window
+    // (FIG-3796). No chain is registered while no `N-1` exists, so the admit
+    // set is exactly `{N}`.
+    if actual == expected
+        || crate::store::upcast_chain_covers(
+            crate::surface_format!(PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION),
+            actual,
+            expected,
+        )
+    {
         Ok(())
     } else {
         Err(ProtocolTurnOptionsError::UnsupportedSchemaVersion { actual, expected })

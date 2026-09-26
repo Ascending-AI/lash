@@ -27,6 +27,7 @@ use super::direct_turn_acceptance::{
     JournalLayer, acceptance_runtime_for_session, direct_input, text_response,
 };
 use crate::admit;
+use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
@@ -191,7 +192,9 @@ async fn admit_checkpoint_row(
             let process_id = crate::ProcessId::fixture(&format!("{SESSION_ID}-producer"));
             let wake_id = format!("wake:{SESSION_ID}:1");
             let wake = crate::ProcessWakeDelivery {
-                version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+                version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
+                    PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+                )),
                 wake_id: wake_id.clone(),
                 target_session_id: SessionId::from(SESSION_ID),
                 process_id: process_id.clone(),
@@ -487,17 +490,17 @@ async fn peer_is_refused(
     let scope = effect_host
         .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, turn_id)))
         .expect("scope the peer turn");
-    let queued = peer
+    let held = peer
         .stream_turn(
             direct_input(turn_id, "the peer's own input"),
             crate::TurnOptions::new(CancellationToken::new(), scope),
         )
         .await
-        .expect("the peer turn is answered as queued, not failed");
-    assert!(
-        matches!(queued.outcome, crate::TurnOutcome::Queued { .. }),
-        "the owed follow-on blocks the peer's claim: {:?}",
-        queued.outcome
+        .expect_err("the owed follow-on blocks the peer's claim");
+    assert_eq!(
+        held.code,
+        crate::RuntimeErrorCode::QueuedRunPending,
+        "the peer's input waits behind the follow-on: {held}"
     );
     until_lane_released(store).await;
 }

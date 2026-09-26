@@ -10,7 +10,7 @@ use lash_core_execution::store_backend_support::required_constraints::{
     compare_required_foreign_keys, extract_foreign_key_clauses, extract_named_check_expressions,
 };
 
-use crate::{SqliteDatabase, conn::SqliteConnection, sqlite_error};
+use crate::{SqliteDatabase, conn::SqliteConnection, sqlite_async_error, sqlite_error};
 
 /// Inspect the registered named `CHECK`s in one existing SQLite database.
 ///
@@ -134,16 +134,6 @@ pub async fn inspect_required_constraints_at(
         actual_foreign_keys,
     )?);
     Ok(report)
-}
-
-fn sqlite_async_error(error: tokio_rusqlite::Error) -> StoreError {
-    match error {
-        tokio_rusqlite::Error::Error(error) => sqlite_error(error),
-        error => StoreError::StorageFailure {
-            backend: "sqlite",
-            message: error.to_string(),
-        },
-    }
 }
 
 fn sqlite_database(database: SqliteConstraintDatabase) -> SqliteDatabase {

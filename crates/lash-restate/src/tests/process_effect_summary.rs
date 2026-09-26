@@ -240,9 +240,11 @@ async fn summary_log(registry: &Arc<dyn ProcessRegistry>, process_id: &ProcessId
             .iter()
             .filter(|event| event.event_type == lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE)
             .map(|event| {
-                let mut occurrence =
-                    lash_core::ProcessEffectSummaryOccurrence::decode(event.payload.clone())
-                        .expect("decode a summary occurrence");
+                let mut occurrence = lash_core::ProcessEffectSummaryOccurrence::decode(
+                    event.payload.clone(),
+                    lash_core::FleetFormat::current(),
+                )
+                .expect("decode a summary occurrence");
                 occurrence.replay_key = occurrence
                     .replay_key
                     .replace(process_id.as_str(), "<process>");
@@ -253,8 +255,11 @@ async fn summary_log(registry: &Arc<dyn ProcessRegistry>, process_id: &ProcessId
             .iter()
             .filter(|event| event.event_type == lash_core::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE)
             .map(|event| {
-                lash_core::ProcessEffectOmissions::decode(event.payload.clone())
-                    .expect("decode the omission record")
+                lash_core::ProcessEffectOmissions::decode(
+                    event.payload.clone(),
+                    lash_core::FleetFormat::current(),
+                )
+                .expect("decode the omission record")
             })
             .collect(),
     }
@@ -477,7 +482,8 @@ async fn a_run_commits_its_summary_once_per_boundary() {
                     cancelled: 0,
                 },
             )]
-            .into()
+            .into(),
+            lash_core::FleetFormat::current(),
         )],
         "the two loop occurrences past the cap are counted"
     );

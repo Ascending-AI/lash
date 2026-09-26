@@ -209,6 +209,7 @@ impl LashRuntime {
             &[],
             operation,
             self.host.core.durability.commit_budget,
+            self.fleet_format(),
         ) {
             Ok(commit) => commit,
             Err(error) => {

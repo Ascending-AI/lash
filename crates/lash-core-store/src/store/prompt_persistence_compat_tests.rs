@@ -214,6 +214,7 @@ fn committed_prompt_cold_loads_into_the_runtime_policy() {
             token_ledger: Vec::new(),
         },
         None,
+        crate::store::FleetFormat::current(),
     )
     .expect("cold-load committed session");
 
@@ -262,6 +263,7 @@ fn committed_generation_cold_loads_into_the_runtime_policy() {
             token_ledger: Vec::new(),
         },
         None,
+        crate::store::FleetFormat::current(),
     )
     .expect("cold-load committed generation");
 
@@ -309,11 +311,18 @@ fn persisted_head_and_frame_open_reject_legacy_slot_fields() {
             protocol_turn_options: crate::ProtocolTurnOptions::default(),
         },
     };
-    let current = node.encode_storage_body().unwrap();
+    let current = node
+        .encode_storage_body(crate::store::FleetFormat::current())
+        .unwrap();
     let restored =
         crate::SessionNodeRecord::decode_storage_body(node.node_id.to_string(), None, &current)
             .unwrap();
-    assert_eq!(restored.encode_storage_body().unwrap(), current);
+    assert_eq!(
+        restored
+            .encode_storage_body(crate::store::FleetFormat::current())
+            .unwrap(),
+        current
+    );
     let mut legacy: serde_json::Value = serde_json::from_str(&current).unwrap();
     legacy["assignment"]["policy"]["prompt"]["slots"]["guidance"]["contributions"][0]["slot"] =
         serde_json::json!("environment");

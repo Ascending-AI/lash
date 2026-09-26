@@ -427,9 +427,65 @@ fn generated_sessions_observe_what_node_observes_shard_3() {
     check_shard(3);
 }
 
+/// How long one generated session may take — Node's answers, lash's runs in
+/// both modes, and a divergence's minimization — before the run names its
+/// seed and fails. Sessions are drawn to terminate and finish in a fraction
+/// of a second, so only a true hang trips this.
+const SESSION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// Runs `work` on a thread of its own and fails the test naming `what` when
+/// it has not answered within [`SESSION_TIMEOUT`]: a hung session must name
+/// its seed, never hang the job.
+fn within_deadline<T: Send + 'static>(
+    what: impl std::fmt::Display,
+    work: impl FnOnce() -> T + Send + 'static,
+) -> T {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let worker = std::thread::spawn(move || {
+        let result = work();
+        let _ = tx.send(result);
+    });
+    match rx.recv_timeout(SESSION_TIMEOUT) {
+        Ok(result) => {
+            let _ = worker.join();
+            result
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            // The worker is abandoned: kill the oracle it may be blocked on
+            // so it cannot spin as an orphan, then fail naming the work.
+            super::node::kill_oracles();
+            panic!("{what} did not finish within {SESSION_TIMEOUT:?}");
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            panic!("{what}'s worker died without answering; its failure is above");
+        }
+    }
+}
+
+/// One seed's full comparison against `oracle`: Node's answers, lash in
+/// both modes, and a divergence's minimized corpus row, or `None` when lash
+/// agrees.
+fn run_seed(oracle: &mut NodeOracle, seed: u64) -> Option<String> {
+    let session = generate(seed);
+    let answers = node_answers(oracle, &session);
+    for mode in HarnessMode::ALL {
+        if let Some(divergence) = first_divergence(&session, &answers, *mode) {
+            let row = super::minimize::minimize(oracle, seed, &session, *mode, &divergence);
+            return Some(format!(
+                "seed {seed} {mode:?} cell {}: {}\n{row}",
+                divergence.cell, divergence.detail
+            ));
+        }
+    }
+    None
+}
+
 /// The longer run: fresh seeds (`LASH_GENERATED_SEEDS=START..END`) against
 /// the pinned Node live. A divergence is minimized and printed as the
-/// session-corpus row that pins it, ready to classify and commit.
+/// session-corpus row that pins it, ready to classify and commit. Each
+/// session runs on one worker under [`SESSION_TIMEOUT`], so a session that
+/// never terminates fails the run naming its seed rather than hanging the
+/// job.
 #[test]
 #[ignore = "asks the pinned Node live; set LASH_GENERATED_SEEDS=START..END"]
 #[allow(clippy::disallowed_methods)] // FIG-2971: a test is a host; the live Node oracle is a test host capability.
@@ -441,28 +497,72 @@ fn generated_sessions_against_live_node() {
         .expect("LASH_GENERATED_SEEDS is START..END");
     let start = start.parse::<u64>().expect("a start seed");
     let end = end.parse::<u64>().expect("an end seed");
-    let mut oracle = NodeOracle::start();
+    // One worker owns the oracle for the whole run; the test relays a seed,
+    // waits a deadline for its answer, and names the seed that outlives it.
+    let (jobs, job_rx) = std::sync::mpsc::channel::<u64>();
+    let (done, done_rx) = std::sync::mpsc::channel::<Option<String>>();
+    let worker = std::thread::spawn(move || {
+        let mut oracle = NodeOracle::start();
+        while let Ok(seed) = job_rx.recv() {
+            if done.send(run_seed(&mut oracle, seed)).is_err() {
+                return;
+            }
+        }
+    });
     let mut diverged = Vec::new();
     for seed in start..end {
-        let session = generate(seed);
-        let answers = node_answers(&mut oracle, &session);
-        for mode in HarnessMode::ALL {
-            if let Some(divergence) = first_divergence(&session, &answers, *mode) {
-                let row =
-                    super::minimize::minimize(&mut oracle, seed, &session, *mode, &divergence);
-                println!(
-                    "seed {seed} {mode:?} cell {}: {}\n{row}",
-                    divergence.cell, divergence.detail
-                );
+        jobs.send(seed).expect("the session worker is running");
+        match done_rx.recv_timeout(SESSION_TIMEOUT) {
+            Ok(Some(row)) => {
+                println!("{row}");
                 diverged.push(seed);
-                break;
+            }
+            Ok(None) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                // The worker is abandoned: kill the oracle it may be
+                // blocked on so it cannot spin as an orphan, then fail
+                // naming the seed — never skip it silently.
+                super::node::kill_oracles();
+                panic!(
+                    "seed {seed} did not finish within {SESSION_TIMEOUT:?}: the session hung \
+                     (rerun it alone with LASH_GENERATED_SEEDS={seed}..{})",
+                    seed + 1
+                );
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("seed {seed}'s session worker died without answering; its failure is above");
             }
         }
     }
+    drop(jobs);
+    let _ = worker.join();
     assert!(
         diverged.is_empty(),
         "generated sessions diverged from Node at seeds {diverged:?}; the minimized corpus row of each is printed above"
     );
+}
+
+/// The seeds a live-Node run once found non-terminating, each run through
+/// lash in both modes under the session deadline. Generated sessions are
+/// drawn to terminate, so one that does not names its seed rather than
+/// hanging the suite.
+#[test]
+fn generated_hang_seeds_terminate() {
+    for seed in [943554060] {
+        let session = generate(seed);
+        let sources = session
+            .cells
+            .iter()
+            .map(|cell| cell.source())
+            .collect::<Vec<_>>();
+        for mode in HarnessMode::ALL {
+            let probe = session.probe.clone();
+            let sources = sources.clone();
+            within_deadline(format!("seed {seed} {mode:?}"), move || {
+                run_session(*mode, &probe, &sources);
+            });
+        }
+    }
 }
 
 /// Whether the census accepts the row `kind name`.

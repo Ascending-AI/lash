@@ -235,7 +235,8 @@ impl RlmCheckpointPerfFixture {
     }
 
     pub fn capture(&mut self) -> Result<lash_core::plugin::ExecutionStateSnapshot, SessionError> {
-        self.state.snapshot_execution_state()
+        self.state
+            .snapshot_execution_state(lash_core::FleetFormat::current())
     }
 
     pub fn acknowledge_capture(&mut self) {
@@ -289,7 +290,7 @@ impl RlmCheckpointPerfFixture {
     pub fn restore(state: &lash_core::plugin::HydratedExecutionState) -> Result<(), SessionError> {
         let mut restored = RlmExecutionState::for_engine("typescript");
         restored
-            .restore_execution_state(state)
+            .restore_execution_state(state, lash_core::FleetFormat::current())
             .map_err(|error| SessionError::Protocol(error.to_string()))
     }
 }

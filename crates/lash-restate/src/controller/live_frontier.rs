@@ -37,11 +37,10 @@ use restate_sdk::serde::Json;
 use super::context::RestateControllerContext;
 use super::effect_journal::{FrontierMark, frontier_entry, recorded_frontier_mark};
 
-/// Refuses a served-only effect (FIG-3719) that acts outside a `ctx.run`
-/// closure and has no frontier marker — every process command but a start,
-/// which reaches Restate through its own journaled commands — before it acts:
-/// such an effect cannot tell a recorded outcome from a live one, so the
-/// command parks. A start and a timer answer at their frontier marker
+/// Refuses a served-only effect (FIG-3719) that has no frontier marker —
+/// every process command but a start — before it acts. Such a command's
+/// recorded steps (FIG-3827) do not check the live frontier, so it cannot
+/// tell a recorded outcome from a live one, and the command parks. A start and a timer answer at their frontier marker
 /// instead ([`pass_process_start_frontier`], [`pass_sleep_frontier`]).
 pub(super) fn refuse_outside_a_run(
     execution: &super::RestateEffectExecution,

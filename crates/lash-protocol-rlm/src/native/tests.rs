@@ -31,6 +31,7 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
             plugin_extensions: Default::default(),
             trigger_events: Default::default(),
             extra_prompt_contributions: Vec::new(),
+            writer_formats: lash_core::build_newest_writer_formats(),
         });
     TurnMachineConfig {
         protocol_driver: preamble.config.protocol,
@@ -51,6 +52,7 @@ fn config(native: bool, termination: RlmTermination) -> TurnMachineConfig {
         agent_frame_id: "parity-frame".to_string(),
         turn_id: TurnId::from("parity-turn"),
         emit_llm_trace: false,
+        writer_formats: lash_core::build_newest_writer_formats(),
         termination: lash_core::ProtocolTurnOptions::typed(RlmTurnOptions {
             termination: Some(termination),
             final_answer_format: None,
@@ -680,6 +682,7 @@ async fn factory_selects_native_abi_and_completed_cell_events() {
             plugin_extensions: Default::default(),
             trigger_events: Default::default(),
             extra_prompt_contributions: Vec::new(),
+            writer_formats: lash_core::build_newest_writer_formats(),
         });
     assert_eq!(preamble.tool_specs.len(), 1);
     assert_eq!(preamble.tool_specs[0].name, "execute_code");

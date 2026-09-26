@@ -89,6 +89,7 @@ impl CurrentSessionCapability {
                 usage_deltas,
                 operation,
                 self.host.core.durability.commit_budget,
+                self.fleet_format(),
             )
             .map_err(|err| crate::PluginError::Session(err.to_string()))?;
         commit.turn_commit = append_stamp;

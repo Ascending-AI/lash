@@ -3,6 +3,7 @@ use crate::SessionId;
 
 fn persisted_session_state_from_read(
     read: &PersistedSessionRead,
+    fleet: FleetFormat,
 ) -> Result<crate::RuntimeSessionState, StoreError> {
     persisted_session_state_from_head(
         SessionHead {
@@ -16,6 +17,7 @@ fn persisted_session_state_from_read(
             token_ledger: read.token_ledger.clone(),
         },
         read.checkpoint.clone(),
+        fleet,
     )
 }
 
@@ -45,7 +47,7 @@ async fn load_persisted_session_with_relation(
     let config = read.config.clone();
     Ok(Some((
         LoadedPersistedSession {
-            state: persisted_session_state_from_read(&read)?,
+            state: persisted_session_state_from_read(&read, store.fleet_format())?,
             config,
             turn_failure_settlements: read.turn_failure_settlements,
         },

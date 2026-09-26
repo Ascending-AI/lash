@@ -1,5 +1,6 @@
 use super::*;
 use crate::testing::TestClock;
+use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use pretty_assertions::assert_eq;
@@ -1634,7 +1635,9 @@ async fn mixed_era_floor_and_ordering(
     let mut dense_batches = Vec::new();
     for sequence in 1..=3 {
         let wake = crate::ProcessWakeDelivery {
-            version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+            version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
+                PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+            )),
             wake_id: format!("wake:mixed-era:{sequence}"),
             target_session_id: SessionId::from(target_session_id.to_string()),
             process_id: process_id.clone(),
@@ -1665,7 +1668,9 @@ async fn mixed_era_floor_and_ordering(
     let settled_redelivery = target
         .enqueue_queued_work(crate::process_wake_batch_draft(
             crate::ProcessWakeDelivery {
-                version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+                version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
+                    PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+                )),
                 wake_id: "wake:mixed-era:3".to_string(),
                 target_session_id: SessionId::from(target_session_id.to_string()),
                 process_id: process_id.clone(),
@@ -1702,7 +1707,9 @@ async fn mixed_era_floor_and_ordering(
     let live_redelivery = target
         .enqueue_queued_work(crate::process_wake_batch_draft(
             crate::ProcessWakeDelivery {
-                version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+                version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
+                    PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+                )),
                 wake_id: "wake:mixed-era:2".to_string(),
                 target_session_id: SessionId::from(target_session_id.to_string()),
                 process_id: process_id.clone(),
@@ -1803,7 +1810,9 @@ async fn rewound_fresh_delivery_is_discarded_without_blocking(
         .expect("register restored sender process");
     let process_id = wake_store_rewind_poison_record.id.clone();
     let old = crate::ProcessWakeDelivery {
-        version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
+            PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+        )),
         wake_id: "wake:store-rewind:10".to_string(),
         target_session_id: SessionId::from(target_session_id.to_string()),
         process_id: process_id.clone(),

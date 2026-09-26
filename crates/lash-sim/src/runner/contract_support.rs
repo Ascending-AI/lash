@@ -563,6 +563,7 @@ pub(super) fn standard_contract_turn_machine_config() -> lash_core::TurnMachineC
         agent_frame_id: "standard-max-turn-frame".to_string(),
         turn_id: TurnId::from("standard-max-turn"),
         emit_llm_trace: false,
+        writer_formats: lash_core::build_newest_writer_formats(),
         termination: lash_core::ProtocolTurnOptions::empty(),
     }
 }
@@ -633,10 +634,6 @@ pub(super) fn turn_outcome_contract_json(
             "frame_key": frame_key,
             "initial_nodes": initial_nodes,
             "task": task,
-        }),
-        lash_core::facade_support::TurnOutcome::Queued { ahead } => json!({
-            "kind": "queued",
-            "ahead": ahead,
         }),
     }
 }

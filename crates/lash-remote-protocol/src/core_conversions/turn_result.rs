@@ -72,7 +72,6 @@ impl From<lash_core::facade_support::TurnOutcome> for RemoteTurnOutcome {
             lash_core::facade_support::TurnOutcome::Stopped(stop) => {
                 Self::Stopped { stop: stop.into() }
             }
-            lash_core::facade_support::TurnOutcome::Queued { ahead } => Self::Queued { ahead },
         }
     }
 }
@@ -322,6 +321,15 @@ impl From<lash_core::facade_support::TurnIssueSeverity> for RemoteTurnIssueSever
         match value {
             lash_core::facade_support::TurnIssueSeverity::Advisory => Self::Advisory,
             lash_core::facade_support::TurnIssueSeverity::Blocking => Self::Blocking,
+        }
+    }
+}
+
+impl From<&lash_core::store::ParkReason> for RemoteTurnParkReason {
+    fn from(value: &lash_core::store::ParkReason) -> Self {
+        Self {
+            code: value.code().as_str().to_string(),
+            message: value.message().to_string(),
         }
     }
 }

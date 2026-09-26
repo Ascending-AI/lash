@@ -195,6 +195,7 @@ pub(super) fn projection_test_config(
         agent_frame_id: "prefix-stability-frame".to_string(),
         turn_id: TurnId::from("prefix-stability-turn"),
         emit_llm_trace: false,
+        writer_formats: lash_core::build_newest_writer_formats(),
         termination: lash_core::ProtocolTurnOptions::typed(RlmTurnOptions::default())
             .expect("RLM options"),
     }

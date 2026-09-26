@@ -28,9 +28,12 @@ asserting 105.  ``COMPONENT_VERSION_PINS`` below sweeps those literals out of
 the tree and demands each equal the declared constant, so the stale pin is
 refused here, on every pull request, without a database.
 
-The gate is paused until the lash 1.0 cut: while ``tools/release-mode.toml``
-carries ``pre_release = true`` it reports "paused pre-1.0" and exits 0
-(FIG-3660).
+The gate is frozen until the lash 1.0 cut: while the surface inventory's
+top-level ``[policy]`` table carries ``freeze = "pre-1.0"`` it prints its
+findings, reports the freeze, and exits 0 (FIG-3846) -- including a
+could-not-run outcome, which under the freeze is reported rather than raised.
+Removing the key restores strict enforcement unchanged, under the post-1.0
+migration policy (ADR 0106); a gate that then cannot evaluate fails.
 """
 
 from __future__ import annotations
@@ -42,7 +45,7 @@ import re
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from release_mode import pre_release  # noqa: E402
+from version_freeze import FREEZE_NOTICE, frozen  # noqa: E402
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -443,12 +446,28 @@ def named_set_failure(constant: str, derivation: str, found: tuple[str, ...], ex
 
 
 def check(repo: Path) -> tuple[bool, str]:
-    if pre_release(repo):
+    """The gate's verdict: under the pre-1.0 freeze the same findings report
+    as a pass the freeze notice heads.
+
+    A ``CheckError`` -- a source the derivation cannot read or parse -- stays
+    a hard error in strict mode but reports under the freeze: a frozen-schema
+    change may move the very shape the derivation reads.
+    """
+    freeze = frozen(repo)
+    try:
+        valid, message = evaluate(repo)
+    except CheckError as error:
+        if not freeze:
+            raise
         return True, (
-            "version-bump fixture check paused pre-1.0 under "
-            "tools/release-mode.toml (pre_release = true; FIG-3660); "
-            "set it false at the lash 1.0 cut"
+            f"{FREEZE_NOTICE}\nversion-bump fixture check could not run: {error}"
         )
+    if freeze:
+        return True, f"{FREEZE_NOTICE}\n{message}"
+    return valid, message
+
+
+def evaluate(repo: Path) -> tuple[bool, str]:
     version_text = read_source(repo, VERSION_SOURCE)
     migrations_text = read_source(repo, MIGRATIONS_SOURCE)
     fixture_text = read_source(repo, FIXTURE_SOURCE)

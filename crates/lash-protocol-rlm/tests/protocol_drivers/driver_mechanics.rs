@@ -2154,6 +2154,7 @@ fn drive_rlm_to_second_llm_request(
             plugin_extensions: Default::default(),
             trigger_events: Default::default(),
             extra_prompt_contributions: Vec::new(),
+            writer_formats: lash_core::build_newest_writer_formats(),
         },
         lash_protocol_rlm::RlmProjectorConfig {
             max_budget_tokens: Some(1_000),

@@ -264,7 +264,9 @@ impl RuntimeCommit {
                 Ok(total.saturating_add(measure_json(serde_json::to_vec(node))?))
             },
         )?;
-        let checkpoint_root = self.checkpoint.manifest()?;
+        let checkpoint_root = self
+            .checkpoint
+            .manifest(crate::store::FleetFormat::current())?;
         let checkpoint_root_bytes = rmp_serde::to_vec_named(&checkpoint_root)
             .map(|bytes| bytes.len())
             .map_err(|err| StoreError::RecordEncodingFailed {
@@ -451,7 +453,7 @@ mod tests {
         let expected_root_bytes = rmp_serde::to_vec_named(
             &commit
                 .checkpoint
-                .manifest()
+                .manifest(crate::store::FleetFormat::current())
                 .expect("project checkpoint root"),
         )
         .expect("encode checkpoint root")

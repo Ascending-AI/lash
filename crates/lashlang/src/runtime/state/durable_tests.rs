@@ -31,7 +31,10 @@ fn install(roots: Vec<(&str, Value)>, heap: Heap) -> State {
 
 fn complete(state: &State) -> DurableParts {
     state
-        .durable_parts(&DurableBaseline::default())
+        .durable_parts(
+            &DurableBaseline::default(),
+            lash_core_execution::FleetFormat::current(),
+        )
         .expect("capture every fragment")
 }
 
@@ -52,6 +55,7 @@ fn reload(header: &[u8], bodies: &BTreeMap<String, Vec<u8>>) -> (State, DurableB
         bodies
             .iter()
             .map(|(name, body)| (name.as_str(), body.as_slice())),
+        lash_core_execution::FleetFormat::current(),
     )
     .expect("reload the durable parts")
 }
@@ -244,7 +248,9 @@ fn a_capture_rewrites_exactly_the_fragments_whose_objects_changed() {
     let first = complete(&state);
     assert_eq!(changed_names(&first), ["a", "b", "c"]);
 
-    let quiet = state.durable_parts(&first.baseline).expect("capture again");
+    let quiet = state
+        .durable_parts(&first.baseline, lash_core_execution::FleetFormat::current())
+        .expect("capture again");
     assert!(
         changed_names(&quiet).is_empty(),
         "nothing changed, so nothing is rewritten"
@@ -255,7 +261,7 @@ fn a_capture_rewrites_exactly_the_fragments_whose_objects_changed() {
         .push_list(&shared, Value::Number(2.0))
         .expect("push through the alias");
     let after_push = state
-        .durable_parts(&quiet.baseline)
+        .durable_parts(&quiet.baseline, lash_core_execution::FleetFormat::current())
         .expect("capture the push");
     assert_eq!(
         changed_names(&after_push),
@@ -274,7 +280,10 @@ fn a_capture_rewrites_exactly_the_fragments_whose_objects_changed() {
         .replace_object(holder_id, HeapObject::Record(Box::new(replaced)))
         .expect("write the holder");
     let after_write = state
-        .durable_parts(&after_push.baseline)
+        .durable_parts(
+            &after_push.baseline,
+            lash_core_execution::FleetFormat::current(),
+        )
         .expect("capture the write");
     assert_eq!(changed_names(&after_write), ["b"]);
 
@@ -282,7 +291,10 @@ fn a_capture_rewrites_exactly_the_fragments_whose_objects_changed() {
         .insert_global("a", Value::Number(0.0))
         .expect("rebind `a`");
     let after_rebind = state
-        .durable_parts(&after_write.baseline)
+        .durable_parts(
+            &after_write.baseline,
+            lash_core_execution::FleetFormat::current(),
+        )
         .expect("capture the rebind");
     assert_eq!(
         changed_names(&after_rebind),
@@ -318,14 +330,17 @@ fn a_rebuilt_heap_is_unlike_every_capture_taken_before_it() {
     assert!(
         changed_names(
             &reloaded
-                .durable_parts(&reload_baseline)
+                .durable_parts(
+                    &reload_baseline,
+                    lash_core_execution::FleetFormat::current()
+                )
                 .expect("capture the reload")
         )
         .is_empty(),
         "a reload is clean against the baseline it returns"
     );
     let against_old = reloaded
-        .durable_parts(&parts.baseline)
+        .durable_parts(&parts.baseline, lash_core_execution::FleetFormat::current())
         .expect("capture against the pre-reload baseline");
     assert_eq!(
         changed_names(&against_old),
@@ -387,12 +402,16 @@ fn warm_and_cold_captures_persist_byte_identical_state() {
             .push_list(&Value::Ref(list), Value::Number(2.0))
             .expect("push onto the list");
     }
-    let warm_parts = warm.durable_parts(&first.baseline).expect("warm capture");
-    let cold_parts = cold.durable_parts(&cold_baseline).expect("cold capture");
+    let warm_parts = warm
+        .durable_parts(&first.baseline, lash_core_execution::FleetFormat::current())
+        .expect("warm capture");
+    let cold_parts = cold
+        .durable_parts(&cold_baseline, lash_core_execution::FleetFormat::current())
+        .expect("cold capture");
     // A cold worker diffing against the capture a warm worker took before the
     // heap was rebuilt rewrites more, and persists the same bytes.
     let rebuilt_parts = cold
-        .durable_parts(&first.baseline)
+        .durable_parts(&first.baseline, lash_core_execution::FleetFormat::current())
         .expect("rebuilt capture");
     assert!(
         changed_names(&rebuilt_parts).len() > changed_names(&warm_parts).len(),
@@ -439,6 +458,7 @@ fn a_reader_refuses_parts_this_writer_would_not_produce() {
         moved
             .iter()
             .map(|(name, body)| (name.as_str(), body.as_slice())),
+        lash_core_execution::FleetFormat::current(),
     )
     .expect_err("an object carried by the wrong root is refused");
     assert!(
@@ -455,6 +475,7 @@ fn a_reader_refuses_parts_this_writer_would_not_produce() {
             twice
                 .iter()
                 .map(|(name, body)| (name.as_str(), body.as_slice())),
+            lash_core_execution::FleetFormat::current(),
         )
         .is_err(),
         "an object carried twice is refused"
@@ -469,6 +490,7 @@ fn a_reader_refuses_parts_this_writer_would_not_produce() {
             dangling
                 .iter()
                 .map(|(name, body)| (name.as_str(), body.as_slice())),
+            lash_core_execution::FleetFormat::current(),
         )
         .is_err(),
         "a reference to an object no fragment carries is refused"
@@ -483,6 +505,7 @@ fn a_reader_refuses_parts_this_writer_would_not_produce() {
             missing
                 .iter()
                 .map(|(name, body)| (name.as_str(), body.as_slice())),
+            lash_core_execution::FleetFormat::current(),
         )
         .is_err(),
         "a partial set of fragments is refused"
@@ -507,8 +530,12 @@ fn a_duplicated_record_field_is_refused_not_collapsed() {
         value: CanonicalValue::Number { value: 2.0 },
     });
     let body = rmp_serde::to_vec_named(&decoded).expect("encode the duplicate");
-    let error = State::from_durable_parts(&parts.header, [("r", body.as_slice())])
-        .expect_err("a record cannot hold one key twice");
+    let error = State::from_durable_parts(
+        &parts.header,
+        [("r", body.as_slice())],
+        lash_core_execution::FleetFormat::current(),
+    )
+    .expect_err("a record cannot hold one key twice");
     assert!(
         matches!(&error, SnapshotDecodeError::NonCanonicalEncoding { .. }),
         "{error:?}"
@@ -527,8 +554,12 @@ fn a_predecessor_header_is_refused_by_its_version() {
         b'e', 0xa5, b'v', b'a', b'l', b'u', b'e', 0x81, 0xa4, b'k', b'i', b'n', b'd', 0xa4, b'n',
         b'u', b'l', b'l',
     ];
-    let error = State::from_durable_parts(&v7_value_body, [("value", &v7_value_body[..])])
-        .expect_err("a v7 body is not a current header");
+    let error = State::from_durable_parts(
+        &v7_value_body,
+        [("value", &v7_value_body[..])],
+        lash_core_execution::FleetFormat::current(),
+    )
+    .expect_err("a v7 body is not a current header");
     assert_eq!(
         error,
         SnapshotDecodeError::VersionMismatch {
@@ -643,6 +674,7 @@ fn a_dropped_name_that_is_also_bound_is_refused() {
         bodies(&parts)
             .iter()
             .map(|(name, body)| (name.as_str(), body.as_slice())),
+        lash_core_execution::FleetFormat::current(),
     )
     .expect_err("a live binding cannot also be a dropped function");
     assert!(
@@ -657,8 +689,12 @@ fn a_dropped_name_that_is_also_bound_is_refused() {
 #[test]
 fn a_v8_header_is_refused_by_its_version() {
     let v8_header = [0x81, 0xa7, b'v', b'e', b'r', b's', b'i', b'o', b'n', 0x08];
-    let error = State::from_durable_parts(&v8_header, std::iter::empty())
-        .expect_err("a v8 header is not a v9 one");
+    let error = State::from_durable_parts(
+        &v8_header,
+        std::iter::empty(),
+        lash_core_execution::FleetFormat::current(),
+    )
+    .expect_err("a v8 header is not a v9 one");
     assert_eq!(
         error,
         SnapshotDecodeError::VersionMismatch {

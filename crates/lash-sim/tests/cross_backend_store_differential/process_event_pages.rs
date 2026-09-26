@@ -270,14 +270,15 @@ pub(super) async fn compare_bounded_process_event_pages(
                     .failure_code()
                 }),
                 replay_key,
+                lash_core::FleetFormat::current(),
             )
             .append_request(),
         );
     }
-    let omissions = lash_core::ProcessEffectOmissions::new(std::collections::BTreeMap::from([(
-        "repeated-node".to_string(),
-        omitted,
-    )]));
+    let omissions = lash_core::ProcessEffectOmissions::new(
+        std::collections::BTreeMap::from([("repeated-node".to_string(), omitted)]),
+        lash_core::FleetFormat::current(),
+    );
     // The run commits its summary at its boundaries (FIG-3571): a bare
     // batch, a wait's enter and its clear, each with a prelude, and the
     // terminal batch closing with the omission record. Each boundary is
@@ -369,7 +370,11 @@ pub(super) async fn compare_bounded_process_event_pages(
             .expect("read effect events")
         {
             summary
-                .fold_event(&event.event_type, &event.payload)
+                .fold_event(
+                    &event.event_type,
+                    &event.payload,
+                    lash_core::FleetFormat::current(),
+                )
                 .expect("fold effect event");
         }
         summaries.push(summary);

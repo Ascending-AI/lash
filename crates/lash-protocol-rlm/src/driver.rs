@@ -121,6 +121,7 @@ pub(crate) fn build_rlm_preamble_with_dialect(
         tool_names_fingerprint,
         execution_prompt: Arc::from(execution),
         prompt_contributions,
+        writer_formats: input.writer_formats,
     }
 }
 
@@ -164,6 +165,7 @@ mod catalogue_tests {
                 plugin_extensions: Default::default(),
                 trigger_events: Default::default(),
                 extra_prompt_contributions: Vec::new(),
+                writer_formats: lash_core::build_newest_writer_formats(),
             },
             RlmProjectorConfig {
                 lashlang_surface: LashlangSurface::new(
@@ -195,6 +197,7 @@ mod catalogue_tests {
                 plugin_extensions: Default::default(),
                 trigger_events: Default::default(),
                 extra_prompt_contributions: Vec::new(),
+                writer_formats: lash_core::build_newest_writer_formats(),
             },
             RlmProjectorConfig {
                 lashlang_surface: LashlangSurface::new(

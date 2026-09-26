@@ -25,6 +25,7 @@ async fn open_factory_catalog(
 fn retained_fork_config_conn(
     conn: &rusqlite::Connection,
     node_id: &str,
+    fleet: lash_core_execution::FleetFormat,
 ) -> Result<lash_core_execution::PersistedSessionConfig, lash_core_execution::StoreError> {
     let frame_node_id =
         persistence::nearest_frame_node_id_conn(conn, node_id)?.ok_or_else(|| {
@@ -45,10 +46,11 @@ fn retained_fork_config_conn(
                 "retained frame node `{frame_node_id}` is missing"
             ))
         })?;
-    lash_core_execution::SessionNodeRecord::decode_storage_body(
+    lash_core_execution::SessionNodeRecord::decode_storage_body_for_fleet(
         frame_node_id.clone(),
         parent_node_id,
         &node_json,
+        fleet,
     )
     .map_err(|error| {
         lash_core_execution::StoreError::Backend(format!(
@@ -73,6 +75,11 @@ pub(super) async fn pin_in_catalog(
     conn.write_flow(move |tx| {
         let outcome: Result<lash_core_execution::ForkPoint, lash_core_execution::StoreError> =
             (|| {
+                let fleet_format = crate::fleet_format::read_recorded(
+                    tx,
+                    lash_core_execution::FleetFormat::writable_range(),
+                )
+                .map_err(sqlite_error)?;
                 if let Some((checkpoint_ref, source_session_id)) = tx
                     .query_row(
                         session_sql().anchors.select_by_node.sql(),
@@ -82,7 +89,7 @@ pub(super) async fn pin_in_catalog(
                     .optional()
                     .map_err(sqlite_error)?
                 {
-                    let config = retained_fork_config_conn(tx, &node_id)?;
+                    let config = retained_fork_config_conn(tx, &node_id, fleet_format)?;
                     return Ok(lash_core_execution::ForkPoint {
                         node_id: node_id.into(),
                         checkpoint_ref: checkpoint_ref.into(),
@@ -128,7 +135,7 @@ pub(super) async fn pin_in_catalog(
                     params![node_id, checkpoint_ref, source_session_id.as_str()],
                 )
                 .map_err(sqlite_error)?;
-                let config = retained_fork_config_conn(tx, &node_id)?;
+                let config = retained_fork_config_conn(tx, &node_id, fleet_format)?;
                 Ok(lash_core_execution::ForkPoint {
                     node_id: node_id.into(),
                     checkpoint_ref: checkpoint_ref.into(),
@@ -181,6 +188,11 @@ pub(super) async fn fork_points_in_catalog(
         let tx = conn.transaction()?;
         let outcome: Result<Vec<lash_core_execution::ForkPoint>, lash_core_execution::StoreError> =
             (|| {
+                let fleet_format = crate::fleet_format::read_recorded(
+                    &tx,
+                    lash_core_execution::FleetFormat::writable_range(),
+                )
+                .map_err(sqlite_error)?;
                 let mut stmt = tx
                     .prepare(session_sql().head.select_fork_points.sql())
                     .map_err(sqlite_error)?;
@@ -199,7 +211,7 @@ pub(super) async fn fork_points_in_catalog(
                 rows.into_iter()
                     .map(|(node_id, checkpoint_ref, source_session_id, pinned)| {
                         Ok(lash_core_execution::ForkPoint {
-                            config: retained_fork_config_conn(&tx, &node_id)?,
+                            config: retained_fork_config_conn(&tx, &node_id, fleet_format)?,
                             node_id: node_id.into(),
                             checkpoint_ref: lash_core_execution::BlobRef(checkpoint_ref),
                             source_session_id: SessionId::from(source_session_id),
@@ -234,8 +246,11 @@ pub(super) async fn fork_at_in_catalog(
             // writer consult; this transaction writes durable head/meta rows,
             // so it reads the deployment's generation rather than a build
             // constant.
-            let fleet_format =
-                crate::fleet_format::read_recorded(tx).map_err(sqlite_error)?;
+            let fleet_format = crate::fleet_format::read_recorded(
+                tx,
+                lash_core_execution::FleetFormat::writable_range(),
+            )
+            .map_err(sqlite_error)?;
             // Keep the fork fences in the shared order: exists -> deleted ->
             // retained -> live -> frame.
             let exists = tx
@@ -389,7 +404,9 @@ pub(super) async fn fork_at_in_catalog(
                 &request.session_id,
                 lash_core_execution::store::SessionHeadPayload {
                     schema_version: fleet_format.writer_version(
-                        lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION,
+                        lash_core_execution::surface_format!(
+                            lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION
+                        ),
                     ),
                     session_id: request.session_id.clone(),
                     config,

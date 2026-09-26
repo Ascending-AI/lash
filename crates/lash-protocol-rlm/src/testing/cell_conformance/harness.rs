@@ -220,7 +220,7 @@ impl Session {
     pub(crate) fn restart(&mut self) {
         let snapshot = self
             .state
-            .snapshot_execution_state()
+            .snapshot_execution_state(lash_core::FleetFormat::current())
             .expect("capture the RLM execution state");
         self.state.acknowledge_execution_state_capture();
         let mut components = BTreeMap::new();
@@ -244,7 +244,7 @@ impl Session {
         };
         let mut restored = RlmExecutionState::for_engine(LANGUAGE_ID);
         restored
-            .restore_execution_state(&hydrated)
+            .restore_execution_state(&hydrated, lash_core::FleetFormat::current())
             .expect("restore the RLM execution state");
         self.state = restored;
     }
@@ -299,7 +299,7 @@ impl Session {
     /// body, exactly as a host would store them.
     pub(crate) fn persisted_state(&self) -> lash_core::plugin::HydratedExecutionState {
         self.state
-            .hydrated_execution_state()
+            .hydrated_execution_state(lash_core::FleetFormat::current())
             .expect("capture the RLM execution state")
     }
 

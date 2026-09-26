@@ -185,7 +185,9 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 .await
                 .map_err(store_sqlx_error)?
         {
-            let config = crate::support::retained_fork_config_tx(&mut tx, node_id).await?;
+            let config =
+                crate::support::retained_fork_config_tx(&mut tx, node_id, self.fleet_format)
+                    .await?;
             tx.commit().await.map_err(store_sqlx_error)?;
             return Ok(lash_core_execution::ForkPoint {
                 node_id: node_id.to_string().into(),
@@ -214,7 +216,8 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
             .execute(&mut *tx)
             .await
             .map_err(store_sqlx_error)?;
-        let config = crate::support::retained_fork_config_tx(&mut tx, node_id).await?;
+        let config =
+            crate::support::retained_fork_config_tx(&mut tx, node_id, self.fleet_format).await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(lash_core_execution::ForkPoint {
             node_id: node_id.to_string().into(),
@@ -262,7 +265,12 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         for row in rows {
             let node_id: String = row.get(0);
             points.push(lash_core_execution::ForkPoint {
-                config: crate::support::retained_fork_config_tx(&mut tx, &node_id).await?,
+                config: crate::support::retained_fork_config_tx(
+                    &mut tx,
+                    &node_id,
+                    self.fleet_format,
+                )
+                .await?,
                 node_id: node_id.into(),
                 checkpoint_ref: BlobRef(row.get(1)),
                 source_session_id: SessionId::from(row.get::<String, _>(2)),
@@ -421,9 +429,11 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
         let head = lash_core_execution::store::SessionHeadMeta::assemble(
             &request.session_id,
             lash_core_execution::store::SessionHeadPayload {
-                schema_version: self
-                    .fleet_format
-                    .writer_version(lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION),
+                schema_version: self.fleet_format.writer_version(
+                    lash_core_execution::surface_format!(
+                        lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION
+                    ),
+                ),
                 session_id: request.session_id.clone(),
                 config,
                 current_frame_node_id: Some({

@@ -73,6 +73,7 @@ fn occurrence(node: &str, occurrence: u64, replay_key: &str) -> ProcessEventAppe
         lash_core::ProcessEffectOutcomeClass::Success,
         None,
         replay_key,
+        lash_core::FleetFormat::current(),
     )
     .append_request()
 }
@@ -94,6 +95,7 @@ fn summary() -> Vec<ProcessEventAppendRequest> {
                 },
             )]
             .into(),
+            lash_core::FleetFormat::current(),
         )
         .append_request("batch-law:omissions"),
     ]
@@ -405,6 +407,7 @@ pub async fn a_boundary_commits_its_prelude_in_its_own_transaction(
             },
         )]
         .into(),
+        lash_core::FleetFormat::current(),
     )
     .append_request("boundary-law:omissions");
     let completion = registry

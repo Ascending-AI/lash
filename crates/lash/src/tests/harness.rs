@@ -46,6 +46,44 @@ pub(crate) async fn memory_backend_with_clock(
     )
 }
 
+/// The Restate double a facade test runs on (FIG-3600 S5c): lash-restate's
+/// engine and services over a fresh SQLite memory store set, connected to an
+/// in-process server double.
+///
+/// `ServerConfig::default()` schedules concurrently, so no outside gates are
+/// needed. Keep the returned double alive to the end of the test (FIG-3723):
+/// a core built over `double.lash_backend()` does not hold it.
+pub(crate) async fn restate_double(seed: u64) -> lash_restate_test::RestateTestBackend {
+    lash_restate_test::backend(seed, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("build the Restate double")
+}
+
+/// A fresh SQLite memory store set: storage ports only, no engine. For a
+/// test whose every use is a store port.
+#[allow(
+    dead_code,
+    reason = "a PREP-F twin the S5c batches move their fixtures onto"
+)]
+pub(crate) async fn memory_store_set() -> Arc<lash_sqlite_store::SqliteStoreSet> {
+    Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("open a SQLite memory store set"),
+    )
+}
+
+/// A backend over a fresh SQLite memory store set whose effect host only
+/// records: for a test that needs a backend value but runs no effect.
+#[allow(
+    dead_code,
+    reason = "a PREP-F twin the S5c batches move their fixtures onto"
+)]
+pub(crate) async fn memory_store_backend() -> lash_core::Backend {
+    let stores = memory_store_set().await;
+    lash_conformance::recording_backend_over(stores)
+}
+
 /// A raw read of `backend`'s durable-core catalog: inspection of rows no
 /// API reports, taken at a quiescent point of the test.
 fn core_rows<T>(

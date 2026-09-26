@@ -944,7 +944,7 @@ async fn upgrade_prior_fixture_graph_node_bodies(pool: &sqlx::PgPool) {
         )
         .expect("refusal fixture node payload must decode under the current generation");
         let restamped = record
-            .encode_storage_body()
+            .encode_storage_body(lash_core_execution::FleetFormat::current())
             .expect("re-encode refusal fixture node body");
         sqlx::query("UPDATE lash_graph_nodes SET node_json = $1 WHERE node_id = $2")
             .bind(&restamped)
@@ -1152,7 +1152,7 @@ async fn refresh_prior_fixture_node_bodies(pool: &sqlx::PgPool) {
         )
         .expect("prior fixture node body must match the current payload shape");
         let canonical = record
-            .encode_storage_body()
+            .encode_storage_body(lash_core_execution::FleetFormat::current())
             .expect("re-encode prior fixture node body at the current generation");
         sqlx::query("UPDATE lash_graph_nodes SET node_json = $1 WHERE node_id = $2")
             .bind(&canonical)

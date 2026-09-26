@@ -185,7 +185,7 @@ class VersionBumpFixtureCheckTest(unittest.TestCase):
         fixture_dump: str | None = None,
         fixture_manifest: str | None = None,
         schema_ddl: str = SCHEMA_DDL_SOURCE,
-        release_mode: str | None = None,
+        surfaces: str | None = None,
     ) -> tuple[bool, str]:
         # The component pins track whatever generation the case declares unless
         # the case is about a stale pin and says so; every other case is then
@@ -215,32 +215,60 @@ class VersionBumpFixtureCheckTest(unittest.TestCase):
                 path = repo / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(text, encoding="utf-8")
-            if release_mode is not None:
-                switch = repo / "tools" / "release-mode.toml"
+            if surfaces is not None:
+                switch = repo / "scripts" / "versioned-surfaces.toml"
                 switch.parent.mkdir(parents=True, exist_ok=True)
-                switch.write_text(release_mode, encoding="utf-8")
+                switch.write_text(surfaces, encoding="utf-8")
             return MODULE.check(repo)
 
-    def test_pre_release_switch_pauses_the_gate(self) -> None:
+    def test_pre_1_0_freeze_reports_findings_without_enforcing(self) -> None:
         valid, message = self.check(
             version="const SCHEMA_VERSION: i32 = 53;\n",
             store_test=STORE_TEST_SOURCE,
             fixture_dump=FIXTURE_DUMP_SOURCE,
             fixture_manifest=FIXTURE_MANIFEST_SOURCE,
-            release_mode="pre_release = true\n",
+            surfaces='[policy]\nfreeze = "pre-1.0"\n',
         )
         self.assertTrue(valid)
-        self.assertIn("paused pre-1.0", message)
-
-    def test_pre_release_switch_off_enforces_as_before(self) -> None:
-        valid, _ = self.check(
-            version="const SCHEMA_VERSION: i32 = 53;\n",
-            store_test=STORE_TEST_SOURCE,
-            fixture_dump=FIXTURE_DUMP_SOURCE,
-            fixture_manifest=FIXTURE_MANIFEST_SOURCE,
-            release_mode="pre_release = false\n",
+        self.assertIn(
+            "version freeze active (pre-1.0): findings reported, not enforced",
+            message,
         )
-        self.assertFalse(valid)
+        # The findings still print -- report, not skip.
+        self.assertIn("names component 52, but", message)
+
+    def test_freeze_off_enforces_as_before(self) -> None:
+        for switch in ('[policy]\nfreeze = "off"\n', None):
+            with self.subTest(switch=switch):
+                valid, _ = self.check(
+                    version="const SCHEMA_VERSION: i32 = 53;\n",
+                    store_test=STORE_TEST_SOURCE,
+                    fixture_dump=FIXTURE_DUMP_SOURCE,
+                    fixture_manifest=FIXTURE_MANIFEST_SOURCE,
+                    surfaces=switch,
+                )
+                self.assertFalse(valid)
+
+    def test_freeze_reports_a_check_the_derivation_cannot_run(self) -> None:
+        # A frozen-schema change may move the shape the derivation reads; under
+        # the freeze that reports rather than raises. Strict mode still fails.
+        for switch, raises in (
+            ('[policy]\nfreeze = "pre-1.0"\n', False),
+            ('[policy]\nfreeze = "off"\n', True),
+        ):
+            with self.subTest(switch=switch):
+                if raises:
+                    with self.assertRaises(MODULE.CheckError):
+                        self.check(migrations="", surfaces=switch)
+                else:
+                    valid, message = self.check(migrations="", surfaces=switch)
+                    self.assertTrue(valid)
+                    self.assertIn(
+                        "version freeze active (pre-1.0): findings reported, "
+                        "not enforced",
+                        message,
+                    )
+                    self.assertIn("could not run", message)
 
     # FIG-3413: the #1796 situation. The component moves and the literal the
     # trunk-only Postgres suite asserts stays where it was, which every

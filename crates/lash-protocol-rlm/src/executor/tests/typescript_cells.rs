@@ -385,12 +385,12 @@ fn a_restored_typescript_closure_does_not_poison_a_different_cell() {
 
             let snapshot = hydrate_snapshot(
                 state
-                    .snapshot_execution_state()
+                    .snapshot_execution_state(lash_core::FleetFormat::current())
                     .expect("snapshot components"),
             );
             let mut restored = RlmExecutionState::for_engine("typescript");
             restored
-                .restore_execution_state(&snapshot)
+                .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
                 .expect("restore TypeScript execution state");
 
             let (_, response) = execute_typescript_test_cell(restored, TRIVIAL_NEXT_CELL).await;

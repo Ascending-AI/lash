@@ -1,22 +1,6 @@
 use super::*;
 use lash::SessionId;
 
-pub(super) async fn sync_cron_jobs_with_context(
-    state: &AppState,
-    ctx: &WorkflowContext<'_>,
-    session_id: &SessionId,
-    reason: &str,
-) -> HandlerResult<()> {
-    sync_cron_jobs(
-        state,
-        &WorkflowCronJobSyncSurface { ctx },
-        session_id,
-        reason,
-        classified_embed_handler_error,
-    )
-    .await
-}
-
 #[async_trait::async_trait]
 trait CronJobSyncSurface {
     type Error;
@@ -28,38 +12,6 @@ trait CronJobSyncSurface {
     ) -> Result<WorkbenchCronInfo, Self::Error>;
 
     async fn cancel(&self, job_key: &str) -> Result<(), Self::Error>;
-}
-
-struct WorkflowCronJobSyncSurface<'a, 'ctx> {
-    ctx: &'a WorkflowContext<'ctx>,
-}
-
-#[async_trait::async_trait]
-impl CronJobSyncSurface for WorkflowCronJobSyncSurface<'_, '_> {
-    type Error = HandlerError;
-
-    async fn upsert(
-        &self,
-        job_key: &str,
-        request: WorkbenchCronRequest,
-    ) -> Result<WorkbenchCronInfo, Self::Error> {
-        let Json(info) = self
-            .ctx
-            .object_client::<WorkbenchCronJobClient>(job_key.to_string())
-            .upsert(Json(request))
-            .call()
-            .await?;
-        Ok(info)
-    }
-
-    async fn cancel(&self, job_key: &str) -> Result<(), Self::Error> {
-        self.ctx
-            .object_client::<WorkbenchCronJobClient>(job_key.to_string())
-            .cancel()
-            .call()
-            .await?;
-        Ok(())
-    }
 }
 
 struct IngressCronJobSyncSurface {
@@ -87,6 +39,24 @@ impl CronJobSyncSurface for IngressCronJobSyncSurface {
             .await
             .map_err(|err| AppError::internal(format!("Restate cron sync failed: {err}")))
     }
+}
+
+/// Resynchronise the session's cron jobs with its trigger registrations once a
+/// turn settled: the turn may have registered, changed or disabled one.
+pub(crate) async fn sync_cron_jobs_after_turn(
+    state: &AppState,
+    session_id: &SessionId,
+    reason: &str,
+) -> Result<(), AppError> {
+    let surface = IngressCronJobSyncSurface {
+        client: lash_restate::RestateIngressClient::new(
+            lash_restate::RestateConnection::with_client(
+                &state.restate_ingress_url,
+                state.restate_http.clone(),
+            ),
+        ),
+    };
+    sync_cron_jobs(state, &surface, session_id, reason, AppError::runtime).await
 }
 
 /// The pre-mutation record keeps a disabled job cancellable even when this process did not
@@ -200,8 +170,6 @@ where
     S: CronJobSyncSurface + Sync,
     Classify: Fn(lash::EmbedError) -> S::Error,
 {
-    #[cfg(test)]
-    crate::tests::arm_registered_session_open_admission_gate(session_id, reason);
     let session = state
         .open_session(session_id, "restate.cron_sync")
         .await
@@ -308,6 +276,8 @@ pub(super) async fn emit_cron_occurrence_with_effect_controller(
     job_key: &str,
     scoped_effect_controller: lash::runtime::ScopedEffectController<'_>,
 ) -> HandlerResult<Json<CronEmitReport>> {
+    // A wake the occurrence delivers is a root the engine starts on its own.
+    super::watch_session_roots(&state, &request.session_id);
     let report = state
         .core
         .triggers()

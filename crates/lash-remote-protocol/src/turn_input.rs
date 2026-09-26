@@ -9,7 +9,6 @@ use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 use crate::llm::RemoteAttachmentSource;
-use crate::prompt::RemotePromptLayer;
 use crate::registry_errors::{RemoteProtocolError, require_non_empty};
 use crate::tools::RemoteToolGrant;
 
@@ -52,8 +51,6 @@ pub struct RemoteTurnInput {
     pub protocol_turn_options: Option<RemoteProtocolTurnOptions>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub trace_turn_id: Option<TurnId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompt_layer: Option<RemotePromptLayer>,
 }
 
 impl RemoteTurnInput {
@@ -62,7 +59,6 @@ impl RemoteTurnInput {
             items: vec![RemoteInputItem::Text { text: text.into() }],
             protocol_turn_options: None,
             trace_turn_id: None,
-            prompt_layer: None,
         }
     }
 
@@ -96,7 +92,7 @@ pub enum RemoteInputItem {
 
 /// A request to add turn input to a session.
 ///
-/// `session_id`, `turn_id`, `idempotency_key`, `tool_grants`, and `metadata`
+/// `session_id`, `turn_id`, `tool_grants`, and `metadata`
 /// are host-transport fields: they route and describe the request at the
 /// process boundary and are consumed by the transport layer, not by the
 /// `TurnInput` conversion.
@@ -104,21 +100,14 @@ pub enum RemoteInputItem {
 pub struct RemoteTurnRequest {
     /// Target session.
     pub session_id: SessionId,
-    /// Stable turn identifier for the submitted input.
+    /// Stable turn identifier for the submitted input: the root the input
+    /// opens and its idempotency key at once. A transport sends it as
+    /// `send(input).id(turn_id)`, so resending the same request answers the
+    /// first acceptance instead of admitting the input again.
     ///
     /// Shared by every payload routed to this turn while it is open, including
     /// tool results, usage, and activity.
     pub turn_id: TurnId,
-    /// Host-transport deduplication key.
-    ///
-    /// Lash does **not** deduplicate on this field: the conversion to
-    /// [`lash_core::TurnInput`] drops it and no admission path reads it, so
-    /// resending a request with the same key admits the turn again. Lash's
-    /// turn-input idempotency key is the `source_key` the host supplies at
-    /// admission; a transport that wants dedup on `idempotency_key` must
-    /// enforce it before conversion.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub idempotency_key: Option<String>,
     pub input: RemoteTurnInput,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tool_grants: Vec<RemoteToolGrant>,

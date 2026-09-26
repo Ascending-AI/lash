@@ -56,8 +56,10 @@
 //! configured Live Replay store — in-memory, and therefore process-local, by
 //! default.
 
+use crate::core::HeldWork;
 use crate::support::{
-    Arc, EmbedError, Result, RuntimePersistence, SessionStoreFactory, SessionWorkEngine, TurnInput,
+    Arc, EffectHost, EmbedError, Result, RuntimePersistence, SessionStoreFactory,
+    SessionWorkEngine, TurnInput,
 };
 use lash_core::LiveReplayStore;
 use lash_core::facade_support::DurableSessionOps;
@@ -91,21 +93,35 @@ pub struct DurableSession {
     catalog: Arc<dyn SessionStoreFactory>,
     /// Shared by every clone so concurrent operations acquire the store once.
     store: Arc<OnceCell<Arc<dyn RuntimePersistence>>>,
+    /// What a [`send`](Self::send) needs beyond the queue: the engine a
+    /// handle waits on, the effect host its terminal reads and cancels go
+    /// through, and the live replay its events come from.
+    work: HeldWork,
+    effect_host: Arc<dyn EffectHost>,
+    live_replay_store: Arc<dyn LiveReplayStore>,
 }
 
 impl DurableSession {
     pub(crate) fn from_catalog(
         session_id: SessionId,
         catalog: Arc<dyn SessionStoreFactory>,
-        queued: Arc<dyn SessionWorkEngine>,
+        work: HeldWork,
+        effect_host: Arc<dyn EffectHost>,
         live_replay_store: Arc<dyn LiveReplayStore>,
     ) -> Self {
         Self {
-            ops: DurableSessionOps::new(session_id.clone(), queued, live_replay_store),
+            ops: DurableSessionOps::new(
+                session_id.clone(),
+                work.engine() as Arc<dyn SessionWorkEngine>,
+                Arc::clone(&live_replay_store),
+            ),
             acquisition: DurableAcquisition::Catalog,
             catalog,
             store: Arc::new(OnceCell::new()),
             session_id,
+            work,
+            effect_host,
+            live_replay_store,
         }
     }
 
@@ -114,17 +130,43 @@ impl DurableSession {
     pub(crate) fn from_binding(
         session_id: SessionId,
         store: Arc<dyn RuntimePersistence>,
-        queued: Arc<dyn SessionWorkEngine>,
+        work: HeldWork,
+        effect_host: Arc<dyn EffectHost>,
         live_replay_store: Arc<dyn LiveReplayStore>,
         catalog: Arc<dyn SessionStoreFactory>,
     ) -> Self {
         Self {
-            ops: DurableSessionOps::new(session_id.clone(), queued, live_replay_store),
+            ops: DurableSessionOps::new(
+                session_id.clone(),
+                work.engine() as Arc<dyn SessionWorkEngine>,
+                Arc::clone(&live_replay_store),
+            ),
             acquisition: DurableAcquisition::Bound(store),
             catalog,
             store: Arc::new(OnceCell::new()),
             session_id,
+            work,
+            effect_host,
+            live_replay_store,
         }
+    }
+
+    /// The session's store, its queue operations and its send ports: what a
+    /// send handle bound to this Durable Session reads and writes through.
+    pub(crate) async fn send_parts(&self) -> Result<crate::send::SendParts> {
+        Ok(crate::send::SendParts {
+            session_id: self.session_id.clone(),
+            store: Arc::clone(self.store().await?),
+            ops: self.ops.clone(),
+            work: self.work.clone(),
+            effect_host: Arc::clone(&self.effect_host),
+            live_replay_store: Arc::clone(&self.live_replay_store),
+        })
+    }
+
+    /// The live replay a handle's events come from.
+    pub(crate) fn live_replay_store(&self) -> &Arc<dyn LiveReplayStore> {
+        &self.live_replay_store
     }
 
     /// The session this handle is bound to.
@@ -204,6 +246,13 @@ impl DurableSession {
             id: None,
             ingress: TurnInputIngress::NextTurn,
         }
+    }
+
+    /// Accept `input` durably and ask the engine to drive the session; the
+    /// same acceptance as [`LashSession::send`](crate::LashSession::send), with
+    /// no resident runtime to refresh when the handle answers.
+    pub fn send(&self, input: TurnInput) -> crate::SendBuilder {
+        crate::SendBuilder::new(crate::send::SendTarget::Durable(self.clone()), input)
     }
 
     /// A held input remains present with the exact expiry of the matching live

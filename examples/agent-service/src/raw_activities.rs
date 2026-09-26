@@ -10,7 +10,7 @@ use axum::extract::{Path as AxumPath, State};
 use axum::http::{StatusCode, header};
 use axum::response::Response;
 use bytes::Bytes;
-use lash::rlm::RlmTurnBuilderExt as _;
+use lash::rlm::RlmSendBuilderExt as _;
 use lash::{TurnActivityFanout, TurnActivitySink, TurnInput, TurnOutput};
 use lash_remote_protocol::RemoteTurnActivitySink;
 use serde::Deserialize;
@@ -22,8 +22,6 @@ use crate::routes::{
     ChannelTurnEvents, TurnPersistenceState, assistant_text_for_persistence,
     model_spec_for_chat_selection,
 };
-#[cfg(feature = "restate")]
-use crate::state::AgentServiceDurability;
 use crate::state::{AppError, AppResult, AppStateData};
 
 #[derive(Debug, Deserialize)]
@@ -34,8 +32,7 @@ pub(crate) struct StreamRawActivitiesRequest {
 /// Run one chat turn and expose its canonical remote activity projection as
 /// newline-delimited JSON. This is a raw transport endpoint: unlike the
 /// product message stream, it carries no app-owned rows or replay envelope.
-/// In Restate mode, use the app-owned turn outbox keyed by `turn_id` that the
-/// progress stream reads. The fanout invokes the remote sink before the
+/// The fanout invokes the remote sink before the
 /// persistence sink, so clients must not read app rows as soon as they see an
 /// activity.
 pub(crate) async fn stream_raw_activities(
@@ -43,15 +40,6 @@ pub(crate) async fn stream_raw_activities(
     AxumPath(chat_id): AxumPath<String>,
     Json(request): Json<StreamRawActivitiesRequest>,
 ) -> AppResult<Response> {
-    #[cfg(feature = "restate")]
-    if state.durability() == AgentServiceDurability::Restate {
-        return Err(AppError {
-            status: StatusCode::NOT_IMPLEMENTED,
-            message: "raw turn activities are unavailable in Restate mode; use the app-owned turn outbox keyed by turn_id that the progress stream reads"
-                .to_string(),
-        });
-    }
-
     let text = request.text.trim().to_string();
     if text.is_empty() {
         return Err(AppError::bad_request("message text is required"));
@@ -80,8 +68,8 @@ pub(crate) async fn stream_raw_activities(
     let session = state.open_session(&chat_id, turn_model).await?;
     let turn_id = TurnId::from(format!("agent-service-raw-turn:{}", uuid::Uuid::new_v4()));
     let turn = session
-        .turn(TurnInput::text(text))
-        .turn_id(turn_id.clone())
+        .send(TurnInput::text(text))
+        .id(turn_id.clone())
         .require_finish()?;
     let (tx, rx) = mpsc::unbounded_channel::<Result<Bytes, Infallible>>();
     let remote_events = Arc::new(RemoteTurnActivitySink::new(NdjsonChannelWriter::new(tx), 0));
@@ -90,6 +78,7 @@ pub(crate) async fn stream_raw_activities(
         state.clone(),
         chat_id.clone(),
         Arc::clone(&turn_state),
+        None,
     ));
     let events = TurnActivityFanout::new([
         Arc::clone(&remote_events) as Arc<dyn TurnActivitySink>,
@@ -97,7 +86,7 @@ pub(crate) async fn stream_raw_activities(
     ]);
 
     tokio::spawn(async move {
-        match turn.stream_to(&events).await {
+        match turn.output_into(&events).await {
             Ok(result) => {
                 let output = TurnOutput {
                     result,
@@ -259,44 +248,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "restate")]
-    #[tokio::test]
-    async fn raw_activity_route_rejects_restate_without_inserting_a_user_row() {
-        let temp = tempfile::tempdir().expect("tempdir");
-        let data_dir = temp.path();
-        let state = raw_activity_test_state(data_dir, AgentServiceDurability::Restate).await;
-        let chat = state
-            .with_db(|db| db.create_chat("raw activities", "scripted-model", None))
-            .await
-            .expect("create chat");
-        let chat_id = chat.id;
-
-        let error = stream_raw_activities(
-            State(state.clone()),
-            AxumPath(chat_id.clone()),
-            Json(StreamRawActivitiesRequest {
-                text: "must not be inserted".to_string(),
-            }),
-        )
-        .await
-        .expect_err("Restate raw activity route must return 501");
-        assert_eq!(error.status, StatusCode::NOT_IMPLEMENTED);
-        assert!(
-            error
-                .message
-                .contains("app-owned turn outbox keyed by turn_id"),
-            "501 should point to the Restate progress-stream alternative: {error}"
-        );
-        let messages = state
-            .with_db(move |db| db.list_messages(&chat_id))
-            .await
-            .expect("persisted messages");
-        assert!(
-            messages.is_empty(),
-            "Restate rejection must happen before inserting the user row: {messages:#?}"
-        );
-    }
-
     async fn raw_activity_test_state(
         data_dir: &std::path::Path,
         durability: AgentServiceDurability,
@@ -362,7 +313,6 @@ finish("done through raw activities");
             "scripted-model".to_string(),
             None,
             durability,
-            None,
             None,
         );
         state

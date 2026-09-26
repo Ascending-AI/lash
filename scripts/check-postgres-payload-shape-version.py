@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """Require payload artifact or fingerprint changes to bump every owning backend.
 
-The gate is paused until the lash 1.0 cut: while ``tools/release-mode.toml``
-carries ``pre_release = true`` it reports "paused pre-1.0" and exits 0
-(FIG-3660).
+The gate is frozen until the lash 1.0 cut: while the surface inventory's
+top-level ``[policy]`` table carries ``freeze = "pre-1.0"`` it prints its
+findings, reports the freeze, and exits 0 (FIG-3846). Removing the key
+restores strict enforcement unchanged, under the post-1.0 migration policy
+(ADR 0106).
 """
 
 from __future__ import annotations
@@ -19,7 +21,7 @@ import sys
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from release_mode import pre_release  # noqa: E402
+from version_freeze import FREEZE_NOTICE, frozen  # noqa: E402
 
 DEFAULT_RANGE = "origin/main...HEAD"
 ARTIFACT = "crates/lash-postgres-store/schema-shape.txt"
@@ -270,20 +272,16 @@ def load_patch(args: argparse.Namespace) -> str:
 
 
 def main(argv: list[str]) -> int:
-    if pre_release(ROOT):
-        print(
-            "PostgreSQL payload-shape version check paused pre-1.0 under "
-            "tools/release-mode.toml (pre_release = true; FIG-3660); "
-            "set it false at the lash 1.0 cut"
-        )
-        return 0
+    freeze = frozen(ROOT)
     try:
         valid, message = validate_patch(load_patch(parse_args(argv)))
     except (OSError, subprocess.CalledProcessError) as error:
         print(f"PostgreSQL payload-shape version check could not run: {error}", file=sys.stderr)
         return 2
+    if freeze:
+        print(FREEZE_NOTICE)
     print(message, file=sys.stdout if valid else sys.stderr)
-    return 0 if valid else 1
+    return 0 if valid or freeze else 1
 
 
 if __name__ == "__main__":

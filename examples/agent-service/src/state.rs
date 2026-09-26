@@ -23,10 +23,6 @@ pub(crate) struct AppStateData {
     durability: AgentServiceDurability,
     #[cfg(feature = "restate")]
     restate_ingress_url: Option<String>,
-    #[cfg(feature = "restate")]
-    restate_authority_id: Option<lash_restate::RestateAuthorityId>,
-    #[cfg(feature = "restate")]
-    restate_http: reqwest::Client,
 }
 
 impl AppStateData {
@@ -43,7 +39,6 @@ impl AppStateData {
         default_model_variant: Option<String>,
         durability: AgentServiceDurability,
         restate_ingress_url: Option<String>,
-        restate_authority_id: Option<lash_restate::RestateAuthorityId>,
     ) -> Self {
         Self {
             core,
@@ -53,8 +48,6 @@ impl AppStateData {
             default_model_variant,
             durability,
             restate_ingress_url,
-            restate_authority_id,
-            restate_http: reqwest::Client::new(),
         }
     }
 
@@ -104,86 +97,26 @@ impl AppStateData {
         self.restate_ingress_url.as_deref()
     }
 
-    #[cfg(feature = "restate")]
-    pub(crate) fn restate_authority_id(&self) -> Option<&lash_restate::RestateAuthorityId> {
-        self.restate_authority_id.as_ref()
-    }
-
-    #[cfg(feature = "restate")]
-    pub(crate) fn restate_http(&self) -> &reqwest::Client {
-        &self.restate_http
-    }
-
-    /// Parks the chat's in-flight turn under the first of `turn_ids` a turn
-    /// is in flight for, when `error` is the session-state generation gate's
-    /// refusal (FIG-3735), and answers whether it parked. A refused redrive of
-    /// an in-flight turn replays a journal that already holds commands, so its
-    /// handler ends the attempt parked, never terminally.
-    #[cfg(feature = "restate")]
-    pub(crate) async fn park_generation_refused_turn(
-        &self,
-        chat_id: &str,
-        turn_ids: impl IntoIterator<Item = lash::TurnId>,
-        error: &lash::EmbedError,
-    ) -> bool {
-        let Some(refusal) = error.session_state_version_refusal() else {
-            return false;
-        };
-        let backend = self.core.backend();
-        let sessions = backend.session_store_factory();
-        for turn_id in turn_ids {
-            let scope = lash::runtime::ExecutionScope::turn(chat_id, turn_id);
-            match lash_restate::park_generation_refused_turn(
-                sessions.as_ref(),
-                &scope,
-                refusal,
-                backend.clock().timestamp_ms(),
-            )
-            .await
-            {
-                Ok(Some(_)) => return true,
-                Ok(None) => {}
-                // The park could not be read or written: end the attempt the
-                // parked way anyway, retryably, so the invocation keeps its
-                // journal and its retry writes the park.
-                Err(store) => {
-                    eprintln!("agent-service: recording the refused turn's park failed: {store}");
-                    return true;
-                }
-            }
-        }
-        false
-    }
-
     pub(crate) async fn open_session(
         &self,
         chat_id: &str,
         model: ModelSpec,
     ) -> AppResult<LashSession> {
-        let session = self.open_lash_session(chat_id, model).await?;
-        self.record_tool_loss_notice(chat_id, &session).await?;
-        Ok(session)
-    }
-
-    /// The chat's Lash session, with the facade's typed refusal, before the
-    /// service reads it. A turn handler inspects the refusal (FIG-3735).
-    pub(crate) async fn open_lash_session(
-        &self,
-        chat_id: &str,
-        model: ModelSpec,
-    ) -> Result<LashSession, lash::EmbedError> {
         // TypeScript is the sole RLM language (ADR 0096), so a chat states no
         // language at its open: there is nothing left to pin, and a bag that
         // still records the retired `dialect` field is refused by the protocol
         // as an incompatible format rather than served under another language.
-        let builder = self
+        let session = self
             .core
             .session(chat_id)
             .session_spec(lash::SessionSpec::inherit().model(model))
             .plugin::<DemoPlugin>(DemoPluginConfig {
                 db: Arc::clone(&self.db),
-            });
-        builder.open().await
+            })
+            .open()
+            .await?;
+        self.record_tool_loss_notice(chat_id, &session).await?;
+        Ok(session)
     }
 
     /// Tell this chat's user when the reopened session lost a tool.
@@ -496,7 +429,6 @@ pub(crate) mod test_support {
                 "mock-model".to_string(),
                 None,
                 AgentServiceDurability::Local,
-                None,
                 None,
             )
         }

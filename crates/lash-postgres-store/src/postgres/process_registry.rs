@@ -35,6 +35,12 @@ use wake_delivery::{
     claim_pending_wake_deliveries, decode_wake_delivery_row, load_wake_delivery_tx,
     update_wake_delivery_state, wake_delivery_report,
 };
+impl lash_core_execution::FleetFormatStore for PostgresProcessRegistry {
+    fn fleet_format(&self) -> lash_core_execution::FleetFormat {
+        self.fleet_format
+    }
+}
+
 #[async_trait::async_trait]
 impl lash_core_execution::ProcessQuery for PostgresProcessRegistry {
     async fn get_process_by_start_key(
@@ -362,6 +368,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
                 ),
                 now,
                 self.wake_delivery_config,
+                self.fleet_format,
             )
             .await?;
         }
@@ -406,6 +413,7 @@ impl lash_core_execution::ProcessRegistrar for PostgresProcessRegistry {
                     *request,
                     self.clock.timestamp_ms(),
                     self.wake_delivery_config,
+                    self.fleet_format,
                 )
                 .await?;
             }
@@ -439,6 +447,7 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
                 ProcessEventAppendRequest::observer_added(process_id, session_id, &by),
                 self.clock.timestamp_ms(),
                 self.wake_delivery_config,
+                self.fleet_format,
             )
             .await?;
         }
@@ -468,6 +477,7 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
                 ProcessEventAppendRequest::observer_removed(process_id, session_id, &by),
                 self.clock.timestamp_ms(),
                 self.wake_delivery_config,
+                self.fleet_format,
             )
             .await?;
         }
@@ -509,6 +519,7 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
                 ProcessEventAppendRequest::observer_removed(process_id, from_session_id, &by),
                 self.clock.timestamp_ms(),
                 self.wake_delivery_config,
+                self.fleet_format,
             )
             .await?;
             append_process_event_tx(
@@ -517,6 +528,7 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
                 ProcessEventAppendRequest::observer_added(process_id, to_session_id, &by),
                 self.clock.timestamp_ms(),
                 self.wake_delivery_config,
+                self.fleet_format,
             )
             .await?;
         }
@@ -609,6 +621,7 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
             ProcessEventAppendRequest::subscription_retargeted(process_id, target),
             self.clock.timestamp_ms(),
             self.wake_delivery_config,
+            self.fleet_format,
         )
         .await?;
         sqlx::query(process_sql().process.set_wake_session_id.sql())
@@ -685,6 +698,7 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
             request,
             occurred_at_ms,
             self.wake_delivery_config,
+            self.fleet_format,
         )
         .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
@@ -704,7 +718,13 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
         let mut record = require_process_tx(&mut tx, process_id).await?;
         let now_ms = process_lease_now_epoch_ms_tx(&mut tx).await?;
         validate_process_execution_authority_tx(
-            &mut tx, process_id, &record, authority, None, now_ms,
+            &mut tx,
+            process_id,
+            &record,
+            authority,
+            None,
+            now_ms,
+            self.fleet_format,
         )
         .await?;
         // `occurred_at_ms` provenance is inconsistent in this backend: four
@@ -718,6 +738,7 @@ impl lash_core_execution::ProcessEventLog for PostgresProcessRegistry {
             requests,
             occurred_at_ms,
             self.wake_delivery_config,
+            self.fleet_format,
         )
         .await?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
@@ -900,7 +921,9 @@ impl lash_core_execution::ProcessWakeOutbox for PostgresProcessRegistry {
                 .await
                 .map_err(plugin_sqlx_error)?
         };
-        rows.into_iter().map(decode_wake_delivery_row).collect()
+        rows.into_iter()
+            .map(|row| decode_wake_delivery_row(row, self.fleet_format))
+            .collect()
     }
 
     async fn wake_delivery_report(
@@ -967,7 +990,7 @@ impl lash_core_execution::ProcessWakeOutbox for PostgresProcessRegistry {
             .rows_affected();
         if changed == 0 {
             let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-            let delivery = load_wake_delivery_tx(&mut tx, delivery_id).await?;
+            let delivery = load_wake_delivery_tx(&mut tx, delivery_id, self.fleet_format).await?;
             tx.commit().await.map_err(plugin_sqlx_error)?;
             return Ok(lash_core_execution::WakeDeliveryClaimOutcome::ClaimLost {
                 state: delivery.state(),

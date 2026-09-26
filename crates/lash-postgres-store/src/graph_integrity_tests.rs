@@ -106,11 +106,22 @@ impl GraphIntegrityInjector for PostgresGraphIntegrityInjector {
             .begin()
             .await
             .map_err(store_sqlx_error)?;
-        let leaf_node_id = load_session_head_meta_tx(&mut tx, session_id, false)
-            .await?
-            .and_then(|meta| meta.leaf_node_id)
-            .map(lash_core_execution::NodeId::into_inner);
-        let graph = load_whole_graph_tx(&mut tx, session_id, leaf_node_id).await?;
+        let leaf_node_id = load_session_head_meta_tx(
+            &mut tx,
+            session_id,
+            false,
+            lash_core_execution::FleetFormat::current(),
+        )
+        .await?
+        .and_then(|meta| meta.leaf_node_id)
+        .map(lash_core_execution::NodeId::into_inner);
+        let graph = load_whole_graph_tx(
+            &mut tx,
+            session_id,
+            leaf_node_id,
+            lash_core_execution::FleetFormat::current(),
+        )
+        .await?;
         tx.commit().await.map_err(store_sqlx_error)?;
         Ok(graph)
     }

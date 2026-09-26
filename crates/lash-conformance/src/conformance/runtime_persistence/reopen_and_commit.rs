@@ -4,6 +4,7 @@
 //! budget; every law keeps its name and its registration path.
 
 use super::*;
+use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 use pretty_assertions::assert_eq;
 
 /// Metadata written through the store round-trips.
@@ -675,7 +676,9 @@ pub async fn queued_wake_delivery_is_source_key_idempotent_and_claimed_once(
 /// A process wake from `process-1` to `root` at `sequence`.
 fn root_process_wake(sequence: u64) -> ProcessWakeDelivery {
     ProcessWakeDelivery {
-        version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
+            PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+        )),
         wake_id: format!("wake-{sequence}"),
         target_session_id: SessionId::from("root"),
         process_id: crate::ProcessId::fixture("process-1"),

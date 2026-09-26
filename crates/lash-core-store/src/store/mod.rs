@@ -109,7 +109,13 @@ pub use fencing::{
     require_single_writer_head_publication, turn_input_claimability,
     unclaimed_turn_input_is_settleable, wake_delivery_claim_verdict,
 };
-pub use fleet_format::{FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState};
+pub use fleet_format::{
+    FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, RECORD_UPCASTERS, ReadWindow,
+    RecordUpcaster, SurfaceFormat, WriterPin, decode_versioned_json_record,
+    decode_versioned_json_record_for_fleet, decode_versioned_msgpack_record_for_fleet,
+    ensure_supported_record_schema_version_for_fleet, ensure_supported_schema_version_for_fleet,
+    upcast_chain_covers, upcast_json_record,
+};
 pub use fork_plan::{ForkLineageAncestor, ForkNodeFacts, ForkPlan};
 pub use lease_timings::{LeaseTimings, LeaseTimingsError};
 pub use load::{
@@ -158,7 +164,9 @@ pub use runtime_commit::{
     AppendRequestIdentity, RUNTIME_COMMIT_RECEIPT_RECORD_KIND,
     RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION, RuntimeCommit, RuntimeCommitReceipt,
     RuntimeTurnCommitStamp, RuntimeUsageDelta, RuntimeUsageDeltaIdentity,
-    SemanticBoundaryOperation, decode_runtime_commit_receipt, ensure_supported_receipt_version,
+    SemanticBoundaryOperation, decode_runtime_commit_receipt,
+    decode_runtime_commit_receipt_for_fleet, ensure_supported_receipt_version,
+    ensure_supported_receipt_version_for_fleet,
 };
 pub use runtime_commit_plan::{
     FreshRuntimeCommitFacts, ParentNodeFacts, PlannedNodeFacts, PublishedLeafFacts,
@@ -518,6 +526,18 @@ pub fn ensure_supported_record_schema_version(
     value: &serde_json::Value,
     expected: u32,
 ) -> Result<(), StoreError> {
+    let actual = record_schema_version(record_kind, value, expected)?;
+    ensure_supported_schema_version(record_kind, actual, expected)
+}
+
+/// The `schema_version` a persisted record carries — the read half of
+/// [`ensure_supported_record_schema_version`], split out so the fleet's read
+/// window can admit the extracted version instead of a bare `expected`.
+fn record_schema_version(
+    record_kind: &'static str,
+    value: &serde_json::Value,
+    expected: u32,
+) -> Result<u32, StoreError> {
     let Some(schema_version) = value.get("schema_version") else {
         // A persisted record that did not decode to an object at all is
         // corruption, not a version refusal: there is no record here whose
@@ -538,32 +558,14 @@ pub fn ensure_supported_record_schema_version(
             expected,
         });
     };
-    let Some(actual) = schema_version
+    schema_version
         .as_u64()
         .and_then(|version| u32::try_from(version).ok())
-    else {
-        return Err(StoreError::InvalidRecordSchemaVersion {
+        .ok_or_else(|| StoreError::InvalidRecordSchemaVersion {
             record_kind,
             actual: schema_version.to_string(),
             expected,
-        });
-    };
-    ensure_supported_schema_version(record_kind, actual, expected)
-}
-
-pub fn decode_versioned_json_record<T>(
-    json: &str,
-    record_kind: &'static str,
-    expected: u32,
-) -> Result<T, StoreError>
-where
-    T: serde::de::DeserializeOwned,
-{
-    let value: serde_json::Value = serde_json::from_str(json)
-        .map_err(|err| StoreError::Backend(format!("failed to decode {record_kind}: {err}")))?;
-    ensure_supported_record_schema_version(record_kind, &value, expected)?;
-    serde_json::from_value(value)
-        .map_err(|err| StoreError::Backend(format!("failed to decode {record_kind}: {err}")))
+        })
 }
 
 fn build_persisted_turn_state(state: &crate::RuntimeSessionState) -> crate::PersistedTurnState {
@@ -587,10 +589,11 @@ pub(crate) fn encode_checkpoint_component<T: serde::Serialize>(
 
 fn build_checkpoint_from_persisted_state(
     state: &crate::RuntimeSessionState,
+    fleet_format: FleetFormat,
 ) -> Result<HydratedSessionCheckpoint, StoreError> {
     state
         .checkpoint_components
-        .build_checkpoint(build_persisted_turn_state(state))
+        .build_checkpoint(build_persisted_turn_state(state), fleet_format)
 }
 
 impl RuntimeCommit {
@@ -780,6 +783,7 @@ impl RuntimeCommit {
         usage_deltas: &[crate::TokenLedgerEntry],
         operation: OperationId,
         commit_budget: CommitBudget,
+        fleet_format: FleetFormat,
     ) -> Result<(Self, Vec<crate::NodeId>), StoreError> {
         let mut graph = state.pending_graph_commit();
         let mapping = graph.derive_node_ids(&state.session_id, &operation)?;
@@ -795,6 +799,7 @@ impl RuntimeCommit {
             usage_deltas,
             operation,
             commit_budget,
+            fleet_format,
         )?;
         Ok((commit, persisted_node_ids))
     }
@@ -804,6 +809,7 @@ impl RuntimeCommit {
         usage_deltas: &[RuntimeUsageDelta],
         operation: OperationId,
         commit_budget: CommitBudget,
+        fleet_format: FleetFormat,
     ) -> Result<(Self, Vec<crate::NodeId>), StoreError> {
         let mut graph = state.pending_graph_commit();
         let mapping = graph.derive_node_ids(&state.session_id, &operation)?;
@@ -819,6 +825,7 @@ impl RuntimeCommit {
             usage_deltas,
             operation,
             commit_budget,
+            fleet_format,
         )?;
         Ok((commit, persisted_node_ids))
     }
@@ -829,6 +836,7 @@ impl RuntimeCommit {
         usage_deltas: &[crate::TokenLedgerEntry],
         operation: OperationId,
         commit_budget: CommitBudget,
+        fleet_format: FleetFormat,
     ) -> Result<Self, StoreError> {
         let usage_deltas = RuntimeUsageDelta::for_operation(&operation, usage_deltas)?;
         Self::persisted_state_with_graph_commit_and_staged_usage_and_budget(
@@ -837,6 +845,7 @@ impl RuntimeCommit {
             &usage_deltas,
             operation,
             commit_budget,
+            fleet_format,
         )
     }
 
@@ -846,6 +855,7 @@ impl RuntimeCommit {
         usage_deltas: &[RuntimeUsageDelta],
         operation: OperationId,
         commit_budget: CommitBudget,
+        fleet_format: FleetFormat,
     ) -> Result<Self, StoreError> {
         let current_frame_node_id = graph.derive_current_frame_node_id(&state.session_graph);
         Ok(Self {
@@ -860,7 +870,7 @@ impl RuntimeCommit {
             current_frame_node_id,
             graph,
             graph_base_leaf_node_id: state.session_graph.leaf_node_id.clone(),
-            checkpoint: build_checkpoint_from_persisted_state(state)?,
+            checkpoint: build_checkpoint_from_persisted_state(state, fleet_format)?,
             usage_deltas: usage_deltas.to_vec(),
             failure_evidence: Vec::new(),
             turn_commit: RuntimeTurnCommitStamp::new(operation),
@@ -1036,6 +1046,7 @@ fn remap_optional_node_id(
 fn persisted_session_state_from_head(
     head: SessionHead,
     checkpoint: Option<HydratedSessionCheckpoint>,
+    fleet: FleetFormat,
 ) -> Result<crate::RuntimeSessionState, StoreError> {
     // A cold load adopts the head onto a default state: every durable fact
     // comes from the head (adoption is head-authoritative, FIG-1875), and the
@@ -1044,7 +1055,7 @@ fn persisted_session_state_from_head(
     let mut state =
         crate::RuntimeSessionState::new(crate::SessionPolicy::new(head.config.turn_budget));
     let live_owned = crate::runtime::state::LiveOwnedSessionFacts::of(&state.policy);
-    crate::runtime::state::adopt_durable_head(&mut state, &head, checkpoint, live_owned)?;
+    crate::runtime::state::adopt_durable_head(&mut state, &head, checkpoint, live_owned, fleet)?;
     Ok(state)
 }
 
@@ -1550,13 +1561,16 @@ pub trait TurnInputStore: Send + Sync {
     /// Unlike live observation replay, this surface is not retention-window
     /// dependent. Implementations return settled applications in durable
     /// commit order so a host can reconcile admission identity after a gap.
+    ///
+    /// The default refuses as an unsupported operation: a store that keeps
+    /// no application records cannot answer which turn applied an input.
     async fn list_turn_input_applications(
         &self,
         _session_id: &SessionId,
     ) -> Result<Vec<crate::TurnInputApplication>, StoreError> {
-        Err(StoreError::Backend(
-            "turn input application reconciliation is not implemented by this store".to_string(),
-        ))
+        Err(StoreError::UnsupportedStoreOperation {
+            operation: "list_turn_input_applications",
+        })
     }
 
     /// Cancel an unclaimed pending user input by id.
@@ -2221,6 +2235,23 @@ pub trait StoreMaintenance: Send + Sync {
     async fn gc_unreachable(&self) -> MaintenanceResult<GcReport>;
 }
 
+/// The fleet-format generation a store's writers must emit (ADR 0106 §1,
+/// FIG-3796).
+///
+/// Every durable writer on a store handle consults the recorded `F` through
+/// [`FleetFormat::writer_version`] rather than stamping the build's own
+/// constants: while a mixed-version fleet runs, `F` names the generation
+/// every worker in the fleet can still read, and a build's newer format
+/// knowledge stays unwritten until `finalize-upgrade` moves the row
+/// (FIG-3800). A store bound to a session answers the `F` its backend
+/// admitted at open; a store with no recorded row — an in-memory fake or a
+/// pre-`F` store — answers [`FleetFormat::current`], the only generation such
+/// a store could write.
+pub trait FleetFormatStore: Send + Sync {
+    /// The recorded fleet format this store's writers emit.
+    fn fleet_format(&self) -> FleetFormat;
+}
+
 /// Exact settled-session persistence protocol required by the runtime.
 ///
 /// `Arc<dyn RuntimePersistence>` is *the* runtime storage handle: one object
@@ -2245,7 +2276,8 @@ pub trait StoreMaintenance: Send + Sync {
 /// (`RuntimePersistence + StoreTestSupport`) instead; see
 /// [`StoreMaintenance`] for the norm.
 pub trait RuntimePersistence:
-    SessionCommitStore
+    FleetFormatStore
+    + SessionCommitStore
     + TurnInputStore
     + SessionExecutionLeaseStore
     + QueuedWorkStore
@@ -2256,7 +2288,8 @@ pub trait RuntimePersistence:
 }
 
 impl<T> RuntimePersistence for T where
-    T: SessionCommitStore
+    T: FleetFormatStore
+        + SessionCommitStore
         + TurnInputStore
         + SessionExecutionLeaseStore
         + QueuedWorkStore

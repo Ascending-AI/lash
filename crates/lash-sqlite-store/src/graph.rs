@@ -48,23 +48,27 @@ impl GcRoot {
 }
 
 impl Store {
+    /// `fleet` is the store's recorded `F`: stored node bodies admit the
+    /// `[N-1, N]` reader window `F` names (FIG-3796).
     pub(crate) fn load_session_graph_from_conn(
         conn: &Connection,
         session_id: &SessionId,
         leaf_node_id: Option<String>,
+        fleet: lash_core_execution::FleetFormat,
     ) -> Result<lash_core_execution::SessionGraph, StoreError> {
-        Self::load_readable_graph_from_conn(conn, session_id, leaf_node_id, false)
+        Self::load_readable_graph_from_conn(conn, session_id, leaf_node_id, false, fleet)
     }
 
     pub(crate) fn load_active_path_session_graph_from_conn(
         conn: &Connection,
         session_id: &SessionId,
         leaf_node_id: Option<String>,
+        fleet: lash_core_execution::FleetFormat,
     ) -> Result<lash_core_execution::SessionGraph, StoreError> {
         let Some(leaf_node_id) = leaf_node_id else {
             return Ok(lash_core_execution::SessionGraph::default());
         };
-        Self::load_readable_graph_from_conn(conn, session_id, Some(leaf_node_id), true)
+        Self::load_readable_graph_from_conn(conn, session_id, Some(leaf_node_id), true, fleet)
     }
 
     fn load_readable_graph_from_conn(
@@ -72,6 +76,7 @@ impl Store {
         session_id: &SessionId,
         leaf_node_id: Option<String>,
         active_path_only: bool,
+        fleet: lash_core_execution::FleetFormat,
     ) -> Result<lash_core_execution::SessionGraph, StoreError> {
         let leaf_generation = match leaf_node_id.as_deref() {
             Some(leaf_node_id) => {
@@ -141,10 +146,11 @@ impl Store {
                     ),
                 ));
             }
-            let node = lash_core_execution::SessionNodeRecord::decode_storage_body(
+            let node = lash_core_execution::SessionNodeRecord::decode_storage_body_for_fleet(
                 node_id.clone(),
                 parent_node_id,
                 &node_json,
+                fleet,
             )
             .map_err(|error| stored_data_corrupt("SessionGraph node", error))?;
             if matches!(
@@ -184,6 +190,7 @@ impl Store {
         &self,
     ) -> Result<lash_core_execution::SessionGraph, StoreError> {
         let session_id = self.selected_session_id()?;
+        let fleet = self.fleet_format;
         self.conn
             .call(move |conn| {
                 let leaf_node_id = conn
@@ -194,7 +201,7 @@ impl Store {
                     )
                     .optional()?
                     .flatten();
-                Self::load_session_graph_from_conn(conn, &session_id, leaf_node_id)
+                Self::load_session_graph_from_conn(conn, &session_id, leaf_node_id, fleet)
                     .map_err(sqlite_conversion_error)
             })
             .await
@@ -209,9 +216,10 @@ impl Store {
     /// no work survived* — never because the failure was absorbed into a clean
     /// zero report.
     pub async fn gc_unreachable(&self) -> lash_core_execution::MaintenanceResult<GcReport> {
+        let fleet = self.fleet_format;
         self.conn
-            .write(|tx| {
-                Self::gc_unreachable_in_tx(tx).map_err(|err| {
+            .write(move |tx| {
+                Self::gc_unreachable_in_tx(tx, fleet).map_err(|err| {
                     rusqlite::Error::ToSqlConversionFailure(Box::new(std::io::Error::other(
                         err.to_string(),
                     )))
@@ -279,7 +287,12 @@ impl Store {
     /// Synchronous body of [`Store::gc_unreachable`], run on the connection thread
     /// inside the `BEGIN IMMEDIATE` transaction so the mark/sweep is atomic and
     /// holds the write lock for its duration.
-    pub(crate) fn gc_unreachable_in_tx(tx: &Transaction<'_>) -> Result<GcReport, StoreError> {
+    /// `fleet` is the store's recorded `F`: a live checkpoint manifest admits
+    /// the `[N-1, N]` reader window `F` names (FIG-3796).
+    pub(crate) fn gc_unreachable_in_tx(
+        tx: &Transaction<'_>,
+        fleet: lash_core_execution::FleetFormat,
+    ) -> Result<GcReport, StoreError> {
         let mut roots = Self::live_checkpoint_roots(tx)?;
         roots.extend(Self::artifact_ref_roots(tx)?);
         let root_count = roots.len();
@@ -318,7 +331,7 @@ impl Store {
                 continue;
             };
             let content = decode_artifact_blob(&bytes)?;
-            let checkpoint = decode_checkpoint(&content)?;
+            let checkpoint = decode_checkpoint_for_fleet(&content, fleet)?;
             // GC interprets only the root's ref graph, never component bodies.
             // Retain refs even when a newer writer used an unknown component
             // codec so an older binary cannot turn incompatibility into loss.
@@ -465,8 +478,13 @@ mod tests {
         let graph = store
             .conn
             .call(move |conn| {
-                Store::load_session_graph_from_conn(conn, &session_id, None)
-                    .map_err(sqlite_conversion_error)
+                Store::load_session_graph_from_conn(
+                    conn,
+                    &session_id,
+                    None,
+                    lash_core_execution::FleetFormat::current(),
+                )
+                .map_err(sqlite_conversion_error)
             })
             .await
             .map_err(sqlite_error)

@@ -366,6 +366,7 @@ async fn measure_store_hardening_backend_turn(
                 session_id,
                 &format!("hardening task {turn_index}"),
                 turn_index as u64 + 1,
+                store.fleet_format(),
             ),
         ))
         .await?;

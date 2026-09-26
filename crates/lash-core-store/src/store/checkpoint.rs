@@ -46,22 +46,35 @@ pub struct SessionCheckpoint {
 }
 
 impl Default for SessionCheckpoint {
+    /// A manifest outside any store — snapshots, tests, and in-memory state —
+    /// carries this build's own fleet format, the only generation a context
+    /// that never consulted a store could write.
     fn default() -> Self {
-        Self {
-            schema_version: SESSION_CHECKPOINT_SCHEMA_VERSION,
-            turn_state: crate::PersistedTurnState::default(),
-            components: std::collections::BTreeMap::new(),
-        }
+        Self::for_fleet(crate::store::FleetFormat::current())
     }
 }
 
 impl SessionCheckpoint {
+    /// The manifest a durable writer publishes under `fleet_format`: the
+    /// `schema_version` stamp is the fleet's writer version for the
+    /// checkpoint surface (FIG-3796), not the bare build constant.
+    pub fn for_fleet(fleet_format: crate::store::FleetFormat) -> Self {
+        Self {
+            schema_version: fleet_format
+                .writer_version(crate::surface_format!(SESSION_CHECKPOINT_SCHEMA_VERSION)),
+            turn_state: crate::PersistedTurnState::default(),
+            components: std::collections::BTreeMap::new(),
+        }
+    }
+
     pub fn new(
         turn_state: crate::PersistedTurnState,
         components: std::collections::BTreeMap<String, CheckpointComponentDescriptor>,
+        fleet_format: crate::store::FleetFormat,
     ) -> Self {
         Self {
-            schema_version: SESSION_CHECKPOINT_SCHEMA_VERSION,
+            schema_version: fleet_format
+                .writer_version(crate::surface_format!(SESSION_CHECKPOINT_SCHEMA_VERSION)),
             turn_state,
             components,
         }
@@ -73,9 +86,27 @@ impl SessionCheckpoint {
             .map(|component| &component.blob_ref)
     }
 
+    /// A manifest outside any store validates component encodings against
+    /// this build's newest version alone; a bound store's reads go through
+    /// [`Self::validate_component_encoding_versions_for_fleet`].
     pub fn validate_component_encoding_versions(&self) -> Result<(), StoreError> {
+        self.validate_component_encoding_versions_for_fleet(crate::store::FleetFormat::current())
+    }
+
+    /// The fleet leg of [`Self::validate_component_encoding_versions`]: a
+    /// component's `encoding_version` admits this build's newest and the
+    /// version `fleet` records for the component-encoding surface — the
+    /// `[N-1, N]` reader window of ADR 0106 §2 (FIG-3796).
+    pub fn validate_component_encoding_versions_for_fleet(
+        &self,
+        fleet_format: crate::store::FleetFormat,
+    ) -> Result<(), StoreError> {
         for (key, descriptor) in &self.components {
-            ensure_checkpoint_component_encoding_version(key, descriptor.encoding_version)?;
+            ensure_checkpoint_component_encoding_version_for_fleet(
+                key,
+                descriptor.encoding_version,
+                fleet_format,
+            )?;
         }
         Ok(())
     }
@@ -170,8 +201,25 @@ impl HydratedCheckpointComponent {
     /// to smuggle bytes encoded for a different version. The content address is
     /// retained beside the body so every later commit projection can reuse the
     /// same digest.
+    ///
+    /// Non-durable and test callers mint at the build's current format; a
+    /// durable writer calls [`Self::changed_for_fleet`] with its store's `F`.
     pub fn changed(body: impl Into<Arc<[u8]>>) -> Self {
-        Self::changed_with_encoding_version(body.into(), CHECKPOINT_COMPONENT_ENCODING_VERSION)
+        Self::changed_for_fleet(body, crate::store::FleetFormat::current())
+    }
+
+    /// The fleet-stamped variant: `encoding_version` is the fleet's writer
+    /// version for the component-encoding surface (FIG-3796).
+    pub fn changed_for_fleet(
+        body: impl Into<Arc<[u8]>>,
+        fleet_format: crate::store::FleetFormat,
+    ) -> Self {
+        Self::changed_with_encoding_version(
+            body.into(),
+            fleet_format.writer_version(crate::surface_format!(
+                CHECKPOINT_COMPONENT_ENCODING_VERSION
+            )),
+        )
     }
 
     fn changed_with_encoding_version(body: Arc<[u8]>, encoding_version: u32) -> Self {
@@ -279,8 +327,16 @@ impl HydratedCheckpointComponent {
         }
     }
 
-    fn projected_descriptor(&self, key: &str) -> Result<CheckpointComponentDescriptor, StoreError> {
-        ensure_checkpoint_component_encoding_version(key, self.encoding_version())?;
+    fn projected_descriptor(
+        &self,
+        key: &str,
+        fleet_format: crate::store::FleetFormat,
+    ) -> Result<CheckpointComponentDescriptor, StoreError> {
+        ensure_checkpoint_component_encoding_version_for_fleet(
+            key,
+            self.encoding_version(),
+            fleet_format,
+        )?;
         match self {
             Self::Changed {
                 encoding_version,
@@ -310,17 +366,37 @@ impl HydratedCheckpointComponent {
     }
 }
 
+/// The no-store form: admits this build's newest encoding alone. Bound
+/// stores route through [`ensure_checkpoint_component_encoding_version_for_fleet`].
 pub fn ensure_checkpoint_component_encoding_version(
     key: &str,
     actual: u32,
 ) -> Result<(), StoreError> {
-    if actual == CHECKPOINT_COMPONENT_ENCODING_VERSION {
+    ensure_checkpoint_component_encoding_version_for_fleet(
+        key,
+        actual,
+        crate::store::FleetFormat::current(),
+    )
+}
+
+/// The fleet leg of [`ensure_checkpoint_component_encoding_version`]:
+/// `actual` admits the `[N-1, N]` window `fleet` records for the
+/// component-encoding surface (FIG-3796).
+pub fn ensure_checkpoint_component_encoding_version_for_fleet(
+    key: &str,
+    actual: u32,
+    fleet_format: crate::store::FleetFormat,
+) -> Result<(), StoreError> {
+    let window = fleet_format.read_window(crate::surface_format!(
+        CHECKPOINT_COMPONENT_ENCODING_VERSION
+    ));
+    if window.admits(actual) {
         Ok(())
     } else {
         Err(StoreError::CheckpointComponentEncodingVersionMismatch {
             key: key.to_string(),
             actual,
-            expected: CHECKPOINT_COMPONENT_ENCODING_VERSION,
+            expected: window.newest(),
         })
     }
 }
@@ -379,14 +455,21 @@ impl HydratedSessionCheckpoint {
     /// Opaque owners such as protocol execution state use this instead of
     /// [`Self::decode_component`]: Lash validates the envelope but does not
     /// interpret owner-defined body bytes.
-    pub(crate) fn checked_component_body(
+    /// The component's `encoding_version` admits this build's newest and the
+    /// version `fleet` records for the component-encoding surface (FIG-3796).
+    pub(crate) fn checked_component_body_for_fleet(
         &self,
         key: &str,
+        fleet_format: crate::store::FleetFormat,
     ) -> Result<Option<Arc<[u8]>>, StoreError> {
         let Some(component) = self.component(key) else {
             return Ok(None);
         };
-        ensure_checkpoint_component_encoding_version(key, component.encoding_version())?;
+        ensure_checkpoint_component_encoding_version_for_fleet(
+            key,
+            component.encoding_version(),
+            fleet_format,
+        )?;
         component
             .body_arc()
             .map(Some)
@@ -402,11 +485,25 @@ impl HydratedSessionCheckpoint {
     /// use this on values returned from a full manifest hydration. `Ok(None)`
     /// means the authoritative manifest omitted `key`; a present reference-only
     /// entry is corrupt at this boundary rather than equivalent to absence.
+    /// A manifest outside any store admits this build's newest component
+    /// encoding alone; a bound store's reads go through
+    /// [`Self::decode_component_for_fleet`].
     pub fn decode_component<T: serde::de::DeserializeOwned>(
         &self,
         key: &str,
     ) -> Result<Option<T>, StoreError> {
-        let Some(body) = self.checked_component_body(key)? else {
+        self.decode_component_for_fleet(key, crate::store::FleetFormat::current())
+    }
+
+    /// The fleet leg of [`Self::decode_component`]: the component's
+    /// `encoding_version` admits the `[N-1, N]` window `fleet` records
+    /// (FIG-3796).
+    pub fn decode_component_for_fleet<T: serde::de::DeserializeOwned>(
+        &self,
+        key: &str,
+        fleet_format: crate::store::FleetFormat,
+    ) -> Result<Option<T>, StoreError> {
+        let Some(body) = self.checked_component_body_for_fleet(key, fleet_format)? else {
             return Ok(None);
         };
         rmp_serde::from_slice(&body)
@@ -426,17 +523,24 @@ impl HydratedSessionCheckpoint {
     /// publishing the returned root, a backend must store every changed body
     /// and prove that every unchanged reference exists. Keys absent from the
     /// returned manifest are deletions.
-    pub fn manifest(&self) -> Result<SessionCheckpoint, StoreError> {
+    pub fn manifest(
+        &self,
+        fleet_format: crate::store::FleetFormat,
+    ) -> Result<SessionCheckpoint, StoreError> {
         let components = self
             .components
             .iter()
             .map(|(key, component)| {
                 component
-                    .projected_descriptor(key)
+                    .projected_descriptor(key, fleet_format)
                     .map(|descriptor| (key.clone(), descriptor))
             })
             .collect::<Result<_, StoreError>>()?;
-        Ok(SessionCheckpoint::new(self.turn_state.clone(), components))
+        Ok(SessionCheckpoint::new(
+            self.turn_state.clone(),
+            components,
+            fleet_format,
+        ))
     }
 }
 
@@ -481,7 +585,8 @@ mod checkpoint_tests {
         };
 
         assert!(matches!(
-            checkpoint.checked_component_body(key),
+            checkpoint
+                .checked_component_body_for_fleet(key, crate::store::FleetFormat::current()),
             Err(StoreError::CheckpointComponentEncodingVersionMismatch {
                 key: actual_key,
                 actual,

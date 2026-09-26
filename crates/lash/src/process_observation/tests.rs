@@ -214,6 +214,7 @@ impl Fixture {
             },
             None,
             format!("l8-effect:{occurrence}"),
+            lash_core::FleetFormat::current(),
         );
         let event = self
             .registry
@@ -273,7 +274,11 @@ impl Fixture {
         };
         for event in events.iter().filter(|event| event.sequence <= high_water) {
             summary
-                .fold_event(&event.event_type, &event.payload)
+                .fold_event(
+                    &event.event_type,
+                    &event.payload,
+                    lash_core::FleetFormat::current(),
+                )
                 .expect("fold");
         }
         summary

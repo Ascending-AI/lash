@@ -8,6 +8,7 @@ use lash_core::facade_support;
 use lash_sansio::SessionId;
 
 pub(crate) struct NativeQueuedWorkRunConfig {
+    pub(super) residents: Arc<super::residents::ResidentSessions>,
     pub(super) session_execution_owner: lash_core::LeaseOwnerIdentity,
     pub(super) env: RuntimeEnvironment,
     pub(super) policy: SessionPolicy,
@@ -27,6 +28,7 @@ pub(crate) fn native_queued_work_handle_for_tests(
     store_factory: Arc<dyn SessionStoreFactory>,
 ) -> NativeQueuedWorkRunHandle {
     NativeQueuedWorkRunHandle::new(Arc::new(NativeQueuedWorkRunConfig {
+        residents: Arc::clone(&core.residents),
         session_execution_owner: core.session_execution_owner.clone(),
         env: core.env.clone(),
         policy: core.policy.clone(),
@@ -79,7 +81,12 @@ impl NativeQueuedWorkRunHandle {
     async fn open_runtime(
         &self,
         session_id: &SessionId,
-    ) -> std::result::Result<(RuntimeHandle, Arc<dyn lash_core::EffectHost>), OpenFailure> {
+    ) -> std::result::Result<DriveRuntime, OpenFailure> {
+        // A session a host holds open is driven on its own runtime, which
+        // carries what the host configured on it.
+        if let Some(borrow) = self.config.residents.borrow(session_id) {
+            return Ok(DriveRuntime::Resident(borrow));
+        }
         let mut policy = self.config.policy.clone();
         policy.session_id = Some(session_id.clone());
         let store = self
@@ -133,7 +140,8 @@ impl NativeQueuedWorkRunHandle {
             })?;
         env.plugin_host = Some(Arc::new(plugin_host));
         let effect_host = Arc::clone(&env.core.control.effect_host);
-        let runtime = LashRuntime::from_environment(
+        let is_root_session = state.authority.subagent.is_none();
+        let mut runtime = LashRuntime::from_environment(
             &env,
             policy,
             state,
@@ -147,11 +155,24 @@ impl NativeQueuedWorkRunHandle {
                 error => lash_core::PluginError::Session(error.to_string()),
             })
         })?;
+        // The protocol applies and pins its per-session options on every
+        // open, as a host's open does: a session the engine opens first (a
+        // send to a session no host committed yet) records them with its
+        // first commit, so a later open rematerializes it.
+        runtime
+            .configure_protocol_on_materialize(
+                &lash_core::PluginOptions::default(),
+                is_root_session,
+            )
+            .map_err(OpenFailure::Terminal)?;
         let handle = RuntimeHandle::with_live_replay_store(
             runtime,
             Arc::clone(&self.config.live_replay_store),
         );
-        Ok((handle, effect_host))
+        Ok(DriveRuntime::Opened {
+            handle,
+            effect_host,
+        })
     }
 
     async fn drive_queued_work(
@@ -181,14 +202,47 @@ impl NativeQueuedWorkRunHandle {
                 })
             }
             Err(abort) => {
-                let retry = matches!(abort, lash_core::engine::DriveAbort::Retry(_));
-                let error = lash_core::PluginError::Session(abort.to_string());
+                // The kernel's own error rides the run error, so a send
+                // waiting on this drive answers the code the drive refused
+                // with.
+                let (retry, error) = match abort {
+                    lash_core::engine::DriveAbort::Retry(error) => (true, error),
+                    lash_core::engine::DriveAbort::Refused(error) => (false, error),
+                    lash_core::engine::DriveAbort::Parked { error, .. } => (false, *error),
+                };
+                let error = lash_core::PluginError::Runtime(error);
                 Err(if retry {
                     facade_support::QueuedWorkRunError::transient(error)
                 } else {
                     facade_support::QueuedWorkRunError::terminal(error)
                 })
             }
+        }
+    }
+}
+
+/// The runtime a drive runs on: the host's open session, borrowed for the
+/// drive, or one opened from the store.
+enum DriveRuntime {
+    Resident(super::residents::ResidentBorrow),
+    Opened {
+        handle: RuntimeHandle,
+        effect_host: Arc<dyn lash_core::EffectHost>,
+    },
+}
+
+impl DriveRuntime {
+    fn handle(&self) -> &RuntimeHandle {
+        match self {
+            Self::Resident(borrow) => borrow.runtime(),
+            Self::Opened { handle, .. } => handle,
+        }
+    }
+
+    fn effect_host(&self) -> &Arc<dyn lash_core::EffectHost> {
+        match self {
+            Self::Resident(borrow) => borrow.effect_host(),
+            Self::Opened { effect_host, .. } => effect_host,
         }
     }
 }
@@ -223,17 +277,18 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
         &self,
         request: lash_core::engine::DriveRequest,
     ) -> std::result::Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
-        let (handle, effect_host) = self
+        let runtime = self
             .open_runtime(&request.session)
             .await
             .map_err(OpenFailure::into_abort)?;
-        let controller = effect_host
+        let controller = runtime
+            .effect_host()
             .scoped(lash_core::engine::drive_admission_scope(
                 &request.session,
                 &request.request,
             ))
             .map_err(lash_core::engine::DriveAbort::Refused)?;
-        crate::turn::drive_session_observed(&handle, &controller, &request).await
+        crate::turn::drive_session_observed(runtime.handle(), &controller, &request).await
     }
 
     async fn admit(
@@ -242,11 +297,11 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
         request: &lash_core::engine::DriveRequest,
         ordinal: u32,
     ) -> std::result::Result<lash_core::engine::AdmitVerdict, lash_core::engine::DriveAbort> {
-        let (handle, _) = self
+        let runtime = self
             .open_runtime(&request.session)
             .await
             .map_err(OpenFailure::into_abort)?;
-        crate::turn::admit_drive_observed(&handle, &controller, request, ordinal).await
+        crate::turn::admit_drive_observed(runtime.handle(), &controller, request, ordinal).await
     }
 
     async fn run_root(
@@ -254,11 +309,11 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
         controller: lash_core::ScopedEffectController<'_>,
         admitted: lash_core::engine::Admitted,
     ) -> std::result::Result<lash_core::engine::RootOutcome, lash_core::engine::DriveAbort> {
-        let (handle, _) = self
+        let runtime = self
             .open_runtime(admitted.session())
             .await
             .map_err(OpenFailure::into_abort)?;
-        crate::turn::run_admitted_root_observed(&handle, &controller, admitted).await
+        crate::turn::run_admitted_root_observed(runtime.handle(), &controller, admitted).await
     }
 }
 

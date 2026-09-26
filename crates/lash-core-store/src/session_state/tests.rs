@@ -42,7 +42,7 @@ fn commit_result_for(state: &RuntimeSessionState) -> crate::store::RuntimeCommit
         checkpoint_ref: "checkpoint-ref".to_string().into(),
         manifest: commit
             .checkpoint
-            .manifest()
+            .manifest(crate::store::FleetFormat::current())
             .expect("project the committed manifest"),
         committed_leaf_node_id: None,
         realized_node_timestamps: Vec::new(),
@@ -327,7 +327,10 @@ fn restoring_a_capture_keeps_held_leaves_unchanged_and_stages_missing_ones() {
 
     let checkpoint = state
         .checkpoint_components
-        .build_checkpoint(crate::PersistedTurnState::default())
+        .build_checkpoint(
+            crate::PersistedTurnState::default(),
+            crate::store::FleetFormat::current(),
+        )
         .expect("build the next commit's checkpoint");
     let component = |key: &str| checkpoint.components.get(key).expect(key);
     assert!(
@@ -513,7 +516,10 @@ fn incomplete_checkpoint_component_projection_is_a_typed_error() {
 
     let error = state
         .checkpoint_components
-        .build_checkpoint(crate::PersistedTurnState::default())
+        .build_checkpoint(
+            crate::PersistedTurnState::default(),
+            crate::store::FleetFormat::current(),
+        )
         .expect_err("snapshot projection cannot prove the complete keyed set");
 
     assert!(matches!(

@@ -441,6 +441,11 @@ impl<'a> RuntimeCommitPlan<'a> {
     pub fn planned_node_facts(&self) -> &[PlannedNodeFacts] {
         &self.planned_node_facts
     }
+
+    /// The recorded fleet format this commit's writers emit (FIG-3796).
+    pub fn fleet_format(&self) -> super::FleetFormat {
+        self.fleet_format
+    }
     /// Head revision observed under backend commit authority.
     pub fn actual_head_revision(&self) -> u64 {
         self.actual_head_revision
@@ -467,9 +472,9 @@ impl<'a> RuntimeCommitPlan<'a> {
     )]
     pub fn head_meta(&self, checkpoint_ref: BlobRef) -> SessionHeadMeta {
         SessionHeadMeta {
-            schema_version: self
-                .fleet_format
-                .writer_version(super::SESSION_HEAD_META_SCHEMA_VERSION),
+            schema_version: self.fleet_format.writer_version(crate::surface_format!(
+                super::SESSION_HEAD_META_SCHEMA_VERSION
+            )),
             session_id: self.commit.session_id.clone(),
             head_revision: self.next_head_revision,
             config: self.commit.config.clone(),
@@ -490,9 +495,9 @@ impl<'a> RuntimeCommitPlan<'a> {
         manifest: SessionCheckpoint,
     ) -> RuntimeCommitReceipt {
         RuntimeCommitReceipt {
-            schema_version: self
-                .fleet_format
-                .writer_version(super::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION),
+            schema_version: self.fleet_format.writer_version(crate::surface_format!(
+                super::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION
+            )),
             head_revision: self.next_head_revision,
             checkpoint_ref,
             manifest,

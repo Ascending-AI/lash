@@ -1,4 +1,6 @@
 use super::*;
+use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
+use lash_core::store::CHECKPOINT_COMPONENT_ENCODING_VERSION;
 use pretty_assertions::assert_eq;
 
 /// A backend must mint refs for checkpoint bodies and resolve those refs after
@@ -89,7 +91,7 @@ where
     let root_bytes = rmp_serde::to_vec_named(
         &second_commit
             .checkpoint
-            .manifest()
+            .manifest(crate::FleetFormat::current())
             .expect("project ordinary checkpoint root"),
     )
     .expect("encode ordinary checkpoint root")
@@ -204,7 +206,9 @@ where
         crate::HydratedCheckpointComponent::Unchanged {
             descriptor: crate::CheckpointComponentDescriptor {
                 blob_ref: crate::BlobRef("never-stored".to_string()),
-                encoding_version: crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
+                encoding_version: crate::FleetFormat::current().writer_version(
+                    lash_core::surface_format!(CHECKPOINT_COMPONENT_ENCODING_VERSION),
+                ),
             },
         },
     );
@@ -230,7 +234,9 @@ where
     mismatch.checkpoint.components.insert(
         "arbitrary/versioned".to_string(),
         crate::HydratedCheckpointComponent::Changed {
-            encoding_version: crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION + 1,
+            encoding_version: crate::FleetFormat::current().writer_version(
+                lash_core::surface_format!(CHECKPOINT_COMPONENT_ENCODING_VERSION),
+            ) + 1,
             body_ref: crate::store::BlobRef::for_content(b"unsupported"),
             body: b"unsupported".as_slice().into(),
         },
@@ -272,7 +278,9 @@ pub async fn checkpoint_rejects_unknown_component_ref(store: Arc<dyn RuntimePers
         crate::HydratedCheckpointComponent::Unchanged {
             descriptor: crate::CheckpointComponentDescriptor {
                 blob_ref: crate::BlobRef("checkpoint-component-that-was-never-stored".to_string()),
-                encoding_version: crate::store::CHECKPOINT_COMPONENT_ENCODING_VERSION,
+                encoding_version: crate::FleetFormat::current().writer_version(
+                    lash_core::surface_format!(CHECKPOINT_COMPONENT_ENCODING_VERSION),
+                ),
             },
         },
     );
@@ -893,7 +901,9 @@ pub fn queued_process_wake_draft(
     delivery_policy: DeliveryPolicy,
 ) -> QueuedWorkBatchDraft {
     let wake = ProcessWakeDelivery {
-        version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
+            PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+        )),
         wake_id: format!("wake:{session_id}:{text}"),
         target_session_id: session_id.clone(),
         process_id: crate::ProcessId::fixture(&format!("process:{text}")),

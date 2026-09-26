@@ -35,10 +35,12 @@ pub use lash_core_llm::llm;
 pub(crate) use lash_core_llm::model;
 pub use lash_core_store::attachments;
 pub use lash_core_store::chronological;
+pub use lash_core_store::impl_current_fleet_format;
 pub use lash_core_store::impl_noop_attachment_manifest;
 pub use lash_core_store::protocol_turn_options::{
     PROTOCOL_TURN_OPTIONS_SCHEMA_VERSION, ProtocolTurnOptions, ProtocolTurnOptionsError,
 };
+pub use lash_core_store::surface_format;
 pub(crate) use model_clamp::ModelGenerationClamp;
 /// The session drive (FIG-3600): admission as recorded steps, then the
 /// admitted root's turns.
@@ -376,6 +378,7 @@ pub mod facade_support {
     pub use crate::runtime::WakeDeliveryDriveReport;
     pub use crate::runtime::WakeDeliveryDriver;
     pub use crate::runtime::WatchedRegistry;
+    pub use crate::runtime::WeakRuntimeHandle;
     pub use crate::runtime::await_event_coordinator;
     pub use crate::runtime::current_epoch_ms;
     pub use crate::runtime::diff_token_ledger;
@@ -518,27 +521,35 @@ pub mod facade_support {
     pub use lash_trace::parse_jsonl_records;
     pub use schemars::JsonSchema;
 
+    /// Cancelling `shutdown` stops the engine: no drive starts and a drive
+    /// in flight is dropped.
     pub fn native_queued_work_with_execution_concurrency_and_work_cadence(
         run_handle: std::sync::Arc<dyn crate::runtime::QueuedWorkRunHandle>,
         concurrency: usize,
         work_cadence: crate::runtime::WorkCadencePolicy,
+        shutdown: tokio_util::sync::CancellationToken,
     ) -> Result<crate::runtime::NativeQueuedWork, crate::runtime::NativeQueuedWorkConfigError> {
         crate::runtime::NativeQueuedWork::with_execution_concurrency_and_work_cadence(
             run_handle,
             concurrency,
             work_cadence,
+            shutdown,
         )
     }
 
+    /// `shutdown` as for
+    /// [`native_queued_work_with_execution_concurrency_and_work_cadence`].
     pub fn native_queued_work_with_worker_slot_supplier_and_work_cadence(
         run_handle: std::sync::Arc<dyn crate::runtime::QueuedWorkRunHandle>,
         supplier: std::sync::Arc<dyn crate::runtime::WorkerSlotSupplier>,
         work_cadence: crate::runtime::WorkCadencePolicy,
+        shutdown: tokio_util::sync::CancellationToken,
     ) -> Result<crate::runtime::NativeQueuedWork, crate::runtime::NativeSubstrateConfigError> {
         crate::runtime::NativeQueuedWork::with_worker_slot_supplier_and_work_cadence(
             run_handle,
             supplier,
             work_cadence,
+            shutdown,
         )
     }
 
@@ -658,6 +669,9 @@ pub use lash_core_execution::{
     TurnMachine, TurnMachineConfig,
 };
 pub use lash_sansio::{
+    BuildNewestWriterFormats, WriterFormats, build_newest_writer_formats, driver_writer_version,
+};
+pub use lash_sansio::{
     FailureCode, HostNamespace, InvalidNamespace, Namespace, TurnFailureCode, TurnFailureKind,
 };
 #[cfg(feature = "otel-trace")]
@@ -731,26 +745,27 @@ pub use runtime::{
     ExecutableGeneration, ExecutableGenerationRefusal, ExecutionScope, ForkPoint,
     ForkSessionReceipt, ForkSessionRequest, GroupChildBinding, GroupDrainReport, GroupExecutors,
     GroupFinalizationReport, GroupOnlyFinalization, GroupReopen, GroupSettlement, GroupWakePolicy,
-    HandleId, IndependentEffectWork, InputItem, InvalidStartKey, LedgerUsageDisposition,
-    LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome, LiveReplayStore,
-    LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription, LlmRequestSpec,
-    LlmStreamRecord, LocalTurnStop, LoserPolicy, NativeProcessWork, NativeQueuedWork,
-    NativeQueuedWorkConfigError, NativeSubstrateConfig, NativeSubstrateConfigError, NoSessionWork,
-    OnParentEnd, OpenerFinalizationSteps, PARENT_SCOPE_STORAGE_PAYLOAD_VERSION,
-    PROCESS_EFFECT_OCCURRENCE_CAP, PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
-    PROCESS_EFFECT_OUTCOME_EVENT_TYPE, PROCESS_EVENT_VOCABULARY_VERSION,
-    PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY, ParentEndPlan, ParentScope,
-    ParentScopeStorageError, PendingTurnInput, PendingTurnInputCancelOutcome,
-    PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget, PendingTurnInputClaimDiagnostics,
-    PendingTurnInputDraft, PendingTurnInputRead, PendingTurnInputReadStatus,
-    PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover, PreparedLiveReplayPublication,
-    ProcessArtifactCleanup, ProcessArtifactCleanupAck, ProcessAwaitOutput, ProcessCancelReceipt,
-    ProcessChange, ProcessChangeCursor, ProcessClockRebind, ProcessCommand,
-    ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessContinuationStore,
-    ProcessDefinitionRef, ProcessDefinitionRefusal, ProcessDefinitionResolution,
-    ProcessDefinitionValue, ProcessDriveStep, ProcessEffectNodeSummary, ProcessEffectOmissions,
-    ProcessEffectOmittedCounts, ProcessEffectOutcome, ProcessEffectOutcomeClass,
-    ProcessEffectSummary, ProcessEffectSummaryError, ProcessEffectSummaryOccurrence, ProcessEngine,
+    HandleId, IndependentEffectWork, InlineSessionWork, InputItem, InvalidStartKey,
+    LedgerUsageDisposition, LiveReplayEventDraft, LiveReplayGapReason, LiveReplayOutcome,
+    LiveReplayStore, LiveReplayStoreError, LiveReplaySubscribeOutcome, LiveReplaySubscription,
+    LlmRequestSpec, LlmStreamRecord, LocalTurnStop, LoserPolicy, NativeProcessWork,
+    NativeQueuedWork, NativeQueuedWorkConfigError, NativeSubstrateConfig,
+    NativeSubstrateConfigError, NoSessionWork, OnParentEnd, OpenerFinalizationSteps,
+    PARENT_SCOPE_STORAGE_PAYLOAD_VERSION, PROCESS_EFFECT_OCCURRENCE_CAP,
+    PROCESS_EFFECT_OMISSIONS_EVENT_TYPE, PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
+    PROCESS_EVENT_VOCABULARY_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, PROCESS_WAKE_MERGE_KEY,
+    ParentEndPlan, ParentScope, ParentScopeStorageError, PendingTurnInput,
+    PendingTurnInputCancelOutcome, PendingTurnInputCancelReceipt, PendingTurnInputCancelTarget,
+    PendingTurnInputClaimDiagnostics, PendingTurnInputDraft, PendingTurnInputRead,
+    PendingTurnInputReadStatus, PendingTurnInputSuffixCancelOutcome, PersistedSegmentHandover,
+    PreparedLiveReplayPublication, ProcessArtifactCleanup, ProcessArtifactCleanupAck,
+    ProcessAwaitOutput, ProcessCancelReceipt, ProcessChange, ProcessChangeCursor,
+    ProcessClockRebind, ProcessCommand, ProcessCompletionAuthority, ProcessCompletionOutcome,
+    ProcessContinuationStore, ProcessDefinitionRef, ProcessDefinitionRefusal,
+    ProcessDefinitionResolution, ProcessDefinitionValue, ProcessDriveStep,
+    ProcessEffectNodeSummary, ProcessEffectOmissions, ProcessEffectOmittedCounts,
+    ProcessEffectOutcome, ProcessEffectOutcomeClass, ProcessEffectSummary,
+    ProcessEffectSummaryError, ProcessEffectSummaryOccurrence, ProcessEngine,
     ProcessEngineAdmission, ProcessEngineKind, ProcessEngineRegistration, ProcessEngineRegistry,
     ProcessEngineRunContext, ProcessEvent, ProcessEventAppendReceipt, ProcessEventAppendRequest,
     ProcessEventHistoryRetention, ProcessEventLite, ProcessEventLog, ProcessEventPage,
@@ -806,12 +821,12 @@ pub use runtime::{
     TurnInputStateKind, UnreportedLedgerAttempt, UnsettledEffectGroup, UsageDispositionError,
     WaitKind, WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
     WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason, WatchedRegistry, WorkCadencePolicy, WorkerSlotKind, WorkerSlotPermit,
-    WorkerSlotSupplier, WorkerSweepPolicy, admit_session_state_generation,
-    artifact_destination_owner_retired_error, artifact_owner_retired_error,
-    artifact_staging_edge_missing_error, artifact_store_plugin_error, effect_groups_unsupported,
-    ensure_process_lease_schema_version, mint_process_id, park_turn_of_refused_group_child,
-    park_turn_refused_by_generation, tool_failure_code,
+    WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry, WorkCadencePolicy,
+    WorkerSlotKind, WorkerSlotPermit, WorkerSlotSupplier, WorkerSweepPolicy,
+    admit_session_state_generation, artifact_destination_owner_retired_error,
+    artifact_owner_retired_error, artifact_staging_edge_missing_error, artifact_store_plugin_error,
+    effect_groups_unsupported, ensure_process_lease_schema_version, mint_process_id,
+    park_turn_of_refused_group_child, park_turn_refused_by_generation, tool_failure_code,
 };
 pub(crate) use runtime::{ProcessEngineRunGuard, ProcessEngineRuntimeContext};
 #[allow(unused_imports)]
@@ -851,10 +866,10 @@ pub use store::{
     AttachmentOwnerKind, AttachmentWriteFence, AttachmentWritePermit, AttachmentWriteToken,
     BlobRef, CURRENT_SESSION_STATE_VERSION, CheckpointComponentDescriptor, CommitBudget,
     CommitBudgetLimit, DurableItem, DurablePayload, DurableScan, DurableScanPage, DurableSurface,
-    FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, GcReport, HydratedCheckpointComponent,
-    HydratedSessionCheckpoint, LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure,
-    MaintenanceRefusal, MaintenanceReport, MaintenanceResult, MaintenanceStop, MaintenanceSweep,
-    OLDEST_SUPPORTED_SESSION_STATE_VERSION, OperationId, OrphanedTurnInputScope,
+    FLEET_FORMAT_VERSION, FleetFormat, FleetFormatState, FleetFormatStore, GcReport,
+    HydratedCheckpointComponent, HydratedSessionCheckpoint, LeaseClaimNonce, LeaseOwnerIdentity,
+    MaintenanceFailure, MaintenanceRefusal, MaintenanceReport, MaintenanceResult, MaintenanceStop,
+    MaintenanceSweep, OLDEST_SUPPORTED_SESSION_STATE_VERSION, OperationId, OrphanedTurnInputScope,
     QueuedWorkClaimOutcome, QueuedWorkClaimRefusal, QueuedWorkStore, RetentionBound,
     RetentionReport, RuntimeCommit, RuntimePersistence, RuntimeTurnCommitStamp, RuntimeUsageDelta,
     RuntimeUsageDeltaIdentity, ScanCoverage, SelectedQueuedWorkClaimOutcome,
@@ -865,9 +880,9 @@ pub use store::{
     SessionExecutionLeaseRenewalInstallMismatch, SessionExecutionLeaseStore, SessionMeta,
     SessionStateAdmission, StoreBackend, StoreComponentVersion, StoreError, StoreMaintenance,
     StorePreflight, StoreReleaseStamp, StoreReleaseState, StoreSchemaDatabase, StoreSchemaOutcome,
-    StoreSchemaStatus, StoreSchemaVerdict, TurnCancelRepairDecision, TurnCancelRepairResult,
-    TurnInputStore, VacuumReport, WorkClaim, WorkCompletion, compare_releases,
-    release_stamp_advances,
+    StoreSchemaStatus, StoreSchemaVerdict, SurfaceFormat, TurnCancelRepairDecision,
+    TurnCancelRepairResult, TurnInputStore, VacuumReport, WorkClaim, WorkCompletion, WriterPin,
+    compare_releases, release_stamp_advances,
 };
 #[allow(unused_imports)]
 pub(crate) use store::{

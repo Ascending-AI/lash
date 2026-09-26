@@ -50,19 +50,30 @@ pub(crate) fn reclaim_settled_plans_conn(
 }
 
 /// The typed payload a ledger row persists beside the projection key.
-fn ledger_payload(parent: &ParentScope) -> Result<String, PluginError> {
-    parent.storage_payload().map_err(process_decode_error)
+fn ledger_payload(
+    parent: &ParentScope,
+    fleet_format: lash_core_execution::FleetFormat,
+) -> Result<String, PluginError> {
+    parent
+        .storage_payload(fleet_format)
+        .map_err(process_decode_error)
 }
 
 pub(super) fn record_conn(
     conn: &Connection,
     parent: &ParentScope,
     ended_at_ms: u64,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<(), PluginError> {
     let (kind, id) = ledger_key(parent)?;
     conn.execute(
         process_sql().plan.insert_if_absent.sql(),
-        params![kind, id, ledger_payload(parent)?, ended_at_ms as i64],
+        params![
+            kind,
+            id,
+            ledger_payload(parent, fleet_format)?,
+            ended_at_ms as i64
+        ],
     )
     .map_err(process_sqlite_error)?;
     Ok(())
@@ -91,9 +102,17 @@ pub(super) async fn record(
 ) -> Result<(), PluginError> {
     let parent = parent.clone();
     let ended_at_ms = registry.clock.timestamp_ms();
+    let fleet_format = registry.fleet_format;
     registry
         .conn
-        .write_flow(move |tx| Ok(tx_outcome(record_conn(tx, &parent, ended_at_ms))))
+        .write_flow(move |tx| {
+            Ok(tx_outcome(record_conn(
+                tx,
+                &parent,
+                ended_at_ms,
+                fleet_format,
+            )))
+        })
         .await
         .map_err(process_sqlite_error)?
 }
@@ -104,9 +123,11 @@ fn decode_plan(
     payload: String,
     ended: i64,
     settled: Option<i64>,
+    fleet_format: lash_core_execution::FleetFormat,
 ) -> Result<ParentEndPlan, PluginError> {
-    let parent = ParentScope::from_storage_columns(&kind, Some(id.as_str()), &payload)
-        .map_err(|error| PluginError::Session(error.to_string()))?;
+    let parent =
+        ParentScope::from_storage_columns(&kind, Some(id.as_str()), &payload, fleet_format)
+            .map_err(|error| PluginError::Session(error.to_string()))?;
     Ok(ParentEndPlan {
         parent,
         ended_at_ms: ended.max(0) as u64,
@@ -135,8 +156,11 @@ pub(super) async fn list_pending(
         })
         .await
         .map_err(process_sqlite_error)?;
+    let fleet_format = registry.fleet_format;
     rows.into_iter()
-        .map(|(kind, id, payload, ended, settled)| decode_plan(kind, id, payload, ended, settled))
+        .map(|(kind, id, payload, ended, settled)| {
+            decode_plan(kind, id, payload, ended, settled, fleet_format)
+        })
         .collect()
 }
 
@@ -164,8 +188,17 @@ pub(super) async fn get(
         })
         .await
         .map_err(process_sqlite_error)?;
-    row.map(|(payload, ended, settled)| decode_plan(kind.to_string(), id, payload, ended, settled))
-        .transpose()
+    row.map(|(payload, ended, settled)| {
+        decode_plan(
+            kind.to_string(),
+            id,
+            payload,
+            ended,
+            settled,
+            registry.fleet_format,
+        )
+    })
+    .transpose()
 }
 
 /// Turn and queue-drain scopes with live `Cancel` children and no ledger row

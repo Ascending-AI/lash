@@ -31,8 +31,8 @@ use lash_restate_postgres_workers_e2e::{
     DirectDurableWaitResolveResponse, EXPECTED_ASYNC_TEXT, EXPECTED_DURABLE_INPUT_TEXT,
     EXPECTED_FINAL_TEXT, EXPECTED_FRAME_SWITCH_CANCEL_TEXT, EXPECTED_FRAME_SWITCH_TEXT,
     EXPECTED_PARENT_DURABLE_INPUT_TEXT, EXPECTED_SEGMENT_LOOP_TEXT, FRAME_CRASH_SESSION_ID,
-    HealthResponse, TurnRequest, TurnResponse, TurnScenario, build_e2e_core, claim_crash_exit,
-    crash_exit_taken, default_session_originator_id, e2e_tokio_thread_stack_bytes,
+    HealthResponse, TurnRequest, TurnResponse, TurnScenario, build_e2e_core, crash_exit_taken,
+    default_session_originator_id, driven_queued_roots, e2e_tokio_thread_stack_bytes,
     ensure_e2e_schema, env, record_terminal_result, record_turn_activity, record_worker_event,
     required_env, s3_store_from_env, turn_session_id,
 };
@@ -124,9 +124,13 @@ impl AppState {
         })
     }
 
+    /// `core` is the worker's one core, the one whose session driver the
+    /// backend's engine runs: a session this handler opens is the resident a
+    /// drive landing on this worker borrows, so its turns stream here live.
     async fn run_turn_with_restate(
         &self,
         ctx: WorkflowContext<'_>,
+        core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<Json<TurnResponse>> {
         self.record(
@@ -141,48 +145,50 @@ impl AppState {
 
         let controller =
             RestateRuntimeEffectController::new(ctx, self.restate_authority_id.clone());
-        let core = self.build_core().map_err(terminal_error)?;
         if request.scenario == TurnScenario::SignalProcess {
-            return Box::pin(self.signal_process(&controller, &core, &request))
+            return Box::pin(self.signal_process(&controller, core, &request))
                 .await
                 .map(Json);
         }
 
         if request.scenario == TurnScenario::DrainQueued {
-            return Box::pin(self.drain_queued_turn_with_restate(&controller, &core, request))
+            return Box::pin(self.await_driven_wake(core, request))
                 .await
                 .map(Json);
         }
 
         if request.scenario == TurnScenario::FrameSwitchQueued {
-            return Box::pin(self.frame_switch_queued(&controller, &core, request))
+            return Box::pin(self.frame_switch_queued(core, request))
                 .await
                 .map(Json);
         }
         if request.scenario == TurnScenario::FrameSwitchCancel {
-            return Box::pin(self.frame_switch_cancel(&controller, &core, request))
+            return Box::pin(self.frame_switch_cancel(core, request))
                 .await
                 .map(Json);
         }
         if request.scenario == TurnScenario::FrameSwitchCrash {
-            return Box::pin(self.frame_switch_crash(&controller, &core, request))
+            return Box::pin(self.frame_switch_crash(core, request))
                 .await
                 .map(Json);
         }
         if request.scenario == TurnScenario::TriggerEmit {
-            return Box::pin(self.emit_button_trigger(&controller, &core, request))
+            return Box::pin(self.emit_button_trigger(&controller, core, request))
                 .await
                 .map(Json);
         }
 
-        Box::pin(self.main_turn_with_restate(&controller, &core, request))
-            .await
-            .map(Json)
+        Box::pin(self.main_turn(core, request)).await.map(Json)
     }
 
-    async fn drain_queued_turn_with_restate(
+    /// The kitchen-sink process's deferred wake. The engine drives a wake
+    /// the moment it is enqueued, under the queued run's own root, so this
+    /// awaits the engine's drive of it and reads the queued turn's result from
+    /// the session: the oldest driven queued root no other wake workflow
+    /// claimed whose turn consumed the wake. A redelivered invocation finds
+    /// the root it claimed.
+    async fn await_driven_wake(
         &self,
-        controller: &RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
@@ -190,41 +196,54 @@ impl AppState {
             .session(DEFAULT_SESSION_ID)
             .open()
             .await
-            .map_err(terminal_error)?;
-
-        let cursor = session.observe().current_observation().cursor;
-        let cursor_text = cursor.as_str().to_string();
-        let sink = RecordingTurnSink::new(
-            self.storage.pool().clone(),
-            request.workflow_id.clone(),
-            self.worker_id.clone(),
-            "queued",
-            Some(cursor_text.clone()),
-        );
-        let turn = session
-            .queued_turn()
-            .drain_id(request.workflow_id.clone())
-            .stream_to_with_effects(&sink, controller)
-            .await
             .map_err(turn_error)?;
-        let turn = turn.ran();
-        let final_value = turn
-            .as_ref()
-            .and_then(|turn| turn.final_value().cloned())
-            .unwrap_or(serde_json::Value::Null);
-        self.finish_response(
-            &request,
-            final_value,
-            sink.count().await,
-            Some(cursor_text),
-            turn.is_some(),
-        )
-        .await
+        let pool = self.storage.pool();
+        let deadline = Instant::now() + Duration::from_secs(120);
+        while Instant::now() < deadline {
+            let claimed: Vec<String> = sqlx::query_scalar(
+                "SELECT detail_json::jsonb ->> 'root' FROM lash_e2e_worker_events
+                 WHERE event_type = 'wake_root' AND workflow_id <> $1",
+            )
+            .bind(&request.workflow_id)
+            .fetch_all(pool)
+            .await
+            .map_err(terminal_error)?;
+            let roots = driven_queued_roots(pool, DEFAULT_SESSION_ID)
+                .await
+                .map_err(terminal_error)?;
+            for root in roots.into_iter().filter(|root| !claimed.contains(root)) {
+                let turn = session
+                    .root(root.as_str())
+                    .output()
+                    .await
+                    .map_err(turn_error)?;
+                let Some(final_value) = turn.result.final_value().cloned() else {
+                    continue;
+                };
+                if final_value
+                    .get("wake_consumed")
+                    .and_then(serde_json::Value::as_bool)
+                    != Some(true)
+                {
+                    continue;
+                }
+                self.record(&request.workflow_id, "wake_root", json!({ "root": root }))
+                    .await?;
+                return self
+                    .finish_response(&request, final_value, turn.activities.len(), None, true)
+                    .await;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        Err(terminal_error(format!(
+            "timed out waiting for the engine to drive the wake for `{}`",
+            request.workflow_id
+        ))
+        .into())
     }
 
-    async fn main_turn_with_restate(
+    async fn main_turn(
         &self,
-        controller: &RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
@@ -232,7 +251,7 @@ impl AppState {
             .session(turn_session_id(&request.workflow_id))
             .open()
             .await
-            .map_err(terminal_error)?;
+            .map_err(turn_error)?;
 
         let cursor = session.observe().current_observation().cursor;
         let cursor_text = cursor.as_str().to_string();
@@ -245,10 +264,13 @@ impl AppState {
             Some(cursor_text.clone()),
         );
         let input = TurnInput::text(prompt_for_request(&request));
+        // The engine drives the turn under the workflow id. A redelivered
+        // invocation sends the same id again, which commits nothing and
+        // answers the root's evidence.
         let turn = session
-            .turn(input)
-            .turn_id(request.workflow_id.clone())
-            .stream_to_with_effects(&sink, controller)
+            .send(input)
+            .id(request.workflow_id.clone())
+            .output_into(&sink)
             .await
             .map_err(turn_error)?;
         let final_value = if matches!(
@@ -318,24 +340,23 @@ impl AppState {
 
     async fn frame_switch_queued(
         &self,
-        controller: &RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
         let session = open_e2e_session(core).await?;
         let first = session
-            .durable()
-            .enqueue(TurnInput::text(format!(
+            .send(TurnInput::text(format!(
                 "Run queued frame switch. workflow_id={} frame_switch_queued_start=true",
                 request.workflow_id
             )))
             .id(format!("{}:first", request.workflow_id))
-            .send()
             .await
-            .map_err(terminal_error)?;
+            .map_err(turn_error)?;
+        let first_input = first.input_id().clone();
         let enqueue_session = session.clone();
         let enqueue_pool = self.storage.pool().clone();
         let enqueue_workflow_id = request.workflow_id.clone();
+        // The second input lands while the first root runs its frame switch.
         let enqueue_second = tokio::spawn(async move {
             wait_for_provider_scenario(
                 &enqueue_pool,
@@ -344,24 +365,15 @@ impl AppState {
             )
             .await?;
             enqueue_session
-                .durable()
-                .enqueue(TurnInput::text(format!(
+                .send(TurnInput::text(format!(
                     "Run pending item. workflow_id={enqueue_workflow_id} frame_switch_pending=true"
                 )))
                 .id(format!("{enqueue_workflow_id}:second"))
-                .send()
                 .await
                 .map_err(anyhow::Error::from)
         });
-        let first_turn = session
-            .queued_turn()
-            .drain_id(format!("{}:first-drain", request.workflow_id))
-            .run_with_effects(controller)
-            .await
-            .map_err(terminal_error)?
-            .ran()
-            .ok_or_else(|| terminal_error("first queued frame-switch turn did not run"))?;
-        let first_value = first_turn.final_value().cloned().ok_or_else(|| {
+        let first_turn = first.output().await.map_err(turn_error)?;
+        let first_value = first_turn.result.final_value().cloned().ok_or_else(|| {
             terminal_error("queued frame-switch follow-on produced no final value")
         })?;
         let second = enqueue_second
@@ -372,36 +384,34 @@ impl AppState {
             .durable()
             .pending_turn_inputs()
             .await
-            .map_err(terminal_error)?;
+            .map_err(turn_error)?;
         let first_completed = pending_after_follow
             .iter()
-            .all(|input| input.input.input_id != first.input_id);
-        let second_pending_before_drain = pending_after_follow
-            .iter()
-            .any(|input| input.input.input_id == second.input_id);
-        let second_turn = session
-            .queued_turn()
-            .drain_id(format!("{}:second-drain", request.workflow_id))
-            .run_with_effects(controller)
-            .await
-            .map_err(terminal_error)?
-            .ran()
-            .ok_or_else(|| terminal_error("second queued turn did not run"))?;
+            .all(|input| input.input.input_id != first_input);
+        let second_turn = second.output().await.map_err(turn_error)?;
         let second_value = second_turn
+            .result
             .final_value()
             .cloned()
             .ok_or_else(|| terminal_error("second queued turn produced no final value"))?;
+        // The input accepted mid-chain is not folded into the first root's
+        // follow-on turn: its own root answers the pending item, not the seed.
+        let second_own_root = second_value
+            .get("pending_item")
+            .and_then(serde_json::Value::as_bool)
+            == Some(true)
+            && second_value.get("seed_visible").is_none();
         let queue_empty = session
             .durable()
             .queued_work()
             .await
-            .map_err(terminal_error)?
+            .map_err(turn_error)?
             .is_empty();
         let inputs_empty = session
             .durable()
             .pending_turn_inputs()
             .await
-            .map_err(terminal_error)?
+            .map_err(turn_error)?
             .is_empty();
         self.finish_response(
             &request,
@@ -410,7 +420,7 @@ impl AppState {
                 "seed_visible": first_value.get("seed_visible").cloned().unwrap_or_default(),
                 "follow_on": first_value.get("follow_on").cloned().unwrap_or_default(),
                 "first_completed": first_completed,
-                "second_pending_before_drain": second_pending_before_drain,
+                "second_own_root": second_own_root,
                 "second_completed": second_value.get("pending_item").cloned().unwrap_or_default(),
                 "queue_empty": queue_empty,
                 "inputs_empty": inputs_empty,
@@ -422,16 +432,16 @@ impl AppState {
         .await
     }
 
-    /// The frame-switch turn killed before its switch commits and recovered by
-    /// Restate redelivery: the worker exits once, as the original turn enters
-    /// its effect loop, and the redelivered invocation replays what the
+    /// The frame-switch turn killed before its switch commits and recovered
+    /// by Restate redelivery of the engine's drive: the original turn's
+    /// `crash_once` tool exits whichever worker runs it, once, before the
+    /// turn's `continue_as`, and the redelivered drive replays what the
     /// journal holds and runs on, so the provider sees each physical turn
     /// once. The kill after the switch commits is parked on FIG-3788: a
     /// queued frame-switch drain redriven after its commit diverges from its
     /// Restate journal.
     async fn frame_switch_crash(
         &self,
-        controller: &RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
@@ -440,40 +450,17 @@ impl AppState {
             .open()
             .await
             .map_err(turn_error)?;
-        session
-            .durable()
-            .enqueue(TurnInput::text(format!(
+        let recovered = session
+            .send(TurnInput::text(format!(
                 "Run crash-recovered frame switch. workflow_id={} frame_switch_crash_start=true",
                 request.workflow_id
             )))
             .id(format!("{}:original", request.workflow_id))
-            .send()
+            .output()
             .await
             .map_err(turn_error)?;
-        let pool = self.storage.pool().clone();
-        let marker = format!("{}:before-switch-commit", request.workflow_id);
-        let exit_before_commit = request.fail_once
-            && !crash_exit_taken(&pool, &marker)
-                .await
-                .map_err(terminal_error)?;
-        session
-            .set_turn_phase_probe(Arc::new(FrameCrashProbe {
-                pool: pool.clone(),
-                workflow_id: request.workflow_id.clone(),
-                worker_id: self.worker_id.clone(),
-                marker: marker.clone(),
-                armed: exit_before_commit,
-            }))
-            .await;
-        let recovered = session
-            .queued_turn()
-            .drain_id(format!("{}:drain", request.workflow_id))
-            .run_with_effects(controller)
-            .await
-            .map_err(turn_error)?
-            .ran()
-            .ok_or_else(|| terminal_error("crash-recovered frame switch did not run"))?;
         let value = recovered
+            .result
             .final_value()
             .cloned()
             .ok_or_else(|| terminal_error("recovered follow-on produced no final value"))?;
@@ -481,17 +468,18 @@ impl AppState {
             .durable()
             .queued_work()
             .await
-            .map_err(terminal_error)?
+            .map_err(turn_error)?
             .is_empty();
         let inputs_empty = session
             .durable()
             .pending_turn_inputs()
             .await
-            .map_err(terminal_error)?
+            .map_err(turn_error)?
             .is_empty();
-        let recovered_before_switch_commit = crash_exit_taken(&pool, &marker)
-            .await
-            .map_err(terminal_error)?;
+        let recovered_before_switch_commit =
+            crash_exit_taken(self.storage.pool(), &request.workflow_id)
+                .await
+                .map_err(terminal_error)?;
         self.finish_response(
             &request,
             json!({
@@ -563,69 +551,60 @@ impl AppState {
 
     async fn frame_switch_cancel(
         &self,
-        controller: &RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
         let session = open_e2e_session(core).await?;
-        session
-            .durable()
-            .enqueue(TurnInput::text(format!(
+        let original = session
+            .send(TurnInput::text(format!(
                 "Run cancellable frame switch. workflow_id={} frame_switch_cancel_start=true",
                 request.workflow_id
             )))
             .id(format!("{}:cancel-original", request.workflow_id))
-            .send()
+            .await
+            .map_err(turn_error)?;
+        wait_for_cancel_gate(self.storage.pool(), &request.workflow_id)
             .await
             .map_err(terminal_error)?;
-        let cancel_session = session.clone();
-        let cancel_pool = self.storage.pool().clone();
-        let cancel_workflow_id = request.workflow_id.clone();
-        let canceller = tokio::spawn(async move {
-            wait_for_cancel_gate(&cancel_pool, &cancel_workflow_id).await?;
-            Ok::<usize, anyhow::Error>(
-                cancel_session
-                    .cancel_running_turns_with_origin(Some("scripted-e2e-worker".to_string())),
-            )
-        });
-        let cancelled = session
-            .queued_turn()
-            .drain_id(format!("{}:cancel-drain", request.workflow_id))
-            .run_with_effects(controller)
+        // The root is mid-chain, in its follow-on turn: the cancel lands on
+        // the root's gate wherever the engine runs it.
+        let receipt = original
+            .cancel()
+            .origin("scripted-e2e-worker")
             .await
-            .map_err(terminal_error)?
-            .ran()
-            .ok_or_else(|| terminal_error("cancellable queued turn did not run"))?;
-        let cancel_count = canceller
-            .await
-            .map_err(terminal_error)?
-            .map_err(terminal_error)?;
-        let terminal_cancelled = matches!(
-            cancelled.result.outcome,
-            TurnOutcome::Stopped(TurnStop::Cancelled { .. })
-        );
+            .map_err(turn_error)?;
+        self.record(
+            &request.workflow_id,
+            "cancel_receipt",
+            json!({ "receipt": format!("{receipt:?}") }),
+        )
+        .await?;
+        let cancel_count = usize::from(matches!(receipt, lash::CancelReceipt::Requested { .. }));
+        let cancelled = original.outcome().await.map_err(turn_error)?;
+        let terminal_cancelled = matches!(cancelled.status, lash::TurnStatus::Cancelled);
         let claims_settled = session
             .durable()
             .queued_work()
             .await
-            .map_err(terminal_error)?
+            .map_err(turn_error)?
             .is_empty()
             && session
                 .durable()
                 .pending_turn_inputs()
                 .await
-                .map_err(terminal_error)?
+                .map_err(turn_error)?
                 .is_empty();
         let usable = session
-            .turn(TurnInput::text(format!(
+            .send(TurnInput::text(format!(
                 "Run after cancellation. workflow_id={} frame_switch_post_cancel=true",
                 request.workflow_id
             )))
-            .turn_id(format!("{}:post-cancel", request.workflow_id))
-            .run_with_effects(controller)
+            .id(format!("{}:post-cancel", request.workflow_id))
+            .output()
             .await
-            .map_err(terminal_error)?;
+            .map_err(turn_error)?;
         let usable_value = usable
+            .result
             .final_value()
             .cloned()
             .ok_or_else(|| terminal_error("post-cancel turn produced no final value"))?;
@@ -923,49 +902,11 @@ fn prompt_for_request(request: &TurnRequest) -> String {
     }
 }
 
-/// Exits the worker once, at the invocation's first effect loop: the
-/// original turn's, before the switch commits. A redelivered invocation finds
-/// the exit taken and runs through.
-struct FrameCrashProbe {
-    pool: sqlx::PgPool,
-    workflow_id: String,
-    worker_id: String,
-    marker: String,
-    armed: bool,
-}
-
-impl lash_core::runtime::RuntimeTurnPhaseProbe for FrameCrashProbe {
-    fn begin(&self, phase: lash_core::runtime::RuntimeTurnPhase) {
-        if !self.armed || phase != lash_core::runtime::RuntimeTurnPhase::EffectLoop {
-            return;
-        }
-        let claimed = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(claim_crash_exit(
-                &self.pool,
-                &self.marker,
-                &self.workflow_id,
-                &self.worker_id,
-            ))
-        });
-        if claimed {
-            tracing::warn!(
-                worker_id = %self.worker_id,
-                marker = %self.marker,
-                "intentional E2E frame-switch crash exit"
-            );
-            std::process::exit(76);
-        }
-    }
-
-    fn end(&self, _phase: lash_core::runtime::RuntimeTurnPhase) {}
-}
-
 async fn open_e2e_session(core: &lash::LashCore) -> HandlerResult<lash::LashSession> {
-    Ok(core
-        .session(DEFAULT_SESSION_ID)
+    core.session(DEFAULT_SESSION_ID)
         .open()
         .await
-        .map_err(terminal_error)?)
+        .map_err(turn_error)
 }
 
 async fn wait_for_cancel_gate(pool: &sqlx::PgPool, workflow_id: &str) -> Result<()> {
@@ -1086,11 +1027,12 @@ impl TurnActivitySink for RecordingTurnSink {
 
 struct E2eTurnWorkflowImpl {
     state: AppState,
+    core: lash::LashCore,
 }
 
 impl E2eTurnWorkflowImpl {
-    fn new(state: AppState) -> Self {
-        Self { state }
+    fn new(state: AppState, core: lash::LashCore) -> Self {
+        Self { state, core }
     }
 }
 
@@ -1100,7 +1042,9 @@ impl E2eTurnWorkflow for E2eTurnWorkflowImpl {
         ctx: WorkflowContext<'_>,
         Json(request): Json<TurnRequest>,
     ) -> HandlerResult<Json<TurnResponse>> {
-        self.state.run_turn_with_restate(ctx, request).await
+        self.state
+            .run_turn_with_restate(ctx, &self.core, request)
+            .await
     }
 
     async fn health(
@@ -1256,7 +1200,7 @@ async fn async_main() -> Result<()> {
     // binds only its turn workflow beside them.
     let endpoint = backend
         .endpoint_builder(processes)
-        .bind(E2eTurnWorkflowImpl::new(state).serve())
+        .bind(E2eTurnWorkflowImpl::new(state, core).serve())
         .build();
     restate_sdk::http_server::HttpServer::new(endpoint)
         .listen_and_serve(addr)

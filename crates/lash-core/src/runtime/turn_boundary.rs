@@ -720,6 +720,7 @@ impl TurnBoundary {
                 usage_deltas,
                 operation,
                 commit_budget,
+                crate::FleetFormatStore::fleet_format(store),
             )?
             .with_committed_attachments(committed_attachment_ids);
         commit.failure_evidence = failure_evidence.to_vec();

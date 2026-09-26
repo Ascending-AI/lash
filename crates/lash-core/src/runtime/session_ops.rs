@@ -45,6 +45,19 @@ fn append_session_error_context(error: SessionError, suffix: &str) -> SessionErr
 }
 
 impl LashRuntime {
+    /// The fleet-format generation this runtime's durable writers emit — the
+    /// `F` the bound session's store recorded (ADR 0106 §1, FIG-3796).
+    ///
+    /// A runtime holding no store writes nothing durable, so the build's own
+    /// generation is the only honest answer it can give.
+    pub(super) fn fleet_format(&self) -> crate::FleetFormat {
+        self.session
+            .as_ref()
+            .and_then(|session| session.history_store())
+            .map(|store| crate::FleetFormatStore::fleet_format(store.as_ref()))
+            .unwrap_or_else(crate::FleetFormat::current)
+    }
+
     /// Replace the host-owned state envelope without durable publication.
     /// Reachable only through the test surface (`apply_persistence_state`).
     #[cfg(any(test, feature = "testing"))]
@@ -287,6 +300,7 @@ impl LashRuntime {
                 &[],
                 operation,
                 self.host.core.durability.commit_budget,
+                self.fleet_format(),
             )
             .map_err(|err| AppendFailure::Passthrough(SessionError::Protocol(err.to_string())))?;
         commit.turn_commit = append_stamp;
@@ -822,6 +836,7 @@ impl LashRuntime {
                     &[],
                     operation,
                     self.host.core.durability.commit_budget,
+                self.fleet_format(),
                 )
                 .map_err(|err| {
                     PluginOperationInvokeError::Failed(format!(
@@ -879,12 +894,14 @@ impl LashRuntime {
             operation_scope,
             crate::store::PLUGIN_OPERATION_STATE_RECEIPT_KEY,
         );
+        let fleet_format = self.fleet_format();
         let (commit, persisted_node_ids) =
             crate::store::RuntimeCommit::persisted_state_with_operation_and_budget(
                 &mut self.state,
                 &[],
                 operation,
                 self.host.core.durability.commit_budget,
+                fleet_format,
             )
             .map_err(|err| {
                 PluginOperationInvokeError::Failed(format!(

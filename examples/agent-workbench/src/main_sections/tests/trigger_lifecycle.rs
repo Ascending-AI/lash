@@ -226,7 +226,6 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(1024),
-        queued_work_driver: inert_queued_work(),
         restate_ingress_url: "http://127.0.0.1:8080".to_string(),
         restate_admin_url: "http://127.0.0.1:9070".to_string(),
         restate_http: reqwest::Client::new(),
@@ -264,45 +263,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
         "process wake should target the current session"
     );
 
-    let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
-    let submitter = WorkbenchQueuedWorkSubmitter {
-        sessions: state.sessions.clone(),
-        store_factory: Arc::clone(&core_store_factory),
-        restate_ingress_url,
-        restate_http: reqwest::Client::new(),
-        active_turns: active_turns.clone(),
-    };
-    lash::runtime::QueuedWorkRunHandle::claim_and_run_pending(
-        &submitter,
-        Some(&session_id),
-        "trigger_fired_mid_turn",
-    )
-    .await
-    .expect("active-turn queued-work deferral");
-    assert!(
-        tokio::time::timeout(Duration::from_millis(100), restate_requests.recv())
-            .await
-            .is_err(),
-        "trigger wake must not submit a competing queued turn while the active turn owns ingress"
-    );
     active_turns.remove(&session_id, &TurnId::from("mid-turn-trigger-contract"));
-    lash::runtime::QueuedWorkRunHandle::claim_and_run_pending(
-        &submitter,
-        Some(&session_id),
-        "active_turn_settled",
-    )
-    .await
-    .expect("post-settle queued turn submission");
-    let queued_turn_request = tokio::time::timeout(Duration::from_secs(1), restate_requests.recv())
-        .await
-        .expect("queued turn submission after settle")
-        .expect("queued turn request body");
-    assert!(
-        queued_turn_request["path"]
-            .as_str()
-            .is_some_and(|path| path.starts_with("WorkbenchQueuedTurnWorkflow/")),
-        "unexpected post-settle request: {queued_turn_request:#?}"
-    );
     let Json(work) = list_work(State(state), Query(SessionQuery::default()))
         .await
         .expect("list work");

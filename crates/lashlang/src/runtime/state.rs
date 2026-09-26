@@ -7,6 +7,7 @@ use super::{
     ProjectedValue, Record, RegExpObject, ResourceHandle, RuntimeError, SetObject, UrlObject,
     UrlSearchParamsObject, Value, record_with_capacity,
 };
+use lash_core_execution::surface_format;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -503,7 +504,19 @@ impl Snapshot {
     /// Snapshot equality does not imply byte equality for `-0.0` and `+0.0`:
     /// they compare equal under `PartialEq`, but preserve their distinct bits.
     pub fn to_canonical_bytes(&self) -> Result<Vec<u8>, ContinuationError> {
-        let wire = CanonicalSnapshot::try_from(self)?;
+        self.to_canonical_bytes_at_version(LASHLANG_SNAPSHOT_VERSION)
+    }
+
+    /// The canonical encode carrying `version` as its stamped snapshot
+    /// generation: the fixed-point read re-encodes at the version the wire
+    /// recorded, so a held snapshot proves byte-identical under the stamp it
+    /// was written with.
+    pub(crate) fn to_canonical_bytes_at_version(
+        &self,
+        version: u32,
+    ) -> Result<Vec<u8>, ContinuationError> {
+        let mut wire = CanonicalSnapshot::try_from(self)?;
+        wire.version = version;
         rmp_serde::to_vec_named(&wire).map_err(|_| ContinuationError::UnserializableValue {
             location: "snapshot".to_string(),
             variant: "canonical encoding",
@@ -514,12 +527,34 @@ impl Snapshot {
     /// structural nesting bound and canonical wire representation in one raw
     /// byte pass, before serde deserialization.
     pub fn from_canonical_bytes(bytes: &[u8]) -> Result<Self, SnapshotDecodeError> {
-        validate_snapshot_messagepack(bytes)?;
+        Self::from_canonical_bytes_for_fleet(bytes, lash_core_execution::FleetFormat::current())
+    }
+
+    /// The fleet leg of [`Self::from_canonical_bytes`]: the read admits the
+    /// pair `{fleet's writer version, this build's newest}` — ADR 0106 §2's
+    /// `[N-1, N]` window (FIG-3796). A snapshot at the fleet's older recorded
+    /// version would climb to the newest through a surface-owned lift step
+    /// before it decodes; this canonical form has no lift step yet, so an
+    /// admitted older version is refused closed rather than decoded on shape
+    /// alone.
+    pub fn from_canonical_bytes_for_fleet(
+        bytes: &[u8],
+        fleet_format: lash_core_execution::FleetFormat,
+    ) -> Result<Self, SnapshotDecodeError> {
+        validate_snapshot_messagepack_for_fleet(bytes, fleet_format)?;
         let wire: CanonicalSnapshot = rmp_serde::from_slice(bytes)
             .map_err(|error| SnapshotDecodeError::InvalidEncoding(error.to_string()))?;
+        let recorded_version = wire.version;
+        let window = fleet_format.read_window(surface_format!(LASHLANG_SNAPSHOT_VERSION));
+        if recorded_version != window.newest() {
+            return Err(SnapshotDecodeError::VersionMismatch {
+                expected: window.newest(),
+                found: recorded_version,
+            });
+        }
         let snapshot: Self = wire.try_into()?;
         let canonical = snapshot
-            .to_canonical_bytes()
+            .to_canonical_bytes_at_version(recorded_version)
             .map_err(|error| SnapshotDecodeError::InvalidEncoding(error.to_string()))?;
         if canonical.as_slice() != bytes {
             return Err(SnapshotDecodeError::NonCanonicalEncoding {
@@ -971,8 +1006,11 @@ const TAGGED_VALUE_FIELDS: &[&str] = &[
 ];
 const MAP_ENTRY_FIELDS: &[&str] = &["key", "value"];
 
-fn validate_snapshot_messagepack(bytes: &[u8]) -> Result<(), SnapshotDecodeError> {
-    let globals_result = validate_snapshot_globals(bytes);
+fn validate_snapshot_messagepack_for_fleet(
+    bytes: &[u8],
+    fleet_format: lash_core_execution::FleetFormat,
+) -> Result<(), SnapshotDecodeError> {
+    let globals_result = validate_snapshot_globals_for_fleet(bytes, fleet_format);
     if matches!(
         globals_result,
         Err(SnapshotDecodeError::ValueDepthLimitExceeded { .. })
@@ -1017,7 +1055,11 @@ fn validate_snapshot_messagepack(bytes: &[u8]) -> Result<(), SnapshotDecodeError
     globals_result
 }
 
-fn validate_snapshot_globals(bytes: &[u8]) -> Result<(), SnapshotDecodeError> {
+fn validate_snapshot_globals_for_fleet(
+    bytes: &[u8],
+    fleet_format: lash_core_execution::FleetFormat,
+) -> Result<(), SnapshotDecodeError> {
+    let window = fleet_format.read_window(surface_format!(LASHLANG_SNAPSHOT_VERSION));
     let mut cursor = 0;
     let fields = take_map_length(bytes, &mut cursor, "snapshot", "snapshot")?;
     // The version, one representation, and the expired-function names when
@@ -1037,9 +1079,9 @@ fn validate_snapshot_globals(bytes: &[u8]) -> Result<(), SnapshotDecodeError> {
             "snapshot version must be a non-negative 32-bit integer",
         )
     })?;
-    if version != LASHLANG_SNAPSHOT_VERSION {
+    if !window.admits(version) {
         return Err(SnapshotDecodeError::VersionMismatch {
-            expected: LASHLANG_SNAPSHOT_VERSION,
+            expected: window.newest(),
             found: version,
         });
     }

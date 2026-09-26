@@ -39,6 +39,7 @@ mod model_agreement;
 mod run_shape;
 use generator::generated_case;
 pub use generator::sample_store_contract_operations;
+use lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION;
 use model_agreement::{assert_model_agreement, terminal_outcome_under_standing_cancel};
 /// Fresh process-registry and runtime-persistence handles for one generated case.
 pub struct StoreContractHandles {
@@ -2395,7 +2396,9 @@ fn runtime_wake_for(
     sequence: u64,
 ) -> ProcessWakeDelivery {
     ProcessWakeDelivery {
-        version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        version: crate::FleetFormat::current().writer_version(lash_core::surface_format!(
+            PROCESS_WAKE_DELIVERY_FORMAT_VERSION
+        )),
         wake_id: format!("wake:{process_id}:{sequence}"),
         target_session_id: session_id.clone(),
         process_id: process_id.clone(),

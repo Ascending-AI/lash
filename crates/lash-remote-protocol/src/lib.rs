@@ -292,6 +292,14 @@ pub use usage_activity::*;
 // `process_id_reused` gap are gone, and a trigger delivery receipt's
 // `process_id` is optional. A window-99 peer sends host-named ids and
 // incarnations this decoder refuses, so peers must adopt 100.
+// The same window also moves input onto `send()` (FIG-3600): `RemoteTurnRequest`
+// drops `idempotency_key` (`turn_id` is the send's id: the root and the
+// idempotency key at once), `RemoteTurnInput` drops `prompt_layer` (a
+// per-turn prompt cannot cross durable acceptance), `RemoteTurnOutcome` drops
+// `queued` (no turn answers "queued" once the engine drives every accepted
+// input), and `RemoteTurnStatus` becomes a tagged
+// `answered`/`failed`/`cancelled`/`parked` status that names a parked root's
+// park.
 pub const REMOTE_PROTOCOL_VERSION: u32 = 100;
 
 /// One versioned remote-protocol message.

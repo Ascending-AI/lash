@@ -654,10 +654,11 @@ impl TurnInputStore for PostgresSessionStore {
         for row in rows {
             let turn_id = row.get::<String, _>(0);
             let result_json: String = row.get(1);
-            let result = lash_core_execution::store::decode_runtime_commit_receipt(
+            let result = lash_core_execution::store::decode_runtime_commit_receipt_for_fleet(
                 session_id,
                 &turn_id,
                 &result_json,
+                self.fleet_format,
             )?;
             commits.push((
                 result.head_revision,

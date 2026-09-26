@@ -161,10 +161,11 @@ and a guarded in-scope shape that has no disposition. Shapes outside this
 domain retain their own existing version rule. This mechanical gate proves
 coverage of declared source projections; the fixture and fault laws below
 prove operational totality. The per-PR bump requirement the gate enforces is
-paused until the lash 1.0 cut under `tools/release-mode.toml`
-(`pre_release = true`, FIG-3660): while it holds the gate reports
-"paused pre-1.0" and exits 0, and the post-1.0 migration policy (ADR 0106)
-restores it.
+frozen until the lash 1.0 cut under the `[policy]` table's
+`freeze = "pre-1.0"` in `scripts/versioned-surfaces.toml` (FIG-3846): while it
+holds the gate prints its findings, reports the freeze, and exits 0, and
+removing the key restores strict enforcement under the post-1.0 migration
+policy (ADR 0106).
 
 ### Executable state remains pinned
 

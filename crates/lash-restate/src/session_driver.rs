@@ -181,8 +181,9 @@ fn check_generation(
 /// The key is `{len}:{session}{root}`, where `len` is the session id's length
 /// in bytes, so it parses back to exactly one `(session, root)` whatever
 /// either id contains ([`parse_turn_workflow_key`]): reconciliation maps a
-/// paused `LashTurn` invocation to its root by its key alone.
-pub(crate) fn turn_workflow_key(session: &SessionId, root: &lash_core::TurnId) -> String {
+/// paused `LashTurn` invocation to its root by its key alone. A host finds
+/// the invocation running one of its roots by this key.
+pub fn turn_workflow_key(session: &SessionId, root: &lash_core::TurnId) -> String {
     format!(
         "{}:{}{}",
         session.as_str().len(),
@@ -389,6 +390,26 @@ impl RestateSessionWork {
     }
 }
 
+impl RestateSessionWork {
+    /// The refusal a released root's `LashTurn` ended with, when its run
+    /// failed with one.
+    async fn released_root_refusal(
+        &self,
+        session: &SessionId,
+        root: &lash_core::TurnId,
+    ) -> Option<lash_core::RuntimeError> {
+        let key = turn_workflow_key(session, root);
+        match self
+            .ingress
+            .attach_workflow_run(LashService::TurnDriver.name(), &key)
+            .await
+        {
+            Err(crate::RestateHttpError::Status { body, .. }) => decode_drive_refusal(&body),
+            _ => None,
+        }
+    }
+}
+
 impl std::fmt::Debug for RestateSessionWork {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         formatter
@@ -399,6 +420,7 @@ impl std::fmt::Debug for RestateSessionWork {
     }
 }
 
+#[async_trait::async_trait]
 impl SessionWorkEngine for RestateSessionWork {
     fn schedule_drive(&self, session: &SessionId, request: DriveRequestId) {
         // The ask is fire-and-forget by contract: the row it follows is
@@ -429,6 +451,78 @@ impl SessionWorkEngine for RestateSessionWork {
     fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
         self.slot.install(driver)
     }
+
+    /// Attach to `request`'s drive by its idempotency key, starting it if no
+    /// send reached Restate. A drive a handler refused terminally is decoded
+    /// back to the kernel's refusal; any other failure to attach (transport,
+    /// the attach ceiling) is a retry under the same key.
+    ///
+    /// A root the drive consumed as released answers the refusal its
+    /// `LashTurn` ended with, as the in-process drive answers a root's
+    /// terminal refusal: the drive goes on past it, but a waiter on that root
+    /// learns why it did not run to its end.
+    async fn await_drive(
+        &self,
+        session: &SessionId,
+        request: &DriveRequestId,
+    ) -> Result<DriveOutcome, DriveAbort> {
+        let error = match self.attach_drive(session, request.clone()).await {
+            Ok(outcome) => {
+                for ran in &outcome.ran {
+                    if let lash_core::engine::RootOutcome::Released { root } = ran
+                        && let Some(refusal) = self.released_root_refusal(session, root).await
+                    {
+                        return Err(DriveAbort::Refused(refusal));
+                    }
+                }
+                return Ok(outcome);
+            }
+            Err(error) => error,
+        };
+        if let crate::RestateHttpError::Status { body, .. } = &error
+            && let Some(refusal) = decode_drive_refusal(body)
+        {
+            return Err(DriveAbort::Refused(refusal));
+        }
+        Err(DriveAbort::Retry(lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::EngineTurnTerminalAttach,
+            format!(
+                "attach to drive `{}` of session `{session}`: {error}",
+                request.as_str()
+            ),
+        )))
+    }
+}
+
+/// The prefix of a session-driver handler's terminal error message that
+/// carries the refusal as a serialized [`lash_core::RuntimeError`], so a
+/// caller attached to the drive reads back the kernel's own code.
+const DRIVE_REFUSAL_MARKER: &str = "lash-drive-refused:";
+
+/// A handler's terminal refusal, carrying `error` for a caller attached to
+/// the drive.
+fn drive_refusal(error: &lash_core::RuntimeError) -> HandlerError {
+    let encoded = serde_json::to_string(error).unwrap_or_else(|_| {
+        serde_json::json!({ "code": error.code.as_str(), "message": error.message }).to_string()
+    });
+    TerminalError::new(format!("{DRIVE_REFUSAL_MARKER}{encoded}")).into()
+}
+
+/// The refusal a failed attach's response body carries, when a
+/// session-driver handler ended the drive terminally.
+fn decode_drive_refusal(body: &str) -> Option<lash_core::RuntimeError> {
+    let message = serde_json::from_str::<serde_json::Value>(body)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("message")
+                .and_then(serde_json::Value::as_str)
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| body.to_owned());
+    let (_, encoded) = message.split_once(DRIVE_REFUSAL_MARKER)?;
+    let mut stream = serde_json::Deserializer::from_str(encoded).into_iter();
+    stream.next()?.ok()
 }
 
 // ---------------------------------------------------------------------------
@@ -506,12 +600,14 @@ impl LashTurnImpl {
 /// The terminal refusal of a request stamped for another generation. It is
 /// returned before the handler journals anything.
 fn retired_generation(service: LashService, found: u32) -> HandlerError {
-    TerminalError::new(format!(
-        "{} request carries lash-session-drive-v{found}; this handler journals generation \
-         {LASH_SESSION_DRIVE_VERSION}",
-        service.name()
+    drive_refusal(&lash_core::RuntimeError::new(
+        lash_core::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
+        format!(
+            "{} request carries lash-session-drive-v{found}; this handler journals generation \
+             {LASH_SESSION_DRIVE_VERSION}",
+            service.name()
+        ),
     ))
-    .into()
 }
 
 /// How a handler ends an attempt the kernel aborted.
@@ -522,12 +618,20 @@ fn abort_failure(abort: DriveAbort) -> HandlerError {
         // The park is durable; the invocation keeps its journal and pauses
         // after its attempt budget.
         DriveAbort::Parked { error, .. } => parked_turn_failure(error),
-        DriveAbort::Refused(error) => TerminalError::new(error.to_string()).into(),
+        DriveAbort::Refused(error) => drive_refusal(&error),
     }
 }
 
 fn refused_scope(error: lash_core::RuntimeError) -> HandlerError {
-    TerminalError::new(error.to_string()).into()
+    drive_refusal(&error)
+}
+
+/// A handler asked to run under a key its request does not name.
+fn misaddressed(message: String) -> HandlerError {
+    drive_refusal(&lash_core::RuntimeError::new(
+        lash_core::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
+        message,
+    ))
 }
 
 impl LashSession for LashSessionImpl {
@@ -603,12 +707,11 @@ async fn drive_session_journal(
     request: DriveRequest,
 ) -> Result<DriveOutcome, HandlerError> {
     if ctx.key() != request.session.as_str() {
-        return Err(TerminalError::new(format!(
+        return Err(misaddressed(format!(
             "LashSession/{} was asked to drive session `{}`",
             ctx.key(),
             request.session
-        ))
-        .into());
+        )));
     }
     let Json(recorded) = ctx
         .run(|| {
@@ -693,11 +796,11 @@ async fn drive_session_journal(
                     return Ok(DriveOutcome { ran, stop });
                 }
                 ordinal = ordinal.checked_add(1).ok_or_else(|| {
-                    HandlerError::from(TerminalError::new(format!(
+                    misaddressed(format!(
                         "session `{}` drive `{}` exhausted its admission ordinals",
                         request.session,
                         request.request.as_str()
-                    )))
+                    ))
                 })?;
                 continue;
             }
@@ -723,11 +826,10 @@ async fn run_root_journal(
 ) -> Result<RootOutcome, HandlerError> {
     let expected = turn_workflow_key(admitted.session(), admitted.root());
     if ctx.key() != expected {
-        return Err(TerminalError::new(format!(
+        return Err(misaddressed(format!(
             "LashTurn/{} was asked to run root `{expected}`",
             ctx.key()
-        ))
-        .into());
+        )));
     }
     let Json(recorded) = ctx
         .run(|| {
@@ -843,6 +945,129 @@ mod tests {
         let message = format!("{refusal:?}");
         assert!(message.contains("RetiredGeneration"), "{message}");
         assert!(message.contains(other.as_str()), "{message}");
+    }
+
+    #[test]
+    fn a_terminal_drive_refusal_decodes_back_to_its_runtime_error() {
+        let error = lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::AcceptedTurnInputCeded,
+            "the input was ceded: \"quoted\" text",
+        );
+        let message = format!(
+            "{DRIVE_REFUSAL_MARKER}{}",
+            serde_json::to_string(&error).expect("encode")
+        );
+        for body in [
+            serde_json::json!({ "message": message.clone() }).to_string(),
+            message.clone(),
+            format!(
+                "{{\"code\":500,\"message\":{}}}",
+                serde_json::json!(message)
+            ),
+        ] {
+            let decoded = decode_drive_refusal(&body).expect("the refusal decodes");
+            assert_eq!(decoded.code, error.code);
+            assert_eq!(decoded.message, error.message);
+        }
+        assert!(decode_drive_refusal("{\"message\":\"connection reset\"}").is_none());
+    }
+
+    /// Answers each request in turn from a script.
+    #[derive(Debug)]
+    struct Scripted {
+        requests: std::sync::Mutex<Vec<lash_http_transport::HttpRequest>>,
+        responses: std::sync::Mutex<std::collections::VecDeque<lash_http_transport::HttpResponse>>,
+    }
+
+    #[async_trait::async_trait]
+    impl lash_http_transport::HttpTransport for Scripted {
+        async fn send(
+            &self,
+            request: lash_http_transport::HttpRequest,
+            _timeout: Option<std::time::Duration>,
+        ) -> Result<lash_http_transport::HttpResponse, lash_http_transport::LlmTransportError>
+        {
+            self.requests
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push(request);
+            self.responses
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .pop_front()
+                .ok_or_else(|| lash_http_transport::LlmTransportError::new("script exhausted"))
+        }
+    }
+
+    fn scripted_response(status: u16, body: String) -> lash_http_transport::HttpResponse {
+        lash_http_transport::HttpResponse {
+            status,
+            headers: vec![("content-type".to_string(), "application/json".to_string())],
+            body: lash_http_transport::HttpResponseBody::buffered(body),
+        }
+    }
+
+    /// A root the drive consumed as released answers a waiter with the
+    /// refusal its `LashTurn` run ended with, as the in-process drive answers
+    /// a root's terminal refusal, rather than a stop that says nothing of why.
+    #[tokio::test]
+    async fn a_released_root_answers_the_refusal_its_run_ended_with() {
+        let session = SessionId::from("released-session");
+        let root = lash_core::TurnId::from("released-root");
+        let outcome = DriveOutcome {
+            ran: vec![lash_core::engine::RootOutcome::Released { root: root.clone() }],
+            stop: lash_core::engine::DriveStop::RootAborted { root: root.clone() },
+        };
+        let refusal = lash_core::RuntimeError::new(
+            lash_core::RuntimeErrorCode::AcceptedTurnInputCeded,
+            "the session is being deleted",
+        );
+        let failure = serde_json::json!({
+            "message": format!(
+                "{DRIVE_REFUSAL_MARKER}{}",
+                serde_json::to_string(&refusal).expect("encode")
+            ),
+        });
+        let transport = Arc::new(Scripted {
+            requests: std::sync::Mutex::default(),
+            responses: std::sync::Mutex::new(
+                [
+                    scripted_response(200, serde_json::to_string(&outcome).expect("encode")),
+                    scripted_response(500, failure.to_string()),
+                ]
+                .into(),
+            ),
+        });
+        let work = RestateSessionWork::new(
+            crate::RestateIngressClient::new(crate::RestateConnection::with_transport(
+                "https://cloud.example",
+                transport.clone(),
+            )),
+            RestateSessionDriverSlot::new(),
+            BuildGeneration::for_test("t0"),
+        );
+
+        let answer = work
+            .await_drive(&session, &DriveRequestId::new("released-request"))
+            .await;
+        let Err(DriveAbort::Refused(answered)) = answer else {
+            panic!("the released root answers its refusal: {answer:?}");
+        };
+        assert_eq!(answered.code, refusal.code);
+        assert_eq!(answered.message, refusal.message);
+        let requests = transport
+            .requests
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[1].method, lash_http_transport::HttpMethod::Get);
+        assert!(
+            requests[1].url.ends_with("/attach")
+                && requests[1].url.contains("restate/workflow/LashTurn/"),
+            "{}",
+            requests[1].url
+        );
     }
 
     #[test]

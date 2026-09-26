@@ -400,7 +400,9 @@ fn large_scalar_edit_commits_changed_state_not_retained_session() {
             .expect("seed a global");
     }
     state.mark_execution_started();
-    let initial = state.snapshot_execution_state().expect("initial snapshot");
+    let initial = state
+        .snapshot_execution_state(lash_core::FleetFormat::current())
+        .expect("initial snapshot");
     state.acknowledge_execution_state_capture();
 
     state
@@ -411,7 +413,9 @@ fn large_scalar_edit_commits_changed_state_not_retained_session() {
         )
         .expect("seed a global");
     state.mark_execution_started();
-    let changed = state.snapshot_execution_state().expect("changed snapshot");
+    let changed = state
+        .snapshot_execution_state(lash_core::FleetFormat::current())
+        .expect("changed snapshot");
     let retained_bytes = state
         .rlm
         .snapshot()
@@ -457,7 +461,10 @@ fn fragment_body(value: FlowValue) -> Vec<u8> {
         .insert_global("value", value)
         .expect("seed the fragment's binding");
     let mut parts = state
-        .durable_parts(&DurableBaseline::default())
+        .durable_parts(
+            &DurableBaseline::default(),
+            lash_core::FleetFormat::current(),
+        )
         .expect("encode the fragment");
     match parts.fragments.remove("value") {
         Some(DurableFragment::Changed(body)) => body,
@@ -520,10 +527,13 @@ fn old_json_snapshot_is_typed_format_rejection_with_cutover_remedy() {
     let mut state = RlmExecutionState::new();
 
     let error = state
-        .restore_execution_state(&lash_core::plugin::HydratedExecutionState {
-            root: old_snapshot.into(),
-            components: BTreeMap::new(),
-        })
+        .restore_execution_state(
+            &lash_core::plugin::HydratedExecutionState {
+                root: old_snapshot.into(),
+                components: BTreeMap::new(),
+            },
+            lash_core::FleetFormat::current(),
+        )
         .expect_err("old JSON must not have a compatibility decoder");
 
     assert!(matches!(&error, RlmSnapshotError::FormatMismatch { .. }));
@@ -690,7 +700,7 @@ fn rlm_snapshot_accepts_inline_global_named_schema() {
     state.mark_execution_started();
 
     let snapshot = state
-        .snapshot_execution_state()
+        .snapshot_execution_state(lash_core::FleetFormat::current())
         .expect("schema global snapshots as canonical RLM state");
     let hydration = hydrate(snapshot);
     let root: RlmSnapshotRoot =
@@ -729,7 +739,7 @@ fn older_snapshot_version_is_typed_rejection_with_cutover_remedy() {
     let mut target = RlmExecutionState::new();
 
     let error = target
-        .restore_execution_state(&hydration)
+        .restore_execution_state(&hydration, lash_core::FleetFormat::current())
         .expect_err("older version must be rejected before Lashlang decode");
 
     assert!(matches!(
@@ -788,7 +798,7 @@ fn previous_snapshot_version_is_typed_rejection_for_missing_child_attempt_bound(
     };
     let mut target = RlmExecutionState::for_engine("lashlang");
     let error = target
-        .restore_execution_state(&hydration)
+        .restore_execution_state(&hydration, lash_core::FleetFormat::current())
         .expect_err("version 19 must fail closed rather than drop the pinned attempt bound");
 
     assert!(matches!(
@@ -860,7 +870,7 @@ fn version_17_snapshot_is_typed_rejection_with_or_without_file_leaves() {
 
         let mut target = RlmExecutionState::for_engine("lashlang");
         let error = target
-            .restore_execution_state(&hydration)
+            .restore_execution_state(&hydration, lash_core::FleetFormat::current())
             .expect_err("the previous snapshot version must fail closed");
 
         assert!(matches!(
@@ -902,7 +912,7 @@ fn version_14_root_with_files_field_is_refused_by_the_field_validator() {
     let mut target = RlmExecutionState::for_engine("lashlang");
 
     let error = target
-        .restore_execution_state(&hydration)
+        .restore_execution_state(&hydration, lash_core::FleetFormat::current())
         .expect_err("a v14 root must not accept the removed files field");
 
     assert!(matches!(
@@ -915,11 +925,15 @@ fn version_14_root_with_files_field_is_refused_by_the_field_validator() {
 #[test]
 fn restore_validates_the_snapshot_engine_against_the_active_dialect() {
     let mut source = RlmExecutionState::for_engine("lashlang");
-    let hydration = hydrate(source.snapshot_execution_state().expect("source snapshot"));
+    let hydration = hydrate(
+        source
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .expect("source snapshot"),
+    );
     let mut target = RlmExecutionState::for_engine("typescript");
 
     let error = target
-        .restore_execution_state(&hydration)
+        .restore_execution_state(&hydration, lash_core::FleetFormat::current())
         .expect_err("a snapshot from another dialect must be rejected");
 
     assert!(matches!(
@@ -1001,7 +1015,10 @@ fn version_26_root_encodes_to_golden_bytes() {
         version: RLM_SNAPSHOT_VERSION,
         engine: "lashlang".to_string(),
         state_header: FlowState::new()
-            .durable_parts(&DurableBaseline::default())
+            .durable_parts(
+                &DurableBaseline::default(),
+                lash_core::FleetFormat::current(),
+            )
             .expect("encode the plain state's header")
             .header,
         globals,
@@ -1091,10 +1108,13 @@ fn a_predecessor_v22_capture_is_refused_by_its_version_before_anything_is_restor
     );
     let (_, mut live) = leaf_bearing_hydration_and_live_target();
     let error = live
-        .restore_execution_state(&lash_core::plugin::HydratedExecutionState {
-            root: root.into(),
-            components: BTreeMap::new(),
-        })
+        .restore_execution_state(
+            &lash_core::plugin::HydratedExecutionState {
+                root: root.into(),
+                components: BTreeMap::new(),
+            },
+            lash_core::FleetFormat::current(),
+        )
         .expect_err("a version-22 capture must not restore");
     assert!(
         matches!(
@@ -1125,7 +1145,11 @@ fn leaf_bearing_hydration_and_live_target()
         )
         .expect("seed a global");
     source.mark_execution_started();
-    let hydration = hydrate(source.snapshot_execution_state().expect("source snapshot"));
+    let hydration = hydrate(
+        source
+            .snapshot_execution_state(lash_core::FleetFormat::current())
+            .expect("source snapshot"),
+    );
     assert!(
         !hydration.components.is_empty(),
         "the hydration must reference at least one leaf"
@@ -1164,7 +1188,7 @@ fn restore_rejects_a_hydration_that_omits_a_referenced_leaf() {
     tampered.components.remove(&dropped);
 
     let error = live
-        .restore_execution_state(&tampered)
+        .restore_execution_state(&tampered, lash_core::FleetFormat::current())
         .expect_err("a root referencing an unsupplied leaf must be rejected");
 
     match &error {
@@ -1178,7 +1202,7 @@ fn restore_rejects_a_hydration_that_omits_a_referenced_leaf() {
         other => panic!("unexpected error: {other}"),
     }
     assert_live_state_untouched(&live);
-    live.restore_execution_state(&hydration)
+    live.restore_execution_state(&hydration, lash_core::FleetFormat::current())
         .expect("the untampered hydration still restores");
 }
 
@@ -1197,7 +1221,7 @@ fn restore_rejects_a_leaf_whose_body_does_not_match_its_content_address() {
         .insert(key.clone(), b"tampered body".as_slice().into());
 
     let error = live
-        .restore_execution_state(&tampered)
+        .restore_execution_state(&tampered, lash_core::FleetFormat::current())
         .expect_err("a leaf body that is not its own content address must be rejected");
 
     match &error {
@@ -1212,7 +1236,7 @@ fn restore_rejects_a_leaf_whose_body_does_not_match_its_content_address() {
         other => panic!("unexpected error: {other}"),
     }
     assert_live_state_untouched(&live);
-    live.restore_execution_state(&hydration)
+    live.restore_execution_state(&hydration, lash_core::FleetFormat::current())
         .expect("the untampered hydration still restores");
 }
 
@@ -1226,7 +1250,7 @@ fn restore_rejects_a_hydration_carrying_a_leaf_the_root_does_not_reference() {
         .insert(surplus.clone(), b"orphan".as_slice().into());
 
     let error = live
-        .restore_execution_state(&tampered)
+        .restore_execution_state(&tampered, lash_core::FleetFormat::current())
         .expect_err("an orphan leaf must be rejected rather than silently ignored");
 
     match &error {
@@ -1240,7 +1264,7 @@ fn restore_rejects_a_hydration_carrying_a_leaf_the_root_does_not_reference() {
         other => panic!("unexpected error: {other}"),
     }
     assert_live_state_untouched(&live);
-    live.restore_execution_state(&hydration)
+    live.restore_execution_state(&hydration, lash_core::FleetFormat::current())
         .expect("the untampered hydration still restores");
 }
 
@@ -1275,14 +1299,18 @@ fn aborted_capture_retries_leaf_bodies_instead_of_uncommitted_refs() {
         )
         .expect("seed a global");
     state.mark_execution_started();
-    let first = state.snapshot_execution_state().expect("first capture");
+    let first = state
+        .snapshot_execution_state(lash_core::FleetFormat::current())
+        .expect("first capture");
     assert!(first.components.values().any(|component| matches!(
         component,
         lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
     )));
 
     state.abort_execution_state_capture();
-    let retry = state.snapshot_execution_state().expect("retry capture");
+    let retry = state
+        .snapshot_execution_state(lash_core::FleetFormat::current())
+        .expect("retry capture");
     assert!(retry.components.values().any(|component| matches!(
         component,
         lash_core::plugin::ExecutionStateComponentSnapshot::Changed(_)
@@ -1447,7 +1475,7 @@ fn the_dialect_pins_snapshot_engine_id() {
 
     let mut session = dialect.create_session();
     let snapshot = session
-        .snapshot_execution_state()
+        .snapshot_execution_state(lash_core::FleetFormat::current())
         .expect("snapshot the session");
     let root: RlmSnapshotRoot =
         rmp_serde::from_slice(snapshot.root.as_deref().expect("fresh snapshot has a root"))
@@ -1479,12 +1507,12 @@ fn the_first_child_start_pins_the_attempt_bound_and_later_host_changes_do_not_mo
     // the process boundary a redrive crosses.
     let snapshot = hydrate(
         state
-            .snapshot_execution_state()
+            .snapshot_execution_state(lash_core::FleetFormat::current())
             .expect("capture a pinned snapshot"),
     );
     let mut restored = RlmExecutionState::for_engine("lashlang");
     restored
-        .restore_execution_state(&snapshot)
+        .restore_execution_state(&snapshot, lash_core::FleetFormat::current())
         .expect("restore the pinned snapshot");
     assert_eq!(restored.child_max_attempts(), Some(first));
 }
