@@ -648,6 +648,12 @@ fn decode_session_head_meta_row(
     let head_revision: i64 = row.get(1);
     let leaf_node_id: Option<String> = row.get(2);
     let checkpoint_ref: Option<String> = row.get(3);
+    let pending_follow_on: Option<String> = row.get(4);
+    let pending_follow_on =
+        lash_core_execution::store::pending_follow_on::decode_pending_follow_on(
+            session_id,
+            pending_follow_on.as_deref(),
+        )?;
     let payload: SessionHeadPayload = lash_core_execution::store::decode_versioned_json_record(
         &head_json,
         "SessionHeadMeta",
@@ -660,13 +666,16 @@ fn decode_session_head_meta_row(
         },
         error => error,
     })?;
-    Ok(Some(SessionHeadMeta::assemble(
-        session_id,
-        payload,
-        u64_from_sql("SessionHeadMeta", "head_revision", head_revision)?,
-        checkpoint_ref.map(Into::into),
-        leaf_node_id.map(lash_core_execution::NodeId::from),
-    )?))
+    Ok(Some(
+        SessionHeadMeta::assemble(
+            session_id,
+            payload,
+            u64_from_sql("SessionHeadMeta", "head_revision", head_revision)?,
+            checkpoint_ref.map(Into::into),
+            leaf_node_id.map(lash_core_execution::NodeId::from),
+        )?
+        .with_pending_follow_on(pending_follow_on),
+    ))
 }
 
 pub(crate) async fn load_usage_deltas_tx(

@@ -13,11 +13,21 @@ pub const TABLE: &str = "session_head";
 
 /// Every column, in insert order.
 pub const INSERT_COLUMNS: &str =
-    "session_id, head_json, head_revision, leaf_node_id, checkpoint_ref";
+    "session_id, head_json, head_revision, leaf_node_id, checkpoint_ref, pending_follow_on_json";
 
 /// The head as every loader decodes it: the full row minus the `session_id`
 /// the read is keyed by.
-pub const HEAD_META_COLUMNS: &str = "head_json, head_revision, leaf_node_id, checkpoint_ref";
+pub const HEAD_META_COLUMNS: &str =
+    "head_json, head_revision, leaf_node_id, checkpoint_ref, pending_follow_on_json";
+
+/// A fork's head row: every column but the pending follow-on, which a fork
+/// head never owes (ADR 0101 §3), so the column stays NULL.
+pub const FORK_INSERT_COLUMNS: &str =
+    "session_id, head_json, head_revision, leaf_node_id, checkpoint_ref";
+
+/// The pending follow-on alone: every claim reads it, and the recovery raise
+/// rewrites it without touching the rest of the head (ADR 0101 §3).
+pub const PENDING_FOLLOW_ON_COLUMNS: &str = "pending_follow_on_json";
 
 /// What session deletion needs from the head before it removes the row: the
 /// ancestry to retire and the checkpoint root to reclaim.

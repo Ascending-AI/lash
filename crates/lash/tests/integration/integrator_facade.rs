@@ -17,8 +17,8 @@ use lash::messages::{PartAttachment, SessionMessageTreeNode, SharedJsonValue};
 use lash::persistence::{
     AttachmentIntent, AttachmentManifest, AttachmentManifestEntry, AttachmentOwnerKind,
     LiveReplayOutcome, LiveReplaySubscription, ProcessWakeSource, QueuedCheckpointTurnInput,
-    QueuedCheckpointWork, QueuedTurnWork, SessionCursorError, SessionNodePayload,
-    SessionNodeProjection, SessionNodeRecord, TurnInputClaimMode,
+    QueuedCheckpointWork, SessionCursorError, SessionNodePayload, SessionNodeProjection,
+    SessionNodeRecord, TurnInputClaimMode,
     queued_work::{PendingSessionWorkOrdering, PendingWorkOrderingKey},
 };
 use lash::plugins::{
@@ -134,7 +134,7 @@ fn protocol_integrator_traits_are_implementable_from_the_facade() {
 }
 
 #[test]
-fn snapshot_agent_frame_can_target_queued_work_from_the_facade() {
+fn snapshot_agent_frame_is_constructible_from_the_facade() {
     let frame_node_id: FrameNodeId = serde_json::from_str(r#""frame-node/v2/host-path""#)
         .expect("transparent frame node id restore");
     let policy = lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded);
@@ -154,16 +154,7 @@ fn snapshot_agent_frame_can_target_queued_work_from_the_facade() {
         .into_iter()
         .next()
         .expect("snapshot agent frame");
-    let payload = lash::persistence::QueuedWorkPayload::agent_frame_task(
-        record.frame_node_id,
-        "resume frame work",
-        None,
-    );
-
-    let lash::persistence::QueuedWorkPayload::AgentFrameTask { frame_id, .. } = payload else {
-        panic!("expected agent frame task");
-    };
-    assert_eq!(frame_id.as_str(), "frame-node/v2/host-path");
+    assert_eq!(record.frame_node_id.as_str(), "frame-node/v2/host-path");
 }
 
 /// A host binds a tool through the facade with no `rlm` feature and no

@@ -99,6 +99,44 @@ impl SessionCommitStore for PostgresSessionStore {
         Ok(())
     }
 
+    async fn raise_pending_follow_on_attempts(
+        &self,
+        lease: &SessionExecutionLeaseAuthority,
+        follow_on_turn_id: &lash_core_execution::TurnId,
+    ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
+        let mut connection = acquire_runtime_connection(&self.pool).await?;
+        let mut tx = connection.begin().await.map_err(store_sqlx_error)?;
+        #[cfg(any(test, feature = "testing"))]
+        self.set_transaction_lease_clock_for_testing(&mut tx)
+            .await?;
+        ensure_session_execution_lease_tx(&mut tx, &lease.session_id, lease).await?;
+        let not_pending = || StoreError::FollowOnNotPending {
+            session_id: lease.session_id.clone(),
+            follow_on_turn_id: follow_on_turn_id.clone(),
+        };
+        let pending = super::claim_support::pending_follow_on_tx(&mut tx, &lease.session_id, true)
+            .await?
+            .filter(|pending| pending.is_turn(follow_on_turn_id))
+            .ok_or_else(not_pending)?;
+        let raised = pending.raised()?;
+        let updated = sqlx::query(session_sql().head.raise_pending_follow_on.sql())
+            .bind(lease.session_id.as_str())
+            .bind(
+                lash_core_execution::store::pending_follow_on::encode_pending_follow_on(Some(
+                    &raised,
+                ))?,
+            )
+            .bind(follow_on_turn_id.as_str())
+            .execute(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+        if updated.rows_affected() != 1 {
+            return Err(not_pending());
+        }
+        tx.commit().await.map_err(store_sqlx_error)?;
+        Ok(raised)
+    }
+
     async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
         self.read_session_state_version().await?;
         let mut connection = acquire_runtime_connection(&self.pool).await?;
@@ -623,7 +661,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 .ok_or_else(|| StoreError::QueuedRunConflict {
                     session_id: commit.session_id.clone(),
                 })?;
-            admission.advance(progress, &[])?;
+            admission.advance(progress)?;
             let fence = commit
                 .session_execution_lease_fence
                 .as_ref()
@@ -635,11 +673,16 @@ impl SessionCommitStore for PostgresSessionStore {
         } else {
             None
         };
+        // The head row is locked above, so the fact read here is the one this
+        // commit publishes over (ADR 0101 §3).
+        let existing_pending_follow_on =
+            super::claim_support::pending_follow_on_tx(&mut tx, &commit.session_id, true).await?;
         let plan = planner.plan(lash_core_execution::store::FreshRuntimeCommitFacts {
             actual_head_revision: authoritative_revision,
             published_leaf,
             requested_ancestor_is_active,
             occupied_node_ids,
+            existing_pending_follow_on,
         })?;
         let sql_head_revision = sql_monotonic_counter_value(
             "session_head_revision",
@@ -729,6 +772,11 @@ impl SessionCommitStore for PostgresSessionStore {
             .bind(checkpoint_ref.as_str())
             .bind(meta.leaf_node_id.as_deref())
             .bind(plan.actual_head_revision() as i64)
+            .bind(
+                lash_core_execution::store::pending_follow_on::encode_pending_follow_on(
+                    meta.pending_follow_on.as_ref(),
+                )?,
+            )
             .execute(&mut *tx)
             .await;
         let head_write = match head_write {
@@ -911,10 +959,6 @@ impl SessionCommitStore for PostgresSessionStore {
             .await
             .map_err(store_sqlx_error)?;
         }
-        let mut enqueued_queue_batches = Vec::new();
-        for batch in &commit.enqueued_queue_batches {
-            enqueued_queue_batches.push(enqueue_queued_work_tx(&mut tx, batch, now).await?);
-        }
         if let (Some(admission), Some(progress)) = (&queued_admission, &commit.queued_run) {
             if matches!(
                 progress.progress,
@@ -928,14 +972,9 @@ impl SessionCommitStore for PostgresSessionStore {
                     })?;
                 settle_run_members_tx(&mut tx, fence, &progress.scope).await?;
             }
-            write_run_tx(
-                &mut tx,
-                &admission.advance(progress, &enqueued_queue_batches)?,
-                false,
-            )
-            .await?;
+            write_run_tx(&mut tx, &admission.advance(progress)?, false).await?;
         }
-        let mut result = plan.result(checkpoint_ref, manifest, enqueued_queue_batches);
+        let mut result = plan.result(checkpoint_ref, manifest);
         result.turn_cancel_input_outcome = turn_cancel_input_outcome;
         {
             let receipt = plan.receipt_write(&result);
@@ -1338,6 +1377,13 @@ impl PostgresSessionStore {
             },
             None => None,
         };
+        // A turn is admitted only while the head owes no follow-on (ADR 0101
+        // §3), so an admitted base never carries one.
+        let pending_follow_on = if base.is_some() {
+            None
+        } else {
+            meta.pending_follow_on.clone()
+        };
         let (current_frame_node_id, config) = match leaf_node_id.as_ref() {
             Some(leaf) if base.is_some() && meta.leaf_node_id.as_ref() != Some(leaf) => {
                 let frame = super::nearest_frame_node_id_tx(&mut tx, leaf.as_str())
@@ -1382,6 +1428,7 @@ impl PostgresSessionStore {
             head_revision,
             config,
             current_frame_node_id,
+            pending_follow_on,
             graph,
             checkpoint_ref,
             checkpoint,

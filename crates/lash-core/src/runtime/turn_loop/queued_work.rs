@@ -291,6 +291,23 @@ impl LashRuntime {
             let _ = lease.release_if_live().await;
             return Err(session_head_refresh_error(error).into());
         }
+        // A follow-on the head owes runs before anything this drain claims
+        // (ADR 0101 §3). S5 moves this recovery to drive admission (O6).
+        let (lease, exhausted_follow_on) = match Box::pin(self.admit_pending_follow_on(
+            &store,
+            lease,
+            &queued_opts,
+            selected.is_some(),
+        ))
+        .await?
+        {
+            super::follow_on_recovery::FollowOnAdmission::Continue { lease, exhausted } => {
+                (lease, exhausted)
+            }
+            super::follow_on_recovery::FollowOnAdmission::Recovered(drain) => {
+                return Ok(QueuedWorkDrainResult::Automatic(*drain));
+            }
+        };
         let anonymous_caller = queued_opts.source.identity().is_none();
         let request = crate::store::BeginQueuedRun {
             session_id: self.state.session_id.clone(),
@@ -541,10 +558,14 @@ impl LashRuntime {
         if selected.is_some() {
             input.turn_context.mark_selected_queued_work_drain();
         }
+        let start = match exhausted_follow_on {
+            Some(owed) => LogicalTurnStart::ExhaustedFollowOn(owed),
+            None => LogicalTurnStart::Input(input),
+        };
         let mut lease = Some(lease);
         let mut result = self
             .drive_logical_turn(
-                LogicalTurnStart::Input(input),
+                start,
                 opts.events_or_noop(),
                 opts.turn_events_or_noop(),
                 opts.scoped_effect_controller(),
@@ -611,31 +632,34 @@ impl LashRuntime {
                         input.protocol_turn_options = pending.input.protocol_turn_options.clone();
                     }
                 }
+                // A batch's work reaches the turn as its turn causes,
+                // materialized from the claim at prepare.
                 crate::store::QueuedRunMember::Batch(id) => {
-                    let batch = selected
+                    if !selected
                         .queued
                         .iter()
                         .flat_map(|claim| &claim.batches)
-                        .find(|batch| batch.batch_id == id)
-                        .ok_or_else(|| {
-                            RuntimeError::new(
-                                RuntimeErrorCode::QueuedRunPending,
-                                "Admitted batch is missing from its claims",
-                            )
-                        })?;
-                    for item in &batch.items {
-                        if let crate::QueuedWorkPayload::AgentFrameTask {
-                            task,
-                            protocol_turn_options,
-                            ..
-                        } = &item.payload
-                        {
-                            input.items.push(crate::InputItem::text(task.clone()));
-                            input.protocol_turn_options = protocol_turn_options.clone();
-                        }
+                        .any(|batch| batch.batch_id == id)
+                    {
+                        return Err(RuntimeError::new(
+                            RuntimeErrorCode::QueuedRunPending,
+                            "Admitted batch is missing from its claims",
+                        ));
                     }
                 }
             }
+        }
+        // The run's next physical turn is the follow-on its switch left on
+        // the head: the task is its input, under the switch's options (ADR
+        // 0101 §3). A follow-on is never a member row.
+        if let Some(owed) = self
+            .state
+            .pending_follow_on
+            .as_ref()
+            .filter(|owed| owed.is_turn(&selected.admission.position.turn_id))
+        {
+            input.items.push(crate::InputItem::text(owed.task.clone()));
+            input.protocol_turn_options = owed.options.as_deref().cloned();
         }
         if announce_claims {
             let turn_index =
@@ -665,7 +689,7 @@ impl LashRuntime {
                 );
             }
             for claim in &selected.queued {
-                let materialized = claim.materialize_queued_turn_work();
+                let materialized = claim.materialize_queued_checkpoint_work();
                 crate::trace::emit_trace(
                     &self.host.core.tracing.trace_sink,
                     &self.host.core.tracing.trace_context,

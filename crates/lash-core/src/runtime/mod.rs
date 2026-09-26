@@ -382,9 +382,9 @@ pub(crate) use turn_queue::SessionCommandSettlement;
 pub(crate) use turn_queue::SessionCommandSettlementHandle;
 pub use turn_queue::{
     DeliveryPolicy, PROCESS_WAKE_MERGE_KEY, ProcessWakeSource, QueuedCheckpointWork,
-    QueuedTurnWork, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,
-    QueuedWorkBatchPayloads, QueuedWorkBatchingConfig, QueuedWorkClaim, QueuedWorkClaimBoundary,
-    QueuedWorkClaimData, QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkCompletionData,
+    QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft, QueuedWorkBatchPayloads,
+    QueuedWorkBatchingConfig, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimData,
+    QueuedWorkClaimPolicy, QueuedWorkCompletion, QueuedWorkCompletionData,
     QueuedWorkEnqueueOutcome, QueuedWorkItem, QueuedWorkKind, QueuedWorkPayload, SessionCommand,
     SessionCommandPayload, SessionCommandReceipt, TurnWorkPayload, process_wake_batch_draft,
     process_wake_batch_draft_with_delivery_policy, process_wake_source_key,

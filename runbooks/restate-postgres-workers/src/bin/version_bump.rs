@@ -83,8 +83,9 @@ const POST_FLOOR_INDEXES: [&str; 0] = [];
 /// columns component 105 installed (FIG-1956) — the receipts table itself
 /// predates the floor, so its post-floor columns drop by name — the typed
 /// parent payload component 109 installed (FIG-3418), and the columns later
-/// components added to pre-floor tables.
-const POST_FLOOR_COLUMNS: [(&str, &str); 12] = [
+/// components added to pre-floor tables, among them the session head's
+/// pending follow-on component 135 installs (FIG-3542).
+const POST_FLOOR_COLUMNS: [(&str, &str); 13] = [
     ("lash_pending_turn_inputs", "submitted_ingress_json"),
     ("lash_pending_turn_inputs", "claim_bound_turn_id"),
     ("lash_pending_turn_inputs", "claim_bound_receipt_input_id"),
@@ -97,6 +98,7 @@ const POST_FLOOR_COLUMNS: [(&str, &str); 12] = [
     ("lash_session_meta", "drive_admission_id"),
     ("lash_session_meta", "admission_base_checkpoint_ref"),
     ("lash_turn_parks", "park_executable_generation"),
+    ("lash_sessions", "pending_follow_on_json"),
 ];
 /// The named constraints absent from component 101 on tables that survive the
 /// table drops: none.

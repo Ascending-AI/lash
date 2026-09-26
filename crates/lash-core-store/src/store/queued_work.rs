@@ -118,6 +118,10 @@ pub enum QueuedWorkClaimRefusal {
     HeadWithheld,
     /// The selection was legal, but another writer took the rows first.
     ClaimRaceLost,
+    /// A pending follow-on owns the session (ADR 0101 §3): nothing is
+    /// claimed until its turn commits. Not an error; the drain answers it
+    /// after the follow-on.
+    FollowOnPending,
 }
 
 impl QueuedWorkClaimRefusal {
@@ -131,6 +135,7 @@ impl QueuedWorkClaimRefusal {
             Self::DeliveryBoundaryBlocked => "delivery_boundary_blocked",
             Self::HeadWithheld => "head_withheld",
             Self::ClaimRaceLost => "claim_race_lost",
+            Self::FollowOnPending => "follow_on_pending",
         }
     }
 }
@@ -346,7 +351,6 @@ pub struct ClaimCandidate {
     pub merge_key: Option<String>,
     pub enqueued_at_ms: u64,
     turn_causes: Vec<TurnCause>,
-    input_texts: Vec<String>,
 }
 
 impl ClaimCandidate {
@@ -357,7 +361,6 @@ impl ClaimCandidate {
         prior_claim_token: Option<String>,
     ) -> Self {
         let mut turn_causes = Vec::new();
-        let mut input_texts = Vec::new();
         let config_patch_command = matches!(
             batch.items.as_slice(),
             [crate::QueuedWorkItem {
@@ -370,7 +373,6 @@ impl ClaimCandidate {
                 QueuedWorkPayload::ProcessWake { wake } => {
                     turn_causes.push(crate::process_wake_turn_cause(wake));
                 }
-                QueuedWorkPayload::AgentFrameTask { task, .. } => input_texts.push(task.clone()),
                 QueuedWorkPayload::SessionCommand { .. } => {}
             }
         }
@@ -387,7 +389,6 @@ impl ClaimCandidate {
             merge_key: batch.merge_key.clone(),
             enqueued_at_ms: batch.enqueued_at_ms,
             turn_causes,
-            input_texts,
         }
     }
 }
@@ -814,8 +815,8 @@ pub fn select_interrupted_exact_claim_indices(
 
 /// Conservative upper bound for the exact model-visible queued-work render.
 ///
-/// Process wakes use the shared turn-events renderer. Agent-frame task text is
-/// appended exactly as turn input. One UTF-8 byte is charged as one token: this
+/// Process wakes use the shared turn-events renderer. One UTF-8 byte is
+/// charged as one token: this
 /// deliberately overestimates ordinary model tokenizers while remaining safe
 /// without moving tokenizer selection from the host/provider boundary into
 /// core.
@@ -824,19 +825,7 @@ fn rendered_token_upper_bound(candidates: &[ClaimCandidate]) -> usize {
         .iter()
         .flat_map(|candidate| candidate.turn_causes.iter().cloned())
         .collect::<Vec<_>>();
-    let mut rendered_bytes =
-        crate::render_turn_causes_prompt(&causes).map_or(0, |rendered| rendered.len());
-    let input_items = candidates
-        .iter()
-        .flat_map(|candidate| candidate.input_texts.iter())
-        .map(|text| crate::InputItem::text(text.clone()))
-        .collect::<Vec<_>>();
-    if !input_items.is_empty() {
-        let input = crate::TurnInput::items(input_items);
-        let input_bytes = serde_json::to_vec(&input).map_or(usize::MAX, |rendered| rendered.len());
-        rendered_bytes = rendered_bytes.saturating_add(input_bytes);
-    }
-    rendered_bytes
+    crate::render_turn_causes_prompt(&causes).map_or(0, |rendered| rendered.len())
 }
 
 fn record_turn_claim_decision(

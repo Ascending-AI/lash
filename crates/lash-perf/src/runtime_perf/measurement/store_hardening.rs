@@ -376,18 +376,13 @@ async fn measure_store_hardening_backend_turn(
     phases.insert(phase.0, phase.1);
 
     store
-        .enqueue_queued_work(
-            QueuedWorkBatchDraft::new(
+        .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(
+            super::queued_work::queued_work_stress_wake(
                 session_id,
-                DeliveryPolicy::EarliestSafeBoundary,
-                lash_core::runtime::TurnWorkPayload::agent_frame_task(
-                    lash_core::facade_support::frame_node_id(session_id, "perf-frame"),
-                    format!("hardening task {turn_index}"),
-                    None,
-                ),
-            )
-            .with_source_key(format!("hardening:{session_id}:{turn_index}")),
-        )
+                &format!("hardening task {turn_index}"),
+                turn_index as u64 + 1,
+            ),
+        ))
         .await?;
     let (claim, phase) = measure_runtime_perf_async_phase(names.claim_queued_work, async {
         store

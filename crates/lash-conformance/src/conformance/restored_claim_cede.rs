@@ -10,11 +10,12 @@
 //! The laws run the follow-on physical turn of a logical run, which carries no
 //! journaled initial drive: its first physical turn already settled that. The
 //! claim is the follow-on's checkpoint claim, once of turn input and once of
-//! queued work. Two recoveries are covered. When a recovery drain answers the
-//! rows and commits, the moved session head already refuses the redrive's
-//! follow-on commit. When a peer takes the rows and dies holding them, the
-//! head is unmoved and only the settlement stops the redrive: it cedes with
-//! `accepted_turn_input_ceded`, and the next drain answers the rows once.
+//! queued work. The follow-on is owed on the session head (ADR 0101 §3), so
+//! only the follow-on itself can take its rows. Two recoveries are covered.
+//! When a recovery drain recovers the owed follow-on, the follow-on answers
+//! the rows and commits, and the redrive commits nothing more for it. When a
+//! peer turn tries to run first, the owed follow-on blocks its claim: the peer
+//! takes nothing, and the redrive answers the rows once from its journal.
 //!
 //! A resumed queued run is the complement: it retakes the rows its
 //! checkpoints were assigned under its own generation first, so a restored
@@ -470,40 +471,35 @@ async fn drain(
     }
 }
 
-/// A direct turn `turn_id` on a fresh worker takes the row and dies at the
-/// commit that would settle it.
+/// A direct turn `turn_id` on a fresh worker meets the owed follow-on: its
+/// claim is blocked, so it runs nothing and its accepted input waits in order.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn peer_dies_holding(
+async fn peer_is_refused(
     turn_id: &TurnId,
     backend: &crate::Backend,
     store: &Arc<dyn crate::RuntimePersistence>,
-    row_id: String,
     requests: Arc<Mutex<Vec<String>>>,
 ) {
-    let admitted = Arc::new(AdmittedRow::default());
-    admitted.set(row_id);
-    let died = Arc::new(tokio::sync::Notify::new());
-    let dying: Arc<dyn crate::RuntimePersistence> = Arc::new(CrashAtSettlingCommit {
-        inner: Arc::clone(store),
-        admitted,
-        died: Arc::clone(&died),
-    });
     let effect_host = backend.effect_host();
-    let mut peer = fresh_worker(turn_id.as_str(), backend, &dying, requests).await;
+    let mut peer = fresh_worker(turn_id.as_str(), backend, store, requests).await;
     let scope = effect_host
         .scoped(admit(crate::ExecutionScope::turn(SESSION_ID, turn_id)))
         .expect("scope the peer turn");
-    let turn = peer.stream_turn(
-        direct_input(turn_id, "the peer's own input"),
-        crate::TurnOptions::new(CancellationToken::new(), scope),
+    let queued = peer
+        .stream_turn(
+            direct_input(turn_id, "the peer's own input"),
+            crate::TurnOptions::new(CancellationToken::new(), scope),
+        )
+        .await
+        .expect("the peer turn is answered as queued, not failed");
+    assert!(
+        matches!(queued.outcome, crate::TurnOutcome::Queued { .. }),
+        "the owed follow-on blocks the peer's claim: {:?}",
+        queued.outcome
     );
-    tokio::select! {
-        result = turn => panic!("the peer must take the row and die before settling it: {result:?}"),
-        () = died.notified() => {}
-    }
     until_lane_released(store).await;
 }
 
@@ -535,10 +531,10 @@ enum Recovery {
     /// A recovery drain answers it and commits. Its commit moves the session
     /// head, so the redrive must commit nothing for the follow-on turn.
     DrainCommits,
-    /// A peer takes it under a newer generation and dies before settling it.
-    /// The head is unmoved, so only the settlement can stop the redrive: it
-    /// must cede, and a later drain answers the row once.
-    PeerDiesHolding,
+    /// A peer direct turn tries to run first. The owed follow-on blocks its
+    /// claim, so it takes nothing and its input waits; the redrive answers the
+    /// row once, and a later drain answers the peer's input.
+    PeerRefused,
 }
 
 /// The steps of FIG-3552 for the law's `row`: the first execution dies after
@@ -625,12 +621,11 @@ async fn redrive_after_recovery(
                 "the recovery drain committed its answer"
             );
         }
-        Recovery::PeerDiesHolding => {
-            peer_dies_holding(
+        Recovery::PeerRefused => {
+            peer_is_refused(
                 &TurnId::from(format!("{prefix}-peer")),
                 backend,
                 store,
-                row_id.clone(),
                 Arc::clone(&recovery_requests),
             )
             .await;
@@ -638,12 +633,18 @@ async fn redrive_after_recovery(
     }
     #[expect(clippy::expect_used, reason = "conformance fixture lock")]
     let recovery_requests = recovery_requests.lock().expect("request lock").clone();
-    assert!(
-        recovery_requests
-            .iter()
-            .any(|request| request.contains(words)),
-        "the other worker took the row: {recovery_requests:?}"
-    );
+    match recovery {
+        Recovery::DrainCommits => assert!(
+            recovery_requests
+                .iter()
+                .any(|request| request.contains(words)),
+            "the recovered follow-on answered the row: {recovery_requests:?}"
+        ),
+        Recovery::PeerRefused => assert!(
+            recovery_requests.is_empty(),
+            "the refused peer ran no model call: {recovery_requests:?}"
+        ),
+    }
 
     // 3. The logical turn is redriven on its journal.
     let redrive_store: Arc<dyn crate::RuntimePersistence> = Arc::new(PreCommitResidentState {
@@ -660,8 +661,8 @@ async fn redrive_after_recovery(
         )
         .await;
 
-    // 4. A row the peer left open is answered by the next drain.
-    if recovery == Recovery::PeerDiesHolding {
+    // 4. The input the refused peer left queued is answered by the next drain.
+    if recovery == Recovery::PeerRefused {
         until_lane_released(store).await;
         drain(
             &format!("{prefix}-final-drain"),
@@ -674,29 +675,22 @@ async fn redrive_after_recovery(
     (row_id, redriven)
 }
 
-/// The redrive ceded: it returned `accepted_turn_input_ceded`, or its
-/// logical run reports the follow-on turn that ceded and committed nothing.
-fn assert_ceded(redriven: &Result<crate::AssembledTurn, crate::RuntimeError>) {
-    let ceded = crate::FailureCode::from(&crate::RuntimeErrorCode::AcceptedTurnInputCeded);
+/// The redrive finished the logical run: its last physical turn is the
+/// follow-on's committed answer.
+fn assert_redrive_answered(redriven: &Result<crate::AssembledTurn, crate::RuntimeError>) {
     match redriven {
-        Err(error) => assert_eq!(
-            error.code,
-            crate::RuntimeErrorCode::AcceptedTurnInputCeded,
-            "{error:?}"
-        ),
         Ok(turn) => assert!(
-            turn.errors
-                .iter()
-                .any(|issue| issue.code.as_ref() == Some(&ceded)),
-            "the redriven follow-on turn must cede, not commit: {:?} {:?}",
+            matches!(turn.outcome, crate::TurnOutcome::Finished(_)) && turn.errors.is_empty(),
+            "the redrive answers the follow-on: {:?} {:?}",
             turn.outcome,
             turn.errors
         ),
+        Err(error) => panic!("the redrive answers the follow-on: {error:?}"),
     }
 }
 
 /// The row was answered exactly once, by `answered_by`, and the first
-/// execution's journaled reply to it was never committed.
+/// execution's journaled reply to it was committed `journaled_replies` times.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -707,6 +701,7 @@ async fn assert_answered_once(
     row_id: &str,
     words: &str,
     answered_by: &str,
+    journaled_replies: usize,
 ) {
     match row {
         CheckpointRow::TurnInput => {
@@ -745,16 +740,17 @@ async fn assert_answered_once(
     );
     assert_eq!(
         committed_mentions(store, FIRST_EXECUTION_REPLY).await,
-        0,
-        "the redrive commits no second answer to the row"
+        journaled_replies,
+        "the row has exactly one committed answer"
     );
 }
 
 /// The ticket's interleaving: a follow-on turn's checkpoint claims a steering
 /// input and journals the model's reply to it; the worker dies before the
-/// commit. A recovery drain re-defers the input, answers it, and commits. The
-/// redrive of the logical run on the same journal commits nothing for the
-/// follow-on turn: the input has one application and one answer.
+/// commit. A recovery drain recovers the owed follow-on, which answers the
+/// input and commits. The redrive of the logical run on the same journal
+/// commits nothing more for the follow-on: the input has one application and
+/// one answer, the follow-on's.
 pub async fn a_redrive_commits_nothing_for_input_a_recovery_drain_answered(
     prefix: &str,
     backend: crate::Backend,
@@ -775,14 +771,15 @@ pub async fn a_redrive_commits_nothing_for_input_a_recovery_drain_answered(
         CheckpointRow::TurnInput,
         &row_id,
         words,
-        &format!("{prefix}-recovery-drain"),
+        &format!("{prefix}-logical-run:agent-frame:1"),
+        0,
     )
     .await;
 }
 
-/// The queued-work form of the ticket's interleaving: the recovery drain's own
-/// checkpoint claims the ready wake the dead follow-on turn had claimed,
-/// answers it, and commits. The redrive commits nothing for the follow-on.
+/// The queued-work form of the ticket's interleaving: the recovered follow-on's
+/// own checkpoint claims the ready wake the dead execution had claimed,
+/// answers it, and commits. The redrive commits nothing more.
 pub async fn a_redrive_commits_nothing_for_work_a_recovery_checkpoint_answered(
     prefix: &str,
     backend: crate::Backend,
@@ -798,13 +795,14 @@ pub async fn a_redrive_commits_nothing_for_work_a_recovery_checkpoint_answered(
         Recovery::DrainCommits,
     ))
     .await;
-    assert_answered_once(&store, CheckpointRow::QueuedWork, &row_id, words, "").await;
+    assert_answered_once(&store, CheckpointRow::QueuedWork, &row_id, words, "", 0).await;
 }
 
-/// A peer takes the steering input the dead follow-on turn had claimed at its
-/// checkpoint and dies holding it. The redrive's settlement is superseded, so
-/// it cedes and commits nothing; the next drain answers the input once.
-pub async fn a_redrive_cedes_checkpoint_input_a_peer_reclaimed(
+/// A peer turn tries to run while the dead follow-on is owed. Its claim is
+/// blocked, so it cannot take the steering input the follow-on had claimed;
+/// the redrive answers the input once, from its journal, and the next drain
+/// answers the peer's own input.
+pub async fn a_redrive_answers_checkpoint_input_a_peer_could_not_take(
     prefix: &str,
     backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
@@ -816,24 +814,24 @@ pub async fn a_redrive_cedes_checkpoint_input_a_peer_reclaimed(
         &store,
         CheckpointRow::TurnInput,
         words,
-        Recovery::PeerDiesHolding,
+        Recovery::PeerRefused,
     ))
     .await;
-    assert_ceded(&redriven);
+    assert_redrive_answered(&redriven);
     assert_answered_once(
         &store,
         CheckpointRow::TurnInput,
         &row_id,
         words,
-        &format!("{prefix}-final-drain"),
+        &format!("{prefix}-logical-run:agent-frame:1"),
+        1,
     )
     .await;
 }
 
-/// The queued-work form: a peer's checkpoint takes the ready wake the dead
-/// follow-on turn had claimed and dies holding it. The redrive cedes; the next
-/// drain answers the wake once.
-pub async fn a_redrive_cedes_checkpoint_work_a_peer_reclaimed(
+/// The queued-work form: the peer cannot take the ready wake the owed
+/// follow-on had claimed; the redrive answers it once.
+pub async fn a_redrive_answers_checkpoint_work_a_peer_could_not_take(
     prefix: &str,
     backend: crate::Backend,
     store: Arc<dyn crate::RuntimePersistence>,
@@ -845,9 +843,9 @@ pub async fn a_redrive_cedes_checkpoint_work_a_peer_reclaimed(
         &store,
         CheckpointRow::QueuedWork,
         words,
-        Recovery::PeerDiesHolding,
+        Recovery::PeerRefused,
     ))
     .await;
-    assert_ceded(&redriven);
-    assert_answered_once(&store, CheckpointRow::QueuedWork, &row_id, words, "").await;
+    assert_redrive_answered(&redriven);
+    assert_answered_once(&store, CheckpointRow::QueuedWork, &row_id, words, "", 1).await;
 }

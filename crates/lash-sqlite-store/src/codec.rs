@@ -94,32 +94,42 @@ pub(crate) fn try_load_session_head_meta_from_conn(
                     row.get::<_, i64>(1)?,
                     row.get::<_, Option<String>>(2)?,
                     row.get::<_, Option<String>>(3)?,
+                    row.get::<_, Option<String>>(4)?,
                 ))
             },
         )
         .optional()
         .map_err(sqlite_error)?;
-    let Some((head_json, head_revision, leaf_node_id, checkpoint_ref)) = row else {
+    let Some((head_json, head_revision, leaf_node_id, checkpoint_ref, pending_follow_on)) = row
+    else {
         return Ok(None);
     };
+    let pending_follow_on =
+        lash_core_execution::store::pending_follow_on::decode_pending_follow_on(
+            session_id,
+            pending_follow_on.as_deref(),
+        )?;
     let payload: SessionHeadPayload = lash_core_execution::store::decode_versioned_json_record(
         &head_json,
         "SessionHeadMeta",
         lash_core_execution::store::SESSION_HEAD_META_SCHEMA_VERSION,
     )
     .map_err(|error| map_record_decode_error("SessionHeadMeta", error))?;
-    Ok(Some(SessionHeadMeta::assemble(
-        session_id,
-        payload,
-        u64::try_from(head_revision).map_err(|_| {
-            stored_data_corrupt(
-                "SessionHeadMeta",
-                format!("head_revision must be non-negative, got {head_revision}"),
-            )
-        })?,
-        checkpoint_ref.map(Into::into),
-        leaf_node_id.map(lash_core_execution::NodeId::from),
-    )?))
+    Ok(Some(
+        SessionHeadMeta::assemble(
+            session_id,
+            payload,
+            u64::try_from(head_revision).map_err(|_| {
+                stored_data_corrupt(
+                    "SessionHeadMeta",
+                    format!("head_revision must be non-negative, got {head_revision}"),
+                )
+            })?,
+            checkpoint_ref.map(Into::into),
+            leaf_node_id.map(lash_core_execution::NodeId::from),
+        )?
+        .with_pending_follow_on(pending_follow_on),
+    ))
 }
 
 pub(crate) fn decode_checkpoint(bytes: &[u8]) -> Result<SessionCheckpoint, StoreError> {

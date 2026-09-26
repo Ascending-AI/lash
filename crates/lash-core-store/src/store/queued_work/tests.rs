@@ -79,8 +79,26 @@ fn candidate(enqueue_seq: u64, merge_key: Option<&str>) -> ClaimCandidate {
         authority: QueuedWorkAuthority::new("principal"),
         merge_key: merge_key.map(str::to_string),
         enqueued_at_ms: 900,
-        turn_causes: Vec::new(),
-        input_texts: vec!["wake".to_string()],
+        turn_causes: vec![wake_cause(enqueue_seq, "wake")],
+    }
+}
+
+/// The turn cause a durable process wake renders into the claim's
+/// model-visible prompt, the only queued work the token bound measures.
+/// Identifiers stay short so one default row renders under the tiny windows
+/// some claim laws below use, while several rows together do not.
+fn wake_cause(sequence: u64, text: &str) -> TurnCause {
+    TurnCause {
+        id: format!("w{sequence}"),
+        event_type: "wake".to_string(),
+        origin: crate::MessageOrigin::Process {
+            process_id: ProcessId::from("p"),
+            event_type: "wake".to_string(),
+            sequence,
+            wake_id: Some(format!("w{sequence}")),
+            caused_by: None,
+        },
+        text: text.to_string(),
     }
 }
 
@@ -100,13 +118,6 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
         Just(QueuedWorkAuthority::new("principal-a")),
         Just(QueuedWorkAuthority::new("principal-b").with_elevation("root")),
     ];
-    let input_texts = vec(0usize..=256, 0..=3).prop_map(|lengths| {
-        lengths
-            .into_iter()
-            .enumerate()
-            .map(|(index, length)| ((b'a' + index as u8) as char).to_string().repeat(length))
-            .collect::<Vec<_>>()
-    });
     let turn_causes = vec((0usize..=128, 0u8..3), 0..=4).prop_map(|causes| {
         causes
             .into_iter()
@@ -143,32 +154,24 @@ fn rendered_candidate_strategy() -> impl Strategy<Value = ClaimCandidate> {
         kind,
         delivery_policy,
         authority,
-        input_texts,
         turn_causes,
     )
         .prop_map(
-            |(
-                enqueue_seq,
-                merge_key,
-                kind,
-                delivery_policy,
-                authority,
-                input_texts,
-                turn_causes,
-            )| ClaimCandidate {
-                batch_id: format!("qwb-{enqueue_seq}").into(),
-                enqueue_seq,
-                claim_fencing_token: 0,
-                prior_claim_id: None,
-                prior_claim_token: None,
-                config_patch_command: false,
-                delivery_policy,
-                kind,
-                authority,
-                merge_key,
-                enqueued_at_ms: 900,
-                turn_causes,
-                input_texts,
+            |(enqueue_seq, merge_key, kind, delivery_policy, authority, turn_causes)| {
+                ClaimCandidate {
+                    batch_id: format!("qwb-{enqueue_seq}").into(),
+                    enqueue_seq,
+                    claim_fencing_token: 0,
+                    prior_claim_id: None,
+                    prior_claim_token: None,
+                    config_patch_command: false,
+                    delivery_policy,
+                    kind,
+                    authority,
+                    merge_key,
+                    enqueued_at_ms: 900,
+                    turn_causes,
+                }
             },
         )
 }
@@ -615,9 +618,9 @@ fn an_exact_host_selection_is_never_sized_by_the_automatic_drain_policy() {
 #[test]
 fn an_oversized_non_head_row_clamps_the_drain_instead_of_failing_it() {
     let mut first = candidate(1, Some("wake"));
-    first.input_texts = vec!["a".repeat(8)];
+    first.turn_causes = vec![wake_cause(1, &"a".repeat(8))];
     let mut second = candidate(2, Some("wake"));
-    second.input_texts = vec!["b".repeat(4_000)];
+    second.turn_causes = vec![wake_cause(2, &"b".repeat(4_000))];
     let third = candidate(3, Some("wake"));
     let mut claim_policy = policy(1_000, 100);
     claim_policy.drain_policy =
@@ -724,7 +727,7 @@ fn rendered_bound_is_monotonic_over_prefixes() {
 #[test]
 fn oversized_for_reserve_but_fitting_context_is_attempted_alone() {
     let mut first = candidate(1, Some("wake"));
-    first.input_texts = vec!["a".repeat(800)];
+    first.turn_causes = vec![wake_cause(1, &"a".repeat(800))];
     assert_eq!(
         select_turn_work_claim_prefix(
             &[first],
@@ -740,7 +743,7 @@ fn oversized_for_reserve_but_fitting_context_is_attempted_alone() {
 #[test]
 fn row_that_cannot_fit_context_fails_loudly() {
     let mut first = candidate(7, Some("wake"));
-    first.input_texts = vec!["a".repeat(1_001)];
+    first.turn_causes = vec![wake_cause(7, &"a".repeat(1_001))];
     assert!(matches!(
         select_turn_work_claim_prefix(
             &[first],
@@ -835,7 +838,6 @@ fn lease_derivation_is_deterministic_and_advances_fencing() {
         merge_key: None,
         enqueued_at_ms: 0,
         turn_causes: Vec::new(),
-        input_texts: Vec::new(),
     };
     let owner = LeaseOwnerIdentity::opaque("owner", "owner:incarnation");
     let lease =
@@ -869,7 +871,6 @@ fn lease_token_framing_distinguishes_opaque_identity_boundaries() {
         merge_key: None,
         enqueued_at_ms: 0,
         turn_causes: Vec::new(),
-        input_texts: Vec::new(),
     };
     let left = WorkClaimLease::derive_queued_work(
         &head,

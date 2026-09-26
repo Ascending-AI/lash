@@ -48,6 +48,49 @@ fn advancing_differential_clock_wall_clock_faces_agree() {
     assert_eq!(text.timestamp_millis() as u64, milliseconds);
 }
 
+/// A literal-oracle row as a durable process wake from its own process, so
+/// every row has a distinct `(process, sequence)` source. The row id rides in
+/// the wake input, where [`oracle_row_id`] reads it back.
+fn oracle_wake_draft(session_id: &SessionId, row_id: &str) -> QueuedWorkBatchDraft {
+    let process_id = || lash_core::runtime::ProcessId::from(row_id);
+    lash_core::runtime::process_wake_batch_draft(lash_core::runtime::ProcessWakeDelivery {
+        version: lash_core::runtime::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        wake_id: format!("{row_id}-wake-1"),
+        target_session_id: session_id.clone(),
+        process_id: process_id(),
+        process_incarnation: lash_core::runtime::ProcessIncarnation::from_registration_sequence(1),
+        sequence: 1,
+        event_type: "process.wake".to_string(),
+        event_invocation: lash_core::runtime::RuntimeInvocation {
+            attribution: lash_core::runtime::RuntimeAttribution::for_session(session_id.clone()),
+            subject: lash_core::runtime::RuntimeSubject::ProcessEvent {
+                process_id: process_id(),
+                sequence: 1,
+                event_type: "process.wake".to_string(),
+            },
+            caused_by: None,
+            replay: None,
+        },
+        process_caused_by: None,
+        authority: lash_core::runtime::QueuedWorkAuthority::default(),
+        input: row_id.to_string(),
+        created_at_ms: 1,
+    })
+}
+
+/// The row id a claimed literal-oracle batch carries in its one wake.
+fn oracle_row_id(batch: &lash_core::runtime::QueuedWorkBatch) -> String {
+    match batch.items.as_slice() {
+        [
+            lash_core::runtime::QueuedWorkItem {
+                payload: lash_core::runtime::QueuedWorkPayload::ProcessWake { wake },
+                ..
+            },
+        ] => wake.input.clone(),
+        other => panic!("literal-oracle batch must carry one process wake, got {other:?}"),
+    }
+}
+
 #[derive(Clone, Copy)]
 struct BatchOracleRow {
     id: &'static str,
@@ -197,22 +240,8 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
         for runner in &mut runners {
             let store = runner.store();
             for row in fixture.rows {
-                let mut draft = QueuedWorkBatchDraft::new(
-                    &runner.session_id,
-                    DeliveryPolicy::EarliestSafeBoundary,
-                    lash_core::runtime::TurnWorkPayload::agent_frame_task(
-                        lash_core::facade_support::frame_node_id(
-                            &runner.session_id,
-                            "literal-oracle-frame",
-                        ),
-                        row.id,
-                        None,
-                    ),
-                )
-                .with_source_key(row.id);
-                if let Some(merge_key) = row.merge_key {
-                    draft = draft.with_merge_key(merge_key);
-                }
+                let mut draft = oracle_wake_draft(&runner.session_id, row.id);
+                draft.merge_key = row.merge_key.map(str::to_string);
                 store
                     .enqueue_queued_work(draft)
                     .await
@@ -246,18 +275,7 @@ async fn coalesced_batches_match_literal_oracles_on_every_backend() {
                 .expect("claim literal-oracle batch")
                 .claim()
             {
-                observed.push(
-                    claim
-                        .batches
-                        .iter()
-                        .map(|batch| {
-                            batch
-                                .source_key
-                                .clone()
-                                .expect("literal-oracle row has a source id")
-                        })
-                        .collect::<Vec<_>>(),
-                );
+                observed.push(claim.batches.iter().map(oracle_row_id).collect::<Vec<_>>());
             }
             match fixture.name {
                 "max_rows_one" => assert_eq!(
@@ -370,21 +388,9 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
         {
             store
                 .enqueue_queued_work(
-                    QueuedWorkBatchDraft::new(
-                        &runner.session_id,
-                        DeliveryPolicy::EarliestSafeBoundary,
-                        lash_core::runtime::TurnWorkPayload::agent_frame_task(
-                            lash_core::facade_support::frame_node_id(
-                                &runner.session_id,
-                                "ready-gap-frame",
-                            ),
-                            source_key,
-                            None,
-                        ),
-                    )
-                    .with_source_key(source_key)
-                    .with_merge_key("ready-gap-key")
-                    .with_available_at_ms(available_at_ms),
+                    oracle_wake_draft(&runner.session_id, source_key)
+                        .with_merge_key("ready-gap-key")
+                        .with_available_at_ms(available_at_ms),
                 )
                 .await
                 .expect("enqueue ready-gap literal row");
@@ -417,11 +423,7 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
             .claim()
             .expect("original ready-gap composition exists");
         assert_eq!(
-            claim
-                .batches
-                .iter()
-                .map(|batch| batch.source_key.clone().expect("source key is present"))
-                .collect::<Vec<_>>(),
+            claim.batches.iter().map(oracle_row_id).collect::<Vec<_>>(),
             vec!["gap-w1".to_string(), "gap-w3".to_string()],
             "{} backend changed the initial literal ready-gap composition",
             runner.name
@@ -474,7 +476,7 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
             redriven
                 .batches
                 .iter()
-                .map(|batch| batch.source_key.clone().expect("source key is present"))
+                .map(oracle_row_id)
                 .collect::<Vec<_>>(),
             vec!["gap-w1".to_string(), "gap-w3".to_string()],
             "{} backend did not recover the literal claim identity",
@@ -496,7 +498,7 @@ async fn interrupted_claim_identity_crosses_a_newly_ready_physical_gap() {
             delayed
                 .batches
                 .iter()
-                .map(|batch| batch.source_key.clone().expect("source key is present"))
+                .map(oracle_row_id)
                 .collect::<Vec<_>>(),
             vec!["gap-w2".to_string()],
             "{} backend did not preserve the literal delayed-row remainder",

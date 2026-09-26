@@ -29,24 +29,22 @@ pub(super) struct Case {
 
 pub(super) async fn prepare(store: Arc<dyn RuntimePersistence>, entry: Entry) -> Case {
     let mut ids = Vec::new();
-    for task in ["first", "second"] {
-        let payload: lash_core::runtime::QueuedWorkBatchPayloads = match entry {
-            Entry::Leading => lash_core::runtime::SessionCommand::ApplyConfigPatch {
-                patch: Box::default(),
-            }
-            .into(),
-            _ => lash_core::runtime::TurnWorkPayload::agent_frame_task(
-                lash_core::facade_support::frame_node_id(&SessionId::from("root"), "frame"),
-                task,
-                None,
+    for (sequence, task) in [(1, "first"), (2, "second")] {
+        // Both turn-work rows are wakes from one process, so they share the
+        // process-wake merge key and coalesce like the command pair does.
+        let draft = match entry {
+            Entry::Leading => QueuedWorkBatchDraft::new(
+                "root",
+                DeliveryPolicy::EarliestSafeBoundary,
+                lash_core::runtime::SessionCommand::ApplyConfigPatch {
+                    patch: Box::default(),
+                },
             )
-            .into(),
+            .with_merge_key("atomicity"),
+            _ => lash_core::runtime::process_wake_batch_draft(wake(sequence, task)),
         };
         let batch = store
-            .enqueue_queued_work(
-                QueuedWorkBatchDraft::new("root", DeliveryPolicy::EarliestSafeBoundary, payload)
-                    .with_merge_key("atomicity"),
-            )
+            .enqueue_queued_work(draft)
             .await
             .expect("enqueue claim row");
         ids.push(batch.batch_id);
@@ -69,6 +67,33 @@ pub(super) async fn prepare(store: Arc<dyn RuntimePersistence>, entry: Entry) ->
         owner,
         lease,
         entry,
+    }
+}
+
+fn wake(sequence: u64, text: &str) -> lash_core::runtime::ProcessWakeDelivery {
+    let process_id = || lash_core::runtime::ProcessId::from("atomicity-process");
+    lash_core::runtime::ProcessWakeDelivery {
+        version: lash_core::runtime::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        wake_id: format!("atomicity-process-wake-{sequence}"),
+        target_session_id: SessionId::from("root"),
+        process_id: process_id(),
+        process_incarnation: lash_core::runtime::ProcessIncarnation::from_registration_sequence(1),
+        sequence,
+        event_type: "process.wake".to_string(),
+        event_invocation: lash_core::runtime::RuntimeInvocation {
+            attribution: lash_core::runtime::RuntimeAttribution::for_session("root"),
+            subject: lash_core::runtime::RuntimeSubject::ProcessEvent {
+                process_id: process_id(),
+                sequence,
+                event_type: "process.wake".to_string(),
+            },
+            caused_by: None,
+            replay: None,
+        },
+        process_caused_by: None,
+        authority: lash_core::runtime::QueuedWorkAuthority::default(),
+        input: text.to_string(),
+        created_at_ms: 1,
     }
 }
 

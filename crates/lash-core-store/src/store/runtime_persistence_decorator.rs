@@ -40,6 +40,7 @@ macro_rules! persistence_operations {
                 fn drain_end_exists(&self, drain_id: &str) -> Result<bool, StoreError>;
                 fn load_node(&self, node_id: &str) -> Result<Option<crate::SessionNodeRecord>, StoreError>;
                 fn commit_runtime_state(&self, commit: RuntimeCommit) -> Result<RuntimeCommitReceipt, StoreError>;
+                fn raise_pending_follow_on_attempts(&self, lease: &SessionExecutionLeaseAuthority, follow_on_turn_id: &crate::TurnId) -> Result<PendingFollowOn, StoreError>;
                 fn admit_and_bind_session(&self, binding: &SessionBinding) -> Result<SessionAdmission, StoreError>;
                 fn save_session_meta(&self, meta: SessionMeta) -> Result<(), StoreError>;
                 fn load_session_meta(&self) -> Result<Option<SessionMeta>, StoreError>;

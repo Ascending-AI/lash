@@ -3,20 +3,36 @@ use lash::ProcessId;
 use lash::SessionId;
 use lash::TurnId;
 
+/// Queued turn work for the workbench tests: one durable process wake from a
+/// process named `source_key`, so every call site's row has its own source.
 pub(crate) fn queued_work_test_draft(
     session_id: &SessionId,
     source_key: &str,
 ) -> lash::persistence::QueuedWorkBatchDraft {
-    lash::persistence::QueuedWorkBatchDraft::new(
-        session_id,
-        lash::persistence::DeliveryPolicy::EarliestSafeBoundary,
-        lash::persistence::TurnWorkPayload::agent_frame_task(
-            lash::testing::frame_node_id(session_id, "workbench-queued-work-test-frame"),
-            source_key,
-            None,
-        ),
-    )
-    .with_source_key(source_key)
+    let process_id = || ProcessId::from(source_key);
+    workbench_process_wake_draft(lash::process::ProcessWakeDelivery {
+        version: lash::formats::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        wake_id: format!("{source_key}-wake-1"),
+        target_session_id: session_id.clone(),
+        process_id: process_id(),
+        process_incarnation: lash::process::ProcessIncarnation::from_registration_sequence(1),
+        sequence: 1,
+        event_type: "process.wake".to_string(),
+        event_invocation: lash::runtime::RuntimeInvocation {
+            attribution: lash::runtime::RuntimeAttribution::for_session(session_id.clone()),
+            subject: lash::durability::RuntimeSubject::ProcessEvent {
+                process_id: process_id(),
+                sequence: 1,
+                event_type: "process.wake".to_string(),
+            },
+            caused_by: None,
+            replay: None,
+        },
+        process_caused_by: None,
+        authority: lash::persistence::QueuedWorkAuthority::default(),
+        input: source_key.to_string(),
+        created_at_ms: 1,
+    })
 }
 
 fn workbench_process_wake_draft(

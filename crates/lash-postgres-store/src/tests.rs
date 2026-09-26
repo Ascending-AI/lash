@@ -664,13 +664,42 @@ async fn one_id_selected_drain_touches_at_most_four_queue_rows() {
     .execute(storage.pool())
     .await
     .expect("seed 10,000 ready selected-drain batches");
+    // Every seeded row carries the same process-wake payload: the proof is
+    // about how many queue rows the selected claim touches, not their content.
+    let process_id = || lash_core_execution::ProcessId::from("selected-plan-process");
+    let wake = lash_core_execution::ProcessWakeDelivery {
+        version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        wake_id: "selected-plan-wake".to_string(),
+        target_session_id: session_id.clone(),
+        process_id: process_id(),
+        process_incarnation: lash_core_execution::ProcessIncarnation::from_registration_sequence(1),
+        sequence: 1,
+        event_type: "process.wake".to_string(),
+        event_invocation: lash_core_execution::RuntimeInvocation {
+            attribution: lash_core_execution::RuntimeAttribution::for_session(session_id.as_str()),
+            subject: lash_core_execution::runtime::RuntimeSubject::ProcessEvent {
+                process_id: process_id(),
+                sequence: 1,
+                event_type: "process.wake".to_string(),
+            },
+            caused_by: None,
+            replay: None,
+        },
+        process_caused_by: None,
+        authority: lash_core_execution::QueuedWorkAuthority::default(),
+        input: "selected plan row".to_string(),
+        created_at_ms: 1,
+    };
+    let payload_json =
+        serde_json::to_string(&lash_core_execution::runtime::QueuedWorkPayload::process_wake(wake))
+            .expect("encode selected-drain payload");
     sqlx::query(
         "INSERT INTO lash_queued_work_items (batch_id, item_index, item_id, payload_json)
-         SELECT $1 || value::text, 0, $1 || value::text || ':item:0',
-                '{\"type\":\"agent_frame_task\",\"frame_id\":\"selected-plan\",\"task\":\"selected plan row\"}'
+         SELECT $1 || value::text, 0, $1 || value::text || ':item:0', $2
          FROM generate_series(1, 10000) AS value",
     )
     .bind(&batch_prefix)
+    .bind(&payload_json)
     .execute(storage.pool())
     .await
     .expect("seed selected-drain batch payloads");
@@ -1618,6 +1647,9 @@ fn postgres_statement_name(query: &str) -> &'static str {
         {
             "queued-run-pending-load"
         }
+        q if q.starts_with("SELECT pending_follow_on_json FROM lash_sessions") => {
+            "pending-follow-on-read"
+        }
         q if q.starts_with("SELECT head_json, head_revision") => "head-load",
         q if q.starts_with("SELECT head_revision") => "head-lock",
         q if q.starts_with("SELECT node_id FROM lash_graph_nodes") => "graph-nodes-exist",
@@ -1734,7 +1766,8 @@ async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
         .expect("statement-pin input is claimable");
     assert_eq!(claim.inputs.len(), 1);
     let claim_statements = postgres_statement_calls_by_name(storage.pool()).await;
-    // FIG-3412: production claim is 7 round trips; the testing build adds two
+    // FIG-3412: production claim is 8 round trips, one of them the pending
+    // follow-on gate (ADR 0101 §3, FIG-3542); the testing build adds two
     // `current_setting('lash.test_lease_epoch_ms')` probes inside the same
     // transaction.
     assert_eq!(
@@ -1747,6 +1780,7 @@ async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
             ("session-lease-lock", 1),
             ("pending-inputs-lock", 1),
             ("pending-input-claim-update", 1),
+            ("pending-follow-on-read", 1),
         ]),
         "claim round trips changed",
     );
@@ -1773,6 +1807,8 @@ async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
     let commit_statements = postgres_statement_calls_by_name(storage.pool()).await;
     // The pending queued-run guard adds one read to the previous 16-round-trip
     // head commit. It excludes unowned commits while a queued run is pending.
+    // The pending follow-on read (ADR 0101 §3, FIG-3542) adds one more: the
+    // head-write invariant decides against the locked fact.
     // This fixture does not pass through the testing lease-epoch probe.
     let expected_commit: std::collections::BTreeMap<&'static str, i64> =
         std::collections::BTreeMap::from([
@@ -1783,6 +1819,7 @@ async fn turn_input_claim_and_head_commit_round_trips_are_pinned() {
             ("head-lock", 1),
             ("head-load", 1),
             ("queued-run-pending-load", 1),
+            ("pending-follow-on-read", 1),
             ("turn-commit-load", 1),
             ("graph-nodes-exist", 1),
             ("blob-lock", 1),

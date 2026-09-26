@@ -870,6 +870,36 @@ fn checkpoint_from_spec(
     }
 }
 
+/// The claimable turn work the generated sequences enqueue: one durable
+/// process wake with a fixed `(process, sequence)` source, so a repeated
+/// enqueue in one sequence is the same idempotent source on every backend.
+fn claim_observability_wake(session_id: &SessionId) -> lash_core::runtime::ProcessWakeDelivery {
+    let process_id = || lash_core::runtime::ProcessId::from("differential-process");
+    lash_core::runtime::ProcessWakeDelivery {
+        version: lash_core::runtime::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        wake_id: "differential-process-wake-1".to_string(),
+        target_session_id: session_id.clone(),
+        process_id: process_id(),
+        process_incarnation: lash_core::runtime::ProcessIncarnation::from_registration_sequence(1),
+        sequence: 1,
+        event_type: "process.wake".to_string(),
+        event_invocation: lash_core::runtime::RuntimeInvocation {
+            attribution: lash_core::runtime::RuntimeAttribution::for_session(session_id.clone()),
+            subject: lash_core::runtime::RuntimeSubject::ProcessEvent {
+                process_id: process_id(),
+                sequence: 1,
+                event_type: "process.wake".to_string(),
+            },
+            caused_by: None,
+            replay: None,
+        },
+        process_caused_by: None,
+        authority: lash_core::runtime::QueuedWorkAuthority::default(),
+        input: "exercise queued-work claim state".to_string(),
+        created_at_ms: 1,
+    }
+}
+
 fn differential_usage_delta() -> TokenLedgerEntry {
     TokenLedgerEntry {
         source: "differential".to_string(),
@@ -1301,19 +1331,10 @@ impl BackendRunner {
             StoreOperation::EnqueueClaimableQueuedWork => self
                 .store()
                 .enqueue_queued_work(
-                    QueuedWorkBatchDraft::new(
-                        &self.session_id,
+                    lash_core::runtime::process_wake_batch_draft_with_delivery_policy(
+                        claim_observability_wake(&self.session_id),
                         DeliveryPolicy::AfterCurrentTurnCommit,
-                        lash_core::runtime::TurnWorkPayload::agent_frame_task(
-                            lash_core::facade_support::frame_node_id(
-                                &self.session_id,
-                                "differential-frame",
-                            ),
-                            "exercise queued-work claim state",
-                            None,
-                        ),
                     )
-                    .with_source_key("cross-backend-claim-observability")
                     .with_available_at_ms(777)
                     .with_merge_key("cross-backend-claim-observability"),
                 )

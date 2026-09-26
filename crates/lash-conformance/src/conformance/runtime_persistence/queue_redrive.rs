@@ -496,12 +496,12 @@ pub async fn queued_work_redrive_preserves_interrupted_batch_composition(
     for (source_key, label) in [("redrive-w1", "w1"), ("redrive-w2", "w2")] {
         store
             .enqueue_queued_work(
-                queued_draft(
+                keyed_queued_draft(
                     &SessionId::from("interrupted-batch-redrive"),
                     label,
                     DeliveryPolicy::EarliestSafeBoundary,
+                    source_key,
                 )
-                .with_source_key(source_key)
                 .with_merge_key("redrive-key"),
             )
             .await
@@ -531,7 +531,7 @@ pub async fn queued_work_redrive_preserves_interrupted_batch_composition(
         first_claim
             .batches
             .iter()
-            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
         vec![(Some("redrive-w1"), 1), (Some("redrive-w2"), 2)]
     );
@@ -543,12 +543,12 @@ pub async fn queued_work_redrive_preserves_interrupted_batch_composition(
     release_session_execution_lease_for_test(&store, &first_lease).await;
     store
         .enqueue_queued_work(
-            queued_draft(
+            keyed_queued_draft(
                 &SessionId::from("interrupted-batch-redrive"),
                 "w3",
                 DeliveryPolicy::EarliestSafeBoundary,
+                "redrive-w3",
             )
-            .with_source_key("redrive-w3")
             .with_merge_key("redrive-key"),
         )
         .await
@@ -577,7 +577,7 @@ pub async fn queued_work_redrive_preserves_interrupted_batch_composition(
         redriven
             .batches
             .iter()
-            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
         vec![(Some("redrive-w1"), 1), (Some("redrive-w2"), 2)],
         "redrive must retain the literal predecessor batch composition"
@@ -608,7 +608,7 @@ pub async fn queued_work_redrive_preserves_interrupted_batch_composition(
         twice_redriven
             .batches
             .iter()
-            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
         vec![(Some("redrive-w1"), 1), (Some("redrive-w2"), 2)],
         "a third generation must recover the second generation's literal composition"
@@ -631,7 +631,7 @@ pub async fn queued_work_redrive_preserves_interrupted_batch_composition(
         subsequent
             .batches
             .iter()
-            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
         vec![(Some("redrive-w3"), 3)],
         "new compatible work must wait for a separate successor claim"
@@ -854,12 +854,12 @@ pub async fn queued_work_names_a_deferred_lane_apart_from_an_exhausted_one(
 
     let deferred = store
         .enqueue_queued_work(
-            queued_draft(
+            keyed_queued_draft(
                 &SessionId::from(session_id),
                 "deferred",
                 DeliveryPolicy::EarliestSafeBoundary,
+                "deferred-row",
             )
-            .with_source_key("deferred-row")
             .with_available_at_ms(lease_timing.delayed_queue_row_available_at_ms()),
         )
         .await
@@ -916,24 +916,24 @@ pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
     let session_id = "interrupted-batch-ready-gap";
     store
         .enqueue_queued_work(
-            queued_draft(
+            keyed_queued_draft(
                 &SessionId::from(session_id),
                 "w1",
                 DeliveryPolicy::EarliestSafeBoundary,
+                "gap-w1",
             )
-            .with_source_key("gap-w1")
             .with_merge_key("gap-key"),
         )
         .await
         .expect("enqueue ready gap W1");
     store
         .enqueue_queued_work(
-            queued_draft(
+            keyed_queued_draft(
                 &SessionId::from(session_id),
                 "w2",
                 DeliveryPolicy::EarliestSafeBoundary,
+                "gap-w2",
             )
-            .with_source_key("gap-w2")
             .with_merge_key("gap-key")
             .with_available_at_ms(lease_timing.delayed_queue_row_available_at_ms()),
         )
@@ -941,12 +941,12 @@ pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
         .expect("enqueue delayed gap W2");
     store
         .enqueue_queued_work(
-            queued_draft(
+            keyed_queued_draft(
                 &SessionId::from(session_id),
                 "w3",
                 DeliveryPolicy::EarliestSafeBoundary,
+                "gap-w3",
             )
-            .with_source_key("gap-w3")
             .with_merge_key("gap-key"),
         )
         .await
@@ -975,7 +975,7 @@ pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
         first_claim
             .batches
             .iter()
-            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
         vec![(Some("gap-w1"), 1), (Some("gap-w3"), 3)]
     );
@@ -1005,7 +1005,7 @@ pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
         redriven
             .batches
             .iter()
-            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
         vec![(Some("gap-w1"), 1), (Some("gap-w3"), 3)]
     );
@@ -1025,7 +1025,7 @@ pub async fn queued_work_redrive_selects_claim_identity_across_ready_gap(
         delayed
             .batches
             .iter()
-            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
         vec![(Some("gap-w2"), 2)]
     );
@@ -1043,12 +1043,12 @@ pub async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
     for (source_key, label) in [("gate-w1", "w1"), ("gate-w2", "w2")] {
         store
             .enqueue_queued_work(
-                queued_draft(
+                keyed_queued_draft(
                     &SessionId::from(session_id),
                     label,
                     DeliveryPolicy::AfterCurrentTurnCommit,
+                    source_key,
                 )
-                .with_source_key(source_key)
                 .with_merge_key("gate-key"),
             )
             .await
@@ -1077,7 +1077,7 @@ pub async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
         first_claim
             .batches
             .iter()
-            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
         vec![(Some("gate-w1"), 1), (Some("gate-w2"), 2)]
     );
@@ -1109,12 +1109,12 @@ pub async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
     for (source_key, label) in [("gate-fresh-w1", "fresh-w1"), ("gate-fresh-w2", "fresh-w2")] {
         store
             .enqueue_queued_work(
-                queued_draft(
+                keyed_queued_draft(
                     &SessionId::from(session_id),
                     label,
                     DeliveryPolicy::EarliestSafeBoundary,
+                    source_key,
                 )
-                .with_source_key(source_key)
                 .with_merge_key("gate-fresh-key"),
             )
             .await
@@ -1136,7 +1136,7 @@ pub async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
         fresh_checkpoint_claim
             .batches
             .iter()
-            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
         vec![(Some("gate-fresh-w1"), 3), (Some("gate-fresh-w2"), 4),]
     );
@@ -1160,7 +1160,7 @@ pub async fn queued_work_redrive_obeys_delivery_boundary_before_identity(
         after_boundary
             .batches
             .iter()
-            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
         vec![(Some("gate-w1"), 1), (Some("gate-w2"), 2)]
     );
@@ -1189,12 +1189,12 @@ pub async fn queued_work_redrive_ignores_a_changed_drain_policy(
     ] {
         store
             .enqueue_queued_work(
-                queued_draft(
+                keyed_queued_draft(
                     &SessionId::from(session_id),
                     label,
                     DeliveryPolicy::EarliestSafeBoundary,
+                    source_key,
                 )
-                .with_source_key(source_key)
                 .with_merge_key("policy-key"),
             )
             .await
@@ -1231,7 +1231,7 @@ pub async fn queued_work_redrive_ignores_a_changed_drain_policy(
         first_claim
             .batches
             .iter()
-            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
         expected
     );
@@ -1262,7 +1262,7 @@ pub async fn queued_work_redrive_ignores_a_changed_drain_policy(
         redriven
             .batches
             .iter()
-            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
         expected,
         "a redrive must serve the journaled composition, not re-run the successor's drain policy"
@@ -1285,12 +1285,12 @@ pub async fn queued_work_redrive_ignores_successor_row_limit(store: Arc<dyn Runt
     ] {
         store
             .enqueue_queued_work(
-                queued_draft(
+                keyed_queued_draft(
                     &SessionId::from(session_id),
                     label,
                     DeliveryPolicy::EarliestSafeBoundary,
+                    source_key,
                 )
-                .with_source_key(source_key)
                 .with_merge_key("limit-key"),
             )
             .await
@@ -1319,7 +1319,7 @@ pub async fn queued_work_redrive_ignores_successor_row_limit(store: Arc<dyn Runt
         first_claim
             .batches
             .iter()
-            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
         vec![
             (Some("limit-w1"), 1),
@@ -1354,7 +1354,7 @@ pub async fn queued_work_redrive_ignores_successor_row_limit(store: Arc<dyn Runt
         redriven
             .batches
             .iter()
-            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
         vec![
             (Some("limit-w1"), 1),
@@ -1393,7 +1393,7 @@ pub async fn queued_work_redrive_ignores_successor_row_limit(store: Arc<dyn Runt
         selected_redrive
             .batches
             .iter()
-            .map(|batch| (batch.source_key.as_deref(), batch.enqueue_seq))
+            .map(|batch| (keyed_source(batch), batch.enqueue_seq))
             .collect::<Vec<_>>(),
         vec![
             (Some("limit-w1"), 1),
@@ -1424,12 +1424,12 @@ pub async fn queued_work_selected_multi_identity_validation_and_abandon_restore(
         batches.push(
             store
                 .enqueue_queued_work(
-                    queued_draft(
+                    keyed_queued_draft(
                         &SessionId::from(session_id),
                         label,
                         DeliveryPolicy::EarliestSafeBoundary,
+                        source_key,
                     )
-                    .with_source_key(source_key)
                     .with_merge_key("selected-multi-identity-key"),
                 )
                 .await
@@ -1456,11 +1456,7 @@ pub async fn queued_work_selected_multi_identity_validation_and_abandon_restore(
         .claim()
         .expect("predecessor A exists");
     assert_eq!(
-        claim_a
-            .batches
-            .iter()
-            .map(|batch| batch.source_key.as_deref())
-            .collect::<Vec<_>>(),
+        claim_a.batches.iter().map(keyed_source).collect::<Vec<_>>(),
         vec![Some("selected-claim-a1"), Some("selected-claim-a2")]
     );
     let claim_b = store
@@ -1476,11 +1472,7 @@ pub async fn queued_work_selected_multi_identity_validation_and_abandon_restore(
         .claim()
         .expect("predecessor B exists");
     assert_eq!(
-        claim_b
-            .batches
-            .iter()
-            .map(|batch| batch.source_key.as_deref())
-            .collect::<Vec<_>>(),
+        claim_b.batches.iter().map(keyed_source).collect::<Vec<_>>(),
         vec![Some("selected-claim-b1"), Some("selected-claim-b2")]
     );
     release_session_execution_lease_for_test(&store, &predecessor_lease).await;
@@ -1538,7 +1530,7 @@ pub async fn queued_work_selected_multi_identity_validation_and_abandon_restore(
         successor_claim
             .batches
             .iter()
-            .map(|batch| batch.source_key.as_deref())
+            .map(keyed_source)
             .collect::<Vec<_>>(),
         vec![Some("selected-claim-a1"), Some("selected-claim-a2")]
     );
@@ -1839,24 +1831,27 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
         .expect("claim atomic pending input")
         .expect("atomic pending input claim");
     assert_eq!(input_claim.inputs[0].input_id, input.input_id);
-    let state = RuntimeSessionState {
+    let mut state = RuntimeSessionState {
         session_id: SessionId::from("root"),
         turn_index: 41,
         ..RuntimeSessionState::new(crate::SessionPolicy::new(crate::TurnBudget::Unbounded))
     };
+    state.ensure_agent_frame_initialized();
+    // The switch commit writes the follow-on it owes onto the head, in the
+    // same transaction that settles the inbound claims (ADR 0101 §3).
+    let follow_on = crate::store::PendingFollowOn {
+        follow_on_turn_id: crate::TurnId::from("turn-atomic:agent-frame:1"),
+        frame_id: state
+            .current_frame_node_id
+            .clone()
+            .expect("the initial frame is current"),
+        task: "follow-on task".to_string(),
+        options: None,
+        chain_depth: 1,
+        attempts: 0,
+    };
     let mut base_commit = RuntimeCommit::persisted_state_for_test(&state, &[]);
-    base_commit.enqueued_queue_batches = vec![
-        QueuedWorkBatchDraft::new(
-            "root",
-            DeliveryPolicy::AfterCurrentTurnCommit,
-            crate::TurnWorkPayload::agent_frame_task(
-                crate::session_graph::frame_node_id(&SessionId::from("root"), "follow-frame"),
-                "follow-on task",
-                None,
-            ),
-        )
-        .with_source_key("agent-frame-handoff:turn-atomic"),
-    ];
+    base_commit.pending_follow_on = Some(follow_on.clone());
     let turn_commit =
         RuntimeTurnCommitStamp::new(crate::OperationId::turn("root", "turn-atomic", "final"));
     base_commit.turn_commit = turn_commit.clone();
@@ -1890,34 +1885,36 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
         "rejected queue completion must preserve queued work"
     );
 
-    let mut cross_session_outbox = base_commit.clone();
-    cross_session_outbox.enqueued_queue_batches[0].session_id =
-        SessionId::from("other-session".to_string());
+    let mut elsewhere = base_commit.clone();
+    elsewhere.pending_follow_on = Some(crate::store::PendingFollowOn {
+        frame_id: crate::session_graph::frame_node_id(&SessionId::from("root"), "elsewhere"),
+        ..follow_on.clone()
+    });
     let err = store
         .commit_runtime_state(
-            cross_session_outbox
+            elsewhere
                 .completing_queue_claim(claim.completion())
                 .completing_turn_input_claim(input_claim.completion()),
         )
         .await
-        .expect_err("outbox enqueue failure must reject the whole final commit");
-    assert!(matches!(err, StoreError::SessionBindingMismatch { .. }));
+        .expect_err("a follow-on off the current frame must reject the whole final commit");
+    assert!(matches!(err, StoreError::FollowOnFrameNotCurrent { .. }));
     assert!(
         store
             .load_session()
             .await
-            .expect("load after rejected outbox enqueue")
+            .expect("load after rejected follow-on")
             .is_none(),
-        "rejected outbox enqueue must roll back session state"
+        "a rejected follow-on must roll back session state"
     );
     assert_eq!(
         store
             .list_queued_work(&SessionId::from("root"))
             .await
-            .expect("list after rejected outbox enqueue")
+            .expect("list after rejected follow-on")
             .len(),
         1,
-        "rejected outbox enqueue must roll back inbound queue completion"
+        "a rejected follow-on must roll back inbound queue completion"
     );
 
     let first = store
@@ -1951,27 +1948,28 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
         retry.realized_node_timestamps,
         first.realized_node_timestamps
     );
-    assert_eq!(first.enqueued_queue_batches.len(), 1);
-    assert_eq!(retry.enqueued_queue_batches.len(), 1);
+    assert_eq!(first.pending_follow_on.as_ref(), Some(&follow_on));
     assert_eq!(
-        retry.enqueued_queue_batches[0].batch_id, first.enqueued_queue_batches[0].batch_id,
-        "idempotent commit retry must return the original outbox identity"
+        retry.pending_follow_on, first.pending_follow_on,
+        "an idempotent commit retry returns the follow-on the switch wrote"
     );
-    assert!(
+    assert_eq!(
         store
             .load_session()
             .await
             .expect("load after accepted atomic commit")
-            .is_some()
+            .expect("committed head")
+            .pending_follow_on,
+        Some(follow_on),
+        "the switch commit leaves its follow-on on the head"
     );
     assert!(
         store
             .list_queued_work(&SessionId::from("root"))
             .await
             .expect("list after accepted atomic commit")
-            .iter()
-            .map(|batch| batch.batch_id.as_str())
-            .eq([first.enqueued_queue_batches[0].batch_id.as_str()])
+            .is_empty(),
+        "a frame handoff is never a queue row"
     );
     assert!(
         store
@@ -1979,6 +1977,6 @@ pub async fn queue_completion_and_turn_commit_stamp_are_atomic(store: Arc<dyn Ru
             .await
             .expect("list inputs after accepted atomic commit")
             .is_empty(),
-        "accepted switch commit must complete inbound input with the outbox enqueue"
+        "accepted switch commit must complete inbound input with the follow-on write"
     );
 }

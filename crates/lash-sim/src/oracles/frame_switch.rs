@@ -143,33 +143,33 @@ pub fn logical_turn_claims_settle_exactly_once(
     )
 }
 
-pub fn frame_switch_outbox_is_atomic(
+pub fn frame_switch_follow_on_is_atomic(
     observations: &[FrameSwitchCommitObservation],
 ) -> OracleVerdict {
     if observations.is_empty() {
         return OracleVerdict::failed(
-            FRAME_SWITCH_OUTBOX_ATOMICITY_ORACLE,
+            FRAME_SWITCH_FOLLOW_ON_ATOMICITY_ORACLE,
             "no claimed frame-switch commit was observed",
         );
     }
     if let Some(observation) = observations
         .iter()
-        .find(|observation| !observation.inbound_claim_completed || !observation.follow_on_enqueued)
+        .find(|observation| !observation.inbound_claim_completed || !observation.follow_on_owed)
     {
         return OracleVerdict::failed(
-            FRAME_SWITCH_OUTBOX_ATOMICITY_ORACLE,
+            FRAME_SWITCH_FOLLOW_ON_ATOMICITY_ORACLE,
             format!(
-                "switch commit `{}` exposed inbound_completed={} follow_on_enqueued={}",
+                "switch commit `{}` exposed inbound_completed={} follow_on_owed={}",
                 observation.turn_id,
                 observation.inbound_claim_completed,
-                observation.follow_on_enqueued
+                observation.follow_on_owed
             ),
         );
     }
     OracleVerdict::passed(
-        FRAME_SWITCH_OUTBOX_ATOMICITY_ORACLE,
+        FRAME_SWITCH_FOLLOW_ON_ATOMICITY_ORACLE,
         format!(
-            "{} switch commits exposed claim completion and follow-on enqueue together",
+            "{} switch commits exposed claim completion and the owed follow-on together",
             observations.len()
         ),
     )

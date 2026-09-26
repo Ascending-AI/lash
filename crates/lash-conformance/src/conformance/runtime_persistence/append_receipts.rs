@@ -1051,21 +1051,17 @@ pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimePe
         serde_json::json!({"value": "atomic"}),
     )];
     let (clean, ids) = append_request_commit(&mut state, "atomic-append", &nodes, None);
+    // An append is not a turn's terminal commit, so it may not write a
+    // pending follow-on (ADR 0101 §3): the store refuses the whole commit.
     let mut failing = clean.clone();
-    failing
-        .enqueued_queue_batches
-        .push(QueuedWorkBatchDraft::new(
-            "different-session",
-            DeliveryPolicy::AfterCurrentTurnCommit,
-            crate::TurnWorkPayload::agent_frame_task(
-                crate::session_graph::frame_node_id(
-                    &SessionId::from("different-session"),
-                    "atomic-frame",
-                ),
-                "must roll back",
-                None,
-            ),
-        ));
+    failing.pending_follow_on = Some(crate::store::PendingFollowOn {
+        follow_on_turn_id: crate::TurnId::from("atomic-append:agent-frame:1"),
+        frame_id: crate::session_graph::frame_node_id(&SessionId::from("root"), "atomic-frame"),
+        task: "must roll back".to_string(),
+        options: None,
+        chain_depth: 1,
+        attempts: 0,
+    });
     let failing_lease = claim_session_execution_lease_for_test(
         &store,
         &SessionId::from("root"),
@@ -1075,8 +1071,8 @@ pub async fn append_receipt_and_graph_append_are_atomic(store: Arc<dyn RuntimePe
     let error = store
         .commit_runtime_state(failing.releasing_session_execution_lease(failing_lease.completion()))
         .await
-        .expect_err("mid-commit outbox failure rolls back append and receipt");
-    assert!(matches!(error, StoreError::SessionBindingMismatch { .. }));
+        .expect_err("a refused follow-on write rolls back append and receipt");
+    assert!(matches!(error, StoreError::FollowOnHeadInvariant { .. }));
     assert!(
         store
             .load_session()

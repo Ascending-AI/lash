@@ -63,8 +63,8 @@ macro_rules! restored_claim_cede_tests {
         $crate::direct_turn_acceptance_tests!(@catalogue $fixture; [
             (a_redrive_commits_nothing_for_input_a_recovery_drain_answered, "restored-claim-recovery-answered-input"),
             (a_redrive_commits_nothing_for_work_a_recovery_checkpoint_answered, "restored-claim-recovery-answered-work"),
-            (a_redrive_cedes_checkpoint_input_a_peer_reclaimed, "restored-claim-cede-input"),
-            (a_redrive_cedes_checkpoint_work_a_peer_reclaimed, "restored-claim-cede-queued-work"),
+            (a_redrive_answers_checkpoint_input_a_peer_could_not_take, "restored-claim-cede-input"),
+            (a_redrive_answers_checkpoint_work_a_peer_could_not_take, "restored-claim-cede-queued-work"),
         ]);
     };
 }

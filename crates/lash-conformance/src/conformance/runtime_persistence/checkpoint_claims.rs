@@ -927,20 +927,42 @@ pub fn queued_process_wake_draft(
     .with_process_wake_source(ProcessId::from(format!("process:{text}")), 1)
 }
 
+/// Some queued turn work carrying `text`: a process wake, the one turn-work
+/// payload (a frame handoff is a head fact, never a queue row; ADR 0101 §3).
 pub(super) fn queued_draft(
     session_id: &SessionId,
     text: &str,
     delivery_policy: DeliveryPolicy,
 ) -> QueuedWorkBatchDraft {
-    QueuedWorkBatchDraft::new(
+    queued_process_wake_draft(session_id, text, delivery_policy)
+}
+
+/// Queued turn work carrying `text` whose source is `key`: the wake of
+/// process `key` at sequence 1, so the source key is that wake's own and the
+/// same `key` names the same row.
+pub(super) fn keyed_queued_draft(
+    session_id: &SessionId,
+    text: &str,
+    delivery_policy: DeliveryPolicy,
+    key: impl AsRef<str>,
+) -> QueuedWorkBatchDraft {
+    crate::conformance::helpers::process_wake_work(
         session_id,
+        key.as_ref(),
+        1,
+        text,
         delivery_policy,
-        crate::TurnWorkPayload::agent_frame_task(
-            crate::session_graph::frame_node_id(session_id, &format!("frame:{text}")),
-            text,
-            None,
-        ),
     )
+}
+
+/// The `key` a [`keyed_queued_draft`] row was enqueued under, read back from
+/// its wake source key.
+pub(super) fn keyed_source(batch: &QueuedWorkBatch) -> Option<&str> {
+    batch
+        .source_key
+        .as_deref()
+        .and_then(|key| key.strip_prefix("process:"))
+        .and_then(|key| key.strip_suffix(":event:1:wake"))
 }
 
 pub(super) fn queued_session_command_draft(
@@ -960,7 +982,6 @@ pub(super) fn queued_batch_text(batch: &QueuedWorkBatch) -> Option<&str> {
     let payload = batch.items.first().map(|item| &item.payload)?;
     match payload {
         QueuedWorkPayload::ProcessWake { wake } => Some(wake.input.as_str()),
-        QueuedWorkPayload::AgentFrameTask { task, .. } => Some(task.as_str()),
         QueuedWorkPayload::SessionCommand { .. } => None,
     }
 }

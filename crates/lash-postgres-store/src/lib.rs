@@ -545,7 +545,13 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // component-133 catalog forward by creating the ledger and restamping,
 // and provisions an empty database outright. Older catalogs are still
 // rejected and recreated.
-const SCHEMA_VERSION: i32 = 134;
+//
+// Version 135 (FIG-3542) adds `lash_sessions.pending_follow_on_json`, the
+// follow-on turn a committed agent-frame switch owes the session (ADR 0101
+// §3); a frame handoff is no longer a queued-work row, and runtime-commit
+// receipts carry schema 2. `lash migrate` carries a component-134 catalog
+// forward by adding the nullable column and restamping.
+const SCHEMA_VERSION: i32 = 135;
 
 /// The oldest component schema version this build admits at open (FIG-3797).
 ///

@@ -231,21 +231,20 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
 use lash_core::runtime::{
-    QueuedWorkBatchDraft, QueuedWorkClaimBoundary, QueuedWorkPayload, load_process_execution_env,
+    QueuedWorkClaimBoundary, QueuedWorkPayload, load_process_execution_env,
     process_wake_batch_draft, publish_process_execution_env,
 };
 use lash_core::{
     AdmittedScope, AttachmentId, AttachmentIntent, AttachmentManifest, AwaitEventKey,
-    AwaitEventWaitIdentity, BoundaryReason, Clock, DeliveryPolicy, EffectHost, ExecResponse,
-    ExecutionScope, LashSchema, LeaseClaimNonce, LeaseOwnerIdentity, MessageOrigin, MessageRole,
-    OperationId, PartKind, PendingTurnInputDraft, PersistedSegmentHandover, PluginNamespaceState,
-    PluginState, ProcessAwaitOutput, ProcessChange, ProcessChangeCursor,
-    ProcessCompletionAuthority, ProcessContinuationStore, ProcessEventAppendRequest,
-    ProcessEventLogTestSupport as _, ProcessEventSemanticsSpec, ProcessEventType,
-    ProcessExecutionEnvRef, ProcessExecutionEnvSpec, ProcessExecutionEnvStore,
-    ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput, ProcessOriginator,
-    ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry, ProcessStatus,
-    ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark,
+    AwaitEventWaitIdentity, BoundaryReason, Clock, EffectHost, ExecResponse, ExecutionScope,
+    LashSchema, LeaseClaimNonce, LeaseOwnerIdentity, MessageOrigin, MessageRole, OperationId,
+    PartKind, PendingTurnInputDraft, PersistedSegmentHandover, PluginNamespaceState, PluginState,
+    ProcessAwaitOutput, ProcessChange, ProcessChangeCursor, ProcessCompletionAuthority,
+    ProcessContinuationStore, ProcessEventAppendRequest, ProcessEventLogTestSupport as _,
+    ProcessEventSemanticsSpec, ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
+    ProcessExecutionEnvStore, ProcessExecutionWriteAuthority, ProcessIdentity, ProcessInput,
+    ProcessOriginator, ProcessProvenance, ProcessRecord, ProcessRegistration, ProcessRegistry,
+    ProcessStatus, ProcessValueSelector, ProcessWakeDelivery, ProcessWakeSpec, ProjectionWatermark,
     ProtocolTurnOptions, RecoveryContract, Resolution, ResolveOutcome, RuntimeCommit,
     RuntimeEffectCommand, RuntimeEffectEnvelope, RuntimeEffectInvocation,
     RuntimeEffectLocalExecutor, RuntimeEffectOutcome, RuntimePersistence, RuntimeSessionState,
@@ -260,7 +259,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 128;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 129;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 
@@ -300,7 +299,36 @@ const DELETED_SESSION_ID: &str = "durable-read-deleted-session";
 const REVOKED_SESSION_ID: &str = "durable-read-revoked-session";
 const TRIGGER_KEY: &str = "durable-read-trigger";
 const TRIGGER_REGISTER_OPERATION: &str = "durable-read-trigger-register";
-const QUEUE_SOURCE_KEY: &str = "durable-read-queue-source";
+const QUEUE_WAKE_PROCESS: &str = "durable-read-queue-process";
+const QUEUE_SOURCE_KEY: &str = "process:durable-read-queue-process:event:1:wake";
+
+/// The fixture's one queued row: a process wake, the one turn-work payload.
+fn fixture_wake() -> lash_core::runtime::ProcessWakeDelivery {
+    let process_id = lash_core::runtime::ProcessId::from(QUEUE_WAKE_PROCESS);
+    lash_core::runtime::ProcessWakeDelivery {
+        version: lash_core::runtime::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        wake_id: "durable-read-queue-wake".to_string(),
+        target_session_id: SessionId::from(SESSION_ID),
+        process_id: process_id.clone(),
+        process_incarnation: lash_core::runtime::ProcessIncarnation::from_registration_sequence(1),
+        sequence: 1,
+        event_type: "process.wake".to_string(),
+        event_invocation: lash_core::runtime::RuntimeInvocation {
+            attribution: lash_core::runtime::RuntimeAttribution::for_session(SESSION_ID),
+            subject: lash_core::runtime::RuntimeSubject::ProcessEvent {
+                process_id,
+                sequence: 1,
+                event_type: "process.wake".to_string(),
+            },
+            caused_by: None,
+            replay: None,
+        },
+        process_caused_by: None,
+        authority: lash_core::runtime::QueuedWorkAuthority::default(),
+        input: "durable read queued task".to_string(),
+        created_at_ms: FIXTURE_WRITE_MS,
+    }
+}
 const INPUT_SOURCE_KEY: &str = "durable-read-input-source";
 
 fn fixture_effect_outcome() -> lash_core::ProcessEffectSummaryOccurrence {
@@ -704,6 +732,11 @@ fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
         (
             crate::CONFIG_REVISION_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
             127,
+            128,
+        ),
+        (
+            crate::FOLLOW_ON_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            128,
             DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         ),
     ] {
@@ -875,21 +908,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
 
     let queued = handles
         .runtime
-        .enqueue_queued_work(
-            QueuedWorkBatchDraft::new(
-                SESSION_ID,
-                DeliveryPolicy::EarliestSafeBoundary,
-                lash_core::runtime::TurnWorkPayload::agent_frame_task(
-                    lash_core::facade_support::frame_node_id(
-                        &SessionId::from(SESSION_ID),
-                        "durable-read-frame",
-                    ),
-                    "durable read queued task",
-                    None,
-                ),
-            )
-            .with_source_key(QUEUE_SOURCE_KEY),
-        )
+        .enqueue_queued_work(lash_core::runtime::process_wake_batch_draft(fixture_wake()))
         .await
         .expect("enqueue fixture queued work");
     let pending = handles
@@ -1522,9 +1541,9 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert!(
         matches!(
             &queued[0].items[0].payload,
-            QueuedWorkPayload::AgentFrameTask { frame_id, task, .. }
-                if frame_id == &lash_core::facade_support::frame_node_id(&SessionId::from(SESSION_ID), "durable-read-frame")
-                    && task == "durable read queued task"
+            QueuedWorkPayload::ProcessWake { wake }
+                if wake.process_id.as_str() == QUEUE_WAKE_PROCESS
+                    && wake.input == "durable read queued task"
         ),
         "durable fixture semantic drift: queued-work payload changed"
     );
@@ -2196,7 +2215,12 @@ fn fixture_effect_envelope() -> RuntimeEffectEnvelope {
                 "durable-read-exec-replay",
             )
             .expect("valid durable read fixture address"),
-            lash_core::RuntimeAttribution::for_turn(SESSION_ID, "durable-read-effect-turn", 7, 0),
+            lash_core::runtime::RuntimeAttribution::for_turn(
+                SESSION_ID,
+                "durable-read-effect-turn",
+                7,
+                0,
+            ),
             "durable-read-exec-effect",
         ),
         RuntimeEffectCommand::ExecCode {

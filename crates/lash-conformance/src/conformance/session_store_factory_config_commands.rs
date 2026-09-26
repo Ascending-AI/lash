@@ -420,14 +420,12 @@ async fn enqueue_config_settlement_blocker(
     session_id: &SessionId,
 ) {
     store
-        .enqueue_queued_work(crate::QueuedWorkBatchDraft::new(
+        .enqueue_queued_work(crate::conformance::helpers::process_wake_work(
             session_id,
+            "config-settlement-blocker",
+            1,
+            "block the FIFO head",
             crate::DeliveryPolicy::AfterCurrentTurnCommit,
-            crate::TurnWorkPayload::agent_frame_task(
-                crate::session_graph::frame_node_id(session_id, "config-settlement-blocker"),
-                "block the FIFO head",
-                None,
-            ),
         ))
         .await
         .expect("enqueue config-settlement blocker");

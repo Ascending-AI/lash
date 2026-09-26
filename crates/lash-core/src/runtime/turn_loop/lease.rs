@@ -443,6 +443,24 @@ impl LashRuntime {
     /// that turn, and an otherwise idle drain cannot tell that row apart from an
     /// orphan. Such a row is re-deferred and delivered at the next turn instead
     /// of the pre-named one - delivery timing, never a dropped input.
+    /// The follow-on the durable head owes, read once per repair pass.
+    async fn owed_follow_on(
+        &self,
+        store: &Arc<dyn crate::store::RuntimePersistence>,
+        owed: &mut Option<Option<crate::store::PendingFollowOn>>,
+    ) -> Result<Option<crate::store::PendingFollowOn>, RuntimeError> {
+        if let Some(owed) = owed {
+            return Ok(owed.clone());
+        }
+        let read = store
+            .load_session_head_meta()
+            .await
+            .map_err(super::runtime_error_from_store_commit)?
+            .and_then(|head| head.pending_follow_on);
+        *owed = Some(read.clone());
+        Ok(read)
+    }
+
     pub(super) async fn defer_orphaned_turn_inputs_before_drain(
         &self,
         store: &Arc<dyn crate::store::RuntimePersistence>,
@@ -474,9 +492,17 @@ impl LashRuntime {
             .await
             .map_err(super::runtime_error_from_store_commit)?;
         let mut repaired_count = 0;
+        // The follow-on the head owes is not orphaned: its turn runs next, and
+        // the input pinned to it is its own (ADR 0101 §3). The head is read
+        // only when some turn looks orphaned.
+        let mut owed: Option<Option<crate::store::PendingFollowOn>> = None;
         for authorization in pending {
             let resumes_here =
-                is_resumable_turn_or_follow_on(authorization.turn_id(), resumable_turn_id);
+                is_resumable_turn_or_follow_on(authorization.turn_id(), resumable_turn_id)
+                    || self
+                        .owed_follow_on(store, &mut owed)
+                        .await?
+                        .is_some_and(|owed| owed.is_turn(authorization.turn_id()));
             if resumes_here {
                 // The interrupted logical turn must replay to the original
                 // closure position before issuing any of this authorization's
@@ -528,7 +554,15 @@ impl LashRuntime {
             )
             .await
             .map_err(super::runtime_error_from_store_commit)?;
-        for turn_id in turn_ids {
+        let owed = if turn_ids.is_empty() {
+            None
+        } else {
+            self.owed_follow_on(store, &mut owed).await?
+        };
+        for turn_id in turn_ids
+            .into_iter()
+            .filter(|turn_id| !owed.as_ref().is_some_and(|owed| owed.is_turn(turn_id)))
+        {
             let address = crate::TurnAddress::new(&self.state.session_id, &turn_id);
             'discover: loop {
                 let observed = store

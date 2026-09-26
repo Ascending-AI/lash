@@ -1,5 +1,5 @@
 #[cfg(test)]
-use super::logical_turn::agent_frame_follow_turn_id;
+use super::logical_turn::next_physical_turn_id;
 use super::logical_turn::{
     LogicalTurnClaims, LogicalTurnStart, PhysicalTurnExecution, PreparedLogicalTurn,
 };
@@ -14,6 +14,7 @@ mod accept;
 mod commit;
 mod drain_end;
 mod execute;
+mod follow_on_recovery;
 mod generation_fence;
 mod initial_drive;
 mod lease;
@@ -168,7 +169,6 @@ impl SessionExecutionLeaseReleasePolicy {
 fn queued_work_payload_type(payload: &crate::QueuedWorkPayload) -> &'static str {
     match payload {
         crate::QueuedWorkPayload::ProcessWake { .. } => "process_wake",
-        crate::QueuedWorkPayload::AgentFrameTask { .. } => "agent_frame_task",
         crate::QueuedWorkPayload::SessionCommand { command } => command.kind(),
     }
 }
@@ -570,7 +570,7 @@ mod tests {
     use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use super::{ActiveTurnControl, agent_frame_follow_turn_id, publish_terminal_after_commit};
+    use super::{ActiveTurnControl, next_physical_turn_id, publish_terminal_after_commit};
     use crate::{
         AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, ExecutionScope, Resolution,
         ResolveOutcome, RuntimeError, TurnAddress, TurnFinish, TurnOutcome, TurnTerminal,
@@ -641,18 +641,14 @@ mod tests {
     }
 
     #[test]
-    fn agent_frame_follow_turn_ids_are_distinct_and_deterministic() {
+    fn physical_turn_ids_count_on_from_the_root_deterministically() {
+        let first = next_physical_turn_id(&TurnId::from("root-turn")).expect("first");
+        assert_eq!(first, "root-turn:agent-frame:1");
+        let second = next_physical_turn_id(&first).expect("second");
+        assert_eq!(second, "root-turn:agent-frame:2");
         assert_eq!(
-            agent_frame_follow_turn_id(&TurnId::from("root-turn"), 0),
-            "root-turn"
-        );
-        assert_eq!(
-            agent_frame_follow_turn_id(&TurnId::from("root-turn"), 1),
-            "root-turn:agent-frame:1"
-        );
-        assert_eq!(
-            agent_frame_follow_turn_id(&TurnId::from("root-turn"), 2),
-            "root-turn:agent-frame:2"
+            crate::store::QueuedRunPosition::split_turn_id(&second),
+            (TurnId::from("root-turn"), 2)
         );
     }
 

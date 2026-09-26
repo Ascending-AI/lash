@@ -826,14 +826,21 @@ IDENTIFIER_RENAME_BASELINES = {
     # The encoded fields, serde attributes and constants are unchanged, so
     # 3/3/5 stay. Superseded state:
     # sha256:48d26fb4f576abf84a952620b6431359e2e7210597e8763655dedab9dd66676d.
+    # FIG-3542 (updated in place): the destructure's ignored
+    # `enqueued_queue_batches: _` becomes the ignored `pending_follow_on: _`,
+    # and the purity list drops the batch-list refusal: a boundary commit
+    # carries the head's pending follow-on unchanged and the store refuses a
+    # change. Neither field was ever encoded, so SemanticBoundaryRequestIntent,
+    # its hash and 3/3/5 are unchanged. Superseded state:
+    # sha256:674711b54ee29d1eb2192e996a1f2ba5104043b37eaa7af2b8918e01d8014cd2.
     "crates/lash-core-store/src/store/semantic_boundary.rs:RECORD_CONFIG_REQUEST_IDENTITY_ENCODING_VERSION": (
-        "sha256:674711b54ee29d1eb2192e996a1f2ba5104043b37eaa7af2b8918e01d8014cd2"
+        "sha256:c13ab269498d3f11a79290e180b48c769af3bf5051a080372bff5ceb22aa6737"
     ),
     "crates/lash-core-store/src/store/semantic_boundary.rs:CREATE_SESSION_REQUEST_IDENTITY_ENCODING_VERSION": (
-        "sha256:674711b54ee29d1eb2192e996a1f2ba5104043b37eaa7af2b8918e01d8014cd2"
+        "sha256:c13ab269498d3f11a79290e180b48c769af3bf5051a080372bff5ceb22aa6737"
     ),
     "crates/lash-core-store/src/store/semantic_boundary.rs:USAGE_LEDGER_REQUEST_IDENTITY_ENCODING_VERSION": (
-        "sha256:674711b54ee29d1eb2192e996a1f2ba5104043b37eaa7af2b8918e01d8014cd2"
+        "sha256:c13ab269498d3f11a79290e180b48c769af3bf5051a080372bff5ceb22aa6737"
     ),
     # Comment-only sweep: the guarded-shape texts moved solely by deleting or
     # slimming comments; no schema statement, struct, field, serde attribute,

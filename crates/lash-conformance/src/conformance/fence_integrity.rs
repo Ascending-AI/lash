@@ -140,14 +140,12 @@ pub async fn signed_counter_write_domain_conformance(store: Arc<dyn crate::Runti
 }
 
 fn queued_draft(session_id: &SessionId, label: &str) -> crate::QueuedWorkBatchDraft {
-    crate::QueuedWorkBatchDraft::new(
+    crate::conformance::helpers::process_wake_work(
         session_id,
+        &format!("fence-integrity:{label}"),
+        1,
+        label,
         crate::DeliveryPolicy::EarliestSafeBoundary,
-        crate::TurnWorkPayload::agent_frame_task(
-            crate::session_graph::frame_node_id(session_id, &format!("frame:{label}")),
-            label,
-            None,
-        ),
     )
     .with_merge_key("fence-integrity")
 }

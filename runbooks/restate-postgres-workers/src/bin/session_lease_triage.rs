@@ -801,7 +801,7 @@ async fn commit_cas_livelock(
             completed_queue_claims: Vec::new(),
             completed_turn_input_claims: Vec::new(),
             undelivered_turn_input_claims: Vec::new(),
-            enqueued_queue_batches: Vec::new(),
+            pending_follow_on: None,
             interrupted_turn_input_turn_id: None,
             interrupted_turn_input_cancellation: None,
             interrupted_turn_cancel_intent: None,

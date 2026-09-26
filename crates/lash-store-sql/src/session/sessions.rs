@@ -13,11 +13,22 @@ pub const TABLE: &str = "sessions";
 /// both orders are what their backend's statements have always bound, and an
 /// insert's column order is not something this arc changes.
 pub const INSERT_COLUMNS: &str =
-    "session_id, head_revision, head_json, checkpoint_ref, leaf_node_id";
+    "session_id, head_revision, head_json, checkpoint_ref, leaf_node_id, pending_follow_on_json";
 
 /// The head as every loader decodes it: the full row minus the `session_id`
 /// the read is keyed by.
-pub const HEAD_META_COLUMNS: &str = "head_json, head_revision, leaf_node_id, checkpoint_ref";
+pub const HEAD_META_COLUMNS: &str =
+    "head_json, head_revision, leaf_node_id, checkpoint_ref, pending_follow_on_json";
+
+/// A fork's head row, and a first commit's placeholder: every column but the
+/// pending follow-on, which neither ever owes (ADR 0101 §3), so the column
+/// stays NULL.
+pub const FORK_INSERT_COLUMNS: &str =
+    "session_id, head_revision, head_json, checkpoint_ref, leaf_node_id";
+
+/// The pending follow-on alone: every claim reads it, and the recovery raise
+/// rewrites it without touching the rest of the head (ADR 0101 §3).
+pub const PENDING_FOLLOW_ON_COLUMNS: &str = "pending_follow_on_json";
 
 /// What session deletion needs from the head before it removes the row.
 pub const RECLAIM_COLUMNS: &str = "leaf_node_id, checkpoint_ref";

@@ -123,3 +123,47 @@ pub(crate) use lash_core::testing::store_fixtures::{
     append_conformance_event_node, bind_conformance_session, commit_conformance_state,
     durable_turn_address, durable_turn_scope,
 };
+
+/// Queued turn work carrying `text`: one process wake of `process` at
+/// `sequence`. A process wake is the one turn-work payload; a frame handoff is
+/// the head's pending follow-on, never a queue row (ADR 0101 §3). The source
+/// key is the wake's own, so the same `(process, sequence)` names the same row.
+pub(crate) fn process_wake_work(
+    session_id: &crate::SessionId,
+    process: &str,
+    sequence: u64,
+    text: &str,
+    delivery_policy: crate::DeliveryPolicy,
+) -> crate::QueuedWorkBatchDraft {
+    let process_id = crate::ProcessId::from(process);
+    let wake = crate::ProcessWakeDelivery {
+        version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        wake_id: format!("wake:{session_id}:{process}:{sequence}"),
+        target_session_id: session_id.clone(),
+        process_id: process_id.clone(),
+        process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
+        sequence,
+        event_type: "process.wake".to_string(),
+        event_invocation: crate::RuntimeInvocation {
+            attribution: crate::RuntimeAttribution::for_session(session_id),
+            subject: crate::RuntimeSubject::ProcessEvent {
+                process_id: process_id.clone(),
+                sequence,
+                event_type: "process.wake".to_string(),
+            },
+            caused_by: None,
+            replay: None,
+        },
+        process_caused_by: None,
+        authority: crate::QueuedWorkAuthority::default(),
+        input: text.to_string(),
+        created_at_ms: 1,
+    };
+    crate::QueuedWorkBatchDraft::new(
+        session_id,
+        delivery_policy,
+        crate::TurnWorkPayload::process_wake(wake),
+    )
+    .with_source_key(crate::process_wake_source_key(&process_id, sequence))
+    .with_process_wake_source(process_id, sequence)
+}

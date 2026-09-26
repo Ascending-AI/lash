@@ -122,5 +122,9 @@
   "lash_process_park_events.reason_json": {
     "verdict": "enroll-now",
     "reason": "A `parked` process park feed event carries the same ParkReason payload the turn park feed stores (FIG-3659 NOW-B); its schemars shape participates in the component shape gate with it."
+  },
+  "lash_sessions.pending_follow_on_json": {
+    "verdict": "deliberately-excluded",
+    "reason": "PendingFollowOn is fenced by the store component version (reject and recreate) and decoded through its shared store type with deny_unknown_fields; it is the same head fact on both backends (ADR 0101 §3)."
   }
 }

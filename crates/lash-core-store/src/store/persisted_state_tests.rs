@@ -7,6 +7,7 @@ fn persisted_state_hydrates_provider_id_without_live_provider_rebinding() {
             session_id: SessionId::from("stored"),
             head_revision: 7,
             current_frame_node_id: None,
+            pending_follow_on: None,
             graph: crate::SessionGraph::default(),
             config: crate::PersistedSessionConfig {
                 provider_id: "stored-provider".to_string(),
@@ -191,6 +192,7 @@ fn head_with_protocol_turn_options(
         session_id: SessionId::from("stored"),
         head_revision: 3,
         current_frame_node_id: None,
+        pending_follow_on: None,
         graph: crate::SessionGraph::default(),
         config,
         checkpoint_ref: None,

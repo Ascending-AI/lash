@@ -159,7 +159,8 @@ CREATE TABLE IF NOT EXISTS session_head (
     head_json      TEXT NOT NULL DEFAULT '{}',
     head_revision  INTEGER NOT NULL DEFAULT 0,
     leaf_node_id   TEXT,
-    checkpoint_ref TEXT
+    checkpoint_ref TEXT,
+    pending_follow_on_json TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_session_head_leaf
     ON session_head(leaf_node_id);
@@ -930,7 +931,13 @@ CREATE TABLE IF NOT EXISTS release_stamp (
 /// and `turn_parks` gains the projected, indexed `park_executable_generation` column the
 /// drain counts retired parks by. A pre-93 database is rejected at open and
 /// recreated; it is not migrated.
-pub(crate) const SCHEMA_VERSION: i32 = 93;
+/// Bumped to 94 for FIG-3542: `session_head` gains `pending_follow_on_json`,
+/// the follow-on turn a committed agent-frame switch owes the session (ADR
+/// 0101 §3), and a frame handoff is no longer a queued-work row: the
+/// `agent_frame_task` payload is gone and `runtime_turn_commits.result_json`
+/// carries receipt schema 2. A pre-94 database is rejected at open and
+/// recreated; it is not migrated.
+pub(crate) const SCHEMA_VERSION: i32 = 94;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS processes (

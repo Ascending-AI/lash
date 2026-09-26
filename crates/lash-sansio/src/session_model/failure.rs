@@ -203,6 +203,9 @@ pub enum TurnFailureCode {
     InvalidTurnInput,
     /// The turn exceeded its agent-frame-switch limit.
     AgentFrameSwitchLimit,
+    /// A pending follow-on was recovered more often than the host allows, so
+    /// it committed failed instead of running (ADR 0101 §3).
+    FollowOnRecoveryExhausted,
     /// Restoring resident protocol session state after commit failed.
     ProtocolRestoreSession,
     /// A plugin lifecycle hook failed.
@@ -329,6 +332,7 @@ impl TurnFailureCode {
             Self::AssistantOutputRecoveredFromState => "assistant_output_recovered_from_state",
             Self::InvalidTurnInput => "invalid_turn_input",
             Self::AgentFrameSwitchLimit => "agent_frame_switch_limit",
+            Self::FollowOnRecoveryExhausted => "follow_on_recovery_exhausted",
             Self::ProtocolRestoreSession => "protocol_restore_session",
             Self::LifecycleHookFailed => "lifecycle_hook_failed",
             Self::InvalidProviderEndpoint => "invalid_provider_endpoint",
@@ -431,6 +435,7 @@ impl TurnFailureCode {
             "assistant_output_recovered_from_state" => Self::AssistantOutputRecoveredFromState,
             "invalid_turn_input" => Self::InvalidTurnInput,
             "agent_frame_switch_limit" => Self::AgentFrameSwitchLimit,
+            "follow_on_recovery_exhausted" => Self::FollowOnRecoveryExhausted,
             "protocol_restore_session" => Self::ProtocolRestoreSession,
             "lifecycle_hook_failed" => Self::LifecycleHookFailed,
             "invalid_provider_endpoint" => Self::InvalidProviderEndpoint,
@@ -512,6 +517,7 @@ impl TurnFailureCode {
         Self::AssistantOutputRecoveredFromState,
         Self::InvalidTurnInput,
         Self::AgentFrameSwitchLimit,
+        Self::FollowOnRecoveryExhausted,
         Self::ProtocolRestoreSession,
         Self::LifecycleHookFailed,
         Self::InvalidProviderEndpoint,
@@ -1130,6 +1136,7 @@ mod tests {
             TurnFailureCode::AssistantOutputRecoveredFromState,
             TurnFailureCode::InvalidTurnInput,
             TurnFailureCode::AgentFrameSwitchLimit,
+            TurnFailureCode::FollowOnRecoveryExhausted,
             TurnFailureCode::ProtocolRestoreSession,
             TurnFailureCode::LifecycleHookFailed,
             TurnFailureCode::InvalidProviderEndpoint,
@@ -1313,7 +1320,7 @@ mod tests {
     fn all_named_covers_every_named_arm() {
         assert_eq!(
             TurnFailureCode::ALL_NAMED.len(),
-            71,
+            72,
             "a new named arm must be added to ALL_NAMED"
         );
         for code in TurnFailureCode::ALL_NAMED {

@@ -728,6 +728,17 @@ pub(super) async fn claim_pending_turn_inputs_postgres_tx(
     if max_inputs == 0 {
         return Ok(ClaimTransactionOutcome::Commit(None));
     }
+    let follow_on_claim = match &mode {
+        lash_core_execution::TurnInputClaimMode::ActiveTurn { turn_id, .. } => {
+            lash_core_execution::store::FollowOnClaim::Checkpoint { turn_id }
+        }
+        lash_core_execution::TurnInputClaimMode::NextTurn => {
+            lash_core_execution::store::FollowOnClaim::Idle
+        }
+    };
+    if follow_on_blocks_claim_tx(tx, session_id, follow_on_claim).await? {
+        return Ok(ClaimTransactionOutcome::Commit(None));
+    }
     let generation = session_execution_lease.fencing_token;
     let now = postgres_transaction_epoch_ms(tx).await?;
     // One named statement per filter shape production takes, picked by an
@@ -804,6 +815,16 @@ pub(super) async fn reclaim_turn_bound_inputs_postgres(
     #[cfg(any(test, feature = "testing"))]
     super::test_support::set_transaction_lease_clock_for_testing(&mut tx, lease_clock).await?;
     ensure_session_execution_lease_tx(&mut tx, session_id, session_execution_lease).await?;
+    if follow_on_blocks_claim_tx(
+        &mut tx,
+        session_id,
+        lash_core_execution::store::FollowOnClaim::Idle,
+    )
+    .await?
+    {
+        tx.commit().await.map_err(store_sqlx_error)?;
+        return Ok(None);
+    }
     let now = postgres_transaction_epoch_ms(&mut tx).await?;
     let rows = sqlx::query(
         crate::turn_ingress::turn_ingress_sql()
@@ -1116,6 +1137,51 @@ pub(super) async fn acquire_session_execution_lease_tx(
         lease_term_ms: lease_ttl_ms,
         expires_at_epoch_ms: expires_at,
     })
+}
+
+/// The follow-on the head of `session_id` owes (ADR 0101 §3), read inside
+/// the caller's transaction under a row lock: `FOR UPDATE` for a writer that
+/// decides against it, `FOR SHARE` for a claim.
+pub(super) async fn pending_follow_on_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    for_update: bool,
+) -> Result<Option<lash_core_execution::store::PendingFollowOn>, StoreError> {
+    let statement = if for_update {
+        crate::session_sql::session_sql()
+            .head
+            .select_pending_follow_on_for_update
+            .sql()
+    } else {
+        crate::session_sql::session_sql()
+            .head
+            .select_pending_follow_on_for_share
+            .sql()
+    };
+    let json = sqlx::query_scalar::<_, Option<String>>(statement)
+        .bind(session_id.as_str())
+        .fetch_optional(&mut **tx)
+        .await
+        .map_err(store_sqlx_error)?
+        .flatten();
+    lash_core_execution::store::pending_follow_on::decode_pending_follow_on(
+        session_id,
+        json.as_deref(),
+    )
+}
+
+/// Whether the head's pending follow-on refuses `claim` (ADR 0101 §3): every
+/// claim but the follow-on's own is blocked while it is set.
+pub(super) async fn follow_on_blocks_claim_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    session_id: &SessionId,
+    claim: lash_core_execution::store::FollowOnClaim<'_>,
+) -> Result<bool, StoreError> {
+    Ok(lash_core_execution::store::follow_on_blocks_claim(
+        pending_follow_on_tx(tx, session_id, false).await?.as_ref(),
+        claim,
+    )
+    .is_some())
 }
 
 pub(super) async fn ensure_session_execution_lease_tx(

@@ -177,6 +177,9 @@ const RETIRED_GENERATION_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const CONFIG_REVISION_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-127-ebb1defac/postgres-expected.json",
 ];
+const FOLLOW_ON_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-128-8ef0aea502/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -266,7 +269,7 @@ async fn postgres_durable_fixture_reads_with_identical_semantics_when_configured
             .expect("read committed Postgres durable-fixture expectations"),
     )
     .expect("decode committed Postgres durable-fixture expectations");
-    fixture::assert_semantics(&handles, &expected).await;
+    Box::pin(fixture::assert_semantics(&handles, &expected)).await;
     drop(handles);
     storage.pool().close().await;
     drop_fixture_schema(&database_url).await;
@@ -317,7 +320,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 134);
+    assert_eq!(PostgresStorage::schema_version(), 135);
     let fixture_database_url = fixture_database_url(&database_url);
     // The committed dump was captured at the previous component; advance it
     // the way a deployment does (FIG-3816).
@@ -494,6 +497,16 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .execute(&pool)
         .await
         .expect("recreate the process registry from the authoritative DDL");
+    // The recreated clock table drops its seed row; worker opens verify seed
+    // rows now (FIG-3797), so the refresh replays the schema.sql seed.
+    sqlx::query(
+        "INSERT INTO lash_process_change_clock \
+             (singleton, current_seq, tombstone_compaction_horizon) \
+             VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO NOTHING",
+    )
+    .execute(&pool)
+    .await
+    .expect("re-seed the process change clock the registry recreate dropped");
     sqlx::raw_sql(schema_artifact_owner_ddl())
         .execute(&pool)
         .await
@@ -550,7 +563,9 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
              ADD COLUMN IF NOT EXISTS mode TEXT NOT NULL DEFAULT 'immediate',
              ADD COLUMN IF NOT EXISTS intent_revision BIGINT NOT NULL DEFAULT 1;
          ALTER TABLE lash_turn_cancel_requests
-             ALTER COLUMN intent_revision DROP DEFAULT;",
+             ALTER COLUMN intent_revision DROP DEFAULT;
+         ALTER TABLE lash_sessions
+             ADD COLUMN IF NOT EXISTS pending_follow_on_json TEXT;",
     )
     .execute(&pool)
     .await
@@ -602,7 +617,7 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .execute(&pool)
         .await
         .expect("discard an earlier refresh's session ingress");
-    sqlx::raw_sql(schema_table_ddl("lash_session_ingress"))
+    sqlx::raw_sql(schema_session_ingress_ddl())
         .execute(&pool)
         .await
         .expect("create the session ingress from the authoritative DDL");
@@ -618,7 +633,8 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     // Component 128 (FIG-3659) reshapes the parked-turn row and adds the feed
     // clock and event tables. The refusal fixture's park row predates them,
     // so the park catalog is discarded and recreated from the authoritative
-    // DDL; the clock's seed row lands with the opening provision below.
+    // DDL; the clock's seed row is replayed from the schema.sql seed below —
+    // worker opens verify seed rows (FIG-3797) and never provision.
     sqlx::raw_sql(
         "DROP TABLE IF EXISTS lash_turn_parks;
          DROP TABLE IF EXISTS lash_turn_park_clock;
@@ -631,6 +647,13 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
         .execute(&pool)
         .await
         .expect("recreate the turn-park catalog from the authoritative DDL");
+    sqlx::query(
+        "INSERT INTO lash_turn_park_clock (singleton, current_seq, compaction_horizon) \
+             VALUES (TRUE, 0, 0) ON CONFLICT (singleton) DO NOTHING",
+    )
+    .execute(&pool)
+    .await
+    .expect("re-seed the turn-park clock the park-catalog recreate dropped");
     // The enclosing catalog uses the current session-metadata constraints;
     // only the deliberately obsolete checkpoint component remains historical.
     for constraint in
@@ -913,6 +936,21 @@ fn schema_table_ddl(table: &str) -> &'static str {
         .find(';')
         .unwrap_or_else(|| panic!("{table} DDL must end with a semicolon"));
     &statement[..=end]
+}
+
+/// The ingress table plus its three class-level indexes: `schema_table_ddl`
+/// stops at the CREATE TABLE's semicolon, and worker opens no longer backfill
+/// missing objects (FIG-3797), so the refresh must install the indexes itself.
+fn schema_session_ingress_ddl() -> &'static str {
+    let ddl = PostgresStorage::schema_ddl();
+    let start = ddl
+        .find("CREATE TABLE IF NOT EXISTS lash_session_ingress (")
+        .expect("schema DDL must declare the session ingress");
+    let end = ddl[start..]
+        .find("CREATE TABLE IF NOT EXISTS lash_attachment_manifest (")
+        .map(|offset| start + offset)
+        .expect("session-ingress DDL must precede the attachment manifest");
+    &ddl[start..end]
 }
 
 fn schema_process_registry_ddl() -> &'static str {

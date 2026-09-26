@@ -142,6 +142,12 @@ symbols = [
   "QueuedRunMember", "QueuedRunTerminal", "QueuedRunProgress", "QueuedRunCommit",
 ]
 
+# The session head's pending follow-on JSON column (ADR 0101 §3, FIG-3542).
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/store/pending_follow_on.rs"]
+symbols = ["PendingFollowOn"]
+
 [[surface.guard]]
 kind = "rust_items"
 paths = ["crates/lash-sansio/src/effect_identity.rs"]
@@ -266,6 +272,12 @@ symbols = [
   "QueuedRunAdmission", "QueuedRunOrigin", "QueuedRunRequest", "QueuedRunPosition",
   "QueuedRunMember", "QueuedRunTerminal", "QueuedRunProgress", "QueuedRunCommit",
 ]
+
+# The session head's pending follow-on JSON column (ADR 0101 §3, FIG-3542).
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/store/pending_follow_on.rs"]
+symbols = ["PendingFollowOn"]
 
 [[surface.guard]]
 kind = "rust_items"
@@ -1143,6 +1155,11 @@ symbols = [
 kind = "rust_items"
 paths = ["crates/lash-core-store/src/store/runtime_commit_plan.rs"]
 symbols = ["RuntimeCommitReceiptRecord"]
+
+[[surface.guard]]
+kind = "rust_items"
+paths = ["crates/lash-core-store/src/store/pending_follow_on.rs"]
+symbols = ["PendingFollowOn"]
 
 [[surface.guard]]
 kind = "rust_items"

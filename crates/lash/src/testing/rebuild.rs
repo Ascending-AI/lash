@@ -38,7 +38,10 @@ where
 {
     reopen_restores_trigger_registry_state(make().await).await;
     worker_runs_trigger_started_lashlang_process_after_restart(make().await).await;
-    trigger_triggered_process_wake_provenance_survives_restart(make().await).await;
+    Box::pin(trigger_triggered_process_wake_provenance_survives_restart(
+        make().await,
+    ))
+    .await;
     worker_recovers_tool_call_process_in_restarted_session(make().await).await;
     worker_recovers_session_turn_process_in_restarted_session(make().await).await;
 }

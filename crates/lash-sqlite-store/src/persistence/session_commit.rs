@@ -126,6 +126,31 @@ impl SessionCommitStore for Store {
             .map_err(sqlite_error)?
     }
 
+    async fn raise_pending_follow_on_attempts(
+        &self,
+        lease: &SessionExecutionLeaseAuthority,
+        follow_on_turn_id: &lash_core_execution::TurnId,
+    ) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
+        let lease = lease.clone();
+        let follow_on_turn_id = follow_on_turn_id.clone();
+        let now = self.clock.timestamp_ms();
+        self.conn
+            .write_flow(move |tx| {
+                let outcome = super::claim_support::raise_pending_follow_on_conn(
+                    tx,
+                    &lease,
+                    &follow_on_turn_id,
+                    now,
+                );
+                Ok(match outcome {
+                    Ok(raised) => TxOutcome::Commit(Ok(raised)),
+                    Err(error) => TxOutcome::Rollback(Err(error)),
+                })
+            })
+            .await
+            .map_err(sqlite_error)?
+    }
+
     async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
         self.read_session_state_version().await?;
         Store::load_session_head_meta(self).await
@@ -476,10 +501,6 @@ impl SessionCommitStore for Store {
         self.bind_session(&planner.commit().session_id)?;
         let blob_profile = self.options.blob_profile;
         let now = self.clock.timestamp_ms();
-        let enqueue_nonce_start = self.commit_count.fetch_add(
-            planner.commit().enqueued_queue_batches.len() as u64,
-            AtomicOrdering::Relaxed,
-        );
         let result = self
             .conn
             .write_flow(move |tx| {
@@ -760,7 +781,7 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                     }
                                         let queued_admission = if let Some(progress) = &commit.queued_run {
                         let admission = load_run_conn(tx, &commit.session_id, Some(&progress.scope))?.ok_or_else(|| StoreError::QueuedRunConflict { session_id: commit.session_id.clone() })?;
-                        admission.advance(progress, &[])?;
+                        admission.advance(progress)?;
                         let fence = commit.session_execution_lease_fence.as_ref().ok_or_else(|| StoreError::SessionExecutionLeaseExpired { session_id: commit.session_id.clone() })?;
                         validate_run_members_conn(tx, fence, progress)?;
                         Some(admission)
@@ -770,6 +791,9 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                         published_leaf,
                         requested_ancestor_is_active,
                         occupied_node_ids,
+                        existing_pending_follow_on: existing
+                            .as_ref()
+                            .and_then(|meta| meta.pending_follow_on.clone()),
                     })?;
                     let sql_head_revision = sql_monotonic_counter_value(
                         "session_head_revision",
@@ -948,6 +972,9 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                             sql_head_revision,
                             meta.leaf_node_id.as_deref(),
                             meta.checkpoint_ref.as_ref().map(BlobRef::as_str),
+                            lash_core_execution::store::pending_follow_on::encode_pending_follow_on(
+                                meta.pending_follow_on.as_ref(),
+                            )?,
                         ],
                     )
                     .map_err(sqlite_error)?;
@@ -1186,32 +1213,16 @@ if commit.queued_run.is_some() && commit.session_execution_lease_fence.is_none()
                         )
                         .map_err(sqlite_error)?;
                     }
-                    let mut enqueued_queue_batches = Vec::new();
-                    for (index, batch) in commit.enqueued_queue_batches.iter().enumerate() {
-                        let enqueue_nonce = enqueue_nonce_start
-                            .checked_add(index as u64)
-                            .ok_or(StoreError::MonotonicCounterOverflow {
-                                counter: "queued_work_enqueue_sequence",
-                                current: enqueue_nonce_start,
-                            })?;
-                        enqueued_queue_batches.push(enqueue_queued_work_conn(
-                            tx,
-                            batch,
-                            now,
-                            enqueue_nonce,
-                        )?);
-                    }
                     if let (Some(admission), Some(progress)) = (&queued_admission, &commit.queued_run) {
                         if matches!(progress.progress, lash_core_execution::store::QueuedRunProgress::Settle { .. }) {
                     let fence = commit.session_execution_lease_fence.as_ref().ok_or_else(|| StoreError::SessionExecutionLeaseExpired { session_id: commit.session_id.clone() })?;
                     settle_run_members_conn(tx, fence, &progress.scope)?;
                 }
-                write_run_conn(tx, &admission.advance(progress, &enqueued_queue_batches)?, false)?;
+                write_run_conn(tx, &admission.advance(progress)?, false)?;
                     }
                     let mut result = plan.result(
                         stored_checkpoint.checkpoint_ref,
                         stored_checkpoint.manifest,
-                        enqueued_queue_batches,
                     );
                     result.turn_cancel_input_outcome = turn_cancel_input_outcome;
                     {
@@ -1576,6 +1587,13 @@ impl Store {
                         }),
                         None => None,
                     };
+                    // A turn is admitted only while the head owes no follow-on
+                    // (ADR 0101 §3), so an admitted base never carries one.
+                    let pending_follow_on = if base.is_some() {
+                        None
+                    } else {
+                        meta.pending_follow_on.clone()
+                    };
                     let (current_frame_node_id, config) = match leaf_node_id.as_ref() {
                         Some(leaf)
                             if base.is_some() && meta.leaf_node_id.as_ref() != Some(leaf) =>
@@ -1598,6 +1616,7 @@ impl Store {
                         head_revision,
                         config,
                         current_frame_node_id,
+                        pending_follow_on,
                         graph,
                         checkpoint_ref,
                         checkpoint,

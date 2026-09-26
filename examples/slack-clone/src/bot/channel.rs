@@ -872,6 +872,7 @@ impl ChannelBot {
                 | QueuedWorkClaimRefusal::CommandAtHead
                 | QueuedWorkClaimRefusal::DeliveryBoundaryBlocked
                 | QueuedWorkClaimRefusal::HeadWithheld
+                | QueuedWorkClaimRefusal::FollowOnPending
                 | QueuedWorkClaimRefusal::ClaimRaceLost => false,
             },
             EmptyQueuedDrainReason::ExecutionLaneBusy | EmptyQueuedDrainReason::NoDurableQueue => {

@@ -462,6 +462,17 @@ pub(super) fn claim_pending_turn_inputs_sqlite_conn(
     if max_inputs == 0 {
         return Ok(TxOutcome::Commit(None));
     }
+    let follow_on_claim = match &mode {
+        lash_core_execution::TurnInputClaimMode::ActiveTurn { turn_id, .. } => {
+            lash_core_execution::store::FollowOnClaim::Checkpoint { turn_id }
+        }
+        lash_core_execution::TurnInputClaimMode::NextTurn => {
+            lash_core_execution::store::FollowOnClaim::Idle
+        }
+    };
+    if follow_on_blocks_claim_conn(tx, session_id, follow_on_claim)? {
+        return Ok(TxOutcome::Commit(None));
+    }
     let generation = session_execution_lease.fencing_token;
     let candidate_rows = {
         // One named statement per filter shape production takes, picked by an
@@ -689,6 +700,13 @@ pub(super) async fn reclaim_turn_bound_inputs_sqlite(
                     &session_execution_lease,
                     now,
                 )?;
+                if follow_on_blocks_claim_conn(
+                    tx,
+                    &session_id,
+                    lash_core_execution::store::FollowOnClaim::Idle,
+                )? {
+                    return Ok(TxOutcome::Commit(None));
+                }
                 let rows = {
                     let mut stmt = tx
                         .prepare(
@@ -833,6 +851,83 @@ pub(super) fn acquire_session_execution_lease_conn(
         lease_term_ms: lease_ttl_ms,
         expires_at_epoch_ms: expires_at,
     })
+}
+
+/// The follow-on the head of `session_id` owes (ADR 0101 §3), read inside
+/// the caller's transaction.
+pub(super) fn pending_follow_on_conn(
+    conn: &Connection,
+    session_id: &SessionId,
+) -> Result<Option<lash_core_execution::store::PendingFollowOn>, StoreError> {
+    let json = conn
+        .query_row(
+            crate::session_sql::session_sql()
+                .head
+                .select_pending_follow_on
+                .sql(),
+            params![session_id.as_str()],
+            |row| row.get::<_, Option<String>>(0),
+        )
+        .optional()
+        .map_err(sqlite_error)?
+        .flatten();
+    lash_core_execution::store::pending_follow_on::decode_pending_follow_on(
+        session_id,
+        json.as_deref(),
+    )
+}
+
+/// Raise the owed follow-on's recovery count under the live lane `lease`
+/// (ADR 0101 §3), inside the caller's write transaction. The head revision
+/// does not move.
+pub(super) fn raise_pending_follow_on_conn(
+    conn: &Connection,
+    lease: &SessionExecutionLeaseAuthority,
+    follow_on_turn_id: &lash_core_execution::TurnId,
+    now: u64,
+) -> Result<lash_core_execution::store::PendingFollowOn, StoreError> {
+    ensure_session_execution_lease_conn(conn, &lease.session_id, lease, now)?;
+    let not_pending = || StoreError::FollowOnNotPending {
+        session_id: lease.session_id.clone(),
+        follow_on_turn_id: follow_on_turn_id.clone(),
+    };
+    let pending = pending_follow_on_conn(conn, &lease.session_id)?
+        .filter(|pending| pending.is_turn(follow_on_turn_id))
+        .ok_or_else(not_pending)?;
+    let raised = pending.raised()?;
+    let updated = conn
+        .execute(
+            crate::session_sql::session_sql()
+                .head
+                .raise_pending_follow_on
+                .sql(),
+            params![
+                lease.session_id.as_str(),
+                lash_core_execution::store::pending_follow_on::encode_pending_follow_on(Some(
+                    &raised
+                ),)?,
+                follow_on_turn_id.as_str(),
+            ],
+        )
+        .map_err(sqlite_error)?;
+    if updated != 1 {
+        return Err(not_pending());
+    }
+    Ok(raised)
+}
+
+/// Whether the head's pending follow-on refuses `claim` (ADR 0101 §3): every
+/// claim but the follow-on's own is blocked while it is set.
+pub(super) fn follow_on_blocks_claim_conn(
+    conn: &Connection,
+    session_id: &SessionId,
+    claim: lash_core_execution::store::FollowOnClaim<'_>,
+) -> Result<bool, StoreError> {
+    Ok(lash_core_execution::store::follow_on_blocks_claim(
+        pending_follow_on_conn(conn, session_id)?.as_ref(),
+        claim,
+    )
+    .is_some())
 }
 
 pub(super) fn ensure_session_execution_lease_conn(

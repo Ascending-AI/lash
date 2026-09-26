@@ -13,7 +13,7 @@ use lash::durability::RuntimeHostConfig;
 use lash::messages::MessageRole;
 use lash::persistence::{
     CheckpointKind, GcReport, GraphAppend, LeaseClaimNonce, LeaseOwnerIdentity, MaintenanceFailure,
-    MaintenanceRefusal, MaintenanceResult, OperationId, OrphanedTurnInputScope,
+    MaintenanceRefusal, MaintenanceResult, OperationId, OrphanedTurnInputScope, PendingFollowOn,
     PendingTurnInputDraft, PersistedSessionConfig, PersistedSessionRead, QueuedWorkBatch,
     QueuedWorkBatchDraft, QueuedWorkClaim, QueuedWorkClaimBoundary, QueuedWorkClaimOutcome,
     QueuedWorkClaimPolicy, QueuedWorkEnqueueOutcome, QueuedWorkStore, RealizedNodeTimestamp,
@@ -56,6 +56,17 @@ impl SessionCommitStore for FacadeStore {
         Ok(None)
     }
 
+    async fn raise_pending_follow_on_attempts(
+        &self,
+        _lease: &SessionExecutionLeaseAuthority,
+        follow_on_turn_id: &TurnId,
+    ) -> Result<PendingFollowOn, StoreError> {
+        Err(StoreError::FollowOnNotPending {
+            session_id: SessionId::from("facade"),
+            follow_on_turn_id: follow_on_turn_id.clone(),
+        })
+    }
+
     async fn load_session_head_meta(&self) -> Result<Option<SessionHeadMeta>, StoreError> {
         Ok(None)
     }
@@ -90,7 +101,7 @@ impl SessionCommitStore for FacadeStore {
                 .map(|delta| delta.identity.clone())
                 .collect(),
             failure_evidence: commit.failure_evidence.clone(),
-            enqueued_queue_batches: Vec::new(),
+            pending_follow_on: None,
             turn_input_applications: Vec::new(),
             turn_cancel_input_outcome: Default::default(),
             receipt_replayed: false,
@@ -470,7 +481,7 @@ fn persistence_types_are_nameable(
         completed_queue_claims: Vec::new(),
         completed_turn_input_claims: Vec::new(),
         undelivered_turn_input_claims: Vec::new(),
-        enqueued_queue_batches: Vec::new(),
+        pending_follow_on: None,
         interrupted_turn_input_turn_id: None,
         interrupted_turn_input_cancellation: None,
         interrupted_turn_cancel_intent: None,

@@ -46,6 +46,9 @@ pub struct FreshRuntimeCommitFacts {
     /// Incoming node ids already occupied in durable history, including
     /// tombstoned rows.
     pub occupied_node_ids: HashSet<crate::NodeId>,
+    /// The follow-on the head owes, read under the same authority as
+    /// `actual_head_revision` (ADR 0101 §3).
+    pub existing_pending_follow_on: Option<super::PendingFollowOn>,
 }
 
 /// The previously published leaf observed under commit authority.
@@ -363,17 +366,18 @@ impl RuntimeCommitPlanner {
                 });
             }
         }
-        for batch in &self.commit.enqueued_queue_batches {
-            if batch.session_id != self.commit.session_id {
-                return Err(StoreError::SessionBindingMismatch {
-                    bound_session_id: self.commit.session_id.clone(),
-                    attempted_session_id: batch.session_id.clone(),
-                });
-            }
-            batch
-                .validate_process_wake_source()
-                .map_err(StoreError::Backend)?;
-        }
+        let derived_frame = derived_frame_node_id
+            .clone()
+            .map(crate::FrameNodeId::new)
+            .transpose()
+            .map_err(|error| StoreError::Backend(error.to_string()))?;
+        super::validate_follow_on_head_write(
+            &self.commit.session_id,
+            facts.existing_pending_follow_on.as_ref(),
+            &self.commit.turn_commit.operation,
+            self.commit.pending_follow_on.as_ref(),
+            derived_frame.as_ref(),
+        )?;
 
         let next_head_revision = StoreError::checked_monotonic_increment(
             "session_head_revision",
@@ -458,15 +462,15 @@ impl<'a> RuntimeCommitPlan<'a> {
             }),
             checkpoint_ref: Some(checkpoint_ref),
             leaf_node_id: self.committed_leaf_node_id.clone(),
+            pending_follow_on: self.commit.pending_follow_on.clone(),
         }
     }
 
-    /// Construct the canonical result after backend writes and enqueues finish.
+    /// Construct the canonical result after backend writes finish.
     pub fn result(
         &self,
         checkpoint_ref: BlobRef,
         manifest: SessionCheckpoint,
-        enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
     ) -> RuntimeCommitReceipt {
         RuntimeCommitReceipt {
             schema_version: super::RUNTIME_COMMIT_RECEIPT_SCHEMA_VERSION,
@@ -477,7 +481,7 @@ impl<'a> RuntimeCommitPlan<'a> {
             realized_node_timestamps: self.realized_node_timestamps.clone(),
             committed_usage_delta_identities: self.committed_usage_delta_identities.clone(),
             failure_evidence: self.commit.failure_evidence.clone(),
-            enqueued_queue_batches,
+            pending_follow_on: self.commit.pending_follow_on.clone(),
             turn_input_applications: self.turn_input_applications.clone(),
             turn_cancel_input_outcome: crate::TurnCancelInputOutcome::default(),
             receipt_replayed: false,
@@ -649,6 +653,7 @@ mod tests {
             published_leaf: PublishedLeafFacts::Absent,
             requested_ancestor_is_active: true,
             occupied_node_ids: HashSet::new(),
+            existing_pending_follow_on: None,
         }) {
             Ok(_) => panic!("exhausted head revision must refuse"),
             Err(error) => error,
@@ -678,6 +683,7 @@ mod tests {
             },
             requested_ancestor_is_active: true,
             occupied_node_ids: HashSet::new(),
+            existing_pending_follow_on: None,
         });
         assert!(
             matches!(result, Err(StoreError::InvalidGraphLeaf { leaf_node_id: Some(id) }) if id == "retired-parent")

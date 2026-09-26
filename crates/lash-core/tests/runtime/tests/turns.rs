@@ -553,6 +553,7 @@ mod config_patches;
 mod drain_and_recovery;
 mod drop_cancel_owner_failure;
 mod effects_and_queue;
+mod follow_on;
 mod lease_and_claims;
 mod turn_lifecycle;
 

@@ -9,7 +9,6 @@
 //! corpora in this module pin the exact bytes.
 
 use super::*;
-use crate::ProcessId;
 use crate::SessionId;
 use crate::TurnId;
 
@@ -668,6 +667,7 @@ mod commit_identity_effect_tests;
 #[allow(clippy::disallowed_methods)] // FIG-2971: test module is a host; ambient fs/env/process access is sanctioned
 mod append_request_identity_tests {
     use super::*;
+    use crate::ProcessId;
 
     fn operation(id: &str) -> OperationId {
         OperationId::new(
@@ -1224,7 +1224,10 @@ struct RuntimeCommitIntent<'a> {
     /// disposition (FIG-3531). Absent from every other commit's identity.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     undelivered_turn_inputs: Vec<&'a crate::InputId>,
-    enqueued_queue_batches: Vec<QueuedBatchIntent<'a>>,
+    /// The follow-on the head owes after this commit (ADR 0101 §3). Absent
+    /// from every commit that leaves the head owing nothing.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pending_follow_on: Option<&'a super::PendingFollowOn>,
     interrupted_turn_input_turn_id: Option<&'a TurnId>,
     #[serde(skip_serializing_if = "Option::is_none")]
     interrupted_turn_input_cancellation: Option<&'a crate::TurnCancellationEvidence>,
@@ -1281,11 +1284,7 @@ impl<'a> From<&'a RuntimeCommit> for RuntimeCommitIntent<'a> {
                 .iter()
                 .flat_map(|claim| claim.inputs.iter().map(|input| &input.input_id))
                 .collect(),
-            enqueued_queue_batches: commit
-                .enqueued_queue_batches
-                .iter()
-                .map(QueuedBatchIntent::from)
-                .collect(),
+            pending_follow_on: commit.pending_follow_on.as_ref(),
             interrupted_turn_input_turn_id: commit.interrupted_turn_input_turn_id.as_ref(),
             interrupted_turn_input_cancellation: commit
                 .interrupted_turn_input_cancellation
@@ -1392,87 +1391,6 @@ impl<'a> From<&'a crate::TurnInputCompletion> for CompletedTurnInputIntent<'a> {
             session_id: &completion.session_id,
             input_ids: &completion.input_ids,
             applications: &completion.applications,
-        }
-    }
-}
-
-#[derive(serde::Serialize)]
-struct QueuedBatchIntent<'a> {
-    session_id: &'a SessionId,
-    source_key: Option<&'a str>,
-    delivery_policy: &'a crate::DeliveryPolicy,
-    kind: crate::QueuedWorkKind,
-    authority: &'a crate::QueuedWorkAuthority,
-    merge_key: Option<&'a str>,
-    payloads: Vec<QueuedPayloadIntent<'a>>,
-}
-
-impl<'a> From<&'a crate::QueuedWorkBatchDraft> for QueuedBatchIntent<'a> {
-    fn from(batch: &'a crate::QueuedWorkBatchDraft) -> Self {
-        Self {
-            session_id: &batch.session_id,
-            source_key: batch.source_key.as_deref(),
-            delivery_policy: &batch.delivery_policy,
-            kind: batch.kind(),
-            authority: &batch.authority,
-            merge_key: batch.merge_key.as_deref(),
-            payloads: batch
-                .payloads
-                .iter()
-                .map(QueuedPayloadIntent::from)
-                .collect(),
-        }
-    }
-}
-
-#[derive(serde::Serialize)]
-#[serde(tag = "type", rename_all = "snake_case")]
-enum QueuedPayloadIntent<'a> {
-    ProcessWake {
-        wake_id: &'a str,
-        target_session_id: &'a SessionId,
-        process_id: &'a ProcessId,
-        sequence: u64,
-        event_type: &'a str,
-        event_invocation: &'a crate::RuntimeInvocation,
-        process_caused_by: &'a Option<crate::CausalRef>,
-        input: &'a str,
-    },
-    AgentFrameTask {
-        frame_id: &'a str,
-        task: &'a str,
-        protocol_turn_options: &'a Option<crate::ProtocolTurnOptions>,
-    },
-    SessionCommand {
-        command: &'a crate::SessionCommand,
-    },
-}
-
-impl<'a> From<&'a crate::QueuedWorkPayload> for QueuedPayloadIntent<'a> {
-    fn from(payload: &'a crate::QueuedWorkPayload) -> Self {
-        match payload {
-            crate::QueuedWorkPayload::ProcessWake { wake } => Self::ProcessWake {
-                wake_id: &wake.wake_id,
-                target_session_id: &wake.target_session_id,
-                process_id: &wake.process_id,
-                sequence: wake.sequence,
-                event_type: &wake.event_type,
-                event_invocation: &wake.event_invocation,
-                process_caused_by: &wake.process_caused_by,
-                input: &wake.input,
-            },
-            crate::QueuedWorkPayload::AgentFrameTask {
-                frame_id,
-                task,
-                protocol_turn_options,
-            } => Self::AgentFrameTask {
-                frame_id,
-                task,
-                protocol_turn_options,
-            },
-            crate::QueuedWorkPayload::SessionCommand { command } => {
-                Self::SessionCommand { command }
-            }
         }
     }
 }

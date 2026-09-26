@@ -2722,6 +2722,32 @@ and this statement exists once per backend by construction.
 """
 
 [[dialect_only]]
+statement = "session_head.select_pending_follow_on"
+backends = ["sqlite"]
+kind = "head table differs"
+reason = """
+The durable head table is `session_head` on SQLite and `sessions` on
+PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
+and this statement exists once per backend by construction.
+Every claim reads the head's pending follow-on (ADR 0101 §3) inside its own
+`BEGIN IMMEDIATE` transaction, which already serializes it against the head
+commit, so it takes no lock of its own.
+"""
+
+[[dialect_only]]
+statement = "session_head.raise_pending_follow_on"
+backends = ["sqlite"]
+kind = "head table differs; json_extract"
+reason = """
+The durable head table is `session_head` on SQLite and `sessions` on
+PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
+and this statement exists once per backend by construction.
+The raise is conditional on the fact still naming the recovered follow-on, read
+with SQLite's `json_extract`; PostgreSQL spells the same predicate with its
+`jsonb` operator.
+"""
+
+[[dialect_only]]
 statement = "session_head.upsert"
 backends = ["sqlite"]
 kind = "head table differs"
@@ -3061,6 +3087,45 @@ reason = """
 The durable head table is `session_head` on SQLite and `sessions` on
 PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
 and this statement exists once per backend by construction.
+"""
+
+[[dialect_only]]
+statement = "sessions.select_pending_follow_on_for_share"
+backends = ["postgres"]
+kind = "head table differs; FOR SHARE"
+reason = """
+The durable head table is `session_head` on SQLite and `sessions` on
+PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
+and this statement exists once per backend by construction.
+A claim reads the head's pending follow-on (ADR 0101 §3) under a share lock so a
+head commit or a recovery raise cannot move it under the claim's
+`READ COMMITTED` transaction; SQLite's claim transaction is already the
+database-wide writer.
+"""
+
+[[dialect_only]]
+statement = "sessions.select_pending_follow_on_for_update"
+backends = ["postgres"]
+kind = "head table differs; FOR UPDATE"
+reason = """
+The durable head table is `session_head` on SQLite and `sessions` on
+PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
+and this statement exists once per backend by construction.
+The head commit and the recovery raise decide against the pending follow-on
+under the row lock; SQLite holds the database-wide writer instead.
+"""
+
+[[dialect_only]]
+statement = "sessions.raise_pending_follow_on"
+backends = ["postgres"]
+kind = "head table differs; jsonb operator"
+reason = """
+The durable head table is `session_head` on SQLite and `sessions` on
+PostgreSQL; ADR 0098 freezes both names, so the table name itself is the fork
+and this statement exists once per backend by construction.
+The raise is conditional on the fact still naming the recovered follow-on, read
+with PostgreSQL's `jsonb` operator; SQLite spells the same predicate with
+`json_extract`.
 """
 
 [[dialect_only]]

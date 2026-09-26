@@ -1013,6 +1013,7 @@ async fn rejected_refresh_does_not_retain_stale_checkpoint_components() {
             head_revision: runtime.state.head_revision + 1,
             config,
             current_frame_node_id: replacement.current_frame_node_id.clone(),
+            pending_follow_on: None,
             graph: replacement.session_graph.clone(),
             checkpoint_ref: Some("new-checkpoint".to_string().into()),
             checkpoint: Some(checkpoint),

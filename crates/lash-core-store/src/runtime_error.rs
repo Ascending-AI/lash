@@ -83,6 +83,9 @@ pub enum RuntimeErrorCode {
     QueuedRunFailed,
     /// Restore the admitted configuration or explicitly abandon this run.
     QueuedRunConfigurationChanged,
+    /// A pending follow-on owns the session (ADR 0101 §3): the commit or
+    /// frame change is refused until the follow-on's own terminal commit.
+    FollowOnPending,
     /// The final runtime commit lost the session-head compare-and-swap to a
     /// newer commit. Nothing from the losing commit was published, but the
     /// identical stale commit is not safe to retry: reload the durable head and
@@ -497,6 +500,11 @@ pub fn runtime_error_from_store_commit(err: crate::store::StoreError) -> Runtime
             err.to_string(),
         )
         .with_session_state_version_refusal(SessionStateVersionRefusal { found, current }),
+        ref err @ (crate::store::StoreError::FollowOnPending { .. }
+        | crate::store::StoreError::FollowOnFrameNotCurrent { .. }
+        | crate::store::StoreError::FollowOnNotPending { .. }) => {
+            RuntimeError::new(RuntimeErrorCode::FollowOnPending, err.to_string())
+        }
         crate::store::StoreError::QueuedRunConfigurationChanged { session_id } => {
             RuntimeError::new(
                 RuntimeErrorCode::QueuedRunConfigurationChanged,
@@ -532,6 +540,7 @@ impl RuntimeErrorCode {
             Self::QueuedRunPending => "queued_run_pending",
             Self::QueuedRunFailed => "queued_run_failed",
             Self::QueuedRunConfigurationChanged => "queued_run_configuration_changed",
+            Self::FollowOnPending => "follow_on_pending",
             Self::StoreCommitSuperseded => "store_commit_superseded",
             Self::SessionDeleted => "session_deleted",
             Self::SessionCatalogLookupUnsupported => "session_catalog_lookup_unsupported",
@@ -794,6 +803,7 @@ impl RuntimeErrorCode {
         Self::QueuedRunPending,
         Self::QueuedRunFailed,
         Self::QueuedRunConfigurationChanged,
+        Self::FollowOnPending,
         Self::StoreCommitSuperseded,
         Self::SessionDeleted,
         Self::SessionCatalogLookupUnsupported,
@@ -986,6 +996,7 @@ impl RuntimeErrorCode {
             "queued_run_pending" => Self::QueuedRunPending,
             "queued_run_failed" => Self::QueuedRunFailed,
             "queued_run_configuration_changed" => Self::QueuedRunConfigurationChanged,
+            "follow_on_pending" => Self::FollowOnPending,
             "store_commit_superseded" => Self::StoreCommitSuperseded,
             "session_deleted" => Self::SessionDeleted,
             "session_catalog_lookup_unsupported" => Self::SessionCatalogLookupUnsupported,

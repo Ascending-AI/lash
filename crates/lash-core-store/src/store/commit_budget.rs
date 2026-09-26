@@ -70,7 +70,7 @@ pub struct RuntimeCommitBudgetMeasurement {
     pub graph_delta_bytes: usize,
     pub checkpoint_bytes: usize,
     pub attachment_manifest_bytes: usize,
-    pub queue_batch_bytes: usize,
+    pub follow_on_bytes: usize,
     pub agent_frame_bytes: usize,
     pub usage_delta_bytes: usize,
     pub turn_result_bytes: usize,
@@ -204,7 +204,7 @@ impl RuntimeCommit {
                 graph_delta_bytes = measurement.graph_delta_bytes,
                 checkpoint_bytes = measurement.checkpoint_bytes,
                 attachment_manifest_bytes = measurement.attachment_manifest_bytes,
-                queue_batch_bytes = measurement.queue_batch_bytes,
+                follow_on_bytes = measurement.follow_on_bytes,
                 agent_frame_bytes = measurement.agent_frame_bytes,
                 usage_delta_bytes = measurement.usage_delta_bytes,
                 turn_result_bytes = measurement.turn_result_bytes,
@@ -218,7 +218,7 @@ impl RuntimeCommit {
                 graph_delta_bytes: measurement.graph_delta_bytes,
                 checkpoint_bytes: measurement.checkpoint_bytes,
                 attachment_manifest_bytes: measurement.attachment_manifest_bytes,
-                queue_batch_bytes: measurement.queue_batch_bytes,
+                follow_on_bytes: measurement.follow_on_bytes,
                 agent_frame_bytes: measurement.agent_frame_bytes,
                 usage_delta_bytes: measurement.usage_delta_bytes,
                 turn_result_bytes: measurement.turn_result_bytes,
@@ -237,7 +237,7 @@ impl RuntimeCommit {
             graph_delta_bytes = measurement.graph_delta_bytes,
             checkpoint_bytes = measurement.checkpoint_bytes,
             attachment_manifest_bytes = measurement.attachment_manifest_bytes,
-            queue_batch_bytes = measurement.queue_batch_bytes,
+            follow_on_bytes = measurement.follow_on_bytes,
             agent_frame_bytes = measurement.agent_frame_bytes,
             usage_delta_bytes = measurement.usage_delta_bytes,
             turn_result_bytes = measurement.turn_result_bytes,
@@ -282,12 +282,12 @@ impl RuntimeCommit {
             .committed_attachment_ids
             .iter()
             .fold(0usize, |total, id| total.saturating_add(id.as_str().len()));
-        let queue_batch_bytes = self.enqueued_queue_batches.iter().try_fold(
-            0usize,
-            |total, batch| -> Result<usize, StoreError> {
-                Ok(total.saturating_add(measure_json(serde_json::to_vec(batch))?))
-            },
-        )?;
+        let follow_on_bytes = self
+            .pending_follow_on
+            .as_ref()
+            .map(|pending| measure_json(serde_json::to_vec(pending)))
+            .transpose()?
+            .unwrap_or_default();
         let agent_frame_bytes = self
             .current_frame_node_id
             .as_ref()
@@ -305,7 +305,7 @@ impl RuntimeCommit {
             .saturating_add(graph_delta_bytes)
             .saturating_add(checkpoint_bytes)
             .saturating_add(attachment_manifest_bytes)
-            .saturating_add(queue_batch_bytes)
+            .saturating_add(follow_on_bytes)
             .saturating_add(agent_frame_bytes)
             .saturating_add(usage_delta_bytes)
             .saturating_add(turn_result_bytes);
@@ -320,7 +320,7 @@ impl RuntimeCommit {
             graph_delta_bytes,
             checkpoint_bytes,
             attachment_manifest_bytes,
-            queue_batch_bytes,
+            follow_on_bytes,
             agent_frame_bytes,
             usage_delta_bytes,
             turn_result_bytes,
@@ -466,7 +466,7 @@ mod tests {
                 graph_delta_bytes,
                 checkpoint_bytes,
                 attachment_manifest_bytes,
-                queue_batch_bytes,
+                follow_on_bytes,
                 agent_frame_bytes,
                 usage_delta_bytes,
                 turn_result_bytes,
@@ -476,7 +476,7 @@ mod tests {
                 && graph_delta_bytes == expected_graph_bytes
                 && checkpoint_bytes == expected_checkpoint_bytes
                 && attachment_manifest_bytes == expected_attachment_bytes
-                && queue_batch_bytes == 0
+                && follow_on_bytes == 0
                 && agent_frame_bytes == 0
                 && usage_delta_bytes == 0
                 && turn_result_bytes > 0
@@ -519,10 +519,10 @@ mod tests {
     }
 
     #[test]
-    fn queue_batch_bytes_can_exceed_the_commit_budget_alone() {
+    fn follow_on_bytes_can_exceed_the_commit_budget_alone() {
         const BYTE_LIMIT: usize = 2_048;
         let state = crate::RuntimeSessionState {
-            session_id: SessionId::from("budget-queue-batch"),
+            session_id: SessionId::from("budget-follow-on"),
             ..crate::RuntimeSessionState::new(crate::SessionPolicy::new(
                 crate::TurnBudget::Unbounded,
             ))
@@ -534,17 +534,16 @@ mod tests {
         let mut commit = RuntimeCommit::persisted_state_for_test_with_budget(&state, &[], budget);
         commit
             .validate_budget()
-            .expect("the commit without a queue batch must fit");
+            .expect("the commit without a pending follow-on must fit");
 
-        commit.enqueued_queue_batches = vec![crate::QueuedWorkBatchDraft::new(
-            state.session_id.clone(),
-            crate::DeliveryPolicy::AfterCurrentTurnCommit,
-            crate::TurnWorkPayload::agent_frame_task(
-                crate::session_graph::frame_node_id(&state.session_id, "oversized-queue-batch"),
-                "q".repeat(BYTE_LIMIT * 2),
-                None,
-            ),
-        )];
+        commit.pending_follow_on = Some(crate::store::PendingFollowOn {
+            follow_on_turn_id: crate::TurnId::from("budget:agent-frame:1"),
+            frame_id: crate::session_graph::frame_node_id(&state.session_id, "budget-frame"),
+            task: "q".repeat(BYTE_LIMIT * 2),
+            options: None,
+            chain_depth: 1,
+            attempts: 0,
+        });
 
         assert!(matches!(
             commit.validate_budget(),
@@ -685,15 +684,14 @@ mod tests {
         commit.committed_attachment_ids = vec![
             crate::AttachmentId::parse("all-families-attachment").expect("valid attachment id"),
         ];
-        commit.enqueued_queue_batches = vec![crate::QueuedWorkBatchDraft::new(
-            state.session_id.clone(),
-            crate::DeliveryPolicy::AfterCurrentTurnCommit,
-            crate::TurnWorkPayload::agent_frame_task(
-                crate::session_graph::frame_node_id(&state.session_id, "all-families-follow-up"),
-                "follow-up",
-                None,
-            ),
-        )];
+        commit.pending_follow_on = Some(crate::store::PendingFollowOn {
+            follow_on_turn_id: crate::TurnId::from("budget:agent-frame:1"),
+            frame_id: crate::session_graph::frame_node_id(&state.session_id, "budget-frame"),
+            task: "follow-up".to_string(),
+            options: None,
+            chain_depth: 1,
+            attempts: 0,
+        });
 
         commit
             .validate_budget()
@@ -705,7 +703,7 @@ mod tests {
         assert!(measurement.graph_delta_bytes > 0);
         assert!(measurement.checkpoint_bytes > 0);
         assert!(measurement.attachment_manifest_bytes > 0);
-        assert!(measurement.queue_batch_bytes > 0);
+        assert!(measurement.follow_on_bytes > 0);
         assert!(measurement.agent_frame_bytes > 0);
         assert!(measurement.usage_delta_bytes > 0);
         assert!(measurement.turn_result_bytes > 0);

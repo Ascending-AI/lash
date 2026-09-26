@@ -17,11 +17,9 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use lash_core_execution::runtime::{
-    QueuedWorkBatchDraft, QueuedWorkClaimBoundary, TurnWorkPayload,
-};
+use lash_core_execution::runtime::{QueuedWorkClaimBoundary, process_wake_batch_draft};
 use lash_core_execution::{
-    DeliveryPolicy, LeaseOwnerIdentity, QueuedWorkStore, SessionExecutionLeaseStore, StoreError,
+    LeaseOwnerIdentity, QueuedWorkStore, SessionExecutionLeaseStore, StoreError,
 };
 use lash_postgres_store::{
     ColumnValueSource, ForeignKeyAction, PostgresStorage, PostgresStoreConfig,
@@ -1917,6 +1915,36 @@ async fn fig2837_required_constraint_inspection_preserves_quoted_identifier_iden
     scratch.cleanup().await;
 }
 
+fn corruption_fixture_wake(
+    session_id: &SessionId,
+    case: &str,
+) -> lash_core_execution::ProcessWakeDelivery {
+    let process_id = || lash_core_execution::ProcessId::from(format!("corrupt-process-{case}"));
+    lash_core_execution::ProcessWakeDelivery {
+        version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
+        wake_id: format!("corrupt-wake-{case}"),
+        target_session_id: session_id.clone(),
+        process_id: process_id(),
+        process_incarnation: lash_core_execution::ProcessIncarnation::from_registration_sequence(1),
+        sequence: 1,
+        event_type: "process.wake".to_string(),
+        event_invocation: lash_core_execution::RuntimeInvocation {
+            attribution: lash_core_execution::RuntimeAttribution::for_session(session_id.clone()),
+            subject: lash_core_execution::runtime::RuntimeSubject::ProcessEvent {
+                process_id: process_id(),
+                sequence: 1,
+                event_type: "process.wake".to_string(),
+            },
+            caused_by: None,
+            replay: None,
+        },
+        process_caused_by: None,
+        authority: lash_core_execution::QueuedWorkAuthority::default(),
+        input: case.to_string(),
+        created_at_ms: 1,
+    }
+}
+
 #[tokio::test]
 async fn fig2837_corrupt_queued_predecessor_pair_is_typed_and_claim_update_rolls_back() {
     let Some(database_url) = database_url() else {
@@ -1943,21 +1971,10 @@ async fn fig2837_corrupt_queued_predecessor_pair_is_typed_and_claim_update_rolls
         let session_id = SessionId::from(format!("corrupt-predecessor-{case}"));
         let store = storage.session_store(session_id.clone());
         let queued = store
-            .enqueue_queued_work(
-                QueuedWorkBatchDraft::new(
-                    &session_id,
-                    DeliveryPolicy::EarliestSafeBoundary,
-                    TurnWorkPayload::agent_frame_task(
-                        lash_core_execution::session_graph::frame_node_id(
-                            &session_id,
-                            &format!("frame:{case}"),
-                        ),
-                        case,
-                        None,
-                    ),
-                )
-                .with_source_key(format!("corrupt:{case}")),
-            )
+            .enqueue_queued_work(process_wake_batch_draft(corruption_fixture_wake(
+                &session_id,
+                case,
+            )))
             .await
             .expect("enqueue corruption fixture");
         sqlx::query(

@@ -162,6 +162,7 @@ impl SnapshotStore {
                 head_revision: 7,
                 config,
                 current_frame_node_id: state.current_frame_node_id,
+                pending_follow_on: None,
                 graph: state.session_graph,
                 checkpoint_ref: None,
                 checkpoint: Some(lash_core::store::HydratedSessionCheckpoint {
@@ -207,6 +208,17 @@ lash_core::impl_noop_attachment_manifest!(SnapshotStore);
 
 #[async_trait]
 impl lash_core::SessionCommitStore for SnapshotStore {
+    async fn raise_pending_follow_on_attempts(
+        &self,
+        lease: &lash_core::SessionExecutionLeaseAuthority,
+        follow_on_turn_id: &lash_core::TurnId,
+    ) -> std::result::Result<lash_core::store::PendingFollowOn, lash_core::store::StoreError> {
+        Err(lash_core::store::StoreError::FollowOnNotPending {
+            session_id: lease.session_id.clone(),
+            follow_on_turn_id: follow_on_turn_id.clone(),
+        })
+    }
+
     async fn admit_and_bind_session(
         &self,
         binding: &lash_core::SessionBinding,
@@ -385,6 +397,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             head_revision: next_head_revision,
             config: commit.config,
             current_frame_node_id: commit.current_frame_node_id,
+            pending_follow_on: None,
             graph,
             checkpoint_ref: Some(lash_core::BlobRef("checkpoint".to_string())),
             checkpoint: Some(commit.checkpoint),
@@ -404,7 +417,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
                 .map(|delta| delta.identity.clone())
                 .collect(),
             failure_evidence: commit.failure_evidence.clone(),
-            enqueued_queue_batches: Vec::new(),
+            pending_follow_on: None,
             turn_input_applications: Vec::new(),
             turn_cancel_input_outcome: Default::default(),
             receipt_replayed: false,
@@ -932,6 +945,17 @@ lash_core::impl_noop_attachment_manifest!(BoundSessionStore);
 
 #[async_trait]
 impl lash_core::SessionCommitStore for BoundSessionStore {
+    async fn raise_pending_follow_on_attempts(
+        &self,
+        lease: &lash_core::SessionExecutionLeaseAuthority,
+        follow_on_turn_id: &lash_core::TurnId,
+    ) -> std::result::Result<lash_core::store::PendingFollowOn, lash_core::store::StoreError> {
+        Err(lash_core::store::StoreError::FollowOnNotPending {
+            session_id: lease.session_id.clone(),
+            follow_on_turn_id: follow_on_turn_id.clone(),
+        })
+    }
+
     async fn admit_and_bind_session(
         &self,
         binding: &lash_core::SessionBinding,

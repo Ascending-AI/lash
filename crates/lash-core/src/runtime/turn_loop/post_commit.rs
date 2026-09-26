@@ -10,7 +10,6 @@ use crate::TurnId;
 pub(super) struct PostCommitDelivery {
     pub(super) turn: AssembledTurn,
     pub(super) events: Vec<SessionStreamEvent>,
-    pub(super) enqueued_queue_batches: Vec<crate::QueuedWorkBatch>,
     pub(super) post_commit_delivery_failed: bool,
 }
 

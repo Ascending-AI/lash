@@ -103,10 +103,21 @@ mod tests {
                     .map(|delta| delta.identity.clone())
                     .collect(),
                 failure_evidence: commit.failure_evidence.clone(),
-                enqueued_queue_batches: Vec::new(),
+                pending_follow_on: None,
                 turn_input_applications: Vec::new(),
                 turn_cancel_input_outcome: crate::TurnCancelInputOutcome::default(),
                 receipt_replayed: self.replayed,
+            })
+        }
+
+        async fn raise_pending_follow_on_attempts(
+            &self,
+            lease: &super::super::SessionExecutionLeaseAuthority,
+            follow_on_turn_id: &crate::TurnId,
+        ) -> Result<super::super::PendingFollowOn, StoreError> {
+            Err(StoreError::FollowOnNotPending {
+                session_id: lease.session_id.clone(),
+                follow_on_turn_id: follow_on_turn_id.clone(),
             })
         }
 

@@ -4,7 +4,7 @@
 //! session-command family that rides in them. The runtime's queue driver
 //! stays in `lash-core`; only the data it persists lives here.
 
-use crate::{ProcessId, ProcessWakeDelivery, QueuedWorkClass, SessionId, TurnCause, TurnInput};
+use crate::{ProcessId, ProcessWakeDelivery, QueuedWorkClass, SessionId, TurnCause};
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -262,18 +262,8 @@ pub struct QueuedWorkClaimPolicy {
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize, schemars::JsonSchema)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum QueuedWorkPayload {
-    ProcessWake {
-        wake: Box<ProcessWakeDelivery>,
-    },
-    AgentFrameTask {
-        frame_id: crate::FrameNodeId,
-        task: String,
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        protocol_turn_options: Option<crate::ProtocolTurnOptions>,
-    },
-    SessionCommand {
-        command: Box<SessionCommand>,
-    },
+    ProcessWake { wake: Box<ProcessWakeDelivery> },
+    SessionCommand { command: Box<SessionCommand> },
 }
 impl QueuedWorkPayload {
     pub fn process_wake(wake: ProcessWakeDelivery) -> Self {
@@ -288,22 +278,10 @@ impl QueuedWorkPayload {
         }
     }
 
-    pub fn agent_frame_task(
-        frame_id: crate::FrameNodeId,
-        task: impl Into<String>,
-        protocol_turn_options: Option<crate::ProtocolTurnOptions>,
-    ) -> Self {
-        Self::AgentFrameTask {
-            frame_id,
-            task: task.into(),
-            protocol_turn_options,
-        }
-    }
-
     pub fn work_class(&self) -> QueuedWorkClass {
         match self {
             Self::SessionCommand { .. } => QueuedWorkClass::SessionCommand,
-            Self::ProcessWake { .. } | Self::AgentFrameTask { .. } => QueuedWorkClass::TurnWork,
+            Self::ProcessWake { .. } => QueuedWorkClass::TurnWork,
         }
     }
 }
@@ -558,7 +536,6 @@ impl crate::WorkClaim<QueuedWorkClaimData> {
                     QueuedWorkPayload::ProcessWake { wake } => {
                         turn_causes.push(crate::process_wake_turn_cause(wake));
                     }
-                    QueuedWorkPayload::AgentFrameTask { .. } => {}
                     QueuedWorkPayload::SessionCommand { .. } => {}
                 }
             }
@@ -598,35 +575,6 @@ impl crate::WorkClaim<QueuedWorkClaimData> {
             commands.push((batch, command.as_ref()));
         }
         (!commands.is_empty()).then_some(commands)
-    }
-
-    /// Materializes turn-producing input from a claim for queued-work driver implementors.
-    pub fn materialize_queued_turn_work(&self) -> QueuedTurnWork {
-        let checkpoint = self.materialize_queued_checkpoint_work();
-        let mut input_items = Vec::new();
-        let mut selected_turn_options = None;
-        for batch in &self.batches {
-            for item in &batch.items {
-                if let QueuedWorkPayload::AgentFrameTask {
-                    task,
-                    protocol_turn_options: task_options,
-                    ..
-                } = &item.payload
-                {
-                    input_items.push(crate::InputItem::text(task.clone()));
-                    // A producer choosing one merge key asserts that these
-                    // events may share a turn. Preserve every task in order;
-                    // the last event retains the former option precedence.
-                    selected_turn_options = task_options.clone();
-                }
-            }
-        }
-        let mut input = TurnInput::items(input_items);
-        input.protocol_turn_options = selected_turn_options;
-        QueuedTurnWork {
-            input,
-            turn_causes: checkpoint.turn_causes,
-        }
     }
 }
 impl From<SessionCommand> for SessionCommandPayload {
@@ -787,11 +735,6 @@ struct QueuedWorkDraftWire {
     payloads: QueuedWorkBatchPayloads,
 }
 
-#[derive(Clone, Debug)]
-pub struct QueuedTurnWork {
-    pub input: TurnInput,
-    pub turn_causes: Vec<TurnCause>,
-}
 pub fn process_wake_source_key(process_id: &ProcessId, sequence: u64) -> String {
     format!("process:{process_id}:event:{sequence}:wake")
 }
@@ -836,18 +779,6 @@ impl TurnWorkPayload {
     /// Wrap one durable process wake as turn work.
     pub fn process_wake(wake: ProcessWakeDelivery) -> Self {
         Self(QueuedWorkPayload::process_wake(wake))
-    }
-
-    pub fn agent_frame_task(
-        frame_id: crate::FrameNodeId,
-        task: impl Into<String>,
-        protocol_turn_options: Option<crate::ProtocolTurnOptions>,
-    ) -> Self {
-        Self(QueuedWorkPayload::agent_frame_task(
-            frame_id,
-            task,
-            protocol_turn_options,
-        ))
     }
 }
 /// Exactly one session command, validated by construction.

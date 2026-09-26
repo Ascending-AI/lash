@@ -15,13 +15,13 @@ fn backend_over(backend: lash_sqlite_store::SqliteBackend) -> lash_core::Backend
 #[test]
 fn runtime_rebuild_and_worker_recovery_on_a_memory_backend() {
     run_async_test_on_stack_budget("runtime-rebuild-memory-backend", || async {
-        runtime_rebuild_and_worker_recovery(|| async {
+        Box::pin(runtime_rebuild_and_worker_recovery(|| async {
             backend_over(
                 lash_sqlite_store::SqliteBackend::memory()
                     .await
                     .expect("open the memory backend"),
             )
-        })
+        }))
         .await;
     });
 }
@@ -31,7 +31,7 @@ fn runtime_rebuild_and_worker_recovery_with_durable_stores() {
     run_async_test_on_stack_budget("runtime-rebuild-file-backend", || async {
         let root = tempfile::tempdir().expect("tempdir");
         let scenario = std::sync::atomic::AtomicUsize::new(0);
-        runtime_rebuild_and_worker_recovery(|| {
+        Box::pin(runtime_rebuild_and_worker_recovery(|| {
             let dir = root.path().join(format!(
                 "scenario-{}",
                 scenario.fetch_add(1, std::sync::atomic::Ordering::SeqCst)
@@ -43,7 +43,7 @@ fn runtime_rebuild_and_worker_recovery_with_durable_stores() {
                         .expect("open the file backend"),
                 )
             }
-        })
+        }))
         .await;
     });
 }
