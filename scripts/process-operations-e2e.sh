@@ -4,6 +4,9 @@ set -euo pipefail
 repo="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$repo"
 
+# shellcheck source=scripts/worktree-gate-env.sh
+source "$repo/scripts/worktree-gate-env.sh"
+
 # Every binary this runbook runs comes from the shared build pool's cache, in
 # one build (FIG-3666): the Cargo compiles it used to run one scenario at a
 # time spent 20 of the job's 22 minutes, one of them a release build of the
@@ -36,15 +39,9 @@ else
     //runbooks/restate-postgres-workers "$LASH_PROCESS_OPERATIONS_BIN_DIR" >/dev/null
 fi
 export LASH_PROCESS_OPERATIONS_BIN_DIR
-for binary in lash-e2e-process-operations-worker; do
-  if [ ! -x "$LASH_PROCESS_OPERATIONS_BIN_DIR/$binary" ]; then
-    echo "Missing executable worker: $LASH_PROCESS_OPERATIONS_BIN_DIR/$binary" >&2
-    exit 1
-  fi
-done
+lash_gate_require_mounted_bins "$LASH_PROCESS_OPERATIONS_BIN_DIR" \
+  lash-e2e-process-operations-worker
 
-# shellcheck source=scripts/worktree-gate-env.sh
-source "$repo/scripts/worktree-gate-env.sh"
 lash_gate_acquire process-operations-e2e
 
 compose_project="${LASH_PROCESS_OPERATIONS_COMPOSE_PROJECT:-lash-process-operations-${LASH_GATE_WORKTREE_SLUG}}"

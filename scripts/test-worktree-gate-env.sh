@@ -485,5 +485,58 @@ PATH="$stub_bin:$PATH" DOCKER_STUB_STATE="$docker_state" bash -c '
 remaining_networks="$(find "$docker_state/networks" -mindepth 1 -maxdepth 1 | wc -l)"
 [ "$remaining_networks" -eq 0 ] || fail "gated runs left $remaining_networks leftover networks"
 
-printf 'worktree gate env regressions passed: distinct_slugs=%s,%s override_slot=%s leaked_child_lock=released\n' \
+# (e) Mounted-binary guard: every bind-mounted host binary must be a regular
+# executable before Compose can interpolate the mount.
+bin_dir="$test_tmp/mounted-bins"
+mkdir -p "$bin_dir"
+printf '#!/usr/bin/env bash\nexit 0\n' >"$bin_dir/lash-e2e-worker"
+chmod +x "$bin_dir/lash-e2e-worker"
+
+bash -c 'source "$1"; lash_gate_require_mounted_bins "$2" lash-e2e-worker' \
+  _ "$helper" "$bin_dir" \
+  || fail "mounted-binary guard refused a complete bin dir"
+
+guard_log="$test_tmp/guard.log"
+set +e
+bash -c 'source "$1"; lash_gate_require_mounted_bins "$2" lash-e2e-runner' \
+  _ "$helper" "$bin_dir" >"$guard_log" 2>&1
+guard_status=$?
+set -e
+[ "$guard_status" -eq 1 ] \
+  || fail "mounted-binary guard exited $guard_status on a missing binary"
+grep -Fq "$bin_dir/lash-e2e-runner" "$guard_log" \
+  || fail "missing-binary refusal omitted the path"
+
+mkdir "$bin_dir/lash-e2e-mock-provider"
+set +e
+bash -c 'source "$1"; lash_gate_require_mounted_bins "$2" lash-e2e-mock-provider' \
+  _ "$helper" "$bin_dir" >"$guard_log" 2>&1
+guard_status=$?
+set -e
+[ "$guard_status" -eq 1 ] \
+  || fail "mounted-binary guard exited $guard_status on a directory in place of a binary"
+grep -Fq "$bin_dir/lash-e2e-mock-provider" "$guard_log" \
+  || fail "directory-in-place refusal omitted the path"
+grep -Fq "remove the directory" "$guard_log" \
+  || fail "directory-in-place refusal omitted the remove-and-retry remedy"
+
+chmod -x "$bin_dir/lash-e2e-worker"
+set +e
+bash -c 'source "$1"; lash_gate_require_mounted_bins "$2" lash-e2e-worker' \
+  _ "$helper" "$bin_dir" >"$guard_log" 2>&1
+guard_status=$?
+set -e
+[ "$guard_status" -eq 1 ] \
+  || fail "mounted-binary guard exited $guard_status on a non-executable file"
+
+# Every e2e script whose compose file bind-mounts host binaries must call the
+# shared guard, so no consumer can reach `docker compose` on a missing source.
+for consumer in \
+  "$repo/scripts/restate-postgres-workers-e2e.sh" \
+  "$repo/scripts/process-operations-e2e.sh"; do
+  grep -Fq "lash_gate_require_mounted_bins" "$consumer" \
+    || fail "$(basename "$consumer") does not call the mounted-binary guard"
+done
+
+printf 'worktree gate env regressions passed: distinct_slugs=%s,%s override_slot=%s leaked_child_lock=released mounted_bin_guard=ok\n' \
   "$slug_a" "$slug_b" "$override_slot"
