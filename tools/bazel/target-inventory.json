@@ -1,7 +1,7 @@
 {
   "cargo_only_target_count": 1,
   "cargo_package_count": 47,
-  "cargo_target_count": 176,
+  "cargo_target_count": 177,
   "feature_lane_units": [
     {
       "features": [
@@ -16633,7 +16633,7 @@
       "package": "slack-clone"
     }
   ],
-  "generated_label_count": 235,
+  "generated_label_count": 236,
   "packages": [
     {
       "declared_features": [
@@ -18317,9 +18317,15 @@
           "tags": []
         },
         {
-          "cargo": "handler_controller_turn",
+          "cargo": "host_send_wait",
           "kind": "test",
-          "label": "//crates/lash-restate-test:handler_controller_turn__test",
+          "label": "//crates/lash-restate-test:host_send_wait__test",
+          "tags": []
+        },
+        {
+          "cargo": "one_driver",
+          "kind": "test",
+          "label": "//crates/lash-restate-test:one_driver__test",
           "tags": []
         },
         {
@@ -18389,8 +18395,9 @@
           "//crates/lash-restate-test:admission_invariant__test",
           "//crates/lash-restate-test:drop__test",
           "//crates/lash-restate-test:follow_on_crash_replay__test",
-          "//crates/lash-restate-test:handler_controller_turn__test",
+          "//crates/lash-restate-test:host_send_wait__test",
           "//crates/lash-restate-test:lash-restate-test__unit_test",
+          "//crates/lash-restate-test:one_driver__test",
           "//crates/lash-restate-test:process_crash_replay__test",
           "//crates/lash-restate-test:process_successor_after_prune__test",
           "//crates/lash-restate-test:server_semantics__test",

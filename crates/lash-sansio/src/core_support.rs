@@ -33,6 +33,7 @@ const BLAKE3_DOMAINS: &[&str] = &[
     "lash-google-upload-credential-scope/v2",
     "lash-history-node/v3",
     "lash-intent/v2",
+    "lash-keyed-turn-input/v1",
     "lash-lifted-process-name/v2",
     "lash-lashlang-cell-generation/v1",
     "lash-lashlang-content/v2",

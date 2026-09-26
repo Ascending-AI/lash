@@ -724,13 +724,6 @@ impl<'ctx, C> RuntimeEffectController for RestateRuntimeEffectController<'ctx, C
 where
     C: RestateControllerContext<'ctx>,
 {
-    fn scoped_for<'run>(
-        &'run self,
-        admitted: lash_core::AdmittedScope,
-    ) -> Option<Result<lash_core::ScopedEffectController<'run>, RuntimeError>> {
-        Some(self.scoped_effect_controller(admitted))
-    }
-
     fn owns_commit_backpressure(&self) -> bool {
         true
     }

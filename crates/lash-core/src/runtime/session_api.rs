@@ -1036,6 +1036,13 @@ pub(in crate::runtime) async fn enqueue_turn_input_to_store(
     super::turn_loop::ensure_durable_effect_input(&input)?;
     let is_next_turn = matches!(ingress, crate::TurnInputIngress::NextTurn);
     let mut draft = crate::PendingTurnInputDraft::new(session_id, ingress, input);
+    // A keyed input's id is its key's: a host re-attaches by the key alone.
+    if let Some(key) = source_key.as_deref() {
+        draft.input_id = Some(crate::PendingTurnInputDraft::keyed_input_id(
+            &draft.session_id,
+            key,
+        ));
+    }
     draft.source_key = source_key;
     store
         .read_session_state_version()

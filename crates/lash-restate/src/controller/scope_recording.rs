@@ -229,13 +229,6 @@ where
     C: RestateControllerContext<'ctx>,
     'ctx: 'run,
 {
-    fn scoped_for<'a>(
-        &'a self,
-        admitted: lash_core::AdmittedScope,
-    ) -> Option<Result<lash_core::ScopedEffectController<'a>, RuntimeError>> {
-        self.inner.scoped_for(admitted)
-    }
-
     fn owns_commit_backpressure(&self) -> bool {
         self.inner.owns_commit_backpressure()
     }

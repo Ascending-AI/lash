@@ -30,9 +30,9 @@ pub use session_meta::{
 };
 pub use turn_input_lifecycle_sql::{
     accepted_turn_input_state_predicate_sql, active_turn_input_state_predicate_sql,
-    deferred_next_turn_turn_input_state_predicate_sql, nonterminal_turn_input_state_predicate_sql,
-    pending_active_turn_input_state_predicate_sql, terminal_turn_input_state_predicate_sql,
-    undelivered_turn_input_state_predicate_sql,
+    cancelled_turn_input_state_predicate_sql, deferred_next_turn_turn_input_state_predicate_sql,
+    nonterminal_turn_input_state_predicate_sql, pending_active_turn_input_state_predicate_sql,
+    terminal_turn_input_state_predicate_sql, undelivered_turn_input_state_predicate_sql,
 };
 
 /// Reserved runtime-receipt identity used as the durable completion marker

@@ -10,6 +10,7 @@ use axum::{
 use lash::ProcessId;
 use lash::durability::DurableProcessWorker;
 use lash::observe::SessionResume;
+use lash::restate::RestateWait;
 use lash::{TurnActivity, TurnActivitySink, TurnEvent, TurnInput};
 use lash_core::AwaitEventResolver as _;
 use lash_core::{ProcessEventAppendRequest, facade_support::TurnOutcome, facade_support::TurnStop};
@@ -47,6 +48,21 @@ fn terminal_error(err: impl Display) -> TerminalError {
 /// input is momentarily held by a driver that has gone away (ADR 0069 §5) —
 /// user-visible-fatal, so retryable errors leave the invocation retryable and
 /// only genuinely terminal ones end it.
+/// A settled root's output. A root that parked holds its work until an
+/// operator resolves the park, and an input withdrawn before it ran has no
+/// turn: neither is an answer this workflow can report, so each ends the
+/// invocation terminally with the status it answered.
+fn settled_output(outcome: lash::SendOutcome) -> HandlerResult<lash::TurnOutput> {
+    match outcome.output {
+        Some(output) => Ok(output),
+        None => Err(terminal_error(format!(
+            "the turn answered {:?} without a settled turn",
+            outcome.status
+        ))
+        .into()),
+    }
+}
+
 fn turn_error(err: lash::EmbedError) -> restate_sdk::errors::HandlerError {
     if err.is_retryable() {
         restate_sdk::errors::HandlerError::from(anyhow::anyhow!(err.to_string()))
@@ -151,24 +167,25 @@ impl AppState {
                 .map(Json);
         }
 
+        let ctx = controller.context();
         if request.scenario == TurnScenario::DrainQueued {
-            return Box::pin(self.await_driven_wake(core, request))
+            return Box::pin(self.await_driven_wake(ctx, core, request))
                 .await
                 .map(Json);
         }
 
         if request.scenario == TurnScenario::FrameSwitchQueued {
-            return Box::pin(self.frame_switch_queued(core, request))
+            return Box::pin(self.frame_switch_queued(ctx, core, request))
                 .await
                 .map(Json);
         }
         if request.scenario == TurnScenario::FrameSwitchCancel {
-            return Box::pin(self.frame_switch_cancel(core, request))
+            return Box::pin(self.frame_switch_cancel(ctx, core, request))
                 .await
                 .map(Json);
         }
         if request.scenario == TurnScenario::FrameSwitchCrash {
-            return Box::pin(self.frame_switch_crash(core, request))
+            return Box::pin(self.frame_switch_crash(ctx, core, request))
                 .await
                 .map(Json);
         }
@@ -178,7 +195,7 @@ impl AppState {
                 .map(Json);
         }
 
-        Box::pin(self.main_turn(core, request)).await.map(Json)
+        Box::pin(self.main_turn(ctx, core, request)).await.map(Json)
     }
 
     /// The kitchen-sink process's deferred wake. The engine drives a wake
@@ -189,6 +206,7 @@ impl AppState {
     /// the root it claimed.
     async fn await_driven_wake(
         &self,
+        ctx: &WorkflowContext<'_>,
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
@@ -212,11 +230,12 @@ impl AppState {
                 .await
                 .map_err(terminal_error)?;
             for root in roots.into_iter().filter(|root| !claimed.contains(root)) {
-                let turn = session
-                    .root(root.as_str())
-                    .output()
-                    .await
-                    .map_err(turn_error)?;
+                let turn = settled_output(
+                    session
+                        .root(root.as_str())
+                        .outcome_restate(ctx, RestateWait::new())
+                        .await?,
+                )?;
                 let Some(final_value) = turn.result.final_value().cloned() else {
                     continue;
                 };
@@ -244,6 +263,7 @@ impl AppState {
 
     async fn main_turn(
         &self,
+        ctx: &WorkflowContext<'_>,
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
@@ -264,15 +284,19 @@ impl AppState {
             Some(cursor_text.clone()),
         );
         let input = TurnInput::text(prompt_for_request(&request));
-        // The engine drives the turn under the workflow id. A redelivered
-        // invocation sends the same id again, which commits nothing and
-        // answers the root's evidence.
-        let turn = session
-            .send(input)
-            .id(request.workflow_id.clone())
-            .output_into(&sink)
-            .await
-            .map_err(turn_error)?;
+        // The engine drives the turn under the workflow id; this handler
+        // only journals the acceptance and waits in journaled probes, so a
+        // replayed invocation neither submits twice nor runs the turn.
+        let turn = settled_output(
+            session
+                .send(input)
+                .id(request.workflow_id.clone())
+                .accept_restate(ctx)
+                .await?
+                .outcome_restate(ctx, RestateWait::new().sink(&sink))
+                .await?,
+        )?
+        .result;
         let final_value = if matches!(
             request.scenario,
             TurnScenario::TurnControlHold
@@ -340,6 +364,7 @@ impl AppState {
 
     async fn frame_switch_queued(
         &self,
+        ctx: &WorkflowContext<'_>,
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
@@ -350,13 +375,15 @@ impl AppState {
                 request.workflow_id
             )))
             .id(format!("{}:first", request.workflow_id))
-            .await
-            .map_err(turn_error)?;
+            .accept_restate(ctx)
+            .await?;
         let first_input = first.input_id().clone();
         let enqueue_session = session.clone();
         let enqueue_pool = self.storage.pool().clone();
         let enqueue_workflow_id = request.workflow_id.clone();
         // The second input lands while the first root runs its frame switch.
+        // A replayed invocation sends it again under the same id, which the
+        // store answers with the first acceptance.
         let enqueue_second = tokio::spawn(async move {
             wait_for_provider_scenario(
                 &enqueue_pool,
@@ -372,7 +399,7 @@ impl AppState {
                 .await
                 .map_err(anyhow::Error::from)
         });
-        let first_turn = first.output().await.map_err(turn_error)?;
+        let first_turn = settled_output(first.outcome_restate(ctx, RestateWait::new()).await?)?;
         let first_value = first_turn.result.final_value().cloned().ok_or_else(|| {
             terminal_error("queued frame-switch follow-on produced no final value")
         })?;
@@ -388,7 +415,7 @@ impl AppState {
         let first_completed = pending_after_follow
             .iter()
             .all(|input| input.input.input_id != first_input);
-        let second_turn = second.output().await.map_err(turn_error)?;
+        let second_turn = settled_output(second.outcome_restate(ctx, RestateWait::new()).await?)?;
         let second_value = second_turn
             .result
             .final_value()
@@ -442,6 +469,7 @@ impl AppState {
     /// Restate journal.
     async fn frame_switch_crash(
         &self,
+        ctx: &WorkflowContext<'_>,
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
@@ -450,15 +478,18 @@ impl AppState {
             .open()
             .await
             .map_err(turn_error)?;
-        let recovered = session
-            .send(TurnInput::text(format!(
-                "Run crash-recovered frame switch. workflow_id={} frame_switch_crash_start=true",
-                request.workflow_id
-            )))
-            .id(format!("{}:original", request.workflow_id))
-            .output()
-            .await
-            .map_err(turn_error)?;
+        let recovered = settled_output(
+            session
+                .send(TurnInput::text(format!(
+                    "Run crash-recovered frame switch. workflow_id={} frame_switch_crash_start=true",
+                    request.workflow_id
+                )))
+                .id(format!("{}:original", request.workflow_id))
+                .accept_restate(ctx)
+                .await?
+                .outcome_restate(ctx, RestateWait::new())
+                .await?,
+        )?;
         let value = recovered
             .result
             .final_value()
@@ -551,6 +582,7 @@ impl AppState {
 
     async fn frame_switch_cancel(
         &self,
+        ctx: &WorkflowContext<'_>,
         core: &lash::LashCore,
         request: TurnRequest,
     ) -> HandlerResult<TurnResponse> {
@@ -561,8 +593,8 @@ impl AppState {
                 request.workflow_id
             )))
             .id(format!("{}:cancel-original", request.workflow_id))
-            .await
-            .map_err(turn_error)?;
+            .accept_restate(ctx)
+            .await?;
         wait_for_cancel_gate(self.storage.pool(), &request.workflow_id)
             .await
             .map_err(terminal_error)?;
@@ -580,7 +612,7 @@ impl AppState {
         )
         .await?;
         let cancel_count = usize::from(matches!(receipt, lash::CancelReceipt::Requested { .. }));
-        let cancelled = original.outcome().await.map_err(turn_error)?;
+        let cancelled = original.outcome_restate(ctx, RestateWait::new()).await?;
         let terminal_cancelled = matches!(cancelled.status, lash::TurnStatus::Cancelled);
         let claims_settled = session
             .durable()
@@ -594,15 +626,18 @@ impl AppState {
                 .await
                 .map_err(turn_error)?
                 .is_empty();
-        let usable = session
-            .send(TurnInput::text(format!(
-                "Run after cancellation. workflow_id={} frame_switch_post_cancel=true",
-                request.workflow_id
-            )))
-            .id(format!("{}:post-cancel", request.workflow_id))
-            .output()
-            .await
-            .map_err(turn_error)?;
+        let usable = settled_output(
+            session
+                .send(TurnInput::text(format!(
+                    "Run after cancellation. workflow_id={} frame_switch_post_cancel=true",
+                    request.workflow_id
+                )))
+                .id(format!("{}:post-cancel", request.workflow_id))
+                .accept_restate(ctx)
+                .await?
+                .outcome_restate(ctx, RestateWait::new())
+                .await?,
+        )?;
         let usable_value = usable
             .result
             .final_value()

@@ -24,7 +24,7 @@ impl StoreMaintenance for Store {
                 let removed_pending_turn_input_tombstone_count = tx.execute(
                     crate::turn_ingress::turn_ingress_sql()
                         .pending_inputs
-                        .delete_terminal
+                        .delete_withdrawn
                         .sql(),
                     params![session_id.as_str()],
                 )?;

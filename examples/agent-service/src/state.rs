@@ -247,7 +247,15 @@ impl From<rusqlite::Error> for AppError {
 }
 
 impl From<lash::EmbedError> for AppError {
+    /// A retryable refusal (the session briefly busy) stays retryable over
+    /// HTTP: it answers 503, never a 500 a client would not resend.
     fn from(err: lash::EmbedError) -> Self {
+        if err.is_retryable() {
+            return Self {
+                status: StatusCode::SERVICE_UNAVAILABLE,
+                message: err.to_string(),
+            };
+        }
         Self::internal(err.to_string())
     }
 }
@@ -740,5 +748,32 @@ mod session_language_tests {
             .await
             .expect("a chat reopens under the config it recorded");
         reopened.close().await.expect("close the reopened session");
+    }
+}
+
+#[cfg(test)]
+mod retryable_refusal_tests {
+    use super::*;
+
+    /// A refusal the same request would get past once the session's lane is
+    /// free stays retryable over HTTP (FIG-3831): it answers 503, never the
+    /// 500 a client would not resend; any other lash error stays a 500.
+    #[test]
+    fn a_retryable_lash_refusal_answers_service_unavailable() {
+        let busy = lash::EmbedError::Runtime(lash::runtime::RuntimeError::new(
+            lash::runtime::RuntimeErrorCode::SessionExecutionLaneBusy,
+            "the session's execution lane is held",
+        ));
+        assert!(busy.is_retryable());
+        assert_eq!(AppError::from(busy).status, StatusCode::SERVICE_UNAVAILABLE);
+
+        let unknown = lash::EmbedError::UnknownSession {
+            session_id: lash::SessionId::from("missing"),
+        };
+        assert!(!unknown.is_retryable());
+        assert_eq!(
+            AppError::from(unknown).status,
+            StatusCode::INTERNAL_SERVER_ERROR
+        );
     }
 }

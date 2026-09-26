@@ -45,7 +45,7 @@ impl PostgresSessionStore {
         let removed_pending_turn_input_tombstone_count = sqlx::query(
             crate::turn_ingress::turn_ingress_sql()
                 .pending_inputs
-                .delete_terminal
+                .delete_withdrawn
                 .sql(),
         )
         .bind(self.session_id.as_str())

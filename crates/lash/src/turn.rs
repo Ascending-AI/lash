@@ -465,7 +465,10 @@ async fn run_adapted(
     let canceller = handle.cancel();
     let settle = async move {
         match sink {
-            Some(sink) => handle.output_into_collecting(sink).await,
+            Some(sink) => {
+                let input_id = handle.input_id().clone();
+                crate::send::settled_output(input_id, handle.outcome_into(sink).await?)
+            }
             None => handle.output().await,
         }
     };
@@ -1423,6 +1426,48 @@ impl TurnReport {
             cancel_input_outcome: turn_cancel_input_outcome,
             source: ReportSource::Live,
         }
+    }
+
+    /// This report as the remote protocol's settled turn, under `turn_id`
+    /// (a send's root), carrying `activities` as its activity list. An
+    /// activity the remote vocabulary cannot carry is left out.
+    pub fn to_remote(
+        &self,
+        session_id: &lash_sansio::SessionId,
+        turn_id: &TurnId,
+        activities: &[TurnActivity],
+    ) -> lash_remote_protocol::RemoteTurnReport {
+        let turn = lash_core::facade_support::AssembledTurn {
+            state: self.state.clone(),
+            turn_input_acceptance: self.acceptance.clone(),
+            turn_cancel_input_outcome: self.cancel_input_outcome.clone(),
+            outcome: self.outcome.clone(),
+            assistant_output: self.assistant_output.clone(),
+            execution: self.execution.clone(),
+            token_usage: self.usage.clone(),
+            llm_calls: self.llm_calls.clone(),
+            tool_calls: self.tool_calls.clone(),
+            omitted: self.omitted.clone(),
+            failure_evidence: self.failure_evidence.clone(),
+            errors: self.errors.clone(),
+        };
+        let activities = activities
+            .iter()
+            .enumerate()
+            .filter_map(|(sequence, activity)| {
+                lash_remote_protocol::RemoteTurnActivity::from_core(
+                    sequence as u64,
+                    activity.clone(),
+                )
+                .ok()
+            })
+            .collect::<Vec<_>>();
+        lash_remote_protocol::RemoteTurnReport::from_core(
+            session_id.clone(),
+            turn_id.clone(),
+            turn,
+            activities,
+        )
     }
 
     /// The four-way status of the settled turn this report describes:

@@ -14,6 +14,10 @@ fn each_predicate_spells_the_partition_it_names() {
         "state IN ('pending_active')"
     );
     assert_eq!(
+        cancelled_turn_input_state_predicate_sql("state"),
+        "state IN ('cancelled')"
+    );
+    assert_eq!(
         deferred_next_turn_turn_input_state_predicate_sql("state"),
         "state IN ('deferred_next_turn')"
     );

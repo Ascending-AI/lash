@@ -109,6 +109,19 @@ for tracing and rendered once, even though none of them names a table.
 # owners must be able to find it, which is what these entries are for.
 
 [[cross_family]]
+statement = "pending_turn_input.delete_withdrawn"
+owner = "crates/lash-store-sql/src/turn_ingress/pending_inputs.rs"
+touches = ["session_root_inputs"]
+reason = """
+Retention may reclaim an input only if no root took it: a withdrawn row a
+root's claim bound keeps its submission digest for as long as that root keeps
+its terminal evidence, so a retry under its id is validated rather than
+admitted again (FIG-3837). "Did a root take it?" is the root family's binding,
+read inside the same delete so a claim cannot bind the row between the check
+and the delete.
+"""
+
+[[cross_family]]
 statement = "effect_journal.scope_is_quiescent"
 owner = "crates/lash-store-sql/src/effect.rs"
 touches = ["await_event_waits"]

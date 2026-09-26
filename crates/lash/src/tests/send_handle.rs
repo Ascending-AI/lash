@@ -8,6 +8,7 @@
 
 use super::*;
 
+use futures_util::StreamExt;
 use tokio::sync::Notify;
 
 const SEED: u64 = 0x5b_5e_4d;
@@ -43,7 +44,7 @@ fn scripted_provider(
             async move {
                 calls.fetch_add(1, Ordering::SeqCst);
                 let text = last_user_text(&request);
-                if text == HELD {
+                if text.contains(HELD) {
                     let mut held = Abandoned(Some(abandoned));
                     release.notified().await;
                     held.0 = None;
@@ -175,16 +176,38 @@ async fn a_send_under_a_settled_id_commits_nothing_and_answers_its_evidence(
     assert_eq!(first.assistant_message(), Some("echo: only once"));
     let applied = session.durable().turn_input_applications().await?;
     assert_eq!(applied.len(), 1);
+    session
+        .durable()
+        .send_parts()
+        .await?
+        .store
+        .vacuum()
+        .await
+        .expect("vacuum retains the settled root's retry evidence");
 
     let again = session
-        .send(TurnInput::text("a different text under the same id"))
+        .send(TurnInput::text("only once"))
         .id("settled-root")
         .await?;
     assert_eq!(again.input_id(), &applied[0].input_id);
+    assert_eq!(
+        session.attach_id("settled-root").input_id(),
+        again.input_id(),
+        "a retry answers the original acceptance, which its id alone addresses"
+    );
     let outcome = again.outcome().await?;
     assert_eq!(outcome.status, crate::TurnStatus::Answered);
     let output = outcome.output.expect("a settled root has a report");
     assert_eq!(output.assistant_message(), Some("echo: only once"));
+
+    let conflicting = session
+        .send(TurnInput::text("different semantic input"))
+        .id("settled-root")
+        .await;
+    assert!(
+        conflicting.is_err(),
+        "a settled id must validate its submission digest"
+    );
 
     assert!(session.durable().pending_turn_inputs().await?.is_empty());
     assert_eq!(session.durable().turn_input_applications().await?, applied);
@@ -222,6 +245,11 @@ async fn a_withdrawn_send_answers_cancelled_without_output(engine: Engine) -> Re
         outcome.output.is_none(),
         "no turn applied a withdrawn input"
     );
+    assert_eq!(outcome.root, None, "no root took a withdrawn input");
+    outcome
+        .to_remote(&session.session_id(), &input_id)
+        .validate()
+        .expect("a withdrawn input's remote outcome is consistent");
     let refusal = session
         .attach(input_id.clone())
         .output()
@@ -273,6 +301,14 @@ async fn an_input_answered_inside_another_root_resolves_answered_with_that_root(
     let second = second.output().await?;
     let third = third.outcome().await?;
     assert_eq!(third.status, crate::TurnStatus::Answered);
+    assert_eq!(third.root, Some(lash_core::TurnId::from("second-root")));
+    let remote = third.to_remote(&session.session_id(), &third_input);
+    remote.validate().expect("the remote outcome is consistent");
+    assert_eq!(
+        remote.root_id,
+        Some(lash_core::TurnId::from("second-root")),
+        "a transport re-attaches through the root that answered"
+    );
     let third = third.output.expect("an answered input has a report");
     // One turn applied both inputs, so both handles answer its reply.
     assert!(
@@ -496,6 +532,203 @@ async fn a_cancel_reaches_a_root_past_its_frame_switch() -> Result<()> {
     Ok(())
 }
 
+async fn cancel_finds_the_consuming_root_before_application(engine: Engine) -> Result<()> {
+    let fixture = fixture(engine, 4).await?;
+    let session = fixture.core.session("cancel-bound-input").open().await?;
+    let first = session.send(TurnInput::text(HELD)).id("first-root").await?;
+    provider_called(&fixture, 1).await;
+    let second = session
+        .send(TurnInput::text(HELD))
+        .id("consuming-root")
+        .await?;
+    let third = session
+        .send(TurnInput::text("batched input"))
+        .id("batched-id")
+        .await?;
+    fixture.release.notify_one();
+    provider_called(&fixture, 2).await;
+    let input_id = third.input_id().clone();
+    let parts = session.durable().send_parts().await?;
+    assert_eq!(
+        parts
+            .store
+            .root_binding(&session.session_id(), &input_id)
+            .await?,
+        Some(lash_core::TurnId::from("consuming-root")),
+        "the controlled barrier must hold after binding"
+    );
+    assert!(
+        session
+            .durable()
+            .turn_input_applications()
+            .await?
+            .iter()
+            .all(|application| application.input_id != input_id),
+        "the controlled barrier must hold before application"
+    );
+    let receipt = session.attach(input_id).cancel().await?;
+    assert!(
+        matches!(&receipt, crate::CancelReceipt::Requested { root, .. }
+        if root.as_str() == "consuming-root"),
+        "{receipt:?}"
+    );
+    fixture.release.notify_one();
+    let outcome = tokio::time::timeout(std::time::Duration::from_secs(20), second.outcome())
+        .await
+        .expect("the consuming root settles")?;
+    assert_eq!(outcome.status, crate::TurnStatus::Cancelled);
+    assert_eq!(third.outcome().await?.status, crate::TurnStatus::Cancelled);
+    first.outcome().await?;
+    Ok(())
+}
+
+async fn replay_gaps_reach_both_streams_and_sinks(engine: Engine) -> Result<()> {
+    let fixture = fixture(engine, 1).await?;
+    let session = fixture.core.session("send-replay-gap").open().await?;
+    let handle = session.send(TurnInput::text(HELD)).id("gap-root").await?;
+    provider_called(&fixture, 1).await;
+    drop(
+        fixture
+            .core
+            .live_replay_store
+            .prepare_publication(
+                &session.session_id(),
+                lash_core::SessionRevision::new(0),
+                vec![lash_core::LiveReplayEventDraft::new(
+                    None::<String>,
+                    lash_core::SessionObservationEventPayload::AgentFrameSwitched {
+                        frame_id: "lost".into(),
+                    },
+                )],
+            )
+            .expect("abandon a publication to create a known replay gap"),
+    );
+    let mut events = handle.events();
+    let event = tokio::time::timeout(std::time::Duration::from_secs(2), events.next())
+        .await
+        .expect("the stream reports its gap")
+        .expect("gap item");
+    assert!(
+        matches!(event, Err(EmbedError::Send(error)) if matches!(*error, crate::SendError::ObservationGap(_)))
+    );
+    // The sink follows from the same cursor, so it meets the same gap.
+    let sink = RecordingEvents::default();
+    let followed = tokio::spawn(async move {
+        handle
+            .outcome_into(&sink)
+            .await
+            .map(|outcome| (outcome, sink))
+    });
+    fixture.release.notify_one();
+    // The stream goes on past its gap and ends once the root settles.
+    let mut after_gap = 0;
+    while let Some(item) = tokio::time::timeout(std::time::Duration::from_secs(20), events.next())
+        .await
+        .expect("the stream ends once the root settles")
+    {
+        item.expect("one gap, then the root's activity");
+        after_gap += 1;
+    }
+    assert!(after_gap > 0, "the stream observes on past its gap");
+    let (sunk, sink) = followed.await.expect("the sink follower")?;
+    assert_eq!(sunk.status, crate::TurnStatus::Answered);
+    assert!(
+        !sunk.gaps.is_empty(),
+        "a sink cannot take a gap in-stream, so its answer reports it: {:?}",
+        sunk.gaps
+    );
+    assert!(
+        !sink.snapshot().await.is_empty(),
+        "the sink observes on past its gap"
+    );
+    Ok(())
+}
+
+/// A host re-attaches to its input with nothing but the id it sent under,
+/// on a durable session with no resident state, and follows the input into
+/// the root that answered it: a keyed input's id is derived from its session
+/// and key.
+async fn a_host_reattaches_by_its_id_alone(engine: Engine) -> Result<()> {
+    let fixture = fixture(engine, 4).await?;
+    let session = fixture.core.session("send-attach-id").open().await?;
+
+    let running = session.send(TurnInput::text(HELD)).id("held-root").await?;
+    provider_called(&fixture, 1).await;
+    let second = session
+        .send(TurnInput::text("second"))
+        .id("second-root")
+        .await?;
+    let third = session
+        .send(TurnInput::text("third"))
+        .id("third-root")
+        .await?;
+    let durable = fixture.core.session("send-attach-id").durable().await?;
+    let attached = durable.attach_id("third-root");
+    assert_eq!(attached.input_id(), third.input_id());
+    assert_eq!(attached.id(), Some(&lash_core::TurnId::from("third-root")));
+    fixture.release.notify_one();
+    running.outcome().await?;
+    second.outcome().await?;
+
+    let outcome = attached.outcome().await?;
+    assert_eq!(outcome.status, crate::TurnStatus::Answered);
+    let output = outcome.output.expect("an answered input has a report");
+    assert!(
+        output
+            .assistant_message()
+            .is_some_and(|reply| reply.contains("third")),
+        "{output:?}"
+    );
+    assert_eq!(
+        session.attach_id("third-root").outcome().await?.status,
+        crate::TurnStatus::Answered
+    );
+    // An id nothing was accepted under answers like a withdrawn input.
+    let never = durable.attach_id("never-sent").outcome().await?;
+    assert_eq!(never.status, crate::TurnStatus::Cancelled);
+    assert!(never.output.is_none());
+    Ok(())
+}
+
+/// A root this follower never observed live answers with a reported
+/// Unavailable gap, so its (empty) activity list is not taken for the root's
+/// history; a follower that watched it run reports none.
+async fn an_unobserved_root_answers_with_a_reported_gap(engine: Engine) -> Result<()> {
+    let fixture = fixture(engine, 1).await?;
+    let session = fixture.core.session("send-unobserved-root").open().await?;
+
+    let handle = session
+        .send(TurnInput::text("watch me"))
+        .id("watched-root")
+        .await?;
+    let input_id = handle.input_id().clone();
+    let watched = handle.outcome().await?;
+    assert_eq!(watched.status, crate::TurnStatus::Answered);
+    assert!(watched.gaps.is_empty(), "{:?}", watched.gaps);
+    assert!(
+        !watched
+            .output
+            .as_ref()
+            .expect("an answered root has a report")
+            .activities
+            .is_empty()
+    );
+
+    let unobserved = session.attach(input_id).outcome().await?;
+    assert_eq!(unobserved.status, crate::TurnStatus::Answered);
+    let output = unobserved.output.expect("an answered root has a report");
+    assert!(output.activities.is_empty());
+    assert!(
+        matches!(
+            unobserved.gaps.as_slice(),
+            [gap] if gap.reason == lash_core::LiveReplayGapReason::Unavailable
+        ),
+        "{:?}",
+        unobserved.gaps
+    );
+    Ok(())
+}
+
 macro_rules! send_handle_laws {
     ($engine:ident, $engine_variant:expr) => {
         mod $engine {
@@ -514,6 +747,26 @@ macro_rules! send_handle_laws {
                     $engine_variant,
                 )
                 .await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn cancel_finds_the_consuming_root_before_application() -> Result<()> {
+                super::cancel_finds_the_consuming_root_before_application($engine_variant).await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn replay_gaps_reach_both_streams_and_sinks() -> Result<()> {
+                super::replay_gaps_reach_both_streams_and_sinks($engine_variant).await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn a_host_reattaches_by_its_id_alone() -> Result<()> {
+                super::a_host_reattaches_by_its_id_alone($engine_variant).await
+            }
+
+            #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+            async fn an_unobserved_root_answers_with_a_reported_gap() -> Result<()> {
+                super::an_unobserved_root_answers_with_a_reported_gap($engine_variant).await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]

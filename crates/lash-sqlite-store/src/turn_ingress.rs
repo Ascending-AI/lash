@@ -59,7 +59,7 @@ pub(crate) use turn_parks::{
 /// Every expansion is generated from
 /// [`TurnInputStateKind`](lash_core_execution::runtime::TurnInputStateKind), so adding a state is
 /// one edit in `lash-core-store` rather than one per statement. The term names
-/// are the domain's, and PostgreSQL registers the same seven.
+/// are the domain's, and PostgreSQL registers the same eight.
 const TURN_INPUT_LIFECYCLE: Vocabulary = Vocabulary::new(&[
     VocabularyTerm::new(
         "accepted_turn_input_state",
@@ -68,6 +68,10 @@ const TURN_INPUT_LIFECYCLE: Vocabulary = Vocabulary::new(&[
     VocabularyTerm::new(
         "active_turn_input_state",
         vocabulary::active_turn_input_state_predicate_sql,
+    ),
+    VocabularyTerm::new(
+        "cancelled_turn_input_state",
+        vocabulary::cancelled_turn_input_state_predicate_sql,
     ),
     VocabularyTerm::new(
         "deferred_next_turn_turn_input_state",

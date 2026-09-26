@@ -54,6 +54,12 @@ pub fn pending_active_turn_input_state_predicate_sql(column: &str) -> String {
     membership_predicate(column, &[TurnInputStateKind::PendingActive])
 }
 
+/// `<column> = 'cancelled'`: an input withdrawn or cancelled before any turn
+/// applied it.
+pub fn cancelled_turn_input_state_predicate_sql(column: &str) -> String {
+    membership_predicate(column, &[TurnInputStateKind::Cancelled])
+}
+
 /// `<column> = 'deferred_next_turn'`: an input held for the next turn.
 pub fn deferred_next_turn_turn_input_state_predicate_sql(column: &str) -> String {
     membership_predicate(column, &[TurnInputStateKind::DeferredNextTurn])
