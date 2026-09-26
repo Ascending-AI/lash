@@ -1517,6 +1517,9 @@ impl LashRuntime {
             .all(|command| matches!(command, crate::SessionCommand::ApplyConfigPatch { .. }));
         let mut next_config_state = config_only.then(|| self.state.clone());
         if let Some(next_state) = next_config_state.as_mut() {
+            // Commands explicitly change the sticky config, unlike the
+            // recorded execution view of a root.
+            next_state.authority.committed_config = None;
             for command in &commands {
                 let crate::SessionCommand::ApplyConfigPatch { patch } = command else {
                     unreachable!("config-only command group was checked above")

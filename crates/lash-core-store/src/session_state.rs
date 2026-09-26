@@ -613,6 +613,11 @@ pub struct RuntimeSessionAuthority {
     pub tool_access: crate::SessionToolAccess,
     #[serde(default)]
     pub subagent: Option<crate::SubagentSessionContext>,
+    /// Sticky head config while a root uses a different recorded execution view.
+    /// Commits read this value; turn preparation reads the resident policy.
+    /// Boxed under `authority` so carrying it costs resident state nothing.
+    #[serde(skip)]
+    pub committed_config: Option<Box<crate::PersistedSessionConfig>>,
 }
 
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
@@ -1304,6 +1309,18 @@ pub fn adopt_session_config(
     }
 }
 
+/// Install a recorded root view without changing the config that a commit
+/// writes to the session head.
+pub fn adopt_root_execution_config(
+    state: &mut RuntimeSessionState,
+    config: &crate::PersistedSessionConfig,
+) {
+    state.authority.committed_config = Some(Box::new(
+        crate::store::persisted_session_config_from_state(state),
+    ));
+    adopt_session_config(state, config);
+}
+
 /// Adopt the durable head config's carried fields onto resident state: the
 /// policy-homed values plus the config compare-and-set revision, which moves
 /// only with the config itself (ADR 0101 §12).
@@ -1441,6 +1458,7 @@ pub fn adopt_durable_head(
         .map(|node| node.node_id.clone())
         .collect();
     adopt_session_config(state, &head.config);
+    state.authority.committed_config = None;
     state.policy.session_id = live_owned.session_id;
     state.policy.turn_budget = live_owned.turn_budget;
     // The config adopted the commanded head value before the checkpoint
