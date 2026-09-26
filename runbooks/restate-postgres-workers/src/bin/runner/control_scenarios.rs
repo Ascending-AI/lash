@@ -725,7 +725,7 @@ pub(super) async fn drive_break_glass_scenario(
     let admin = RestateAdminClient::new(admin_url.to_string());
     let invocation_id = lash_turn_invocation(&admin, &break_glass).await?;
     admin
-        .kill_invocation_for_test_cleanup(&invocation_id)
+        .kill_invocation(&invocation_id)
         .await
         .context("kill Restate invocation as break-glass")?;
     report_workflow_progress(&break_glass.workflow_id, "admin-kill-requested");

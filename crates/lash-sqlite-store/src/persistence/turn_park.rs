@@ -262,6 +262,10 @@ pub(crate) fn record_turn_park_conn(
 
 /// Record redrive `intent` on session `session_id`'s park `park_id`, on
 /// `conn` (inside the redrive's store half).
+#[expect(
+    dead_code,
+    reason = "the redrive's store half lands with the parked-root verbs"
+)]
 pub(crate) fn set_resume_intent_conn(
     conn: &Connection,
     session_id: &SessionId,
