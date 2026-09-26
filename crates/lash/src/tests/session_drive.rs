@@ -88,8 +88,10 @@ async fn fixture_with_batching(
 /// continuation request, so a session holding more pending inputs than one
 /// invocation's root budget still drains — and a waiter on the ask observes
 /// the chain's end, not the first leg's yield (review of #2290, HIGH-2 and
-/// LOW-17). Rows committed through the store alone schedule nothing, so the
-/// single ask is the only drive the session has.
+/// LOW-17). Rows committed through the store alone schedule nothing; the
+/// law's own ask is the only deliberate drive, but the core's boot sweep
+/// may legitimately ask again for the same rows (ADR 0104 O2), so sibling
+/// drive chains are accounted, not assumed away.
 async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs(
     engine: Engine,
 ) -> Result<()> {
@@ -140,13 +142,61 @@ async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs(
     );
     assert_eq!(fixture.calls.load(Ordering::SeqCst), INPUTS);
     if matches!(engine, Engine::Restate) {
+        // The waiter observes the roots of every leg in its own chain; a
+        // reconcile sweep's sibling chain legitimately owns the roots it
+        // claimed first, so fold those chains in before asserting.
+        let mut observed = outcome.ran.len();
+        for root in sibling_drive_roots(&fixture, &session_id, request.as_str()).await? {
+            let sibling = tokio::time::timeout(
+                std::time::Duration::from_secs(120),
+                engine_port.await_drive(&session_id, &lash_core::engine::DriveRequestId::new(root)),
+            )
+            .await
+            .expect("a sibling drive chain ends")
+            .expect("a sibling drive is not refused");
+            observed += sibling.ran.len();
+        }
         assert_eq!(
-            outcome.ran.len(),
-            INPUTS,
-            "the waiter observes every leg's roots, not only the yielding leg's"
+            observed, INPUTS,
+            "the waiter observes every leg of its chain; sibling chains own the rest"
         );
     }
     Ok(())
+}
+
+/// The request ids of `session`'s drive invocations that are not legs of
+/// `request`'s chain: each is the root of a sibling chain (the reconcile
+/// sweep asks for `reconcile:` requests). `drive-next:` invocations are
+/// continuation legs and count through their chain's root, so they are
+/// skipped here. On the SQLite engine there is no invocation journal to
+/// query and no sibling assertion to feed.
+async fn sibling_drive_roots(
+    fixture: &Fixture,
+    session: &lash_core::SessionId,
+    request: &str,
+) -> Result<Vec<String>> {
+    #[derive(serde::Deserialize)]
+    struct DriveKey {
+        idempotency_key: Option<String>,
+    }
+    let Some(double) = fixture._double.as_ref() else {
+        return Ok(Vec::new());
+    };
+    let session = session.as_str();
+    let rows = lash_restate::RestateAdminClient::new(double.connection())
+        .query_json::<DriveKey>(&format!(
+            "SELECT idempotency_key FROM sys_invocation \
+             WHERE target_service_key = '{session}' AND target_handler_name = 'drive'"
+        ))
+        .await
+        .expect("sys_invocation query");
+    Ok(rows
+        .into_iter()
+        .filter_map(|row| row.idempotency_key)
+        .filter(|key| {
+            key != request && !key.starts_with(lash_core::engine::DRIVE_CONTINUATION_PREFIX)
+        })
+        .collect())
 }
 
 /// The reconcile sweep's standing caller besides boot (ADR 0104 O2, review

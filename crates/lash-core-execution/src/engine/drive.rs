@@ -27,6 +27,11 @@ const DRIVE_ADMISSION_SCOPE_PREFIX: &str = "drive:";
 /// remaining work to a new request.
 pub const MAX_ROOTS_PER_DRIVE: usize = 64;
 
+/// The request-id prefix of a drive's continuation invocations: every leg a
+/// yielded drive hands off to is named under it, so a walk of a session's
+/// drive requests can tell chain legs from new chain roots.
+pub const DRIVE_CONTINUATION_PREFIX: &str = "drive-next:";
+
 /// The stable, fixed-size request id of a drive's next invocation.
 #[must_use]
 pub fn drive_continuation_request(request: &DriveRequest) -> DriveRequestId {
@@ -34,7 +39,10 @@ pub fn drive_continuation_request(request: &DriveRequest) -> DriveRequestId {
     digest.update((request.session.as_str().len() as u64).to_be_bytes());
     digest.update(request.session.as_str().as_bytes());
     digest.update(request.request.as_str().as_bytes());
-    DriveRequestId::new(format!("drive-next:{:x}", digest.finalize()))
+    DriveRequestId::new(format!(
+        "{DRIVE_CONTINUATION_PREFIX}{:x}",
+        digest.finalize()
+    ))
 }
 
 /// The scope a drive's `AdmitDrive` steps are recorded under: one per drive
