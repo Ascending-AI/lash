@@ -903,6 +903,14 @@ impl crate::store::RuntimePersistenceDecorator for RedriveStore {
         self.inner.as_ref()
     }
 
+    async fn claim_root_inputs(
+        &self,
+        request: &crate::store::RootInputClaimRequest,
+    ) -> Result<Option<crate::AcceptedTurnInputDrive>, crate::StoreError> {
+        self.pending_row_reads.fetch_add(1, Ordering::SeqCst);
+        self.inner.claim_root_inputs(request).await
+    }
+
     async fn load_session(
         &self,
     ) -> Result<Option<crate::store::PersistedSessionRead>, crate::StoreError> {
@@ -1611,21 +1619,20 @@ impl crate::store::RuntimePersistenceDecorator for WithdrawBeforeClaim {
         self.inner.as_ref()
     }
 
-    async fn claim_next_turn_inputs(
+    async fn claim_root_inputs(
         &self,
-        session_id: &SessionId,
-        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
-        owner: &crate::LeaseOwnerIdentity,
-        max_inputs: usize,
-    ) -> Result<Option<crate::TurnInputClaim>, crate::StoreError> {
-        for open in self.inner.list_pending_turn_inputs(session_id).await? {
+        request: &crate::store::RootInputClaimRequest,
+    ) -> Result<Option<crate::AcceptedTurnInputDrive>, crate::StoreError> {
+        for open in self
+            .inner
+            .list_pending_turn_inputs(&request.session_id)
+            .await?
+        {
             self.inner
-                .cancel_pending_turn_input(session_id, &open.input.input_id)
+                .cancel_pending_turn_input(&request.session_id, &open.input.input_id)
                 .await?;
         }
-        self.inner
-            .claim_next_turn_inputs(session_id, session_execution_lease, owner, max_inputs)
-            .await
+        self.inner.claim_root_inputs(request).await
     }
 }
 

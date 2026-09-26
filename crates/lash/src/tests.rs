@@ -100,6 +100,9 @@ struct SnapshotStore {
     drive_epochs: lash_core::store::InMemoryDriveEpochs,
     /// Logical roots' terminal evidence and input bindings (FIG-3600 S7).
     roots: lash_core::store::InMemoryRootLedger,
+    root_claim_results: std::sync::Mutex<
+        HashMap<(SessionId, lash_core::TurnId), lash_core::AcceptedTurnInputDrive>,
+    >,
     read: std::sync::Mutex<Option<lash_core::store::PersistedSessionRead>>,
     session_meta: std::sync::Mutex<Option<lash_core::SessionMeta>>,
     runtime_turn_commits: std::sync::Mutex<
@@ -163,6 +166,7 @@ impl SnapshotStore {
         Self {
             drive_epochs: Default::default(),
             roots: Default::default(),
+            root_claim_results: Default::default(),
             read: std::sync::Mutex::new(Some(lash_core::store::PersistedSessionRead {
                 session_id: state.session_id,
                 head_revision: 7,

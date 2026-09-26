@@ -198,6 +198,7 @@ pub(crate) fn nearest_frame_node_id_conn(
 }
 
 mod claim_support;
+pub(crate) use claim_support::claim_root_inputs_sqlite;
 mod maintenance;
 pub(crate) mod queued_run;
 mod queued_run_assignment;

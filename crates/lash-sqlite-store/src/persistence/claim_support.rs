@@ -1,5 +1,111 @@
 use super::*;
 
+/// Commit the root's complete claim result with its rows, bindings and base.
+pub(crate) async fn claim_root_inputs_sqlite(
+    store: &crate::Store,
+    request: &lash_core_execution::store::RootInputClaimRequest,
+) -> Result<Option<lash_core_execution::AcceptedTurnInputDrive>, StoreError> {
+    let request = request.clone();
+    let now = store.clock.timestamp_ms();
+    let fleet = store.fleet_format;
+    store
+        .conn
+        .write_flow(move |tx| {
+            let outcome: Result<
+                TxOutcome<Option<lash_core_execution::AcceptedTurnInputDrive>>,
+                StoreError,
+            > = (|| {
+                ensure_session_execution_lease_conn(tx, &request.session_id, &request.lease, now)?;
+                let roots = crate::session_roots::session_roots_sql();
+                let existing: Option<Option<String>> = tx
+                    .query_row(
+                        roots.roots.select_claim_result.sql(),
+                        params![
+                            request.session_id.as_str(),
+                            request.root.as_str(),
+                            request.head.as_str()
+                        ],
+                        |row| row.get(0),
+                    )
+                    .optional()
+                    .map_err(sqlite_error)?;
+                if let Some(Some(json)) = existing {
+                    let drive = serde_json::from_str(&json).map_err(|error| {
+                        StoreError::StoredDataCorrupt {
+                            record_kind: "RootClaimResult",
+                            message: error.to_string(),
+                        }
+                    })?;
+                    return Ok(TxOutcome::Commit(Some(drive)));
+                }
+                let claim = match claim_pending_turn_inputs_sqlite_conn(
+                    tx,
+                    now,
+                    &request.session_id,
+                    &request.lease,
+                    &request.owner,
+                    request.max_inputs,
+                    lash_core_execution::TurnInputClaimMode::NextTurn,
+                )? {
+                    TxOutcome::Commit(Some(claim)) => claim,
+                    TxOutcome::Commit(None) => return Ok(TxOutcome::Commit(None)),
+                    TxOutcome::Rollback(_) => return Ok(TxOutcome::Rollback(None)),
+                };
+                if !claim
+                    .inputs
+                    .iter()
+                    .any(|input| input.input_id == request.head)
+                {
+                    return Ok(TxOutcome::Rollback(None));
+                }
+                let mut base = request.base.clone();
+                base.generation = read_session_state_version_conn(tx, &request.session_id, fleet)?;
+                crate::session_meta::retain_admission_base_conn(
+                    tx,
+                    &request.session_id,
+                    base.checkpoint.as_ref(),
+                )?;
+                let inputs = claim
+                    .inputs
+                    .iter()
+                    .map(|input| input.input_id.clone())
+                    .collect::<Vec<_>>();
+                crate::session_roots::bind_root_inputs_conn(
+                    tx,
+                    &request.session_id,
+                    &request.root,
+                    &inputs,
+                )?;
+                let drive = lash_core_execution::AcceptedTurnInputDrive::Claimed {
+                    claim: Box::new(claim),
+                    base,
+                    turn_index: request.turn_index,
+                    generation: request.generation,
+                };
+                let json = encode_json(&drive)?;
+                let changed = tx
+                    .execute(
+                        roots.roots.write_claim_result.sql(),
+                        params![request.session_id.as_str(), request.root.as_str(), json],
+                    )
+                    .map_err(sqlite_error)?;
+                if changed != 1 {
+                    return Err(StoreError::Backend(
+                        "root claim result was already recorded".into(),
+                    ));
+                }
+                Ok(TxOutcome::Commit(Some(drive)))
+            })();
+            Ok(match outcome {
+                Ok(TxOutcome::Commit(value)) => TxOutcome::Commit(Ok(value)),
+                Ok(TxOutcome::Rollback(value)) => TxOutcome::Rollback(Ok(value)),
+                Err(error) => TxOutcome::Rollback(Err(error)),
+            })
+        })
+        .await
+        .map_err(sqlite_error)?
+}
+
 /// The binding input `input_id` of `session_id` carries, if any (FIG-3589).
 fn turn_input_binding_conn(
     conn: &Connection,

@@ -20,6 +20,23 @@ crate::statements! {
         insert_open = "INSERT INTO session_roots (session_id, root) VALUES (?1, ?2)
              ON CONFLICT (session_id, root) DO NOTHING";
 
+        /// The recorded result of root `?2`'s claim (NULL until its claim
+        /// transaction commits), while the claim's head input `?3` is still
+        /// undelivered. Once the head settles, is cancelled or is pruned,
+        /// there is nothing left to replay and no row comes back.
+        select_claim_result = "SELECT claim_result_json FROM session_roots
+             WHERE session_id = ?1 AND root = ?2
+               AND EXISTS (
+                   SELECT 1 FROM pending_turn_inputs
+                   WHERE session_id = ?1
+                     AND input_id = ?3
+                     AND {{nonterminal_turn_input_state(state)}}
+               )";
+
+        /// Record the claim after opening its root, in the claim transaction.
+        write_claim_result = "UPDATE session_roots SET claim_result_json = ?3
+             WHERE session_id = ?1 AND root = ?2 AND claim_result_json IS NULL";
+
         /// The terminal evidence of root `?2` of session `?1`: all four
         /// columns NULL while the root has none.
         select_terminal = "SELECT terminal_kind, terminal_cause_json, terminal_head_revision, terminal_at_ms

@@ -158,6 +158,7 @@ macro_rules! drive_admission_tests {
             (fence_is_not_in_the_envelope_hash, "drive-fence-envelope"),
             (every_driver_turn_is_owned_by_its_root, "drive-owned-root"),
             (a_store_fault_at_the_root_claim_is_retried_not_recorded, "drive-claim-fault-retried"),
+            (a_claim_commit_survives_a_worker_crash_without_widening, "drive-claim-commit-crash"),
             (a_committed_root_answers_its_terminal_by_root, "drive-root-answered"),
             (a_host_id_naming_a_terminal_root_is_answered_not_rerun, "drive-root-adopted"),
             (a_root_whose_admission_a_successor_sealed_commits_nothing, "drive-root-superseded"),

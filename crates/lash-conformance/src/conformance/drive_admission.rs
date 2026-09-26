@@ -879,6 +879,157 @@ struct ClaimFaultsOnce {
     fired: AtomicUsize,
 }
 
+/// A session store whose worker dies once right after the root claim
+/// committed, before the effect journal records the claim's outcome
+/// (FIG-3840). It keeps every claim result it returned, with the lease
+/// generation that asked for it.
+struct CrashAfterClaim {
+    inner: Arc<dyn crate::RuntimePersistence>,
+    fired: AtomicUsize,
+    results: std::sync::Mutex<Vec<(u64, crate::AcceptedTurnInputDrive)>>,
+}
+
+#[async_trait::async_trait]
+impl crate::store::RuntimePersistenceDecorator for CrashAfterClaim {
+    fn inner(&self) -> &(dyn crate::RuntimePersistence + '_) {
+        self.inner.as_ref()
+    }
+
+    async fn claim_root_inputs(
+        &self,
+        request: &crate::store::RootInputClaimRequest,
+    ) -> Result<Option<crate::AcceptedTurnInputDrive>, crate::StoreError> {
+        let claim = self.inner.claim_root_inputs(request).await?;
+        if let Some(drive) = &claim {
+            self.results
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .push((request.lease.fencing_token, drive.clone()));
+            if self
+                .fired
+                .compare_exchange(0, 1, Ordering::SeqCst, Ordering::SeqCst)
+                .is_ok()
+            {
+                panic!("worker died after the claim commit");
+            }
+        }
+        Ok(claim)
+    }
+}
+
+/// A root whose worker dies after the store committed its claim, but before
+/// the journal recorded the claim's outcome, is redriven by a fresh worker
+/// under a new lease generation on exactly the composition, base and
+/// executable generation the claim committed (FIG-3840). An input that
+/// arrives in the window never widens the recorded prefix.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+pub async fn a_claim_commit_survives_a_worker_crash_without_widening(
+    prefix: &str,
+    effect_host: Arc<dyn crate::EffectHost>,
+    stores: Arc<dyn crate::StoreSet>,
+    runner: Arc<dyn crate::ConformanceTurnRunner>,
+) {
+    let mut parts = DriveParts::new(prefix, "claim-commit-crash", &effect_host, &stores, 8).await;
+    let crash = Arc::new(CrashAfterClaim {
+        inner: Arc::clone(&parts.store),
+        fired: AtomicUsize::new(0),
+        results: std::sync::Mutex::new(Vec::new()),
+    });
+    parts.store = Arc::clone(&crash) as Arc<dyn crate::RuntimePersistence>;
+    let first = parts.enqueue("first", Some("claim-commit-root")).await;
+    let second = parts.enqueue("second", None).await;
+    let request = parts.request("claim-commit-drive");
+    let crashing: crate::ConformanceTurnAttempt = {
+        let parts = parts.clone();
+        let request = request.clone();
+        Arc::new(move |scope| {
+            let parts = parts.clone();
+            let request = request.clone();
+            Box::pin(async move {
+                let mut runtime = parts.runtime().await;
+                let admitted = admitted(
+                    lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0)
+                        .await
+                        .expect("admit the root"),
+                );
+                let _ = lash_core::drive::run_admitted_root(&mut runtime, &scope, admitted).await;
+                panic!("the claim crash must interrupt the root");
+            })
+        })
+    };
+    let redrive: crate::ConformanceTurnAttempt = {
+        let parts = parts.clone();
+        Arc::new(move |scope| {
+            let parts = parts.clone();
+            let request = request.clone();
+            Box::pin(async move {
+                let _late = parts.enqueue("late", None).await;
+                let mut runtime = parts.runtime().await;
+                let admitted = admitted(
+                    lash_core::drive::admit_drive(&mut runtime, &scope, &request, 0)
+                        .await
+                        .expect("readmit the root"),
+                );
+                lash_core::drive::run_admitted_root(&mut runtime, &scope, admitted)
+                    .await
+                    .expect("redrive the root");
+                crate::ConformanceTurnEnd::Settled
+            })
+        })
+    };
+    runner
+        .run_crashed_then_redriven_turn(
+            admit(crate::ExecutionScope::turn(
+                &parts.session_id,
+                TurnId::from("claim-commit-driver"),
+            )),
+            crashing,
+            redrive,
+        )
+        .await;
+    assert_eq!(crash.fired.load(Ordering::SeqCst), 1, "claim was committed");
+    let results = crash
+        .results
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone();
+    let [(crashed_lease, crashed), (successor_lease, successor)] = results.as_slice() else {
+        panic!("the crashed worker and its successor each claim once: {results:?}");
+    };
+    assert_ne!(
+        crashed_lease, successor_lease,
+        "the successor claims under a new lease generation"
+    );
+    let crate::AcceptedTurnInputDrive::Claimed { claim, .. } = crashed else {
+        panic!("the crashed worker claimed its head: {crashed:?}");
+    };
+    assert_eq!(
+        claim
+            .inputs
+            .iter()
+            .map(|input| input.input_id.clone())
+            .collect::<Vec<_>>(),
+        vec![first.clone(), second.clone()],
+        "the crashed worker claimed the prefix queued before it"
+    );
+    assert_eq!(
+        serde_json::to_value(successor).expect("encode the successor's claim"),
+        serde_json::to_value(crashed).expect("encode the crashed claim"),
+        "the successor drives the recorded composition, base and generation"
+    );
+    assert_eq!(
+        parts.applications().await,
+        vec![
+            (first, TurnId::from("claim-commit-root")),
+            (second, TurnId::from("claim-commit-root"))
+        ],
+        "the late input must not enter the crashed root's recorded claim"
+    );
+}
+
 impl ClaimFaultsOnce {
     fn fire(&self, at: ClaimFault) -> Result<(), crate::StoreError> {
         if std::mem::discriminant(&at) == std::mem::discriminant(&self.fault)
@@ -896,26 +1047,14 @@ impl crate::store::RuntimePersistenceDecorator for ClaimFaultsOnce {
         self.inner.as_ref()
     }
 
-    async fn claim_next_turn_inputs(
+    async fn claim_root_inputs(
         &self,
-        session_id: &SessionId,
-        session_execution_lease: &crate::SessionExecutionLeaseAuthority,
-        owner: &crate::LeaseOwnerIdentity,
-        max_inputs: usize,
-    ) -> Result<Option<crate::TurnInputClaim>, crate::StoreError> {
+        request: &crate::store::RootInputClaimRequest,
+    ) -> Result<Option<crate::AcceptedTurnInputDrive>, crate::StoreError> {
         self.fire(ClaimFault::AtClaim)?;
-        self.inner
-            .claim_next_turn_inputs(session_id, session_execution_lease, owner, max_inputs)
-            .await
-    }
-
-    async fn retain_admission_base(
-        &self,
-        lease: &crate::SessionExecutionLeaseAuthority,
-        base: &crate::store::SessionHeadRef,
-    ) -> Result<(), crate::StoreError> {
+        let drive = self.inner.claim_root_inputs(request).await?;
         self.fire(ClaimFault::AfterClaim)?;
-        self.inner.retain_admission_base(lease, base).await
+        Ok(drive)
     }
 }
 

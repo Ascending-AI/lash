@@ -568,20 +568,34 @@ impl RootInputClaimRunner {
 
     /// Claim the accepted next-turn prefix headed by the admitted input.
     ///
-    /// A claim that reaches the head drives every row it took. One that does
-    /// not is handed straight back, and the head row is read without
-    /// mutating it: bound to this root means an earlier execution of it
-    /// aborted, and this redrive re-takes the set that execution drove
-    /// (FIG-3589); held means another driver has it; absent means it was
-    /// settled, cancelled, or pruned. Nothing here ever drops, withdraws, or
-    /// re-admits a row.
+    /// The store claims the prefix, retains the base, binds the rows to the
+    /// root and records the resulting drive in one transaction, and a later
+    /// execution of the same root reads that record back instead of claiming
+    /// again while the head is undelivered (FIG-3840). A worker that dies after the commit but before the
+    /// journal takes the outcome therefore leaves nothing to recompute: the
+    /// successor drives exactly the recorded composition, base and executable
+    /// generation, never a prefix widened by inputs that arrived meanwhile.
+    ///
+    /// A claim that would not reach the head takes nothing, and the head row
+    /// is read without mutating it: bound to this root means an earlier
+    /// execution of it aborted, and this redrive re-takes the set that
+    /// execution drove (FIG-3589); held means another driver has it; absent
+    /// means it was settled, cancelled, or pruned. Nothing here ever drops,
+    /// withdraws, or re-admits a row.
     async fn claim(self) -> Result<crate::AcceptedTurnInputDrive, crate::StoreError> {
-        if let Some(claim) = self
-            .store
-            .claim_next_turn_inputs(&self.session_id, &self.fence, &self.owner, self.max_inputs)
-            .await?
-        {
-            if claim.inputs.iter().any(|input| input.input_id == self.head) {
+        let request = crate::store::RootInputClaimRequest {
+            session_id: self.session_id.clone(),
+            lease: self.fence.clone(),
+            owner: self.owner.clone(),
+            root: self.root.clone(),
+            head: self.head.clone(),
+            max_inputs: self.max_inputs,
+            base: self.base.clone(),
+            turn_index: self.turn_index as u64,
+            generation: self.generation.clone(),
+        };
+        if let Some(drive) = self.store.claim_root_inputs(&request).await? {
+            if let crate::AcceptedTurnInputDrive::Claimed { claim, .. } = &drive {
                 self.emit(
                     "turn_input.claimed",
                     serde_json::json!({
@@ -593,17 +607,8 @@ impl RootInputClaimRunner {
                             .collect::<Vec<_>>(),
                     }),
                 );
-                return self.admit_or_release(claim).await;
             }
-            self.emit(
-                "turn_input.claim_abandoned",
-                serde_json::json!({
-                    "claim_id": &claim.claim_id,
-                    "head_input_id": &self.head,
-                    "reason": "claim_missed_admitted_head",
-                }),
-            );
-            self.store.abandon_turn_input_claim(&claim).await?;
+            return Ok(drive);
         }
         let open = self
             .store

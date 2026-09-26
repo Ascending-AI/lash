@@ -706,6 +706,17 @@ impl SeamStore {
 
 #[async_trait::async_trait]
 impl crate::store::RuntimePersistenceDecorator for SeamStore {
+    async fn claim_root_inputs(
+        &self,
+        request: &crate::store::RootInputClaimRequest,
+    ) -> Result<Option<crate::AcceptedTurnInputDrive>, StoreError> {
+        self.control
+            .around(
+                TurnSeamOperation::Store(StoreOperation::ClaimNextTurnInputs),
+                self.inner.claim_root_inputs(request),
+            )
+            .await
+    }
     fn inner(&self) -> &(dyn RuntimePersistence + '_) {
         self.inner.as_ref()
     }

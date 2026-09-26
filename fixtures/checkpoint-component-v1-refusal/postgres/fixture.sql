@@ -731,6 +731,7 @@ CREATE TABLE lash_durable_read_fixture.lash_session_roots (
     terminal_cause_json text,
     terminal_head_revision bigint,
     terminal_at_ms bigint,
+    claim_result_json text,
     CONSTRAINT ck_session_roots_terminal CHECK ((((terminal_kind IS NULL) AND (terminal_cause_json IS NULL) AND (terminal_head_revision IS NULL) AND (terminal_at_ms IS NULL)) OR ((terminal_kind = ANY (ARRAY['answered'::text, 'failed'::text, 'cancelled'::text])) AND (terminal_cause_json IS NOT NULL) AND (terminal_at_ms IS NOT NULL))))
 );
 

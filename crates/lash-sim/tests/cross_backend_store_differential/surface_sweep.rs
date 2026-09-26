@@ -37,6 +37,7 @@ pub(super) struct SurfaceScratch {
     pub(super) batch_id: Option<String>,
     pub(super) queued_work_claim: Option<QueuedWorkClaim>,
     pub(super) turn_input_claim: Option<TurnInputClaim>,
+    pub(super) root_claim: Option<serde_json::Value>,
     pub(super) queued_run: Option<lash_core::store::QueuedRunAdmission>,
     /// The `CloseSession` intent this backend's ledger minted for the case's
     /// session: ids are the backend's own clock, so answers compare it by
@@ -51,6 +52,11 @@ pub(super) enum SurfaceMethod {
     ListPendingTurnInputs,
     ListTurnInputApplications,
     ClaimNextTurnInputs,
+    ClaimRootInputs {
+        lease: LeaseSlot,
+    },
+    ClaimRootInputsAfterHeadSettled,
+    EnqueueLateTurnInput,
     ClaimReadyQueuedWork,
     ReadSessionStateVersion,
     AdmitSessionState,
@@ -158,6 +164,14 @@ impl SurfaceMethod {
             Self::ListPendingTurnInputs => "surface:list_pending_turn_inputs",
             Self::ListTurnInputApplications => "surface:list_turn_input_applications",
             Self::ClaimNextTurnInputs => "surface:claim_next_turn_inputs",
+            Self::ClaimRootInputs {
+                lease: LeaseSlot::First,
+            } => "surface:claim_root_inputs",
+            Self::ClaimRootInputs {
+                lease: LeaseSlot::Successor,
+            } => "surface:replay_root_claim_inputs",
+            Self::ClaimRootInputsAfterHeadSettled => "surface:claim_root_inputs_after_head_settled",
+            Self::EnqueueLateTurnInput => "surface:enqueue_late_turn_input",
             Self::ClaimReadyQueuedWork => "surface:claim_ready_queued_work",
             Self::ReadSessionStateVersion => "surface:read_session_state_version",
             Self::AdmitSessionState => "surface:admit_session_state",
@@ -515,6 +529,37 @@ pub(super) fn surface_sweep_case() -> GeneratedCase {
     }
 }
 
+/// The claim result is replayed after a lease handoff, even when another
+/// input becomes eligible between the claim commit and the journal write.
+pub(super) fn root_claim_replay_case() -> GeneratedCase {
+    GeneratedCase {
+        name: CaseName::RootClaimReplay,
+        operations: vec![
+            StoreOperation::EnqueueNextTurnInput,
+            StoreOperation::AcquireSessionLease {
+                slot: LeaseSlot::First,
+                owner: "root-claim-first",
+            },
+            surface(SurfaceMethod::ClaimRootInputs {
+                lease: LeaseSlot::First,
+            }),
+            StoreOperation::ReleaseSessionLease {
+                lease: LeaseSlot::First,
+            },
+            surface(SurfaceMethod::EnqueueLateTurnInput),
+            StoreOperation::AcquireSessionLease {
+                slot: LeaseSlot::Successor,
+                owner: "root-claim-successor",
+            },
+            surface(SurfaceMethod::ClaimRootInputs {
+                lease: LeaseSlot::Successor,
+            }),
+            surface(SurfaceMethod::CancelPendingTurnInputs),
+            surface(SurfaceMethod::ClaimRootInputsAfterHeadSettled),
+        ],
+    }
+}
+
 /// `raise_pending_follow_on_attempts` over a live fact (ADR 0101 §3): a
 /// frame-switch terminal commit leaves the head owing a follow-on, the held
 /// lease raises its attempts count twice without moving the head revision,
@@ -803,6 +848,110 @@ impl BackendRunner {
                     self.surface.turn_input_claim = Some(claim);
                 }
                 format!("claimed={claimed}")
+            }
+            SurfaceMethod::ClaimRootInputs { lease } => {
+                let lease_slot = lease;
+                let lease = self.lease(lease_slot).clone();
+                let request = lash_core::store::RootInputClaimRequest {
+                    session_id: session_id.clone(),
+                    lease: lease.fence(),
+                    owner: lease.owner.clone(),
+                    root: lash_core::TurnId::from(SURFACE_ROOT_ID),
+                    head: lash_core::InputId::from(format!("{session_id}:input")),
+                    max_inputs: 8,
+                    base: lash_core::store::SessionHeadRef {
+                        generation: 0,
+                        revision: 0,
+                        leaf: None,
+                        checkpoint: None,
+                    },
+                    turn_index: 1,
+                    generation: None,
+                };
+                // A replay that differs, a refusal or a widened prefix is a
+                // law violation on this backend, never an answer to compare.
+                let Some(drive) = store.claim_root_inputs(&request).await? else {
+                    panic!("{}: root claim did not reach its queued head", self.name);
+                };
+                let encoded = serde_json::to_value(&drive)
+                    .map_err(|error| StoreError::Backend(error.to_string()))?;
+                match &self.surface.root_claim {
+                    Some(recorded) => assert_eq!(
+                        *recorded, encoded,
+                        "{}: a successor's root claim must return the recorded result",
+                        self.name
+                    ),
+                    None => self.surface.root_claim = Some(encoded),
+                }
+                let lash_core::AcceptedTurnInputDrive::Claimed {
+                    claim,
+                    base,
+                    turn_index,
+                    ..
+                } = drive
+                else {
+                    panic!("{}: root claim refused its queued head", self.name);
+                };
+                assert_eq!(
+                    claim
+                        .inputs
+                        .iter()
+                        .map(|input| input.input_id.clone())
+                        .collect::<Vec<_>>(),
+                    vec![request.head.clone()],
+                    "{}: the root claim must not widen past its recorded prefix",
+                    self.name
+                );
+                format!(
+                    "inputs={} base_generation={} base_revision={} turn_index={turn_index} replay={}",
+                    claim.inputs.len(),
+                    base.generation,
+                    base.revision,
+                    matches!(lease_slot, LeaseSlot::Successor)
+                )
+            }
+            SurfaceMethod::EnqueueLateTurnInput => {
+                // Queued between a root's claim commit and its replay: it must
+                // never widen the recorded prefix.
+                store
+                    .enqueue_pending_turn_input(
+                        PendingTurnInputDraft::new(
+                            &session_id,
+                            TurnInputIngress::NextTurn,
+                            TurnInput::text("late input after root claim"),
+                        )
+                        .with_input_id(format!("{session_id}:late-input")),
+                    )
+                    .await?;
+                "enqueued".to_string()
+            }
+            SurfaceMethod::ClaimRootInputsAfterHeadSettled => {
+                // The head left the queue: the recorded claim is not replayed,
+                // and the late input alone never makes a claim for this root.
+                let lease = self.lease(LeaseSlot::Successor).clone();
+                let request = lash_core::store::RootInputClaimRequest {
+                    session_id: session_id.clone(),
+                    lease: lease.fence(),
+                    owner: lease.owner.clone(),
+                    root: lash_core::TurnId::from(SURFACE_ROOT_ID),
+                    head: lash_core::InputId::from(format!("{session_id}:input")),
+                    max_inputs: 8,
+                    base: lash_core::store::SessionHeadRef {
+                        generation: 0,
+                        revision: 0,
+                        leaf: None,
+                        checkpoint: None,
+                    },
+                    turn_index: 1,
+                    generation: None,
+                };
+                let drive = store.claim_root_inputs(&request).await?;
+                assert!(
+                    drive.is_none(),
+                    "{}: a root whose head settled replays nothing: {drive:?}",
+                    self.name
+                );
+                "none".to_string()
             }
             SurfaceMethod::ClaimReadyQueuedWork => {
                 let outcome = store

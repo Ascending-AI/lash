@@ -157,9 +157,9 @@ pub use retention::{
     is_facade_minted_operation_id, mint_facade_operation_id, plugin_operation_receipt_storage_key,
 };
 pub use root::{
-    InMemoryRootLedger, RootStore, RootTerminal, RootTerminalCause, RootTerminalKind,
-    RootTerminalWrite, RootTerminalWriteDecision, StoredRootTerminal, TurnCommitId,
-    decide_root_terminal_write, root_binding_conflict, settled_queued_root_cause,
+    InMemoryRootLedger, RootInputClaimRequest, RootStore, RootTerminal, RootTerminalCause,
+    RootTerminalKind, RootTerminalWrite, RootTerminalWriteDecision, StoredRootTerminal,
+    TurnCommitId, decide_root_terminal_write, root_binding_conflict, settled_queued_root_cause,
     settled_queued_root_terminal,
 };
 pub use runtime_commit::{

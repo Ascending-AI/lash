@@ -35,7 +35,8 @@ pub(crate) struct SessionRootsSql {
 }
 
 static SESSION_ROOTS_SQL: LazyLock<SessionRootsSql> = LazyLock::new(|| {
-    let dialect = Dialect::postgres();
+    // The claim-result read names the head input's lifecycle (FIG-3840).
+    let dialect = Dialect::postgres().with_vocabulary(crate::turn_ingress::TURN_INPUT_LIFECYCLE);
     SessionRootsSql {
         roots: SessionRootStatements::render(dialect),
         verbs: RootVerbStatements::render(
@@ -493,6 +494,13 @@ pub(crate) async fn delete_session_roots_conn(
 
 #[async_trait::async_trait]
 impl RootStore for PostgresSessionStore {
+    async fn claim_root_inputs(
+        &self,
+        request: &lash_core_execution::store::RootInputClaimRequest,
+    ) -> Result<Option<lash_core_execution::AcceptedTurnInputDrive>, StoreError> {
+        self.bind_session_id(&request.session_id)?;
+        crate::runtime_persistence::claim_root_inputs_postgres(self, request).await
+    }
     async fn root_terminal(
         &self,
         session_id: &SessionId,

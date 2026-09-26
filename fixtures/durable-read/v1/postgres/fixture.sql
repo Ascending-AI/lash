@@ -725,6 +725,7 @@ CREATE TABLE lash_durable_read_fixture.lash_session_root_inputs (
 CREATE TABLE lash_durable_read_fixture.lash_session_roots (
     session_id text NOT NULL,
     root text NOT NULL,
+    claim_result_json text,
     terminal_kind text,
     terminal_cause_json text,
     terminal_head_revision bigint,
