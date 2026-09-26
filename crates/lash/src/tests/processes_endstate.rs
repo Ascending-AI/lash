@@ -627,6 +627,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
     let factory = &core.store_factory;
     let store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,
@@ -739,6 +740,7 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
     let late_session_id = lash_core::SessionId::from("process-prune-closure-late-session");
     let late_store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: late_session_id.clone(),
             relation: lash_core::SessionRelation::Root,
@@ -1074,21 +1076,39 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
     .await;
 
     let start_request = process.start_request("sessionless-direct");
-    let sessionless_direct_id = core
+    let started = core
         .processes()
         .start(
             start_request.clone(),
             runtime_operation_scope(&core, "sessionless-direct-start"),
         )
-        .await?
-        .id;
-    core.processes()
+        .await?;
+    assert_eq!(
+        started.disposition,
+        lash_core::ProcessRegistrationDisposition::Created,
+        "the first start under its key creates the process"
+    );
+    assert!(
+        started.start_key.is_some(),
+        "the receipt names the start's key"
+    );
+    let sessionless_direct_id = started.process_id.clone();
+    let retried = core
+        .processes()
         .start(
             start_request,
             runtime_operation_scope(&core, "sessionless-direct-start-replay"),
         )
         .await
         .expect("public start replay discovers process ownership after staging retirement");
+    assert_eq!(
+        retried,
+        lash_core::ProcessStartReceipt {
+            disposition: lash_core::ProcessRegistrationDisposition::Existing,
+            ..started
+        },
+        "a retry under the same key answers the same process, found not created"
+    );
     let waiting = wait_for_waiting_signal(&core, &sessionless_direct_id, "ready").await;
     assert!(matches!(
         waiting.originator,
@@ -1319,7 +1339,7 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
             runtime_operation_scope(&core, "signal-validation-start"),
         )
         .await?
-        .id;
+        .process_id;
     wait_for_waiting_signal(&core, &process_id, "ready").await;
 
     let undeclared = core
@@ -1426,7 +1446,7 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
             runtime_operation_scope(&core, "repeated-waits-start"),
         )
         .await?
-        .id;
+        .process_id;
 
     let first_wait = wait_for_waiting_signal(&core, &process_id, "ready").await;
     let lash_core::WaitKind::Signal { ordinal, .. } =
@@ -1517,7 +1537,7 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
             runtime_operation_scope(&core, "parent-joins-child-start"),
         )
         .await?
-        .id;
+        .process_id;
     let output = core.processes().await_output(&process_id).await?;
     let output = output.into_tool_output();
     let lash_core::ToolCallOutcome::Success(value) = output.outcome else {

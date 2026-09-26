@@ -14,6 +14,8 @@ use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
 
 mod admission;
+mod owning_process;
+pub use owning_process::session_meta_records_the_process_that_owns_it;
 mod process_successor;
 pub use process_successor::a_same_start_key_successor_after_prune_owns_fresh_session_stores;
 mod queued_run;
@@ -816,6 +818,7 @@ pub async fn process_prune_deletes_owned_session_stores(
         .enumerate()
     {
         let request = crate::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: crate::SessionRelation::default(),
@@ -1031,6 +1034,7 @@ pub async fn process_prune_deletes_owned_session_stores(
     for session_id in crate::process_runtime_session_ids(&next.id) {
         factory
             .create_store(&crate::SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id,
                 relation: crate::SessionRelation::default(),
@@ -1618,6 +1622,7 @@ async fn session_store_factory_round_trips_every_relation_shape(
             .await
             .unwrap_or_else(|error| panic!("create {label} relation store: {error}"));
         let expected = SessionMeta {
+            owning_process_id: None,
             pending_observer_intents: vec![
                 crate::SessionObserverIntent::host_requested(crate::ProcessId::fixture(
                     "observer-a",
@@ -1999,6 +2004,7 @@ async fn session_store_factory_fork_semantics(factory: Arc<dyn crate::SessionSto
         .expect("remove lineage fork");
     let branch = factory
         .open_existing_store(&crate::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: fork_request.session_id.clone(),
             relation: fork_request.relation.clone(),

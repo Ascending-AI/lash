@@ -162,6 +162,7 @@ async fn parent_bound_session_store(
     let store = backend
         .session_store_factory()
         .create_store(&crate::SessionStoreCreateRequest {
+            owning_process_id: None,
             session_id: SessionId::from(PARENT_SESSION_ID),
             relation: crate::SessionRelation::Root,
             pending_observer_intents: Vec::new(),
@@ -435,6 +436,7 @@ async fn engine_put_after_nested_turn_restores_the_durable_process_owner() {
     await_terminal(&registry, &process_id).await;
 
     let request = crate::SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(format!("process-env:{process_id}")),
         relation: crate::SessionRelation::default(),
@@ -569,6 +571,7 @@ async fn a_start_after_prune_binds_attachments_to_its_own_process() {
         let factory = Arc::clone(&factory);
         async move {
             let request = crate::SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(format!("process-env:{process_id}")),
                 relation: crate::SessionRelation::default(),

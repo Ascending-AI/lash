@@ -119,6 +119,7 @@ async fn host_supplied_reopen_value_is_durable_immediately_after_open() -> Resul
     let store = lash_core::SessionStoreFactory::create_store(
         factory.as_ref(),
         &lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             session_id: lash_core::SessionId::from("seeded-reopen"),
             relation: lash_core::SessionRelation::Root,
             policy,

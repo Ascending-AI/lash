@@ -457,6 +457,7 @@ pub(super) async fn fork_at_in_catalog(
                 }
             }
             let session_meta = lash_core_execution::SessionMeta {
+                owning_process_id: None,
                 session_id: request.session_id.clone(),
                 relation: request.relation,
                 pending_observer_intents: request.pending_observer_intents,

@@ -53,9 +53,9 @@ lash_store_sql::statements! {
               caused_by_process_event_sequence, caused_by_occurrence_id,
               caused_by_subscription_id, caused_by_subscription_incarnation,
               caused_by_subscription_revision, caused_by_node_id, source_session_id,
-              source_node_id, created_at_ms, last_commit_at_ms)
+              source_node_id, created_at_ms, last_commit_at_ms, owning_process_id)
              VALUES (?1, ?19, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                     ?13, ?14, ?15, ?16, ?17, ?18, NULL)";
+                     ?13, ?14, ?15, ?16, ?17, ?18, NULL, ?20)";
 
         /// Forks with [`SessionMetaSqliteStatements::insert`], and again on
         /// the conflict alias: SQLite's is `excluded`, PostgreSQL's is
@@ -67,9 +67,9 @@ lash_store_sql::statements! {
               caused_by_process_event_sequence, caused_by_occurrence_id,
               caused_by_subscription_id, caused_by_subscription_incarnation,
               caused_by_subscription_revision, caused_by_node_id, source_session_id,
-              source_node_id, created_at_ms, last_commit_at_ms)
+              source_node_id, created_at_ms, last_commit_at_ms, owning_process_id)
              VALUES (?1, ?19, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12,
-                     ?13, ?14, ?15, ?16, ?17, ?18, NULL)
+                     ?13, ?14, ?15, ?16, ?17, ?18, NULL, ?20)
              ON CONFLICT(session_id) DO UPDATE SET
                relation_kind = excluded.relation_kind,
                parent_session_id = excluded.parent_session_id,

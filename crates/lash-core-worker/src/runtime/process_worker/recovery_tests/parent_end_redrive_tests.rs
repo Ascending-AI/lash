@@ -76,6 +76,7 @@ async fn commit_turn(backend: &crate::Backend, turn_id: &str, head_revision: u64
         Some(store) => store,
         None => factory
             .create_store(&crate::SessionStoreCreateRequest {
+                owning_process_id: None,
                 session_id: session_id.clone(),
                 relation: crate::SessionRelation::Root,
                 pending_observer_intents: Vec::new(),

@@ -220,12 +220,12 @@ async fn zombie_after_substrate_lost(first: First, seed: u64) {
                     let request = request.clone();
                     let started = Arc::clone(&started);
                     Box::pin(async move {
-                        let record = core
+                        let receipt = core
                             .processes()
                             .start(request, scoped)
                             .await
                             .expect("start the process");
-                        *started.lock().expect("the start slot") = Some(record.id);
+                        *started.lock().expect("the start slot") = Some(receipt.process_id);
                     })
                 }),
             ),

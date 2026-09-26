@@ -968,6 +968,8 @@ pub enum ProcessEffectOutcome {
         // (and the runtime effect enum wrapping it) inline through the recursive
         // effect executor.
         record: Box<ProcessRecord>,
+        /// Whether this start created the process or found it registered.
+        disposition: crate::ProcessRegistrationDisposition,
     },
     List {
         entries: Vec<ProcessRecord>,

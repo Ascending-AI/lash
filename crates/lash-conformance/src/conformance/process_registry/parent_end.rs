@@ -338,16 +338,20 @@ async fn complete_process(
         .expect("complete process");
 }
 
-/// Deleting a session closes its `Session` scope (FIG-3607 R10): the delete
-/// writes the scope's close row in the same step, so a process living
-/// `Until` the session is owed its cancel, and a start that names the closed
-/// session — as its lifetime or its starter — is refused (R11). A process
-/// started by the session's turn but `Detached` owes nothing.
+/// A session's `Session` scope closes only through its close row (FIG-3607
+/// R10, ADR 0108 §5). Deleting the session's process state writes none: the
+/// session's `CloseSession` intent is the one owner of that row, and its
+/// scope owner writes it. Once the row is there, a process living `Until` the
+/// session is owed its cancel, and a start that names the closed session — as
+/// its lifetime or its starter — is refused (R11). A process started by the
+/// session's turn but `Detached` owes nothing.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub(super) async fn a_session_delete_closes_its_session_scope(registry: Arc<dyn ProcessRegistry>) {
+pub(super) async fn a_session_scope_closes_only_through_its_close_row(
+    registry: Arc<dyn ProcessRegistry>,
+) {
     let session = SessionId::from("session-close-session");
     let originator = SessionScope::new(session.as_str());
     let turn = lash_core::ScopeId::turn(session.clone(), crate::TurnId::from("session-close-turn"));
@@ -387,23 +391,58 @@ pub(super) async fn a_session_delete_closes_its_session_scope(registry: Arc<dyn 
         .delete_session_process_state(&session)
         .await
         .expect("delete the session's process state");
+    assert!(
+        registry
+            .get_parent_end_plan(&session_scope)
+            .await
+            .expect("read the session's close row after its process state went")
+            .is_none(),
+        "deleting a session's process state writes no close row: its close intent owns it"
+    );
+    let until_unclosed = registry
+        .register_process(crate::started_until(
+            registration(),
+            turn.clone(),
+            session_scope.clone(),
+        ))
+        .await
+        .expect("a session that is not closed still admits a start living until it");
 
+    // What the session's close intent does through the registry's scope owner.
+    lash_core::engine::ScopeCloseSink::close_session_scope(
+        &crate::RegistryScopeClose::new(
+            Arc::clone(&registry),
+            Arc::new(crate::facade_support::SystemClock),
+        ),
+        &session,
+        lash_core::store::ControlIntentId::from_sequence(1),
+        &[],
+    )
+    .await
+    .expect("close the session's scope");
     let closed = registry
         .get_parent_end_plan(&session_scope)
         .await
         .expect("read the session's close row")
-        .expect("the delete writes the session scope's close row");
+        .expect("the scope close writes the session scope's close row");
     assert_eq!(closed.parent, session_scope);
+    let mut owed = registry
+        .list_parent_end_children(
+            &session_scope,
+            None,
+            std::num::NonZeroUsize::new(8).expect("non-zero page"),
+        )
+        .await
+        .expect("page the closed session's children")
+        .into_iter()
+        .map(|record| record.id)
+        .collect::<Vec<_>>();
+    owed.sort();
+    let mut expected = vec![until_session.id.clone(), until_unclosed.id.clone()];
+    expected.sort();
     assert_eq!(
-        registry
-            .list_parent_end_children(&session_scope, None, std::num::NonZeroUsize::MIN)
-            .await
-            .expect("page the closed session's children")
-            .into_iter()
-            .map(|record| record.id)
-            .collect::<Vec<_>>(),
-        vec![until_session.id.clone()],
-        "the sweep owes the child living until the session its cancel, and nothing \
+        owed, expected,
+        "the sweep owes each child living until the session its cancel, and nothing \
          to the detached one"
     );
     assert!(

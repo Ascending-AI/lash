@@ -67,6 +67,7 @@ async fn sqlite_effect_host_satisfies_cold_process_await_event_conformance() {
                 ));
             store_factory
                 .create_store(&lash_core_execution::SessionStoreCreateRequest {
+                    owning_process_id: None,
                     pending_observer_intents: Vec::new(),
                     session_id: address.session_id.clone(),
                     relation: lash_core_execution::SessionRelation::Root,

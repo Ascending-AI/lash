@@ -939,6 +939,7 @@ mod tests {
         let session_id = "deleted-during-runtime-binding";
         let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
         let request = crate::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
             relation: crate::SessionRelation::Root,
@@ -986,6 +987,7 @@ mod tests {
         let session_id = "deleted-during-park-commit";
         let policy = standard_test_policy();
         let request = crate::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
             relation: crate::SessionRelation::Root,
@@ -1062,6 +1064,7 @@ mod tests {
             backend
                 .session_store_factory()
                 .create_store(&crate::SessionStoreCreateRequest {
+                    owning_process_id: None,
                     pending_observer_intents: Vec::new(),
                     session_id: SessionId::from(session_id.to_string()),
                     relation: crate::SessionRelation::Root,

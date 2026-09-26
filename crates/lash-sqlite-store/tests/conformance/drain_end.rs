@@ -23,6 +23,7 @@ async fn sqlite_drain_end_world(retained: Retained<TestEngineBackend>) -> DrainE
     let store = backend
         .session_store_factory()
         .create_store(&lash_core_execution::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("root"),
             relation: lash_core_execution::SessionRelation::Root,

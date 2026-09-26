@@ -71,6 +71,7 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
     use lash_core::CausalRef;
 
     let child = |session_id: &SessionId, caused_by| SessionMeta {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: SessionRelation::Child {
@@ -81,6 +82,7 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
     vec![
         SessionMetaLayoutCase {
             meta: SessionMeta {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from("layout-root-literal"),
                 relation: SessionRelation::Root,
@@ -306,6 +308,7 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
         },
         SessionMetaLayoutCase {
             meta: SessionMeta {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from("layout-fork-history-literal"),
                 relation: SessionRelation::Fork {
@@ -325,6 +328,7 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
         },
         SessionMetaLayoutCase {
             meta: SessionMeta {
+                owning_process_id: None,
                 pending_observer_intents: vec![
                     lash_core::facade_support::SessionObserverIntent::host_requested(
                         ProcessId::fixture("layout-pending-selected-literal"),
@@ -352,6 +356,7 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
         },
         SessionMetaLayoutCase {
             meta: SessionMeta {
+                owning_process_id: None,
                 pending_observer_intents: vec![
                     lash_core::facade_support::SessionObserverIntent::host_requested(
                         ProcessId::fixture("layout-observer-root-a-literal"),
@@ -724,6 +729,7 @@ pub(super) async fn verify_independent_session_meta_layout(
     let mut postgres_stores = Vec::with_capacity(cases.len());
     for case in &cases {
         let request = SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: case.meta.pending_observer_intents.clone(),
             session_id: case.meta.session_id.clone(),
             relation: case.meta.relation.clone(),

@@ -50,13 +50,6 @@ lash_conformance::turn_config_tests!({
     (backend, prefix, effect_host, stores, turn_runner)
 });
 
-// The in-process tier redelivers no drive: a root whose scope close failed
-// after its evidence committed leaves no work for a later drive to admit, so
-// the close's at-least-once retry is an engine's, and
-// `root_scope_close_runs_after_terminal_evidence_at_least_once` runs on the
-// Restate double only. In process, the process worker's recovery pass
-// reconciles an unacknowledged close: it re-derives the root's missing
-// scope-close row from the root's terminal evidence (FIG-3607).
 lash_conformance::drive_admission_tests!(@laws [] {
     let (backend, prefix, effect_host, stores, _process_work, turn_runner, _after_law) =
         sqlite_turn_runner_fixture().await;

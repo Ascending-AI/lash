@@ -338,6 +338,7 @@ async fn create_sessions(storage: &PostgresStorage) -> Result<()> {
     for session_id in SESSION_IDS {
         factory
             .create_store(&SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(session_id.to_string()),
                 relation: SessionRelation::Root,

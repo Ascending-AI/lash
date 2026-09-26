@@ -157,6 +157,7 @@ async fn retarget(storage: &PostgresStorage) -> Result<()> {
     for session_id in [OLD_SESSION_ID, NEW_SESSION_ID] {
         factory
             .create_store(&SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(session_id.to_string()),
                 relation: SessionRelation::Root,
@@ -295,6 +296,7 @@ async fn prepare(storage: &PostgresStorage) -> Result<()> {
     storage
         .session_store_factory_with_shared_process_registry()
         .create_store(&SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(SESSION_ID.to_string()),
             relation: SessionRelation::Root,

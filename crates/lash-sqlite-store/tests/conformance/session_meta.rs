@@ -12,6 +12,7 @@ lash_conformance::unbound_session_meta_tests!({
     for session_id in ["unbound-session-meta-a", "unbound-session-meta-b"] {
         factory
             .create_store(&SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(session_id.to_string()),
                 relation: SessionRelation::Root,

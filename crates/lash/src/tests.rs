@@ -141,6 +141,7 @@ impl SnapshotStore {
     ) -> Self {
         let turn_state = state.turn_state();
         let session_meta = lash_core::SessionMeta {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: state.session_id.clone(),
             relation: lash_core::SessionRelation::Root,
@@ -248,6 +249,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             return Ok(lash_core::SessionAdmission::Rebound);
         }
         *meta = Some(lash_core::SessionMeta {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: binding.session_id.clone(),
             relation: binding.relation.clone(),
@@ -348,6 +350,7 @@ impl lash_core::SessionCommitStore for SnapshotStore {
             let mut session_meta = self.session_meta.lock_recover();
             if session_meta.is_none() {
                 *session_meta = Some(lash_core::SessionMeta {
+                    owning_process_id: None,
                     pending_observer_intents: Vec::new(),
                     session_id: commit.session_id.clone(),
                     relation: lash_core::SessionRelation::Root,
@@ -909,6 +912,7 @@ impl lash_core::SessionCommitStore for BoundSessionStore {
         &self,
     ) -> std::result::Result<Option<lash_core::SessionMeta>, lash_core::store::StoreError> {
         Ok(Some(lash_core::SessionMeta {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: self.session_id.clone(),
             relation: lash_core::SessionRelation::Root,

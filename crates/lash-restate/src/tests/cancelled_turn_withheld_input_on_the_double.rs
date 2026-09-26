@@ -22,6 +22,7 @@ lash_conformance::cancelled_turn_withheld_input_tests!({
     let store = stores
         .session_store_factory()
         .create_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(lash_conformance::CANCELLED_TURN_WITHHELD_INPUT_SESSION_ID),
             relation: lash_core::SessionRelation::Root,

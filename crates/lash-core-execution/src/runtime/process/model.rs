@@ -1052,7 +1052,8 @@ impl StoreRealization {
 /// returns the recorded row instead of failing. `Created` therefore says
 /// something a successful `Ok` does not — that this call, and no earlier one,
 /// put the row there.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ProcessRegistrationDisposition {
     /// This call inserted the row.
     Created,
@@ -1384,6 +1385,32 @@ impl ProcessHandleView {
     /// implementors while persisting and coordinating durable process execution.
     pub fn from_record(record: ProcessRecord) -> Self {
         Self::new(record.id, record.identity, record.status)
+    }
+}
+
+/// What a process start answers: the process it names, the key that made
+/// the start idempotent, and whether this start created the process or found
+/// it already registered under that key.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProcessStartReceipt {
+    /// The minted id of the started process.
+    pub process_id: ProcessId,
+    /// The key the process is registered under, when the start carried one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_key: Option<StartKey>,
+    /// Whether this start created the process.
+    pub disposition: ProcessRegistrationDisposition,
+}
+
+impl ProcessStartReceipt {
+    /// The receipt of a start that registered `record` with `disposition`.
+    pub fn of(record: &ProcessRecord, disposition: ProcessRegistrationDisposition) -> Self {
+        Self {
+            process_id: record.id.clone(),
+            start_key: record.start_key.clone(),
+            disposition,
+        }
     }
 }
 

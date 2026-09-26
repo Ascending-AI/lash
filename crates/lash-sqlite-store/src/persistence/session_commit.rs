@@ -357,6 +357,7 @@ impl SessionCommitStore for Store {
                     crate::session_meta::write_session_meta(
                         tx,
                         &SessionMeta {
+                            owning_process_id: None,
                             session_id: commit.session_id.clone(),
                             relation: lash_core_execution::SessionRelation::Root,
                             pending_observer_intents: Vec::new(),
@@ -1154,6 +1155,7 @@ impl SessionCommitStore for Store {
         let created_at_ms = self.clock.timestamp_ms();
         let fleet_format = self.fleet_format();
         let meta = SessionMeta {
+            owning_process_id: None,
             session_id: session_id.clone(),
             relation: binding.relation.clone(),
             pending_observer_intents: Vec::new(),

@@ -14,6 +14,7 @@ async fn sqlite_queued_work_partial_claim_rolls_back_through_all_entry_points() 
         let store = backend
             .session_store_factory()
             .create_store(&lash_core_execution::SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: "root".into(),
                 relation: lash_core_execution::SessionRelation::Root,
@@ -55,6 +56,7 @@ async fn sqlite_queued_work_claimability_verdict_holds_over_a_displaced_generati
     let store = backend
         .session_store_factory()
         .create_store(&lash_core_execution::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: "root".into(),
             relation: lash_core_execution::SessionRelation::Root,

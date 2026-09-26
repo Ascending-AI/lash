@@ -862,7 +862,7 @@ pub(super) async fn restate_controller_schedules_process_workflow_without_runnin
         .await
         .expect("start");
     let RuntimeEffectOutcome::Process {
-        result: ProcessEffectOutcome::Start { record },
+        result: ProcessEffectOutcome::Start { record, .. },
     } = outcome
     else {
         panic!("wrong outcome");
@@ -1036,7 +1036,7 @@ pub(super) async fn restate_failed_start_compensation_returns_the_registered_rec
         .await
         .expect("a failed compensation write must return the record, not the error");
     let RuntimeEffectOutcome::Process {
-        result: ProcessEffectOutcome::Start { record },
+        result: ProcessEffectOutcome::Start { record, .. },
     } = outcome
     else {
         panic!("wrong start outcome")
@@ -1100,7 +1100,7 @@ pub(super) async fn restate_external_ref_write_failure_preserves_inputs_for_exac
         .await
         .expect("exact start retry completes ownership transfer");
     let RuntimeEffectOutcome::Process {
-        result: ProcessEffectOutcome::Start { record },
+        result: ProcessEffectOutcome::Start { record, .. },
     } = outcome
     else {
         panic!("wrong recovery outcome")
@@ -1139,7 +1139,7 @@ pub(super) async fn restate_ambiguous_submission_failure_leaves_the_row_for_reco
         .await
         .expect("an ambiguous failure must return the record, not the error");
     let RuntimeEffectOutcome::Process {
-        result: ProcessEffectOutcome::Start { record },
+        result: ProcessEffectOutcome::Start { record, .. },
     } = outcome
     else {
         panic!("wrong start outcome")
@@ -1203,7 +1203,7 @@ pub(super) async fn restate_exact_retry_start_failure_does_not_cancel_the_first_
         .await
         .expect("a retry that did not create the row returns it rather than cancelling it");
     let RuntimeEffectOutcome::Process {
-        result: ProcessEffectOutcome::Start { record },
+        result: ProcessEffectOutcome::Start { record, .. },
     } = outcome
     else {
         panic!("wrong start outcome")
@@ -1296,7 +1296,7 @@ pub(super) async fn restate_controller_replays_process_start_await_command_seque
     let terminal = process_success(serde_json::json!({ "done": true }));
 
     let RuntimeEffectOutcome::Process {
-        result: ProcessEffectOutcome::Start { record },
+        result: ProcessEffectOutcome::Start { record, .. },
     } = host
         .execute_effect(start(), registry_local_executor(registry.clone()))
         .await
@@ -1494,7 +1494,7 @@ pub(super) async fn restate_controller_start_after_prune_sends_a_new_workflow() 
     };
     let started = |outcome: RuntimeEffectOutcome| {
         let RuntimeEffectOutcome::Process {
-            result: ProcessEffectOutcome::Start { record },
+            result: ProcessEffectOutcome::Start { record, .. },
         } = outcome
         else {
             panic!("a start reports its process");
@@ -1614,7 +1614,7 @@ pub(super) async fn run_parent_shaped_start_await_suspend_flow(
         .await
         .expect("parent flow start child");
     let RuntimeEffectOutcome::Process {
-        result: ProcessEffectOutcome::Start { record },
+        result: ProcessEffectOutcome::Start { record, .. },
     } = started
     else {
         panic!("parent flow start must report the started child");

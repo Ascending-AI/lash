@@ -99,6 +99,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
     ) -> String {
         let store = factory
             .create_store(&lash_core_execution::SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from(session_id.to_string()),
                 relation: lash_core_execution::SessionRelation::Root,
@@ -160,6 +161,7 @@ async fn postgres_delete_reclaims_tombstones_orphaned_by_earlier_delete_when_con
     {
         let child = factory
             .open_existing_store(&lash_core_execution::SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from("orphan-fork-child"),
                 relation: lash_core_execution::SessionRelation::Root,

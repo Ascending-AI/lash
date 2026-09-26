@@ -638,7 +638,7 @@ async fn segment_body(
                 .await;
             let observed = match &outcome {
                 Ok(RuntimeEffectOutcome::Process {
-                    result: crate::ProcessEffectOutcome::Start { record },
+                    result: crate::ProcessEffectOutcome::Start { record, .. },
                 }) => {
                     assert_eq!(
                         record.start_key.as_ref(),

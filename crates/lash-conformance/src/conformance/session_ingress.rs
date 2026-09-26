@@ -55,6 +55,7 @@ pub struct SessionIngressHandles {
 #[must_use]
 pub fn session_ingress_session_request() -> crate::SessionStoreCreateRequest {
     crate::SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: session(),
         relation: crate::SessionRelation::Root,

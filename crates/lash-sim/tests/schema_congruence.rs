@@ -1308,6 +1308,7 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
     let encode = |relation| {
         codec
             .encode(&SessionMeta {
+                owning_process_id: None,
                 session_id: SessionId::from("session"),
                 relation,
                 pending_observer_intents: Vec::new(),

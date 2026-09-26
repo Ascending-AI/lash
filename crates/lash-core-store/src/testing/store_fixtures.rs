@@ -76,6 +76,7 @@ pub fn session_store_request(
     relation: crate::SessionRelation,
 ) -> crate::SessionStoreCreateRequest {
     crate::SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation,

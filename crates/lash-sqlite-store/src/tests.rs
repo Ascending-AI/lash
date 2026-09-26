@@ -548,6 +548,7 @@ async fn session_listing_statement_count_is_session_count_invariant() {
         };
         factory
             .create_store(&SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: if index == 0 {
                     Vec::new()
                 } else {
@@ -868,6 +869,7 @@ async fn attachment_gc_aborts_when_a_missing_catalog_has_a_deletion_candidate() 
     let live_root = dir.path().join("live-sessions");
     let live_factory = SqliteSessionStoreFactory::new(&live_root);
     let request = SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("live-attachment"),
         relation: lash_core_execution::SessionRelation::Root,
@@ -956,6 +958,7 @@ async fn attachment_gc_allows_an_operator_reset_with_an_empty_backend() {
     let dir = tempfile::tempdir().expect("tempdir");
     let factory = SqliteSessionStoreFactory::new(dir.path().join("sessions"));
     let request = SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("reset-empty-attachment-gc"),
         relation: lash_core_execution::SessionRelation::Root,
@@ -1023,6 +1026,7 @@ async fn open_existing_store_aborts_on_unreadable_requested_session_meta() {
     let root = dir.path().join("sessions");
     let factory = SqliteSessionStoreFactory::new(&root);
     let request = SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("corrupt-session-meta"),
         relation: lash_core_execution::SessionRelation::Root,

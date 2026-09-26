@@ -1146,6 +1146,7 @@ pub(super) async fn an_oversized_queued_row_fails_an_automatic_drain_by_name() -
     {
         let store = store_factory
             .create_store(&crate::persistence::SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: session.session_id(),
                 relation: crate::persistence::SessionRelation::Root,

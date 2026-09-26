@@ -53,7 +53,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
             })
             .await?
         {
-            crate::ProcessEffectOutcome::Start { record } => Ok(*record),
+            crate::ProcessEffectOutcome::Start { record, .. } => Ok(*record),
             _ => Err(wrong_process_outcome("start")),
         }
     }
@@ -1087,13 +1087,31 @@ fn process_visibility_miss(process_id: &ProcessId) -> crate::PluginError {
 /// the live body — reads it back from the enclosing process's own row: the
 /// lineage is a recorded, immutable fact of that row, never re-derived. A
 /// process with no row is refused rather than recorded as a root.
+///
+/// A turn or drain of a session a process runs as its own — a subagent's
+/// session, driven by the host or the session's engine rather than lent the
+/// live body's lineage — reads its owner from the session's metadata
+/// (`owning_process_id`, recorded when the owner's start created the session)
+/// and that owner's lineage from its row, so the start records the owner
+/// above the session (R1).
 async fn with_admitted_start_cx(
     current: &CurrentSessionCapability,
     registration: crate::ProcessRegistration,
     scope: &crate::ProcessOpScope<'_>,
 ) -> Result<crate::ProcessRegistration, crate::PluginError> {
     let process_id = match scope.start_cx() {
-        Ok(Some(cx)) => return Ok(registration.with_start_cx(&cx)),
+        Ok(Some(cx)) => {
+            if scope.process_lineage.is_none()
+                && let Some(session_id) = cx.session_capability()
+                && let Some(owner) = owning_process_lineage(current, &session_id).await?
+            {
+                let cx = scope.start_cx_under(&owner).map_err(|error| {
+                    crate::PluginError::Session(format!("process start refused: {error}"))
+                })?;
+                return Ok(registration.with_start_cx(&cx));
+            }
+            return Ok(registration.with_start_cx(&cx));
+        }
         Ok(None) => return Ok(registration),
         Err(crate::StartCxError::MissingLineage { process_id }) => process_id,
         Err(error) => {
@@ -1118,4 +1136,56 @@ async fn with_admitted_start_cx(
         .start_cx_under(&enclosing.lineage())
         .map_err(|error| crate::PluginError::Session(format!("process start refused: {error}")))?;
     Ok(registration.with_start_cx(&cx))
+}
+
+/// The lineage of the process that runs `session_id` as its own, read from
+/// the session's recorded `owning_process_id` and that process's row (FIG-3607
+/// R1). `None` for a session no process owns, and for one whose owner's row
+/// retention already pruned: a pruned owner ended long ago, its scope is
+/// closed, and it can bound nothing a start made now would name.
+async fn owning_process_lineage(
+    current: &CurrentSessionCapability,
+    session_id: &SessionId,
+) -> Result<Option<crate::ProcessLineage>, crate::PluginError> {
+    let store = match current.store.as_ref() {
+        Some(store) if current.session_id == *session_id => Some(Arc::clone(store)),
+        _ => current
+            .host
+            .core
+            .session_store_factory()
+            .open_existing_store_by_id(session_id)
+            .await
+            .map_err(|error| {
+                crate::PluginError::Session(format!(
+                    "process start refused: the owner of session `{session_id}` cannot be \
+                     read: {error}"
+                ))
+            })?,
+    };
+    let Some(store) = store else {
+        return Ok(None);
+    };
+    let owner = store
+        .load_session_meta()
+        .await
+        .map_err(|error| {
+            crate::PluginError::Session(format!(
+                "process start refused: the owner of session `{session_id}` cannot be read: \
+                 {error}"
+            ))
+        })?
+        .and_then(|meta| meta.owning_process_id);
+    let Some(owner) = owner else {
+        return Ok(None);
+    };
+    let registry = current.host.process_registry().ok_or_else(|| {
+        crate::PluginError::Session(format!(
+            "process start refused: no registry holds the lineage of process `{owner}`, which \
+             owns session `{session_id}`"
+        ))
+    })?;
+    Ok(registry
+        .get_process(&owner)
+        .await?
+        .map(|record| record.lineage()))
 }

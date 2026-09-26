@@ -31,7 +31,7 @@ async fn native_process_await_sink_and_prune_end_to_end() -> Result<()> {
             runtime_operation_scope(&core, "e2e-start"),
         )
         .await?
-        .id;
+        .process_id;
     wait_for_waiting_signal(&core, &process_id, "ready").await;
 
     // Hold the terminal await while the process is still running; it must resolve

@@ -416,6 +416,7 @@ async fn measured_commit_size_curve() {
                 let store = match backend {
                     "sqlite" => sqlite_factory
                         .create_store(&SessionStoreCreateRequest {
+                            owning_process_id: None,
                             pending_observer_intents: Vec::new(),
                             session_id: session_id.clone(),
                             relation: SessionRelation::Root,

@@ -349,6 +349,7 @@ impl TurnCore {
 
 fn request(session_id: &SessionId) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: lash::persistence::SessionRelation::default(),

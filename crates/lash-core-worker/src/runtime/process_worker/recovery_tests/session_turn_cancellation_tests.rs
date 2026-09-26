@@ -15,6 +15,7 @@ async fn cancelled_session_turn_never_creates_and_leaves_foreign_sessions_alone(
     let foreign_session_id = "cancel-never-creates-foreign-root";
     factory
         .create_store(&crate::SessionStoreCreateRequest {
+            owning_process_id: None,
             session_id: SessionId::from(foreign_session_id.to_string()),
             relation: crate::SessionRelation::Root,
             pending_observer_intents: Vec::new(),

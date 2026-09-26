@@ -560,6 +560,7 @@ pub(super) fn runtime_perf_session_create_request(
     session_id: &SessionId,
 ) -> lash_core::SessionStoreCreateRequest {
     lash_core::SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: lash_core::SessionRelation::Root,

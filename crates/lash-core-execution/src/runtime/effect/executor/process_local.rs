@@ -80,6 +80,7 @@ impl ProcessLocalExecution {
                 )
                 .await?;
                 let realization = started.realization();
+                let disposition = started.disposition;
                 let record = started.record;
                 // The poke is advisory. Registration already committed the
                 // durable row, and the row is the work queue: the native
@@ -99,6 +100,7 @@ impl ProcessLocalExecution {
                 Ok((
                     ProcessEffectOutcome::Start {
                         record: Box::new(record),
+                        disposition,
                     },
                     realization,
                 ))

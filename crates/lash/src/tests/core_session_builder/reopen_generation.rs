@@ -20,6 +20,7 @@ async fn reopen_generation_merges_durable_options_and_allows_explicit_clear() ->
     let store = lash_core::SessionStoreFactory::create_store(
         factory.as_ref(),
         &lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             session_id: SessionId::from("generation-merge"),
             relation: lash_core::SessionRelation::Root,
             policy,

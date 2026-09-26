@@ -421,6 +421,7 @@ impl Backend {
             uuid::Uuid::new_v4().simple()
         ));
         let request = SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: SessionRelation::Root,
@@ -1100,6 +1101,7 @@ async fn storeless_runtime(
         inner: backend
             .session_store_factory()
             .create_store(&SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from("fig2521-detached"),
                 relation: SessionRelation::Root,

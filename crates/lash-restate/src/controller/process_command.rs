@@ -331,6 +331,7 @@ where
             let Json(recorded) = journaled
                 .map_err(|error| process_command_journal_error("start registration", error))?;
             let started: lash_core::runtime::RegisteredProcessStart = recorded?;
+            let disposition = started.disposition;
             let registration = registration.with_execution_env_ref(started.env_ref.clone());
             let (record, realization) = schedule_restate_process(
                 Arc::clone(&registry),
@@ -344,6 +345,7 @@ where
             Ok((
                 ProcessEffectOutcome::Start {
                     record: Box::new(record),
+                    disposition,
                 },
                 realization,
             ))

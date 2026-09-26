@@ -1132,6 +1132,7 @@ table lash_session_meta
   column drive_epoch bigint not-null default
   column drive_root_start text nullable
   column last_commit_at_ms bigint nullable
+  column owning_process_id text nullable
   column parent_session_id text nullable
   column relation_kind text not-null
   column session_id text not-null

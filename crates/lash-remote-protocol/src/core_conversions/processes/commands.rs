@@ -98,24 +98,61 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
     }
 }
 
-impl TryFrom<lash_core::ProcessRecord> for RemoteProcessStartReceipt {
-    type Error = RemoteProtocolError;
-
-    fn try_from(value: lash_core::ProcessRecord) -> Result<Self, Self::Error> {
-        Ok(Self {
-            record: value.try_into()?,
-            summary: None,
-        })
+impl From<lash_core::ProcessRegistrationDisposition> for RemoteProcessStartDisposition {
+    fn from(value: lash_core::ProcessRegistrationDisposition) -> Self {
+        match value {
+            lash_core::ProcessRegistrationDisposition::Created => Self::Created,
+            lash_core::ProcessRegistrationDisposition::Existing => Self::Existing,
+        }
     }
 }
 
-impl TryFrom<RemoteProcessStartReceipt> for lash_core::ProcessRecord {
+impl From<RemoteProcessStartDisposition> for lash_core::ProcessRegistrationDisposition {
+    fn from(value: RemoteProcessStartDisposition) -> Self {
+        match value {
+            RemoteProcessStartDisposition::Created => Self::Created,
+            RemoteProcessStartDisposition::Existing => Self::Existing,
+        }
+    }
+}
+
+impl From<lash_core::ProcessStartReceipt> for RemoteProcessStartReceipt {
+    fn from(value: lash_core::ProcessStartReceipt) -> Self {
+        Self {
+            process_id: value.process_id,
+            start_key_digest: value
+                .start_key
+                .map(|start_key| start_key.as_str().to_string()),
+            disposition: value.disposition.into(),
+        }
+    }
+}
+
+impl TryFrom<RemoteProcessStartReceipt> for lash_core::ProcessStartReceipt {
     type Error = RemoteProtocolError;
 
     fn try_from(value: RemoteProcessStartReceipt) -> Result<Self, Self::Error> {
         value.validate()?;
-        let RemoteProcessStartReceipt { record, summary: _ } = value;
-        record.try_into()
+        let RemoteProcessStartReceipt {
+            process_id,
+            start_key_digest,
+            disposition,
+        } = value;
+        let start_key = start_key_digest
+            .map(|digest| {
+                lash_core::StartKey::parse(&digest).map_err(|error| {
+                    RemoteProtocolError::InvalidEnvelope {
+                        type_name: "RemoteProcessStartReceipt",
+                        message: error.to_string(),
+                    }
+                })
+            })
+            .transpose()?;
+        Ok(Self {
+            process_id,
+            start_key,
+            disposition: disposition.into(),
+        })
     }
 }
 

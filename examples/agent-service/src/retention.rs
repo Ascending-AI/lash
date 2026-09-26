@@ -65,6 +65,7 @@ pub(crate) async fn run_store_retention_pass(
 
     for session_id in session_ids {
         let request = SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: SessionRelation::Root,

@@ -151,6 +151,7 @@ impl LashCore {
         let session_id = SessionId::from(session_id.as_ref());
         let store_factory = &self.store_factory;
         let request = lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::default(),
@@ -203,6 +204,7 @@ mod tests {
         .runtime_clock(host_clock);
         let factory = lash_core::Backend::from(backend.clone()).session_store_factory();
         let request = lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(SESSION_ID.to_string()),
             relation: lash_core::SessionRelation::default(),

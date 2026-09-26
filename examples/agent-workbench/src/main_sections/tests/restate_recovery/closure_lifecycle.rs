@@ -21,6 +21,7 @@ async fn authorize_restate_completion_closure(
     let address = lash::TurnAddress::new(session, "turn");
     let store = factory
         .create_store(&lash::persistence::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: address.session_id.clone(),
             relation: lash::persistence::SessionRelation::Root,
@@ -549,6 +550,7 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
         let late_address = lash::TurnAddress::new("live-restate-late-catalog", "turn");
         let late_store = factory_a
             .create_store(&lash::persistence::SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: late_address.session_id.clone(),
                 relation: lash::persistence::SessionRelation::Root,

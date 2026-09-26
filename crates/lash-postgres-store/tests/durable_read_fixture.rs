@@ -674,12 +674,14 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
              ADD COLUMN IF NOT EXISTS drive_admission_id TEXT,
              ADD COLUMN IF NOT EXISTS drive_root_start TEXT,
              ADD COLUMN IF NOT EXISTS admission_base_checkpoint_ref TEXT,
-             ADD COLUMN IF NOT EXISTS closing_intent BIGINT;",
+             ADD COLUMN IF NOT EXISTS closing_intent BIGINT,
+             ADD COLUMN IF NOT EXISTS owning_process_id TEXT;",
     )
     .execute(&pool)
     .await
     .expect(
-        "add the drive epoch, the admission base and the closing intent to the session metadata",
+        "add the drive epoch, the admission base, the closing intent and the owning process \
+         to the session metadata",
     );
     // Component 128 (FIG-3659) reshapes the parked-turn row and adds the feed
     // clock and event tables. The refusal fixture's park row predates them,

@@ -250,6 +250,7 @@ impl WakeDeliveryDriver {
 
             let target_session_id = delivery.wake.target_session_id.clone();
             let request = SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: target_session_id.clone(),
                 relation: SessionRelation::default(),

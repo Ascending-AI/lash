@@ -71,6 +71,7 @@ impl World {
         let store = backend
             .session_store_factory()
             .create_store(&lash_core::SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash_core::SessionRelation::Root,

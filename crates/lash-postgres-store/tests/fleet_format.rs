@@ -105,6 +105,7 @@ async fn postgres_session_meta_stamps_the_version_the_fleet_format_selects() {
     lash_core::SessionCommitStore::save_session_meta(
         &store,
         lash_core::SessionMeta {
+            owning_process_id: None,
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,
             pending_observer_intents: Vec::new(),
@@ -211,6 +212,7 @@ async fn a_select_only_role_reads_the_fleet_format_and_is_refused_on_write() {
     let error = lash_core::SessionCommitStore::save_session_meta(
         &store,
         lash_core::SessionMeta {
+            owning_process_id: None,
             session_id,
             relation: lash_core::SessionRelation::Root,
             pending_observer_intents: Vec::new(),

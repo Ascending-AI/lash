@@ -78,6 +78,12 @@ owner is keyed the same way. The minted id is a result the start records, and
 a redrive reads it back. A journaled start without a key is refused
 (`process_start_key_missing`).
 
+The start records whether it created the process or found it (`Created` or
+`Existing`) beside the id, so a redrive answers what the first execution saw.
+A host start answers a `ProcessStartReceipt` of the id, the key and that
+disposition; the remote protocol's `RemoteProcessStartReceipt` carries the
+same three, with the key as its digest.
+
 ### 4. A declared start answers a slot, not a handle
 
 A tool attempt that declares a start cannot know the id. It answers

@@ -345,6 +345,7 @@ lash_conformance::runtime_persistence_reopenable_tests!({
                     .await
                     .expect("open independent Postgres conformance pool");
                 let request = lash_core_execution::SessionStoreCreateRequest {
+                    owning_process_id: None,
                     pending_observer_intents: Vec::new(),
                     session_id,
                     relation: lash_core_execution::SessionRelation::Root,
@@ -856,6 +857,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
     let session_id = "wake-source-lock-target";
     let store = factory
         .create_store(&lash_core_execution::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
             relation: lash_core_execution::SessionRelation::Root,
@@ -1340,6 +1342,7 @@ async fn postgres_turn_commit_stamps_use_injected_store_clock_when_configured() 
         .with_clock(clock);
     let store = factory
         .create_store(&lash_core_execution::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(SESSION_ID.to_string()),
             relation: lash_core_execution::SessionRelation::default(),

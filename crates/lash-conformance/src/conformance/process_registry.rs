@@ -716,10 +716,12 @@ pub async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_written(
     turn_parent_end::an_unrecorded_turn_parent_is_reported_until_its_row_is_written(registry).await;
 }
 
-/// Deleting a session closes its `Session` scope: its close row, owed
-/// cancels, and refusals of later starts naming it (FIG-3607 R10, R11).
-pub async fn a_session_delete_closes_its_session_scope(registry: Arc<dyn ProcessRegistry>) {
-    parent_end::a_session_delete_closes_its_session_scope(registry).await;
+/// A session's `Session` scope closes only through its close row, which its
+/// `CloseSession` intent writes, never through the deletion of its process
+/// state; the row owes its cancels and refuses later starts naming it
+/// (FIG-3607 R10, R11).
+pub async fn a_session_scope_closes_only_through_its_close_row(registry: Arc<dyn ProcessRegistry>) {
+    parent_end::a_session_scope_closes_only_through_its_close_row(registry).await;
 }
 
 /// Retention reclaims a settled parent-end ledger row once no live child

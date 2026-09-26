@@ -300,6 +300,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     let registry: Arc<dyn crate::ProcessRegistry> = registry;
     let target_session_id = "wake-crash-target";
     let request = crate::SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(target_session_id.to_string()),
         relation: crate::SessionRelation::Root,
@@ -405,6 +406,7 @@ pub async fn wake_delivery_crash_matrix<BeforeTerminal, BeforeTerminalFuture>(
     let authority_target_session_id = "wake-authority-target";
     let authority_target = factory
         .create_store(&crate::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(authority_target_session_id.to_string()),
             relation: crate::SessionRelation::Root,
@@ -1162,6 +1164,7 @@ async fn missing_target_is_deferred_and_rearmed(
 
     factory
         .create_store(&crate::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(target_session_id.to_string()),
             relation: crate::SessionRelation::Root,
@@ -1211,6 +1214,7 @@ async fn sender_floor_lifetime(
     let target_session_id = "wake-allocation-floor-lifetime-target";
     let target = factory
         .create_store(&crate::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(target_session_id.to_string()),
             relation: crate::SessionRelation::Root,
@@ -1944,6 +1948,7 @@ async fn target_gone_is_a_typed_discard(
 ) {
     let target_session_id = "wake-target-gone-session";
     let target_request = crate::SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(target_session_id.to_string()),
         relation: crate::SessionRelation::Root,

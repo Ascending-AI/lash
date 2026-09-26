@@ -175,6 +175,7 @@ async fn postgres_process_prune_removes_queued_run_admission_and_members() {
     let factory = storage.session_store_factory_with_shared_process_registry();
     let store = factory
         .create_store(&lash_core_execution::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core_execution::SessionRelation::default(),

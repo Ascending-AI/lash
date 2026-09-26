@@ -53,6 +53,7 @@ async fn authorize_completion_closure(
     let address = TurnAddress::new(session, turn);
     let store = factory
         .create_store(&lash_core_execution::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: address.session_id.clone(),
             relation: lash_core_execution::SessionRelation::Root,
@@ -228,6 +229,7 @@ async fn owner_retirement_before_authorization_refuses_the_catalog_without_a_pin
     let address = TurnAddress::new("late-catalog-session", "turn");
     let store = factory
         .create_store(&lash_core_execution::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: address.session_id.clone(),
             relation: lash_core_execution::SessionRelation::Root,

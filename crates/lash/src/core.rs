@@ -481,6 +481,7 @@ impl LashCore {
         };
         let mut fork = store_factory.fork_at(&request).await?;
         let create_request = lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             session_id: request.session_id,
             relation: request.relation,
             pending_observer_intents: request.pending_observer_intents,

@@ -144,6 +144,7 @@ pub async fn unbound_session_reads_resolve_the_same_session<MakeAxis, MakeAxisFu
 
     fn request(session_id: &SessionId) -> crate::SessionStoreCreateRequest {
         crate::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
             relation: crate::SessionRelation::Root,

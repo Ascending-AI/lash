@@ -17,6 +17,7 @@ pub(crate) mod helpers {
         let sqlite = crate::testing::memory_store_set().await;
         let factory = RecordingSessionStoreFactory::over(sqlite.session_store_factory());
         let request = crate::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("recording-factory-gc"),
             relation: crate::SessionRelation::Root,

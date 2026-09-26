@@ -112,6 +112,7 @@ mod tests {
 
         let factory = backend.session_store_factory();
         let request = crate::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("session"),
             relation: crate::SessionRelation::Root,

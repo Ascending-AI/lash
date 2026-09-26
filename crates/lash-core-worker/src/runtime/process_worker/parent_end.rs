@@ -294,6 +294,7 @@ impl DurableProcessWorker {
         session_id: &crate::SessionId,
     ) -> Option<std::sync::Arc<dyn crate::store::RuntimePersistence>> {
         let request = crate::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: crate::SessionRelation::default(),

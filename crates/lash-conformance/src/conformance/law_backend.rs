@@ -126,6 +126,7 @@ pub(crate) async fn law_session_store(
     stores
         .session_store_factory()
         .create_store(&crate::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: crate::SessionRelation::Root,

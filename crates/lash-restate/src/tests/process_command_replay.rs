@@ -250,7 +250,7 @@ pub(super) async fn a_start_replayed_after_its_child_is_pruned_answers_as_record
         .expect("the live start");
     let live_commands = commands_since(&context, 0);
     let RuntimeEffectOutcome::Process {
-        result: ProcessEffectOutcome::Start { record },
+        result: ProcessEffectOutcome::Start { record, .. },
     } = &first
     else {
         panic!("a start outcome: {first:?}");

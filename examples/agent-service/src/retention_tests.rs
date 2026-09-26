@@ -29,6 +29,7 @@ async fn production_retention_pass_reclaims_each_store_residue_class() {
         &process_registry_path,
     ));
     let request = SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("retention-session"),
         relation: SessionRelation::Root,

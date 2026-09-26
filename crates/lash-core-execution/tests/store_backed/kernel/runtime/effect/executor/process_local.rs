@@ -340,7 +340,7 @@ mod tests {
 
     fn started_record(outcome: crate::RuntimeEffectOutcome) -> crate::ProcessRecord {
         let crate::RuntimeEffectOutcome::Process {
-            result: ProcessEffectOutcome::Start { record },
+            result: ProcessEffectOutcome::Start { record, .. },
         } = outcome
         else {
             panic!("wrong start outcome: {outcome:?}")
@@ -812,7 +812,7 @@ mod tests {
             .await
             .expect("an advisory poke failure must not fail the start");
         let crate::RuntimeEffectOutcome::Process {
-            result: ProcessEffectOutcome::Start { record },
+            result: ProcessEffectOutcome::Start { record, .. },
         } = outcome
         else {
             panic!("wrong start outcome")

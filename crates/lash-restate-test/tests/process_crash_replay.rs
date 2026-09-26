@@ -376,12 +376,12 @@ async fn run_process(scenario: Scenario) -> Run {
             let request = request.clone();
             let started = Arc::clone(&started);
             Box::pin(async move {
-                let record = core
+                let receipt = core
                     .processes()
                     .start(request, scoped)
                     .await
                     .expect("start the process");
-                *started.lock().unwrap() = Some(record.id);
+                *started.lock().unwrap() = Some(receipt.process_id);
             })
         })
         .await

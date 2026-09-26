@@ -407,7 +407,7 @@ impl Processes {
         &self,
         request: lash_core::ProcessStartRequest,
         scoped_effect_controller: ScopedEffectController<'_>,
-    ) -> Result<lash_core::ProcessRecord> {
+    ) -> Result<lash_core::ProcessStartReceipt> {
         // A root start's session grant is the host's lookup: the session must
         // exist now, whether the grant came from `session_scope` or from a
         // remote start's `until_session` data (FIG-3607 R3).
@@ -436,7 +436,11 @@ impl Processes {
         let outcome = self
             .run_command(command, scoped_effect_controller.clone())
             .await?;
-        let lash_core::ProcessEffectOutcome::Start { record } = outcome else {
+        let lash_core::ProcessEffectOutcome::Start {
+            record,
+            disposition,
+        } = outcome
+        else {
             return Err(EmbedError::Plugin(lash_core::PluginError::Session(
                 "process start returned the wrong outcome".to_string(),
             )));
@@ -455,7 +459,7 @@ impl Processes {
                 "process start registered; advisory worker poke failed, the recovery sweep owns the run"
             );
         }
-        Ok(*record)
+        Ok(lash_core::ProcessStartReceipt::of(&record, disposition))
     }
 
     /// Lists processes matching the supplied filter.

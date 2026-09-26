@@ -10,8 +10,8 @@
 use super::*;
 use lash_core::{ProcessListFilter, ProcessStatusFilter};
 
-/// The ids each attempt's start returned, in attempt order.
-type StartedIds = Arc<Mutex<Vec<ProcessId>>>;
+/// The id and disposition each attempt's start returned, in attempt order.
+type StartedIds = Arc<Mutex<Vec<(ProcessId, lash_core::ProcessRegistrationDisposition)>>>;
 
 /// The process-start envelope a host start issues under `scoped`: a start is
 /// addressed by its key.
@@ -37,7 +37,8 @@ fn start_envelope(
     )
 }
 
-/// Starts one process under `scoped` and records the id the start returned.
+/// Starts one process under `scoped` and records the id and disposition the
+/// start returned.
 async fn start_and_record(
     scoped: &lash_core::ScopedEffectController<'_>,
     registry: &Arc<dyn ProcessRegistry>,
@@ -52,12 +53,18 @@ async fn start_and_record(
         .await
         .expect("the start runs");
     let RuntimeEffectOutcome::Process {
-        result: ProcessEffectOutcome::Start { record },
+        result: ProcessEffectOutcome::Start {
+            record,
+            disposition,
+        },
     } = outcome
     else {
         panic!("a start reports its process: {outcome:?}");
     };
-    started.lock().unwrap().push(record.id.clone());
+    started
+        .lock()
+        .unwrap()
+        .push((record.id.clone(), disposition));
     record.id
 }
 
@@ -153,7 +160,11 @@ pub(super) async fn a_parent_replay_after_its_child_was_pruned_returns_the_recor
     );
     assert_eq!(
         started[1], started[0],
-        "the replay returns the recorded id, never a second minted one"
+        "the replay returns the recorded id and disposition, never a second minted id"
+    );
+    assert_eq!(
+        started[0].1,
+        lash_core::ProcessRegistrationDisposition::Created
     );
     assert_eq!(
         retained_processes(&registry).await,
@@ -215,11 +226,16 @@ pub(super) async fn a_keyless_host_start_replays_to_the_process_it_started(seed:
     );
     assert_eq!(
         started[1], started[0],
-        "the replayed keyless start returns the process it started"
+        "the replayed keyless start returns the process it started, and its recorded \
+         disposition: a live re-registration under the same key would find it `Existing`"
+    );
+    assert_eq!(
+        started[0].1,
+        lash_core::ProcessRegistrationDisposition::Created
     );
     assert_eq!(
         retained_processes(&registry).await,
-        vec![started[0].clone()],
+        vec![started[0].0.clone()],
         "a keyless start replayed starts no second process"
     );
 }

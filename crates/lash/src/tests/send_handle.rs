@@ -407,6 +407,7 @@ async fn a_drive_never_runs_on_a_session_opened_to_observe() -> Result<()> {
         .core
         .store_factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,

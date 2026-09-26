@@ -264,6 +264,7 @@ await control.continue_as({{ task: "finish after cold reopen", seed: {{ frame_se
     .expect("dropped runtime releases its session lane");
 
     let store_request = lash_core::SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: lash_core::SessionRelation::Root,
@@ -975,6 +976,7 @@ pub(super) async fn fig1573_queued_turn_claims_after_a_hard_killed_boot_left_a_l
     let dead_boot_store = lash_core::SessionStoreFactory::create_store(
         store_factory.as_ref(),
         &lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
             relation: lash_core::SessionRelation::Root,

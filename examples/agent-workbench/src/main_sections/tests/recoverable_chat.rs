@@ -2219,6 +2219,7 @@ async fn send_turn_state_projection_stays_readable_and_settles_to_durable_truth(
     let in_flight_store = state
         .session_store_factory
         .create_store(&lash::persistence::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: state.current_session_id(),
             relation: lash::persistence::SessionRelation::Root,

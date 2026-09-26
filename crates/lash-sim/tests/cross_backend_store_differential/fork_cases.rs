@@ -359,6 +359,7 @@ pub(super) async fn selected_observer_intents(
         let intent =
             lash_core::facade_support::SessionObserverIntent::host_requested(selected.clone());
         let request = SessionStoreCreateRequest {
+            owning_process_id: None,
             session_id: session_id.clone(),
             relation: SessionRelation::Fork {
                 source_session_id: "host-selected-lineage".into(),
@@ -369,6 +370,7 @@ pub(super) async fn selected_observer_intents(
         };
         let source_id = SessionId::from(format!("selected-history-{nonce}-{index}"));
         let source_request = SessionStoreCreateRequest {
+            owning_process_id: None,
             session_id: source_id.clone(),
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),

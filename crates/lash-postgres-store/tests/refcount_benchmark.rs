@@ -22,6 +22,7 @@ const WIDE_SIBLING_COUNT: usize = 64;
 
 fn request(session_id: impl Into<SessionId>) -> SessionStoreCreateRequest {
     SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: session_id.into(),
         relation: SessionRelation::Root,

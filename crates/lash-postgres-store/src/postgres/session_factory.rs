@@ -474,6 +474,7 @@ impl SessionStoreFactory for PostgresSessionStoreFactory {
                 .map_err(store_sqlx_error)?;
         }
         let meta = SessionMeta {
+            owning_process_id: None,
             session_id: request.session_id.clone(),
             relation: request.relation.clone(),
             pending_observer_intents: request.pending_observer_intents.clone(),

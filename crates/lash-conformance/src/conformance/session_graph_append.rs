@@ -264,6 +264,7 @@ async fn abandoned_branch_scenario(
         .await
         .expect("create the rewound session at the retained node");
     let branch_open_request = crate::SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: branch_request.session_id.clone(),
         relation: branch_request.relation.clone(),

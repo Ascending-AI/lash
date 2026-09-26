@@ -42,7 +42,7 @@ pub struct RegisteredProcessStart {
     /// registrar retains under the start key.
     pub record: ProcessRecord,
     /// Whether the registrar created the row for this start.
-    pub created: bool,
+    pub disposition: crate::ProcessRegistrationDisposition,
     /// The execution environment the start's registration names once staged.
     pub env_ref: Option<ProcessExecutionEnvRef>,
 }
@@ -51,7 +51,9 @@ impl RegisteredProcessStart {
     /// The registry's verdict: a coalesced start is reported as a replay
     /// rather than a fresh start (FIG-3070).
     pub fn realization(&self) -> StoreRealization {
-        StoreRealization::from_wrote(self.created)
+        StoreRealization::from_wrote(
+            self.disposition == crate::ProcessRegistrationDisposition::Created,
+        )
     }
 }
 
@@ -127,7 +129,8 @@ pub async fn register_process_start(
             return Err(error.into());
         }
     };
-    let created = registered.is_created();
+    let disposition = registered.disposition;
+    let created = disposition == crate::ProcessRegistrationDisposition::Created;
     let record = registered.record;
     let process_owner = ArtifactOwner::process(record.id.clone());
     let adopts_env = created || record.env_ref == submitted_env_ref;
@@ -168,7 +171,7 @@ pub async fn register_process_start(
     }
     Ok(RegisteredProcessStart {
         record,
-        created,
+        disposition,
         env_ref: submitted_env_ref,
     })
 }

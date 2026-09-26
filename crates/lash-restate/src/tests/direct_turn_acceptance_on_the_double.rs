@@ -22,6 +22,7 @@ lash_conformance::direct_turn_acceptance_tests!({
     let store = stores
         .session_store_factory()
         .create_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("root"),
             relation: lash_core::SessionRelation::Root,

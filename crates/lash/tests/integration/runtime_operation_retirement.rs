@@ -1112,6 +1112,7 @@ async fn reclaim_sweep_respects_turn_cancel_closure_participant() {
     let address = lash_core::runtime::TurnAddress::new(&session_id, "turn");
     let store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,
@@ -1378,6 +1379,7 @@ async fn authorize_participant_crash_closure(
     let address = lash_core::runtime::TurnAddress::new(&session_id, "turn");
     let store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,

@@ -1446,6 +1446,7 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
 
         store_factory
             .create_store(&lash_core::SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: vec![
                     lash_core::facade_support::SessionObserverIntent::host_requested(
                         create_process_id.clone(),
@@ -1488,6 +1489,7 @@ async fn persisted_observer_intents_publish_before_open_returns() -> Result<()> 
         }));
         let child_store = store_factory
             .open_existing_store(&lash_core::SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: child_session_id.clone(),
                 relation: lash_core::SessionRelation::Root,

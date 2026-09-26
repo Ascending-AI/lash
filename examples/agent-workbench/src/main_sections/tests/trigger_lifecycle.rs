@@ -238,6 +238,7 @@ async fn button_trigger_lifecycle_stays_visible_and_queues_wakes_during_active_t
     let target_session_id = state.current_session_id();
     let session_store = session_store_factory
         .create_store(&lash::persistence::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash::persistence::SessionRelation::Root,

@@ -1138,6 +1138,7 @@ impl BackendRunner {
 
     fn create_request(&self) -> SessionStoreCreateRequest {
         SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: self.session_id.clone(),
             relation: SessionRelation::Root,
@@ -1968,6 +1969,7 @@ fn normalized_store_error(_backend: &str, error: &StoreError) -> String {
 )]
 async fn assert_storage_failure_mappings_agree(sqlite_root: &Path, postgres: &PostgresStorage) {
     let create_request = SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(format!("fig-1242-storage-failure:{}", run_nonce())),
         relation: SessionRelation::Root,
@@ -2125,13 +2127,16 @@ async fn runners_for_case_with_clock(
         parent_session_id: SessionId::from(format!("fig-778-{run_nonce}-parent")),
         caused_by: None,
     };
+    // A process-created session records its owner; every backend reads it back.
     let create_request = SessionStoreCreateRequest {
+        owning_process_id: Some(differential_process_owner_id()),
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: relation.clone(),
         policy: lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded),
     };
     let expected_meta = SessionMeta {
+        owning_process_id: Some(differential_process_owner_id()),
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation,

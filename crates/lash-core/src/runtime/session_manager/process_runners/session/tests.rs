@@ -289,6 +289,7 @@ async fn cancelled_mid_turn_subagent_retains_durable_child_session(case: &str) {
     let foreign_session_id = SessionId::from(format!("unrelated-{case}-session"));
     factory
         .create_store(&crate::SessionStoreCreateRequest {
+            owning_process_id: None,
             session_id: foreign_session_id.clone(),
             relation: crate::SessionRelation::Root,
             pending_observer_intents: Vec::new(),
@@ -1050,6 +1051,7 @@ async fn redelivery_after_metadata_only_create_finishes_initialisation() {
     // — without a committed session head.
     factory
         .create_store(&crate::SessionStoreCreateRequest {
+            owning_process_id: None,
             session_id: child_session_id.clone(),
             relation: create_request
                 .clone()
@@ -1418,4 +1420,138 @@ fn test_lineage(
         None,
         Some(&own_session),
     )
+}
+
+/// FIG-3607 R1 (item 6): the session a `SessionTurn` process's start creates
+/// records that process as its owner, and a start made in one of that
+/// session's turns — driven without the owner's live lineage, as the host or
+/// the session's engine drives it — records the owner and the owner's own
+/// ancestry above the session.
+#[tokio::test]
+async fn a_start_in_a_process_owned_session_records_its_owner_above_the_session() {
+    let backend = crate::testing::memory_backend().await;
+    let host = crate::EmbeddedRuntimeHost::new(crate::RuntimeHostConfig::new(
+        backend.clone(),
+        crate::CommitBudget::bounded(1024 * 1024, 512),
+        crate::QueuedWorkBatchingConfig::new(1),
+    ));
+    let transport = mock_provider(vec![MockCall {
+        stream_events: Vec::new(),
+        response: Ok(crate::LlmResponse {
+            parts: vec![crate::LlmOutputPart::Text {
+                text: "owned session answered".to_string(),
+                response_meta: None,
+            }],
+            ..Default::default()
+        }),
+    }]);
+    let runtime =
+        runtime_with_plugins_and_tools_and_host(Vec::new(), Arc::new(EmptyTools), transport, host)
+            .await;
+    let parent = SessionId::from(runtime.session_id());
+    let registry = backend.process_registry();
+    // The owner: a process a turn of the parent session started.
+    let parent_turn = crate::ScopeId::turn(parent.clone(), TurnId::from("owner-start-turn"));
+    let mut owner = crate::ProcessRegistration::new(
+        crate::ProcessInput::External {
+            metadata: serde_json::Value::Null,
+        },
+        crate::RecoveryContract::Rerunnable,
+        crate::ProcessProvenance::session(crate::SessionScope::new(parent.as_str())),
+        crate::Lifetime::Detached,
+    );
+    owner.ancestry = crate::Ancestry::from_scopes([
+        parent_turn.clone(),
+        crate::ScopeId::session(parent.clone()),
+    ]);
+    owner.session_capability = Some(parent.clone());
+    let owner = registry
+        .register_process(owner)
+        .await
+        .expect("register the owner");
+
+    let owned = SessionId::from("owned-by-its-process");
+    let services = runtime
+        .runtime_session_services()
+        .expect("runtime session services");
+    let plugin_init = runtime
+        .session_state_service()
+        .expect("session state")
+        .session_plugin_init(&parent)
+        .await
+        .expect("plugin init");
+    let create_request = crate::SessionCreateRequest::child_session(
+        runtime.session_id(),
+        crate::SessionStartPoint::Empty,
+        crate::PluginOptions::default(),
+    )
+    .with_session_id(&owned)
+    .with_plugin_source(crate::SessionPluginSource::ParentFork)
+    .with_plugin_init(plugin_init);
+    services
+        .run_process_session_turn(
+            owner.id.clone(),
+            test_lineage(&owner.id, &create_request),
+            create_request,
+            crate::TurnInput::text("run in the owned session"),
+            native_execution_write_authority(owner.id.clone()),
+            host_process_scope(&runtime.host.core, &owner.id),
+            tokio_util::sync::CancellationToken::new(),
+        )
+        .await
+        .expect("the owner's session turn runs");
+    let owned_store = backend
+        .session_store_factory()
+        .open_existing_store_by_id(&owned)
+        .await
+        .expect("open the owned session")
+        .expect("the owner's start created the session");
+    assert_eq!(
+        owned_store
+            .load_session_meta()
+            .await
+            .expect("load the owned session's metadata")
+            .expect("the owned session has metadata")
+            .owning_process_id,
+        Some(owner.id.clone()),
+        "the session records the process whose start created it"
+    );
+
+    // A later turn of the owned session starts a process, without the
+    // owner's live lineage.
+    let owned_turn = TurnId::from("owned-session-later-turn");
+    let scoped =
+        crate::testing::runtime_helpers::host_turn_scope(&runtime.host.core, &owned, &owned_turn);
+    let request = crate::ProcessStartRequest::new(
+        crate::ProcessInput::External {
+            metadata: serde_json::Value::Null,
+        },
+        crate::RecoveryContract::Rerunnable,
+        crate::ProcessOriginator::session(crate::SessionScope::new(owned.as_str())),
+        crate::Lifetime::Detached,
+    )
+    .keyed_in(&scoped);
+    let started = runtime
+        .process_service()
+        .expect("process service")
+        .start_from_request(&parent, request, crate::ProcessOpScope::new(scoped))
+        .await
+        .expect("start in the owned session's turn");
+    let record = registry
+        .get_process(&started.process_id)
+        .await
+        .expect("read the started process")
+        .expect("the start registered");
+    assert_eq!(
+        record.ancestry.scopes(),
+        &[
+            crate::ScopeId::turn(owned.clone(), owned_turn),
+            crate::ScopeId::session(owned.clone()),
+            crate::ScopeId::process(owner.id.clone()),
+            parent_turn,
+            crate::ScopeId::session(parent),
+        ],
+        "the start records its turn and session, then the owning process and its ancestry"
+    );
+    assert_eq!(record.session_capability, Some(owned));
 }

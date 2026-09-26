@@ -30,6 +30,7 @@ pub async fn fork_observer_intent_transient_failure(backend: crate::Backend) {
 
     let store = factory
         .create_store(&crate::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: vec![crate::SessionObserverIntent::host_requested(
                 process_id.clone(),
             )],

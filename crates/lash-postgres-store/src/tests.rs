@@ -798,6 +798,7 @@ async fn concurrent_first_commits_return_one_typed_head_revision_conflict() {
         uuid::Uuid::new_v4()
     ));
     let request = SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: lash_core_execution::SessionRelation::Root,
@@ -1136,6 +1137,7 @@ async fn postgres_delete_permanently_fences_stale_handles_and_session_id_reuse()
     let factory = storage.session_store_factory_with_shared_process_registry();
     let session_id = SessionId::from(format!("postgres-delete-fence:{}", uuid::Uuid::new_v4()));
     let request = SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: session_id.clone(),
         relation: lash_core_execution::SessionRelation::Root,
@@ -1385,6 +1387,7 @@ async fn attachment_gc_refuses_an_empty_postgres_root_database() {
     let live_factory =
         live_backend.session_store_factory() as Arc<dyn lash_core_execution::SessionStoreFactory>;
     let request = SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("postgres-wrong-database-live-attachment"),
         relation: lash_core_execution::SessionRelation::Root,
@@ -1857,6 +1860,7 @@ async fn postgres_batch_session_delete_writes_one_cancel_event_per_park() {
     for label in ["batch-park-a", "batch-park-b"] {
         let session_id = SessionId::from(format!("{label}:{nonce}"));
         let request = SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core_execution::SessionRelation::Root,

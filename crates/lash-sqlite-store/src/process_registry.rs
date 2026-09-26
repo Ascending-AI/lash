@@ -417,18 +417,13 @@ impl lash_core_execution::ProcessObserverRegistry for SqliteProcessRegistry {
     ) -> Result<lash_core_execution::ProcessSessionDeleteReport, lash_core_execution::PluginError>
     {
         let session_id_owned = session_id.to_string();
-        let session_scope = lash_core_execution::ScopeId::session(session_id.clone());
-        let closed_at_ms = self.clock.timestamp_ms();
-        let fleet_format = self.fleet_format;
+        // The session's scope is not closed here: its `CloseSession` intent
+        // is the one owner of that row (FIG-3607 R10, ADR 0108 §5).
         let (removed_observer_count, discarded_wake_delivery_count, cleared_subscription_count) =
             self.conn
                 .write_flow(move |tx| {
                     Ok(tx_outcome((|| {
                         let session_id = session_id_owned;
-                        // The session's scope closes with its process state
-                        // (FIG-3607 R10): every process living `Until` it is
-                        // swept, and a later start naming it is refused.
-                        parent_end::record_conn(tx, &session_scope, closed_at_ms, fleet_format)?;
                         let discarded_wake_delivery_count = tx
                             .execute(
                                 process_sql().wake.discard_target_gone.sql(),

@@ -674,6 +674,7 @@ async fn unwired_sqlite_factory_keeps_process_owned_intents_immortal() {
     let dir = tempfile::tempdir().expect("tempdir");
     let factory = SqliteSessionStoreFactory::new(dir.path().join("sessions"));
     let request = lash_core_execution::SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("unwired-process-owner"),
         relation: lash_core_execution::SessionRelation::default(),
@@ -720,6 +721,7 @@ async fn sqlite_registry_validation_fails_gc_not_session_open() {
         .expect("create non-registry Lash database");
     let factory = SqliteSessionStoreFactory::new_with_process_registry(&sessions, &foreign_path);
     let request = lash_core_execution::SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("validation-boundary"),
         relation: lash_core_execution::SessionRelation::default(),

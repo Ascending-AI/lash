@@ -231,6 +231,7 @@ async fn parked_resume_keeps_the_store_bound_session_id() {
     lash_core::SessionCommitStore::save_session_meta(
         store.as_ref(),
         lash_core::SessionMeta {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("parked-session"),
             relation: lash_core::SessionRelation::Root,
@@ -669,6 +670,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     let factory = backend.session_store_factory();
     let target_store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.to_string()),
             relation: lash_core::SessionRelation::Root,
@@ -1254,6 +1256,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     );
     let child_store = factory
         .open_existing_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("observer-child"),
             relation: lash_core::SessionRelation::Root,

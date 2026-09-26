@@ -83,6 +83,7 @@ async fn sqlite_session_meta_stamps_the_version_the_fleet_format_selects() {
     let session_id = lash_core::SessionId::from("fleet-stamped-session");
     store
         .save_session_meta(lash_core::SessionMeta {
+            owning_process_id: None,
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,
             pending_observer_intents: Vec::new(),

@@ -57,7 +57,7 @@ where
     // write after the send is journaled too, so a replay after the process
     // was pruned reads what the live start wrote and never the store.
     let realization = started.realization();
-    let created_here = started.created;
+    let created_here = started.disposition == lash_core::ProcessRegistrationDisposition::Created;
     let record = started.record;
     let process_id = record.id.clone();
     let invocation_id = match context

@@ -231,6 +231,10 @@ pub struct SessionMeta {
     pub relation: crate::SessionRelation,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub pending_observer_intents: Vec<crate::SessionObserverIntent>,
+    /// The process that runs this session as its own, recorded at creation
+    /// (FIG-3607 R1): see [`SessionStoreCreateRequest::owning_process_id`](crate::SessionStoreCreateRequest::owning_process_id).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owning_process_id: Option<crate::ProcessId>,
 }
 
 impl SessionMeta {

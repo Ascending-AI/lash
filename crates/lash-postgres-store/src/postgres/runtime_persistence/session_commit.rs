@@ -321,6 +321,7 @@ impl SessionCommitStore for PostgresSessionStore {
                 .await?;
         planner.validate_session_binding(existing.as_ref().map(|meta| &meta.session_id))?;
         let direct_meta = SessionMeta {
+            owning_process_id: None,
             session_id: commit.session_id.clone(),
             relation: lash_core_execution::SessionRelation::Root,
             pending_observer_intents: Vec::new(),
@@ -1079,6 +1080,7 @@ impl SessionCommitStore for PostgresSessionStore {
         binding.validate()?;
         let session_id = &binding.session_id;
         let meta = SessionMeta {
+            owning_process_id: None,
             session_id: SessionId::from(session_id.to_string()),
             relation: binding.relation.clone(),
             pending_observer_intents: Vec::new(),

@@ -630,6 +630,7 @@ mod tests {
             ObservedSessionStoreFactory::new(backend.session_store_factory(), collector.clone());
         let store = factory
             .create_store(&SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from("mutation-session"),
                 relation: SessionRelation::Root,

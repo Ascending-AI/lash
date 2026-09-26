@@ -714,7 +714,7 @@ impl TriggerRouter {
             .await?;
         match outcome {
             crate::RuntimeEffectOutcome::Process {
-                result: crate::ProcessEffectOutcome::Start { record },
+                result: crate::ProcessEffectOutcome::Start { record, .. },
             } => {
                 // The delivery owns exactly the process its key minted: bind
                 // it before the delivery is reported, so recovery resumes an

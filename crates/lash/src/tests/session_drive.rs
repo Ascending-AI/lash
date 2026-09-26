@@ -253,6 +253,7 @@ async fn a_booted_core_drives_lost_work_on_its_first_reconcile_tick(engine: Engi
     let store = backend
         .session_store_factory()
         .create_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,

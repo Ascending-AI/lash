@@ -44,6 +44,7 @@ impl PostgresSessionStoreFactory {
         lash_core_execution::store::validate_session_id(&request.session_id)?;
         let store = self.store_for(request.session_id.clone());
         let meta = SessionMeta {
+            owning_process_id: request.owning_process_id.clone(),
             session_id: request.session_id.clone(),
             relation: request.relation.clone(),
             pending_observer_intents: request.pending_observer_intents.clone(),

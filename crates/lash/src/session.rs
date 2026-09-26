@@ -456,6 +456,7 @@ impl SessionBuilder {
 
     async fn create_store(&self, policy: &SessionPolicy) -> Result<ResolvedSessionStore> {
         let request = SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: self.session_id.clone(),
             relation: self

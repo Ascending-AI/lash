@@ -37,6 +37,7 @@ async fn committed_catalog(
 ) {
     let factory = SqliteSessionStoreFactory::new(root);
     let request = lash_core_execution::SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: lash_core_execution::SessionRelation::Root,

@@ -111,6 +111,7 @@ impl NativeQueuedWorkRunHandle {
             .config
             .store_factory
             .create_store(&SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: SessionRelation::default(),
@@ -399,6 +400,7 @@ impl QueuedWorkRunHandle for NativeQueuedWorkRunHandle {
             .store_factory
             .has_claimable_queued_work(
                 &SessionStoreCreateRequest {
+                    owning_process_id: None,
                     pending_observer_intents: Vec::new(),
                     session_id: session_id.clone(),
                     relation: SessionRelation::default(),

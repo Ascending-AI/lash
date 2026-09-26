@@ -21,6 +21,7 @@ use pretty_assertions::assert_eq;
 )]
 pub async fn session_metadata_round_trips(store: Arc<dyn RuntimePersistence>) {
     let meta = SessionMeta {
+        owning_process_id: None,
         pending_observer_intents: vec![
             crate::SessionObserverIntent::host_requested(crate::ProcessId::fixture("observer-a")),
             crate::SessionObserverIntent::host_requested(crate::ProcessId::fixture("observer-b")),
@@ -60,6 +61,7 @@ pub async fn session_metadata_relation_is_write_once(store: Arc<dyn RuntimePersi
     // The fixture admitted this session as a root; claiming a parent for it is
     // the conflict `admit_and_bind_session` already refuses on a rebind.
     let recorded = SessionMeta {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("root"),
         relation: SessionRelation::Root,
@@ -77,6 +79,7 @@ pub async fn session_metadata_relation_is_write_once(store: Arc<dyn RuntimePersi
     // The round trip the production caller performs: the same relation, with
     // its observer intents settled.
     let settled = SessionMeta {
+        owning_process_id: None,
         pending_observer_intents: vec![crate::SessionObserverIntent::host_requested(
             crate::ProcessId::fixture("observer-a"),
         )],
@@ -105,6 +108,7 @@ pub async fn session_metadata_relation_is_write_once(store: Arc<dyn RuntimePersi
     ] {
         let error = store
             .save_session_meta(SessionMeta {
+                owning_process_id: None,
                 relation,
                 ..settled.clone()
             })
@@ -348,6 +352,7 @@ pub async fn runtime_reopen(factory: ReopenableRuntimePersistence) {
     session_execution_lease_first_claim_excludes_concurrent_reopen_handles(&factory).await;
 
     let meta = SessionMeta {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("root"),
         relation: SessionRelation::Root,

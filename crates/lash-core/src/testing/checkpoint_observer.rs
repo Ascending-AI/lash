@@ -773,6 +773,7 @@ mod tests {
         );
         let store = factory
             .create_store(&SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: SessionId::from("observed-usage"),
                 relation: crate::SessionRelation::Root,

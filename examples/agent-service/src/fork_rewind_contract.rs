@@ -58,6 +58,7 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
     };
     let source = stores
         .create_store(&SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(SOURCE_SESSION.to_string()),
             relation: SessionRelation::Root,
@@ -67,6 +68,7 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
         .expect("create source session");
     stores
         .create_store(&SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(FOREIGN_TARGET.to_string()),
             relation: SessionRelation::Root,
@@ -315,6 +317,7 @@ async fn host_can_rewind_from_a_retained_anchor_after_deleting_its_source() {
     assert_eq!(observed[0].id, selected[0]);
     let rewind_store = stores
         .open_existing_store(&SessionStoreCreateRequest {
+            owning_process_id: None,
             session_id: REWOUND_BRANCH.into(),
             relation: SessionRelation::Root,
             pending_observer_intents: Vec::new(),

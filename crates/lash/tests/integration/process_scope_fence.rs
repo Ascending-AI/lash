@@ -552,7 +552,7 @@ async fn restarting_pruned_work(kind: Kind, path: RegistrationPath) {
                 .start(start_request(), start_scope("again"))
                 .await
                 .expect("the core starts the work again")
-                .id,
+                .process_id,
         ),
         RegistrationPath::SessionStart => {
             let session = core

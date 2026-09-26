@@ -65,6 +65,7 @@ pub(crate) fn state_store_request(
     policy.session_id = Some(SessionId::from(session_id.to_string()));
     policy.model = model_spec_from_selection(state.selected_model());
     lash::persistence::SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id.to_string()),
         relation: lash::persistence::SessionRelation::Root,

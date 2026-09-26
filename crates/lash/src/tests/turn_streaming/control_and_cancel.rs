@@ -472,6 +472,7 @@ pub(super) async fn create_only_factory_returns_to_idle_after_draining_unknown_c
     .expect("the conservatively admitted queued turn reaches the provider");
 
     let request = lash_core::SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("create-only-factory-idles"),
         relation: lash_core::SessionRelation::Root,
@@ -625,6 +626,7 @@ pub(super) async fn native_queued_work_burst_reuses_one_hydrated_runtime() -> Re
     .await
     .expect("the hydrated runtime drains every queued input");
     let request = lash_core::SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("queued-work-hydration-burst"),
         relation: lash_core::SessionRelation::Root,

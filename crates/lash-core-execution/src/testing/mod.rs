@@ -1658,7 +1658,7 @@ impl crate::ProcessService for EffectBackedProcessService {
             execution_context: Box::new(crate::ProcessExecutionContext::default()),
         };
         match self.execute(scope, command).await? {
-            crate::ProcessEffectOutcome::Start { record } => {
+            crate::ProcessEffectOutcome::Start { record, .. } => {
                 Ok(crate::ProcessHandleView::from_record(*record))
             }
             _ => unreachable!("start command returns start outcome"),
@@ -1689,7 +1689,7 @@ impl crate::ProcessService for EffectBackedProcessService {
             execution_context: Box::new(crate::ProcessExecutionContext::default()),
         };
         match self.execute(scope, command).await? {
-            crate::ProcessEffectOutcome::Start { record } => Ok(*record),
+            crate::ProcessEffectOutcome::Start { record, .. } => Ok(*record),
             _ => unreachable!("start command returns start outcome"),
         }
     }

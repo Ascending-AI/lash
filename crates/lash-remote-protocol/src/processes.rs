@@ -1470,21 +1470,38 @@ impl RemoteProcessObserverBy {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+/// Acknowledges a process start; start is not completion. It names the
+/// started process, the digest of the key it is registered under, and whether
+/// this start created it or a retry under the same key found it.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessStartReceipt {
-    pub record: RemoteProcessRecord,
+    pub process_id: ProcessId,
+    /// The digest of the key the process is registered under, as a record
+    /// reports it (`start_key_digest`); absent for an unkeyed start.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub summary: Option<RemoteProcessHandleView>,
+    pub start_key_digest: Option<String>,
+    pub disposition: RemoteProcessStartDisposition,
 }
 
 impl RemoteProcessStartReceipt {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        self.record.validate("RemoteProcessStartReceipt")?;
-        if let Some(summary) = &self.summary {
-            summary.validate("RemoteProcessStartReceipt")?;
+        require_non_empty("RemoteProcessStartReceipt", "process_id", &self.process_id)?;
+        if let Some(digest) = &self.start_key_digest {
+            require_non_empty("RemoteProcessStartReceipt", "start_key_digest", digest)?;
         }
         Ok(())
     }
+}
+
+/// Whether a start created its process or found it already registered under
+/// its key.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteProcessStartDisposition {
+    /// This start created the process.
+    Created,
+    /// A start under the same key had already created it.
+    Existing,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]

@@ -226,12 +226,12 @@ async fn start_process(
             let core = core.clone();
             let started = Arc::clone(&started);
             Box::pin(async move {
-                let record = core
+                let receipt = core
                     .processes()
                     .start(request, scoped)
                     .await
                     .expect("the start commits");
-                *started.lock().unwrap() = Some(record.id);
+                *started.lock().unwrap() = Some(receipt.process_id);
             })
         })
     };

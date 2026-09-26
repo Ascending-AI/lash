@@ -362,6 +362,7 @@ async fn queued_work_and_pending_input_lease_decisions_follow_the_postgres_clock
         .with_clock(Arc::clone(&clock) as Arc<dyn Clock>);
     let store = factory
         .create_store(&SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.clone()),
             relation: SessionRelation::Root,
@@ -641,6 +642,7 @@ async fn final_turn_commit_stamps_follow_the_injected_store_clock() {
         .with_clock(clock as Arc<dyn Clock>);
     let store = factory
         .create_store(&SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.clone()),
             relation: SessionRelation::Root,
@@ -699,6 +701,7 @@ async fn diagnostic_lease_read_neither_locks_the_row_nor_waits_for_a_holder() {
         .with_clock(host_clock as Arc<dyn Clock>);
     let store = factory
         .create_store(&SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from(session_id.clone()),
             relation: SessionRelation::Root,

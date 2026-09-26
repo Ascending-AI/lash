@@ -12,7 +12,7 @@ pub const INSERT_COLUMNS: &str =
               caused_by_process_event_sequence, caused_by_occurrence_id,
               caused_by_subscription_id, caused_by_subscription_incarnation,
               caused_by_subscription_revision, caused_by_node_id, source_session_id,
-              source_node_id, created_at_ms, last_commit_at_ms";
+              source_node_id, created_at_ms, last_commit_at_ms, owning_process_id";
 
 /// The stored relation, as `StoredRelation` decodes it positionally.
 ///
@@ -160,6 +160,11 @@ crate::statements! {
         /// The recorded lineage of `?1`.
         select_lineage = "SELECT relation_kind, parent_session_id, source_session_id, source_node_id
              FROM session_meta WHERE session_id = ?1";
+
+        /// The process that runs session `?1` as its own, recorded when that
+        /// process's start created the session (FIG-3607 R1); NULL for every
+        /// other session.
+        select_owning_process = "SELECT owning_process_id FROM session_meta WHERE session_id = ?1";
 
         /// The durable session-state version marker of `?1`.
         select_state_version = "SELECT session_state_version FROM session_meta WHERE session_id = ?1";

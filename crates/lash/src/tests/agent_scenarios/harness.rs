@@ -419,6 +419,7 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
         let seed_store = lash_core::SessionStoreFactory::create_store(
             runtime.store_factory.as_ref(),
             &lash_core::SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: seed_session_id.clone(),
                 relation: lash_core::SessionRelation::Root,

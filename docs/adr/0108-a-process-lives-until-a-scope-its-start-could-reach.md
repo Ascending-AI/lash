@@ -55,12 +55,20 @@ on the registration (R1, R2).
 
 - The ancestry lists the starter first, nearest first, and is empty for a
   root.
-- A turn or drain start's ancestry is the opener, then its session.
+- A turn or drain start's ancestry is the opener, then its session. When a
+  process owns the session, the owner's lineage follows. A session's owner
+  is the process whose start created it (a subagent's session), recorded
+  once as `session_meta.owning_process_id`.
 - A process body's ancestry is the process, then the session it runs, then
   the process's own recorded ancestry.
 - A context that lacks the lineage reads it back from the process's row.
   The lineage is an immutable recorded fact, never re-derived. With no row to
   read, the start is refused rather than recorded as a root.
+- A turn of an owned session that runs without the owner's live lineage (the
+  host or the session's engine drives it) reads the owner from the session's
+  metadata and the owner's lineage from the owner's row. An owner that
+  retention has pruned ended long ago and bounds nothing, so the start
+  records only its turn and session.
 
 ### 3. Registration checks reachability, in every build
 
@@ -94,11 +102,46 @@ The scope-close ledger (`parent_end_plans`) holds one row per closed scope.
   evidence is durable. The drive's recorded `CloseRootScope` step does this
   through the process registry's `RegistryScopeClose` adapter (R9). A frame
   switch writes no evidence, so the root's children survive it (FIG-3554).
-- **Session.** `Session(s)` closes when the session's process state is
-  deleted (R10).
+- **Session.** `Session(s)` closes through the session's `CloseSession`
+  control intent, the one writer of that row (R10). The intent's engine half
+  closes the session's open roots and then the session. Deleting the
+  session's process state writes no close row.
 
-The worker's recovery pass re-derives a root's missing row from the root's
-terminal evidence.
+A root's scope closes at least once, and never for a parked root, which has
+no terminal evidence (L-C1). A crash between the terminal commit and the
+close leaves the evidence durable and the scope open. Recovery closes it in
+two ways:
+
+- an engine that redelivers the execution replays the root to its recorded
+  close step and runs it;
+- every reconcile tick's scopes arm closes each root listed as terminal
+  through the host's scope owner, whatever the engine. The close is
+  idempotent, so a later tick closing it again changes nothing.
+
+Applying the close row's plan then owes each process living `Until` the
+closed scope its cancel: the scope owner applies it when it can deliver, and
+otherwise a later pass does (the process worker, or the reconcile tick's
+parent-end slot, FIG-3822).
+
+### 5a. The `CloseSession` intent is the deletion tombstone
+
+A session's close is recorded as its `CloseSession` intent before anything
+is deleted.
+
+- **While it is open.** An open intent (pending, or failed and retryable) is
+  what recovery works from. A crash between the intent and its
+  acknowledgement leaves the intent open and listed for reconciliation. A
+  retried deletion, or the engine's redelivery of it, answers the same
+  intent and finishes its engine half (L-D6).
+- **After it is acknowledged.** The intent is kept as the deleted session's
+  tombstone. `root_terminal` answers every root of the deleted session from
+  it as `Cancelled` with cause `SessionDeleted`. Once a root answers, it
+  always does.
+- **Retention.** Nothing prunes the tombstone. Like the session's identity
+  tombstone in the deleted-session set, it is permanent deletion evidence,
+  one row per deleted session. Evidence retention
+  (`reclaim_retained_evidence`) and a session's deletion both leave it. A
+  deletion removes only the session's other intents, the parked-root verbs.
 
 ### 6. A closed scope starts nothing
 
@@ -114,8 +157,8 @@ starts too: a closed scope starts nothing.
   version freeze (FIG-3846). Old state is refused, typed, not reinterpreted:
   - a parent-scope row's scope payload is not a `ScopeId`, so it is refused
     as malformed;
-  - the SQLite process schema and the PostgreSQL component keep their
-    stamps. A PostgreSQL catalog provisioned before the change fails the
+  - the SQLite process schema, the SQLite core schema (`session_meta` gains
+    `owning_process_id`) and the PostgreSQL component keep their stamps. A PostgreSQL catalog provisioned before the change fails the
     open-time shape check; a SQLite registry from before it fails its first
     process query on the missing lifetime columns. Either is recreated;
   - the effect journal, the Restate process journal and the remote protocol

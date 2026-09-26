@@ -10,7 +10,7 @@
 //! - The successor-sealed refusal (Q-B3): a root whose admission a successor
 //!   sealed over commits nothing, and a later drive of it commits once.
 //! - L-C1: the root's scope closes after its evidence is durable, at least
-//!   once when the first close fails, and never for a root that did not end.
+//!   once across a crash between the two, and never for a parked root.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -23,7 +23,7 @@ use lash_core::store::{
 use lash_sansio::{SessionId, TurnId};
 use pretty_assertions::assert_eq;
 
-use super::drive_admission::{DriveParts, admitted, on_tier};
+use super::drive_admission::{DriveParts, admitted, driver_scope, on_tier};
 
 /// A scope owner that records every root close with whether the root's
 /// evidence was durable when it was called, and refuses the first close
@@ -329,51 +329,361 @@ pub async fn a_root_whose_admission_a_successor_sealed_commits_nothing(
     assert_eq!(closes.closes(), vec![(root, true)]);
 }
 
-/// L-C1: a root's scope closes only after its terminal evidence is durable,
-/// and a close that fails runs again: the recorded close step is retried
-/// until the owner acknowledges it.
+/// A process registry's scope owner that crashes the execution on its first
+/// root close: it fires `crash` and never answers, so the close writes
+/// nothing, the way a process that dies between a root's terminal commit and
+/// its scope close leaves it. Every later close reaches the registry. It
+/// records each root it was asked to close, with whether the root's evidence
+/// was durable by then.
+struct CrashingRegistryScopeClose {
+    registry: crate::RegistryScopeClose,
+    store: Arc<dyn crate::RuntimePersistence>,
+    crash: crate::ConformanceCrash,
+    armed: AtomicBool,
+    closes: Mutex<Vec<(TurnId, bool)>>,
+}
+
+impl CrashingRegistryScopeClose {
+    fn closes(&self) -> Vec<(TurnId, bool)> {
+        self.closes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .clone()
+    }
+}
+
+#[async_trait::async_trait]
+impl ScopeCloseSink for CrashingRegistryScopeClose {
+    async fn close_root_scope(&self, terminal: &RootTerminal) -> Result<(), crate::StoreError> {
+        let durable = self
+            .store
+            .root_terminal(&terminal.session_id, &terminal.root)
+            .await?
+            .is_some_and(|stored| stored.same_terminal(terminal));
+        self.closes
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .push((terminal.root.clone(), durable));
+        if self.armed.swap(false, Ordering::SeqCst) {
+            self.crash.fire();
+            std::future::pending::<()>().await;
+        }
+        self.registry.close_root_scope(terminal).await
+    }
+
+    async fn close_session_scope(
+        &self,
+        session: &SessionId,
+        intent: ControlIntentId,
+        roots: &[TurnId],
+    ) -> Result<(), crate::StoreError> {
+        self.registry
+            .close_session_scope(session, intent, roots)
+            .await
+    }
+}
+
+/// One drive of the law's session for `request`, as the tier runs it.
+fn drive_once<'a>(
+    mut runtime: crate::LashRuntime,
+    scope: crate::ScopedEffectController<'a>,
+    request: lash_core::engine::DriveRequest,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), String>> + Send + 'a>> {
+    Box::pin(async move {
+        lash_core::drive::drive_session(&mut runtime, &scope, &request)
+            .await
+            .map(|_| ())
+            .map_err(|abort| format!("{abort:?}"))
+    })
+}
+
+/// One reconcile tick over the law's stores (ADR 0108 §5): its scopes arm is
+/// the engine-neutral owner of a terminal root's missing scope close, and
+/// closes each root listed as terminal through `scopes`, the host's scope
+/// owner. Returns how many scopes the tick closed; the scopes arm reports no
+/// failure.
+async fn reconcile_scopes(
+    stores: &Arc<dyn crate::StoreSet>,
+    scopes: &dyn ScopeCloseSink,
+    clock: &dyn lash_core::Clock,
+    tick: &str,
+) -> usize {
+    let factory = stores.session_store_factory();
+    let work = crate::NoSessionWork::new();
+    let report = lash_core::runtime::drive::reconcile_once(
+        &lash_core::runtime::drive::ReconcileParts {
+            sessions: factory.as_ref(),
+            work: &work,
+            scopes,
+            processes: None,
+            clock,
+        },
+        &lash_core::engine::ReconcileCursor::default(),
+        std::num::NonZeroUsize::new(64).unwrap_or(std::num::NonZeroUsize::MIN),
+        tick,
+    )
+    .await;
+    let scope_failures: Vec<_> = report
+        .failures
+        .iter()
+        .filter(|failure| failure.arm == lash_core::engine::ReconcileArm::Scopes)
+        .map(|failure| failure.error.clone())
+        .collect();
+    assert!(
+        scope_failures.is_empty(),
+        "the scopes arm closed every terminal root: {scope_failures:?}"
+    );
+    report.closed_scopes
+}
+
+/// One pass of the process worker over the law's stores: it delivers the
+/// cancel each close row owes the processes living `Until` the closed scope
+/// (ADR 0108 §5).
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the sweep over the law's stores builds and runs"
+)]
+async fn recovery_sweep(
+    stores: &Arc<dyn crate::StoreSet>,
+    effect_host: &Arc<dyn crate::EffectHost>,
+) {
+    let registry = stores.process_registry();
+    let watched = crate::facade_support::watch_process_registry(Arc::clone(&registry));
+    let host = crate::LawBackend::over_stores(Arc::clone(stores), Arc::clone(effect_host))
+        .host_config(
+            crate::CommitBudget::bounded(1024 * 1024, 512),
+            crate::QueuedWorkBatchingConfig::new(1),
+        );
+    let worker = lash_core_worker::DurableProcessWorker::new(
+        lash_core_worker::DurableProcessWorkerConfig::new(
+            Arc::new(crate::facade_support::PluginHost::new(
+                crate::testing::test_standard_protocol_factories(),
+            )),
+            host,
+            lash_core_worker::WorkerProcessWork::SelfNative(watched),
+            Arc::new(crate::NoSessionWork::new()),
+            crate::testing::runtime_lease_owner(),
+        ),
+    )
+    .expect("build the recovery sweep worker");
+    let _ = worker
+        .drive_pending_processes()
+        .await
+        .expect("the recovery sweep runs");
+}
+
+/// A process living `Until` `root`'s turn scope, registered while the root
+/// has not ended.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the registry admits a start under a live root"
+)]
+async fn until_root(
+    registry: &Arc<dyn crate::ProcessRegistry>,
+    session_id: &SessionId,
+    root: &TurnId,
+) -> crate::ProcessRecord {
+    registry
+        .register_process(crate::started_until_starter(
+            crate::ProcessRegistration::new(
+                crate::ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                crate::RecoveryContract::Rerunnable,
+                crate::ProcessProvenance::session(crate::SessionScope::new(session_id.as_str())),
+                lash_core::Lifetime::Detached,
+            ),
+            lash_core::ScopeId::turn(session_id.clone(), root.clone()),
+        ))
+        .await
+        .expect("a start living until the running root is admitted")
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the registry answers its own reads"
+)]
+async fn root_close_row(
+    registry: &Arc<dyn crate::ProcessRegistry>,
+    session_id: &SessionId,
+    root: &TurnId,
+) -> Option<crate::ParentEndPlan> {
+    registry
+        .get_parent_end_plan(&lash_core::ScopeId::turn(session_id.clone(), root.clone()))
+        .await
+        .expect("read the root's close row")
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: the registry answers its own reads"
+)]
+async fn owes_cancel(
+    registry: &Arc<dyn crate::ProcessRegistry>,
+    process: &crate::ProcessId,
+) -> bool {
+    registry
+        .get_process(process)
+        .await
+        .expect("read the child")
+        .expect("the child is recorded")
+        .cancel_request
+        .is_some()
+}
+
+/// L-C1 (FIG-3607 item 7): a root's scope closes after its terminal evidence
+/// is durable, at least once, and never for a root that is parked.
+///
+/// - **A crash between the commit and the close.** The execution that
+///   committed the root's end dies inside the close. The evidence stands and
+///   the scope is still open. The tier's recovery closes it: an engine that
+///   redelivers the execution replays the root to its recorded close step
+///   and runs it, and a reconcile tick's scopes arm closes every root whose
+///   evidence it lists, again on the next tick, so the close runs at least
+///   once. The process worker then delivers the cancel the close row owes
+///   the process living `Until` the root.
+/// - **A parked root.** It has no terminal evidence, so neither the drive nor
+///   the recovery closes its scope: its `Until` child owes nothing.
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once(
+pub async fn root_scope_close_runs_after_terminal_evidence_at_least_once_never_for_parked(
     prefix: &str,
     effect_host: Arc<dyn crate::EffectHost>,
     stores: Arc<dyn crate::StoreSet>,
     runner: Arc<dyn crate::ConformanceTurnRunner>,
 ) {
-    let mut parts = DriveParts::new(prefix, "root-close", &effect_host, &stores, 8).await;
-    let closes = RecordingScopeClose::new(Arc::clone(&parts.store), true);
+    let registry = stores.process_registry();
+
+    // A crash between the root's terminal commit and its scope close.
+    let mut parts = DriveParts::new(prefix, "root-close-crash", &effect_host, &stores, 8).await;
+    let crash = crate::ConformanceCrash::new();
+    let closes = Arc::new(CrashingRegistryScopeClose {
+        registry: crate::RegistryScopeClose::new(Arc::clone(&registry), stores.clock()),
+        store: Arc::clone(&parts.store),
+        crash: crash.clone(),
+        armed: AtomicBool::new(true),
+        closes: Mutex::new(Vec::new()),
+    });
     parts.host.control.scope_close = closes.clone();
-    parts.enqueue("ask", Some("root-close")).await;
-    let root = TurnId::from("root-close");
-    let mut attempts = 0;
-    while closes.closes().len() < 2 && attempts < 3 {
-        attempts += 1;
-        let request = parts.request(&format!("root-close-drive-{attempts}"));
-        let _ = on_tier(&runner, &parts, move |mut runtime, scope| {
-            let request = request.clone();
-            Box::pin(async move {
-                lash_core::drive::drive_session(&mut runtime, &scope, &request)
-                    .await
-                    .map_err(|abort| format!("{abort:?}"))
-            })
-        })
+    let root = TurnId::from("root-close-crash");
+    let child = until_root(&registry, &parts.session_id, &root).await;
+    parts.enqueue("ask", Some(root.as_str())).await;
+    let request = parts.request("root-close-crash-drive");
+    let crashing = parts.clone();
+    let crashing_request = request.clone();
+    runner
+        .run_turn_until_crash(
+            driver_scope(&parts),
+            Arc::new(move |scope| {
+                let parts = crashing.clone();
+                let request = crashing_request.clone();
+                Box::pin(async move {
+                    let _ = drive_once(parts.runtime().await, scope, request).await;
+                    crate::ConformanceTurnEnd::Settled
+                })
+            }),
+            crash.clone(),
+        )
         .await;
-    }
+    assert!(crash.has_fired(), "the execution died inside the close");
     let evidence = terminal(&parts, &root)
         .await
-        .expect("the root committed its evidence");
+        .expect("the root's terminal commit landed before the crash");
     assert_eq!(evidence.kind, RootTerminalKind::Answered);
-    let closes = closes.closes();
-    assert!(closes.len() >= 2, "the refused close ran again: {closes:?}");
+    assert!(
+        root_close_row(&registry, &parts.session_id, &root)
+            .await
+            .is_none(),
+        "the crash took the close: the root's scope is still open"
+    );
+    assert!(
+        !owes_cancel(&registry, &child.id).await,
+        "nothing has closed the child's scope yet"
+    );
+
+    // The tier's recovery: the redelivered execution, then reconcile ticks.
+    let _ = on_tier(&runner, &parts, move |runtime, scope| {
+        drive_once(runtime, scope, request.clone())
+    })
+    .await;
+    let scopes = crate::RegistryScopeClose::new(Arc::clone(&registry), stores.clock());
+    for tick in ["root-close-recover", "root-close-again"] {
+        assert!(
+            reconcile_scopes(&stores, &scopes, parts.host.clock.as_ref(), tick).await >= 1,
+            "tick {tick} closed the ended root's scope, at least once"
+        );
+    }
+    recovery_sweep(&stores, &effect_host).await;
+    assert!(
+        root_close_row(&registry, &parts.session_id, &root)
+            .await
+            .is_some(),
+        "recovery closed the root's scope"
+    );
+    assert!(
+        owes_cancel(&registry, &child.id).await,
+        "the process living until the ended root is owed its cancel"
+    );
     assert!(
         closes
+            .closes()
             .iter()
             .all(|(closed, durable)| *closed == root && *durable),
-        "every close named the root after its evidence was durable: {closes:?}"
+        "every close named the root after its evidence was durable: {:?}",
+        closes.closes()
     );
     assert_eq!(parts.calls(), 1, "the root ran once");
+
+    // A parked root.
+    let mut parts = DriveParts::new(prefix, "root-close-parked", &effect_host, &stores, 8).await;
+    let closes = RecordingScopeClose::new(Arc::clone(&parts.store), false);
+    parts.host.control.scope_close = closes.clone();
+    let parked = TurnId::from("root-close-parked");
+    let child = until_root(&registry, &parts.session_id, &parked).await;
+    parts.enqueue("ask", Some(parked.as_str())).await;
+    parts
+        .store
+        .record_turn_park(&lash_core::store::TurnParkWrite::refusal(
+            parts.session_id.clone(),
+            parked.clone(),
+            lash_core::store::ParkReason::ReplayDivergence {
+                message: "the root's replay diverged".into(),
+            },
+            1,
+        ))
+        .await
+        .expect("park the root");
+    drive(&runner, &parts, "root-close-parked-drive").await;
+    reconcile_scopes(
+        &stores,
+        &crate::RegistryScopeClose::new(Arc::clone(&registry), stores.clock()),
+        parts.host.clock.as_ref(),
+        "root-close-parked",
+    )
+    .await;
+    recovery_sweep(&stores, &effect_host).await;
+    assert_eq!(
+        terminal(&parts, &parked).await,
+        None,
+        "a parked root has no end"
+    );
+    assert!(
+        closes.closes().is_empty(),
+        "no close was asked for the parked root"
+    );
+    assert!(
+        root_close_row(&registry, &parts.session_id, &parked)
+            .await
+            .is_none(),
+        "a parked root's scope stays open"
+    );
+    assert!(
+        !owes_cancel(&registry, &child.id).await,
+        "the process living until the parked root owes nothing"
+    );
+    assert_eq!(parts.calls(), 0, "the parked root ran nothing");
 }
 
 /// L-C1, the settlement half: a queued root that settles without a head

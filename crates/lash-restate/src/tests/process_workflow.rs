@@ -546,7 +546,7 @@ pub(super) async fn process_workflow_endpoint_smoke_schedules_runs_and_cancels_p
         .await
         .expect("start through endpoint smoke");
     let RuntimeEffectOutcome::Process {
-        result: ProcessEffectOutcome::Start { record },
+        result: ProcessEffectOutcome::Start { record, .. },
     } = outcome
     else {
         panic!("wrong start outcome");
@@ -1281,6 +1281,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
     let worker_a = recovery_worker(Arc::clone(&registry_a), Arc::clone(&store_factory)).await;
     let _root_store = store_factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("root"),
             relation: lash_core::SessionRelation::default(),
@@ -1326,9 +1327,11 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
     )));
 
     let RuntimeEffectOutcome::Process {
-        result: ProcessEffectOutcome::Start {
-            record: recover_tool,
-        },
+        result:
+            ProcessEffectOutcome::Start {
+                record: recover_tool,
+                ..
+            },
     } = host_a
         .execute_effect(
             RuntimeEffectEnvelope::new(
@@ -1402,6 +1405,7 @@ pub(super) async fn sqlite_process_recovery_reopens_registry_worker_observers_wa
     );
     let queue_store = store_factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("root"),
             relation: lash_core::SessionRelation::default(),

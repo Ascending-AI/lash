@@ -218,6 +218,7 @@ impl SqliteSessionStoreFactory {
             .map_err(|err| StoreError::Backend(err.to_string()))?,
         );
         let meta = SessionMeta {
+            owning_process_id: request.owning_process_id.clone(),
             session_id: request.session_id.clone(),
             relation: request.relation.clone(),
             pending_observer_intents: request.pending_observer_intents.clone(),

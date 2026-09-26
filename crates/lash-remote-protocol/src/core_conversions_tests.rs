@@ -798,15 +798,17 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
         lash_sansio::ProcessId::fixture("process:observed")
     );
 
-    let start_result = RemoteProcessStartReceipt::try_from(process_record(
-        &lash_sansio::ProcessId::fixture("process:start-result"),
-    ))
-    .expect("start result");
-    let core = lash_core::ProcessRecord::try_from(start_result).expect("core start result");
-    assert_eq!(
-        core.id,
-        lash_sansio::ProcessId::fixture("process:start-result")
+    let started = lash_core::ProcessStartReceipt::of(
+        &process_record(&lash_sansio::ProcessId::fixture("process:start-result")),
+        lash_core::ProcessRegistrationDisposition::Existing,
     );
+    let start_result = RemoteProcessStartReceipt::from(started.clone());
+    assert_eq!(
+        start_result.disposition,
+        RemoteProcessStartDisposition::Existing
+    );
+    let core = lash_core::ProcessStartReceipt::try_from(start_result).expect("core start result");
+    assert_eq!(core, started);
 
     let cancel = RemoteProcessCancelReceipt::from(lash_core::ProcessCancelReceipt {
         origin: lash_sansio::CancelOrigin::ModelRequested,

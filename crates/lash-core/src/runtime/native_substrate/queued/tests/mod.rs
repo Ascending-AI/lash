@@ -558,6 +558,7 @@ async fn create_only_factory_treats_claimability_as_unknown_and_runs() {
             .session_store_factory(),
     };
     let request = crate::SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("create-only-factory"),
         relation: crate::SessionRelation::Root,

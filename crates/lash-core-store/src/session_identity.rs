@@ -712,6 +712,11 @@ pub struct SessionStoreCreateRequest {
     pub relation: SessionRelation,
     pub pending_observer_intents: Vec<crate::SessionObserverIntent>,
     pub policy: SessionPolicy,
+    /// The process that runs this session as its own: the `SessionTurn`
+    /// process whose start created it (FIG-3607 R1). Recorded once, at
+    /// creation, as `session_meta.owning_process_id`; a start made in one of
+    /// the session's turns records that process's lineage above the session.
+    pub owning_process_id: Option<crate::ProcessId>,
 }
 impl SessionStoreCreateRequest {
     pub fn parent_session_id(&self) -> Option<&str> {

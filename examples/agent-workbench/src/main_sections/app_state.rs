@@ -117,9 +117,8 @@ impl AppState {
                     "store_context": context,
                 }),
             );
-            // The store's tombstone is the same fact the in-process mark
-            // carries, so the page reads one shape whichever authority
-            // refused it.
+            // The store's tombstone is the in-process mark's fact, so the
+            // page reads one shape whichever authority refused it.
             return AppError::session_open(error)
                 .with_retirement(session_id, SessionRetirement::Retired);
         }
@@ -357,6 +356,7 @@ impl AppState {
         let store = self
             .session_store_factory
             .create_store(&lash::persistence::SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash::persistence::SessionRelation::Root,

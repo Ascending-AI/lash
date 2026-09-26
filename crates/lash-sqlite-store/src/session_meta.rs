@@ -1,5 +1,6 @@
 use super::*;
 use crate::session_sql::session_sql;
+use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
@@ -96,6 +97,7 @@ pub(crate) fn write_session_meta(
                 fleet_format.writer_version(lash_core_execution::surface_format!(
                     lash_core_execution::store::CURRENT_SESSION_STATE_VERSION
                 )),
+                meta.owning_process_id.as_ref().map(ProcessId::as_str),
             ],
         )
         .map_err(sqlite_error)?;
@@ -228,7 +230,19 @@ pub(crate) fn load_session_meta(
             .pending_observer_intents
             .push(lash_core_execution::store_backend_support::StoredObserverIntent { process_id });
     }
-    let meta = SessionMetaCodec::decode(SESSION_META_CODEC, stored)?;
+    let session_id = stored.session_id.clone();
+    let mut meta = SessionMetaCodec::decode(SESSION_META_CODEC, stored)?;
+    meta.owning_process_id = tx
+        .query_row(
+            session_sql().meta.select_owning_process.sql(),
+            params![session_id.as_str()],
+            |row| {
+                row.get::<_, Option<String>>(0)?
+                    .map(|value| crate::sql_process_id(0, value))
+                    .transpose()
+            },
+        )
+        .map_err(sqlite_error)?;
     tx.commit().map_err(sqlite_error)?;
     Ok(Some(meta))
 }

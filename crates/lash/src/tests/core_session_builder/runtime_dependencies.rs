@@ -555,6 +555,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
     let source_request = lash_core::SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from("orphaned-fork-source"),
         relation: lash_core::SessionRelation::Root,
@@ -609,6 +610,7 @@ async fn fork_distinguishes_collected_point_from_retained_orphaned_source() -> R
     );
     let branch = factory
         .open_existing_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("orphaned-fork-branch"),
             relation: lash_core::SessionRelation::Root,
@@ -664,6 +666,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
     };
     let source_store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("fork-observer-source"),
             relation: lash_core::SessionRelation::Root,
@@ -748,6 +751,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
     );
     let branch_store = factory
         .open_existing_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("fork-observer-branch"),
             relation: lash_core::SessionRelation::Root,
@@ -808,6 +812,7 @@ async fn fork_observer_selection_is_recoverable_selective_and_wake_independent()
     );
     let transient_branch_store = factory
         .open_existing_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("fork-transient-branch"),
             relation: lash_core::SessionRelation::Root,
@@ -1083,6 +1088,7 @@ async fn duplicate_only_fork_intents_are_canonical(
     };
     let source_store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: source_session_id.clone(),
             relation: lash_core::SessionRelation::Root,
@@ -1199,6 +1205,7 @@ async fn session_create_observer_intent_replays_idempotently_on_open() -> Result
         .id;
     let store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: vec![
                 lash_core::facade_support::SessionObserverIntent::host_requested(
                     process_id.clone(),
@@ -1311,6 +1318,7 @@ async fn session_observer_intents_settle_in_one_pass_before_open_returns() -> Re
             <[ProcessId; 2]>::try_from(registered).expect("two registered processes");
         let store = factory
             .create_store(&lash_core::SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: vec![
                     lash_core::facade_support::SessionObserverIntent::host_requested(
                         create_process_id.clone(),
@@ -1604,6 +1612,7 @@ async fn a_fork_runs_under_the_hosts_generation_intent_not_the_branch_points() -
     };
     let source_store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("generation-fork-source"),
             relation: lash_core::SessionRelation::Root,

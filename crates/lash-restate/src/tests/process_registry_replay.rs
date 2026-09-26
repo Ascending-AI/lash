@@ -135,7 +135,7 @@ pub(super) async fn restate_controller_schedules_lashlang_process_with_serializa
         .await
         .expect("start");
     let RuntimeEffectOutcome::Process {
-        result: ProcessEffectOutcome::Start { record },
+        result: ProcessEffectOutcome::Start { record, .. },
     } = outcome
     else {
         panic!("wrong outcome");

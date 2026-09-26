@@ -37,6 +37,10 @@ pub(in crate::runtime::session_manager) struct SessionInitPlan {
     plugin_config: crate::plugin::SessionCreationConfig,
     plugin_source: crate::SessionPluginSource,
     protocol_request: SessionCreateRequest,
+    /// The `SessionTurn` process whose start creates this session, recorded
+    /// on the session's metadata as its owner (FIG-3607 R1). `None` for a
+    /// host create.
+    owning_process_id: Option<crate::ProcessId>,
 }
 
 /// The resolved request with its runtime assembled but not yet committed.
@@ -141,6 +145,7 @@ pub(in crate::runtime::session_manager) async fn resolve_session_init(
         plugin_config,
         plugin_source: request.plugin_source,
         protocol_request: request,
+        owning_process_id: None,
     })
 }
 
@@ -307,6 +312,7 @@ async fn bind_session_store(
             relation: plan.relation.clone(),
             pending_observer_intents: plan.pending_observer_intents.clone(),
             policy: plan.policy.clone(),
+            owning_process_id: plan.owning_process_id.clone(),
         })
         .await
         .map_err(|message| {
@@ -521,8 +527,10 @@ pub(in crate::runtime::session_manager) async fn create_session(
 async fn initialize_session(
     current: &CurrentSessionCapability,
     request: SessionCreateRequest,
+    owning_process_id: &crate::ProcessId,
 ) -> Result<InitializedSession, crate::PluginError> {
-    let plan = resolve_session_init(current, request).await?;
+    let mut plan = resolve_session_init(current, request).await?;
+    plan.owning_process_id = Some(owning_process_id.clone());
     match durable_session_store(current, &plan.session_id).await? {
         Some(store) => match recorded_session_state(&plan, &store).await? {
             Some(state) => reopen_committed_session(current, &plan, store, state).await,
@@ -789,27 +797,31 @@ impl RuntimeSessionServices {
         let session_id = match child.as_ref() {
             Some(initialized) => initialized.session_id.clone(),
             None => {
-                let initialized = Box::pin(initialize_session(&self.current, create_request))
-                    .await
-                    .map_err(|source| {
-                        // A catalog that cannot resolve a session by id can
-                        // never reopen the recorded session on any attempt:
-                        // refuse deterministically so the process terminalizes
-                        // instead of releasing the claim and re-admitting the
-                        // row forever (FIG-3487). Every other failure stays
-                        // `Create` — recoverable, because a transient catalog
-                        // miss may resolve on the next admission.
-                        if session_catalog_lookup_unsupported(&source) {
-                            return SessionTurnInitError::Refused {
-                                session_id: requested_session_id.clone(),
-                                source: Box::new(source),
-                            };
-                        }
-                        SessionTurnInitError::Create {
+                let initialized = Box::pin(initialize_session(
+                    &self.current,
+                    create_request,
+                    process_id,
+                ))
+                .await
+                .map_err(|source| {
+                    // A catalog that cannot resolve a session by id can
+                    // never reopen the recorded session on any attempt:
+                    // refuse deterministically so the process terminalizes
+                    // instead of releasing the claim and re-admitting the
+                    // row forever (FIG-3487). Every other failure stays
+                    // `Create` — recoverable, because a transient catalog
+                    // miss may resolve on the next admission.
+                    if session_catalog_lookup_unsupported(&source) {
+                        return SessionTurnInitError::Refused {
                             session_id: requested_session_id.clone(),
                             source: Box::new(source),
-                        }
-                    })?;
+                        };
+                    }
+                    SessionTurnInitError::Create {
+                        session_id: requested_session_id.clone(),
+                        source: Box::new(source),
+                    }
+                })?;
                 #[cfg(any(test, feature = "testing"))]
                 spawned_children::record(&initialized.session_id, &initialized.handle);
                 let session_id = initialized.session_id.clone();

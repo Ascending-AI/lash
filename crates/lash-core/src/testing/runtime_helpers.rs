@@ -416,6 +416,7 @@ pub async fn recording_session_store(
     let store = backend
         .session_store_factory()
         .create_store(&crate::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.into(),
             relation: crate::SessionRelation::Root,

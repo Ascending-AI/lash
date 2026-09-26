@@ -165,7 +165,6 @@ macro_rules! drive_admission_tests {
             (a_committed_root_answers_its_terminal_by_root, "drive-root-answered"),
             (a_host_id_naming_a_terminal_root_is_answered_not_rerun, "drive-root-adopted"),
             (a_root_whose_admission_a_successor_sealed_commits_nothing, "drive-root-superseded"),
-            (root_scope_close_runs_after_terminal_evidence_at_least_once, "drive-root-close"),
             (a_queued_root_settled_without_a_commit_closes_after_its_evidence, "drive-root-settled-close"),
             (a_root_end_closes_its_turn_scope_in_the_process_registry, "drive-root-registry-close"),
         ]);
@@ -187,11 +186,12 @@ macro_rules! drive_admission_tests {
     };
 }
 
-/// Register the session-close laws L-D1..L-D4 (FIG-3600 S7, FIG-3607 item
+/// Register the session-close laws L-D1..L-D6 (FIG-3600 S7, FIG-3607 item
 /// 7): a deletion's refusals come before its recorded `BeginSessionClose`
 /// step, the close ends every open root `SessionDeleted` and raises the drive
 /// epoch, its engine half is retained on failure, and its `CloseSession`
-/// intent outlives the session as the tombstone its roots are answered from.
+/// intent outlives the session as the tombstone its roots are answered from,
+/// and is the one writer of the session scope's close row (D11).
 /// The fixture is the admitted-head one; a tier with a
 /// [`ConformanceTurnRunner`](crate::ConformanceTurnRunner) runs the close
 /// inside the engine's `SessionDelete` handler.
@@ -203,6 +203,8 @@ macro_rules! session_close_tests {
             (a_refused_deletion_closes_nothing, "session-close-refused"),
             (the_close_intent_is_idempotent_retained_on_failure_and_survives_deletion, "session-close-retained"),
             (a_root_commit_racing_a_close_is_refused_stale_fence, "session-close-fence"),
+            (session_delete_writes_exactly_one_close_row_via_its_intent, "session-close-one-row"),
+            (a_close_interrupted_before_its_acknowledgement_is_finished_and_its_tombstone_kept, "session-close-crash"),
         ]);
     };
     (@laws $fixture:block; [$(($law:ident, $label:literal)),* $(,)?]) => {

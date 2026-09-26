@@ -391,6 +391,7 @@ impl SessionMetaCodec {
             });
         }
         Ok(SessionMeta {
+            owning_process_id: None,
             session_id: stored.session_id,
             relation,
             pending_observer_intents,

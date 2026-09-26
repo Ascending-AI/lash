@@ -134,6 +134,7 @@ pub(crate) async fn write_session_meta_tx(
                 lash_core_execution::store::CURRENT_SESSION_STATE_VERSION
             )) as i32,
         )
+        .bind(meta.owning_process_id.as_ref().map(ProcessId::as_str))
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -224,7 +225,21 @@ pub(crate) async fn load_session_meta(
             },
         );
     }
-    let meta = SessionMetaCodec::decode(SESSION_META_CODEC, stored)?;
+    let session_id = stored.session_id.clone();
+    let mut meta = SessionMetaCodec::decode(SESSION_META_CODEC, stored)?;
+    meta.owning_process_id =
+        sqlx::query_scalar::<_, Option<String>>(session_sql().meta.select_owning_process.sql())
+            .bind(session_id.as_str())
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?
+            .map(|process_id| {
+                ProcessId::parse(&process_id).map_err(|error| StoreError::StoredDataCorrupt {
+                    record_kind: "SessionMeta owning process",
+                    message: error.to_string(),
+                })
+            })
+            .transpose()?;
     tx.commit().await.map_err(store_sqlx_error)?;
     Ok(Some(meta))
 }

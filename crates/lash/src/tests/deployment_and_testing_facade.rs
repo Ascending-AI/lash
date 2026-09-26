@@ -84,6 +84,7 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
         policy.session_id = Some(session_id.clone());
         let store = factory
             .create_store(&lash_core::SessionStoreCreateRequest {
+                owning_process_id: None,
                 pending_observer_intents: Vec::new(),
                 session_id: session_id.clone(),
                 relation: lash_core::SessionRelation::default(),
@@ -212,6 +213,7 @@ async fn parked_work_merges_parked_turns_and_processes() {
     policy.session_id = Some(session_id.clone());
     let store = factory
         .create_store(&lash_core::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::default(),

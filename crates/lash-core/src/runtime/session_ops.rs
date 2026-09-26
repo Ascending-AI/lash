@@ -977,6 +977,7 @@ mod plugin_state_boundary_tests {
         };
         let store = factory
             .create_store(&crate::SessionStoreCreateRequest {
+                owning_process_id: None,
                 session_id: "event-state".into(),
                 relation: crate::SessionRelation::Root,
                 policy: policy.clone(),

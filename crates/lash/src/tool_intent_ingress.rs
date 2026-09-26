@@ -772,7 +772,7 @@ impl ToolIntentIngress {
             ));
         }
         let value = match result {
-            lash_core::ProcessEffectOutcome::Start { record } => {
+            lash_core::ProcessEffectOutcome::Start { record, .. } => {
                 let summary = lash_core::ProcessHandleView::from_record(*record);
                 serde_json::to_value(summary).unwrap_or(serde_json::Value::Null)
             }

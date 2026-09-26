@@ -430,6 +430,7 @@ impl RuntimePerfStoreFactory {
         session_id: &SessionId,
     ) -> Result<Arc<RuntimePerfStore>, StoreError> {
         let request = SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: session_id.clone(),
             relation: lash_core::SessionRelation::Root,

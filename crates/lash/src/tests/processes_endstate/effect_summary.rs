@@ -236,7 +236,7 @@ async fn start_process(
         )
         .await
         .expect("start the effect-summary process")
-        .id
+        .process_id
 }
 
 /// Drives a process whose summary batch carrying kind `fault` "crashes" on

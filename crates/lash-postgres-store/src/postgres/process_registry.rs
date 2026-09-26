@@ -656,17 +656,9 @@ impl lash_core_execution::ProcessObserverRegistry for PostgresProcessRegistry {
         &self,
         session_id: &SessionId,
     ) -> Result<lash_core_execution::ProcessSessionDeleteReport, PluginError> {
+        // The session's scope is not closed here: its `CloseSession` intent
+        // is the one owner of that row (FIG-3607 R10, ADR 0108 §5).
         let mut tx = self.pool.begin().await.map_err(plugin_sqlx_error)?;
-        // The session's scope closes with its process state (FIG-3607 R10):
-        // every process living `Until` it is swept, and a later start naming
-        // it is refused.
-        parent_end::record_tx(
-            &mut tx,
-            &lash_core_execution::ScopeId::session(session_id.clone()),
-            self.clock.timestamp_ms(),
-            self.fleet_format,
-        )
-        .await?;
         let discarded_wake_delivery_count =
             sqlx::query(process_sql().wake.discard_target_gone.sql())
                 .bind(session_id.as_str())

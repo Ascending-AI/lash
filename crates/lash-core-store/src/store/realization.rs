@@ -145,6 +145,7 @@ mod tests {
                 .materialized_session
                 .as_ref()
                 .map(|session_id| super::super::SessionMeta {
+                    owning_process_id: None,
                     session_id: session_id.clone(),
                     relation: crate::SessionRelation::Root,
                     pending_observer_intents: Vec::new(),

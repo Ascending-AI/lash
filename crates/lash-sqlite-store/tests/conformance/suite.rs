@@ -183,6 +183,7 @@ impl ScenarioBackends {
 
 fn root_session_request(session_id: &str) -> lash_core_execution::SessionStoreCreateRequest {
     lash_core_execution::SessionStoreCreateRequest {
+        owning_process_id: None,
         pending_observer_intents: Vec::new(),
         session_id: SessionId::from(session_id),
         relation: lash_core_execution::SessionRelation::Root,

@@ -84,7 +84,7 @@ impl DriveParts {
         clippy::expect_used,
         reason = "conformance-law fixture: the law's runtime builds"
     )]
-    async fn runtime(&self) -> crate::LashRuntime {
+    pub(super) async fn runtime(&self) -> crate::LashRuntime {
         let state = self.initial_state();
         let policy = state.policy.clone();
         Box::pin(
@@ -200,10 +200,7 @@ where
     let attempt_parts = parts.clone();
     runner
         .run_turn(
-            admit(crate::ExecutionScope::turn(
-                &parts.session_id,
-                TurnId::from("drive-law-driver"),
-            )),
+            driver_scope(parts),
             Arc::new(move |scope| {
                 let parts = attempt_parts.clone();
                 let step = Arc::clone(&step);
@@ -218,6 +215,15 @@ where
         )
         .await;
     rx.recv().await.expect("the tier ran the law's step")
+}
+
+/// The scope a law's drive runs under on the tier: one per law session, so a
+/// later run of the same scope is the tier's recovery of a crashed one.
+pub(super) fn driver_scope(parts: &DriveParts) -> crate::AdmittedScope {
+    admit(crate::ExecutionScope::turn(
+        &parts.session_id,
+        TurnId::from("drive-law-driver"),
+    ))
 }
 
 pub(super) fn admitted(verdict: AdmitVerdict) -> Admitted {

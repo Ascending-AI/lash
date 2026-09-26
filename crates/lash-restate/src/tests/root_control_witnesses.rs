@@ -143,6 +143,7 @@ impl Fixture {
                 relation: lash_core::SessionRelation::Root,
                 pending_observer_intents: vec![],
                 policy: lash_core::testing::mock_session_policy(),
+                owning_process_id: None,
             })
             .await
             .expect("store");

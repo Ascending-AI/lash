@@ -16,6 +16,7 @@ async fn sqlite_direct_turn_store(backend: &TestEngineBackend) -> Arc<dyn Runtim
     backend
         .session_store_factory()
         .create_store(&lash_core_execution::SessionStoreCreateRequest {
+            owning_process_id: None,
             pending_observer_intents: Vec::new(),
             session_id: SessionId::from("root"),
             relation: lash_core_execution::SessionRelation::Root,
