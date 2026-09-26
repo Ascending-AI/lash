@@ -23,7 +23,7 @@ pub enum TraceLashlangGraphCompleteness {
 
 /// Canonical identity of one fold input.
 ///
-/// Node transitions use `(node_id, node_kind, occurrence, attempt, incarnation)` plus
+/// Node transitions use `(node_id, node_kind, occurrence, attempt)` plus
 /// the transition kind. The transition kind lets a start and its terminal
 /// fact merge monotonically while still making a second, different start or
 /// terminal a typed conflict.
@@ -342,7 +342,6 @@ pub struct TraceLashlangGraphChildLink {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_graph_key: Option<String>,
     pub child_process_id: lash_sansio::ProcessId,
-    pub child_incarnation: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub child_attempt: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

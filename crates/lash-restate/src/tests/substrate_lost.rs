@@ -25,7 +25,7 @@ use lashlang::testing::ast_builders as b;
 
 /// `main` calls the counting tool once per segment: with a one-effect budget,
 /// segment 0 runs `first`, segment 1 runs `second`.
-async fn two_segment_tool_registration(process_id: &ProcessId) -> ProcessRegistration {
+async fn two_segment_tool_registration() -> ProcessRegistration {
     let call = |line: &str| {
         b::module_call(
             &["tools"],
@@ -72,7 +72,6 @@ async fn two_segment_tool_registration(process_id: &ProcessId) -> ProcessRegistr
     .await
     .expect("store the two-segment artifact");
     ProcessRegistration::new(
-        process_id.clone(),
         lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
@@ -112,10 +111,12 @@ fn substrate_lost(owner: lash_core::LeaseOwnerIdentity) -> impl Fn(&ProcessAwait
 const ROOT_EXECUTION: &str = "root-nonce";
 
 fn segment_input(
+    process_id: &ProcessId,
     registration: &ProcessRegistration,
     segment_ordinal: u64,
 ) -> RestateProcessWorkflowInput {
     RestateProcessWorkflowInput {
+        process_id: process_id.clone(),
         registration: registration.clone(),
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal,
@@ -144,6 +145,7 @@ impl RestateProcessRunner for EffectRunner {
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
+        _process_id: ProcessId,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
@@ -166,6 +168,7 @@ impl RestateProcessRunner for EffectRunner {
 /// A process whose root execution started and handed segment 1 over, served
 /// by an endpoint whose runner is `runner`.
 struct HandedOverSegment {
+    process_id: ProcessId,
     registration: ProcessRegistration,
     registry: Arc<dyn ProcessRegistry>,
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
@@ -175,26 +178,22 @@ struct HandedOverSegment {
 }
 
 impl HandedOverSegment {
-    async fn new(process_id: &str) -> Self {
+    async fn new() -> Self {
         let (registry, continuations) = process_stores();
-        let registration = rerunnable_registration(process_id);
-        registry
+        let registration = rerunnable_registration();
+        let process_id = registry
             .register_process(registration.clone())
             .await
-            .expect("register the handed-over process");
-        let (authority, root_start) =
-            invocation_started(&ProcessId::from(process_id), ROOT_EXECUTION, 1);
+            .expect("register the handed-over process")
+            .id;
+        let (authority, root_start) = invocation_started(&process_id, ROOT_EXECUTION, 1);
         registry
-            .record_first_started_with_authority(
-                &ProcessId::from(process_id),
-                root_start.clone(),
-                &authority,
-            )
+            .record_first_started_with_authority(&process_id, root_start.clone(), &authority)
             .await
             .expect("record the root execution's start");
         continuations
             .put_segment_handover(
-                &ProcessId::from(process_id),
+                &process_id,
                 lash_core::PersistedSegmentHandover {
                     writer: String::new(),
                     segment_ordinal: 1,
@@ -219,6 +218,7 @@ impl HandedOverSegment {
             )
             .build();
         Self {
+            process_id,
             registration,
             registry,
             continuations,
@@ -229,11 +229,11 @@ impl HandedOverSegment {
     }
 
     fn key(&self) -> String {
-        process_segment_workflow_key(&self.registration.id, 1)
+        process_segment_workflow_key(&self.process_id, 1)
     }
 
     fn input(&self) -> RestateProcessWorkflowInput {
-        segment_input(&self.registration, 1)
+        segment_input(&self.process_id, &self.registration, 1)
     }
 
     /// A fresh invocation of segment 1: the key's id with an empty journal.
@@ -262,7 +262,7 @@ impl HandedOverSegment {
     async fn marker(&self) -> Option<lash_core::SegmentStartMarker> {
         self.continuations
             .segment_start(&lash_core::ProcessSegmentKey::new(
-                self.registration.id.clone(),
+                self.process_id.clone(),
                 1,
             ))
             .await
@@ -271,7 +271,7 @@ impl HandedOverSegment {
 
     async fn outcome(&self) -> Option<ProcessAwaitOutput> {
         self.registry
-            .get_process(&self.registration.id)
+            .get_process(&self.process_id)
             .await
             .expect("read the process")
             .expect("the process exists")
@@ -296,7 +296,7 @@ fn proposed_runs(output: &[u8]) -> usize {
 /// behind, so a fresh run of the segment is admitted — and no effect had run.
 #[tokio::test]
 pub(super) async fn law_b_a_journal_lost_before_the_marker_admits_a_fresh_run() {
-    let segment = HandedOverSegment::new("admission-law-b").await;
+    let segment = HandedOverSegment::new().await;
     let lost = segment.invoke_fresh(false).await;
     assert_eq!(
         proposed_runs(&lost),
@@ -324,7 +324,7 @@ pub(super) async fn law_b_a_journal_lost_before_the_marker_admits_a_fresh_run() 
 /// its own nonce and proceeds; nothing is refused.
 #[tokio::test]
 pub(super) async fn law_a_a_crash_between_verdict_and_marker_retries_without_refusal() {
-    let segment = HandedOverSegment::new("admission-law-a").await;
+    let segment = HandedOverSegment::new().await;
     let first = segment.invoke_fresh(false).await;
     // The runtime acknowledged the verdict; the start step then wrote the
     // marker and the endpoint died before its completion was journaled.
@@ -359,7 +359,7 @@ pub(super) async fn law_a_a_crash_between_verdict_and_marker_retries_without_ref
 /// of the double fault: a false Abandoned, never a duplicate effect.
 #[tokio::test]
 pub(super) async fn law_c_a_journal_lost_after_the_marker_is_substrate_lost_with_no_effect() {
-    let segment = HandedOverSegment::new("admission-law-c").await;
+    let segment = HandedOverSegment::new().await;
     let first = segment.invoke_fresh(false).await;
     segment.retry(&first, 1, false).await;
     assert!(segment.marker().await.is_some());
@@ -377,7 +377,7 @@ pub(super) async fn law_c_a_journal_lost_after_the_marker_is_substrate_lost_with
 /// and the effects are not dispatched again.
 #[tokio::test]
 pub(super) async fn law_d_a_journal_lost_after_effects_is_substrate_lost_with_no_redispatch() {
-    let segment = HandedOverSegment::new("admission-law-d").await;
+    let segment = HandedOverSegment::new().await;
     segment
         .runner
         .crash_after_effect
@@ -412,7 +412,6 @@ pub(super) async fn law_d_a_journal_lost_after_effects_is_substrate_lost_with_no
 /// runs once.
 #[tokio::test]
 pub(super) async fn law_d_a_real_tool_call_is_never_executed_twice() {
-    let process_id = ProcessId::from("admission-law-d-tool");
     let executions = Arc::new(AtomicUsize::new(0));
     let stores = memory_process_stores().await;
     let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
@@ -423,11 +422,12 @@ pub(super) async fn law_d_a_real_tool_call_is_never_executed_twice() {
         vec![counting_tool_plugin(Arc::clone(&executions))],
     )
     .await;
-    let registration = two_segment_tool_registration(&process_id).await;
-    registry
+    let registration = two_segment_tool_registration().await;
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register the two-segment process");
+        .expect("register the two-segment process")
+        .id;
 
     // Segment 0 runs its tool and hands segment 1 over.
     let workflow = LashProcessWorkflowImpl::new_for_test(
@@ -443,6 +443,7 @@ pub(super) async fn law_d_a_real_tool_call_is_never_executed_twice() {
     );
     let outcome = workflow
         .run_registration_for_test(
+            process_id.clone(),
             registration.clone(),
             ProcessExecutionContext::default().with_execution_write_authority(
                 lash_core::ProcessExecutionWriteAuthority::invocation(&process_id, ROOT_EXECUTION),
@@ -495,7 +496,7 @@ pub(super) async fn law_d_a_real_tool_call_is_never_executed_twice() {
         &endpoint,
         "run",
         &key,
-        &segment_input(&registration, 1),
+        &segment_input(&process_id, &registration, 1),
         true,
     )
     .await
@@ -511,7 +512,7 @@ pub(super) async fn law_d_a_real_tool_call_is_never_executed_twice() {
         &endpoint,
         "run",
         &key,
-        &segment_input(&registration, 1),
+        &segment_input(&process_id, &registration, 1),
         true,
     )
     .await;
@@ -539,7 +540,6 @@ pub(super) async fn law_d_a_real_tool_call_is_never_executed_twice() {
 /// so the process would end Failed with no tool call.
 #[tokio::test]
 pub(super) async fn an_admitted_lashlang_process_runs_its_body_and_is_running() {
-    let process_id = ProcessId::from("admission-fresh-lashlang");
     let executions = Arc::new(AtomicUsize::new(0));
     let stores = memory_process_stores().await;
     let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
@@ -550,11 +550,12 @@ pub(super) async fn an_admitted_lashlang_process_runs_its_body_and_is_running() 
         vec![counting_tool_plugin(Arc::clone(&executions))],
     )
     .await;
-    let registration = two_segment_tool_registration(&process_id).await;
-    registry
+    let registration = two_segment_tool_registration().await;
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register the process");
+        .expect("register the process")
+        .id;
     let endpoint = Endpoint::builder()
         .bind(
             LashProcessWorkflowImpl::new_for_test(
@@ -571,7 +572,7 @@ pub(super) async fn an_admitted_lashlang_process_runs_its_body_and_is_running() 
         &endpoint,
         "run",
         &process_segment_workflow_key(&process_id, 0),
-        &segment_input(&registration, 0),
+        &segment_input(&process_id, &registration, 0),
         true,
     )
     .await;
@@ -620,14 +621,14 @@ pub(super) async fn an_admitted_lashlang_process_runs_its_body_and_is_running() 
 /// false `SubstrateLost` there would abandon a healthy process.
 #[tokio::test]
 pub(super) async fn a_completed_segment_is_superseded_not_refused() {
-    let segment = HandedOverSegment::new("admission-completed-segment").await;
+    let segment = HandedOverSegment::new().await;
     let first = segment.invoke_fresh(false).await;
     segment.retry(&first, 1, false).await;
     assert!(segment.marker().await.is_some(), "segment 1 started");
     segment
         .continuations
         .put_segment_handover(
-            &segment.registration.id,
+            &segment.process_id,
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 2,
@@ -660,11 +661,11 @@ pub(super) async fn a_completed_segment_is_superseded_not_refused() {
 #[tokio::test]
 pub(super) async fn root_segment_admits_only_rows_that_never_started() {
     let registry = process_registry();
-    let started_id = ProcessId::from("admission-root-started");
-    registry
-        .register_process(rerunnable_registration(started_id.as_str()))
+    let started_id = registry
+        .register_process(rerunnable_registration())
         .await
-        .expect("register the started row");
+        .expect("register the started row")
+        .id;
     let (authority, started) = invocation_started(&started_id, ROOT_EXECUTION, 1);
     registry
         .record_first_started_with_authority(&started_id, started.clone(), &authority)
@@ -681,12 +682,12 @@ pub(super) async fn root_segment_admits_only_rows_that_never_started() {
             .serve(),
         )
         .build();
-    let registration = rerunnable_registration(started_id.as_str());
+    let registration = rerunnable_registration();
     let _ = invoke_process_workflow_endpoint(
         &endpoint,
         "run",
         &process_segment_workflow_key(&started_id, 0),
-        &segment_input(&registration, 0),
+        &segment_input(&started_id, &registration, 0),
         true,
     )
     .await;
@@ -703,17 +704,17 @@ pub(super) async fn root_segment_admits_only_rows_that_never_started() {
         .expect("the refusal is a stored terminal");
     assert!(substrate_lost(started.owner)(&outcome), "got {outcome:?}");
 
-    let fresh_id = ProcessId::from("admission-root-unstarted");
-    let registration = rerunnable_registration(fresh_id.as_str());
-    registry
+    let registration = rerunnable_registration();
+    let fresh_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register the unstarted row");
+        .expect("register the unstarted row")
+        .id;
     invoke_process_workflow_endpoint(
         &endpoint,
         "run",
         &process_segment_workflow_key(&fresh_id, 0),
-        &segment_input(&registration, 0),
+        &segment_input(&fresh_id, &registration, 0),
         true,
     )
     .await
@@ -758,6 +759,7 @@ impl RestateProcessRunner for BoundaryRunner {
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
+        _process_id: ProcessId,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
@@ -780,15 +782,15 @@ impl RestateProcessRunner for BoundaryRunner {
 /// writes the reference and hands over.
 #[tokio::test]
 pub(super) async fn a_successor_reference_store_fault_is_retried_by_restate() {
-    let process_id = ProcessId::from("admission-ref-fault");
     let stores = memory_process_stores().await;
     let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
     let continuations = Arc::clone(&stores.continuations);
-    let registration = rerunnable_registration(process_id.as_str());
-    registry
+    let registration = rerunnable_registration();
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register the handing-over row");
+        .expect("register the handing-over row")
+        .id;
     let endpoint = Endpoint::builder()
         .bind(
             LashProcessWorkflowImpl::new_for_test(
@@ -799,7 +801,7 @@ pub(super) async fn a_successor_reference_store_fault_is_retried_by_restate() {
             .serve(),
         )
         .build();
-    let input = segment_input(&registration, 0);
+    let input = segment_input(&process_id, &registration, 0);
     stores
         .registry
         .fail_next_external_ref_write(PluginError::Runtime(lash_core::RuntimeError::new(
@@ -881,15 +883,15 @@ fn terminal_failure_code(record: &lash_core::ProcessRecord) -> Option<String> {
 /// its awaiters wait on; the invocation never ends with the process Running.
 #[tokio::test]
 pub(super) async fn a_failed_handover_write_ends_the_process_failed_typed() {
-    let process_id = ProcessId::from("segment-failure-handover-write");
     let stores = memory_process_stores().await;
     let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
     let continuations = Arc::clone(&stores.continuations);
-    let registration = rerunnable_registration(process_id.as_str());
-    registry
+    let registration = rerunnable_registration();
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register the handing-over row");
+        .expect("register the handing-over row")
+        .id;
     let endpoint = Endpoint::builder()
         .bind(
             LashProcessWorkflowImpl::new_for_test(
@@ -909,7 +911,7 @@ pub(super) async fn a_failed_handover_write_ends_the_process_failed_typed() {
         &endpoint,
         "run",
         process_id.as_str(),
-        &segment_input(&registration, 0),
+        &segment_input(&process_id, &registration, 0),
         true,
     )
     .await
@@ -957,15 +959,15 @@ pub(super) async fn a_failed_handover_write_ends_the_process_failed_typed() {
 /// and delivers the terminal to the root workflow awaiters wait on.
 #[tokio::test]
 pub(super) async fn a_segment_with_no_handover_ends_the_process_failed_typed() {
-    let process_id = ProcessId::from("segment-failure-handover-missing");
     let stores = memory_process_stores().await;
     let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
     let continuations = Arc::clone(&stores.continuations);
-    let registration = rerunnable_registration(process_id.as_str());
-    registry
+    let registration = rerunnable_registration();
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register the row");
+        .expect("register the row")
+        .id;
     let endpoint = Endpoint::builder()
         .bind(
             LashProcessWorkflowImpl::new_for_test(
@@ -982,7 +984,7 @@ pub(super) async fn a_segment_with_no_handover_ends_the_process_failed_typed() {
         "run",
         endpoint_protocol::encode_invocation_body(
             &format!("{}#1", process_id.as_str()),
-            &segment_input(&registration, 1),
+            &segment_input(&process_id, &registration, 1),
         )
         .expect("encode segment 1"),
         Vec::new(),
@@ -1018,11 +1020,11 @@ pub(super) async fn a_segment_with_no_handover_ends_the_process_failed_typed() {
 /// no longer hides a segment whose workflow Restate lost.
 #[tokio::test]
 pub(super) async fn sweep_submits_the_latest_segment_even_when_its_reference_is_current() {
-    let segment = HandedOverSegment::new("admission-sweep-current-ref").await;
+    let segment = HandedOverSegment::new().await;
     segment
         .registry
         .set_external_ref(
-            &segment.registration.id,
+            &segment.process_id,
             lash_core::ProcessExternalRef {
                 backend: "restate".to_string(),
                 id: format!("LashProcessWorkflow/{}", segment.key()),
@@ -1046,12 +1048,14 @@ pub(super) async fn sweep_submits_the_latest_segment_even_when_its_reference_is_
     .await
     .expect("sweep the pending rows");
     server.await.expect("capture server");
-    assert_eq!(report.admitted, vec![segment.registration.id.to_string()]);
+    assert_eq!(report.admitted, vec![segment.process_id.to_string()]);
     let requests = captured.lock_recover().clone();
     assert_eq!(requests.len(), 1, "{requests:?}");
     assert!(
-        requests[0]
-            .starts_with("POST /LashProcessWorkflow/admission-sweep-current-ref%231/run/send "),
+        requests[0].starts_with(&format!(
+            "POST /LashProcessWorkflow/{}%231/run/send ",
+            segment.process_id
+        )),
         "the sweep addresses the latest segment's key: {}",
         requests[0]
     );
@@ -1064,24 +1068,17 @@ pub(super) async fn sweep_submits_the_latest_segment_even_when_its_reference_is_
     );
 }
 
-/// An input built for another generation of the handler's command prefix —
-/// stamped with a retired version, or unstamped — is refused before the
-/// handler journals anything: the process ends Abandoned with
-/// `ResumeRefused { RetiredGeneration }` naming the generation, and the
-/// runner is never asked for anything.
+/// FIG-3607 review item 4: a real input of a retired generation — the shape a
+/// generation-2 or -3 submitter wrote, whose registration named its process by
+/// a host-chosen `id` and which carries no minted `process_id` — reaches the
+/// handler and is refused by its generation, never by the shape error its
+/// retired fields would raise at decode. It names no process this store holds,
+/// so nothing is stored and nothing is journaled.
 #[tokio::test]
-pub(super) async fn a_retired_journal_generation_is_refused_before_any_command() {
-    for (process_id, stamped) in [
-        ("admission-retired-journal-v1", Some(1_u32)),
-        ("admission-retired-journal-v2", Some(2_u32)),
-        ("admission-retired-journal-unstamped", None),
-    ] {
+pub(super) async fn a_real_retired_generation_input_is_refused_by_generation_not_by_shape() {
+    for generation in [2_u32, 3] {
         let registry = process_registry();
-        let registration = rerunnable_registration(process_id);
-        registry
-            .register_process(registration.clone())
-            .await
-            .expect("register the row");
+        let registration = rerunnable_registration();
         let runner = Arc::new(EffectRunner::default());
         let endpoint = Endpoint::builder()
             .bind(
@@ -1093,8 +1090,155 @@ pub(super) async fn a_retired_journal_generation_is_refused_before_any_command()
                 .serve(),
             )
             .build();
-        let mut input =
-            serde_json::to_value(segment_input(&registration, 0)).expect("encode the input");
+        // The retired wire shape: the registration's own `id`, no `start_key`,
+        // and no top-level `process_id`.
+        let mut retired_registration =
+            serde_json::to_value(&registration).expect("encode the registration");
+        let object = retired_registration
+            .as_object_mut()
+            .expect("the registration is an object");
+        object.remove("start_key");
+        object.insert("id".to_string(), serde_json::json!("legacy-host-name"));
+        let input = serde_json::json!({
+            "registration": retired_registration,
+            "segment_ordinal": 0,
+            "journal_version": generation,
+        });
+        let output =
+            invoke_process_workflow_endpoint(&endpoint, "run", "legacy-host-name", &input, true)
+                .await
+                .unwrap_or_default();
+        assert_eq!(
+            restate_recorded_commands(&output).map(|commands| {
+                commands
+                    .iter()
+                    .filter(|command| command.message_type != 0x0401)
+                    .count()
+            }),
+            Some(0),
+            "generation {generation}: nothing but the terminal output is journaled: {output:?}"
+        );
+        let failure = restate_output_failure_message(&output)
+            .unwrap_or_else(|| panic!("generation {generation}: a terminal failure: {output:?}"));
+        assert!(
+            failure.contains(&format!("restate-process-journal-v{generation}")),
+            "generation {generation}: refused by its generation, not its shape: {failure}"
+        );
+        assert_eq!(runner.runs.load(Ordering::SeqCst), 0);
+    }
+}
+
+/// FIG-3607 review item 4: the requests a caller sends into a running process
+/// workflow are refused by generation before their shape is decoded. Each is a
+/// real payload of the retired generation: the cancel request of generation 3
+/// named a `process_ref` with its incarnation, and the await, complete and
+/// attach requests carried no stamp at all.
+#[test]
+pub(super) fn retired_process_requests_are_refused_by_generation_not_by_shape() {
+    let cancel = serde_json::json!({
+        "process_ref": { "process_id": "legacy-host-name", "incarnation": 1 },
+        "request": {
+            "origin": "operator_requested",
+            "requester": "actor:legacy",
+            "requested_at_ms": 11,
+        },
+        "journal_version": 3,
+    });
+    let error = serde_json::from_value::<RestateProcessCancelRequest>(cancel)
+        .expect_err("a generation-3 cancel request is refused");
+    assert!(
+        error.to_string().contains("restate-process-journal-v3"),
+        "{error}"
+    );
+    let unstamped = serde_json::json!({ "process_id": "legacy-host-name" });
+    for (kind, error) in [
+        (
+            "await",
+            serde_json::from_value::<RestateProcessAwaitRequest>(unstamped.clone())
+                .expect_err("an unstamped await request is refused")
+                .to_string(),
+        ),
+        (
+            "attach",
+            serde_json::from_value::<crate::process_attach::RestateProcessAttachRequest>(
+                serde_json::json!({ "process_ref": { "process_id": "legacy-host-name", "incarnation": 1 }, "key": "legacy" }),
+            )
+            .expect_err("an unstamped attach request is refused")
+            .to_string(),
+        ),
+        (
+            "complete",
+            serde_json::from_value::<crate::process::RestateProcessCompleteRequest>(
+                serde_json::json!({ "process_id": "legacy-host-name", "output": null }),
+            )
+            .expect_err("an unstamped completion is refused")
+            .to_string(),
+        ),
+    ] {
+        assert!(
+            error.contains("restate-process-journal-v1"),
+            "{kind}: refused by generation, not shape: {error}"
+        );
+    }
+
+    // This generation's requests round-trip with their stamp.
+    let current = RestateProcessCancelRequest::new(
+        ProcessId::fixture("current-cancel"),
+        lash_core::CancelRequest::new(lash_core::CancelOrigin::OperatorRequested, "actor:now", 12),
+    );
+    let encoded = serde_json::to_value(&current).expect("encode the current request");
+    assert_eq!(
+        encoded["journal_version"],
+        serde_json::json!(RESTATE_PROCESS_JOURNAL_VERSION)
+    );
+    assert_eq!(
+        serde_json::from_value::<RestateProcessCancelRequest>(encoded).expect("decode"),
+        current
+    );
+    let awaited = RestateProcessAwaitRequest {
+        process_id: ProcessId::fixture("current-await"),
+    };
+    let encoded = serde_json::to_value(&awaited).expect("encode the await request");
+    assert_eq!(
+        encoded["journal_version"],
+        serde_json::json!(RESTATE_PROCESS_JOURNAL_VERSION)
+    );
+    assert_eq!(
+        serde_json::from_value::<RestateProcessAwaitRequest>(encoded)
+            .expect("decode")
+            .process_id,
+        awaited.process_id
+    );
+}
+
+/// An input built for another generation of the handler's command prefix —
+/// stamped with a retired version, or unstamped — is refused before the
+/// handler journals anything: the process ends Abandoned with
+/// `ResumeRefused { RetiredGeneration }` naming the generation, and the
+/// runner is never asked for anything.
+#[tokio::test]
+pub(super) async fn a_retired_journal_generation_is_refused_before_any_command() {
+    for stamped in [Some(1_u32), Some(2_u32), Some(3_u32), None] {
+        let registry = process_registry();
+        let registration = rerunnable_registration();
+        let process_id = registry
+            .register_process(registration.clone())
+            .await
+            .expect("register the row")
+            .id;
+        let runner = Arc::new(EffectRunner::default());
+        let endpoint = Endpoint::builder()
+            .bind(
+                LashProcessWorkflowImpl::new_for_test(
+                    Arc::clone(&runner),
+                    Arc::clone(&registry),
+                    continuation_store(),
+                )
+                .serve(),
+            )
+            .build();
+        let mut input = serde_json::to_value(segment_input(&process_id, &registration, 0))
+            .expect("encode the input");
         match stamped {
             Some(version) => input["journal_version"] = serde_json::json!(version),
             None => {
@@ -1104,9 +1248,10 @@ pub(super) async fn a_retired_journal_generation_is_refused_before_any_command()
                     .remove("journal_version");
             }
         }
-        let output = invoke_process_workflow_endpoint(&endpoint, "run", process_id, &input, true)
-            .await
-            .unwrap_or_default();
+        let output =
+            invoke_process_workflow_endpoint(&endpoint, "run", process_id.as_str(), &input, true)
+                .await
+                .unwrap_or_default();
         assert_eq!(
             restate_recorded_commands(&output).map(|commands| {
                 commands
@@ -1123,7 +1268,7 @@ pub(super) async fn a_retired_journal_generation_is_refused_before_any_command()
         );
         assert_eq!(runner.runs.load(Ordering::SeqCst), 0);
         let outcome = registry
-            .get_process(&ProcessId::from(process_id))
+            .get_process(&process_id)
             .await
             .expect("read the refused row")
             .and_then(|record| record.outcome)
@@ -1155,7 +1300,7 @@ pub(super) async fn a_retired_journal_generation_is_refused_before_any_command()
 /// it, runs nothing and delivers it to the root workflow (FIG-3820).
 #[tokio::test]
 pub(super) async fn a_zombie_successor_after_substrate_lost_recovery_runs_no_body() {
-    let segment = HandedOverSegment::new("fig3818-zombie-successor").await;
+    let segment = HandedOverSegment::new().await;
     let abandoned = ProcessAwaitOutput::Abandoned {
         evidence: Box::new(lash_core::AbandonEvidence {
             writer: lash_core::AbandonWriter::ResumeRefused {
@@ -1169,9 +1314,9 @@ pub(super) async fn a_zombie_successor_after_substrate_lost_recovery_runs_no_bod
     segment
         .registry
         .complete_process(
-            &segment.registration.id,
+            &segment.process_id,
             abandoned.clone(),
-            crate::process::workflow_key_authority(&segment.registration.id),
+            crate::process::workflow_key_authority(&segment.process_id),
         )
         .await
         .expect("the recovery stores Abandoned");
@@ -1191,6 +1336,7 @@ pub(super) async fn a_zombie_successor_after_substrate_lost_recovery_runs_no_bod
 /// SubstrateLost recovery, and the zombie root execution may still hand
 /// segment 1 over. Both segments run on one endpoint over one store.
 struct ZombieRoot {
+    process_id: ProcessId,
     registration: ProcessRegistration,
     registry: Arc<dyn ProcessRegistry>,
     continuations: Arc<dyn lash_core::ProcessContinuationStore>,
@@ -1199,21 +1345,17 @@ struct ZombieRoot {
 }
 
 impl ZombieRoot {
-    async fn new(process_id: &str) -> Self {
+    async fn new() -> Self {
         let (registry, continuations) = process_stores();
-        let registration = rerunnable_registration(process_id);
-        registry
+        let registration = rerunnable_registration();
+        let process_id = registry
             .register_process(registration.clone())
             .await
-            .expect("register the process");
-        let (authority, root_start) =
-            invocation_started(&ProcessId::from(process_id), ROOT_EXECUTION, 1);
+            .expect("register the process")
+            .id;
+        let (authority, root_start) = invocation_started(&process_id, ROOT_EXECUTION, 1);
         registry
-            .record_first_started_with_authority(
-                &ProcessId::from(process_id),
-                root_start,
-                &authority,
-            )
+            .record_first_started_with_authority(&process_id, root_start, &authority)
             .await
             .expect("record the zombie root execution's start");
         let runner = Arc::new(EffectRunner::default());
@@ -1228,6 +1370,7 @@ impl ZombieRoot {
             )
             .build();
         Self {
+            process_id,
             registration,
             registry,
             continuations,
@@ -1237,7 +1380,7 @@ impl ZombieRoot {
     }
 
     fn key(&self, segment_ordinal: u64) -> String {
-        process_segment_workflow_key(&self.registration.id, segment_ordinal)
+        process_segment_workflow_key(&self.process_id, segment_ordinal)
     }
 
     /// A fresh invocation of `segment_ordinal`, runs acknowledged or not.
@@ -1246,7 +1389,7 @@ impl ZombieRoot {
             &self.endpoint,
             "run",
             &self.key(segment_ordinal),
-            &segment_input(&self.registration, segment_ordinal),
+            &segment_input(&self.process_id, &self.registration, segment_ordinal),
             complete_runs,
         )
         .await
@@ -1264,7 +1407,7 @@ impl ZombieRoot {
     async fn retry(&self, segment_ordinal: u64, prior: &[u8], journaled: usize) -> bytes::Bytes {
         let body = encode_journal_retry(
             &self.key(segment_ordinal),
-            &segment_input(&self.registration, segment_ordinal),
+            &segment_input(&self.process_id, &self.registration, segment_ordinal),
             prior,
             journaled,
         )
@@ -1279,7 +1422,7 @@ impl ZombieRoot {
     async fn zombie_hands_over(&self) -> Result<(), PluginError> {
         self.registry
             .set_external_ref(
-                &self.registration.id,
+                &self.process_id,
                 lash_core::ProcessExternalRef {
                     backend: "restate".to_string(),
                     id: format!("LashProcessWorkflow/{}", self.key(1)),
@@ -1290,7 +1433,7 @@ impl ZombieRoot {
             .await?;
         self.continuations
             .put_segment_handover(
-                &self.registration.id,
+                &self.process_id,
                 lash_core::PersistedSegmentHandover {
                     segment_ordinal: 1,
                     writer: String::new(),
@@ -1306,7 +1449,7 @@ impl ZombieRoot {
 
     async fn outcome(&self) -> Option<ProcessAwaitOutput> {
         self.registry
-            .get_process(&self.registration.id)
+            .get_process(&self.process_id)
             .await
             .expect("read the process")
             .expect("the process exists")
@@ -1340,7 +1483,7 @@ impl ZombieRoot {
 /// stores nothing; segment 1 carries the process.
 #[tokio::test]
 pub(super) async fn a_zombie_handover_between_the_recovery_verdict_and_its_terminal_wins() {
-    let root = ZombieRoot::new("fig3820-between").await;
+    let root = ZombieRoot::new().await;
     let verdict = root.invoke_fresh(0, false).await;
     assert_eq!(
         proposed_runs(&verdict),
@@ -1372,7 +1515,7 @@ pub(super) async fn a_zombie_handover_between_the_recovery_verdict_and_its_termi
 /// send that lands anyway runs nothing.
 #[tokio::test]
 pub(super) async fn a_zombie_handover_after_the_recovery_terminal_is_refused_typed() {
-    let root = ZombieRoot::new("fig3820-recovery-first").await;
+    let root = ZombieRoot::new().await;
     root.invoke_fresh(0, true).await;
     assert!(
         root.outcome()
@@ -1396,7 +1539,7 @@ pub(super) async fn a_zombie_handover_after_the_recovery_terminal_is_refused_typ
 /// verdict, so the verdict is Superseded; segment 1 carries the process.
 #[tokio::test]
 pub(super) async fn a_zombie_handover_before_the_recovery_verdict_supersedes_it() {
-    let root = ZombieRoot::new("fig3820-zombie-first").await;
+    let root = ZombieRoot::new().await;
     root.zombie_hands_over()
         .await
         .expect("the zombie hands over before any terminal");
@@ -1411,19 +1554,19 @@ pub(super) async fn a_zombie_handover_before_the_recovery_verdict_supersedes_it(
 /// transaction that would park it.
 #[tokio::test]
 pub(super) async fn a_handover_put_on_an_ended_process_is_refused_typed() {
-    let root = ZombieRoot::new("fig3820-put-after-terminal").await;
+    let root = ZombieRoot::new().await;
     root.registry
         .complete_process(
-            &root.registration.id,
+            &root.process_id,
             process_success(serde_json::json!("done")),
-            crate::process::workflow_key_authority(&root.registration.id),
+            crate::process::workflow_key_authority(&root.process_id),
         )
         .await
         .expect("the process ends");
     let refused = root
         .continuations
         .put_segment_handover(
-            &root.registration.id,
+            &root.process_id,
             lash_core::PersistedSegmentHandover {
                 segment_ordinal: 1,
                 writer: String::new(),
@@ -1441,7 +1584,7 @@ pub(super) async fn a_handover_put_on_an_ended_process_is_refused_typed() {
     );
     assert_eq!(
         root.continuations
-            .latest_segment_handover(&root.registration.id)
+            .latest_segment_handover(&root.process_id)
             .await
             .expect("read handovers"),
         None
@@ -1455,7 +1598,7 @@ pub(super) async fn a_handover_put_on_an_ended_process_is_refused_typed() {
 /// starts nothing.
 #[tokio::test]
 pub(super) async fn a_terminal_between_a_segment_verdict_and_its_start_runs_no_body() {
-    let root = ZombieRoot::new("fig3819-verdict-then-terminal").await;
+    let root = ZombieRoot::new().await;
     root.zombie_hands_over()
         .await
         .expect("the root hands segment 1 over");
@@ -1467,9 +1610,9 @@ pub(super) async fn a_terminal_between_a_segment_verdict_and_its_start_runs_no_b
     );
     root.registry
         .complete_process(
-            &root.registration.id,
+            &root.process_id,
             process_success(serde_json::json!("ended")),
-            crate::process::workflow_key_authority(&root.registration.id),
+            crate::process::workflow_key_authority(&root.process_id),
         )
         .await
         .expect("the process ends after the verdict");
@@ -1478,7 +1621,7 @@ pub(super) async fn a_terminal_between_a_segment_verdict_and_its_start_runs_no_b
     assert_eq!(
         root.continuations
             .segment_start(&lash_core::ProcessSegmentKey::new(
-                root.registration.id.clone(),
+                root.process_id.clone(),
                 1
             ))
             .await

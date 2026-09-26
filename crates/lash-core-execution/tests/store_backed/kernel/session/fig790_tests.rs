@@ -133,7 +133,7 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
             ));
         };
         match *command {
-            crate::ProcessCommand::Await { process_ref } => {
+            crate::ProcessCommand::Await { process_id } => {
                 self.commands
                     .lock_recover()
                     .push(RecordedProcessCommand::Await);
@@ -157,14 +157,14 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
                     result: crate::ProcessEffectOutcome::Await {
                         output: Box::new(crate::ProcessAwaitOutput::from_tool_output(
                             crate::ToolCallOutput::success(
-                                serde_json::json!({ "process_id": process_ref.process_id }),
+                                serde_json::json!({ "process_id": process_id }),
                             ),
                         )),
                     },
                 })
             }
             crate::ProcessCommand::Cancel {
-                process_ref,
+                process_id: _,
                 origin,
                 requester,
                 ..
@@ -174,7 +174,6 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
                     .push(RecordedProcessCommand::Cancel);
                 let mut record = crate::ProcessRecord::from_registration(
                     crate::ProcessRegistration::new(
-                        process_ref.process_id,
                         crate::ProcessInput::External {
                             metadata: serde_json::Value::Null,
                         },
@@ -185,7 +184,7 @@ impl crate::RuntimeEffectController for RecordingProcessEffectController {
                             crate::OnParentEnd::Abandon,
                         ),
                     ),
-                    crate::ProcessIncarnation::from_registration_sequence(1),
+                    crate::ProcessId::fixture("fig790-process"),
                 );
                 record.cancel_request =
                     Some(Box::new(crate::CancelRequest::new(origin, requester, 1)));
@@ -308,10 +307,7 @@ impl crate::ProcessService for EffectBackedProcessService {
             .execute(
                 scope,
                 crate::ProcessCommand::Await {
-                    process_ref: crate::ProcessRef::new(
-                        process_id,
-                        crate::ProcessIncarnation::from_registration_sequence(1),
-                    ),
+                    process_id: process_id.clone(),
                 },
             )
             .await?
@@ -353,10 +349,7 @@ impl crate::ProcessService for EffectBackedProcessService {
             .execute(
                 scope,
                 crate::ProcessCommand::Cancel {
-                    process_ref: crate::ProcessRef::new(
-                        process_id,
-                        crate::ProcessIncarnation::from_registration_sequence(1),
-                    ),
+                    process_id: process_id.clone(),
                     origin: crate::CancelOrigin::OperatorRequested,
                     requester: "test:fig790-cancel".to_string(),
                     attribution: None,
@@ -380,10 +373,7 @@ impl crate::ProcessService for EffectBackedProcessService {
             .execute(
                 scope,
                 crate::ProcessCommand::Cancel {
-                    process_ref: crate::ProcessRef::new(
-                        process_id,
-                        crate::ProcessIncarnation::from_registration_sequence(1),
-                    ),
+                    process_id: process_id.clone(),
                     origin: crate::CancelOrigin::ModelRequested,
                     requester: identity.replay_key.clone(),
                     attribution: Some(crate::RuntimeReplayAttribution::ToolIntent(identity)),
@@ -534,14 +524,11 @@ async fn assert_cancelled_process_await_emits_one_await(already_cancelled: bool)
         cancellation.cancel();
     }
     let cancellation_for_call = cancellation.clone();
-    let process_ref = crate::ProcessRef::new(
-        "fig790-process",
-        crate::ProcessIncarnation::from_registration_sequence(1),
-    );
+    let process_id = crate::ProcessId::fixture("fig790-process");
     let await_task = crate::task::spawn(async move {
         crate::await_process_with_cancellation(
             &context,
-            &process_ref,
+            &process_id,
             None,
             Some(cancellation_for_call),
         )
@@ -592,15 +579,12 @@ async fn mid_await_process_cancellation_emits_exactly_one_await_effect() {
 async fn deleted_session_process_await_latches_typed_enclosing_effect_abort() {
     let context =
         fig790_process_await_context(Arc::new(DeletedSessionProcessEffectController)).await;
-    crate::record_started_process(&context, &ProcessId::from("fig790-process"));
+    crate::record_started_process(&context, &crate::ProcessId::fixture("fig790-process"));
 
     let reply = crate::await_process_handle(
         &context,
         "await-deleted-session-process".to_string(),
-        RuntimeExecutionContext::process_handle_json(&crate::ProcessRef::new(
-            "fig790-process",
-            crate::ProcessIncarnation::from_registration_sequence(1),
-        )),
+        RuntimeExecutionContext::process_handle_json(&crate::ProcessId::fixture("fig790-process")),
     )
     .await;
 

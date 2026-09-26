@@ -39,12 +39,6 @@ pub(super) fn language_execution_attributes(
             i64::from(attempt),
         ));
     }
-    if let Some(incarnation) = event.identity.incarnation() {
-        attrs.push(KeyValue::new(
-            attr::LASH_LANGUAGE_EXECUTION_INCARNATION,
-            incarnation as i64,
-        ));
-    }
     if let Some(session_id) = &event.identity.scope.session_id {
         attrs.push(KeyValue::new(
             attr::LASH_LANGUAGE_EXECUTION_SESSION_ID,
@@ -309,10 +303,6 @@ pub(super) fn language_execution_attributes(
             attrs.push(KeyValue::new(
                 attr::LASH_LANGUAGE_EXECUTION_CHILD_PROCESS_ID,
                 child.process_id.to_string(),
-            ));
-            attrs.push(KeyValue::new(
-                attr::LASH_LANGUAGE_EXECUTION_CHILD_INCARNATION,
-                child.incarnation as i64,
             ));
             if let Some(attempt) = child.attempt {
                 attrs.push(KeyValue::new(

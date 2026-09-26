@@ -25,7 +25,7 @@ use lash_sansio::sync::MutexExt as _;
 
 use crate::runtime::effect::{TOOL_SETTLEMENT_VERSION, ToolSettlement, ToolUsageDelta};
 use crate::session::{IncorporationLedger, SettlementSource, UsageChargeSink, UsageDeltaIdentity};
-use crate::{LlmCallId, PluginMessage, ProcessId, TokenUsage};
+use crate::{LlmCallId, PluginMessage, TokenUsage};
 
 /// The session-ledger stand-in: records every charge the applicator makes as
 /// `(source, model, usage)` so the tests can count them by identity.
@@ -80,7 +80,7 @@ fn settlement() -> ToolSettlement {
     ToolSettlement {
         version: TOOL_SETTLEMENT_VERSION,
         intent_outcomes: Vec::new(),
-        possession: vec![ProcessId::from("child-process")],
+        possession: vec![crate::process_id_for_test("child-process")],
         triggers: Vec::new(),
         checkpoint_messages: vec![PluginMessage::text(
             crate::MessageRole::User,
@@ -116,7 +116,7 @@ fn a_settlement_is_incorporated_exactly_once() {
     assert!(
         context
             .started_process_ids()
-            .contains(&ProcessId::from("child-process"))
+            .contains(&crate::process_id_for_test("child-process"))
     );
     assert_eq!(context.dispatch.checkpoint_messages.drain().len(), 1);
     assert_eq!(charge.charges.lock_recover().len(), 1);

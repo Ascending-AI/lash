@@ -309,7 +309,6 @@ async fn a_declared_label_survives_the_admitted_stamp_byte_identical() {
     };
     let registration = || {
         ProcessRegistration::new(
-            crate::ProcessId::from("process-label-law"),
             crate::ProcessInput::Engine {
                 kind: SIGNED_ENGINE_KIND.to_string(),
                 payload: serde_json::json!({"program": "payout"}),

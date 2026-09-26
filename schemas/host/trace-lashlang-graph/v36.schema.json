@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/trace-lashlang-graph/v35",
+  "$id": "https://lash.dev/schemas/trace-lashlang-graph/v36",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "definitions": {
     "EffectAddress": {
@@ -333,11 +333,6 @@
             "null"
           ]
         },
-        "incarnation": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
         "module_ref": {
           "type": [
             "string",
@@ -352,7 +347,6 @@
         }
       },
       "required": [
-        "incarnation",
         "process_id",
         "scope"
       ],
@@ -794,11 +788,6 @@
             "null"
           ]
         },
-        "incarnation": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
         "module_ref": {
           "type": "string"
         },
@@ -923,7 +912,7 @@
       "type": "string"
     },
     "TraceLashlangEventIdentity": {
-      "description": "Canonical identity of one fold input.\n\nNode transitions use `(node_id, node_kind, occurrence, attempt, incarnation)` plus the transition kind. The transition kind lets a start and its terminal fact merge monotonically while still making a second, different start or terminal a typed conflict.",
+      "description": "Canonical identity of one fold input.\n\nNode transitions use `(node_id, node_kind, occurrence, attempt)` plus the transition kind. The transition kind lets a start and its terminal fact merge monotonically while still making a second, different start or terminal a typed conflict.",
       "properties": {
         "attempt": {
           "format": "uint32",
@@ -935,11 +924,6 @@
             "string",
             "null"
           ]
-        },
-        "incarnation": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
         },
         "node_id": {
           "type": [
@@ -1016,11 +1000,6 @@
             "null"
           ]
         },
-        "child_incarnation": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
         "child_module_ref": {
           "type": [
             "string",
@@ -1038,7 +1017,6 @@
         }
       },
       "required": [
-        "child_incarnation",
         "child_process_id",
         "parent_graph_key",
         "parent_node_id"
@@ -1838,7 +1816,7 @@
     },
     "schema_version": {
       "enum": [
-        35
+        36
       ],
       "format": "uint32",
       "minimum": 0.0,
@@ -1878,6 +1856,6 @@
   ],
   "title": "TraceLashlangGraph",
   "type": "object",
-  "x-lash-schema-version": 35,
+  "x-lash-schema-version": 36,
   "x-lash-version-constant": "TRACE_SCHEMA_VERSION"
 }

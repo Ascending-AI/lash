@@ -135,12 +135,10 @@ fn drain_scope(drain_id: &str) -> crate::ExecutionScope {
 async fn register_drain_child(
     registry: &Arc<dyn ProcessRegistry>,
     drain_id: &str,
-    id: &str,
     on_parent_end: OnParentEnd,
 ) -> ProcessRecord {
     registry
         .register_process(ProcessRegistration::new(
-            ProcessId::from(id),
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -386,9 +384,9 @@ async fn drain_ledger_row(
     clippy::expect_used,
     reason = "conformance-law fixture: each read is established by the setup"
 )]
-async fn child(registry: &Arc<dyn ProcessRegistry>, id: &str) -> ProcessRecord {
+async fn child(registry: &Arc<dyn ProcessRegistry>, id: &ProcessId) -> ProcessRecord {
     registry
-        .get_process(&ProcessId::from(id))
+        .get_process(id)
         .await
         .expect("read the child")
         .expect("the child exists")
@@ -426,8 +424,9 @@ pub async fn a_multi_frame_drain_sweeps_children_only_at_its_own_end(
     world: DrainEndWorld,
 ) {
     let drain_id = format!("{prefix}-l1-drain");
-    let child_id = format!("{prefix}-l1-child");
-    register_drain_child(&world.registry, &drain_id, &child_id, OnParentEnd::Cancel).await;
+    let child_id = register_drain_child(&world.registry, &drain_id, OnParentEnd::Cancel)
+        .await
+        .id;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     seed_turn_input(&world.store, "run a two-frame drain").await;
 
@@ -563,14 +562,12 @@ pub async fn a_drain_end_cancels_cancel_children_and_leaves_abandon_ones(
     world: DrainEndWorld,
 ) {
     let drain_id = format!("{prefix}-l2-drain");
-    let cancel_id = format!("{prefix}-l2-cancel");
-    let abandon_id = format!("{prefix}-l2-abandon");
-    for (id, on_parent_end) in [
-        (cancel_id.clone(), OnParentEnd::Cancel),
-        (abandon_id.clone(), OnParentEnd::Abandon),
-    ] {
-        register_drain_child(&world.registry, &drain_id, &id, on_parent_end).await;
-    }
+    let cancel_id = register_drain_child(&world.registry, &drain_id, OnParentEnd::Cancel)
+        .await
+        .id;
+    let abandon_id = register_drain_child(&world.registry, &drain_id, OnParentEnd::Abandon)
+        .await
+        .id;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     seed_turn_input(&world.store, "run a one-frame drain").await;
 
@@ -622,8 +619,9 @@ pub async fn a_crash_after_the_drain_receipt_recovers_its_ledger_row(
     world: DrainEndWorld,
 ) {
     let drain_id = format!("{prefix}-l3-drain");
-    let child_id = format!("{prefix}-l3-child");
-    register_drain_child(&world.registry, &drain_id, &child_id, OnParentEnd::Cancel).await;
+    let child_id = register_drain_child(&world.registry, &drain_id, OnParentEnd::Cancel)
+        .await
+        .id;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     seed_turn_input(&world.store, "run under a crash-injected ledger").await;
 
@@ -707,13 +705,7 @@ pub async fn an_empty_drain_writes_nothing_and_a_retried_one_ends(
     );
 
     let retried = format!("{prefix}-l4-retried");
-    register_drain_child(
-        &world.registry,
-        &retried,
-        &format!("{prefix}-l4-child"),
-        OnParentEnd::Cancel,
-    )
-    .await;
+    register_drain_child(&world.registry, &retried, OnParentEnd::Cancel).await;
     let empty = drive_drain(&mut runtime, &world.effect_host, &retried)
         .await
         .expect("the resumed drain still finds an empty queue");
@@ -746,8 +738,9 @@ pub async fn a_failed_drain_writes_no_end_and_its_retry_ends_it(
     world: DrainEndWorld,
 ) {
     let drain_id = format!("{prefix}-l5-drain");
-    let child_id = format!("{prefix}-l5-child");
-    register_drain_child(&world.registry, &drain_id, &child_id, OnParentEnd::Cancel).await;
+    let child_id = register_drain_child(&world.registry, &drain_id, OnParentEnd::Cancel)
+        .await
+        .id;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     seed_turn_input(&world.store, "fail once, then commit").await;
 
@@ -821,13 +814,7 @@ pub async fn a_failed_drain_writes_no_end_and_its_retry_ends_it(
 )]
 pub async fn an_interrupted_drain_is_ended_by_its_retry(prefix: &str, world: DrainEndWorld) {
     let drain_id = format!("{prefix}-l6-drain");
-    register_drain_child(
-        &world.registry,
-        &drain_id,
-        &format!("{prefix}-l6-child"),
-        OnParentEnd::Cancel,
-    )
-    .await;
+    register_drain_child(&world.registry, &drain_id, OnParentEnd::Cancel).await;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     seed_turn_input(&world.store, "commit, then die before the epilogue").await;
 
@@ -982,13 +969,7 @@ pub async fn a_closing_group_under_the_drain_scope_withholds_its_end(
     // not a fresh empty poll: the epilogue distinguishes the two by the
     // registry, and an `Abandon` child is exactly the child a drain can own
     // while a closing group withholds its end.
-    register_drain_child(
-        &world.registry,
-        &drain_id,
-        &format!("{prefix}-l7-abandon-child"),
-        OnParentEnd::Abandon,
-    )
-    .await;
+    register_drain_child(&world.registry, &drain_id, OnParentEnd::Abandon).await;
 
     // Open and close a group under the drain's scope on the group host: one
     // child settles, the loser holds a release gate, so `closing` reports an
@@ -1141,8 +1122,9 @@ pub async fn a_durably_failed_drain_settles_its_closing_group_and_ends(
         return;
     };
     let drain_id = format!("{prefix}-l8-drain");
-    let cancel_id = format!("{prefix}-l8-cancel");
-    register_drain_child(&world.registry, &drain_id, &cancel_id, OnParentEnd::Cancel).await;
+    let cancel_id = register_drain_child(&world.registry, &drain_id, OnParentEnd::Cancel)
+        .await
+        .id;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     seed_turn_input(&world.store, "a drain that fails terminally").await;
 
@@ -1263,8 +1245,9 @@ pub async fn an_abandoned_drain_settles_its_closing_group_and_ends(
         return;
     };
     let drain_id = format!("{prefix}-l9-drain");
-    let cancel_id = format!("{prefix}-l9-cancel");
-    register_drain_child(&world.registry, &drain_id, &cancel_id, OnParentEnd::Cancel).await;
+    let cancel_id = register_drain_child(&world.registry, &drain_id, OnParentEnd::Cancel)
+        .await
+        .id;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     seed_turn_input(&world.store, "a drain its host abandons").await;
 
@@ -1424,8 +1407,9 @@ pub async fn a_failed_drain_ends_once_its_foreign_closing_work_settles(
         return;
     };
     let drain_id = format!("{prefix}-l10-drain");
-    let cancel_id = format!("{prefix}-l10-cancel");
-    register_drain_child(&world.registry, &drain_id, &cancel_id, OnParentEnd::Cancel).await;
+    let cancel_id = register_drain_child(&world.registry, &drain_id, OnParentEnd::Cancel)
+        .await
+        .id;
     bind_conformance_session(&world.store, &SessionId::from(SESSION_ID)).await;
     seed_turn_input(
         &world.store,

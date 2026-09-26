@@ -24,7 +24,7 @@ use lash_core::store::{
     IngressWithdrawTarget, QueuedRunRequest, SessionIngressStore, StoreTestSupport,
 };
 use lash_core::testing::store_fixtures::claim_session_execution_lease_for_test;
-use lash_sansio::{ProcessId, SessionId, TurnId};
+use lash_sansio::{SessionId, TurnId};
 
 /// The session every ingress law runs in, on a fresh fixture per law.
 pub const SESSION_INGRESS_SESSION_ID: &str = "session-ingress";
@@ -70,14 +70,13 @@ fn wake_delivery(process: &str, sequence: u64, text: &str) -> crate::ProcessWake
         version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("{process}-wake-{sequence}"),
         target_session_id: session(),
-        process_id: ProcessId::from(process),
-        process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
+        process_id: crate::ProcessId::fixture(process),
         sequence,
         event_type: "process.wake".to_string(),
         event_invocation: crate::RuntimeInvocation {
             attribution: crate::RuntimeAttribution::for_session(SESSION_INGRESS_SESSION_ID),
             subject: crate::RuntimeSubject::ProcessEvent {
-                process_id: ProcessId::from(process),
+                process_id: crate::ProcessId::fixture(process),
                 sequence,
                 event_type: "process.wake".to_string(),
             },
@@ -1110,7 +1109,7 @@ pub async fn every_wake_terminal_raises_the_redelivery_floor(handles: SessionIng
         .withdraw_ingress_items(
             &session(),
             &[IngressWithdrawTarget::SourceKey(
-                crate::process_wake_source_key(&ProcessId::from("withdrawn"), 9),
+                crate::process_wake_source_key(&crate::ProcessId::fixture("withdrawn"), 9),
             )],
         )
         .await

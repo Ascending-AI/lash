@@ -99,12 +99,13 @@ async fn first_boot(root: std::path::PathBuf) -> ProcessId {
         .run()
         .await
         .expect("run the starting turn");
-    let process_id = ProcessId::from(
+    let process_id = ProcessId::parse(
         started
             .final_value()
             .and_then(serde_json::Value::as_str)
             .unwrap_or_else(|| panic!("the cell reports its process id: {started:?}")),
-    );
+    )
+    .expect("the cell reports a minted process id");
     wait_for_process(
         &core,
         &process_id,

@@ -6,7 +6,6 @@
 //! first attempt fails retryably and it journals the sleep before attempt two.
 
 use super::*;
-use crate::ProcessId;
 
 type RetrySleepShape = (bool, Option<crate::ExecutionScope>);
 
@@ -108,13 +107,9 @@ async fn retry_sleep_shape(
             recorder.clone(),
             match &execution_scope {
                 crate::ExecutionScope::Process { process_id } => {
-                    crate::AdmittedScope::process(crate::ProcessRef::new(
-                        process_id.clone(),
-                        crate::ProcessIncarnation::from_registration_sequence(1),
-                    ))
+                    crate::AdmittedScope::process(process_id.clone())
                 }
-                _ => crate::AdmittedScope::unpinned(execution_scope.clone())
-                    .expect("the retry witness scope admits unpinned"),
+                _ => crate::AdmittedScope::new(execution_scope.clone()),
             },
         )
         .expect("valid retry witness scope"),
@@ -169,10 +164,10 @@ async fn retry_sleep_inside_a_process_body_attaches_no_turn_cancel_gate() {
     let shape = Box::pin(retry_sleep_shape(
         ToolAttemptEffectIdentity::Process {
             parent: None,
-            process_id: ProcessId::from("process-1"),
+            process_id: crate::ProcessId::fixture("process-1"),
         },
         crate::runtime::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new()),
-        crate::ExecutionScope::process("process-1"),
+        crate::ExecutionScope::process(crate::ProcessId::fixture("process-1")),
         "ambient-session-a",
     ))
     .await;
@@ -219,10 +214,10 @@ async fn parentless_process_retry_identity_is_stable_across_ambient_sessions() {
         Box::pin(retry_sleep_shape(
             ToolAttemptEffectIdentity::Process {
                 parent: None,
-                process_id: ProcessId::from("stable-process"),
+                process_id: crate::ProcessId::fixture("stable-process"),
             },
             crate::runtime::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new()),
-            crate::ExecutionScope::process("stable-process"),
+            crate::ExecutionScope::process(crate::ProcessId::fixture("stable-process")),
             ambient_session_id,
         ))
     };
@@ -232,7 +227,10 @@ async fn parentless_process_retry_identity_is_stable_across_ambient_sessions() {
     assert_eq!(first.invocation.address(), second.invocation.address());
     assert_eq!(
         first.invocation.replay_key(),
-        "process:stable-process:tool:retry_probe:attempt:1:sleep"
+        format!(
+            "process:{}:tool:retry_probe:attempt:1:sleep",
+            crate::ProcessId::fixture("stable-process")
+        )
     );
     assert!(first.invocation.attribution.is_none());
     assert!(second.invocation.attribution.is_none());

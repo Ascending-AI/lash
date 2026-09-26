@@ -552,7 +552,7 @@ mod process_invocation_correlation_tests {
     }
 
     fn correlated_input() -> TurnInput {
-        let process_id = crate::ProcessId::from("process:subagent:call");
+        let process_id = crate::ProcessId::fixture("process:subagent:call");
         let authority = crate::ProcessExecutionWriteAuthority::invocation(
             process_id.clone(),
             "invocation:subagent:call",
@@ -589,7 +589,7 @@ mod process_invocation_correlation_tests {
 
         clear_process_invocation_correlation_for_ordinary_turn(
             &mut input,
-            &crate::ExecutionScope::process("process:subagent:call"),
+            &crate::ExecutionScope::process(crate::ProcessId::fixture("process:subagent:call")),
         );
 
         assert_eq!(

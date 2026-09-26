@@ -232,6 +232,17 @@ impl lash::triggers::TriggerStore for RetiringSubscriptionListTriggerStore {
         self.inner.list_deliveries().await
     }
 
+    async fn bind_delivery_process(
+        &self,
+        occurrence_id: &str,
+        subscription_id: &str,
+        process_id: &ProcessId,
+    ) -> std::result::Result<(), lash::plugins::PluginError> {
+        self.inner
+            .bind_delivery_process(occurrence_id, subscription_id, process_id)
+            .await
+    }
+
     async fn list_delivery_process_ids(
         &self,
     ) -> std::result::Result<Vec<ProcessId>, lash::plugins::PluginError> {

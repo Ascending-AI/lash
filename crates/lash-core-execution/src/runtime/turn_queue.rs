@@ -273,14 +273,13 @@ mod typed_payload_tests {
             version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
             wake_id: format!("process-1-wake-{sequence}"),
             target_session_id: SessionId::from("s"),
-            process_id: crate::ProcessId::from("process-1"),
-            process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
+            process_id: crate::ProcessId::fixture("process-1"),
             sequence,
             event_type: "process.wake".to_string(),
             event_invocation: crate::RuntimeInvocation {
                 attribution: crate::RuntimeAttribution::for_session("s"),
                 subject: crate::RuntimeSubject::ProcessEvent {
-                    process_id: crate::ProcessId::from("process-1"),
+                    process_id: crate::ProcessId::fixture("process-1"),
                     sequence,
                     event_type: "process.wake".to_string(),
                 },

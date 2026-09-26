@@ -82,7 +82,7 @@ async fn durable_core_generation_43_is_refused_at_the_blake3_boundary() {
     // generation: nothing older than 45 may ever open, whatever the target is.
     // The 43→44 in-place upgrade arm is deleted, so a generation-43 stamp is
     // refused outright rather than folded forward first.
-    assert_eq!(expected, 97, "the pinned durable-core target changed");
+    assert_eq!(expected, 98, "the pinned durable-core target changed");
 
     rewind_user_version(&path, 43);
 
@@ -303,9 +303,8 @@ mod walk {
         DurableSurface::SessionExecutionState,
     ];
 
-    fn registration(id: &str) -> lash_core_execution::ProcessRegistration {
+    fn registration() -> lash_core_execution::ProcessRegistration {
         lash_core_execution::ProcessRegistration::new(
-            id,
             lash_core_execution::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -335,16 +334,20 @@ mod walk {
 
     /// Park one handover under a live process and, when asked, a second under a
     /// process that has already reached a terminal outcome.
-    async fn park_segment(registry: &SqliteProcessRegistry, process_id: &ProcessId) {
+    /// Register a process, park one segment handover under it, and answer
+    /// the id the registrar minted.
+    async fn park_segment(registry: &SqliteProcessRegistry) -> ProcessId {
         use lash_core_execution::ProcessContinuationStore;
-        registry
-            .register_process(registration(process_id))
+        let process_id = registry
+            .register_process(registration())
             .await
-            .expect("register process");
+            .expect("register process")
+            .id;
         registry
-            .put_segment_handover(process_id, handover(1))
+            .put_segment_handover(&process_id, handover(1))
             .await
             .expect("park a segment handover");
+        process_id
     }
 
     async fn complete(registry: &SqliteProcessRegistry, process_id: &ProcessId) {
@@ -459,9 +462,9 @@ mod walk {
         let registry = SqliteProcessRegistry::open(&path, root.path().join("sessions"))
             .await
             .expect("open registry");
-        park_segment(&registry, &ProcessId::from("proc-live")).await;
-        park_segment(&registry, &ProcessId::from("proc-done")).await;
-        complete(&registry, &ProcessId::from("proc-done")).await;
+        let live = park_segment(&registry).await;
+        let done = park_segment(&registry).await;
+        complete(&registry, &done).await;
         drop(registry);
 
         // The terminal process's handover row is still on disk — the exclusion
@@ -470,8 +473,8 @@ mod walk {
         let raw = rusqlite::Connection::open(&path).expect("open raw registry");
         let parked: i64 = raw
             .query_row(
-                "SELECT COUNT(*) FROM process_segment_handovers WHERE process_id = 'proc-done'",
-                [],
+                "SELECT COUNT(*) FROM process_segment_handovers WHERE process_id = ?1",
+                [done.as_str()],
                 |row| row.get(0),
             )
             .expect("count terminal handovers");
@@ -489,13 +492,13 @@ mod walk {
         assert_eq!(page.items.len(), 1, "{:?}", page.items);
         let item = &page.items[0];
         assert_eq!(item.surface, DurableSurface::ParkedSegment);
-        assert_eq!(item.process_id.as_deref(), Some("proc-live"));
+        assert_eq!(item.process_id.as_deref(), Some(live.as_str()));
         assert_eq!(item.session_id.as_deref(), Some("wake-session"));
         assert_eq!(item.status.as_deref(), Some("running"));
         assert!(
             item.owner_record
                 .as_deref()
-                .is_some_and(|record| record.contains("proc-live")),
+                .is_some_and(|record| record.contains(live.as_str())),
             "the owner record travels with the item: {:?}",
             item.owner_record
         );
@@ -506,7 +509,7 @@ mod walk {
             other => panic!("expected the stored handover JSON, got {other:?}"),
         }
         assert!(
-            item.cursor.starts_with("proc-live:"),
+            item.cursor.starts_with(&format!("{live}:")),
             "the cursor names its row: {}",
             item.cursor
         );
@@ -521,13 +524,17 @@ mod walk {
         let registry = SqliteProcessRegistry::open(&path, root.path().join("sessions"))
             .await
             .expect("open registry");
-        for id in ["proc-live", "proc-done"] {
-            registry
-                .register_process(registration(id))
-                .await
-                .expect("register process");
-        }
-        complete(&registry, &ProcessId::from("proc-done")).await;
+        let live = registry
+            .register_process(registration())
+            .await
+            .expect("register process")
+            .id;
+        let done = registry
+            .register_process(registration())
+            .await
+            .expect("register process")
+            .id;
+        complete(&registry, &done).await;
         drop(registry);
 
         let page = SqliteStorePreflight::for_session_store_root(root.path())
@@ -541,10 +548,10 @@ mod walk {
         assert_eq!(page.items.len(), 1, "{:?}", page.items);
         let item = &page.items[0];
         assert_eq!(item.surface, DurableSurface::StartedProcess);
-        assert_eq!(item.process_id.as_deref(), Some("proc-live"));
-        assert_eq!(item.cursor, "proc-live");
+        assert_eq!(item.process_id.as_ref(), Some(&live));
+        assert_eq!(item.cursor, live.as_str());
         match &item.payload {
-            DurablePayload::Json(json) => assert!(json.contains("proc-live"), "{json}"),
+            DurablePayload::Json(json) => assert!(json.contains(live.as_str()), "{json}"),
             other => panic!("expected the stored record JSON, got {other:?}"),
         }
     }
@@ -556,8 +563,8 @@ mod walk {
         let registry = SqliteProcessRegistry::open(&path, root.path().join("sessions"))
             .await
             .expect("open registry");
-        park_segment(&registry, &ProcessId::from("proc-a")).await;
-        park_segment(&registry, &ProcessId::from("proc-b")).await;
+        let first_process = park_segment(&registry).await;
+        let second_process = park_segment(&registry).await;
         drop(registry);
 
         let preflight =
@@ -568,7 +575,10 @@ mod walk {
             .await
             .expect("first page");
         assert_eq!(first.items.len(), 1);
-        assert_eq!(first.items[0].process_id.as_deref(), Some("proc-a"));
+        assert_eq!(
+            first.items[0].process_id.as_deref(),
+            Some(first_process.as_str())
+        );
         let cursor = first
             .next
             .clone()
@@ -586,7 +596,7 @@ mod walk {
         assert_eq!(second.items.len(), 1);
         assert_eq!(
             second.items[0].process_id.as_deref(),
-            Some("proc-b"),
+            Some(second_process.as_str()),
             "resuming after a cursor must not repeat the item it names"
         );
 

@@ -717,7 +717,7 @@ impl RuntimeExecutionContext<'_> {
                 .runtime_execution_context(attempt_context.clone())
                 .prepared_call(&prepared)
                 .cancellation_token(stop)
-                .enclosing_process(self.process_id().map(String::from).map(Into::into))
+                .enclosing_process(self.process_id().cloned())
                 .parent_invocation(Some(attempt_invocation))
                 .child_execution_trace_hook(child_execution_trace_hook);
         if let Some(process_id) = self.process_id()
@@ -1303,7 +1303,7 @@ impl RuntimeExecutionContext<'_> {
 
     pub(crate) async fn await_process_with_cancellation(
         &self,
-        process_ref: &crate::ProcessRef,
+        process_id: &crate::ProcessId,
         parent_invocation: Option<crate::RuntimeInvocation>,
         cancellation: Option<tokio_util::sync::CancellationToken>,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
@@ -1315,7 +1315,7 @@ impl RuntimeExecutionContext<'_> {
         crate::runtime::release_process_execution_permit_while(
             self.dispatch
                 .processes
-                .await_process_ref(process_ref, process_scope),
+                .await_process_ref(process_id, process_scope),
         )
         .await
     }

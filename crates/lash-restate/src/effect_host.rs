@@ -1014,23 +1014,13 @@ impl RuntimeEffectController for RestateEffectHostController {
         }
     }
 
-    /// The host's own controller has no process admission, so a group opened
-    /// on it is admitted unpinned; a scope's view opens with its admission.
+    /// The host's own controller admits a group under the group's own scope;
+    /// a scope's view opens with its admission.
     async fn open_effect_group(
         &self,
         group: RuntimeEffectGroup,
     ) -> Result<EffectGroupHandle, RuntimeEffectControllerError> {
-        let opener =
-            lash_core::AdmittedScope::unpinned(group.invocation().execution_scope().clone())
-                .map_err(|error| {
-                    RuntimeEffectControllerError::new(
-                        RuntimeErrorCode::ExecutionScopeAdmissionRefused,
-                        format!(
-                            "effect group {} has no admitted opener: {error}",
-                            group.group_key()
-                        ),
-                    )
-                })?;
+        let opener = lash_core::AdmittedScope::new(group.invocation().execution_scope().clone());
         self.open_effect_group_opened_by(group, &opener).await
     }
 
@@ -1505,7 +1495,7 @@ mod tests {
     #[test]
     fn session_administrative_read_rejects_non_session_scope_aliases() {
         for scope in [
-            ExecutionScope::process("alias-process"),
+            ExecutionScope::process(lash_core::ProcessId::fixture("alias-process")),
             ExecutionScope::runtime_operation("alias-operation"),
         ] {
             let alias = SessionId::from(durable_wait_index_key_for_scope(&scope));

@@ -26,17 +26,20 @@ const FIXTURE_ENV_REF: &str = concat!(
     "0000000000000000000000000000000000000000000000000000000000000000"
 );
 
-/// The process id every fixture uses, so refusal messages are comparable.
-pub const REFUSAL_FIXTURE_PROCESS_ID: &str = "refusal-fixture";
+/// The host start key every fixture uses, so refusal messages are comparable.
+pub const REFUSAL_FIXTURE_START_KEY: &str = "refusal-fixture";
 
 fn host_registration(input: ProcessInput) -> ProcessRegistration {
     ProcessRegistration::new(
-        REFUSAL_FIXTURE_PROCESS_ID,
         input,
         RecoveryContract::ExternallyOwned,
         ProcessProvenance::host(),
         ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
     )
+    .with_start_key(Some(crate::StartKey::for_host(
+        crate::StartKeyOwner::HOST,
+        REFUSAL_FIXTURE_START_KEY,
+    )))
 }
 
 /// A registration core accepts, and the base every fixture below mutates.
@@ -113,11 +116,6 @@ pub fn refused_process_registrations(rule: ProcessRegistrationRefusal) -> Vec<Pr
             registration.provenance = ProcessProvenance::session(crate::SessionScope::new(
                 "a-different-session".to_string(),
             ));
-            vec![registration]
-        }
-        ProcessRegistrationRefusal::InvalidProcessKey => {
-            let mut registration = accepted_process_registration();
-            registration.id = "refusal#fixture".into();
             vec![registration]
         }
         ProcessRegistrationRefusal::ZeroMaxAttempts => {

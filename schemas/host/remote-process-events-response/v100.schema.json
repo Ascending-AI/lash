@@ -1,5 +1,5 @@
 {
-  "$id": "https://lash.dev/schemas/remote-process-events-response/v99",
+  "$id": "https://lash.dev/schemas/remote-process-events-response/v100",
   "$schema": "http://json-schema.org/draft-07/schema#",
   "additionalProperties": false,
   "definitions": {
@@ -134,8 +134,8 @@
       ]
     },
     "ProcessCursor": {
-      "description": "Opaque process cursor: `lashpc2:<epoch>:<process-reference>:<position>:<sequence>`.",
-      "pattern": "^lashpc2:[^:]+:r[0-9]+\\.[0-9a-f]+:[0-9]+:[0-9]+$",
+      "description": "Opaque process cursor: `lashpc3:<epoch>:<process-reference>:<position>:<sequence>`.",
+      "pattern": "^lashpc3:[^:]+:p_[0-9a-f]{32}:[0-9]+:[0-9]+$",
       "type": "string"
     },
     "ProcessEventHistoryRetention": {
@@ -164,34 +164,6 @@
             "pruned_at_ms",
             "reason",
             "terminal_label"
-          ],
-          "type": "object"
-        },
-        {
-          "additionalProperties": false,
-          "description": "The reusable process id now names a later incarnation.",
-          "properties": {
-            "current_incarnation": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            },
-            "reason": {
-              "enum": [
-                "retired"
-              ],
-              "type": "string"
-            },
-            "requested_incarnation": {
-              "format": "uint64",
-              "minimum": 0.0,
-              "type": "integer"
-            }
-          },
-          "required": [
-            "current_incarnation",
-            "reason",
-            "requested_incarnation"
           ],
           "type": "object"
         }
@@ -705,11 +677,6 @@
         "process_id": {
           "type": "string"
         },
-        "process_incarnation": {
-          "format": "uint64",
-          "minimum": 0.0,
-          "type": "integer"
-        },
         "semantics": {
           "allOf": [
             {
@@ -728,7 +695,6 @@
         "event_type",
         "occurred_at_ms",
         "process_id",
-        "process_incarnation",
         "sequence"
       ],
       "type": "object"
@@ -1356,11 +1322,6 @@
       ],
       "description": "The cursor after this page: its sequence is the last event returned, or the request's when the page returned none."
     },
-    "incarnation": {
-      "format": "uint64",
-      "minimum": 0.0,
-      "type": "integer"
-    },
     "outcome": {
       "$ref": "#/definitions/ProcessEventReadOutcome_for_ProcessEventPage_for_RemoteProcessEvent_and_ProcessEventLite"
     },
@@ -1370,12 +1331,11 @@
   },
   "required": [
     "cursor",
-    "incarnation",
     "outcome",
     "process_id"
   ],
   "title": "RemoteProcessEventsResponse",
   "type": "object",
-  "x-lash-schema-version": 99,
+  "x-lash-schema-version": 100,
   "x-lash-version-constant": "REMOTE_PROTOCOL_VERSION"
 }

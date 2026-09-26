@@ -186,14 +186,18 @@ async fn segment_process(
     let Some(key) = invocation.target_service_key.as_deref() else {
         return Ok(None);
     };
-    // A later segment's key is `<id>#<ordinal>`; segment 0's is the id.
-    if let Some((process_id, ordinal)) = key.rsplit_once('#')
-        && ordinal.parse::<u64>().is_ok()
-        && let Some(record) = read(registry, &ProcessId::from(process_id)).await?
-    {
-        return Ok(Some(record));
-    }
-    read(registry, &ProcessId::from(key)).await
+    // A later segment's key is `<id>#<ordinal>`; segment 0's is the id. A
+    // minted id carries no `#`, so the split is exact, and a key that names
+    // no minted id is no process of this registry.
+    let id = match key.split_once('#') {
+        Some((id, ordinal)) if ordinal.parse::<u64>().is_ok() => id,
+        Some(_) => return Ok(None),
+        None => key,
+    };
+    let Ok(process_id) = ProcessId::parse(id) else {
+        return Ok(None);
+    };
+    read(registry, &process_id).await
 }
 
 async fn read(
@@ -242,11 +246,13 @@ mod tests {
 
     #[test]
     fn a_segment_key_names_its_process_and_no_other() {
-        let process = ProcessId::from("proc");
-        assert!(segment_key_names("proc", &process));
-        assert!(segment_key_names("proc#3", &process));
-        assert!(!segment_key_names("proc#x", &process));
-        assert!(!segment_key_names("process", &process));
-        assert!(!segment_key_names("other#1", &process));
+        let process = ProcessId::fixture("proc");
+        let other = ProcessId::fixture("other");
+        let id = process.as_str();
+        assert!(segment_key_names(id, &process));
+        assert!(segment_key_names(&format!("{id}#3"), &process));
+        assert!(!segment_key_names(&format!("{id}#x"), &process));
+        assert!(!segment_key_names(&format!("{id}0"), &process));
+        assert!(!segment_key_names(&format!("{other}#1"), &process));
     }
 }

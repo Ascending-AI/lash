@@ -8,7 +8,7 @@ pub use lash_core_store::testing::store_fixtures::{
 };
 
 /// The store-backed admitted scope for a registered process row: the
-/// `ProcessRef` the record itself minted, never a fabricated incarnation.
+/// `ProcessId` the record itself minted, never a fabricated incarnation.
 /// Tests that hand a controller to the durable process worker must pin this —
 /// the worker's admission CAS refuses any other pair.
 pub async fn recorded_process_admission(
@@ -20,7 +20,7 @@ pub async fn recorded_process_admission(
         .await
         .expect("process registry read")
         .expect("process record must be registered");
-    AdmittedScope::process(ProcessRef::from_record(&record))
+    AdmittedScope::process(record.id.clone())
 }
 
 /// Authorize and settle the completion gate for a direct store-deferral fixture.

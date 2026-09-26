@@ -1213,7 +1213,7 @@ mod tests {
     #[tokio::test]
     async fn a_retired_scope_fences_mint_resolve_and_peek() {
         let coordinator = coordinator();
-        let scope = ExecutionScope::process("retired-process");
+        let scope = ExecutionScope::process(crate::process_id_for_test("retired-process"));
         let key = coordinator
             .key_for(&scope, AwaitEventWaitIdentity::tool_completion("call"))
             .await

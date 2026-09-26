@@ -1164,22 +1164,18 @@ async fn both_cancel_modes_request_cancellation_of_the_turns_awaited_process_inn
         .expect("open the registry the workbench state shares"),
     ) as Arc<dyn lash::process::ProcessRegistry>;
 
-    for (mode, turn_id, process_id) in [
-        (WorkbenchTurnCancelMode::Stop, "stop-turn", "stop-awaited"),
-        (
-            WorkbenchTurnCancelMode::Abort,
-            "abort-turn",
-            "abort-awaited",
-        ),
+    for (mode, turn_id) in [
+        (WorkbenchTurnCancelMode::Stop, "stop-turn"),
+        (WorkbenchTurnCancelMode::Abort, "abort-turn"),
     ] {
         // A process the turn is the durable parent of — the shape a
         // `processes.start` followed by `await handle` leaves behind, down to
         // the `Abandon` parent-end policy that keeps the parent-end sweep from
         // touching it.
-        register_turn_child(&registry, &session_id, turn_id, process_id).await;
+        let process_id = register_turn_child(&registry, &session_id, turn_id).await;
         // A second process parented by a different turn proves the cancel is
         // addressed, not a session-wide sweep.
-        register_turn_child(&registry, &session_id, "other-turn", "other-awaited").await;
+        register_turn_child(&registry, &session_id, "other-turn").await;
         state.track_turn(&session_id, &TurnId::from(turn_id));
 
         let (driver, acknowledge) = expiring_terminal_driver(&state);
@@ -1216,7 +1212,7 @@ async fn both_cancel_modes_request_cancellation_of_the_turns_awaited_process_inn
         );
         assert_eq!(
             request.pointer("/body/process_id").and_then(Value::as_str),
-            Some(process_id),
+            Some(process_id.as_str()),
             "{mode:?} must cancel the process its own turn awaited"
         );
         assert_eq!(
@@ -1235,11 +1231,9 @@ async fn register_turn_child(
     registry: &Arc<dyn lash::process::ProcessRegistry>,
     session_id: &str,
     turn_id: &str,
-    process_id: &str,
-) {
+) -> lash::ProcessId {
     registry
         .register_process(lash::process::ProcessRegistration::new(
-            process_id,
             lash::process::ProcessInput::External {
                 metadata: json!({ "awaited": true }),
             },
@@ -1254,7 +1248,8 @@ async fn register_turn_child(
             ),
         ))
         .await
-        .expect("register the awaited process");
+        .expect("register the awaited process")
+        .id
 }
 
 #[test]

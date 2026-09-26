@@ -3,7 +3,7 @@ mod tests {
 
     use crate::runtime::RuntimeEffectControllerHandle;
     use crate::support::prelude::*;
-    use crate::{InternalProcessAdmin, ProcessId, SessionId};
+    use crate::{InternalProcessAdmin, SessionId};
 
     fn admin(processes: Arc<dyn crate::ProcessService>) -> InternalProcessAdmin<'static> {
         crate::internal_process_admin(
@@ -26,9 +26,8 @@ mod tests {
         let host = Arc::new(
             crate::testing::MockSessionManager::default().with_process_registry(registry.clone()),
         );
-        registry
+        let process = registry
             .register_process(crate::ProcessRegistration::new(
-                "process",
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -43,7 +42,7 @@ mod tests {
             .expect("register process");
         registry
             .complete_process(
-                &ProcessId::from("process"),
+                &process.id,
                 crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                     serde_json::json!("done"),
                 )),
@@ -55,27 +54,25 @@ mod tests {
         let admin = admin(processes);
 
         let hidden = admin
-            .await_process(&ProcessId::from("process"))
+            .await_process(&process.id)
             .await
             .expect_err("unobserved process must be hidden");
         assert_eq!(
             hidden.to_string(),
-            "plugin session error: process handle `process` is not live or visible in this session"
+            format!(
+                "plugin session error: process handle `{}` is not live or visible in this session",
+                process.id
+            )
         );
 
         registry
             .add_observer(
                 &SessionId::from("session"),
-                &ProcessId::from("process"),
+                &process.id,
                 crate::ProcessObserverBy::host("tool-provider-test"),
             )
             .await
             .expect("observe process");
-        assert!(
-            admin
-                .await_process(&ProcessId::from("process"))
-                .await
-                .is_ok()
-        );
+        assert!(admin.await_process(&process.id).await.is_ok());
     }
 }

@@ -65,10 +65,9 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
         .cloned()
         .expect("process registry");
     let target_scope = lash_core::SessionScope::new("root");
-    registry
+    let registered = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                "stalled-turn-wake",
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -87,7 +86,7 @@ pub(super) async fn long_turn_keeps_claims_live_across_session_lease_renewals() 
     let wake = append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        &ProcessId::from("stalled-turn-wake"),
+        &registered.id,
         lash_core::ProcessEventAppendRequest::new(
             "process.wake",
             json!({
@@ -786,7 +785,7 @@ pub(super) async fn process_scoped_agent_frame_follow_on_uses_distinct_cancel_pe
         unbound_recording_store(&backend).await,
     )
     .await;
-    let process_id = ProcessId::from("process:subagent:physical-follow-on");
+    let process_id = lash_core::ProcessId::fixture("process:subagent:physical-follow-on");
     let root_turn_id = TurnId::from(process_id.as_str());
     let follow_on_turn_id = TurnId::from(format!("{root_turn_id}:agent-frame:1"));
 
@@ -798,10 +797,7 @@ pub(super) async fn process_scoped_agent_frame_follow_on_uses_distinct_cancel_pe
                 super::effect::layered_scope(
                     &backend,
                     Arc::new(recorder.clone()),
-                    lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
-                        &process_id,
-                        lash_core::ProcessIncarnation::from_registration_sequence(1),
-                    )),
+                    lash_core::AdmittedScope::process(process_id.clone()),
                 ),
             ),
         )
@@ -2100,10 +2096,9 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
         session_id: SessionId::from("root"),
         node_id: "trigger:button".to_string(),
     };
-    registry
+    let registered = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                "wake-proc",
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -2123,7 +2118,7 @@ pub(super) async fn pending_process_wake_drains_into_idle_queued_turn_as_turn_ev
     let wake = append_process_wake_to_queue(
         registry.as_ref(),
         store.as_ref(),
-        &ProcessId::from("wake-proc"),
+        &registered.id,
         lash_core::ProcessEventAppendRequest::new(
             "process.wake",
             json!({

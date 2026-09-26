@@ -2,7 +2,7 @@ mod tests {
     use lash_core_execution::runtime::effect::*;
     use lash_core_execution::tool_dispatch::ToolAttemptEffectIdentity;
     use lash_core_execution::{
-        FrameNodeId, PreparedToolCall, ProcessExecutionEnvRef, ProcessRef, SessionId,
+        FrameNodeId, PreparedToolCall, ProcessExecutionEnvRef, ProcessId, SessionId,
         ToolExecutionGrant, ToolManifest, ToolRetryPolicy,
     };
     use lash_core_execution::{ToolDefinition, ToolId};
@@ -45,11 +45,8 @@ mod tests {
         }
     }
 
-    fn process_ref(name: &str, incarnation: u64) -> ProcessRef {
-        ProcessRef::new(
-            name,
-            lash_core_execution::ProcessIncarnation::from_registration_sequence(incarnation),
-        )
+    fn process_id(name: &str) -> ProcessId {
+        ProcessId::fixture(name)
     }
 
     fn authority() -> TurnControlBindingId {
@@ -84,8 +81,8 @@ mod tests {
         let mut original = request();
         // A consistent process-opener request: the enclosing incarnation is
         // the opener's own, which is the only pair `validate` admits.
-        original.scope.opener = EffectOpener::process(process_ref("process-9", 3));
-        original = original.with_enclosing_process(process_ref("process-9", 3));
+        original.scope.opener = EffectOpener::process(process_id("process-9"));
+        original = original.with_enclosing_process(process_id("process-9"));
         let json = serde_json::to_string(&original).expect("a request serializes");
         let decoded: ToolChildRequest = serde_json::from_str(&json).expect("a request decodes");
         assert_eq!(decoded, original);
@@ -94,7 +91,7 @@ mod tests {
         assert_eq!(decoded.execution_env.as_str(), "env-ref");
         assert_eq!(
             decoded.enclosing_process,
-            Some(process_ref("process-9", 3)),
+            Some(process_id("process-9")),
             "the enclosing process must survive as an incarnation, not a bare name"
         );
         assert_eq!(decoded.scope.agent_frame_id.as_str(), "frame-1");
@@ -234,15 +231,15 @@ mod tests {
     #[test]
     fn the_opener_and_the_admitted_scope_are_retained_separately() {
         let mut request = request();
-        request.scope.opener = EffectOpener::process(process_ref("process-1", 4));
+        request.scope.opener = EffectOpener::process(process_id("process-1"));
         request.scope.admitted_scope = AdmittedScope::runtime_operation("op-1");
-        request.enclosing_process = Some(process_ref("process-1", 4));
+        request.enclosing_process = Some(process_id("process-1"));
         let decoded: ToolChildRequest =
             serde_json::from_str(&serde_json::to_string(&request).expect("serializes"))
                 .expect("decodes");
         assert_eq!(
             decoded.scope.opener,
-            EffectOpener::process(process_ref("process-1", 4))
+            EffectOpener::process(process_id("process-1"))
         );
         assert_eq!(
             decoded.scope.admitted_scope,
@@ -258,24 +255,20 @@ mod tests {
     /// not compare equal to one admitted under its predecessor. An
     /// `ExecutionScope::Process` could not express this at all.
     #[test]
-    fn a_reregistered_process_opener_is_not_the_opener_that_was_admitted() {
+    fn another_process_opener_is_not_the_opener_that_was_admitted() {
         let mut admitted = request();
-        admitted.scope.opener = EffectOpener::process(process_ref("indexer", 1));
+        admitted.scope.opener = EffectOpener::process(process_id("indexer-a"));
         let mut successor = request();
-        successor.scope.opener = EffectOpener::process(process_ref("indexer", 2));
+        successor.scope.opener = EffectOpener::process(process_id("indexer-b"));
         assert_ne!(admitted.scope.opener, successor.scope.opener);
 
         let decoded: ToolChildRequest =
             serde_json::from_str(&serde_json::to_string(&admitted).expect("serializes"))
                 .expect("decodes");
         assert_eq!(
-            decoded
-                .scope
-                .opener
-                .process_ref()
-                .map(|r| r.incarnation.registration_sequence()),
-            Some(1),
-            "the admitted incarnation is what recovery validates against"
+            decoded.scope.opener.process_id(),
+            Some(&process_id("indexer-a")),
+            "the admitted process is what recovery validates against"
         );
     }
 
@@ -315,27 +308,27 @@ mod tests {
             "a process claim with no incarnation is the half-admitted shape the pair exists to refuse"
         );
         let mismatched =
-            serde_json::to_value(process_ref("other-worker", 2)).expect("a process ref serializes");
+            serde_json::to_value(process_id("other-worker")).expect("a process ref serializes");
         assert!(
             serde_json::from_value::<ToolChildRequest>(wire(mismatched)).is_err(),
             "a pin naming another process is refused at decode, not trusted"
         );
     }
 
-    /// A process opener's enclosing incarnation is the opener's own — the one
-    /// fact stated twice. A request that pairs `process(P)#7` with enclosing
-    /// `process(P)#9`, or with no enclosing at all, is refused at the boundary
-    /// rather than run under a successor's context.
+    /// A process opener's enclosing process is the opener itself — the one
+    /// fact stated twice. A request that pairs `process(P)` with enclosing
+    /// `process(Q)`, or with no enclosing at all, is refused at the boundary
+    /// rather than run under another process's context.
     #[test]
-    fn a_process_opener_must_enclose_its_own_incarnation() {
+    fn a_process_opener_must_enclose_itself() {
         let mut request = request();
-        request.scope.opener = EffectOpener::process(process_ref("worker", 7));
-        request.scope.admitted_scope = AdmittedScope::process(process_ref("worker", 7));
-        request.enclosing_process = Some(process_ref("worker", 9));
+        request.scope.opener = EffectOpener::process(process_id("worker"));
+        request.scope.admitted_scope = AdmittedScope::process(process_id("worker"));
+        request.enclosing_process = Some(process_id("another-worker"));
         assert_eq!(
             request
                 .validate()
-                .expect_err("enclosing a different incarnation is refused")
+                .expect_err("enclosing another process is refused")
                 .code,
             lash_core_execution::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener
         );
@@ -347,7 +340,7 @@ mod tests {
                 .code,
             lash_core_execution::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener
         );
-        request.enclosing_process = Some(process_ref("worker", 7));
+        request.enclosing_process = Some(process_id("worker"));
         request
             .validate()
             .expect("the opener's own incarnation is the one legal enclosing");
@@ -359,7 +352,7 @@ mod tests {
     #[test]
     fn a_non_process_opener_records_no_enclosing_process() {
         let mut request = request();
-        request.enclosing_process = Some(process_ref("worker", 1));
+        request.enclosing_process = Some(process_id("worker"));
         assert_eq!(
             request
                 .validate()

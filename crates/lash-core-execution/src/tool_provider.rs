@@ -264,8 +264,8 @@ impl<'run> AttemptContext<'run> {
         self.cancellation_token.as_ref()
     }
     /// Integrator class 3 process this attempt executes inside, if any.
-    pub fn enclosing_process(&self) -> Option<&str> {
-        self.enclosing_process.as_deref()
+    pub fn enclosing_process(&self) -> Option<&ProcessId> {
+        self.enclosing_process.as_ref()
     }
     /// Integrator class 3 attachment capability for durable tool output.
     pub fn attachments(&self) -> ToolAttachmentClient {
@@ -454,10 +454,8 @@ pub struct ToolContext<'run> {
 #[derive(Clone)]
 /// Notification emitted when an orchestrating tool starts a child process.
 pub struct ToolChildProcessStarted {
-    /// Stable identity of the child process that started.
+    /// The minted id of the child process that started.
     pub process_id: ProcessId,
-    /// Store-minted lifetime admitted by the child start.
-    pub incarnation: crate::ProcessIncarnation,
     /// Durable execution attempt, when the observer saw the child after admission.
     pub attempt: Option<u32>,
     /// Optional tool-defined name for the child entry point.
@@ -871,8 +869,7 @@ impl<'run> ToolContext<'run> {
     /// preparing or executing an authorized tool call.
     pub fn emit_child_process_started(
         &self,
-        process_id: impl Into<ProcessId>,
-        incarnation: crate::ProcessIncarnation,
+        process_id: ProcessId,
         attempt: Option<u32>,
         child_entry_name: Option<String>,
     ) {
@@ -880,8 +877,7 @@ impl<'run> ToolContext<'run> {
             return;
         };
         hook.child_process_started(ToolChildProcessStarted {
-            process_id: process_id.into(),
-            incarnation,
+            process_id,
             attempt,
             child_entry_name,
         });
@@ -939,8 +935,8 @@ impl<'run> ToolContext<'run> {
 
     /// Exposes the process this call executes inside to protocol and process-engine
     /// implementors while preparing or executing an authorized tool call.
-    pub fn enclosing_process(&self) -> Option<&str> {
-        self.enclosing_process.as_deref()
+    pub fn enclosing_process(&self) -> Option<&ProcessId> {
+        self.enclosing_process.as_ref()
     }
 
     /// Exposes tool call id to protocol and process-engine implementors while preparing or
@@ -1555,7 +1551,7 @@ mod tests {
         )
         .prepared_call(&prepared)
         .cancellation_token(Some(cancellation.clone()))
-        .enclosing_process(Some("process-1".into()))
+        .enclosing_process(Some(crate::ProcessId::fixture("process-1")))
         .build();
 
         assert_eq!(context.session_id(), "session-1");
@@ -1564,23 +1560,30 @@ mod tests {
             context.prepared_payload(),
             &serde_json::json!({ "prepared": true })
         );
-        assert_eq!(context.enclosing_process(), Some("process-1"));
+        assert_eq!(
+            context.enclosing_process(),
+            Some(&crate::ProcessId::fixture("process-1"))
+        );
         assert!(context.cancellation_token().is_some());
     }
 
     #[test]
     fn enclosing_process_travels_from_tool_context_to_attempt_context() {
-        let context = crate::testing::mock_tool_context()
-            .with_enclosing_process("process-1", tokio_util::sync::CancellationToken::new());
+        let context = crate::testing::mock_tool_context().with_enclosing_process(
+            crate::ProcessId::fixture("process-1"),
+            tokio_util::sync::CancellationToken::new(),
+        );
         let attempt = crate::AttemptContext::__for_testing(&context, "attempt-scope".to_string());
-        assert_eq!(attempt.enclosing_process(), Some("process-1"));
+        assert_eq!(
+            attempt.enclosing_process(),
+            Some(&crate::ProcessId::fixture("process-1"))
+        );
     }
 
     // -----------------------------------------------------------------------
     // FIG-3417: the lifecycle parent a child start declares comes from ONE
     // shared derivation — the admitted execution scope, which for a process
-    // already carries the incarnation the admission authority bound. Nothing
-    // on this path re-resolves the reusable process name against a registry.
+    // names its minted id. Nothing on this path reads a registry.
     // -----------------------------------------------------------------------
 
     fn tool_context_under_scope(admitted: crate::AdmittedScope) -> ToolContext<'static> {
@@ -1604,56 +1607,35 @@ mod tests {
         .build()
     }
 
-    /// A recorded leaf attempt under a process scope parents on the pinned
-    /// incarnation — the attempt carries no registry query to re-resolve the
-    /// name, only the admission-time pin.
+    /// A recorded leaf attempt under a process scope parents on its process —
+    /// the attempt carries no registry query, only the admitted scope.
     #[tokio::test]
-    async fn an_attempt_under_a_process_scope_parents_on_the_pinned_incarnation() {
-        let incarnation = crate::ProcessIncarnation::from_registration_sequence(3);
+    async fn an_attempt_under_a_process_scope_parents_on_its_process() {
         let context = tool_context_under_scope(crate::AdmittedScope::process(
-            crate::ProcessRef::new(ProcessId::from("worker"), incarnation),
+            crate::process_id_for_test("worker"),
         ));
         let attempt = crate::AttemptContext::__for_testing(&context, "attempt-scope".to_string());
         assert_eq!(
             attempt
                 .child_process_parent_scope()
-                .expect("the pinned incarnation is the parent"),
-            crate::ParentScope::process(crate::ProcessRef::new(
-                ProcessId::from("worker"),
-                incarnation,
-            )),
+                .expect("the process is the parent"),
+            crate::ParentScope::process(crate::process_id_for_test("worker")),
         );
     }
 
-    /// A process scope nobody bound an admitted incarnation to cannot reach
-    /// this path at all: the controller's construction input — an
-    /// `AdmittedScope` — refuses the unpinned pair, so the late refusal that
-    /// used to live in `child_process_parent_scope` has no input left.
+    /// The orchestrating surface takes the same shared derivation: the
+    /// admitted process, not a registry lookup.
     #[tokio::test]
-    async fn an_attempt_under_an_unpinned_process_scope_is_unconstructible() {
-        assert!(matches!(
-            crate::AdmittedScope::new(crate::ExecutionScope::process("worker"), None),
-            Err(crate::AdmittedScopeError::ProcessIncarnationMissing { .. })
-        ));
-    }
-
-    /// The orchestrating surface takes the same shared derivation: the pinned
-    /// incarnation, not a registry lookup.
-    #[tokio::test]
-    async fn an_orchestrating_context_parents_on_the_pinned_incarnation() {
-        let incarnation = crate::ProcessIncarnation::from_registration_sequence(2);
+    async fn an_orchestrating_context_parents_on_its_process() {
         let context = tool_context_under_scope(crate::AdmittedScope::process(
-            crate::ProcessRef::new(ProcessId::from("worker"), incarnation),
+            crate::process_id_for_test("worker"),
         ));
         let orchestration = crate::OrchestrationContext::new(context);
         assert_eq!(
             orchestration
                 .child_process_parent_scope()
-                .expect("the pinned incarnation is the parent"),
-            crate::ParentScope::process(crate::ProcessRef::new(
-                ProcessId::from("worker"),
-                incarnation,
-            )),
+                .expect("the process is the parent"),
+            crate::ParentScope::process(crate::process_id_for_test("worker")),
         );
     }
 }

@@ -7,7 +7,7 @@ use std::future::Future;
 use std::sync::Arc;
 
 use crate::{
-    ProcessAwaitOutput, ProcessCompletionAuthority, ProcessIdentity, ProcessInput,
+    ProcessAwaitOutput, ProcessCompletionAuthority, ProcessId, ProcessIdentity, ProcessInput,
     ProcessOriginator, ProcessProvenance, ProcessRegistration, ProcessRegistry,
     ProjectionWatermark, RecoveryContract, SessionScope, TriggerCommand, TriggerCommandOutcome,
     TriggerOwnerScope, TriggerStore, TriggerSubscriptionDraft,
@@ -45,7 +45,6 @@ where
     pruned_delivery_process_is_not_a_recovery_candidate(make().await).await;
     unregistered_delivery_is_offered_to_the_recovery_sweep(make().await).await;
     the_narrow_delivery_worklist_agrees_with_the_delivery_table(make().await).await;
-    reregistered_between_classification_and_delete_preserves_delivery(make().await).await;
     outstanding_delivery_blocks_interleaved_tombstone_compaction(make().await).await;
 }
 
@@ -249,6 +248,8 @@ async fn delivery_delete_is_bound_to_observed_row_identity(
             .await
             .expect("ingest identity-law occurrence");
         assert_eq!(ingress.reservations.len(), 1);
+        // A retention candidate is a delivery whose process started.
+        start_and_bind_delivery(&handles, &ingress.reservations[0]).await;
     }
     let candidates = handles
         .triggers
@@ -330,28 +331,7 @@ async fn outstanding_delivery_blocks_interleaved_tombstone_compaction(
         .await
         .expect("ingest occurrence");
     assert_eq!(ingress.reservations.len(), 1);
-    let process_id = ingress.reservations[0].process_id.clone();
-    handles
-        .registry
-        .register_process(
-            ProcessRegistration::new(
-                process_id.clone(),
-                ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
-                RecoveryContract::ExternallyOwned,
-                ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
-            )
-            .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-                ProcessIdentity::new("test"),
-            )),
-        )
-        .await
-        .expect("register delivery process");
+    let process_id = start_and_bind_delivery(&handles, &ingress.reservations[0]).await;
     handles
         .registry
         .complete_process(
@@ -511,6 +491,56 @@ fn draft(session_id: &SessionId, key: &str, source_key: &str) -> TriggerSubscrip
     }
 }
 
+/// Start a reserved delivery's process the way the router does: register it
+/// under the delivery's start key, then bind it to the delivery (ADR 0107).
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each result is established by the setup above"
+)]
+async fn start_and_bind_delivery(
+    handles: &ProcessTriggerRetentionHandles,
+    reservation: &crate::TriggerDeliveryReservation,
+) -> ProcessId {
+    let start_key = crate::StartKey::for_trigger_delivery(
+        &reservation.occurrence.occurrence_id,
+        &reservation.subscription.subscription_id,
+        &reservation.subscription.incarnation,
+        reservation.subscription.revision,
+    );
+    let process_id = handles
+        .registry
+        .register_process(
+            ProcessRegistration::new(
+                ProcessInput::External {
+                    metadata: serde_json::Value::Null,
+                },
+                RecoveryContract::ExternallyOwned,
+                ProcessProvenance::host(),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
+            )
+            .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
+                ProcessIdentity::new("test"),
+            ))
+            .with_start_key(Some(start_key)),
+        )
+        .await
+        .expect("register delivery process")
+        .id;
+    handles
+        .triggers
+        .bind_delivery_process(
+            &reservation.occurrence.occurrence_id,
+            &reservation.subscription.subscription_id,
+            &process_id,
+        )
+        .await
+        .expect("bind the delivery's process");
+    process_id
+}
+
 #[expect(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
@@ -651,32 +681,9 @@ async fn process_prune_only_deletes_deliveries_for_pruned_processes(
         .expect("ingest second occurrence");
     assert_eq!(first.reservations.len(), 1);
     assert_eq!(second.reservations.len(), 1);
-    let pruned_id = first.reservations[0].process_id.clone();
-    let live_id = second.reservations[0].process_id.clone();
+    let pruned_id = start_and_bind_delivery(&handles, &first.reservations[0]).await;
+    let live_id = start_and_bind_delivery(&handles, &second.reservations[0]).await;
 
-    for process_id in [&pruned_id, &live_id] {
-        handles
-            .registry
-            .register_process(
-                ProcessRegistration::new(
-                    process_id.clone(),
-                    ProcessInput::External {
-                        metadata: serde_json::Value::Null,
-                    },
-                    RecoveryContract::ExternallyOwned,
-                    ProcessProvenance::host(),
-                    lash_core::ProcessLifecyclePolicy::new(
-                        lash_core::ParentScope::Host,
-                        lash_core::OnParentEnd::Abandon,
-                    ),
-                )
-                .with_admitted_identity(
-                    lash_core::AdmittedProcessIdentity::for_testing(ProcessIdentity::new("test")),
-                ),
-            )
-            .await
-            .expect("register delivery process");
-    }
     handles
         .registry
         .complete_process(
@@ -746,28 +753,7 @@ async fn pruned_delivery_process_is_not_a_recovery_candidate(
         .await
         .expect("ingest occurrence");
     assert_eq!(ingress.reservations.len(), 1);
-    let process_id = ingress.reservations[0].process_id.clone();
-    handles
-        .registry
-        .register_process(
-            ProcessRegistration::new(
-                process_id.clone(),
-                ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
-                RecoveryContract::ExternallyOwned,
-                ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
-            )
-            .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-                ProcessIdentity::new("test"),
-            )),
-        )
-        .await
-        .expect("register delivery process");
+    let process_id = start_and_bind_delivery(&handles, &ingress.reservations[0]).await;
     handles
         .registry
         .complete_process(
@@ -845,57 +831,32 @@ async fn unregistered_delivery_is_offered_to_the_recovery_sweep(
         .await
         .expect("ingest occurrence");
     assert_eq!(ingress.reservations.len(), 1);
-    let process_id = ingress.reservations[0].process_id.clone();
+    let reservation = ingress.reservations[0].clone();
+    assert_eq!(
+        reservation.process_id, None,
+        "a reservation is unbound until its start registers a process (ADR 0107)"
+    );
 
-    // The crash window itself: the delivery row is reserved and no process row
-    // was ever written. The sweep has to be able to see both facts.
+    // The crash window itself: the delivery row is reserved and no process was
+    // ever registered for it. The sweep has to be able to see that fact: an
+    // unbound delivery is the recovery candidate.
     let reserved = handles
         .triggers
         .list_deliveries()
         .await
         .expect("list deliveries");
     assert!(
-        reserved
-            .iter()
-            .any(|delivery| delivery.process_id == process_id),
+        reserved.iter().any(|delivery| {
+            delivery.occurrence.occurrence_id == reservation.occurrence.occurrence_id
+                && delivery.process_id.is_none()
+        }),
         "a reserved delivery whose process was never registered must stay a \
          recovery candidate in the direct delivery-table view"
     );
-    assert_eq!(
-        handles
-            .registry
-            .filter_unregistered_process_ids(std::slice::from_ref(&process_id))
-            .await
-            .expect("filter recovery candidates"),
-        vec![process_id.clone()],
-        "an unregistered delivery process must be reported missing, or the \
-         sweep never starts it"
-    );
 
-    // Starting it closes the window. The same two reads must now agree that
-    // there is nothing to recover, or the sweep starts the process a second
-    // time.
-    handles
-        .registry
-        .register_process(
-            ProcessRegistration::new(
-                process_id.clone(),
-                ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
-                RecoveryContract::ExternallyOwned,
-                ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
-            )
-            .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-                ProcessIdentity::new("test"),
-            )),
-        )
-        .await
-        .expect("register delivery process");
+    // Starting it closes the window. The same reads must now agree that there
+    // is nothing to recover, or the sweep starts the process a second time.
+    let process_id = start_and_bind_delivery(&handles, &reservation).await;
     assert!(
         handles
             .registry
@@ -912,9 +873,9 @@ async fn unregistered_delivery_is_offered_to_the_recovery_sweep(
             .await
             .expect("list deliveries after registration")
             .iter()
-            .any(|delivery| delivery.process_id == process_id),
-        "the delivery row itself outlives the start: it is retention's to \
-         reclaim, not the sweep's"
+            .any(|delivery| delivery.process_id.as_ref() == Some(&process_id)),
+        "the delivery row itself outlives the start, bound to its process: it is \
+         retention's to reclaim, not the sweep's"
     );
 }
 
@@ -971,6 +932,7 @@ async fn the_narrow_delivery_worklist_agrees_with_the_delivery_table(
             .await
             .expect("ingest occurrence");
         assert_eq!(ingress.reservations.len(), 1);
+        start_and_bind_delivery(&handles, &ingress.reservations[0]).await;
     }
 
     let mut from_table = handles
@@ -979,7 +941,7 @@ async fn the_narrow_delivery_worklist_agrees_with_the_delivery_table(
         .await
         .expect("list deliveries")
         .into_iter()
-        .map(|delivery| delivery.process_id)
+        .filter_map(|delivery| delivery.process_id)
         .collect::<Vec<_>>();
     from_table.sort();
     from_table.dedup();
@@ -999,160 +961,6 @@ async fn the_narrow_delivery_worklist_agrees_with_the_delivery_table(
     assert_eq!(
         from_table.len(),
         2,
-        "the law is vacuous unless both reservations reached the delivery table"
-    );
-}
-
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: each result is established by the setup above"
-)]
-async fn reregistered_between_classification_and_delete_preserves_delivery(
-    handles: ProcessTriggerRetentionHandles,
-) {
-    const SESSION: &str = "process-prune-reuse-session";
-    register_trigger(
-        &handles.triggers,
-        &SessionId::from(SESSION),
-        "process-prune-reuse-key",
-        "process-prune-reuse-source",
-        "process-prune-reuse-register",
-    )
-    .await;
-    let ingress = handles
-        .triggers
-        .ingest_occurrence(crate::TriggerOccurrenceRequest::new(
-            "ui.button.pressed",
-            "process-prune-reuse-source",
-            serde_json::json!({ "button": "Blue" }),
-            "process-prune-reuse-occurrence",
-        ))
-        .await
-        .expect("ingest occurrence");
-    assert_eq!(ingress.reservations.len(), 1);
-    let process_id = ingress.reservations[0].process_id.clone();
-    let registration = || {
-        ProcessRegistration::new(
-            process_id.clone(),
-            ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            RecoveryContract::ExternallyOwned,
-            ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
-        )
-        .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-            ProcessIdentity::new("test"),
-        ))
-    };
-    handles
-        .registry
-        .register_process(registration())
-        .await
-        .expect("register delivery process");
-    handles
-        .registry
-        .complete_process(
-            &process_id,
-            ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                serde_json::json!("done"),
-            )),
-            ProcessCompletionAuthority::external_owner(),
-        )
-        .await
-        .expect("complete delivery process");
-    handles
-        .registry
-        .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
-        .await
-        .expect("prune delivery process");
-    assert_eq!(
-        handles
-            .triggers
-            .list_deliveries_by_process_id(&process_id)
-            .await
-            .expect("list delivery after prune")
-            .len(),
-        1,
-        "the coordinator is the only process-trigger delivery reclamation path"
-    );
-
-    assert_eq!(
-        handles
-            .registry
-            .filter_tombstoned_process_ids(std::slice::from_ref(&process_id))
-            .await
-            .expect("classify tombstoned id before interleaving"),
-        vec![process_id.clone()],
-        "the reconciliation plan must first classify the retained tombstone"
-    );
-    let registry = Arc::clone(&handles.registry);
-    let interleaved_process_id = process_id.clone();
-    assert_eq!(
-        lash_core::testing::conformance_support::reconcile_pruned_trigger_deliveries_interleaved(
-            handles.registry.as_ref(),
-            handles.triggers.as_ref(),
-            Some(handles.sessions.as_ref()),
-            move || async move {
-                registry
-                    .register_process(
-                        ProcessRegistration::new(
-                            interleaved_process_id,
-                            ProcessInput::External {
-                                metadata: serde_json::Value::Null,
-                            },
-                            RecoveryContract::ExternallyOwned,
-                            ProcessProvenance::host(),
-                            lash_core::ProcessLifecyclePolicy::new(
-                                lash_core::ParentScope::Host,
-                                lash_core::OnParentEnd::Abandon,
-                            ),
-                        )
-                        .with_admitted_identity(
-                            lash_core::AdmittedProcessIdentity::for_testing(ProcessIdentity::new(
-                                "test",
-                            )),
-                        ),
-                    )
-                    .await
-                    .expect("re-register after classification and before delete");
-            },
-        )
-        .await
-        .expect("reconcile across process-id reuse interleaving")
-        .reclaimed_delivery_count,
-        0,
-        "stale classification must not delete a re-registered process's delivery"
-    );
-    assert!(
-        handles
-            .registry
-            .filter_tombstoned_process_ids(std::slice::from_ref(&process_id))
-            .await
-            .expect("filter tombstoned ids after re-registration")
-            .is_empty(),
-        "a live process shadows its stale tombstone"
-    );
-    assert!(
-        handles
-            .registry
-            .filter_unregistered_process_ids(std::slice::from_ref(&process_id))
-            .await
-            .expect("filter unregistered ids")
-            .is_empty(),
-        "a re-registered process is live, not unregistered"
-    );
-    assert_eq!(
-        handles
-            .triggers
-            .list_deliveries_by_process_id(&process_id)
-            .await
-            .expect("list delivery after reconciliation")
-            .len(),
-        1,
-        "a re-registered process's delivery must survive reconciliation"
+        "the law is vacuous unless both bound reservations reached the delivery table"
     );
 }

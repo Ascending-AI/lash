@@ -3,7 +3,6 @@
 //! Examples are written in TypeScript, the sole RLM language (ADR 0096).
 //! Prompt prose is tuned for schema-first results and binding subagent output.
 
-use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use std::sync::Arc;
 
@@ -59,15 +58,14 @@ impl RlmSubagentToolsProvider {
             .map_err(|err| format!("spawn_agent was not prepared correctly: {err}"))?;
 
         let request = lash_core::ProcessStartRequest::new(
-            prepared.process_id.clone(),
             lash_core::ProcessInput::SessionTurn {
                 definition_key: "lash-subagent-session-turn:v1".to_string(),
                 create_request: prepared.create_request,
                 turn_input: Box::new(prepared.turn_input),
                 output_contract: lash_core::ToolOutputContract::Static,
             },
-            // Subagent session-turn rows are journaled child sessions, idempotent
-            // by process id, so recovery may re-execute them (ADR 0019).
+            // Subagent session-turn rows are journaled child sessions, so
+            // recovery may re-execute them (ADR 0019).
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
             lash_core::ProcessLifecyclePolicy::new(
@@ -77,6 +75,10 @@ impl RlmSubagentToolsProvider {
                 lash_core::OnParentEnd::Abandon,
             ),
         )
+        // The spawn call's own key: every redrive of this body starts the same
+        // child, and the child's session derives from the id its start mints
+        // (ADR 0107).
+        .with_start_key(Some(context.start_key(0).map_err(|error| error.to_string())?))
         .with_declared_identity(lash_core::DeclaredProcessIdentity::labelled(
             "subagent",
             Some("spawn".to_string()),
@@ -86,13 +88,12 @@ impl RlmSubagentToolsProvider {
             .await
             .map_err(|err| format!("failed to start subagent process: {err}"))?;
         context.emit_child_process_started(
-            child.process_id,
-            child.incarnation,
+            child.process_id.clone(),
             None,
             Some("subagent".to_string()),
         );
         let output = context
-            .await_process(&prepared.process_id)
+            .await_process(&child.process_id)
             .await
             .map_err(|err| format!("subagent failed while executing its task: {err}"))?;
         child_task_result(output, output_schema.as_ref())
@@ -122,7 +123,6 @@ impl RlmSubagentToolsProvider {
             .session_snapshot()
             .await
             .map_err(|err| ToolOutcome::err(serde_json::json!(err.to_string())))?;
-        let child_session_id = SessionId::from(format!("session:subagent:{}", call.call_id));
         let parent_session_id = SessionId::from(context.session_id());
         let mut create_request = build_spawn_create_request(SpawnCreateRequestInput {
             registry: &self.registry,
@@ -156,15 +156,12 @@ impl RlmSubagentToolsProvider {
                 .map_err(|err| ToolOutcome::err(serde_json::json!(err.to_string())))?;
             create_request = create_request.with_plugin_init(plugin_init);
         }
-        let create_request = Box::new(create_request.with_session_id(child_session_id));
+        // The child session is the process's own, derived from the id its
+        // start mints (ADR 0107), so the request names none.
+        create_request.session_id = None;
+        let create_request = Box::new(create_request);
         let turn_input = turn_input_for_task(render_task_prompt(&task, output_schema.as_ref()));
-        // Mint the child's process identity here, in the prepared (journaled)
-        // payload, so it is stable across replay — the durable layer keys the
-        // child session turn by this persisted `process_id` end-to-end. The
-        // parent tool-call id is unique per call and always non-empty.
-        let process_id = ProcessId::from(format!("process:subagent:{}", call.call_id));
         let payload = serde_json::to_value(PreparedSpawnAgent {
-            process_id,
             create_request,
             turn_input,
         })
@@ -233,7 +230,6 @@ impl lash_core::facade_support::OrchestratingToolImplementation for SpawnAgentOr
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 struct PreparedSpawnAgent {
-    process_id: ProcessId,
     create_request: Box<lash_core::SessionCreateRequest>,
     turn_input: lash_core::TurnInput,
 }

@@ -15,17 +15,17 @@ use pretty_assertions::assert_eq;
 pub(super) async fn count_events_through_counts_every_event_at_any_top_bound(
     registry: Arc<dyn ProcessRegistry>,
 ) {
-    let process_id = ProcessId::from("count-events-through-top-bound");
     let counted = "signal.counted";
-    let record =
-        registry
-            .register_process(registration(&process_id).with_extra_event_types([
+    let record = registry
+        .register_process(
+            registration("count-events-through-top-bound").with_extra_event_types([
                 plain_event_type(counted),
                 plain_event_type("signal.other"),
-            ]))
-            .await
-            .expect("register count-bound process");
-    let process_ref = ProcessRef::from_record(&record);
+            ]),
+        )
+        .await
+        .expect("register count-bound process");
+    let process_id = record.id.clone();
     let mut sequences = Vec::new();
     for (index, event_type) in [counted, "signal.other", counted, counted]
         .into_iter()
@@ -59,7 +59,7 @@ pub(super) async fn count_events_through_counts_every_event_at_any_top_bound(
         );
         assert_eq!(
             registry
-                .count_events_through_ref(&process_ref, counted, bound)
+                .count_events_through(&process_id, counted, bound)
                 .await
                 .expect("count through bound by reference"),
             expected,

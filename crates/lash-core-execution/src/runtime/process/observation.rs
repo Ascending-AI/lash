@@ -9,9 +9,9 @@ use crate::plugin::PluginError;
 use super::events::{ProcessAwaitOutput, ProcessEvent};
 use super::model::{
     AbandonRequest, ProcessExecutionEnvRef, ProcessExternalRef, ProcessId, ProcessIdentity,
-    ProcessIncarnation, ProcessInput, ProcessLease, ProcessLifecyclePolicy, ProcessListFilter,
-    ProcessOriginator, ProcessOriginatorFilter, ProcessRecord, ProcessStarted, ProcessStatus,
-    RecoveryContract, SessionScope, WaitState,
+    ProcessInput, ProcessLease, ProcessLifecyclePolicy, ProcessListFilter, ProcessOriginator,
+    ProcessOriginatorFilter, ProcessRecord, ProcessStarted, ProcessStatus, RecoveryContract,
+    SessionScope, WaitState,
 };
 use super::registry::ProcessRegistry;
 
@@ -23,7 +23,7 @@ pub struct ProcessWorkObserver {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessWorkSnapshot {
     pub session_id: SessionId,
-    pub visible_processes: Vec<super::model::ProcessRef>,
+    pub visible_processes: Vec<super::model::ProcessId>,
     pub items: Vec<ObservedWorkItem>,
 }
 
@@ -50,7 +50,6 @@ pub enum ObservedWorkItemState {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ObservedProcess {
     pub process_id: ProcessId,
-    pub incarnation: ProcessIncarnation,
     /// Sequence of the newest event folded into this observed record.
     pub last_event_sequence: u64,
     pub lifecycle: ProcessStatus,
@@ -208,12 +207,7 @@ impl ProcessWorkObserver {
         });
         let visible_processes = items
             .iter()
-            .map(|item| {
-                super::model::ProcessRef::new(
-                    item.process.process_id.clone(),
-                    item.process.incarnation,
-                )
-            })
+            .map(|item| item.process.process_id.clone())
             .collect();
         Ok(ProcessWorkSnapshot {
             session_id,
@@ -364,14 +358,14 @@ impl ProcessWorkObserver {
     /// `after_sequence`.
     pub async fn event_page(
         &self,
-        process_ref: &super::ProcessRef,
+        process_id: &super::ProcessId,
         after_sequence: u64,
         limit: std::num::NonZeroUsize,
         mode: super::ProcessEventQueryMode,
     ) -> Result<ObservedProcessEventReadOutcome, PluginError> {
         let outcome = self
             .registry
-            .event_page_ref(process_ref, after_sequence, limit, mode)
+            .event_page_after(process_id, after_sequence, limit, mode)
             .await?;
         Ok(Self::observed_page(outcome))
     }
@@ -431,7 +425,6 @@ impl ObservedProcess {
         let input = record.input.as_ref().clone();
         let identity = record.identity;
         let process_id = record.id;
-        let incarnation = record.incarnation;
         let last_event_sequence = record.last_event_sequence;
         let (lease_holder, lease_expires_at_ms) = match lease {
             Some(lease) => (Some(lease.owner), Some(lease.expires_at_epoch_ms)),
@@ -439,7 +432,6 @@ impl ObservedProcess {
         };
         Self {
             process_id,
-            incarnation,
             last_event_sequence,
             lifecycle,
             policy: record.lifecycle,
@@ -465,16 +457,12 @@ impl ObservedProcess {
         }
     }
 
-    /// Stable identity of this incarnation in a host work graph.
+    /// Stable identity of this process in a host work graph.
     ///
-    /// Computed rather than carried: it is a function of the process id and
-    /// incarnation, so a transport that shipped it could only ever agree or
-    /// lie.
+    /// Computed rather than carried: it is a function of the minted process
+    /// id, so a transport that shipped it could only ever agree or lie.
     pub fn graph_key(&self) -> String {
-        format!(
-            "process:{}:incarnation:{}",
-            self.process_id, self.incarnation
-        )
+        format!("process:{}", self.process_id)
     }
 
     /// The identity kind this process was registered under.

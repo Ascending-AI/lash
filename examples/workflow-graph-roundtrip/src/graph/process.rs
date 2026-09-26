@@ -1,4 +1,3 @@
-use lash::ProcessId;
 use lash::rlm::lang::{
     ProcessParam, ProcessSignalDecl, WorkflowNode, WorkflowNodeKind, WorkflowNodeNameSource,
     WorkflowProcess, WorkflowSubgraph, WorkflowTerminalKind, format_type_expr,
@@ -28,7 +27,7 @@ pub(super) fn process_from_data(
         origin: Default::default(),
         body: WorkflowSubgraph::default(),
     });
-    let process_id = ProcessId::from(process.id.to_string());
+    let process_id = process.id.to_string();
     // A lifted process's name, title and signals are derived, not authored
     // (FIG-2999, FIG-3118): the name digests the body, the displayed title is
     // that name, and the signal set is read back out of the body's
@@ -58,10 +57,7 @@ pub(super) fn process_from_data(
     Ok(process)
 }
 
-pub(super) fn seeded_process_body(
-    process_id: &ProcessId,
-    params: &[ProcessParam],
-) -> WorkflowSubgraph {
+pub(super) fn seeded_process_body(process_id: &str, params: &[ProcessParam]) -> WorkflowSubgraph {
     WorkflowSubgraph {
         nodes: vec![WorkflowNode {
             id: workflow_node_id(&format!("{process_id}:seed:finish")),
@@ -99,7 +95,7 @@ pub(super) fn editable_process_signal(signal: &ProcessSignalDecl) -> EditablePro
 }
 
 fn process_param_from_data(
-    process_id: &ProcessId,
+    process_id: &str,
     field: &EditableProcessField,
 ) -> Result<ProcessParam, RenderErrorResponse> {
     Ok(ProcessParam {
@@ -109,7 +105,7 @@ fn process_param_from_data(
 }
 
 fn process_signal_from_data(
-    process_id: &ProcessId,
+    process_id: &str,
     field: &EditableProcessField,
 ) -> Result<ProcessSignalDecl, RenderErrorResponse> {
     Ok(ProcessSignalDecl {
@@ -173,7 +169,7 @@ fn editable_identifier(
 /// TypeScript printer can spell exactly the scalar schemas below — anything
 /// richer had no way back out to source. So the closed set is stated here.
 fn editable_process_type(
-    process_id: &ProcessId,
+    process_id: &str,
     field: &str,
     value: &str,
 ) -> Result<lash::rlm::lang::TypeExpr, RenderErrorResponse> {
@@ -204,7 +200,7 @@ mod tests {
     /// the host reads it rather than widened when the source prints.
     #[test]
     fn process_parameter_types_are_the_ones_typescript_can_annotate() {
-        let process = ProcessId::from("process");
+        let process = "process";
         for (text, expected) in [
             ("number", lash::rlm::lang::TypeExpr::Float),
             ("float", lash::rlm::lang::TypeExpr::Float),
@@ -213,11 +209,11 @@ mod tests {
             ("any", lash::rlm::lang::TypeExpr::Any),
         ] {
             assert_eq!(
-                editable_process_type(&process, "params.type", text)
+                editable_process_type(process, "params.type", text)
                     .unwrap_or_else(|_| panic!("{text} is a parameter type")),
                 expected
             );
         }
-        assert!(editable_process_type(&process, "params.type", "int").is_err());
+        assert!(editable_process_type(process, "params.type", "int").is_err());
     }
 }

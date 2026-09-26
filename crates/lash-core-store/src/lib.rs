@@ -119,9 +119,9 @@ pub(crate) use lash_sansio::{
     TurnCancelDisposition, TurnCancelMode, TurnCancellationEvidence, TurnCause,
 };
 pub(crate) use plugin_state::PluginState;
-pub(crate) use process_identity::{
-    ProcessExecutionEnvSpec, ProcessIncarnation, ProcessRef, ProcessStatus,
-};
+#[cfg(any(test, feature = "testing"))]
+pub use process_identity::process_id_for_test;
+pub(crate) use process_identity::{ProcessExecutionEnvSpec, ProcessStatus};
 pub(crate) use protocol_turn_options::ProtocolTurnOptions;
 pub(crate) use queued_work_vocabulary::{
     DeliveryPolicy, QueuedWorkAuthority, QueuedWorkBatch, QueuedWorkBatchDraft,

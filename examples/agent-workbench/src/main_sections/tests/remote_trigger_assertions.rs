@@ -135,7 +135,6 @@ pub(crate) async fn assert_remote_started_process_surface(
             .await
             .expect("process read should succeed")
             .expect("started process record should exist");
-        let process_ref = lash::process::ProcessRef::from_record(&record);
         let remote_record = lash_remote_protocol::RemoteProcessRecord::try_from(record)
             .expect("started process record should convert to remote DTO");
         remote_record
@@ -147,8 +146,8 @@ pub(crate) async fn assert_remote_started_process_surface(
         assert_eq!(&round_trip_record.id, process_id);
 
         let outcome = registry
-            .event_page_ref(
-                &process_ref,
+            .event_page_after(
+                process_id,
                 0,
                 std::num::NonZeroUsize::new(32).expect("nonzero page limit"),
                 lash::process::ProcessEventQueryMode::Full,
@@ -168,16 +167,13 @@ pub(crate) async fn assert_remote_started_process_surface(
         let expected_more = page.more.clone();
         let cursor = lash::process::ProcessCursor::new(
             "workbench",
-            lash::process::ProcessCursorReference::for_lifetime(
-                &process_ref.process_id,
-                process_ref.incarnation.registration_sequence(),
-            ),
+            lash::process::ProcessCursorReference::for_process(process_id),
             0,
             page_events.last().map_or(0, |event| event.sequence),
         )
         .expect("workbench cursor");
         let remote_events = lash_remote_protocol::RemoteProcessEventsResponse::try_from((
-            process_ref.clone(),
+            process_id.clone(),
             outcome,
             cursor.clone(),
         ))
@@ -185,8 +181,8 @@ pub(crate) async fn assert_remote_started_process_surface(
         remote_events
             .validate()
             .expect("remote started process event page should validate");
-        let (round_trip_process_ref, round_trip_outcome, round_trip_cursor): (
-            lash::process::ProcessRef,
+        let (round_trip_process_id, round_trip_outcome, round_trip_cursor): (
+            lash::ProcessId,
             lash::process::ProcessEventReadOutcome<lash::process::ProcessEventPage>,
             lash::process::ProcessCursor,
         ) = remote_events
@@ -205,7 +201,7 @@ pub(crate) async fn assert_remote_started_process_surface(
             .iter()
             .map(|event| (event.sequence, event.event_type.clone()))
             .collect::<Vec<_>>();
-        assert_eq!(round_trip_process_ref, process_ref);
+        assert_eq!(&round_trip_process_id, process_id);
         assert_eq!(round_trip_cursor, cursor);
         assert_eq!(round_trip_tail, expected_tail);
         assert_eq!(round_trip_page.more, expected_more);

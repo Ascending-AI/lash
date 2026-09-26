@@ -12,7 +12,7 @@ use crate::plugin::PluginError;
 use std::num::NonZeroUsize;
 use std::sync::{Arc, Weak};
 
-use crate::{EffectHost, ExecutionScope};
+use crate::EffectHost;
 
 use super::ProcessCompletionOutcome;
 use super::events::{
@@ -22,7 +22,7 @@ use super::events::{
 use super::model::{
     AbandonRequest, ProcessChange, ProcessChangeCursor, ProcessExecutionWriteAuthority,
     ProcessExternalRef, ProcessId, ProcessLease, ProcessLeaseClaimOutcome, ProcessLeaseCompletion,
-    ProcessListFilter, ProcessObserverBy, ProcessRecord, ProcessRef, ProcessRegistration,
+    ProcessListFilter, ProcessObserverBy, ProcessRecord, ProcessRegistration,
     ProcessRegistrationOutcome, ProcessSessionDeleteReport, ProcessStartOutcome, ProcessStarted,
     SessionId, WaitState,
 };
@@ -40,35 +40,36 @@ use super::registry::{
 /// reads and writes only; process waits live on the work-driver seam (ADR 0016).
 #[async_trait::async_trait]
 pub trait ProcessQuery: Send + Sync {
-    /// Resolve a host-facing reusable process name to the currently retained
-    /// structural identity. Internal durable references must keep the returned
-    /// pair rather than resolving the name again.
-    async fn resolve_process_ref(&self, process_id: &ProcessId) -> Result<ProcessRef, PluginError> {
+    /// Refuse unless `process_id` names a retained process, answering the id
+    /// back: an id no registration minted refuses as
+    /// [`PluginError::ProcessUnknown`] and a pruned one as
+    /// [`PluginError::ProcessNoLongerRetained`].
+    async fn require_process_id(&self, process_id: &ProcessId) -> Result<ProcessId, PluginError> {
         match self.get_process(process_id).await? {
-            Some(record) => Ok(ProcessRef::from_record(&record)),
+            Some(record) => Ok(record.id),
             None => Err(super::registry_transitions::unknown_process(process_id)),
         }
     }
 
-    /// Read one exact process incarnation and refuse a successor with the same
-    /// host-facing name.
-    async fn get_process_ref(
-        &self,
-        process_ref: &ProcessRef,
-    ) -> Result<Option<ProcessRecord>, PluginError> {
-        match self.get_process(&process_ref.process_id).await? {
-            Some(record) if record.incarnation == process_ref.incarnation => Ok(Some(record)),
-            Some(record) => Err(super::registry_transitions::process_incarnation_superseded(
-                process_ref,
-                record.incarnation,
-            )),
-            None => Ok(None),
-        }
-    }
-
+    /// Read one process by its minted id.
+    ///
+    /// A retained process answers `Some`, a pruned one refuses with
+    /// [`PluginError::ProcessNoLongerRetained`], and an id no registration
+    /// ever minted answers `None`. An id is never reused, so no read can reach
+    /// a process other than the one the id was minted for.
     async fn get_process(
         &self,
         process_id: &ProcessId,
+    ) -> Result<Option<ProcessRecord>, PluginError>;
+
+    /// Read the process a start key registered, while it is retained
+    /// (ADR 0107). `None` once no retained process holds the key: never
+    /// started, or pruned. A start key is never a reference a caller resolves
+    /// to name a process; this is the registrar's own idempotency answer, read
+    /// by an engine that must know whether a start already registered.
+    async fn get_process_by_start_key(
+        &self,
+        start_key: &crate::StartKey,
     ) -> Result<Option<ProcessRecord>, PluginError>;
 
     async fn list_processes(
@@ -195,13 +196,13 @@ pub trait ProcessQuery: Send + Sync {
 /// Process admission: registration and the durable external backend reference.
 #[async_trait::async_trait]
 pub trait ProcessRegistrar: Send + Sync {
-    /// Process ids may be registered again after their terminal incarnation is
-    /// pruned. A durable sender floor retained per `(target_session_id,
-    /// process_id)` makes a later incarnation continue above every sequence
-    /// allocated to that target, so reuse is safe without a clock precondition.
-    /// A sender store restored behind an already-settled receiver floor is
-    /// rejected and terminalized by the delivery driver as the typed
-    /// `sequence_rewound` discard instead of being silently absorbed.
+    /// Registers a process under an id the registrar mints; an id is never
+    /// reused (ADR 0107). A start key makes the start idempotent while the
+    /// process minted for it is retained, and after the process is pruned the
+    /// same key starts a new process under a new id. A sender store restored
+    /// behind an already-settled receiver floor is rejected and terminalized
+    /// by the delivery driver as the typed `sequence_rewound` discard instead
+    /// of being silently absorbed.
     async fn register_process(
         &self,
         registration: ProcessRegistration,
@@ -284,7 +285,7 @@ pub trait ProcessRegistrar: Send + Sync {
 ///
 /// Requires [`ProcessQuery`]: observer semantics are defined against the
 /// identity and liveness facts of the observed rows, and the provided methods
-/// resolve incarnations and retirement through point reads.
+/// resolve retirement through point reads.
 #[async_trait::async_trait]
 pub trait ProcessObserverRegistry: ProcessQuery {
     async fn add_observer(
@@ -293,18 +294,6 @@ pub trait ProcessObserverRegistry: ProcessQuery {
         process_id: &ProcessId,
         by: ProcessObserverBy,
     ) -> Result<(), PluginError>;
-
-    /// Attach an observer edge to one exact process incarnation.
-    async fn add_observer_ref(
-        &self,
-        session_id: &SessionId,
-        process_ref: &ProcessRef,
-        by: ProcessObserverBy,
-    ) -> Result<(), PluginError> {
-        self.get_process_ref(process_ref).await?;
-        self.add_observer(session_id, &process_ref.process_id, by)
-            .await
-    }
 
     async fn remove_observer(
         &self,
@@ -401,8 +390,8 @@ pub trait ProcessObserverRegistry: ProcessQuery {
 /// The per-process append-only event log.
 ///
 /// Host-owned and authority-fenced appends plus sequence-cursor reads.
-/// Requires [`ProcessQuery`]: the incarnation-pinned (`*_ref`) methods resolve
-/// one exact process incarnation before touching its log.
+/// Requires [`ProcessQuery`]: reads resolve a process's retention through
+/// point reads.
 #[async_trait::async_trait]
 pub trait ProcessEventLog: ProcessQuery {
     /// This unfenced path is reserved for host signal/cancel coordination.
@@ -414,15 +403,6 @@ pub trait ProcessEventLog: ProcessQuery {
         request: ProcessEventAppendRequest,
     ) -> Result<ProcessEventAppendReceipt, PluginError>;
 
-    async fn append_event_ref(
-        &self,
-        process_ref: &ProcessRef,
-        request: ProcessEventAppendRequest,
-    ) -> Result<ProcessEventAppendReceipt, PluginError> {
-        self.get_process_ref(process_ref).await?;
-        self.append_event(&process_ref.process_id, request).await
-    }
-
     /// Implementations validate `authority` and append in one atomic write.
     async fn append_event_with_authority(
         &self,
@@ -431,45 +411,27 @@ pub trait ProcessEventLog: ProcessQuery {
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessEventAppendReceipt, PluginError>;
 
-    /// Read at most `limit` events of one exact process lifetime, strictly
-    /// after `after_sequence`.
+    /// Read at most `limit` events of one process, strictly after
+    /// `after_sequence`.
     ///
-    /// A successor lifetime under the same process id answers
-    /// [`ProcessEventHistoryRetention::Retired`](super::events::ProcessEventHistoryRetention::Retired)
-    /// and a pruned one answers `Pruned`; neither collapses into an empty page.
-    /// Implementations fetch at most one extra row to determine whether another
-    /// page exists.
-    async fn event_page_ref(
+    /// A pruned process answers `Pruned`, never an empty page. Implementations
+    /// fetch at most one extra row to determine whether another page exists.
+    async fn event_page_after(
         &self,
-        process_ref: &ProcessRef,
+        process_id: &ProcessId,
         after_sequence: u64,
         limit: NonZeroUsize,
         mode: ProcessEventQueryMode,
     ) -> Result<ProcessEventReadOutcome<ProcessEventPage>, PluginError>;
 
-    /// Read the first page of the lifetime `process_id` currently names.
+    /// Read the first page of one process's events.
     async fn event_page(
         &self,
         process_id: &ProcessId,
         limit: NonZeroUsize,
         mode: ProcessEventQueryMode,
     ) -> Result<ProcessEventReadOutcome<ProcessEventPage>, PluginError> {
-        let process_ref = match self.resolve_process_ref(process_id).await {
-            Ok(process_ref) => process_ref,
-            Err(PluginError::ProcessNoLongerRetained {
-                terminal_label,
-                pruned_at_ms,
-            }) => {
-                return Ok(ProcessEventReadOutcome::NoLongerRetained(
-                    super::events::ProcessEventHistoryRetention::Pruned {
-                        terminal_label,
-                        pruned_at_ms,
-                    },
-                ));
-            }
-            Err(error) => return Err(error),
-        };
-        self.event_page_ref(&process_ref, 0, limit, mode).await
+        self.event_page_after(process_id, 0, limit, mode).await
     }
 
     /// This is the signal-ordinal query: the Nth occurrence of a signal event
@@ -479,13 +441,6 @@ pub trait ProcessEventLog: ProcessQuery {
     async fn count_events_through(
         &self,
         process_id: &ProcessId,
-        event_type: &str,
-        up_to_sequence: u64,
-    ) -> Result<u64, PluginError>;
-
-    async fn count_events_through_ref(
-        &self,
-        process_ref: &ProcessRef,
         event_type: &str,
         up_to_sequence: u64,
     ) -> Result<u64, PluginError>;
@@ -635,7 +590,7 @@ pub trait ProcessLifecycle: Send + Sync {
         authority: &ProcessExecutionWriteAuthority,
     ) -> Result<ProcessStartOutcome, PluginError>;
 
-    /// Request cancellation of this exact process lifetime.
+    /// Request cancellation of one process.
     ///
     /// The registry stamps the first accepted request with its injected clock.
     /// Same origin and requester is a no-op on a nonterminal row; a different
@@ -644,7 +599,7 @@ pub trait ProcessLifecycle: Send + Sync {
     /// first accepted fact, including its original timestamp.
     async fn request_process_cancel(
         &self,
-        process_ref: &crate::ProcessRef,
+        process_id: &ProcessId,
         origin: crate::CancelOrigin,
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
@@ -665,13 +620,13 @@ pub trait ProcessLifecycle: Send + Sync {
     /// recorded one must override it.
     async fn request_process_cancel_reporting_realization(
         &self,
-        process_ref: &crate::ProcessRef,
+        process_id: &ProcessId,
         origin: crate::CancelOrigin,
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
     ) -> Result<(ProcessRecord, crate::StoreRealization), PluginError> {
         let record = self
-            .request_process_cancel(process_ref, origin, requester, attribution)
+            .request_process_cancel(process_id, origin, requester, attribution)
             .await?;
         Ok((record, crate::StoreRealization::Realized))
     }
@@ -920,16 +875,13 @@ pub trait ProcessRetention: Send + Sync {
 
     /// Acknowledge that all configured artifact stores applied one cleanup.
     ///
-    /// Implementations remove the exact cleanup record and report whether the
-    /// reusable process id now names a successor incarnation. A stale successor
-    /// is an expected typed outcome, never silent success.
+    /// Implementations remove the exact cleanup record.
     async fn complete_process_artifact_cleanup(
         &self,
         process_id: &ProcessId,
-        incarnation: super::model::ProcessIncarnation,
     ) -> Result<super::model::ProcessArtifactCleanupAck, PluginError> {
         Ok(super::model::ProcessArtifactCleanupAck::Unknown {
-            process_ref: super::model::ProcessRef::new(process_id.clone(), incarnation),
+            process_id: process_id.clone(),
         })
     }
 
@@ -1201,11 +1153,11 @@ impl std::fmt::Debug for ProcessRegistryBinding {
             .finish_non_exhaustive()
     }
 }
-/// The effect hosts a process registry lifts scope fences on at registration.
+/// The effect hosts a process registry is bound to.
 ///
-/// Shared by every registry backend: [`bind`](Self::bind) is idempotent and weak,
-/// [`reinstate_process_scope`](Self::reinstate_process_scope) lifts the fence of one process
-/// scope on every bound host that is still alive.
+/// Shared by every registry backend: [`bind`](Self::bind) is idempotent and
+/// weak. A registration never lifts a scope fence: every process is minted a
+/// new id, so no registration names a pruned process's fenced scope.
 #[derive(Clone, Default)]
 pub struct ProcessScopeFenceHosts {
     hosts: Arc<std::sync::Mutex<Vec<Weak<dyn EffectHost>>>>,
@@ -1235,28 +1187,6 @@ impl ProcessScopeFenceHosts {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .iter()
             .all(|host| host.strong_count() == 0)
-    }
-
-    /// Lift the scope-retirement fence of `process_id` on every bound host.
-    pub async fn reinstate_process_scope(&self, process_id: &ProcessId) -> Result<(), PluginError> {
-        let hosts: Vec<Arc<dyn EffectHost>> = self
-            .hosts
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .iter()
-            .filter_map(Weak::upgrade)
-            .collect();
-        let scope = ExecutionScope::process(process_id);
-        for host in hosts {
-            host.reinstate_effect_scope(&scope)
-                .await
-                .map_err(|error| {
-                    PluginError::Session(format!(
-                        "process `{process_id}` registration could not lift its effect-scope fence: {error}"
-                    ))
-                })?;
-        }
-        Ok(())
     }
 }
 

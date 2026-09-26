@@ -522,9 +522,7 @@ async fn run_worker(
         process_name: worker,
         args: serde_json::Map::new(),
     };
-    let process_id = lash_core::ProcessId::from("mini-worker");
     let registration = lash_core::ProcessRegistration::new(
-        process_id.clone(),
         input.to_process_input().expect("valid process input"),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
@@ -536,17 +534,15 @@ async fn run_worker(
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
         input.process_identity(),
     ));
-    let incarnation = lash_core::ProcessIncarnation::from_registration_sequence(1);
     let backend = lash_sqlite_store::SqliteBackend::memory()
         .await
         .expect("open a SQLite memory backend");
+    let registry = lash_core::Backend::from(backend.clone()).process_registry();
+    let process_id = crate::lib_tests::register_harness_process(&registry, &registration).await;
     let effect_host = lash_core::Backend::from(backend.clone()).effect_host();
     let scoped = lash_core::EffectHost::scoped_static(
         effect_host.as_ref(),
-        lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
-            process_id.clone(),
-            incarnation,
-        )),
+        lash_core::AdmittedScope::process(process_id.clone()),
     )
     .expect("valid process scope")
     .expect("the backend host lends a static controller");
@@ -564,14 +560,14 @@ async fn run_worker(
         .build();
     let plugins = Arc::clone(&built.dispatch.plugins);
     let catalog = Arc::clone(&built.dispatch.tool_catalog);
-    let registry = lash_core::Backend::from(backend.clone()).process_registry();
-    let authority =
-        lash_core::ProcessExecutionWriteAuthority::invocation(process_id, run).bind_attempt(1);
-    let process_events = durable_process_events(&registry, &registration, &authority).await;
+    let authority = lash_core::ProcessExecutionWriteAuthority::invocation(process_id.clone(), run)
+        .bind_attempt(1);
+    let process_events = durable_process_events(&registry, &process_id, &authority).await;
     let execution_registration = registration.clone();
+    let execution_process_id = process_id.clone();
     let context = lash_core::ProcessEngineRunContext::new(
         registration,
-        incarnation,
+        process_id.clone(),
         lash_core::ProcessExecutionContext::default().with_execution_write_authority(authority),
         lash_core::testing::process_work_wiring_for_registry(registry),
         lash_core::SessionId::from("mini-session"),
@@ -590,9 +586,11 @@ async fn run_worker(
         Box::new(move |_catalog| {
             Ok(
                 lash_core_execution::runtime::ProcessEngineRuntimeContext::new(
-                    built
-                        .into_runtime()
-                        .with_process_execution(&execution_registration, process_events),
+                    built.into_runtime().with_process_execution(
+                        execution_process_id,
+                        &execution_registration,
+                        process_events,
+                    ),
                     lash_core_execution::runtime::ProcessEngineRunGuard::new(|_| {
                         Box::pin(async { Ok(()) })
                     }),

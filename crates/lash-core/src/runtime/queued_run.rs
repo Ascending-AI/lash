@@ -40,7 +40,7 @@ impl<'a> QueuedEffectSource<'a> {
         &self,
         scope: crate::ExecutionScope,
     ) -> Result<ScopedEffectController<'a>, RuntimeError> {
-        let admitted = crate::AdmittedScope::unpinned(scope)?;
+        let admitted = crate::AdmittedScope::new(scope);
         match self {
             Self::Host { host, .. } => host.scoped(admitted),
             Self::Controller { controller, .. } => {

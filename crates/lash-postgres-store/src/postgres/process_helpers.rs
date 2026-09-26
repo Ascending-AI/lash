@@ -42,9 +42,6 @@ pub(crate) async fn load_process_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
     process_id: &ProcessId,
 ) -> Result<Option<ProcessRecord>, PluginError> {
-    if let Some(reason) = crate::process_key::invalid_process_key_reason(process_id) {
-        return Err(PluginError::Session(reason.into()));
-    }
     let json: Option<String> = sqlx::query_scalar(
         process_sql()
             .process_postgres
@@ -59,13 +56,26 @@ pub(crate) async fn load_process_tx(
         .transpose()
 }
 
+/// The retained process registered under `start_key`, if any, locked for the
+/// registration transaction that read it.
+pub(crate) async fn load_process_by_start_key_tx(
+    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    start_key: &lash_core_execution::StartKey,
+) -> Result<Option<ProcessRecord>, PluginError> {
+    let json: Option<String> =
+        sqlx::query_scalar(process_sql().process.select_record_json_by_start_key.sql())
+            .bind(start_key.as_str())
+            .fetch_optional(&mut **tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
+    json.map(|json| serde_json::from_str(&json).map_err(process_decode_error))
+        .transpose()
+}
+
 pub(crate) async fn load_process(
     pool: &PgPool,
     process_id: &ProcessId,
 ) -> Result<Option<ProcessRecord>, PluginError> {
-    if let Some(reason) = crate::process_key::invalid_process_key_reason(process_id) {
-        return Err(PluginError::Session(reason.into()));
-    }
     let json: Option<String> =
         sqlx::query_scalar(process_sql().process.select_record_json_by_id.sql())
             .bind(process_id.as_str())
@@ -83,7 +93,7 @@ pub(crate) async fn require_process_tx(
     if let Some(record) = load_process_tx(tx, process_id).await? {
         return Ok(record);
     }
-    let row = sqlx::query(process_sql().tombstone.select_latest_terminal.sql())
+    let row = sqlx::query(process_sql().tombstone.select_terminal.sql())
         .bind(process_id.as_str())
         .fetch_optional(&mut **tx)
         .await
@@ -99,59 +109,6 @@ pub(crate) async fn require_process_tx(
     Err(registry_transitions::absent_process_error(
         process_id, tombstone,
     ))
-}
-
-pub(crate) async fn require_process_ref_tx(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    process_ref: &ProcessRef,
-) -> Result<ProcessRecord, PluginError> {
-    if let Some(record) = load_process_tx(tx, &process_ref.process_id).await? {
-        if record.incarnation == process_ref.incarnation {
-            return Ok(record);
-        }
-        return Err(registry_transitions::process_incarnation_superseded(
-            process_ref,
-            record.incarnation,
-        ));
-    }
-    let exact = sqlx::query(
-        process_sql()
-            .tombstone
-            .select_terminal_for_incarnation
-            .sql(),
-    )
-    .bind(process_ref.process_id.as_str())
-    .bind(process_ref.incarnation.registration_sequence() as i64)
-    .fetch_optional(&mut **tx)
-    .await
-    .map_err(plugin_sqlx_error)?;
-    if let Some(row) = exact {
-        return Err(registry_transitions::process_no_longer_retained(
-            registry_transitions::ProcessTombstoneStamp {
-                terminal_label: row.get(0),
-                pruned_at_ms: plugin_u64_from_sql("ProcessTombstone", "pruned_at_ms", row.get(1))?,
-            },
-        ));
-    }
-    let latest: Option<i64> =
-        sqlx::query_scalar(process_sql().tombstone.select_latest_incarnation.sql())
-            .bind(process_ref.process_id.as_str())
-            .fetch_optional(&mut **tx)
-            .await
-            .map_err(plugin_sqlx_error)?;
-    match latest {
-        Some(incarnation) => Err(registry_transitions::process_incarnation_superseded(
-            process_ref,
-            ProcessIncarnation::from_registration_sequence(plugin_u64_from_sql(
-                "ProcessTombstone",
-                "incarnation",
-                incarnation,
-            )?),
-        )),
-        None => Err(registry_transitions::unknown_process(
-            &process_ref.process_id,
-        )),
-    }
 }
 
 pub(crate) fn decode_matching_process(
@@ -396,7 +353,6 @@ pub(crate) async fn apply_process_event_append_tx(
             }
             sqlx::query(process_sql().event.insert.sql())
                 .bind(process_id.as_str())
-                .bind(event.process_incarnation.registration_sequence() as i64)
                 .bind(sequence as i64)
                 .bind(event.event_type.as_str())
                 .bind(event.invocation.replay_key())
@@ -426,12 +382,7 @@ pub(crate) async fn apply_process_event_append_tx(
             if record.is_terminal() {
                 crate::process_registry::parent_end::record_tx(
                     tx,
-                    &lash_core_execution::ParentScope::process(
-                        lash_core_execution::ProcessRef::new(
-                            process_id.clone(),
-                            record.incarnation,
-                        ),
-                    ),
+                    &lash_core_execution::ParentScope::process(process_id.clone()),
                     occurred_at_ms,
                 )
                 .await?;
@@ -502,7 +453,6 @@ pub(crate) async fn insert_wake_delivery_tx(
     sqlx::query(process_sql().wake_postgres.insert_pending.sql())
         .bind(&delivery.delivery_id)
         .bind(delivery.wake.process_id.as_str())
-        .bind(delivery.wake.process_incarnation.registration_sequence() as i64)
         .bind(delivery.wake.target_session_id.as_str())
         .bind(delivery.wake.sequence as i64)
         .bind(delivery.next_attempt_at_ms as i64)
@@ -635,7 +585,7 @@ pub(crate) async fn validate_process_execution_authority_tx(
             // another process is refused without reading this process's row.
             if lease.process_id != process_id {
                 return Err(PluginError::ProcessLeaseSuperseded {
-                    process_id: ProcessId::from(process_id.to_string()),
+                    process_id: process_id.clone(),
                 });
             }
             let current = load_process_lease_tx(tx, process_id).await?;

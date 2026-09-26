@@ -124,7 +124,7 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
             }
         )
         .await,
-        vec!["proc-filter-target".to_string()]
+        vec![target.id.clone()]
     );
     assert_eq!(
         filtered_ids(
@@ -136,7 +136,7 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
             }
         )
         .await,
-        vec!["proc-filter-target".to_string()]
+        vec![target.id.clone()]
     );
     assert_eq!(
         filtered_ids(
@@ -148,7 +148,7 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
             }
         )
         .await,
-        vec!["proc-filter-target".to_string()]
+        vec![target.id.clone()]
     );
     assert_eq!(
         filtered_ids(
@@ -160,7 +160,7 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
             }
         )
         .await,
-        vec!["proc-filter-target".to_string()]
+        vec![target.id.clone()]
     );
     assert_eq!(
         filtered_ids(
@@ -172,7 +172,7 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
             }
         )
         .await,
-        vec!["proc-filter-target".to_string()]
+        vec![target.id.clone()]
     );
     assert_eq!(
         filtered_ids(
@@ -185,7 +185,7 @@ pub async fn list_processes_filters_by_enriched_fields(registry: Arc<dyn Process
             }
         )
         .await,
-        vec!["proc-filter-target".to_string()],
+        vec![target.id.clone()],
         "created-at range is start-inclusive and end-exclusive"
     );
 
@@ -262,20 +262,27 @@ pub async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
     registry: Arc<dyn ProcessRegistry>,
 ) {
     const KIND: &str = "recent-retired-filter-kind";
-    for process_id in ["recent-filter-running", "recent-filter-old"] {
-        registry
-            .register_process_with_observers(
-                registration(process_id).with_admitted_identity(
-                    lash_core::AdmittedProcessIdentity::for_testing(ProcessIdentity::new(KIND)),
-                ),
-                &[SessionId::from("recent-filter-observer".to_string())],
-            )
-            .await
-            .expect("register recent-retired fixture");
+    let mut recent_ids = Vec::new();
+    for label in ["recent-filter-running", "recent-filter-old"] {
+        recent_ids.push(
+            registry
+                .register_process_with_observers(
+                    registration(label).with_admitted_identity(
+                        lash_core::AdmittedProcessIdentity::for_testing(ProcessIdentity::labelled(
+                            KIND,
+                            Some(label),
+                        )),
+                    ),
+                    &[SessionId::from("recent-filter-observer".to_string())],
+                )
+                .await
+                .expect("register recent-retired fixture")
+                .id,
+        );
     }
     registry
         .complete_process(
-            &ProcessId::from("recent-filter-old"),
+            &recent_ids[1],
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!({"age": "old"}),
             )),
@@ -284,18 +291,22 @@ pub async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
         .await
         .expect("complete old terminal process");
     tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-    registry
+    let recent_filter_fresh_id = registry
         .register_process_with_observers(
             registration("recent-filter-fresh").with_admitted_identity(
-                lash_core::AdmittedProcessIdentity::for_testing(ProcessIdentity::new(KIND)),
+                lash_core::AdmittedProcessIdentity::for_testing(ProcessIdentity::labelled(
+                    KIND,
+                    Some("recent-filter-fresh"),
+                )),
             ),
             &[SessionId::from("recent-filter-observer".to_string())],
         )
         .await
-        .expect("register fresh terminal process");
+        .expect("register fresh terminal process")
+        .id;
     let fresh = registry
         .complete_process(
-            &ProcessId::from("recent-filter-fresh"),
+            &recent_filter_fresh_id,
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!({"age": "fresh"}),
             )),
@@ -330,13 +341,7 @@ pub async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
             .list_observed_by(&SessionId::from("recent-filter-observer"), &filter)
             .await
             .expect("bounded observer list");
-        assert_eq!(
-            observed
-                .iter()
-                .map(|record| record.id.as_str())
-                .collect::<Vec<_>>(),
-            expected
-        );
+        assert_eq!(recent_labels(&observed), expected);
         assert!(
             registry
                 .list_observed_by(&SessionId::from("unrelated-observer"), &filter)
@@ -385,12 +390,9 @@ pub async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
             ..ProcessListFilter::default()
         })
         .await
-        .expect("list live plus recently retired processes")
-        .into_iter()
-        .map(|record| record.id)
-        .collect::<Vec<_>>();
+        .expect("list live plus recently retired processes");
     assert_eq!(
-        recent,
+        recent_labels(&recent),
         ["recent-filter-fresh", "recent-filter-running"],
         "the bounded read must retain old live rows and exclude old retired rows"
     );
@@ -402,12 +404,9 @@ pub async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
             ..ProcessListFilter::default()
         })
         .await
-        .expect("list all recent-retired fixtures")
-        .into_iter()
-        .map(|record| record.id)
-        .collect::<Vec<_>>();
+        .expect("list all recent-retired fixtures");
     assert_eq!(
-        all,
+        recent_labels(&all),
         [
             "recent-filter-fresh",
             "recent-filter-old",
@@ -415,6 +414,17 @@ pub async fn list_processes_bounds_retired_rows_without_hiding_live_rows(
         ],
         "the unbounded list must preserve every status"
     );
+}
+
+/// The labels of `records`, sorted: the recent-retired fixtures register
+/// under labels, and a list orders rows by the id the registrar minted.
+fn recent_labels(records: &[crate::ProcessRecord]) -> Vec<&str> {
+    let mut labels = records
+        .iter()
+        .map(|record| record.identity.label.as_deref().unwrap_or_default())
+        .collect::<Vec<_>>();
+    labels.sort_unstable();
+    labels
 }
 
 /// Parent-scope and pending-cancel narrowing, and the agent-frame half of the
@@ -443,9 +453,19 @@ pub async fn list_processes_filters_by_parent_scope_and_pending_cancel(
             .list_processes(filter)
             .await
             .expect("list processes")
-            .into_iter()
-            .map(|record| record.id.to_string())
+            .iter()
+            .map(fixture_label)
             .collect()
+    }
+
+    /// The label a fixture registered under, which names the row whatever id
+    /// the registrar minted for it.
+    fn fixture_label(record: &crate::ProcessRecord) -> String {
+        record
+            .identity
+            .label
+            .clone()
+            .unwrap_or_else(|| record.id.to_string())
     }
 
     #[expect(
@@ -478,7 +498,7 @@ pub async fn list_processes_filters_by_parent_scope_and_pending_cancel(
         let mut expected_by_predicate = all
             .iter()
             .filter(|record| filter.matches_record(record))
-            .map(|record| record.id.to_string())
+            .map(fixture_label)
             .collect::<Vec<_>>();
         expected_by_predicate.sort();
         assert_eq!(
@@ -501,6 +521,7 @@ pub async fn list_processes_filters_by_parent_scope_and_pending_cancel(
     let other_turn_scope =
         lash_core::ParentScope::turn(session.clone(), crate::TurnId::from("scope-turn-two"));
 
+    let mut scope_ids = std::collections::BTreeMap::new();
     for (id, scope, parent) in [
         ("scope-filter-a-child-one", &frame_a, &turn_scope),
         ("scope-filter-a-child-two", &frame_a, &turn_scope),
@@ -511,11 +532,13 @@ pub async fn list_processes_filters_by_parent_scope_and_pending_cancel(
         request.provenance = ProcessProvenance::session(scope.clone());
         request.lifecycle =
             lash_core::ProcessLifecyclePolicy::new(parent.clone(), lash_core::OnParentEnd::Cancel);
-        registry
+        let record = registry
             .register_process(request)
             .await
             .expect("register parent-scoped process");
+        scope_ids.insert(id, record.id);
     }
+    let child_one = scope_ids["scope-filter-a-child-one"].clone();
     let mut host_parented = registration("scope-filter-a-host");
     host_parented.provenance = ProcessProvenance::session(frame_a.clone());
     registry
@@ -586,15 +609,7 @@ pub async fn list_processes_filters_by_parent_scope_and_pending_cancel(
 
     let cancelled = registry
         .request_process_cancel(
-            &lash_core::ProcessRef::new(
-                ProcessId::from("scope-filter-a-child-one"),
-                registry
-                    .get_process(&ProcessId::from("scope-filter-a-child-one"))
-                    .await
-                    .expect("read cancel target")
-                    .expect("retained cancel target")
-                    .incarnation,
-            ),
+            &child_one,
             lash_core::CancelOrigin::OperatorRequested,
             "actor:scope-filter".to_string(),
             None,
@@ -632,7 +647,7 @@ pub async fn list_processes_filters_by_parent_scope_and_pending_cancel(
 
     registry
         .complete_process(
-            &ProcessId::from("scope-filter-a-child-one"),
+            &child_one,
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::cancelled(
                 lash_core::ToolCancellation::runtime("cancel honoured"),
             )),

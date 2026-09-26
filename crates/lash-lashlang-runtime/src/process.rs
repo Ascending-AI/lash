@@ -501,14 +501,10 @@ pub async fn run_lashlang_process(
             }
         }
     };
-    let process_id = context.registration().id.clone();
-    // The opener, not the name: a process re-registered under the same name is
-    // a different opener and must never mint identities the predecessor used
-    // (ADR 0099 §1).
-    let identities = crate::LashlangHostIdentities::process_body(lash_core::ProcessRef::new(
-        process_id.clone(),
-        context.incarnation(),
-    ));
+    let process_id = context.process_id().clone();
+    // The minted id is the opener: it is never reused, so no other process
+    // can mint the identities this one uses (ADR 0099 §1).
+    let identities = crate::LashlangHostIdentities::process_body(process_id.clone());
     let session_id = process_trace_session_id(&context.registration().provenance.originator);
     let engine_execution_id = context
         .execution_context()
@@ -533,7 +529,6 @@ pub async fn run_lashlang_process(
             process_ref: input.process_ref.clone(),
             process_name: input.process_name.clone(),
             attempt,
-            incarnation: context.incarnation(),
             engine_execution_id,
         },
     );
@@ -807,8 +802,8 @@ struct LashlangProcessHost<'run> {
     processes: lash_core::facade_support::ProcessEngineProcessContext,
     process_id: ProcessId,
     /// The one derivation of the ids and key namespace this tier mints,
-    /// shared with the RLM cell bridge. The authority is this process
-    /// incarnation, never a segment: a body that hands over keeps minting from
+    /// shared with the RLM cell bridge. The authority is this process,
+    /// never a segment: a body that hands over keeps minting from
     /// the scope its first segment used.
     identities: crate::LashlangHostIdentities,
     /// The run's issue-ordinal mint and recorded frontier (FIG-3586), resumed
@@ -918,13 +913,12 @@ enum SignalWaitSetupError {
 
 async fn establish_signal_wait(
     processes: &dyn SignalWaitProcesses,
-    process_id: &ProcessId,
     name: String,
     event_type: String,
     key: String,
     ordinal: u64,
 ) -> Result<(), SignalWaitSetupError> {
-    let since_ms = wait_since_ms(processes, process_id, &key)
+    let since_ms = wait_since_ms(processes, &key)
         .await
         .map_err(SignalWaitSetupError::Read)?;
     let wait = lash_core::WaitState {
@@ -945,7 +939,6 @@ async fn establish_signal_wait(
 
 async fn wait_since_ms(
     processes: &dyn SignalWaitProcesses,
-    process_id: &ProcessId,
     key: &str,
 ) -> Result<u64, lash_core::PluginError> {
     if let Some(since_ms) = processes
@@ -977,18 +970,6 @@ async fn wait_since_ms(
                 return Err(lash_core::PluginError::ProcessNoLongerRetained {
                     terminal_label,
                     pruned_at_ms,
-                });
-            }
-            lash_core::ProcessEventReadOutcome::NoLongerRetained(
-                lash_core::ProcessEventHistoryRetention::Retired {
-                    requested_incarnation,
-                    current_incarnation,
-                },
-            ) => {
-                return Err(lash_core::PluginError::ProcessIncarnationSuperseded {
-                    process_id: process_id.clone(),
-                    requested_incarnation,
-                    current_incarnation,
                 });
             }
         };
@@ -1303,7 +1284,6 @@ impl LashlangProcessHost<'_> {
         // the terminal is stored replays its answer instead of meeting a
         // registry that refuses a terminal process's wait (FIG-3673).
         let processes = self.processes.clone();
-        let process_id = self.process_id.clone();
         let step_key = key.clone();
         let step_name = name.clone();
         self.ctx
@@ -1312,7 +1292,6 @@ impl LashlangProcessHost<'_> {
                 Box::pin(async move {
                     establish_signal_wait(
                         &processes,
-                        &process_id,
                         step_name,
                         event_type,
                         step_key,
@@ -1511,7 +1490,6 @@ struct LashlangProcessExecutionTrace {
     process_ref: lashlang::ProcessRef,
     process_name: String,
     attempt: u32,
-    incarnation: lash_core::ProcessIncarnation,
     engine_execution_id: Option<String>,
     resource_call_ids: Arc<std::sync::Mutex<BTreeMap<(String, u64), String>>>,
     pending_resource_starts:
@@ -1532,7 +1510,6 @@ struct LashlangProcessTraceIdentity {
     process_ref: lashlang::ProcessRef,
     process_name: String,
     attempt: u32,
-    incarnation: lash_core::ProcessIncarnation,
     engine_execution_id: Option<String>,
 }
 

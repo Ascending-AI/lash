@@ -3,13 +3,14 @@ use super::*;
 #[tokio::test]
 pub(super) async fn ingress_sweep_resumes_latest_segment_without_duplicate_segment_zero() {
     let (registry, continuations) = process_stores();
-    registry
-        .register_process(rerunnable_registration("mid-chain"))
+    let mid_chain_id = registry
+        .register_process(rerunnable_registration())
         .await
-        .expect("register");
+        .expect("register")
+        .id;
     continuations
         .put_segment_handover(
-            &ProcessId::from("mid-chain"),
+            &mid_chain_id,
             lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 3,
@@ -37,7 +38,9 @@ pub(super) async fn ingress_sweep_resumes_latest_segment_without_duplicate_segme
     let requests = captured.lock_recover();
     assert_eq!(requests.len(), 1);
     assert!(
-        requests[0].starts_with("POST /LashProcessWorkflow/mid-chain%233/run/send "),
+        requests[0].starts_with(&format!(
+            "POST /LashProcessWorkflow/{mid_chain_id}%233/run/send "
+        )),
         "recovery must address the latest segment workflow key: {}",
         requests[0]
     );
@@ -63,13 +66,14 @@ pub(super) async fn ingress_sweep_skips_externally_owned_and_reconciles_abandon_
     // A Rerunnable row alongside them still submits, so exactly one ingress call
     // fires and it is for the Lash-executed row.
     let registry = process_registry();
-    registry
-        .register_process(external_registration("ext-abandon"))
+    let ext_abandon_id = registry
+        .register_process(external_registration())
         .await
-        .expect("register externally-owned row with pending abandon");
+        .expect("register externally-owned row with pending abandon")
+        .id;
     registry
         .request_process_abandon(
-            &ProcessId::from("ext-abandon"),
+            &ext_abandon_id,
             lash_core::AbandonRequest {
                 requested_by: "operator".to_string(),
                 requested_at_ms: 111,
@@ -78,14 +82,16 @@ pub(super) async fn ingress_sweep_skips_externally_owned_and_reconciles_abandon_
         )
         .await
         .expect("record abandon request");
-    registry
-        .register_process(external_registration("ext-idle"))
+    let ext_idle_id = registry
+        .register_process(external_registration())
         .await
-        .expect("register externally-owned row without abandon");
-    registry
-        .register_process(rerunnable_registration("rerun-1"))
+        .expect("register externally-owned row without abandon")
+        .id;
+    let rerun_1_id = registry
+        .register_process(rerunnable_registration())
         .await
-        .expect("register rerunnable row");
+        .expect("register rerunnable row")
+        .id;
 
     // The capture server accepts exactly one connection: if any ExternallyOwned
     // row were submitted, a second connect would be attempted and the extra
@@ -105,7 +111,7 @@ pub(super) async fn ingress_sweep_skips_externally_owned_and_reconciles_abandon_
 
     // Skipped is not silent: an externally-owned row is a typed deferral on this
     // tier too, so one registry reads the same whichever tier drove it.
-    assert_eq!(report.admitted, vec!["rerun-1".to_string()]);
+    assert_eq!(report.admitted, vec![rerun_1_id.to_string()]);
     let externally_owned = report
         .deferred
         .iter()
@@ -114,7 +120,7 @@ pub(super) async fn ingress_sweep_skips_externally_owned_and_reconciles_abandon_
         .collect::<Vec<_>>();
     assert_eq!(
         externally_owned,
-        vec!["ext-abandon".to_string(), "ext-idle".to_string()]
+        vec![ext_abandon_id.to_string(), ext_idle_id.to_string()]
     );
 
     let requests = captured.lock_recover().clone();
@@ -124,7 +130,7 @@ pub(super) async fn ingress_sweep_skips_externally_owned_and_reconciles_abandon_
         "only the Rerunnable row is submitted; ExternallyOwned rows are never POSTed"
     );
     assert!(
-        requests[0].starts_with("POST /LashProcessWorkflow/rerun-1/run/send "),
+        requests[0].starts_with(&format!("POST /LashProcessWorkflow/{rerun_1_id}/run/send ")),
         "the single submit is the Lash-executed row: {}",
         requests[0]
     );
@@ -132,7 +138,7 @@ pub(super) async fn ingress_sweep_skips_externally_owned_and_reconciles_abandon_
     // The abandon-request externally-owned row is now terminal Abandoned, written
     // by the reconciled-request path with no Lash execution owner to name.
     let abandoned = registry
-        .get_process(&ProcessId::from("ext-abandon"))
+        .get_process(&ext_abandon_id)
         .await
         .expect("read process")
         .expect("get reconciled row");
@@ -152,7 +158,7 @@ pub(super) async fn ingress_sweep_skips_externally_owned_and_reconciles_abandon_
     // The externally-owned row without an abandon request is left untouched for
     // its external owner to complete.
     let idle = registry
-        .get_process(&ProcessId::from("ext-idle"))
+        .get_process(&ext_idle_id)
         .await
         .expect("read process")
         .expect("get idle externally-owned row");
@@ -470,7 +476,8 @@ pub(super) async fn restate_turn_control_owner_is_stable_per_configured_authorit
         .expect("claim authority reopen lane")
         .acquired()
         .expect("authority reopen lane is free");
-    let physical_scope = ExecutionScope::process("restate-authority-process");
+    let physical_scope =
+        ExecutionScope::process(lash_core::ProcessId::fixture("restate-authority-process"));
     let first_binding = lash_core::facade_support::turn_control_binding_id_for_scope(
         &first_host.turn_control_binding_id(),
         &physical_scope,
@@ -567,7 +574,7 @@ pub(super) async fn restate_attach_survives_control_timeout_and_honors_ceiling()
             "process-1",
             "await_terminal",
             &RestateProcessAwaitRequest {
-                process_id: ProcessId::from("process-1"),
+                process_id: ProcessId::fixture("process-1"),
             },
         )
         .await
@@ -1020,7 +1027,7 @@ pub(super) async fn restate_ingress_client_calls_workflow_and_decodes_output() {
             "process-1",
             "await_terminal",
             &RestateProcessAwaitRequest {
-                process_id: ProcessId::from("process-1"),
+                process_id: ProcessId::fixture("process-1"),
             },
         )
         .await
@@ -1072,7 +1079,7 @@ pub(super) async fn restate_ingress_client_pins_effect_replay_with_idempotency_k
 
 pub(super) async fn await_process_terminal_until_terminal(
     process_work: &dyn lash_core::ProcessWorkSubstrate,
-    process_ref: &lash_core::ProcessRef,
+    process_ref: &lash_core::ProcessId,
 ) -> Result<ProcessAwaitOutput, PluginError> {
     loop {
         match process_work.await_process_terminal(process_ref).await? {
@@ -1091,10 +1098,10 @@ pub(super) async fn restate_process_attach_calls_await_terminal_ingress() {
     .await;
     let registry = process_registry();
     let record = registry
-        .register_process(external_registration("process-1"))
+        .register_process(external_registration())
         .await
         .expect("register attach target");
-    let process_ref = lash_core::ProcessRef::from_record(&record);
+    let process_ref = record.id.clone();
     let runner = RestateProcessIngressRunner::new(base_url, registry, continuation_store());
 
     let output = await_process_terminal_until_terminal(&runner, &process_ref)
@@ -1111,18 +1118,18 @@ pub(super) async fn restate_process_attach_calls_await_terminal_ingress() {
 #[tokio::test]
 pub(super) async fn cancel_during_successor_boundary_routes_root_and_await_terminal_resolves() {
     assert_eq!(
-        terminal_completion_workflow_key(&ProcessId::from("retained-terminal"), 2),
-        Some("retained-terminal".to_string())
+        terminal_completion_workflow_key(&ProcessId::fixture("retained-terminal"), 2),
+        Some(ProcessId::fixture("retained-terminal").to_string())
     );
     let registry = process_registry();
     let record = registry
-        .register_process(external_registration("retained-terminal"))
+        .register_process(external_registration())
         .await
         .expect("register");
     let expected = process_cancellation("cancelled after a long chain", None);
     registry
         .complete_process(
-            &ProcessId::from("retained-terminal"),
+            &record.id,
             expected.clone(),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
@@ -1132,12 +1139,9 @@ pub(super) async fn cancel_during_successor_boundary_routes_root_and_await_termi
         RestateProcessIngressRunner::new("http://127.0.0.1:1", registry, continuation_store());
 
     assert_eq!(
-        await_process_terminal_until_terminal(
-            &runner,
-            &lash_core::ProcessRef::from_record(&record),
-        )
-        .await
-        .expect("registry terminal bypasses expired workflow key"),
+        await_process_terminal_until_terminal(&runner, &record.id.clone(),)
+            .await
+            .expect("registry terminal bypasses expired workflow key"),
         expected
     );
 }
@@ -1151,10 +1155,10 @@ pub(super) async fn restate_process_attach_maps_ingress_error_to_plugin_error() 
     .await;
     let registry = process_registry();
     let record = registry
-        .register_process(external_registration("process-1"))
+        .register_process(external_registration())
         .await
         .expect("register attach error target");
-    let process_ref = lash_core::ProcessRef::from_record(&record);
+    let process_ref = record.id.clone();
     let runner = RestateProcessIngressRunner::new(base_url, registry, continuation_store());
 
     let err = await_process_terminal_until_terminal(&runner, &process_ref)
@@ -1164,7 +1168,7 @@ pub(super) async fn restate_process_attach_maps_ingress_error_to_plugin_error() 
 
     assert!(
         err.to_string()
-            .contains("ingress await for process `process-1` failed")
+            .contains(&format!("ingress await for process `{process_ref}` failed"))
     );
     assert!(err.to_string().contains("status 500"));
     assert!(err.to_string().contains("boom"));
@@ -1175,10 +1179,10 @@ pub(super) async fn restate_process_attach_preserves_re_attach_signal_on_ceiling
     let (base_url, black_hole) = spawn_restate_http_black_hole().await;
     let registry = process_registry();
     let record = registry
-        .register_process(external_registration("process-1"))
+        .register_process(external_registration())
         .await
         .expect("register attach ceiling target");
-    let process_ref = lash_core::ProcessRef::from_record(&record);
+    let process_ref = record.id.clone();
     let runner = RestateProcessIngressRunner::new(
         RestateConnection::with_config(base_url, short_restate_timeouts(100, 25)),
         registry,
@@ -1205,10 +1209,10 @@ pub(super) async fn restate_process_attach_reattaches_after_timeout_until_termin
     .await;
     let registry = process_registry();
     let record = registry
-        .register_process(external_registration("process-1"))
+        .register_process(external_registration())
         .await
         .expect("register reattach target");
-    let process_ref = lash_core::ProcessRef::from_record(&record);
+    let process_ref = record.id.clone();
     let runner = RestateProcessIngressRunner::new(
         RestateConnection::with_config(base_url, short_restate_timeouts(100, 25)),
         registry,
@@ -1230,12 +1234,9 @@ pub(super) async fn restate_process_attach_reattaches_after_timeout_until_termin
     assert_eq!(output, expected);
     let requests = captured.lock_recover();
     assert_eq!(requests.len(), 2, "attach must re-enter with the same id");
-    assert!(
-        requests
-            .iter()
-            .all(|request| request
-                .starts_with("POST /LashProcessWorkflow/process-1/await_terminal "))
-    );
+    assert!(requests.iter().all(|request| request.starts_with(&format!(
+        "POST /LashProcessWorkflow/{process_ref}/await_terminal "
+    ))));
 }
 
 #[tokio::test]
@@ -1322,13 +1323,13 @@ pub(super) async fn restate_attach_before_run_resolves_with_delayed_workflow_out
     // A non-terminal process routes await_terminal through the ingress attach
     // rather than the registry short-circuit.
     let record = registry
-        .register_process(external_registration("process-1"))
+        .register_process(external_registration())
         .await
         .expect("register non-terminal process");
 
     let started = std::time::Instant::now();
     let output = driver
-        .await_process_terminal(&lash_core::ProcessRef::from_record(&record))
+        .await_process_terminal(&record.id.clone())
         .await
         .expect("attach await resolves with the eventual output");
     let lash_core::ProcessTerminalWait::Terminal(output) = output else {
@@ -1352,7 +1353,10 @@ pub(super) async fn restate_attach_before_run_resolves_with_delayed_workflow_out
         "await_terminal issues exactly one ingress call"
     );
     assert!(
-        requests[0].starts_with("POST /LashProcessWorkflow/process-1/await_terminal "),
+        requests[0].starts_with(&format!(
+            "POST /LashProcessWorkflow/{}/await_terminal ",
+            record.id
+        )),
         "unexpected request: {}",
         requests[0]
     );
@@ -1373,12 +1377,12 @@ pub(super) async fn restate_driver_short_circuits_terminal_without_ingress_call(
     let driver = deployment.test_process_work();
     let output = process_success(serde_json::json!("already-terminal"));
     let record = registry
-        .register_process(external_registration("process-1"))
+        .register_process(external_registration())
         .await
         .expect("register");
     registry
         .complete_process(
-            &ProcessId::from("process-1"),
+            &record.id,
             output.clone(),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
@@ -1386,7 +1390,7 @@ pub(super) async fn restate_driver_short_circuits_terminal_without_ingress_call(
         .expect("complete");
 
     let resolved = driver
-        .await_process_terminal(&lash_core::ProcessRef::from_record(&record))
+        .await_process_terminal(&record.id.clone())
         .await
         .expect("terminal short-circuit resolves without ingress");
     let lash_core::ProcessTerminalWait::Terminal(resolved) = resolved else {
@@ -1412,10 +1416,10 @@ pub(super) async fn restate_process_attach_maps_malformed_ingress_body_to_plugin
     .await;
     let registry = process_registry();
     let record = registry
-        .register_process(external_registration("process-1"))
+        .register_process(external_registration())
         .await
         .expect("register malformed-body target");
-    let process_ref = lash_core::ProcessRef::from_record(&record);
+    let process_ref = record.id.clone();
     let runner = RestateProcessIngressRunner::new(base_url, registry, continuation_store());
 
     let err = await_process_terminal_until_terminal(&runner, &process_ref)
@@ -1425,7 +1429,7 @@ pub(super) async fn restate_process_attach_maps_malformed_ingress_body_to_plugin
 
     assert!(
         err.to_string()
-            .contains("ingress await for process `process-1` failed"),
+            .contains(&format!("ingress await for process `{process_ref}` failed")),
         "unexpected error: {err}"
     );
 }
@@ -1462,28 +1466,27 @@ pub(super) async fn restate_deployment_sink_funnel_feeds_appended_events() {
         Some(Arc::new(sink.clone())),
     );
     let registry = deployment.test_registry();
-    registry
-        .register_process(
-            external_registration("sink-funnel").with_extra_event_types([
-                lash_core::ProcessEventType {
-                    name: "producer.tick".to_string(),
-                    payload_schema: lash_core::LashSchema::any(),
-                    semantics: lash_core::ProcessEventSemanticsSpec::default(),
-                },
-            ]),
-        )
+    let sink_funnel_id = registry
+        .register_process(external_registration().with_extra_event_types([
+            lash_core::ProcessEventType {
+                name: "producer.tick".to_string(),
+                payload_schema: lash_core::LashSchema::any(),
+                semantics: lash_core::ProcessEventSemanticsSpec::default(),
+            },
+        ]))
         .await
-        .expect("register");
+        .expect("register")
+        .id;
     registry
         .append_event(
-            &ProcessId::from("sink-funnel"),
+            &sink_funnel_id,
             lash_core::ProcessEventAppendRequest::new("producer.tick", serde_json::json!({})),
         )
         .await
         .expect("append");
     registry
         .complete_process(
-            &ProcessId::from("sink-funnel"),
+            &sink_funnel_id,
             process_success(serde_json::Value::Null),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
@@ -1522,10 +1525,10 @@ pub(super) async fn restate_process_attach_is_reentrant_across_sequential_awaits
     .await;
     let registry = process_registry();
     let record = registry
-        .register_process(external_registration("process-1"))
+        .register_process(external_registration())
         .await
         .expect("register reentrant attach target");
-    let process_ref = lash_core::ProcessRef::from_record(&record);
+    let process_ref = record.id.clone();
     let runner = RestateProcessIngressRunner::new(base_url, registry, continuation_store());
 
     let first = await_process_terminal_until_terminal(&runner, &process_ref)
@@ -1620,10 +1623,11 @@ pub(super) async fn restate_admin_client_cancels_kills_and_queries_invocation_st
 #[tokio::test]
 pub(super) async fn a_failed_ingress_submit_defers_its_row_without_discarding_the_pass() {
     let registry = process_registry();
-    registry
-        .register_process(rerunnable_registration("submit-fails"))
+    let submit_fails_id = registry
+        .register_process(rerunnable_registration())
         .await
-        .expect("register the row whose submit fails");
+        .expect("register the row whose submit fails")
+        .id;
 
     let (base_url, _captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
         status: "500 Internal Server Error",
@@ -1640,7 +1644,7 @@ pub(super) async fn a_failed_ingress_submit_defers_its_row_without_discarding_th
 
     assert!(report.admitted.is_empty());
     assert_eq!(report.deferred.len(), 1, "{report:?}");
-    assert_eq!(report.deferred[0].process_id, "submit-fails");
+    assert_eq!(report.deferred[0].process_id, submit_fails_id.as_str());
     let ProcessRecoveryAttemptOutcome::BackendError { operation, .. } =
         &report.deferred[0].disposition
     else {
@@ -1660,10 +1664,11 @@ pub(super) async fn a_failed_ingress_submit_defers_its_row_without_discarding_th
 pub(super) async fn a_failed_ingress_submit_reports_a_worker_fault_to_the_sink() {
     let sink = RecordingProcessEventSink::default();
     let registry = process_registry();
-    registry
-        .register_process(rerunnable_registration("submit-fails-loudly"))
+    let submit_fails_loudly_id = registry
+        .register_process(rerunnable_registration())
         .await
-        .expect("register the row whose submit fails");
+        .expect("register the row whose submit fails")
+        .id;
 
     let (base_url, _captured, server) = spawn_restate_http_capture(vec![MockHttpResponse {
         status: "500 Internal Server Error",
@@ -1689,7 +1694,7 @@ pub(super) async fn a_failed_ingress_submit_reports_a_worker_fault_to_the_sink()
     else {
         panic!("expected a recovery backend fault, got {:?}", faults[0]);
     };
-    assert_eq!(process_id, "submit-fails-loudly");
+    assert_eq!(process_id, &submit_fails_loudly_id);
     assert_eq!(*operation, ProcessRecoveryOperation::SubmitRun);
 }
 
@@ -1699,7 +1704,7 @@ pub(super) async fn a_failed_ingress_submit_reports_a_worker_fault_to_the_sink()
 /// handler; session waits keep the session's object (FIG-2499 fix round 1).
 #[test]
 pub(super) fn durable_wait_index_is_keyed_by_scope_for_session_free_waits() {
-    let process = lash_core::ExecutionScope::process("proc-1");
+    let process = lash_core::ExecutionScope::process(lash_core::ProcessId::fixture("proc-1"));
     let operation = lash_core::ExecutionScope::runtime_operation("op-1");
     let process_key = crate::durable_wait::durable_wait_index_key_for_scope(&process);
     let operation_key = crate::durable_wait::durable_wait_index_key_for_scope(&operation);
@@ -1764,7 +1769,9 @@ pub(super) async fn scope_retirement_and_mint_consult_restate_rather_than_answer
         lash_core::RuntimeErrorCode::EngineAwaitEventRevocationRead
     );
     let reinstate = host
-        .reinstate_effect_scope(&lash_core::ExecutionScope::process("unreachable-process"))
+        .reinstate_effect_scope(&lash_core::ExecutionScope::process(
+            lash_core::ProcessId::fixture("unreachable-process"),
+        ))
         .await
         .expect_err("reinstatement without a reachable Restate is a typed failure");
     assert_eq!(

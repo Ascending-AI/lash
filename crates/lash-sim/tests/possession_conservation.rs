@@ -39,10 +39,9 @@ use lash_core::tool_dispatch::ToolDispatchOutcome;
 use lash_core::{
     EffectOpener, OnParentEnd, ParentScope, PluginOptions, ProcessExecutionEnvSpec, ProcessId,
     ProcessInput, ProcessLifecyclePolicy, ProcessListFilter, ProcessOriginator, ProcessProvenance,
-    ProcessRef, ProcessRegistration, ProcessStartRequest, RecoveryContract,
-    RuntimeExecutionContext, SessionId, SessionPolicy, ToolCallOutcome, ToolCallOutput,
-    ToolCallRecord, ToolIntentExecutionOutcome, ToolIntentIdentity, ToolIntentKind,
-    ToolIntentRefusalReason, ToolIntents, TurnBudget, TurnId,
+    ProcessRegistration, ProcessStartRequest, RecoveryContract, RuntimeExecutionContext, SessionId,
+    SessionPolicy, ToolCallOutcome, ToolCallOutput, ToolCallRecord, ToolIntentExecutionOutcome,
+    ToolIntentIdentity, ToolIntentKind, ToolIntentRefusalReason, ToolIntents, TurnBudget, TurnId,
 };
 
 /// One live opener: a session's run-local execution context plus the counters
@@ -69,6 +68,9 @@ struct PossessionWorld {
     /// Registry rows no run realized — observer/external rows. They are
     /// session-visible, never run-local: legitimately possessed by no opener.
     registered_only: BTreeSet<ProcessId>,
+    /// The minted id behind each scenario label (`"{opener}-{child}"` for a
+    /// realized child), so a later step can name a row the registry minted.
+    labels: BTreeMap<String, ProcessId>,
 }
 
 impl PossessionWorld {
@@ -90,6 +92,7 @@ impl PossessionWorld {
             openers: BTreeMap::new(),
             realized: BTreeMap::new(),
             registered_only: BTreeSet::new(),
+            labels: BTreeMap::new(),
         }
     }
 
@@ -130,12 +133,10 @@ impl PossessionWorld {
     /// records possession in the same settled step.
     async fn realize_direct_start(&mut self, opener_name: &'static str, child: &str) {
         let opener = self.opener(opener_name);
-        let child_id = ProcessId::from(format!("{opener_name}-{child}"));
         let reply = opener
             .context
             .start_child_process(
                 ProcessStartRequest::new(
-                    child_id.clone(),
                     ProcessInput::Engine {
                         kind: "sim-child".to_string(),
                         payload: serde_json::Value::Null,
@@ -152,43 +153,46 @@ impl PossessionWorld {
                         )),
                         OnParentEnd::Cancel,
                     ),
-                ),
+                )
+                .with_start_key(Some(lash_core::StartKey::for_host(
+                    lash_core::StartKeyOwner::HOST,
+                    format!("{opener_name}-{child}"),
+                ))),
                 "engine",
                 Some(child.to_string()),
             )
             .await;
-        assert!(
-            matches!(reply.output.outcome, ToolCallOutcome::Success(_)),
-            "direct start of {child_id} under {opener_name} failed: {:?}",
-            reply.output
-        );
+        let ToolCallOutcome::Success(handle) = &reply.output.outcome else {
+            panic!(
+                "direct start of {child} under {opener_name} failed: {:?}",
+                reply.output
+            );
+        };
+        let child_id = lash_core::process_id_from_handle_json(&handle.to_json_value())
+            .unwrap_or_else(|err| panic!("direct start of {child} replies a handle: {err}"));
+        self.labels
+            .insert(format!("{opener_name}-{child}"), child_id.clone());
         self.realized.insert(child_id, opener_name);
         self.assert_conservation(&format!("{opener_name} direct-start {child}"))
             .await;
     }
 
-    /// An intent-channel start: the declaration's replay key *is* the child id
-    /// (`ProcessId::from_intent_identity`), the intent's own execution lands
-    /// the registry row, and the settled `Executed { StartProcess }` outcome
-    /// carries the realized handle home to the run's possession set.
+    /// An intent-channel start: the intent's own execution lands the registry
+    /// row under a minted id, and the settled `Executed { StartProcess }`
+    /// outcome carries the realized handle home to the run's possession set.
     #[expect(
         clippy::expect_used,
         reason = "test fixture: a call that fails to present aborts the law"
     )]
     async fn realize_intent_start(&mut self, opener_name: &'static str, child: &str) {
-        let (call_id, identity, child_id) = {
-            let opener = self.opener(opener_name);
-            let (call_id, identity) = opener.next_intent_identity(child);
-            let child_id = ProcessId::from_intent_identity(&identity);
-            (call_id, identity, child_id)
-        };
+        let (call_id, identity) = self.opener(opener_name).next_intent_identity(child);
         let record = self
             .registry
-            .register_process(self.realized_registration(&child_id, opener_name))
+            .register_process(self.realized_registration(opener_name))
             .await
-            .unwrap_or_else(|err| panic!("register realized child {child_id}: {err}"));
-        let handle =
-            RuntimeExecutionContext::process_handle_json(&ProcessRef::from_record(&record));
+            .unwrap_or_else(|err| panic!("register realized child {child}: {err}"));
+        let child_id = record.id;
+        let handle = RuntimeExecutionContext::process_handle_json(&child_id);
         let opener = self.opener(opener_name);
         let outcome = settled_outcome(
             &call_id,
@@ -204,6 +208,8 @@ impl PossessionWorld {
             .complete_tool_call(call_id.clone(), None, outcome, &call_id, 0)
             .await
             .expect("the call presents");
+        self.labels
+            .insert(format!("{opener_name}-{child}"), child_id.clone());
         self.realized.insert(child_id, opener_name);
         self.assert_conservation(&format!("{opener_name} intent-start {child}"))
             .await;
@@ -273,15 +279,16 @@ impl PossessionWorld {
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
     async fn settle_signal_echoing_handle(&mut self, opener_name: &'static str, victim: &str) {
-        let victim_id = ProcessId::from(victim);
-        let victim_record = self
-            .registry
-            .get_process(&victim_id)
-            .await
-            .expect("registry read")
-            .unwrap_or_else(|| panic!("echo victim {victim_id} is not registered"));
-        let echoed =
-            RuntimeExecutionContext::process_handle_json(&ProcessRef::from_record(&victim_record));
+        let victim_id = self.labels[victim].clone();
+        assert!(
+            self.registry
+                .get_process(&victim_id)
+                .await
+                .expect("registry read")
+                .is_some(),
+            "echo victim {victim} ({victim_id}) is not registered"
+        );
+        let echoed = RuntimeExecutionContext::process_handle_json(&victim_id);
         let opener = self.opener(opener_name);
         let (call_id, identity) = opener.next_intent_identity("signal");
         let outcome = settled_outcome(
@@ -305,10 +312,9 @@ impl PossessionWorld {
     /// A registry row no run realized: durable and session-visible, but never
     /// run-local. Possession of it by any opener is a phantom.
     async fn register_observed_only(&mut self, label: &str) {
-        let process_id = ProcessId::from(label);
-        self.registry
+        let process_id = self
+            .registry
             .register_process(ProcessRegistration::new(
-                process_id.clone(),
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -317,7 +323,9 @@ impl PossessionWorld {
                 ProcessLifecyclePolicy::new(ParentScope::Host, OnParentEnd::Abandon),
             ))
             .await
-            .unwrap_or_else(|err| panic!("register observed-only row {process_id}: {err}"));
+            .unwrap_or_else(|err| panic!("register observed-only row {label}: {err}"))
+            .id;
+        self.labels.insert(label.to_string(), process_id.clone());
         self.registered_only.insert(process_id);
         self.assert_conservation(&format!("observed-only {label}"))
             .await;
@@ -350,11 +358,7 @@ impl PossessionWorld {
         clippy::expect_used,
         reason = "conformance-law fixture: each result is established by the setup above"
     )]
-    fn realized_registration(
-        &self,
-        child_id: &ProcessId,
-        opener_name: &'static str,
-    ) -> ProcessRegistration {
+    fn realized_registration(&self, opener_name: &'static str) -> ProcessRegistration {
         let session = &self.openers[opener_name].session;
         // Engine rows must name the captured environment they run under.
         let env_ref = ProcessExecutionEnvSpec::new(
@@ -364,7 +368,6 @@ impl PossessionWorld {
         .stable_ref()
         .expect("env spec content-addresses");
         ProcessRegistration::new(
-            child_id.clone(),
             ProcessInput::Engine {
                 kind: "sim-child".to_string(),
                 payload: serde_json::Value::Null,
@@ -525,12 +528,8 @@ async fn realized_processes_are_possessed_by_exactly_one_opener_after_every_step
     // echoes a live handle A owns.
     world.settle_refused_start("B", "ghost").await;
     world.settle_protocol_refused("B").await;
-    world
-        .settle_signal_echoing_handle("B", "session-b-intent-1")
-        .await;
-    world
-        .settle_signal_echoing_handle("B", "session-a-intent-1")
-        .await;
+    world.settle_signal_echoing_handle("B", "B-intent-1").await;
+    world.settle_signal_echoing_handle("B", "A-intent-1").await;
 
     // Durable rows outside every run's possession stay unpossessed.
     world.register_observed_only("host-observed").await;

@@ -10,7 +10,7 @@ use lash_core_execution::LeaseOwnerIdentity;
 mod runtime {
     mod process {
         use lash_core_execution::runtime::{
-            PROCESS_LEASE_SCHEMA_VERSION, ProcessId, ProcessLease, ProcessLeaseClaimOutcome,
+            PROCESS_LEASE_SCHEMA_VERSION, ProcessLease, ProcessLeaseClaimOutcome,
             ProcessLeaseSchemaVersionError, ensure_process_lease_schema_version,
         };
 

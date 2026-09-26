@@ -8,17 +8,18 @@
 //! event or installed a subscription before its attempt committed would leave
 //! that effect behind when the attempt failed.
 //!
-//! The one thing an attempt *may* answer with directly is the process id, which
-//! [`lash_core::ProcessId::from_intent_identity`] derives from the declaring
-//! attempt's own intent identity. The executor derives the same id from the
-//! committed declaration, so the id this tool returns before commit and the id
-//! the registry holds after a crash redrive are the same value (FIG-2994).
+//! A start cannot answer its process id directly: the registrar mints it when
+//! the declaration is realized, after the attempt commits. The attempt answers
+//! the start's result slot instead, and the realization replaces the slot with
+//! the handle of the process its start key registered, so a crash redrive of
+//! the attempt realizes the same start and exposes the same process (FIG-2994,
+//! ADR 0107).
 
 use serde_json::Value;
 
 use lash_core::{
-    AttemptContext, ProcessId, SessionId, ToolAttemptOutcome, ToolDefinition, ToolIntent,
-    ToolIntents, ToolOutcome, ToolOutcomeDone,
+    AttemptContext, SessionId, ToolAttemptOutcome, ToolDefinition, ToolIntent, ToolIntents,
+    ToolOutcome, ToolOutcomeDone,
 };
 use lash_tool_support::{ToolBinding, ToolDefinitionBindingExt};
 
@@ -337,9 +338,14 @@ pub async fn execute_process_start_tool_call(
         ),
         Err(message) => return refuse(message),
     };
-    let process_id = ProcessId::from_intent_identity(&identity);
+    // The process id is minted when the declared start is realized, after
+    // this attempt seals its output, so the attempt answers the start's result
+    // slot and the realization replaces it with the handle of the process the
+    // start registered (ADR 0107).
     ToolAttemptOutcome::done(
-        ToolOutcomeDone::ok(unrealized_start_handle(&process_id)),
+        ToolOutcomeDone::ok(lash_sansio::handle::process_start_slot_json(
+            identity.intent_index,
+        )),
         ToolIntents::v3(vec![ToolIntent::StartProcess(Box::new(
             lash_core::StartProcessIntent {
                 session_id,
@@ -347,27 +353,6 @@ pub async fn execute_process_start_tool_call(
             },
         ))]),
     )
-}
-
-/// The handle a start answers with before its declaration is realized.
-///
-/// A handle names a process *and* the incarnation it was taken against, and the
-/// incarnation is a sequence the registry allocates when the row lands — after
-/// this attempt has sealed its output. So the declaration answers the one
-/// handle kind with the incarnation it does not yet have, and the realization
-/// projects the handle the registry actually minted over it
-/// (`project_recorded_intent_outcomes`). A cell that somehow held this record
-/// without the projection holds a handle that names no incarnation, which every
-/// reader already refuses (`ProcessRef::from_handle_json`) — it can never be
-/// mistaken for a live one.
-const UNREALIZED_INCARNATION: u64 = 0;
-
-fn unrealized_start_handle(process_id: &ProcessId) -> Value {
-    let mut handle = lash_sansio::handle::handle_record_json(
-        &lash_sansio::handle::HandleId::process(process_id.as_str(), UNREALIZED_INCARNATION),
-    );
-    handle["process_id"] = serde_json::json!(process_id);
-    handle
 }
 
 pub fn execute_process_signal_tool_call(
@@ -378,8 +363,8 @@ pub fn execute_process_signal_tool_call(
         Ok(value) => value,
         Err(message) => return refuse(message),
     };
-    let process_ref = match lash_core::ProcessRef::from_handle_json(handle) {
-        Ok(process_ref) => process_ref,
+    let process_id = match lash_core::process_id_from_handle_json(handle) {
+        Ok(process_id) => process_id,
         Err(message) => return refuse(message),
     };
     let Some(signal_name) = args
@@ -392,13 +377,13 @@ pub fn execute_process_signal_tool_call(
     };
     ToolAttemptOutcome::done(
         ToolOutcomeDone::ok(serde_json::json!({
-            "process_id": process_ref.process_id,
+            "process_id": process_id,
             "signal": signal_name,
         })),
         ToolIntents::v3(vec![ToolIntent::SignalProcess(
             lash_core::SignalProcessIntent {
                 session_id: SessionId::from(context.session_id()),
-                process_id: process_ref.process_id,
+                process_id,
                 signal_name: signal_name.to_string(),
                 payload: args.get("payload").cloned().unwrap_or(Value::Null),
             },
@@ -423,7 +408,7 @@ pub fn execute_process_emit_tool_call(
         Ok(value) => value.clone(),
         Err(message) => return refuse(message),
     };
-    let process_id = ProcessId::from(process_id.to_string());
+    let process_id = process_id.clone();
     ToolAttemptOutcome::done(
         ToolOutcomeDone::ok(serde_json::json!({
             "process_id": process_id,

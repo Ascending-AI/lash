@@ -228,12 +228,7 @@ impl WakeDeliveryDriver {
         for delivery in registry.claim_pending_wake_deliveries(limit).await? {
             report.inspected += 1;
             let claim_token = delivery.claim_token()?;
-            registry
-                .get_process_ref(&crate::ProcessRef::new(
-                    delivery.wake.process_id.clone(),
-                    delivery.wake.process_incarnation,
-                ))
-                .await?;
+            registry.get_process(&delivery.wake.process_id).await?;
             if clock.timestamp_ms() >= delivery.expires_at_ms {
                 Self::settle(
                     registry.as_ref(),

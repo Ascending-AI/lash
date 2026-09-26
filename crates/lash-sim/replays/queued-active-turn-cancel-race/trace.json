@@ -729,7 +729,7 @@
       "observed": {
         "active_turn_id": "session-001:provider:001",
         "ingress_mode": "active_turn",
-        "input_id": "ti:c33098f457ceba72241686655891ee606dd5d5c37bf65a5e9f1cb2f5b094dc93",
+        "input_id": "ti:7fb2c11656018951ff792dd5b20c0fe1b79503ff7fc8308064981a0d1d063ec9",
         "input_state": "pending_active",
         "queued_ingress": true,
         "session": "session-001",
@@ -1543,7 +1543,7 @@
       "observed": {
         "active_turn_id": null,
         "ingress_mode": "next_turn",
-        "input_id": "ti:34c9b98cd5c7529abb17a7f6f7bc19f82bf5ddfcce73a8ad6bfa80f71dd748d4",
+        "input_id": "ti:21ab8701874e5fd6592414b3f6f702d11fafe287549d095cecfe2d073df39f26",
         "input_state": "deferred_next_turn",
         "queued_ingress": true,
         "session": "session-002",
@@ -1719,7 +1719,7 @@
       "observed": {
         "active_turn_id": "session-003:provider:001",
         "ingress_mode": "active_turn",
-        "input_id": "ti:7bd7815a873afe1806f6b3ec9d92372247571f40836e538f00e8016e7d1d7953",
+        "input_id": "ti:40956450849f25c076eda887042509ae789ca126e930d4a70819a12054ab8206",
         "input_state": "pending_active",
         "queued_ingress": true,
         "session": "session-003",
@@ -15769,9 +15769,9 @@
                 "name": "start_process",
                 "value": {
                   "__handle__": "lash",
-                  "id_prefix": "p.<incarnation>.",
-                  "process_id_digest_present": true,
-                  "process_id_scheme": "tool-intent:v2:blake3"
+                  "id_prefix": "p.",
+                  "names_its_process": true,
+                  "process_id_minted": true
                 }
               }
             ],
@@ -15783,9 +15783,9 @@
           "source": {
             "kind": "fixed_dst_api_execution",
             "path": "crates/lash/src/tests/agent_scenarios/cases.rs",
-            "result_sha256": "70aefaa21dae3528b52692ccb0d415d790d33fb96a5879b1ca9e11052f107e28",
+            "result_sha256": "c127a52bdfb8e96c3e16240e0d2e603acdb8989794c7ee31ec1e836d27d5b08a",
             "scenario": "agent_scenario_started_process_labeled_tool_call",
-            "source_hash": "14858db3a9b4745171656524b90e26c8463554de61c476ccd055be584bceef92"
+            "source_hash": "52ab83b30c72c6cac8e0048ee637e064e08b094f1c8e822a7053efbd30c2729b"
           }
         },
         "session": "session-001",
@@ -15875,9 +15875,9 @@
                 "name": "start_process",
                 "value": {
                   "__handle__": "lash",
-                  "id_prefix": "p.<incarnation>.",
-                  "process_id_digest_present": true,
-                  "process_id_scheme": "tool-intent:v2:blake3"
+                  "id_prefix": "p.",
+                  "names_its_process": true,
+                  "process_id_minted": true
                 }
               }
             ],
@@ -15889,9 +15889,9 @@
           "source": {
             "kind": "fixed_dst_api_execution",
             "path": "crates/lash/src/tests/agent_scenarios/cases.rs",
-            "result_sha256": "70aefaa21dae3528b52692ccb0d415d790d33fb96a5879b1ca9e11052f107e28",
+            "result_sha256": "c127a52bdfb8e96c3e16240e0d2e603acdb8989794c7ee31ec1e836d27d5b08a",
             "scenario": "agent_scenario_started_process_labeled_tool_call",
-            "source_hash": "14858db3a9b4745171656524b90e26c8463554de61c476ccd055be584bceef92"
+            "source_hash": "52ab83b30c72c6cac8e0048ee637e064e08b094f1c8e822a7053efbd30c2729b"
           }
         },
         "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:agent-started-process-tool-call-graph",
@@ -15973,9 +15973,9 @@
                 "payload": {
                   "external_ref": {
                     "backend": "restate",
-                    "id": "LashProcessWorkflow/tool-intent:v2:blake3:ee3dd7b0d0b3f5c2203acfc8f6242f3394ac3bf5064358f4693852fad057ef7c",
+                    "id": "LashProcessWorkflow/p_00000000000070008000000000000001",
                     "metadata": {
-                      "invocation_id": "inv_1da5261f4c137989bdbf0ad892c86174a33632a25ab386791"
+                      "invocation_id": "inv_1da58c29f11f3ed1a0a33706f374aba3f4ff8a899502dfde3"
                     },
                     "segment_ordinal": 0
                   }
@@ -15990,8 +15990,8 @@
                   "started": {
                     "attempt": 1,
                     "fencing_token": 0,
-                    "owner": {},
-                    "replay_grammar": 2
+                    "generation": "blake3:46bdca4e074bf1c2d2cf4f54263c35601b97a039ff4c2dd43bc6e8fc9b920908",
+                    "owner": {}
                   }
                 },
                 "process_ref": "process-ref-633d0005ff5b",
@@ -16040,7 +16040,7 @@
                   },
                   "completion_authority": {
                     "authority": "workflow_key",
-                    "workflow_key": "tool-intent:v2:blake3:ee3dd7b0d0b3f5c2203acfc8f6242f3394ac3bf5064358f4693852fad057ef7c"
+                    "workflow_key": "p_00000000000070008000000000000001"
                   }
                 },
                 "process_ref": "process-ref-633d0005ff5b",
@@ -16094,9 +16094,9 @@
                 "name": "start_process",
                 "value": {
                   "__handle__": "lash",
-                  "id_prefix": "p.<incarnation>.",
-                  "process_id_digest_present": true,
-                  "process_id_scheme": "tool-intent:v2:blake3"
+                  "id_prefix": "p.",
+                  "names_its_process": true,
+                  "process_id_minted": true
                 }
               }
             ],
@@ -16108,9 +16108,9 @@
           "source": {
             "kind": "fixed_dst_api_execution",
             "path": "crates/lash/src/tests/agent_scenarios/cases.rs",
-            "result_sha256": "62ffb9167a66aaa1fd2b44ba6d9d73971f9d4873356e33dd70c7d659a685e585",
+            "result_sha256": "8f9827761001134b6d50898588f39f2bfa2be770a19cd3b065eb5813e4fc6963",
             "scenario": "agent_scenario_process_durable_input_request_tool",
-            "source_hash": "2aea4ae5efe13e8e8b6f6312959597c6dbcc3ad1dbde28d7f91c919ce4bdd30e"
+            "source_hash": "80429f7e7d64415003c088a2bd8b49729e0e89c530214167d38ed214577bc34e"
           }
         },
         "session": "session-001",
@@ -16170,9 +16170,9 @@
                 "payload": {
                   "external_ref": {
                     "backend": "restate",
-                    "id": "LashProcessWorkflow/tool-intent:v2:blake3:ee3dd7b0d0b3f5c2203acfc8f6242f3394ac3bf5064358f4693852fad057ef7c",
+                    "id": "LashProcessWorkflow/p_00000000000070008000000000000001",
                     "metadata": {
-                      "invocation_id": "inv_1da5261f4c137989bdbf0ad892c86174a33632a25ab386791"
+                      "invocation_id": "inv_1da58c29f11f3ed1a0a33706f374aba3f4ff8a899502dfde3"
                     },
                     "segment_ordinal": 0
                   }
@@ -16187,8 +16187,8 @@
                   "started": {
                     "attempt": 1,
                     "fencing_token": 0,
-                    "owner": {},
-                    "replay_grammar": 2
+                    "generation": "blake3:46bdca4e074bf1c2d2cf4f54263c35601b97a039ff4c2dd43bc6e8fc9b920908",
+                    "owner": {}
                   }
                 },
                 "process_ref": "process-ref-633d0005ff5b",
@@ -16237,7 +16237,7 @@
                   },
                   "completion_authority": {
                     "authority": "workflow_key",
-                    "workflow_key": "tool-intent:v2:blake3:ee3dd7b0d0b3f5c2203acfc8f6242f3394ac3bf5064358f4693852fad057ef7c"
+                    "workflow_key": "p_00000000000070008000000000000001"
                   }
                 },
                 "process_ref": "process-ref-633d0005ff5b",
@@ -16291,9 +16291,9 @@
                 "name": "start_process",
                 "value": {
                   "__handle__": "lash",
-                  "id_prefix": "p.<incarnation>.",
-                  "process_id_digest_present": true,
-                  "process_id_scheme": "tool-intent:v2:blake3"
+                  "id_prefix": "p.",
+                  "names_its_process": true,
+                  "process_id_minted": true
                 }
               }
             ],
@@ -16305,9 +16305,9 @@
           "source": {
             "kind": "fixed_dst_api_execution",
             "path": "crates/lash/src/tests/agent_scenarios/cases.rs",
-            "result_sha256": "62ffb9167a66aaa1fd2b44ba6d9d73971f9d4873356e33dd70c7d659a685e585",
+            "result_sha256": "8f9827761001134b6d50898588f39f2bfa2be770a19cd3b065eb5813e4fc6963",
             "scenario": "agent_scenario_process_durable_input_request_tool",
-            "source_hash": "2aea4ae5efe13e8e8b6f6312959597c6dbcc3ad1dbde28d7f91c919ce4bdd30e"
+            "source_hash": "80429f7e7d64415003c088a2bd8b49729e0e89c530214167d38ed214577bc34e"
           }
         },
         "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:agent-durable-input-suspension-resolution",
@@ -16393,20 +16393,20 @@
             },
             "processes": [
               {
-                "child_session_present": true,
-                "definition_present": false,
-                "kind": "subagent",
-                "label": "spawn",
-                "process_ref": "process-ref-492b386bb9f7",
-                "status": "completed",
-                "terminal": true
-              },
-              {
                 "child_session_present": false,
                 "definition_present": true,
                 "kind": "lashlang",
                 "label": "__process_9f30906e8d43cddd1a540476cc84ad3a344b0319a9c997fe89e87fd6dbf73c18",
                 "process_ref": "process-ref-6c98aa69bc05",
+                "status": "completed",
+                "terminal": true
+              },
+              {
+                "child_session_present": false,
+                "definition_present": false,
+                "kind": "subagent",
+                "label": "spawn",
+                "process_ref": "process-ref-9556b1db4fa4",
                 "status": "completed",
                 "terminal": true
               }
@@ -16431,9 +16431,9 @@
                 "name": "start_process",
                 "value": {
                   "__handle__": "lash",
-                  "id_prefix": "p.<incarnation>.",
-                  "process_id_digest_present": true,
-                  "process_id_scheme": "tool-intent:v2:blake3"
+                  "id_prefix": "p.",
+                  "names_its_process": true,
+                  "process_id_minted": true
                 }
               }
             ],
@@ -16445,9 +16445,9 @@
           "source": {
             "kind": "fixed_dst_api_execution",
             "path": "crates/lash/src/tests/agent_scenarios/cases.rs",
-            "result_sha256": "632f41e6194dd5310bc4082d2fe44a3122a0aaf7e95aef6884395702413ccb96",
+            "result_sha256": "f35170eaed0c7f717e04147b89bf135c04e09a1afe6f6aa88340b91608df5cdb",
             "scenario": "agent_scenario_started_process_labeled_subagent_spawn",
-            "source_hash": "c8f128c23a1ad77167370bdad5fd218ea688c2273c6b9381105ea1f27da85f64"
+            "source_hash": "e5ed33c5301cf0d6e17f942e1ab8b32b2f4bbb20bb54ef1958c6c21a77bbaae8"
           }
         },
         "session": "session-001",
@@ -16511,20 +16511,20 @@
             },
             "processes": [
               {
-                "child_session_present": true,
-                "definition_present": false,
-                "kind": "subagent",
-                "label": "spawn",
-                "process_ref": "process-ref-492b386bb9f7",
-                "status": "completed",
-                "terminal": true
-              },
-              {
                 "child_session_present": false,
                 "definition_present": true,
                 "kind": "lashlang",
                 "label": "__process_9f30906e8d43cddd1a540476cc84ad3a344b0319a9c997fe89e87fd6dbf73c18",
                 "process_ref": "process-ref-6c98aa69bc05",
+                "status": "completed",
+                "terminal": true
+              },
+              {
+                "child_session_present": false,
+                "definition_present": false,
+                "kind": "subagent",
+                "label": "spawn",
+                "process_ref": "process-ref-9556b1db4fa4",
                 "status": "completed",
                 "terminal": true
               }
@@ -16549,9 +16549,9 @@
                 "name": "start_process",
                 "value": {
                   "__handle__": "lash",
-                  "id_prefix": "p.<incarnation>.",
-                  "process_id_digest_present": true,
-                  "process_id_scheme": "tool-intent:v2:blake3"
+                  "id_prefix": "p.",
+                  "names_its_process": true,
+                  "process_id_minted": true
                 }
               }
             ],
@@ -16563,9 +16563,9 @@
           "source": {
             "kind": "fixed_dst_api_execution",
             "path": "crates/lash/src/tests/agent_scenarios/cases.rs",
-            "result_sha256": "632f41e6194dd5310bc4082d2fe44a3122a0aaf7e95aef6884395702413ccb96",
+            "result_sha256": "f35170eaed0c7f717e04147b89bf135c04e09a1afe6f6aa88340b91608df5cdb",
             "scenario": "agent_scenario_started_process_labeled_subagent_spawn",
-            "source_hash": "c8f128c23a1ad77167370bdad5fd218ea688c2273c6b9381105ea1f27da85f64"
+            "source_hash": "e5ed33c5301cf0d6e17f942e1ab8b32b2f4bbb20bb54ef1958c6c21a77bbaae8"
           }
         },
         "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:agent-started-process-subagent-spawn",
@@ -16690,9 +16690,9 @@
                 "name": "start_process",
                 "value": {
                   "__handle__": "lash",
-                  "id_prefix": "p.<incarnation>.",
-                  "process_id_digest_present": true,
-                  "process_id_scheme": "tool-intent:v2:blake3"
+                  "id_prefix": "p.",
+                  "names_its_process": true,
+                  "process_id_minted": true
                 }
               }
             ],
@@ -16704,9 +16704,9 @@
           "source": {
             "kind": "fixed_dst_api_execution",
             "path": "crates/lash/src/tests/agent_scenarios/cases.rs",
-            "result_sha256": "e99d4b4cde0c210555e0e8b0d3f843542f34a74b11e03130740ab8dbdbda0e18",
+            "result_sha256": "31525872b5a9c5c8a7537a9074dda9695e8c35ab26a8de1dcfd7a4a19ba091c1",
             "scenario": "agent_scenario_nested_process_start_await",
-            "source_hash": "d03c6925477f0021e46ed21906876e4b201f947d04cbbefc43c5bc2650d04d5a"
+            "source_hash": "fbea5b5a9957eddde6fab63ba24cd1233b7d435db82fbbde2bb4a945209dc8df"
           }
         },
         "session": "session-001",
@@ -16809,9 +16809,9 @@
                 "name": "start_process",
                 "value": {
                   "__handle__": "lash",
-                  "id_prefix": "p.<incarnation>.",
-                  "process_id_digest_present": true,
-                  "process_id_scheme": "tool-intent:v2:blake3"
+                  "id_prefix": "p.",
+                  "names_its_process": true,
+                  "process_id_minted": true
                 }
               }
             ],
@@ -16823,9 +16823,9 @@
           "source": {
             "kind": "fixed_dst_api_execution",
             "path": "crates/lash/src/tests/agent_scenarios/cases.rs",
-            "result_sha256": "e99d4b4cde0c210555e0e8b0d3f843542f34a74b11e03130740ab8dbdbda0e18",
+            "result_sha256": "31525872b5a9c5c8a7537a9074dda9695e8c35ab26a8de1dcfd7a4a19ba091c1",
             "scenario": "agent_scenario_nested_process_start_await",
-            "source_hash": "d03c6925477f0021e46ed21906876e4b201f947d04cbbefc43c5bc2650d04d5a"
+            "source_hash": "fbea5b5a9957eddde6fab63ba24cd1233b7d435db82fbbde2bb4a945209dc8df"
           }
         },
         "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:agent-nested-process-start-await",
@@ -16886,9 +16886,9 @@
                 "name": "start_process",
                 "value": {
                   "__handle__": "lash",
-                  "id_prefix": "p.<incarnation>.",
-                  "process_id_digest_present": true,
-                  "process_id_scheme": "tool-intent:v2:blake3"
+                  "id_prefix": "p.",
+                  "names_its_process": true,
+                  "process_id_minted": true
                 }
               }
             ],
@@ -16900,9 +16900,9 @@
           "source": {
             "kind": "fixed_dst_api_execution",
             "path": "crates/lash/src/tests/agent_scenarios/cases.rs",
-            "result_sha256": "655594f84fbcbc4bc0d4c80d5b6e9f178db340c991811c3c7963627288fdb1f6",
+            "result_sha256": "a5d6ff88fcd2d9a38622640efd6e9fb60c83371d0e81761aceccd9ecd971ce5c",
             "scenario": "agent_scenario_session_turn_process_child",
-            "source_hash": "b5aee01ed7776cb49546f32712d4321b125d1391ef4c73dd177b438ce0a89809"
+            "source_hash": "ce7d015d1b48b5f85f4ac33a8e1a8d4d6dec631ed233ff73a1bd2185fbd28eac"
           }
         },
         "session": "session-001",
@@ -16941,9 +16941,9 @@
                 "name": "start_process",
                 "value": {
                   "__handle__": "lash",
-                  "id_prefix": "p.<incarnation>.",
-                  "process_id_digest_present": true,
-                  "process_id_scheme": "tool-intent:v2:blake3"
+                  "id_prefix": "p.",
+                  "names_its_process": true,
+                  "process_id_minted": true
                 }
               }
             ],
@@ -16955,9 +16955,9 @@
           "source": {
             "kind": "fixed_dst_api_execution",
             "path": "crates/lash/src/tests/agent_scenarios/cases.rs",
-            "result_sha256": "655594f84fbcbc4bc0d4c80d5b6e9f178db340c991811c3c7963627288fdb1f6",
+            "result_sha256": "a5d6ff88fcd2d9a38622640efd6e9fb60c83371d0e81761aceccd9ecd971ce5c",
             "scenario": "agent_scenario_session_turn_process_child",
-            "source_hash": "b5aee01ed7776cb49546f32712d4321b125d1391ef4c73dd177b438ce0a89809"
+            "source_hash": "ce7d015d1b48b5f85f4ac33a8e1a8d4d6dec631ed233ff73a1bd2185fbd28eac"
           }
         },
         "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:agent-session-turn-process-child",
@@ -17043,11 +17043,11 @@
             },
             "processes": [
               {
-                "child_session_present": true,
+                "child_session_present": false,
                 "definition_present": false,
                 "kind": "subagent",
                 "label": "spawn",
-                "process_ref": "process-ref-032fa21baa30",
+                "process_ref": "process-ref-79ef6451578b",
                 "status": "failed",
                 "terminal": true
               }
@@ -17063,9 +17063,9 @@
           "source": {
             "kind": "fixed_dst_api_execution",
             "path": "crates/lash/src/tests/agent_scenarios/cases.rs",
-            "result_sha256": "b2cb42a6ec0244fc761c23cc3c306ccbbc67bb0bd0369dbad057dae5a5f451c6",
+            "result_sha256": "99b990719bc5974e717828a1035f2c62c0665a6a64b1e03951d4c93d71b383f9",
             "scenario": "agent_scenario_failed_child_preserves_failure_graph",
-            "source_hash": "1a10dfb4e4efb915e86a89f8662a3781bdb997814f76c7b15ded05ba231fb831"
+            "source_hash": "f6f50b843d9de0c0b16668252eafc6b125cf076d2264f77ad644eef2d89adc2a"
           }
         },
         "session": "session-001",
@@ -17129,11 +17129,11 @@
             },
             "processes": [
               {
-                "child_session_present": true,
+                "child_session_present": false,
                 "definition_present": false,
                 "kind": "subagent",
                 "label": "spawn",
-                "process_ref": "process-ref-032fa21baa30",
+                "process_ref": "process-ref-79ef6451578b",
                 "status": "failed",
                 "terminal": true
               }
@@ -17149,9 +17149,9 @@
           "source": {
             "kind": "fixed_dst_api_execution",
             "path": "crates/lash/src/tests/agent_scenarios/cases.rs",
-            "result_sha256": "b2cb42a6ec0244fc761c23cc3c306ccbbc67bb0bd0369dbad057dae5a5f451c6",
+            "result_sha256": "99b990719bc5974e717828a1035f2c62c0665a6a64b1e03951d4c93d71b383f9",
             "scenario": "agent_scenario_failed_child_preserves_failure_graph",
-            "source_hash": "1a10dfb4e4efb915e86a89f8662a3781bdb997814f76c7b15ded05ba231fb831"
+            "source_hash": "f6f50b843d9de0c0b16668252eafc6b125cf076d2264f77ad644eef2d89adc2a"
           }
         },
         "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:agent-failed-child-preserves-failure-graph",
@@ -17218,18 +17218,18 @@
                 "name": "start_process",
                 "value": {
                   "__handle__": "lash",
-                  "id_prefix": "p.<incarnation>.",
-                  "process_id_digest_present": true,
-                  "process_id_scheme": "tool-intent:v2:blake3"
+                  "id_prefix": "p.",
+                  "names_its_process": true,
+                  "process_id_minted": true
                 }
               },
               {
                 "name": "start_process",
                 "value": {
                   "__handle__": "lash",
-                  "id_prefix": "p.<incarnation>.",
-                  "process_id_digest_present": true,
-                  "process_id_scheme": "tool-intent:v2:blake3"
+                  "id_prefix": "p.",
+                  "names_its_process": true,
+                  "process_id_minted": true
                 }
               }
             ],
@@ -17241,9 +17241,9 @@
           "source": {
             "kind": "fixed_dst_api_execution",
             "path": "crates/lash/src/tests/agent_scenarios/cases.rs",
-            "result_sha256": "e8f0420a685119025d111d614ed736733fe462c9688dfde6cae8493f115a8a12",
+            "result_sha256": "6a854d61299e4f5bcec2cd60237b7139fc9dd900561a578cf16f1927635f9175",
             "scenario": "agent_scenario_parallel_spawn_and_join",
-            "source_hash": "781966c9fea07f2a9f991d82a27ccb3299e8bcd58e29e3cc3d5f5260dd961265"
+            "source_hash": "e3077bad09212440380c68a0599f7669f23f05e1c1b28abc51811846b9fe40c8"
           }
         },
         "session": "session-001",
@@ -17288,18 +17288,18 @@
                 "name": "start_process",
                 "value": {
                   "__handle__": "lash",
-                  "id_prefix": "p.<incarnation>.",
-                  "process_id_digest_present": true,
-                  "process_id_scheme": "tool-intent:v2:blake3"
+                  "id_prefix": "p.",
+                  "names_its_process": true,
+                  "process_id_minted": true
                 }
               },
               {
                 "name": "start_process",
                 "value": {
                   "__handle__": "lash",
-                  "id_prefix": "p.<incarnation>.",
-                  "process_id_digest_present": true,
-                  "process_id_scheme": "tool-intent:v2:blake3"
+                  "id_prefix": "p.",
+                  "names_its_process": true,
+                  "process_id_minted": true
                 }
               }
             ],
@@ -17311,9 +17311,9 @@
           "source": {
             "kind": "fixed_dst_api_execution",
             "path": "crates/lash/src/tests/agent_scenarios/cases.rs",
-            "result_sha256": "e8f0420a685119025d111d614ed736733fe462c9688dfde6cae8493f115a8a12",
+            "result_sha256": "6a854d61299e4f5bcec2cd60237b7139fc9dd900561a578cf16f1927635f9175",
             "scenario": "agent_scenario_parallel_spawn_and_join",
-            "source_hash": "781966c9fea07f2a9f991d82a27ccb3299e8bcd58e29e3cc3d5f5260dd961265"
+            "source_hash": "e3077bad09212440380c68a0599f7669f23f05e1c1b28abc51811846b9fe40c8"
           }
         },
         "occurrence_id": "trigger:sim-trigger:session-001:contract-execution:agent-parallel-spawn-and-join",
@@ -17586,7 +17586,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.729951401+00:00"
+              "timestamp": "2026-09-26T07:31:22.674531744+00:00"
             },
             {
               "event": {
@@ -17695,7 +17695,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.729951401+00:00"
+              "timestamp": "2026-09-26T07:31:22.674531744+00:00"
             },
             {
               "event": {
@@ -17912,7 +17912,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:16.469704662+00:00"
+              "timestamp": "2026-09-26T07:31:28.956081185+00:00"
             },
             {
               "event": {
@@ -18071,7 +18071,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:16.469704662+00:00"
+              "timestamp": "2026-09-26T07:31:28.956081185+00:00"
             },
             {
               "event": {
@@ -18326,7 +18326,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:16.609048715+00:00"
+              "timestamp": "2026-09-26T07:31:29.413723015+00:00"
             },
             {
               "event": {
@@ -18489,7 +18489,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:16.609048715+00:00"
+              "timestamp": "2026-09-26T07:31:29.413723015+00:00"
             },
             {
               "event": {
@@ -18748,7 +18748,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:16.911908633+00:00"
+              "timestamp": "2026-09-26T07:31:30.651347335+00:00"
             },
             {
               "event": {
@@ -18909,7 +18909,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:16.911908633+00:00"
+              "timestamp": "2026-09-26T07:31:30.651347335+00:00"
             },
             {
               "event": {
@@ -19069,7 +19069,7 @@
     },
     {
       "schema": "lash.sim.checkpoint-write-event.v4",
-      "session_id": "session:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000",
+      "session_id": "session:process:p_00000000000070008000000000000002",
       "attributed_session_id": "session-001",
       "cause_boundary_id": "session-001:contract-execution:agent-started-process-subagent-spawn",
       "commit_index": 6,
@@ -19128,7 +19128,7 @@
       ],
       "state": {
         "submitted_graph_append": {
-          "leaf_node_id": "n_c8cfea040a976fa5b80fa33eb70986a9c8dc1733dea4feba36154f0d3d05aeea",
+          "leaf_node_id": "n_0bde16dba589d9319e6cfe285e2e666b0553ee9b6c5fc152d6638f7fbe0b5056",
           "nodes": [
             {
               "assignment": {
@@ -19166,13 +19166,13 @@
                     "variant": "provider_default"
                   },
                   "provider_id": "lash_runtime agent started process subagent",
-                  "session_id": "session:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000",
+                  "session_id": "session:process:p_00000000000070008000000000000002",
                   "turn_budget": "unbounded"
                 }
               },
               "frame_key": "frame-key/v2/c9b08bd8c779c300744ed4d57455bc2d2166e56c7b2b2783b2fa9db331ef66e6",
               "kind": "frame_open",
-              "node_id": "frame-node/v3/691b355958ff0113b0cc7d283d8a9d9b82ae2dfa75d7d4c37b86d1c1a9a13a34",
+              "node_id": "frame-node/v3/2b827f1829ff53ef5476144cf008c391cb022155149d8720936e391229f8faf8",
               "protocol_turn_options": {
                 "payload": {
                   "channel": "cell",
@@ -19217,8 +19217,8 @@
                 }
               },
               "kind": "event",
-              "node_id": "n_c8cfea040a976fa5b80fa33eb70986a9c8dc1733dea4feba36154f0d3d05aeea",
-              "parent_node_id": "frame-node/v3/691b355958ff0113b0cc7d283d8a9d9b82ae2dfa75d7d4c37b86d1c1a9a13a34",
+              "node_id": "n_0bde16dba589d9319e6cfe285e2e666b0553ee9b6c5fc152d6638f7fbe0b5056",
+              "parent_node_id": "frame-node/v3/2b827f1829ff53ef5476144cf008c391cb022155149d8720936e391229f8faf8",
               "timestamp": "2027-01-15T08:00:00+00:00"
             }
           ]
@@ -19259,7 +19259,7 @@
         },
         "submitted_usage_rows": [],
         "accepted_raw_rows": {
-          "graph_leaf_node_id": "n_c8cfea040a976fa5b80fa33eb70986a9c8dc1733dea4feba36154f0d3d05aeea",
+          "graph_leaf_node_id": "n_0bde16dba589d9319e6cfe285e2e666b0553ee9b6c5fc152d6638f7fbe0b5056",
           "graph_nodes": [
             {
               "assignment": {
@@ -19297,13 +19297,13 @@
                     "variant": "provider_default"
                   },
                   "provider_id": "lash_runtime agent started process subagent",
-                  "session_id": "session:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000",
+                  "session_id": "session:process:p_00000000000070008000000000000002",
                   "turn_budget": "unbounded"
                 }
               },
               "frame_key": "frame-key/v2/c9b08bd8c779c300744ed4d57455bc2d2166e56c7b2b2783b2fa9db331ef66e6",
               "kind": "frame_open",
-              "node_id": "frame-node/v3/691b355958ff0113b0cc7d283d8a9d9b82ae2dfa75d7d4c37b86d1c1a9a13a34",
+              "node_id": "frame-node/v3/2b827f1829ff53ef5476144cf008c391cb022155149d8720936e391229f8faf8",
               "protocol_turn_options": {
                 "payload": {
                   "channel": "cell",
@@ -19348,8 +19348,8 @@
                 }
               },
               "kind": "event",
-              "node_id": "n_c8cfea040a976fa5b80fa33eb70986a9c8dc1733dea4feba36154f0d3d05aeea",
-              "parent_node_id": "frame-node/v3/691b355958ff0113b0cc7d283d8a9d9b82ae2dfa75d7d4c37b86d1c1a9a13a34",
+              "node_id": "n_0bde16dba589d9319e6cfe285e2e666b0553ee9b6c5fc152d6638f7fbe0b5056",
+              "parent_node_id": "frame-node/v3/2b827f1829ff53ef5476144cf008c391cb022155149d8720936e391229f8faf8",
               "timestamp": "2027-01-15T08:00:00+00:00"
             }
           ],
@@ -19501,7 +19501,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:17.172803590+00:00"
+              "timestamp": "2026-09-26T07:31:32.405840440+00:00"
             },
             {
               "event": {
@@ -19664,7 +19664,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:17.172803590+00:00"
+              "timestamp": "2026-09-26T07:31:32.405840440+00:00"
             },
             {
               "event": {
@@ -19919,7 +19919,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:17.656199459+00:00"
+              "timestamp": "2026-09-26T07:31:35.012201450+00:00"
             },
             {
               "event": {
@@ -20082,7 +20082,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:17.656199459+00:00"
+              "timestamp": "2026-09-26T07:31:35.012201450+00:00"
             },
             {
               "event": {
@@ -20337,7 +20337,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:17.970762829+00:00"
+              "timestamp": "2026-09-26T07:31:36.154064858+00:00"
             },
             {
               "event": {
@@ -20500,7 +20500,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:17.970762829+00:00"
+              "timestamp": "2026-09-26T07:31:36.154064858+00:00"
             },
             {
               "event": {
@@ -20662,7 +20662,7 @@
     },
     {
       "schema": "lash.sim.checkpoint-write-event.v4",
-      "session_id": "session:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000",
+      "session_id": "session:process:p_00000000000070008000000000000001",
       "attributed_session_id": "session-001",
       "cause_boundary_id": "session-001:contract-execution:agent-failed-child-preserves-failure-graph",
       "commit_index": 11,
@@ -20721,7 +20721,7 @@
       ],
       "state": {
         "submitted_graph_append": {
-          "leaf_node_id": "frame-node/v3/6087f8afac689e6162833f2a7ba1e5f9f9be61315b1b7f7c0955ab484a53c02a",
+          "leaf_node_id": "frame-node/v3/cadc52b4b6dd42db4970fc67f20caa41ed15e5b6181deefd5f5bdc68e7b21400",
           "nodes": [
             {
               "assignment": {
@@ -20759,7 +20759,7 @@
                     "variant": "provider_default"
                   },
                   "provider_id": "lash_runtime agent failed child graph",
-                  "session_id": "session:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000",
+                  "session_id": "session:process:p_00000000000070008000000000000001",
                   "turn_budget": {
                     "bounded": 1
                   }
@@ -20767,7 +20767,7 @@
               },
               "frame_key": "frame-key/v2/c9b08bd8c779c300744ed4d57455bc2d2166e56c7b2b2783b2fa9db331ef66e6",
               "kind": "frame_open",
-              "node_id": "frame-node/v3/6087f8afac689e6162833f2a7ba1e5f9f9be61315b1b7f7c0955ab484a53c02a",
+              "node_id": "frame-node/v3/cadc52b4b6dd42db4970fc67f20caa41ed15e5b6181deefd5f5bdc68e7b21400",
               "protocol_turn_options": {
                 "payload": {
                   "channel": "cell",
@@ -20833,7 +20833,7 @@
         },
         "submitted_usage_rows": [],
         "accepted_raw_rows": {
-          "graph_leaf_node_id": "frame-node/v3/6087f8afac689e6162833f2a7ba1e5f9f9be61315b1b7f7c0955ab484a53c02a",
+          "graph_leaf_node_id": "frame-node/v3/cadc52b4b6dd42db4970fc67f20caa41ed15e5b6181deefd5f5bdc68e7b21400",
           "graph_nodes": [
             {
               "assignment": {
@@ -20871,7 +20871,7 @@
                     "variant": "provider_default"
                   },
                   "provider_id": "lash_runtime agent failed child graph",
-                  "session_id": "session:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000",
+                  "session_id": "session:process:p_00000000000070008000000000000001",
                   "turn_budget": {
                     "bounded": 1
                   }
@@ -20879,7 +20879,7 @@
               },
               "frame_key": "frame-key/v2/c9b08bd8c779c300744ed4d57455bc2d2166e56c7b2b2783b2fa9db331ef66e6",
               "kind": "frame_open",
-              "node_id": "frame-node/v3/6087f8afac689e6162833f2a7ba1e5f9f9be61315b1b7f7c0955ab484a53c02a",
+              "node_id": "frame-node/v3/cadc52b4b6dd42db4970fc67f20caa41ed15e5b6181deefd5f5bdc68e7b21400",
               "protocol_turn_options": {
                 "payload": {
                   "channel": "cell",
@@ -21058,7 +21058,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:18.100038126+00:00"
+              "timestamp": "2026-09-26T07:31:36.951577152+00:00"
             },
             {
               "event": {
@@ -21217,7 +21217,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:18.100038126+00:00"
+              "timestamp": "2026-09-26T07:31:36.951577152+00:00"
             },
             {
               "event": {
@@ -21466,7 +21466,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:18.304392234+00:00"
+              "timestamp": "2026-09-26T07:31:39.007484178+00:00"
             },
             {
               "event": {
@@ -21640,7 +21640,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:18.304392234+00:00"
+              "timestamp": "2026-09-26T07:31:39.007484178+00:00"
             },
             {
               "event": {
@@ -21902,7 +21902,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:18.448464764+00:00"
+              "timestamp": "2026-09-26T07:31:40.002586668+00:00"
             },
             {
               "event": {
@@ -22072,7 +22072,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:18.448464764+00:00"
+              "timestamp": "2026-09-26T07:31:40.002586668+00:00"
             },
             {
               "event": {
@@ -22386,7 +22386,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.729951401+00:00"
+              "timestamp": "2026-09-26T07:31:22.674531744+00:00"
             },
             {
               "event": {
@@ -22580,7 +22580,7 @@
     },
     {
       "schema": "lash.sim.checkpoint-write-event.v4",
-      "session_id": "session:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000",
+      "session_id": "session:process:p_00000000000070008000000000000002",
       "attributed_session_id": "session-001",
       "cause_boundary_id": "session-001:contract-execution:agent-started-process-subagent-spawn",
       "commit_index": 7,
@@ -22623,21 +22623,21 @@
       ],
       "state": {
         "submitted_graph_append": {
-          "leaf_node_id": "n_d4020eec7a741db152f7deaee3aad489154c223615837b3c8fb857dc3b8a61f2",
+          "leaf_node_id": "n_e91458b4982540bd1345d12bf734746d4441a3774c92cec681bc86435875e434",
           "nodes": [
             {
               "event": {
                 "Conversation": {
-                  "id": "m_ingress_ti:576d7df0cf1af2361a6cf11b10f80f53e9e585e003a67adec1719cdb07984727",
+                  "id": "m_ingress_ti:8cd956c23cbdda937b13539dd70d943dd6d225125c60fb2af418504bb9b7401a",
                   "origin": {
-                    "input_id": "ti:576d7df0cf1af2361a6cf11b10f80f53e9e585e003a67adec1719cdb07984727",
+                    "input_id": "ti:8cd956c23cbdda937b13539dd70d943dd6d225125c60fb2af418504bb9b7401a",
                     "kind": "turn_input",
-                    "turn_id": "process:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000"
+                    "turn_id": "p_00000000000070008000000000000002"
                   },
                   "parts": [
                     {
                       "content": "Finish `{ len: chunk.length }` using the seeded `chunk` variable.\n\n## Required output\n\nWhen done, end the task with `finish(value)`. The value MUST match this JSON Schema exactly:\n\n```json\n{\n  \"additionalProperties\": false,\n  \"properties\": {\n    \"len\": {\n      \"type\": \"integer\"\n    }\n  },\n  \"required\": [\n    \"len\"\n  ],\n  \"type\": \"object\"\n}\n```",
-                      "id": "m_ingress_ti:576d7df0cf1af2361a6cf11b10f80f53e9e585e003a67adec1719cdb07984727.p0",
+                      "id": "m_ingress_ti:8cd956c23cbdda937b13539dd70d943dd6d225125c60fb2af418504bb9b7401a.p0",
                       "kind": "Text"
                     }
                   ],
@@ -22645,8 +22645,8 @@
                 }
               },
               "kind": "event",
-              "node_id": "n_0bafda565d5893314616406fab27cbe539c589ad1421dfaa4d23ab285cd39f6e",
-              "parent_node_id": "n_c8cfea040a976fa5b80fa33eb70986a9c8dc1733dea4feba36154f0d3d05aeea",
+              "node_id": "n_8d1815d99332cc500d02558ab1eaf6da6df6cd39e335071c517a17b3ebd6b2be",
+              "parent_node_id": "n_0bde16dba589d9319e6cfe285e2e666b0553ee9b6c5fc152d6638f7fbe0b5056",
               "timestamp": "2027-01-15T08:00:00+00:00"
             },
             {
@@ -22665,7 +22665,7 @@
                         "decision": "execute_typescript",
                         "reply_fingerprint": "65e7eb0cca744b2f",
                         "termination": "finish_required",
-                        "turn_id": "process:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000"
+                        "turn_id": "p_00000000000070008000000000000002"
                       },
                       "phase": "llm_extraction"
                     }
@@ -22674,8 +22674,8 @@
                 }
               },
               "kind": "event",
-              "node_id": "n_aabac236040e8475f7c876356012bbc3f78f67d1ec76585217ad6ba067f7884a",
-              "parent_node_id": "n_0bafda565d5893314616406fab27cbe539c589ad1421dfaa4d23ab285cd39f6e",
+              "node_id": "n_ec29d1a0426731f2477d2c73380530c0ea73c664e259ba4f1097d46d860ee838",
+              "parent_node_id": "n_8d1815d99332cc500d02558ab1eaf6da6df6cd39e335071c517a17b3ebd6b2be",
               "timestamp": "2027-01-15T08:00:00+00:00"
             },
             {
@@ -22687,7 +22687,7 @@
                       "final_output": {
                         "len": 2
                       },
-                      "id": "lashlang_step_process:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000_0",
+                      "id": "lashlang_step_p_00000000000070008000000000000002_0",
                       "output": [],
                       "protocol_iteration": 0
                     }
@@ -22696,8 +22696,8 @@
                 }
               },
               "kind": "event",
-              "node_id": "n_d4020eec7a741db152f7deaee3aad489154c223615837b3c8fb857dc3b8a61f2",
-              "parent_node_id": "n_aabac236040e8475f7c876356012bbc3f78f67d1ec76585217ad6ba067f7884a",
+              "node_id": "n_e91458b4982540bd1345d12bf734746d4441a3774c92cec681bc86435875e434",
+              "parent_node_id": "n_ec29d1a0426731f2477d2c73380530c0ea73c664e259ba4f1097d46d860ee838",
               "timestamp": "2027-01-15T08:00:00+00:00"
             }
           ]
@@ -22751,7 +22751,7 @@
               "attempts": [
                 {
                   "attempt_ordinal": 1,
-                  "call_id": "session:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000:turn:process:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000:llm:0"
+                  "call_id": "session:process:p_00000000000070008000000000000002:turn:p_00000000000070008000000000000002:llm:0"
                 }
               ],
               "kind": "unreported"
@@ -22759,7 +22759,7 @@
           }
         ],
         "accepted_raw_rows": {
-          "graph_leaf_node_id": "n_d4020eec7a741db152f7deaee3aad489154c223615837b3c8fb857dc3b8a61f2",
+          "graph_leaf_node_id": "n_e91458b4982540bd1345d12bf734746d4441a3774c92cec681bc86435875e434",
           "graph_nodes": [
             {
               "assignment": {
@@ -22797,13 +22797,13 @@
                     "variant": "provider_default"
                   },
                   "provider_id": "lash_runtime agent started process subagent",
-                  "session_id": "session:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000",
+                  "session_id": "session:process:p_00000000000070008000000000000002",
                   "turn_budget": "unbounded"
                 }
               },
               "frame_key": "frame-key/v2/c9b08bd8c779c300744ed4d57455bc2d2166e56c7b2b2783b2fa9db331ef66e6",
               "kind": "frame_open",
-              "node_id": "frame-node/v3/691b355958ff0113b0cc7d283d8a9d9b82ae2dfa75d7d4c37b86d1c1a9a13a34",
+              "node_id": "frame-node/v3/2b827f1829ff53ef5476144cf008c391cb022155149d8720936e391229f8faf8",
               "protocol_turn_options": {
                 "payload": {
                   "channel": "cell",
@@ -22848,23 +22848,23 @@
                 }
               },
               "kind": "event",
-              "node_id": "n_c8cfea040a976fa5b80fa33eb70986a9c8dc1733dea4feba36154f0d3d05aeea",
-              "parent_node_id": "frame-node/v3/691b355958ff0113b0cc7d283d8a9d9b82ae2dfa75d7d4c37b86d1c1a9a13a34",
+              "node_id": "n_0bde16dba589d9319e6cfe285e2e666b0553ee9b6c5fc152d6638f7fbe0b5056",
+              "parent_node_id": "frame-node/v3/2b827f1829ff53ef5476144cf008c391cb022155149d8720936e391229f8faf8",
               "timestamp": "2027-01-15T08:00:00+00:00"
             },
             {
               "event": {
                 "Conversation": {
-                  "id": "m_ingress_ti:576d7df0cf1af2361a6cf11b10f80f53e9e585e003a67adec1719cdb07984727",
+                  "id": "m_ingress_ti:8cd956c23cbdda937b13539dd70d943dd6d225125c60fb2af418504bb9b7401a",
                   "origin": {
-                    "input_id": "ti:576d7df0cf1af2361a6cf11b10f80f53e9e585e003a67adec1719cdb07984727",
+                    "input_id": "ti:8cd956c23cbdda937b13539dd70d943dd6d225125c60fb2af418504bb9b7401a",
                     "kind": "turn_input",
-                    "turn_id": "process:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000"
+                    "turn_id": "p_00000000000070008000000000000002"
                   },
                   "parts": [
                     {
                       "content": "Finish `{ len: chunk.length }` using the seeded `chunk` variable.\n\n## Required output\n\nWhen done, end the task with `finish(value)`. The value MUST match this JSON Schema exactly:\n\n```json\n{\n  \"additionalProperties\": false,\n  \"properties\": {\n    \"len\": {\n      \"type\": \"integer\"\n    }\n  },\n  \"required\": [\n    \"len\"\n  ],\n  \"type\": \"object\"\n}\n```",
-                      "id": "m_ingress_ti:576d7df0cf1af2361a6cf11b10f80f53e9e585e003a67adec1719cdb07984727.p0",
+                      "id": "m_ingress_ti:8cd956c23cbdda937b13539dd70d943dd6d225125c60fb2af418504bb9b7401a.p0",
                       "kind": "Text"
                     }
                   ],
@@ -22872,8 +22872,8 @@
                 }
               },
               "kind": "event",
-              "node_id": "n_0bafda565d5893314616406fab27cbe539c589ad1421dfaa4d23ab285cd39f6e",
-              "parent_node_id": "n_c8cfea040a976fa5b80fa33eb70986a9c8dc1733dea4feba36154f0d3d05aeea",
+              "node_id": "n_8d1815d99332cc500d02558ab1eaf6da6df6cd39e335071c517a17b3ebd6b2be",
+              "parent_node_id": "n_0bde16dba589d9319e6cfe285e2e666b0553ee9b6c5fc152d6638f7fbe0b5056",
               "timestamp": "2027-01-15T08:00:00+00:00"
             },
             {
@@ -22892,7 +22892,7 @@
                         "decision": "execute_typescript",
                         "reply_fingerprint": "65e7eb0cca744b2f",
                         "termination": "finish_required",
-                        "turn_id": "process:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000"
+                        "turn_id": "p_00000000000070008000000000000002"
                       },
                       "phase": "llm_extraction"
                     }
@@ -22901,8 +22901,8 @@
                 }
               },
               "kind": "event",
-              "node_id": "n_aabac236040e8475f7c876356012bbc3f78f67d1ec76585217ad6ba067f7884a",
-              "parent_node_id": "n_0bafda565d5893314616406fab27cbe539c589ad1421dfaa4d23ab285cd39f6e",
+              "node_id": "n_ec29d1a0426731f2477d2c73380530c0ea73c664e259ba4f1097d46d860ee838",
+              "parent_node_id": "n_8d1815d99332cc500d02558ab1eaf6da6df6cd39e335071c517a17b3ebd6b2be",
               "timestamp": "2027-01-15T08:00:00+00:00"
             },
             {
@@ -22914,7 +22914,7 @@
                       "final_output": {
                         "len": 2
                       },
-                      "id": "lashlang_step_process:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000_0",
+                      "id": "lashlang_step_p_00000000000070008000000000000002_0",
                       "output": [],
                       "protocol_iteration": 0
                     }
@@ -22923,8 +22923,8 @@
                 }
               },
               "kind": "event",
-              "node_id": "n_d4020eec7a741db152f7deaee3aad489154c223615837b3c8fb857dc3b8a61f2",
-              "parent_node_id": "n_aabac236040e8475f7c876356012bbc3f78f67d1ec76585217ad6ba067f7884a",
+              "node_id": "n_e91458b4982540bd1345d12bf734746d4441a3774c92cec681bc86435875e434",
+              "parent_node_id": "n_ec29d1a0426731f2477d2c73380530c0ea73c664e259ba4f1097d46d860ee838",
               "timestamp": "2027-01-15T08:00:00+00:00"
             }
           ],
@@ -22943,7 +22943,7 @@
                 "attempts": [
                   {
                     "attempt_ordinal": 1,
-                    "call_id": "session:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000:turn:process:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000:llm:0"
+                    "call_id": "session:process:p_00000000000070008000000000000002:turn:p_00000000000070008000000000000002:llm:0"
                   }
                 ],
                 "kind": "unreported"
@@ -22989,16 +22989,16 @@
           "graph_node_count": 5,
           "messages": [
             {
-              "id": "m_ingress_ti:576d7df0cf1af2361a6cf11b10f80f53e9e585e003a67adec1719cdb07984727",
+              "id": "m_ingress_ti:8cd956c23cbdda937b13539dd70d943dd6d225125c60fb2af418504bb9b7401a",
               "origin": {
-                "input_id": "ti:576d7df0cf1af2361a6cf11b10f80f53e9e585e003a67adec1719cdb07984727",
+                "input_id": "ti:8cd956c23cbdda937b13539dd70d943dd6d225125c60fb2af418504bb9b7401a",
                 "kind": "turn_input",
-                "turn_id": "process:subagent:lashlang:v2:process:86:tool-intent:v2:blake3:c20c91eefea001bd4ca73d3dcfae7161d99bc866e88ee1b3f4949aa3100249b3:incarnation:1:0000000000"
+                "turn_id": "p_00000000000070008000000000000002"
               },
               "parts": [
                 {
                   "content": "Finish `{ len: chunk.length }` using the seeded `chunk` variable.\n\n## Required output\n\nWhen done, end the task with `finish(value)`. The value MUST match this JSON Schema exactly:\n\n```json\n{\n  \"additionalProperties\": false,\n  \"properties\": {\n    \"len\": {\n      \"type\": \"integer\"\n    }\n  },\n  \"required\": [\n    \"len\"\n  ],\n  \"type\": \"object\"\n}\n```",
-                  "id": "m_ingress_ti:576d7df0cf1af2361a6cf11b10f80f53e9e585e003a67adec1719cdb07984727.p0",
+                  "id": "m_ingress_ti:8cd956c23cbdda937b13539dd70d943dd6d225125c60fb2af418504bb9b7401a.p0",
                   "kind": "Text"
                 }
               ],
@@ -23017,7 +23017,7 @@
     },
     {
       "schema": "lash.sim.checkpoint-write-event.v4",
-      "session_id": "session:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000",
+      "session_id": "session:process:p_00000000000070008000000000000001",
       "attributed_session_id": "session-001",
       "cause_boundary_id": "session-001:contract-execution:agent-failed-child-preserves-failure-graph",
       "commit_index": 12,
@@ -23060,21 +23060,21 @@
       ],
       "state": {
         "submitted_graph_append": {
-          "leaf_node_id": "n_5c3300297d596cde2f9d5b0ab5947e22bc427da8b099d6426dd64cd3ac2adc56",
+          "leaf_node_id": "n_db039b3b81b10b6f17149ba3ef470179e33fda02afad53254125e167ef136346",
           "nodes": [
             {
               "event": {
                 "Conversation": {
-                  "id": "m_ingress_ti:0d5346d04bf14ece9c9a09e4332e4395298e6a64aaab04650a1c45db68f7e3bc",
+                  "id": "m_ingress_ti:67f14d59e1f5abea5cb202b02a8a100183c968a6cf9d14d6e9c7b5a2875f2958",
                   "origin": {
-                    "input_id": "ti:0d5346d04bf14ece9c9a09e4332e4395298e6a64aaab04650a1c45db68f7e3bc",
+                    "input_id": "ti:67f14d59e1f5abea5cb202b02a8a100183c968a6cf9d14d6e9c7b5a2875f2958",
                     "kind": "turn_input",
-                    "turn_id": "process:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000"
+                    "turn_id": "p_00000000000070008000000000000001"
                   },
                   "parts": [
                     {
                       "content": "Fail with reason child boom.\n\n## Required output\n\nWhen done, end the task with `finish(value)`. The value MUST match this JSON Schema exactly:\n\n```json\n{\n  \"additionalProperties\": false,\n  \"properties\": {\n    \"reason\": {\n      \"type\": \"string\"\n    }\n  },\n  \"required\": [\n    \"reason\"\n  ],\n  \"type\": \"object\"\n}\n```",
-                      "id": "m_ingress_ti:0d5346d04bf14ece9c9a09e4332e4395298e6a64aaab04650a1c45db68f7e3bc.p0",
+                      "id": "m_ingress_ti:67f14d59e1f5abea5cb202b02a8a100183c968a6cf9d14d6e9c7b5a2875f2958.p0",
                       "kind": "Text"
                     }
                   ],
@@ -23082,8 +23082,8 @@
                 }
               },
               "kind": "event",
-              "node_id": "n_87c6e49c65e1352a2dce4ae7141514fd89c34747605b074b7e849d929e954a8e",
-              "parent_node_id": "frame-node/v3/6087f8afac689e6162833f2a7ba1e5f9f9be61315b1b7f7c0955ab484a53c02a",
+              "node_id": "n_a2109d8648ed0f16438fd6bc08b5fecd27eded299f791847bfe70b816c6c2984",
+              "parent_node_id": "frame-node/v3/cadc52b4b6dd42db4970fc67f20caa41ed15e5b6181deefd5f5bdc68e7b21400",
               "timestamp": "2027-01-15T08:00:00+00:00"
             },
             {
@@ -23102,7 +23102,7 @@
                         "decision": "execute_typescript",
                         "reply_fingerprint": "8dcb1ffee5967463",
                         "termination": "finish_required",
-                        "turn_id": "process:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000"
+                        "turn_id": "p_00000000000070008000000000000001"
                       },
                       "phase": "llm_extraction"
                     }
@@ -23111,8 +23111,8 @@
                 }
               },
               "kind": "event",
-              "node_id": "n_f839b80a82cc272b4a4398001515e557adebd25af88ae095cdf2538420f055c7",
-              "parent_node_id": "n_87c6e49c65e1352a2dce4ae7141514fd89c34747605b074b7e849d929e954a8e",
+              "node_id": "n_4594d826a7f178da494b3b5c3e373be32ceba3fe4af3307c01a2beba4e937d65",
+              "parent_node_id": "n_a2109d8648ed0f16438fd6bc08b5fecd27eded299f791847bfe70b816c6c2984",
               "timestamp": "2027-01-15T08:00:00+00:00"
             },
             {
@@ -23127,7 +23127,7 @@
                         }
                       ],
                       "code": "await task.fail({ reason: \"child boom\" });",
-                      "id": "lashlang_step_process:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000_0",
+                      "id": "lashlang_step_p_00000000000070008000000000000001_0",
                       "output": [],
                       "protocol_iteration": 0
                     }
@@ -23136,8 +23136,8 @@
                 }
               },
               "kind": "event",
-              "node_id": "n_5c3300297d596cde2f9d5b0ab5947e22bc427da8b099d6426dd64cd3ac2adc56",
-              "parent_node_id": "n_f839b80a82cc272b4a4398001515e557adebd25af88ae095cdf2538420f055c7",
+              "node_id": "n_db039b3b81b10b6f17149ba3ef470179e33fda02afad53254125e167ef136346",
+              "parent_node_id": "n_4594d826a7f178da494b3b5c3e373be32ceba3fe4af3307c01a2beba4e937d65",
               "timestamp": "2027-01-15T08:00:00+00:00"
             }
           ]
@@ -23191,7 +23191,7 @@
               "attempts": [
                 {
                   "attempt_ordinal": 1,
-                  "call_id": "session:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000:turn:process:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000:llm:0"
+                  "call_id": "session:process:p_00000000000070008000000000000001:turn:p_00000000000070008000000000000001:llm:0"
                 }
               ],
               "kind": "unreported"
@@ -23199,7 +23199,7 @@
           }
         ],
         "accepted_raw_rows": {
-          "graph_leaf_node_id": "n_5c3300297d596cde2f9d5b0ab5947e22bc427da8b099d6426dd64cd3ac2adc56",
+          "graph_leaf_node_id": "n_db039b3b81b10b6f17149ba3ef470179e33fda02afad53254125e167ef136346",
           "graph_nodes": [
             {
               "assignment": {
@@ -23237,7 +23237,7 @@
                     "variant": "provider_default"
                   },
                   "provider_id": "lash_runtime agent failed child graph",
-                  "session_id": "session:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000",
+                  "session_id": "session:process:p_00000000000070008000000000000001",
                   "turn_budget": {
                     "bounded": 1
                   }
@@ -23245,7 +23245,7 @@
               },
               "frame_key": "frame-key/v2/c9b08bd8c779c300744ed4d57455bc2d2166e56c7b2b2783b2fa9db331ef66e6",
               "kind": "frame_open",
-              "node_id": "frame-node/v3/6087f8afac689e6162833f2a7ba1e5f9f9be61315b1b7f7c0955ab484a53c02a",
+              "node_id": "frame-node/v3/cadc52b4b6dd42db4970fc67f20caa41ed15e5b6181deefd5f5bdc68e7b21400",
               "protocol_turn_options": {
                 "payload": {
                   "channel": "cell",
@@ -23276,16 +23276,16 @@
             {
               "event": {
                 "Conversation": {
-                  "id": "m_ingress_ti:0d5346d04bf14ece9c9a09e4332e4395298e6a64aaab04650a1c45db68f7e3bc",
+                  "id": "m_ingress_ti:67f14d59e1f5abea5cb202b02a8a100183c968a6cf9d14d6e9c7b5a2875f2958",
                   "origin": {
-                    "input_id": "ti:0d5346d04bf14ece9c9a09e4332e4395298e6a64aaab04650a1c45db68f7e3bc",
+                    "input_id": "ti:67f14d59e1f5abea5cb202b02a8a100183c968a6cf9d14d6e9c7b5a2875f2958",
                     "kind": "turn_input",
-                    "turn_id": "process:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000"
+                    "turn_id": "p_00000000000070008000000000000001"
                   },
                   "parts": [
                     {
                       "content": "Fail with reason child boom.\n\n## Required output\n\nWhen done, end the task with `finish(value)`. The value MUST match this JSON Schema exactly:\n\n```json\n{\n  \"additionalProperties\": false,\n  \"properties\": {\n    \"reason\": {\n      \"type\": \"string\"\n    }\n  },\n  \"required\": [\n    \"reason\"\n  ],\n  \"type\": \"object\"\n}\n```",
-                      "id": "m_ingress_ti:0d5346d04bf14ece9c9a09e4332e4395298e6a64aaab04650a1c45db68f7e3bc.p0",
+                      "id": "m_ingress_ti:67f14d59e1f5abea5cb202b02a8a100183c968a6cf9d14d6e9c7b5a2875f2958.p0",
                       "kind": "Text"
                     }
                   ],
@@ -23293,8 +23293,8 @@
                 }
               },
               "kind": "event",
-              "node_id": "n_87c6e49c65e1352a2dce4ae7141514fd89c34747605b074b7e849d929e954a8e",
-              "parent_node_id": "frame-node/v3/6087f8afac689e6162833f2a7ba1e5f9f9be61315b1b7f7c0955ab484a53c02a",
+              "node_id": "n_a2109d8648ed0f16438fd6bc08b5fecd27eded299f791847bfe70b816c6c2984",
+              "parent_node_id": "frame-node/v3/cadc52b4b6dd42db4970fc67f20caa41ed15e5b6181deefd5f5bdc68e7b21400",
               "timestamp": "2027-01-15T08:00:00+00:00"
             },
             {
@@ -23313,7 +23313,7 @@
                         "decision": "execute_typescript",
                         "reply_fingerprint": "8dcb1ffee5967463",
                         "termination": "finish_required",
-                        "turn_id": "process:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000"
+                        "turn_id": "p_00000000000070008000000000000001"
                       },
                       "phase": "llm_extraction"
                     }
@@ -23322,8 +23322,8 @@
                 }
               },
               "kind": "event",
-              "node_id": "n_f839b80a82cc272b4a4398001515e557adebd25af88ae095cdf2538420f055c7",
-              "parent_node_id": "n_87c6e49c65e1352a2dce4ae7141514fd89c34747605b074b7e849d929e954a8e",
+              "node_id": "n_4594d826a7f178da494b3b5c3e373be32ceba3fe4af3307c01a2beba4e937d65",
+              "parent_node_id": "n_a2109d8648ed0f16438fd6bc08b5fecd27eded299f791847bfe70b816c6c2984",
               "timestamp": "2027-01-15T08:00:00+00:00"
             },
             {
@@ -23338,7 +23338,7 @@
                         }
                       ],
                       "code": "await task.fail({ reason: \"child boom\" });",
-                      "id": "lashlang_step_process:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000_0",
+                      "id": "lashlang_step_p_00000000000070008000000000000001_0",
                       "output": [],
                       "protocol_iteration": 0
                     }
@@ -23347,8 +23347,8 @@
                 }
               },
               "kind": "event",
-              "node_id": "n_5c3300297d596cde2f9d5b0ab5947e22bc427da8b099d6426dd64cd3ac2adc56",
-              "parent_node_id": "n_f839b80a82cc272b4a4398001515e557adebd25af88ae095cdf2538420f055c7",
+              "node_id": "n_db039b3b81b10b6f17149ba3ef470179e33fda02afad53254125e167ef136346",
+              "parent_node_id": "n_4594d826a7f178da494b3b5c3e373be32ceba3fe4af3307c01a2beba4e937d65",
               "timestamp": "2027-01-15T08:00:00+00:00"
             }
           ],
@@ -23367,7 +23367,7 @@
                 "attempts": [
                   {
                     "attempt_ordinal": 1,
-                    "call_id": "session:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000:turn:process:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000:llm:0"
+                    "call_id": "session:process:p_00000000000070008000000000000001:turn:p_00000000000070008000000000000001:llm:0"
                   }
                 ],
                 "kind": "unreported"
@@ -23413,16 +23413,16 @@
           "graph_node_count": 4,
           "messages": [
             {
-              "id": "m_ingress_ti:0d5346d04bf14ece9c9a09e4332e4395298e6a64aaab04650a1c45db68f7e3bc",
+              "id": "m_ingress_ti:67f14d59e1f5abea5cb202b02a8a100183c968a6cf9d14d6e9c7b5a2875f2958",
               "origin": {
-                "input_id": "ti:0d5346d04bf14ece9c9a09e4332e4395298e6a64aaab04650a1c45db68f7e3bc",
+                "input_id": "ti:67f14d59e1f5abea5cb202b02a8a100183c968a6cf9d14d6e9c7b5a2875f2958",
                 "kind": "turn_input",
-                "turn_id": "process:subagent:lashlang:v2:turn:31:sim-agent-failed-child-contract:27:sim-agent-failed-child-turn:75:sim-agent-failed-child-contract:sim-agent-failed-child-turn:1:0:exec_code:3:0000000000"
+                "turn_id": "p_00000000000070008000000000000001"
               },
               "parts": [
                 {
                   "content": "Fail with reason child boom.\n\n## Required output\n\nWhen done, end the task with `finish(value)`. The value MUST match this JSON Schema exactly:\n\n```json\n{\n  \"additionalProperties\": false,\n  \"properties\": {\n    \"reason\": {\n      \"type\": \"string\"\n    }\n  },\n  \"required\": [\n    \"reason\"\n  ],\n  \"type\": \"object\"\n}\n```",
-                  "id": "m_ingress_ti:0d5346d04bf14ece9c9a09e4332e4395298e6a64aaab04650a1c45db68f7e3bc.p0",
+                  "id": "m_ingress_ti:67f14d59e1f5abea5cb202b02a8a100183c968a6cf9d14d6e9c7b5a2875f2958.p0",
                   "kind": "Text"
                 }
               ],
@@ -23519,7 +23519,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.768445733+00:00"
+              "timestamp": "2026-09-26T07:31:22.753705128+00:00"
             },
             {
               "event": {
@@ -23638,7 +23638,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.768445733+00:00"
+              "timestamp": "2026-09-26T07:31:22.753705128+00:00"
             },
             {
               "event": {
@@ -23871,7 +23871,7 @@
               "kind": "event",
               "node_id": "n_7672595bed029bfb8068b11c4321b0365161729a3d20990a148173686bbf1b7e",
               "parent_node_id": "n_a85889bfd198034dff6a8fcee95009deff18955306e1334e7e0fc760da3ed5b7",
-              "timestamp": "2027-01-15T08:00:00.894+00:00"
+              "timestamp": "2027-01-15T08:00:02.728+00:00"
             }
           ]
         },
@@ -23937,7 +23937,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.768445733+00:00"
+              "timestamp": "2026-09-26T07:31:22.753705128+00:00"
             },
             {
               "event": {
@@ -24043,7 +24043,7 @@
               "kind": "event",
               "node_id": "n_7672595bed029bfb8068b11c4321b0365161729a3d20990a148173686bbf1b7e",
               "parent_node_id": "n_a85889bfd198034dff6a8fcee95009deff18955306e1334e7e0fc760da3ed5b7",
-              "timestamp": "2027-01-15T08:00:00.894+00:00"
+              "timestamp": "2027-01-15T08:00:02.728+00:00"
             }
           ],
           "token_ledger": [
@@ -24249,7 +24249,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.818612838+00:00"
+              "timestamp": "2026-09-26T07:31:22.820036851+00:00"
             },
             {
               "event": {
@@ -24358,7 +24358,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.818612838+00:00"
+              "timestamp": "2026-09-26T07:31:22.820036851+00:00"
             },
             {
               "event": {
@@ -24561,7 +24561,7 @@
               "kind": "event",
               "node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
               "parent_node_id": "n_92b4ec69cdcbb9ec8ab6efd733263589a1657879d4e9861876496640b014df7a",
-              "timestamp": "2027-01-15T08:00:00.894+00:00"
+              "timestamp": "2027-01-15T08:00:02.728+00:00"
             }
           ]
         },
@@ -24627,7 +24627,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.818612838+00:00"
+              "timestamp": "2026-09-26T07:31:22.820036851+00:00"
             },
             {
               "event": {
@@ -24713,7 +24713,7 @@
               "kind": "event",
               "node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
               "parent_node_id": "n_92b4ec69cdcbb9ec8ab6efd733263589a1657879d4e9861876496640b014df7a",
-              "timestamp": "2027-01-15T08:00:00.894+00:00"
+              "timestamp": "2027-01-15T08:00:02.728+00:00"
             }
           ],
           "token_ledger": [
@@ -24881,7 +24881,7 @@
               "kind": "event",
               "node_id": "n_5a4208b9b28ceade3741adee646095bbb5355bdd47d556a1d8018c9af66d2698",
               "parent_node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
-              "timestamp": "2027-01-15T08:00:00.894+00:00"
+              "timestamp": "2027-01-15T08:00:02.728+00:00"
             },
             {
               "event": {
@@ -24900,7 +24900,7 @@
               "kind": "event",
               "node_id": "n_c0c71a9bb847ab472abefba00a4caaf91232ad5aee6c9efdb5cc20b38f1dc25f",
               "parent_node_id": "n_5a4208b9b28ceade3741adee646095bbb5355bdd47d556a1d8018c9af66d2698",
-              "timestamp": "2027-01-15T08:00:01.115+00:00"
+              "timestamp": "2027-01-15T08:00:03.889+00:00"
             }
           ]
         },
@@ -24966,7 +24966,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.818612838+00:00"
+              "timestamp": "2026-09-26T07:31:22.820036851+00:00"
             },
             {
               "event": {
@@ -25052,7 +25052,7 @@
               "kind": "event",
               "node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
               "parent_node_id": "n_92b4ec69cdcbb9ec8ab6efd733263589a1657879d4e9861876496640b014df7a",
-              "timestamp": "2027-01-15T08:00:00.894+00:00"
+              "timestamp": "2027-01-15T08:00:02.728+00:00"
             },
             {
               "event": {
@@ -25076,7 +25076,7 @@
               "kind": "event",
               "node_id": "n_5a4208b9b28ceade3741adee646095bbb5355bdd47d556a1d8018c9af66d2698",
               "parent_node_id": "n_46e84153add103d55f64f0ef4df1b95f337daddeda914eae3e9a1922a1428e37",
-              "timestamp": "2027-01-15T08:00:00.894+00:00"
+              "timestamp": "2027-01-15T08:00:02.728+00:00"
             },
             {
               "event": {
@@ -25095,7 +25095,7 @@
               "kind": "event",
               "node_id": "n_c0c71a9bb847ab472abefba00a4caaf91232ad5aee6c9efdb5cc20b38f1dc25f",
               "parent_node_id": "n_5a4208b9b28ceade3741adee646095bbb5355bdd47d556a1d8018c9af66d2698",
-              "timestamp": "2027-01-15T08:00:01.115+00:00"
+              "timestamp": "2027-01-15T08:00:03.889+00:00"
             }
           ],
           "token_ledger": [
@@ -25308,7 +25308,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.860566279+00:00"
+              "timestamp": "2026-09-26T07:31:22.883994236+00:00"
             },
             {
               "event": {
@@ -25417,7 +25417,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.860566279+00:00"
+              "timestamp": "2026-09-26T07:31:22.883994236+00:00"
             },
             {
               "event": {
@@ -25620,7 +25620,7 @@
               "kind": "event",
               "node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
               "parent_node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
-              "timestamp": "2027-01-15T08:00:00.894+00:00"
+              "timestamp": "2027-01-15T08:00:02.728+00:00"
             }
           ]
         },
@@ -25686,7 +25686,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.860566279+00:00"
+              "timestamp": "2026-09-26T07:31:22.883994236+00:00"
             },
             {
               "event": {
@@ -25772,7 +25772,7 @@
               "kind": "event",
               "node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
               "parent_node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
-              "timestamp": "2027-01-15T08:00:00.894+00:00"
+              "timestamp": "2027-01-15T08:00:02.728+00:00"
             }
           ],
           "token_ledger": [
@@ -25940,7 +25940,7 @@
               "kind": "event",
               "node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
               "parent_node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
-              "timestamp": "2027-01-15T08:00:00.894+00:00"
+              "timestamp": "2027-01-15T08:00:02.728+00:00"
             },
             {
               "event": {
@@ -25959,7 +25959,7 @@
               "kind": "event",
               "node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
               "parent_node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
-              "timestamp": "2027-01-15T08:00:01.115+00:00"
+              "timestamp": "2027-01-15T08:00:03.889+00:00"
             }
           ]
         },
@@ -26025,7 +26025,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.860566279+00:00"
+              "timestamp": "2026-09-26T07:31:22.883994236+00:00"
             },
             {
               "event": {
@@ -26111,7 +26111,7 @@
               "kind": "event",
               "node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
               "parent_node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
-              "timestamp": "2027-01-15T08:00:00.894+00:00"
+              "timestamp": "2027-01-15T08:00:02.728+00:00"
             },
             {
               "event": {
@@ -26135,7 +26135,7 @@
               "kind": "event",
               "node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
               "parent_node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
-              "timestamp": "2027-01-15T08:00:00.894+00:00"
+              "timestamp": "2027-01-15T08:00:02.728+00:00"
             },
             {
               "event": {
@@ -26154,7 +26154,7 @@
               "kind": "event",
               "node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
               "parent_node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
-              "timestamp": "2027-01-15T08:00:01.115+00:00"
+              "timestamp": "2027-01-15T08:00:03.889+00:00"
             }
           ],
           "token_ledger": [
@@ -26349,7 +26349,7 @@
               "kind": "event",
               "node_id": "n_4685b079ab678bbef20a3e35b0feb6e1ec8a446753c2dc2a3788a4d563f06bdb",
               "parent_node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
-              "timestamp": "2027-01-15T08:00:01.115+00:00"
+              "timestamp": "2027-01-15T08:00:03.889+00:00"
             },
             {
               "event": {
@@ -26368,7 +26368,7 @@
               "kind": "event",
               "node_id": "n_3c1b0d3e5a7a05994e5912786f2c6b052de8c8b785c04b0db48abfe169ebbc50",
               "parent_node_id": "n_4685b079ab678bbef20a3e35b0feb6e1ec8a446753c2dc2a3788a4d563f06bdb",
-              "timestamp": "2027-01-15T08:00:01.295+00:00"
+              "timestamp": "2027-01-15T08:00:04.747+00:00"
             }
           ]
         },
@@ -26434,7 +26434,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.860566279+00:00"
+              "timestamp": "2026-09-26T07:31:22.883994236+00:00"
             },
             {
               "event": {
@@ -26520,7 +26520,7 @@
               "kind": "event",
               "node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
               "parent_node_id": "n_50955c46c9da51f43f2c731d6e8a51fe601761f2ea88de21189b2e9a81085d9f",
-              "timestamp": "2027-01-15T08:00:00.894+00:00"
+              "timestamp": "2027-01-15T08:00:02.728+00:00"
             },
             {
               "event": {
@@ -26544,7 +26544,7 @@
               "kind": "event",
               "node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
               "parent_node_id": "n_4ec9ab1d959da0f7140c880c7b9f958b8aefd7f47c824d0a32b3933f55915641",
-              "timestamp": "2027-01-15T08:00:00.894+00:00"
+              "timestamp": "2027-01-15T08:00:02.728+00:00"
             },
             {
               "event": {
@@ -26563,7 +26563,7 @@
               "kind": "event",
               "node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
               "parent_node_id": "n_c96388f362026aaba4eeb1d10ad2034c27306d3e50e691c80b38345b34ab60ad",
-              "timestamp": "2027-01-15T08:00:01.115+00:00"
+              "timestamp": "2027-01-15T08:00:03.889+00:00"
             },
             {
               "event": {
@@ -26587,7 +26587,7 @@
               "kind": "event",
               "node_id": "n_4685b079ab678bbef20a3e35b0feb6e1ec8a446753c2dc2a3788a4d563f06bdb",
               "parent_node_id": "n_711559d1f2563b84417527baa4f3ead8882b0c1ecb43fcb0e1a601bb11e28294",
-              "timestamp": "2027-01-15T08:00:01.115+00:00"
+              "timestamp": "2027-01-15T08:00:03.889+00:00"
             },
             {
               "event": {
@@ -26606,7 +26606,7 @@
               "kind": "event",
               "node_id": "n_3c1b0d3e5a7a05994e5912786f2c6b052de8c8b785c04b0db48abfe169ebbc50",
               "parent_node_id": "n_4685b079ab678bbef20a3e35b0feb6e1ec8a446753c2dc2a3788a4d563f06bdb",
-              "timestamp": "2027-01-15T08:00:01.295+00:00"
+              "timestamp": "2027-01-15T08:00:04.747+00:00"
             }
           ],
           "token_ledger": [
@@ -26850,7 +26850,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.923184273+00:00"
+              "timestamp": "2026-09-26T07:31:23.028282343+00:00"
             },
             {
               "event": {
@@ -26895,7 +26895,7 @@
               "kind": "event",
               "node_id": "n_c8be6696dd3f59bb15c4c4bb9186403e03871e44ea17d639e69bf4f8a6ba7581",
               "parent_node_id": "n_270eccff0ba95d649c0ca05487d60c80587269c1fa55f7fd6669a941cc0d50db",
-              "timestamp": "2027-01-15T08:00:01.370+00:00"
+              "timestamp": "2027-01-15T08:00:04.994+00:00"
             },
             {
               "event": {
@@ -26921,7 +26921,7 @@
               "kind": "event",
               "node_id": "n_58cd8b1f4bd9a387252840a0dc7a90c9c4da825d3cacf869b2a200b3c3711a6c",
               "parent_node_id": "n_c8be6696dd3f59bb15c4c4bb9186403e03871e44ea17d639e69bf4f8a6ba7581",
-              "timestamp": "2027-01-15T08:00:01.370+00:00"
+              "timestamp": "2027-01-15T08:00:04.994+00:00"
             },
             {
               "event": {
@@ -26940,7 +26940,7 @@
               "kind": "event",
               "node_id": "n_3959d4d6e9b55560cdcb325721e1ba83be72da0a5840d9e3ea6875547c7d2a19",
               "parent_node_id": "n_58cd8b1f4bd9a387252840a0dc7a90c9c4da825d3cacf869b2a200b3c3711a6c",
-              "timestamp": "2027-01-15T08:00:01.370+00:00"
+              "timestamp": "2027-01-15T08:00:04.994+00:00"
             }
           ]
         },
@@ -26987,7 +26987,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.923184273+00:00"
+              "timestamp": "2026-09-26T07:31:23.028282343+00:00"
             },
             {
               "event": {
@@ -27032,7 +27032,7 @@
               "kind": "event",
               "node_id": "n_c8be6696dd3f59bb15c4c4bb9186403e03871e44ea17d639e69bf4f8a6ba7581",
               "parent_node_id": "n_270eccff0ba95d649c0ca05487d60c80587269c1fa55f7fd6669a941cc0d50db",
-              "timestamp": "2027-01-15T08:00:01.370+00:00"
+              "timestamp": "2027-01-15T08:00:04.994+00:00"
             },
             {
               "event": {
@@ -27058,7 +27058,7 @@
               "kind": "event",
               "node_id": "n_58cd8b1f4bd9a387252840a0dc7a90c9c4da825d3cacf869b2a200b3c3711a6c",
               "parent_node_id": "n_c8be6696dd3f59bb15c4c4bb9186403e03871e44ea17d639e69bf4f8a6ba7581",
-              "timestamp": "2027-01-15T08:00:01.370+00:00"
+              "timestamp": "2027-01-15T08:00:04.994+00:00"
             },
             {
               "event": {
@@ -27077,7 +27077,7 @@
               "kind": "event",
               "node_id": "n_3959d4d6e9b55560cdcb325721e1ba83be72da0a5840d9e3ea6875547c7d2a19",
               "parent_node_id": "n_58cd8b1f4bd9a387252840a0dc7a90c9c4da825d3cacf869b2a200b3c3711a6c",
-              "timestamp": "2027-01-15T08:00:01.370+00:00"
+              "timestamp": "2027-01-15T08:00:04.994+00:00"
             }
           ],
           "token_ledger": [],
@@ -27252,7 +27252,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:15.088095243+00:00"
+              "timestamp": "2026-09-26T07:31:23.094137228+00:00"
             },
             {
               "event": {
@@ -27297,7 +27297,7 @@
               "kind": "event",
               "node_id": "n_fb621545030c058fda0d4f6bc2749a8fcd4f5a8be261c4a6f5b169fd7a886c7b",
               "parent_node_id": "n_ccc2ad193b10f29f3e638a7a75cccf47bf4d8f0d9caf5c9b4451d2fc28dffc69",
-              "timestamp": "2027-01-15T08:00:01.370+00:00"
+              "timestamp": "2027-01-15T08:00:04.994+00:00"
             },
             {
               "event": {
@@ -27323,7 +27323,7 @@
               "kind": "event",
               "node_id": "n_e23c0f48c12a2d00e317af16e81606c4fe565484096772239f3e367590dc9ace",
               "parent_node_id": "n_fb621545030c058fda0d4f6bc2749a8fcd4f5a8be261c4a6f5b169fd7a886c7b",
-              "timestamp": "2027-01-15T08:00:01.370+00:00"
+              "timestamp": "2027-01-15T08:00:04.994+00:00"
             },
             {
               "event": {
@@ -27342,7 +27342,7 @@
               "kind": "event",
               "node_id": "n_31dea96e0b9842837e784ee3677941527d5909425d9440993836dc3062bb29e5",
               "parent_node_id": "n_e23c0f48c12a2d00e317af16e81606c4fe565484096772239f3e367590dc9ace",
-              "timestamp": "2027-01-15T08:00:01.370+00:00"
+              "timestamp": "2027-01-15T08:00:04.994+00:00"
             }
           ]
         },
@@ -27389,7 +27389,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:15.088095243+00:00"
+              "timestamp": "2026-09-26T07:31:23.094137228+00:00"
             },
             {
               "event": {
@@ -27434,7 +27434,7 @@
               "kind": "event",
               "node_id": "n_fb621545030c058fda0d4f6bc2749a8fcd4f5a8be261c4a6f5b169fd7a886c7b",
               "parent_node_id": "n_ccc2ad193b10f29f3e638a7a75cccf47bf4d8f0d9caf5c9b4451d2fc28dffc69",
-              "timestamp": "2027-01-15T08:00:01.370+00:00"
+              "timestamp": "2027-01-15T08:00:04.994+00:00"
             },
             {
               "event": {
@@ -27460,7 +27460,7 @@
               "kind": "event",
               "node_id": "n_e23c0f48c12a2d00e317af16e81606c4fe565484096772239f3e367590dc9ace",
               "parent_node_id": "n_fb621545030c058fda0d4f6bc2749a8fcd4f5a8be261c4a6f5b169fd7a886c7b",
-              "timestamp": "2027-01-15T08:00:01.370+00:00"
+              "timestamp": "2027-01-15T08:00:04.994+00:00"
             },
             {
               "event": {
@@ -27479,7 +27479,7 @@
               "kind": "event",
               "node_id": "n_31dea96e0b9842837e784ee3677941527d5909425d9440993836dc3062bb29e5",
               "parent_node_id": "n_e23c0f48c12a2d00e317af16e81606c4fe565484096772239f3e367590dc9ace",
-              "timestamp": "2027-01-15T08:00:01.370+00:00"
+              "timestamp": "2027-01-15T08:00:04.994+00:00"
             }
           ],
           "token_ledger": [],
@@ -27654,7 +27654,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.900433424+00:00"
+              "timestamp": "2026-09-26T07:31:22.929513760+00:00"
             },
             {
               "event": {
@@ -27699,7 +27699,7 @@
               "kind": "event",
               "node_id": "n_95f2e43ca2ffd8c9997355c3a985971f02f1be771128f12a44dcf26aaba10573",
               "parent_node_id": "n_808f443440c2b4e6259cf792f26133b585c444d27be079000d531c5857ab4f66",
-              "timestamp": "2027-01-15T08:00:01.370+00:00"
+              "timestamp": "2027-01-15T08:00:04.994+00:00"
             },
             {
               "event": {
@@ -27725,7 +27725,7 @@
               "kind": "event",
               "node_id": "n_6f4e33c379e9e6873025c0065fb4bbb63755c00b98a90fd6f2897197e144c4c5",
               "parent_node_id": "n_95f2e43ca2ffd8c9997355c3a985971f02f1be771128f12a44dcf26aaba10573",
-              "timestamp": "2027-01-15T08:00:01.370+00:00"
+              "timestamp": "2027-01-15T08:00:04.994+00:00"
             },
             {
               "event": {
@@ -27744,7 +27744,7 @@
               "kind": "event",
               "node_id": "n_4b710976f683da656774dc15a7f0c8e781f1d4eb5f066edf4b4e2adb110c24e4",
               "parent_node_id": "n_6f4e33c379e9e6873025c0065fb4bbb63755c00b98a90fd6f2897197e144c4c5",
-              "timestamp": "2027-01-15T08:00:01.370+00:00"
+              "timestamp": "2027-01-15T08:00:04.994+00:00"
             }
           ]
         },
@@ -27791,7 +27791,7 @@
                 "schema_version": 1
               },
               "reason": "initial",
-              "timestamp": "2026-09-26T01:11:14.900433424+00:00"
+              "timestamp": "2026-09-26T07:31:22.929513760+00:00"
             },
             {
               "event": {
@@ -27836,7 +27836,7 @@
               "kind": "event",
               "node_id": "n_95f2e43ca2ffd8c9997355c3a985971f02f1be771128f12a44dcf26aaba10573",
               "parent_node_id": "n_808f443440c2b4e6259cf792f26133b585c444d27be079000d531c5857ab4f66",
-              "timestamp": "2027-01-15T08:00:01.370+00:00"
+              "timestamp": "2027-01-15T08:00:04.994+00:00"
             },
             {
               "event": {
@@ -27862,7 +27862,7 @@
               "kind": "event",
               "node_id": "n_6f4e33c379e9e6873025c0065fb4bbb63755c00b98a90fd6f2897197e144c4c5",
               "parent_node_id": "n_95f2e43ca2ffd8c9997355c3a985971f02f1be771128f12a44dcf26aaba10573",
-              "timestamp": "2027-01-15T08:00:01.370+00:00"
+              "timestamp": "2027-01-15T08:00:04.994+00:00"
             },
             {
               "event": {
@@ -27881,7 +27881,7 @@
               "kind": "event",
               "node_id": "n_4b710976f683da656774dc15a7f0c8e781f1d4eb5f066edf4b4e2adb110c24e4",
               "parent_node_id": "n_6f4e33c379e9e6873025c0065fb4bbb63755c00b98a90fd6f2897197e144c4c5",
-              "timestamp": "2027-01-15T08:00:01.370+00:00"
+              "timestamp": "2027-01-15T08:00:04.994+00:00"
             }
           ],
           "token_ledger": [],

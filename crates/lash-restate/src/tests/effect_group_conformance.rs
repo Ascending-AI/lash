@@ -5,7 +5,6 @@
 // library code).
 #![allow(clippy::disallowed_methods)]
 
-use lash_sansio::ProcessId;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -68,6 +67,7 @@ impl RestateProcessRunner for ToolChildProcessRunner {
     async fn run_process_segment(
         &self,
         _started: &crate::SegmentStarted,
+        _process_id: lash_core::ProcessId,
         _registration: lash_core::ProcessRegistration,
         _execution_context: lash_core::ProcessExecutionContext,
         _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
@@ -131,22 +131,24 @@ impl RestateProcessRunner for LawProcessRunner {
     async fn run_process_segment(
         &self,
         started: &crate::SegmentStarted,
+        process_id: lash_core::ProcessId,
         registration: lash_core::ProcessRegistration,
         execution_context: lash_core::ProcessExecutionContext,
         scoped_effect_controller: lash_core::ScopedEffectController<'_>,
         handover: Option<lash_core::SegmentHandover>,
         cancellation: CancellationToken,
     ) -> Result<lash_core::ProcessRunOutcome, lash_core::PluginError> {
-        if self.segments.serves(&registration.id) {
+        if self.segments.serves(&process_id, &registration) {
             return self
                 .segments
-                .run(&registration.id, scoped_effect_controller)
+                .run(&process_id, scoped_effect_controller)
                 .await;
         }
         match self.installed() {
             Some(runner) => {
                 Box::pin(runner.run_process_segment(
                     started,
+                    process_id,
                     registration,
                     execution_context,
                     scoped_effect_controller,
@@ -159,6 +161,7 @@ impl RestateProcessRunner for LawProcessRunner {
                 ToolChildProcessRunner
                     .run_process_segment(
                         started,
+                        process_id,
                         registration,
                         execution_context,
                         scoped_effect_controller,
@@ -1442,63 +1445,6 @@ impl LiveConformanceHarness {
             "RESTATE_QUIESCENCE await_registration_orders=registered-first,retired-first PASS"
         );
     }
-
-    /// The crash cut between a registry's commit and its post-commit index reinstate (FIG-2499
-    /// fix round 3, ruling 2): the index is revoked, the registration is committed with no
-    /// host bound, everything is dropped, and a cold registry plus host are opened and bound.
-    /// The first effect under the process is admitted with no explicit re-registration: the
-    /// host reads through the revoked index to the registry it is bound to.
-    /// Runs over a SQLite-backed registry always and over a PostgreSQL-backed one when
-    /// `LASH_POSTGRES_DATABASE_URL` names a server.
-    pub(super) async fn run_cold_reopen_witnesses(&self) -> usize {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let registry_path = dir.path().join("registry.db");
-        let sessions = dir.path().join("sessions");
-        let open_sqlite = || {
-            let registry_path = registry_path.clone();
-            let sessions = sessions.clone();
-            async move {
-                Arc::new(
-                    lash_sqlite_store::SqliteProcessRegistry::open(&registry_path, sessions)
-                        .await
-                        .expect("open the SQLite process registry"),
-                ) as Arc<dyn lash_core::ProcessRegistry>
-            }
-        };
-        cold_reopen_admits_the_registered_process(
-            &self.effect_host_factory(),
-            "sqlite",
-            open_sqlite,
-        )
-        .await;
-        let mut witnessed = 1;
-
-        if let Ok(url) = std::env::var("LASH_POSTGRES_DATABASE_URL") {
-            let database = lash_postgres_store::testing::IsolatedDatabase::create(&url).await;
-            let storage = lash_postgres_store::PostgresStorage::connect(database.url())
-                .await
-                .expect("connect the isolated database");
-            let open_postgres = || {
-                let storage = storage.clone();
-                async move {
-                    Arc::new(storage.process_registry()) as Arc<dyn lash_core::ProcessRegistry>
-                }
-            };
-            cold_reopen_admits_the_registered_process(
-                &self.effect_host_factory(),
-                "postgres",
-                open_postgres,
-            )
-            .await;
-            witnessed += 1;
-        } else {
-            assert!(
-                std::env::var("LASH_REQUIRE_POSTGRES").is_err(),
-                "LASH_REQUIRE_POSTGRES=1 but LASH_POSTGRES_DATABASE_URL is not set"
-            );
-        }
-        witnessed
-    }
 }
 
 fn nonce() -> u128 {
@@ -1605,98 +1551,6 @@ impl GroupOpenBudgetProbe for GroupOpenBudgetProbeImpl {
         .await;
         Ok(Json(opened.err()))
     }
-}
-
-async fn cold_reopen_admits_the_registered_process<F, Fut>(
-    host_factory: &dyn Fn() -> Arc<dyn lash_core::EffectHost>,
-    label: &str,
-    open_registry: F,
-) where
-    F: Fn() -> Fut,
-    Fut: std::future::Future<Output = Arc<dyn lash_core::ProcessRegistry>>,
-{
-    let nonce = nonce();
-    let process_id = ProcessId::from(format!("cold-reopen-{label}-{nonce}"));
-    let scope = ExecutionScope::process(process_id.clone());
-    let registration = || {
-        lash_core::ProcessRegistration::new(
-            process_id.clone(),
-            lash_core::ProcessInput::External {
-                metadata: serde_json::Value::Null,
-            },
-            lash_core::RecoveryContract::ExternallyOwned,
-            lash_core::ProcessProvenance::host(),
-            lash_core::ProcessLifecyclePolicy::new(
-                lash_core::ParentScope::Host,
-                lash_core::OnParentEnd::Abandon,
-            ),
-        )
-        .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
-            lash_core::ProcessIdentity::new("test"),
-        ))
-    };
-
-    // The index is revoked, and the registration commits with no host bound:
-    // the post-commit reinstate never reaches the engine.
-    let host = host_factory();
-    host.retire_effect_journal(lash_core::EffectJournalRetirement::process(
-        process_id.clone(),
-    ))
-    .await
-    .expect("retire the process scope");
-    let registry = open_registry().await;
-    registry
-        .register_process(registration())
-        .await
-        .expect("register the process");
-    drop(registry);
-    drop(host);
-
-    // Cold reopen: a fresh registry and a fresh host, bound the way
-    // `LashCore::build` binds them, and nothing else.
-    let registry = open_registry().await;
-    let cold = host_factory();
-    registry.bind_effect_host(&cold);
-    let other = ExecutionScope::runtime_operation(format!("cold-reopen-ready-{label}-{nonce}"));
-    let key = cold
-        .await_event_key(
-            &other,
-            lash_core::AwaitEventWaitIdentity::tool_completion("ready"),
-        )
-        .await
-        .expect("mint the effect's promise");
-    cold.resolve_await_event(&key, Resolution::Ok(serde_json::json!("ready")))
-        .await
-        .expect("resolve the effect's promise");
-    let envelope = RuntimeEffectEnvelope::new(
-        lash_core::RuntimeEffectInvocation::new(
-            lash_core::EffectAddress::new(
-                scope.clone(),
-                format!("cold-reopen-first-{label}-{nonce}"),
-            )
-            .expect("valid cold-reopen effect address"),
-            lash_core::RuntimeAttribution::none(),
-            "first",
-        ),
-        RuntimeEffectCommand::AwaitEvent { key },
-    );
-    cold.scoped(durable_admission(&scope))
-        .expect("the process scope binds")
-        .controller()
-        .execute_effect(
-            envelope,
-            RuntimeEffectLocalExecutor::await_event(CancellationToken::new(), None),
-        )
-        .await
-        .unwrap_or_else(|error| {
-            panic!("the first effect under the registered process is admitted after a cold reopen over a {label} registry, with no explicit re-registration: {error:?}")
-        });
-    cold.await_event_key(
-        &scope,
-        lash_core::AwaitEventWaitIdentity::tool_completion("after-reopen"),
-    )
-    .await
-    .expect("the registered process mints after the cold reopen");
 }
 
 async fn run_design_witnesses(

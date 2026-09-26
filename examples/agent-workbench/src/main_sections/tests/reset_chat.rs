@@ -88,17 +88,16 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
         old_work_before_reset
             .visible_processes
             .into_iter()
-            .map(|process_ref| process_ref.process_id)
             .collect::<Vec<_>>(),
         started.started_process_ids()
     );
     append_started_graph(
         &state.lashlang_execution,
         &test_graph(
-            "process:old-reset-process",
+            &format!("process:{}", ProcessId::fixture("old-reset-process")),
             &old_session_id,
             TraceRuntimeSubject::Process {
-                process_id: ProcessId::from("old-reset-process"),
+                process_id: ProcessId::fixture("old-reset-process"),
             },
             Vec::new(),
         ),
@@ -156,7 +155,6 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
         old_work_after_reset
             .visible_processes
             .into_iter()
-            .map(|process_ref| process_ref.process_id)
             .collect::<Vec<_>>(),
         started.started_process_ids(),
         "mock Restate ingress must not consume deletion work inline"
@@ -282,11 +280,9 @@ async fn register_terminal_processes(
     )
     .await
     .expect("open the workbench process registry");
-    for index in 0..count {
-        let process_id = format!("reset-load-{index}");
-        registry
+    for _ in 0..count {
+        let process_id = registry
             .register_process(lash::process::ProcessRegistration::new(
-                process_id.clone(),
                 lash::process::ProcessInput::External {
                     metadata: Value::Null,
                 },
@@ -300,10 +296,11 @@ async fn register_terminal_processes(
                 ),
             ))
             .await
-            .expect("register process");
+            .expect("register process")
+            .id;
         registry
             .complete_process(
-                &ProcessId::from(process_id),
+                &process_id,
                 lash::process::ProcessAwaitOutput::from_tool_output(
                     lash::tools::ToolCallOutput::success(json!("done")),
                 ),

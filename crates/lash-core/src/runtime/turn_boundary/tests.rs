@@ -242,10 +242,7 @@ async fn final_commit_retry_preserves_honoured_after_step_settlement() {
             .await
             .expect("create turn gate");
     let scoped = host
-        .scoped(
-            crate::AdmittedScope::unpinned(address.execution_scope().clone())
-                .expect("a turn address admits unpinned"),
-        )
+        .scoped(crate::AdmittedScope::new(address.execution_scope().clone()))
         .expect("scope final-cancel CAS controller");
     let honoured = control
         .observe_pending_cancel(
@@ -1462,14 +1459,13 @@ async fn recovered_final_commit_cedes_when_a_peer_supersedes_its_restored_queue_
             version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
             wake_id: "fig905-process-wake-1".to_string(),
             target_session_id: SessionId::from("session-1"),
-            process_id: crate::ProcessId::from("fig905-process"),
-            process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
+            process_id: crate::ProcessId::fixture("fig905-process"),
             sequence: 1,
             event_type: "process.wake".to_string(),
             event_invocation: crate::RuntimeInvocation {
                 attribution: crate::RuntimeAttribution::for_session("session-1"),
                 subject: crate::RuntimeSubject::ProcessEvent {
-                    process_id: crate::ProcessId::from("fig905-process"),
+                    process_id: crate::ProcessId::fixture("fig905-process"),
                     sequence: 1,
                     event_type: "process.wake".to_string(),
                 },

@@ -22,7 +22,7 @@ async fn intent_law_world() -> IntentLawWorld {
     }
 }
 
-fn recorded_event_intents(event_types: &[&str]) -> crate::ToolIntents {
+fn recorded_event_intents(target: &ProcessId, event_types: &[&str]) -> crate::ToolIntents {
     crate::ToolIntents::v3(
         event_types
             .iter()
@@ -30,7 +30,7 @@ fn recorded_event_intents(event_types: &[&str]) -> crate::ToolIntents {
             .map(|(index, event_type)| {
                 crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
                     session_id: SessionId::from("session"),
-                    process_id: ProcessId::from("intent-law-target"),
+                    process_id: target.clone(),
                     event_type: (*event_type).to_string(),
                     payload: json!({"source_index": index}),
                 })
@@ -42,11 +42,19 @@ fn recorded_event_intents(event_types: &[&str]) -> crate::ToolIntents {
 async fn register_intent_law_target(
     registry: &Arc<dyn crate::ProcessRegistry>,
     event_types: &[&str],
-) {
+) -> ProcessId {
+    register_intent_law_target_observed_by(registry, event_types, &[SessionId::from("session")])
+        .await
+}
+
+async fn register_intent_law_target_observed_by(
+    registry: &Arc<dyn crate::ProcessRegistry>,
+    event_types: &[&str],
+    observers: &[SessionId],
+) -> ProcessId {
     registry
         .register_process_with_observers(
             crate::ProcessRegistration::new(
-                "intent-law-target",
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -64,10 +72,11 @@ async fn register_intent_law_target(
                     semantics: crate::ProcessEventSemanticsSpec::default(),
                 }
             })),
-            &[SessionId::from("session")],
+            observers,
         )
         .await
-        .expect("register the intent law target");
+        .expect("register the intent law target")
+        .id
 }
 
 async fn fixed_intent_dispatch_context(
@@ -157,13 +166,13 @@ async fn crash_redrive_law(pause: IntentPausePoint) {
     let event_types = ["intent.crash.first", "intent.crash.second"];
     let world = intent_law_world().await;
     let registry = Arc::clone(&world.registry);
-    register_intent_law_target(&registry, &event_types).await;
+    let target = register_intent_law_target(&registry, &event_types).await;
     let calls = Arc::new(AtomicUsize::new(0));
     let controller = Arc::new(IntentReplayController::new(Some(pause)).await);
     let context = fixed_intent_dispatch_context(
         Arc::clone(&controller),
         &world,
-        recorded_event_intents(&event_types),
+        recorded_event_intents(&target, &event_types),
         Arc::clone(&calls),
     )
     .await;
@@ -205,7 +214,7 @@ async fn crash_redrive_law(pause: IntentPausePoint) {
             .all(|outcome| matches!(outcome, crate::ToolIntentExecutionOutcome::Executed { .. }))
     );
     let events = registry
-        .full_event_window(&ProcessId::from("intent-law-target"), 0)
+        .full_event_window(&target, 0)
         .await
         .expect("read crash-law target events");
     assert_eq!(
@@ -243,7 +252,7 @@ fn recorded_start_intents() -> crate::ToolIntents {
     ))])
 }
 
-fn started_process_id(outcome: &crate::ToolIntentExecutionOutcome) -> (ProcessId, ProcessId) {
+fn started_process_id(outcome: &crate::ToolIntentExecutionOutcome) -> (ProcessId, crate::StartKey) {
     match outcome {
         crate::ToolIntentExecutionOutcome::Executed {
             identity, result, ..
@@ -251,27 +260,25 @@ fn started_process_id(outcome: &crate::ToolIntentExecutionOutcome) -> (ProcessId
             // The outcome carries the handle and the parts it names. The
             // process id is `process_id`; `id` is the opaque handle (ADR 0095)
             // and reading it here is what the one handle kind stops.
-            ProcessId::from(
+            ProcessId::parse(
                 result
                     .get("process_id")
                     .and_then(serde_json::Value::as_str)
-                    .expect("a start outcome names its process id")
-                    .to_string(),
-            ),
-            ProcessId::from_intent_identity(identity),
+                    .expect("a start outcome names its process id"),
+            )
+            .expect("a minted process id"),
+            crate::StartKey::for_tool_intent(identity),
         ),
         other => panic!("expected an executed start intent, got {other:?}"),
     }
 }
 
-/// FIG-2994: the id the attempt can derive from its own intent identity and
-/// the id the executor starts under are one value, on the first drain and on
-/// the redrive of the same attempt after a crash. Replacing the executor's
-/// `ProcessId::from_intent_identity` call with a freshly minted id fails the
-/// first assertion; carrying the id in the declaration instead of deriving it
-/// fails the redrive equality.
+/// FIG-2994, ADR 0107: the start is keyed by the key the attempt derives from
+/// its own intent identity, so the first drain and the redrive of the same
+/// attempt after a crash converge on one process. Keying the start on
+/// anything the redrive does not re-derive would start a second process.
 #[tokio::test]
-async fn crash_redrive_of_a_start_declaration_derives_the_same_process_id() {
+async fn crash_redrive_of_a_start_declaration_converges_on_one_process() {
     let world = intent_law_world().await;
     let registry = Arc::clone(&world.registry);
     let calls = Arc::new(AtomicUsize::new(0));
@@ -310,23 +317,20 @@ async fn crash_redrive_of_a_start_declaration_derives_the_same_process_id() {
         .first()
         .expect("the redrive reports the start declaration");
     let (started, derived) = started_process_id(outcome);
-    assert_eq!(
-        started, derived,
-        "the executor must start under the id the attempt identity derives"
-    );
 
     let live = registry
         .list_processes(&crate::ProcessListFilter::default())
         .await
         .expect("list the started processes")
         .into_iter()
+        .filter(|record| record.start_key.as_ref() == Some(&derived))
         .map(|record| record.id)
-        .filter(|id| *id == derived)
         .collect::<Vec<_>>();
     assert_eq!(
         live,
-        vec![derived],
-        "the crash and its redrive must converge on exactly one process row"
+        vec![started],
+        "the crash and its redrive must converge on exactly one process row, \
+         started under the key the attempt identity derives"
     );
 }
 
@@ -353,13 +357,13 @@ async fn public_coordinator_redrive_is_byte_stable_after_live_terminal_mutation(
     let event_types = ["signal.redrive.signal"];
     let world = intent_law_world().await;
     let registry = Arc::clone(&world.registry);
-    register_intent_law_target(&registry, &event_types).await;
+    let target = register_intent_law_target(&registry, &event_types).await;
     let calls = Arc::new(AtomicUsize::new(0));
     let controller = Arc::new(IntentReplayController::new(None).await);
     let intents = crate::ToolIntents::v3(vec![crate::ToolIntent::SignalProcess(
         crate::SignalProcessIntent {
             session_id: SessionId::from("session"),
-            process_id: ProcessId::from("intent-law-target"),
+            process_id: target.clone(),
             signal_name: "redrive.signal".to_string(),
             payload: json!({"recorded": true}),
         },
@@ -372,7 +376,7 @@ async fn public_coordinator_redrive_is_byte_stable_after_live_terminal_mutation(
     let first_bytes = serde_json::to_vec(&first).expect("serialize first public outcome");
     registry
         .complete_process(
-            &ProcessId::from("intent-law-target"),
+            &target,
             crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(json!(
                 "terminal after the first drain"
             ))),
@@ -399,14 +403,27 @@ async fn public_coordinator_redrive_is_byte_stable_after_live_terminal_mutation(
 #[tokio::test]
 async fn tool_intent_outcome_replay_is_scoped_to_its_minting_emission() {
     let event_type = "intent.emission.recovered";
-    let world = intent_law_world().await;
-    let registry = Arc::clone(&world.registry);
+    let base = intent_law_world().await;
+    let target = register_intent_law_target(&base.registry, &[event_type]).await;
+    // The first emission's append is refused; the fault is spent, so a later
+    // emission of the same intents executes.
+    let faults = Arc::new(crate::runtime::ProcessRegistryFaults::new(Arc::clone(
+        &base.registry,
+    )));
+    faults.fail_next_event_append(crate::PluginError::Session(
+        "injected append refusal".to_string(),
+    ));
+    let world = IntentLawWorld {
+        registry: Arc::clone(&faults) as Arc<dyn crate::ProcessRegistry>,
+        env_store: base.env_store,
+        trigger_store: base.trigger_store,
+    };
     let calls = Arc::new(AtomicUsize::new(0));
     let controller = Arc::new(IntentReplayController::new(None).await);
     let mut first_emission = fixed_intent_dispatch_context(
         Arc::clone(&controller),
         &world,
-        recorded_event_intents(&[event_type]),
+        recorded_event_intents(&target, &[event_type]),
         Arc::clone(&calls),
     )
     .await;
@@ -426,7 +443,6 @@ async fn tool_intent_outcome_replay_is_scoped_to_its_minting_emission() {
         refused.intent_outcomes
     );
 
-    register_intent_law_target(&registry, &[event_type]).await;
     let mut later_emission = first_emission.clone();
     later_emission.parent_invocation = Some(intent_law_batch_parent("emission-turn-n-plus-1"));
 
@@ -461,8 +477,8 @@ async fn tool_intent_outcome_replay_is_scoped_to_its_minting_emission() {
         "same-emission replay must not execute another provider attempt"
     );
     assert_eq!(
-        registry
-            .full_event_window(&ProcessId::from("intent-law-target"), 0)
+        faults
+            .full_event_window(&target, 0)
             .await
             .expect("read recovered target events")
             .iter()
@@ -478,19 +494,19 @@ async fn refusal_after_success_preserves_the_committed_prefix_and_replays_typed_
     let event_types = ["intent.refusal.first"];
     let world = intent_law_world().await;
     let registry = Arc::clone(&world.registry);
-    register_intent_law_target(&registry, &event_types).await;
+    let target = register_intent_law_target(&registry, &event_types).await;
     let calls = Arc::new(AtomicUsize::new(0));
     let controller = Arc::new(IntentReplayController::new(None).await);
     let intents = crate::ToolIntents::v3(vec![
         crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
             session_id: SessionId::from("session"),
-            process_id: ProcessId::from("intent-law-target"),
+            process_id: target.clone(),
             event_type: "intent.refusal.first".to_string(),
             payload: json!({"committed": true}),
         }),
         crate::ToolIntent::CancelProcess(crate::CancelProcessIntent {
             session_id: SessionId::from("session"),
-            process_id: ProcessId::from("missing-intent-target"),
+            process_id: crate::ProcessId::fixture("missing-intent-target"),
         }),
     ]);
     let context =
@@ -517,7 +533,6 @@ async fn refusal_after_success_preserves_the_committed_prefix_and_replays_typed_
 
     registry
         .register_process(crate::ProcessRegistration::new(
-            "missing-intent-target",
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -538,7 +553,7 @@ async fn refusal_after_success_preserves_the_committed_prefix_and_replays_typed_
         "the recorded refusal cannot become success after live state changes"
     );
     let events = registry
-        .full_event_window(&ProcessId::from("intent-law-target"), 0)
+        .full_event_window(&target, 0)
         .await
         .expect("read the committed prefix");
     assert_eq!(
@@ -564,7 +579,10 @@ async fn replay_mismatch_during_scalar_intent_drain_latches_the_enclosing_effect
     let context = fixed_intent_dispatch_context(
         controller,
         &world,
-        recorded_event_intents(&["replacement.abort"]),
+        recorded_event_intents(
+            &crate::ProcessId::fixture("intent-law-target"),
+            &["replacement.abort"],
+        ),
         Arc::clone(&calls),
     )
     .await;
@@ -605,7 +623,10 @@ async fn ordinary_controller_wrapped_intent_refusal_preserves_its_typed_code() {
     let context = fixed_intent_dispatch_context(
         controller,
         &world,
-        recorded_event_intents(&["controller.refusal"]),
+        recorded_event_intents(
+            &crate::ProcessId::fixture("intent-law-target"),
+            &["controller.refusal"],
+        ),
         calls,
     )
     .await;
@@ -627,7 +648,7 @@ async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
     let event_types = ["post.cancel.intent.0", "post.cancel.intent.1"];
     let world = intent_law_world().await;
     let registry = Arc::clone(&world.registry);
-    register_intent_law_target(&registry, &event_types).await;
+    let target = register_intent_law_target(&registry, &event_types).await;
     let calls = Arc::new(AtomicUsize::new(0));
     let controller = Arc::new(
         IntentReplayController::new(Some(IntentPausePoint::BeforeProcessCommand(1))).await,
@@ -635,7 +656,7 @@ async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
     let context = fixed_intent_dispatch_context(
         Arc::clone(&controller),
         &world,
-        recorded_event_intents(&event_types),
+        recorded_event_intents(&target, &event_types),
         Arc::clone(&calls),
     )
     .await;
@@ -666,7 +687,7 @@ async fn cancellation_after_result_commit_drains_all_intents_unconditionally() {
     );
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     let events = registry
-        .full_event_window(&ProcessId::from("intent-law-target"), 0)
+        .full_event_window(&target, 0)
         .await
         .expect("read post-cancel events");
     assert_eq!(
@@ -686,21 +707,11 @@ async fn retry_drains_only_the_final_attempts_intents() {
     let definition =
         named_beta_tool("retry_intents").with_retry_policy(crate::ToolRetryPolicy::safe(2, 0, 0));
     let calls = Arc::new(AtomicUsize::new(0));
-    let provider: Arc<dyn ToolProvider> = Arc::new(RetryingIntentTools {
-        definition: definition.clone(),
-        calls: Arc::clone(&calls),
-    });
-    let mut context = exact_dispatch_context(
-        crate::support::double_dispatch_ports(&double, &handler),
-        provider,
-    )
-    .await;
     let world = intent_law_world().await;
     let registry = Arc::clone(&world.registry);
-    registry
+    let target = registry
         .register_process(
             crate::ProcessRegistration::new(
-                "retry-intent-target",
                 crate::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -718,7 +729,18 @@ async fn retry_drains_only_the_final_attempts_intents() {
             }]),
         )
         .await
-        .expect("register retry intent target");
+        .expect("register retry intent target")
+        .id;
+    let provider: Arc<dyn ToolProvider> = Arc::new(RetryingIntentTools {
+        definition: definition.clone(),
+        calls: Arc::clone(&calls),
+        target: target.clone(),
+    });
+    let mut context = exact_dispatch_context(
+        crate::support::double_dispatch_ports(&double, &handler),
+        provider,
+    )
+    .await;
     context.processes = crate::testing::effect_backed_process_service(
         Arc::clone(&registry),
         Arc::clone(&world.env_store),
@@ -746,7 +768,7 @@ async fn retry_drains_only_the_final_attempts_intents() {
     assert_eq!(outcome.attempts.len(), 2);
     assert_eq!(outcome.intent_outcomes.len(), 1);
     let events = registry
-        .full_event_window(&ProcessId::from("retry-intent-target"), 0)
+        .full_event_window(&target, 0)
         .await
         .expect("read retry intent target events");
     assert_eq!(events.len(), 1, "the retried declaration never drains");

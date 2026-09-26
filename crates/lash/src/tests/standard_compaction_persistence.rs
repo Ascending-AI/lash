@@ -229,10 +229,7 @@ async fn assert_repeated_admin_compactions_with_changed_snapshot(
         }
     };
     let shared_scope = effect_host
-        .scoped_static(
-            lash_core::AdmittedScope::unpinned(execution_scope)
-                .expect("the repeated admin scope is never process"),
-        )?
+        .scoped_static(lash_core::AdmittedScope::new(execution_scope))?
         .expect("SQLite host supplies the repeated admin scope");
 
     for expected_summary in expected_summaries {

@@ -7,7 +7,6 @@
 use super::*;
 use crate::runtime::LiveReplayEventDraft;
 use futures_util::StreamExt as _;
-use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
@@ -293,7 +292,7 @@ async fn exclusive_after_valid_cursor(store: Arc<dyn LiveReplayStore>) {
         None,
         SessionObservationEventPayload::ProcessChanged {
             kind: SessionProcessEventKind::Started { sequence: 1 },
-            process_ids: vec![ProcessId::from("proc-b".to_string())],
+            process_ids: vec![crate::ProcessId::fixture("proc-b")],
         },
     )
     .expect("append session-b event");
@@ -344,7 +343,11 @@ async fn exclusive_after_valid_cursor(store: Arc<dyn LiveReplayStore>) {
 
     let replay_b =
         expect_live_replay_replayed(store.replay_after_cursor(&start_b), "session-b replay");
-    assert_live_replay_labels(&replay_b, &["process:Started { sequence: 1 }:proc-b"]);
+    let started_b = format!(
+        "process:Started {{ sequence: 1 }}:{}",
+        crate::ProcessId::fixture("proc-b")
+    );
+    assert_live_replay_labels(&replay_b, &[started_b.as_str()]);
 
     let tail_a = store.current_cursor(&SessionId::from("session-a"), SessionRevision::new(9));
     let replay_from_tail = expect_live_replay_replayed(

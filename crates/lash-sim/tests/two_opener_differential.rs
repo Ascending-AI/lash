@@ -57,15 +57,15 @@ use lash_core::{
     GroupDrainReport, GroupExecutors, GroupWakePolicy, LlmCallId, LlmCallRecord, LoserPolicy,
     OnParentEnd, ParentScope, PendingCompletion, PluginOptions, PreparedToolCall,
     ProcessEngineRegistry, ProcessEventType, ProcessExecutionEnvRef, ProcessExecutionEnvSpec,
-    ProcessId, ProcessIncarnation, ProcessInput, ProcessLifecyclePolicy, ProcessOriginator,
-    ProcessRef, ProcessRegistration, ProcessRegistry, ProcessService, ProcessStartDeclaration,
-    ProtocolPosition, RecoveryContract, Resolution, RuntimeAttribution, RuntimeEffectCommand,
-    RuntimeEffectEnvelope, RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectLocalExecutor,
-    RuntimeEffectOutcome, RuntimeInvocation, ScopedEffectController, SessionId, SessionPolicy,
-    StartProcessIntent, StoreEffectGroupDrain, ToolAttemptOutcome, ToolCatalog, ToolContract,
-    ToolDefinition, ToolExecutionGrant, ToolFailure, ToolFailureClass, ToolId, ToolIntent,
-    ToolIntents, ToolManifest, ToolOutcome, ToolOutcomeDone, ToolProvider, ToolRegistry,
-    ToolRetryPolicy, TurnBudget, TurnContext, TurnControlBindingId,
+    ProcessId, ProcessInput, ProcessLifecyclePolicy, ProcessOriginator, ProcessRegistration,
+    ProcessRegistry, ProcessService, ProcessStartDeclaration, ProtocolPosition, RecoveryContract,
+    Resolution, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectEnvelope,
+    RuntimeEffectGroup, RuntimeEffectInvocation, RuntimeEffectLocalExecutor, RuntimeEffectOutcome,
+    RuntimeInvocation, ScopedEffectController, SessionId, SessionPolicy, StartProcessIntent,
+    StoreEffectGroupDrain, ToolAttemptOutcome, ToolCatalog, ToolContract, ToolDefinition,
+    ToolExecutionGrant, ToolFailure, ToolFailureClass, ToolId, ToolIntent, ToolIntents,
+    ToolManifest, ToolOutcome, ToolOutcomeDone, ToolProvider, ToolRegistry, ToolRetryPolicy,
+    TurnBudget, TurnContext, TurnControlBindingId,
 };
 use lash_sansio::sync::MutexExt as _;
 use lash_sqlite_store::{SqliteEffectHost, SqliteEffectReplayOptions};
@@ -136,7 +136,7 @@ impl Observation {
             session_id: context.session_id().to_string(),
             attempt: context.attempt_number(),
             execution_binding: context.tool_execution_binding().clone(),
-            enclosing_process: context.enclosing_process().map(str::to_string),
+            enclosing_process: context.enclosing_process().map(ToString::to_string),
         });
     }
 
@@ -237,7 +237,7 @@ struct OpenerDeployment {
     opener: EffectOpener,
     admitted_scope: AdmittedScope,
     routing: ToolChildCompletionRouting,
-    enclosing_process: Option<ProcessRef>,
+    enclosing_process: Option<ProcessId>,
     /// A label for assertions: "a" or "b".
     tag: &'static str,
 }
@@ -1127,11 +1127,9 @@ async fn fixture(
     drop(probe);
 
     let registry_a: Arc<dyn ProcessRegistry> = backend_a.process_registry();
-    let intent_target_a = ProcessId::from(format!("{prefix}-intent-target-a"));
-    registry_a
+    let intent_target_a = registry_a
         .register_process_with_observers(
             ProcessRegistration::new(
-                intent_target_a.clone(),
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -1147,13 +1145,11 @@ async fn fixture(
             std::slice::from_ref(&SessionId::from("session-a")),
         )
         .await
-        .expect("register the intent target on A's registry");
+        .expect("register the intent target on A's registry")
+        .id;
     let registry_b: Arc<dyn ProcessRegistry> = backend_b.process_registry();
 
-    let process_b = ProcessRef::new(
-        "process-b",
-        ProcessIncarnation::from_registration_sequence(7),
-    );
+    let process_b = ProcessId::fixture("process-b");
     let scope_a = ExecutionScope::turn("session-a", "turn-a");
     let scope_b = ExecutionScope::turn("session-b", "turn-b");
 
@@ -1171,7 +1167,7 @@ async fn fixture(
         impostor: true,
         observation: Arc::new(Observation::default()),
         session_id: SessionId::from("session-b"),
-        intent_target: ProcessId::from("unused-intent-b"),
+        intent_target: ProcessId::fixture("unused-intent-b"),
     });
 
     let mut turn_context_b = TurnContext::default();

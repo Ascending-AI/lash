@@ -57,7 +57,7 @@ impl RuntimeSessionServices {
         run: ProcessToolCallRun<'_>,
     ) -> Result<crate::ToolCallOutput, crate::PluginError> {
         let ProcessToolCallRun {
-            registration,
+            process_id,
             call,
             parent_invocation,
             execution_write_authority,
@@ -91,10 +91,10 @@ impl RuntimeSessionServices {
         let dispatch = run_context.dispatch();
         let tool_context = crate::ToolContext::from_dispatch(Arc::clone(&dispatch))
             .prepared_call(&call)
-            .enclosing_process(Some(registration.id.clone()))
+            .enclosing_process(Some(process_id.clone()))
             .cancellation_token(Some(cancellation))
             .process_events(
-                registration.id.clone(),
+                process_id.clone(),
                 execution_write_authority,
                 process_work,
                 self.current.store.clone(),
@@ -139,7 +139,7 @@ impl RuntimeSessionServices {
             None,
             crate::tool_dispatch::ToolAttemptEffectIdentity::Process {
                 parent: await_parent_invocation.clone(),
-                process_id: registration.id.clone(),
+                process_id: process_id.clone(),
             },
             &turn_cancel_wait,
             None,
@@ -172,34 +172,22 @@ impl RuntimeSessionServices {
                                 .scoped()
                                 .execution_scope()
                                 .clone(),
-                            format!(
-                                "process:{}:tool:{}:await",
-                                registration.id, pending.tool_name
-                            ),
+                            format!("process:{}:tool:{}:await", process_id, pending.tool_name),
                         )
                         .expect("process tool dispatch carries an admitted effect scope"),
                         await_parent_invocation
                             .as_ref()
                             .map(|parent| parent.attribution.clone())
                             .unwrap_or_else(crate::RuntimeAttribution::none),
-                        format!(
-                            "process:{}:tool:{}:await",
-                            registration.id, pending.tool_name
-                        ),
+                        format!("process:{}:tool:{}:await", process_id, pending.tool_name),
                     );
                     &fallback
                 };
                 let invocation = crate::runtime::causal::child_effect_invocation(
                     dispatch.effect_controller.scoped().execution_scope(),
                     parent,
-                    format!(
-                        "process:{}:tool:{}:await",
-                        registration.id, pending.tool_name
-                    ),
-                    format!(
-                        "process:{}:tool:{}:await",
-                        registration.id, pending.tool_name
-                    ),
+                    format!("process:{}:tool:{}:await", process_id, pending.tool_name),
+                    format!("process:{}:tool:{}:await", process_id, pending.tool_name),
                 );
                 // Same rule as the session turn path: arm the resolver this
                 // call named before parking on it, on the first park and on

@@ -149,10 +149,10 @@ lash_store_sql::statements! {
          SELECT catalog.*,
                 CASE WHEN deleted = 1 THEN '[]' ELSE (
                     SELECT json_group_array(
-                        json_array(process_index, process_id, process_incarnation)
+                        json_array(process_index, process_id)
                     )
                     FROM (
-                        SELECT process_index, process_id, process_incarnation
+                        SELECT process_index, process_id
                         FROM session_meta_pending_observer_intents
                         WHERE session_id = catalog.session_id
                         ORDER BY process_index

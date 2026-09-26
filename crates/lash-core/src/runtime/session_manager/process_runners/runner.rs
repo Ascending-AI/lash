@@ -22,14 +22,13 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
         let crate::runtime::effect::AdmittedProcess {
             registration,
-            incarnation,
+            process_id,
         } = admitted;
-        // The controller arrived already admitted: the worker's authority CAS
-        // bound it to `ProcessRef { id, incarnation }` before dispatching here
-        // (ADR 0099 §1), so every arm below — a session-turn row's cells
-        // reading it through their `RuntimeExecutionContext`, an engine row's
-        // run context, a tool-call row's future cells — runs under the
-        // store-minted incarnation by construction.
+        // The controller arrived already admitted for the process's minted id
+        // (ADR 0099 §1, ADR 0107), so every arm below — a session-turn row's
+        // cells reading it through their `RuntimeExecutionContext`, an engine
+        // row's run context, a tool-call row's future cells — runs under that
+        // process by construction.
         let input = Arc::clone(&registration.input);
         // Hybrid process model by design:
         // - ToolCall, SessionTurn, and External are kernel primitives because
@@ -41,7 +40,7 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
             crate::ProcessInput::ToolCall { call } => {
                 let output = Box::pin(
                     self.run_process_tool_call(ProcessToolCallRun {
-                        registration,
+                        process_id,
                         call: call.clone(),
                         parent_invocation: execution_context.causal_invocation,
                         execution_write_authority: execution_context
@@ -65,7 +64,7 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                     .execution_write_authority
                     .expect("process worker installs execution write authority");
                 let output = Box::pin(self.run_process_session_turn(
-                    registration,
+                    process_id,
                     *create_request.clone(),
                     *turn_input.clone(),
                     execution_write_authority,
@@ -84,7 +83,7 @@ impl crate::runtime::effect::ProcessRunner for RuntimeSessionServices {
                 };
                 let engine_context = self.process_engine_run_context(
                     registration,
-                    incarnation,
+                    process_id,
                     execution_context,
                     scoped_effect_controller,
                     cancellation,
@@ -113,7 +112,7 @@ impl RuntimeSessionServices {
     fn process_engine_run_context<'run>(
         &self,
         registration: crate::ProcessRegistration,
-        incarnation: crate::ProcessIncarnation,
+        process_id: crate::ProcessId,
         execution_context: crate::ProcessExecutionContext,
         scoped_effect_controller: crate::ScopedEffectController<'run>,
         cancellation: tokio_util::sync::CancellationToken,
@@ -134,6 +133,7 @@ impl RuntimeSessionServices {
             .expect("process runner requires process-work wiring");
         let services = self.clone();
         let registration_for_runtime = registration.clone();
+        let process_id_for_runtime = process_id.clone();
         let execution_context_for_runtime = execution_context.clone();
         let execution_write_authority = execution_context
             .execution_write_authority
@@ -185,7 +185,11 @@ impl RuntimeSessionServices {
                 services.current.host.core.control.engine_child_max_attempts,
             )
             .with_turn_phase_probe(services.current.turn_phase_probe.clone())
-            .with_process_execution(&registration_for_runtime, event_context)
+            .with_process_execution(
+                process_id_for_runtime.clone(),
+                &registration_for_runtime,
+                event_context,
+            )
             .with_lent_process_stop(cancellation_for_runtime.clone())
             .without_turn_cancel_observation()
             .with_process_work(services.current.host.work.process_wiring().cloned())
@@ -226,7 +230,7 @@ impl RuntimeSessionServices {
         });
         Ok(crate::ProcessEngineRunContext::new(
             registration,
-            incarnation,
+            process_id,
             execution_context,
             process_work,
             session_id,

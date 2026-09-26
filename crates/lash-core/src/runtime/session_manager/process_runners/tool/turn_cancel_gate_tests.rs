@@ -187,7 +187,7 @@ async fn execute_process_dispatch(
 ) -> serde_json::Value {
     let scoped = crate::testing::runtime_helpers::host_process_scope(
         &services.current.host.core,
-        "process-route",
+        &crate::ProcessId::fixture("process-route"),
     );
     let run_context = ProcessRunContext::builder(services)
         .tool_surface(surface)
@@ -250,7 +250,7 @@ async fn runner_side_deferred_await_inside_a_process_body_attaches_no_turn_cance
     let wait =
         crate::runtime::TurnCancelWait::unobserved(tokio_util::sync::CancellationToken::new());
     let key = crate::AwaitEventKey {
-        scope: crate::ExecutionScope::process("process-1"),
+        scope: crate::ExecutionScope::process(crate::ProcessId::fixture("process-1")),
         wait: crate::AwaitEventWaitIdentity::ToolCompletion {
             tool_call_id: "call-1".to_string(),
         },
@@ -268,7 +268,7 @@ async fn runner_side_deferred_await_inside_a_process_body_attaches_no_turn_cance
     };
     let invocation = crate::RuntimeEffectInvocation::new(
         crate::EffectAddress::new(
-            crate::ExecutionScope::process("process-1"),
+            crate::ExecutionScope::process(crate::ProcessId::fixture("process-1")),
             "process:process-1:tool:deferred:await",
         )
         .expect("valid process tool address"),
@@ -322,10 +322,7 @@ async fn process_runner_deferred_await_uses_the_owning_process_execution_trio() 
     let recorder = Arc::new(AwaitShapeRecorder::default());
     let scoped = crate::ScopedEffectController::shared(
         Arc::clone(&recorder) as Arc<dyn crate::RuntimeEffectController>,
-        crate::AdmittedScope::process(crate::ProcessRef::new(
-            "process-witness",
-            crate::ProcessIncarnation::from_registration_sequence(1),
-        )),
+        crate::AdmittedScope::process(crate::ProcessId::fixture("process-witness")),
     )
     .expect("valid process scope");
     let call = crate::PreparedToolCall::identity(
@@ -337,21 +334,14 @@ async fn process_runner_deferred_await_uses_the_owning_process_execution_trio() 
             replay: None,
         },
     );
-    let registration = crate::ProcessRegistration::new(
-        "process-witness",
-        crate::ProcessInput::ToolCall { call: call.clone() },
-        crate::RecoveryContract::Rerunnable,
-        crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
-    );
     let cancellation = tokio_util::sync::CancellationToken::new();
     let output = services
         .run_process_tool_call(ProcessToolCallRun {
-            registration,
+            process_id: crate::ProcessId::fixture("process-witness"),
             call,
             parent_invocation: None,
             execution_write_authority: crate::ProcessExecutionWriteAuthority::invocation(
-                "process-witness",
+                crate::ProcessId::fixture("process-witness"),
                 "process-witness-execution",
             ),
             scoped_effect_controller: scoped,
@@ -396,10 +386,7 @@ async fn run_retrying_host_process_tool(
     let recorder = Arc::new(AwaitShapeRecorder::default());
     let scoped = crate::ScopedEffectController::shared(
         Arc::clone(&recorder) as Arc<dyn crate::RuntimeEffectController>,
-        crate::AdmittedScope::process(crate::ProcessRef::new(
-            "process-attribution-witness",
-            crate::ProcessIncarnation::from_registration_sequence(1),
-        )),
+        crate::AdmittedScope::process(crate::ProcessId::fixture("process-attribution-witness")),
     )
     .expect("valid process scope");
     let call = crate::PreparedToolCall::identity(
@@ -411,20 +398,13 @@ async fn run_retrying_host_process_tool(
             replay: None,
         },
     );
-    let registration = crate::ProcessRegistration::new(
-        "process-attribution-witness",
-        crate::ProcessInput::ToolCall { call: call.clone() },
-        crate::RecoveryContract::Rerunnable,
-        crate::ProcessProvenance::host(),
-        crate::ProcessLifecyclePolicy::new(crate::ParentScope::Host, crate::OnParentEnd::Abandon),
-    );
     let output = services
         .run_process_tool_call(ProcessToolCallRun {
-            registration,
+            process_id: crate::ProcessId::fixture("process-attribution-witness"),
             call,
             parent_invocation,
             execution_write_authority: crate::ProcessExecutionWriteAuthority::invocation(
-                "process-attribution-witness",
+                crate::ProcessId::fixture("process-attribution-witness"),
                 "process-attribution-execution",
             ),
             scoped_effect_controller: scoped,

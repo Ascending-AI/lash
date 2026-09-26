@@ -52,9 +52,9 @@
 //!
 //! Trigger and process-registration payloads were that gap until FIG-1485. The
 //! read-back assertions for triggers are still deliberately shallow (subscription
-//! key, enabled flag, reservation status, occurrence payload), and
-//! `registration_fingerprint` still only agrees with a re-registration by the same
-//! build — so neither could see an additive payload field, which is FIG-1377's
+//! key, enabled flag, reservation status, occurrence payload), and a
+//! re-registration is answered by its start key without comparing content
+//! (ADR 0107) — so neither could see an additive payload field, which is FIG-1377's
 //! class of change in a different store. `ExpectedFixture` now carries the whole
 //! [`TriggerDeliveryReservation`] (which nests the occurrence and subscription
 //! records) and the whole waiting-process [`ProcessRecord`], so both payloads move
@@ -259,7 +259,7 @@ use lash_core::{
 use serde::{Deserialize, Serialize};
 
 pub const SESSION_ID: &str = "durable-read-fixture";
-pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 129;
+pub const DURABLE_READ_FIXTURE_SCHEMA_VERSION: u32 = 130;
 pub const FIXTURE_WRITE_MS: u64 = 1_700_000_000_000;
 pub const FIXTURE_READ_MS: u64 = FIXTURE_WRITE_MS + 1_000;
 
@@ -292,25 +292,43 @@ pub const FIXTURE_ATTACHMENT_WRITE_ID: &str = "88888888888848888888888888888888"
 
 /// The attachment whose manifest row carries [`FIXTURE_ATTACHMENT_WRITE_ID`].
 pub const FIXTURE_ATTACHMENT_ID: &str = "durable-read-attachment";
-const PROCESS_ID: &str = "durable-read-waiting-process";
-const WAKE_PROCESS_ID: &str = "durable-read-wake-process";
-const TOMBSTONE_PROCESS_ID: &str = "durable-read-retired-process";
+/// The seed registers its three processes in this order on a registry
+/// minting sequentially (`ProcessIdMint::sequential_for_testing`), so each id
+/// is fixed by its registration ordinal (ADR 0107).
+fn waiting_process_id() -> ProcessId {
+    lash_core::ProcessIdMint::sequential_id_for_testing(1)
+}
+
+fn wake_process_id() -> ProcessId {
+    lash_core::ProcessIdMint::sequential_id_for_testing(2)
+}
+
+fn tombstone_process_id() -> ProcessId {
+    lash_core::ProcessIdMint::sequential_id_for_testing(3)
+}
+
+/// The key the waiting process is started under, so read-back can present the
+/// same start again and be answered with the retained process.
+const WAITING_PROCESS_START_KEY: &str = "durable-read-waiting-process";
 const DELETED_SESSION_ID: &str = "durable-read-deleted-session";
 const REVOKED_SESSION_ID: &str = "durable-read-revoked-session";
 const TRIGGER_KEY: &str = "durable-read-trigger";
 const TRIGGER_REGISTER_OPERATION: &str = "durable-read-trigger-register";
 const QUEUE_WAKE_PROCESS: &str = "durable-read-queue-process";
-const QUEUE_SOURCE_KEY: &str = "process:durable-read-queue-process:event:1:wake";
+
+/// The fixture's queued wake names this process.
+fn queue_wake_process() -> lash_core::runtime::ProcessId {
+    lash_core::runtime::ProcessId::fixture(QUEUE_WAKE_PROCESS)
+}
 
 /// The fixture's one queued row: a process wake, the one turn-work payload.
 fn fixture_wake() -> lash_core::runtime::ProcessWakeDelivery {
-    let process_id = lash_core::runtime::ProcessId::from(QUEUE_WAKE_PROCESS);
+    let process_id = queue_wake_process();
     lash_core::runtime::ProcessWakeDelivery {
         version: lash_core::runtime::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: "durable-read-queue-wake".to_string(),
         target_session_id: SessionId::from(SESSION_ID),
         process_id: process_id.clone(),
-        process_incarnation: lash_core::runtime::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "process.wake".to_string(),
         event_invocation: lash_core::runtime::RuntimeInvocation {
@@ -419,10 +437,8 @@ pub struct ExpectedFixture {
     /// unflagged, which is FIG-1377's class of change in a different store.
     pub trigger_delivery: TriggerDeliveryReservation,
     /// The projected registration payload of the waiting process (FIG-1485).
-    /// `registration_fingerprint` was otherwise compared only against a
-    /// re-registration by the same build, so it agreed with itself whatever the
-    /// payload became; pinning the whole record makes the fingerprint's inputs
-    /// visible alongside it.
+    /// A re-registration is answered by its start key and compares no content,
+    /// so pinning the whole record is what makes the payload's shape visible.
     pub waiting_process: ProcessRecord,
 }
 
@@ -737,6 +753,11 @@ fn immediate_predecessor_fixture_schema_is_adjacent_and_refused() {
         (
             crate::FOLLOW_ON_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
             128,
+            129,
+        ),
+        (
+            crate::PROCESS_IDENTITY_PREDECESSOR_EXPECTED_RELATIVE_PATHS,
+            129,
             DURABLE_READ_FIXTURE_SCHEMA_VERSION,
         ),
     ] {
@@ -934,15 +955,20 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     .await
     .expect("persist fixture process execution environment");
     let registration = waiting_process_registration(process_env_ref.clone());
-    handles
+    let waiting = handles
         .processes
         .register_process_with_observers(registration, &[SessionId::from(SESSION_ID.to_string())])
         .await
         .expect("register waiting fixture process");
+    assert_eq!(
+        waiting.id,
+        waiting_process_id(),
+        "the seed's registry mints sequentially"
+    );
     let lease = handles
         .processes
         .claim_process_lease(
-            &ProcessId::from(PROCESS_ID),
+            &waiting_process_id(),
             &LeaseOwnerIdentity::opaque("durable-read-owner", "durable-read-incarnation"),
             handles.process_lease_ttl_ms,
         )
@@ -953,7 +979,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     handles
         .processes
         .set_process_wait_with_authority(
-            &ProcessId::from(PROCESS_ID),
+            &waiting_process_id(),
             fixture_wait_state(),
             &ProcessExecutionWriteAuthority::lease(lease.clone()),
         )
@@ -962,7 +988,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     handles
         .processes
         .append_event_with_authority(
-            &ProcessId::from(PROCESS_ID),
+            &waiting_process_id(),
             fixture_effect_outcome().append_request(),
             &ProcessExecutionWriteAuthority::lease(lease.clone()),
         )
@@ -971,7 +997,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     handles
         .processes
         .append_event_with_authority(
-            &ProcessId::from(PROCESS_ID),
+            &waiting_process_id(),
             fixture_effect_omissions().append_request(FIXTURE_EFFECT_OMISSIONS_KEY),
             &ProcessExecutionWriteAuthority::lease(lease),
         )
@@ -979,15 +1005,14 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .expect("persist fixture effect omissions");
     handles
         .continuations
-        .put_segment_handover(&ProcessId::from(PROCESS_ID), fixture_handover())
+        .put_segment_handover(&waiting_process_id(), fixture_handover())
         .await
         .expect("persist fixture continuation");
 
-    handles
+    let wake_process_id = handles
         .processes
         .register_process(
             ProcessRegistration::new(
-                WAKE_PROCESS_ID,
                 ProcessInput::External {
                     metadata: serde_json::json!({"fixture": "wake"}),
                 },
@@ -1012,11 +1037,13 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             .with_wake_session_id(Some(SessionId::from(SESSION_ID.to_string()))),
         )
         .await
-        .expect("register fixture wake process");
+        .expect("register fixture wake process")
+        .id;
+    assert_eq!(wake_process_id, self::wake_process_id());
     let wake_append = handles
         .processes
         .append_event(
-            &ProcessId::from(WAKE_PROCESS_ID),
+            &wake_process_id,
             ProcessEventAppendRequest::new(
                 "fixture.wake",
                 serde_json::json!({"wake_input": "durable read wake"}),
@@ -1028,10 +1055,9 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
         .wake_delivery
         .expect("wake-semantic fixture event emits a delivery");
 
-    handles
+    let tombstone_process_id = handles
         .processes
         .register_process(ProcessRegistration::new(
-            TOMBSTONE_PROCESS_ID,
             ProcessInput::External {
                 metadata: serde_json::json!({"fixture": "tombstone"}),
             },
@@ -1043,11 +1069,13 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
             ),
         ))
         .await
-        .expect("register fixture process to prune");
+        .expect("register fixture process to prune")
+        .id;
+    assert_eq!(tombstone_process_id, self::tombstone_process_id());
     handles
         .processes
         .complete_process(
-            &ProcessId::from(TOMBSTONE_PROCESS_ID),
+            &tombstone_process_id,
             ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::json!({ "fixture": "retired" }),
             )),
@@ -1184,7 +1212,7 @@ pub async fn seed(handles: &FixtureHandles) -> ExpectedFixture {
     };
     let waiting_process = handles
         .processes
-        .get_process(&ProcessId::from(PROCESS_ID))
+        .get_process(&waiting_process_id())
         .await
         .expect("read seeded fixture waiting process")
         .expect("fixture waiting process exists after seeding");
@@ -1536,13 +1564,19 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         .expect("durable fixture drift: queued-work read failed");
     assert_eq!(queued.len(), 1);
     assert_eq!(queued[0].batch_id, expected.queue_batch_id);
-    assert_eq!(queued[0].source_key.as_deref(), Some(QUEUE_SOURCE_KEY));
+    assert_eq!(
+        queued[0].source_key,
+        Some(lash_core::runtime::process_wake_source_key(
+            &queue_wake_process(),
+            1
+        ))
+    );
     assert_eq!(queued[0].items.len(), 1);
     assert!(
         matches!(
             &queued[0].items[0].payload,
             QueuedWorkPayload::ProcessWake { wake }
-                if wake.process_id.as_str() == QUEUE_WAKE_PROCESS
+                if wake.process_id == queue_wake_process()
                     && wake.input == "durable read queued task"
         ),
         "durable fixture semantic drift: queued-work payload changed"
@@ -1568,7 +1602,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
 
     let process = handles
         .processes
-        .get_process(&ProcessId::from(PROCESS_ID))
+        .get_process(&waiting_process_id())
         .await
         .expect("durable fixture drift: process read failed")
         .expect("durable fixture drift: process disappeared");
@@ -1582,7 +1616,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     );
     let process_events = handles
         .processes
-        .full_event_window(&ProcessId::from(PROCESS_ID), 0)
+        .full_event_window(&waiting_process_id(), 0)
         .await
         .expect("durable fixture drift: waiting-process event read failed");
     assert_eq!(process_events.len(), 4);
@@ -1624,7 +1658,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert_eq!(
         handles
             .processes
-            .observers_for_process(&ProcessId::from(PROCESS_ID))
+            .observers_for_process(&waiting_process_id())
             .await
             .expect("durable fixture drift: process-observer read failed"),
         vec![SESSION_ID.to_string()],
@@ -1632,7 +1666,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     );
     let process_lease = handles
         .processes
-        .get_process_lease(&ProcessId::from(PROCESS_ID))
+        .get_process_lease(&waiting_process_id())
         .await
         .expect("durable fixture drift: process-lease read failed")
         .expect("durable fixture drift: process lease disappeared");
@@ -1666,7 +1700,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     assert_eq!(
         handles
             .continuations
-            .latest_segment_handover(&ProcessId::from(PROCESS_ID))
+            .latest_segment_handover(&waiting_process_id())
             .await
             .expect("durable fixture drift: continuation read failed"),
         Some(fixture_handover())
@@ -1686,15 +1720,15 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
             &[SessionId::from(SESSION_ID.to_string())],
         )
         .await
-        .expect("durable fixture identity drift: identical process re-registration conflicted");
+        .expect("durable fixture identity drift: a start under a retained key failed");
     assert_eq!(
-        reregistered.registration_fingerprint,
-        process.registration_fingerprint
+        reregistered.id, process.id,
+        "durable fixture identity drift: a start under a retained key answers the retained process"
     );
     assert_eq!(
         handles
             .processes
-            .get_process(&ProcessId::from(WAKE_PROCESS_ID))
+            .get_process(&wake_process_id())
             .await
             .expect("durable fixture drift: wake process read failed")
             .expect("durable fixture drift: wake process disappeared")
@@ -1703,7 +1737,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
     );
     let wake_events = handles
         .processes
-        .full_event_window(&ProcessId::from(WAKE_PROCESS_ID), 0)
+        .full_event_window(&wake_process_id(), 0)
         .await
         .expect("durable fixture drift: wake-process event read failed");
     assert_eq!(wake_events.len(), 1);
@@ -1721,16 +1755,13 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
             .await
             .expect("durable fixture drift: wake-delivery read failed")
             .iter()
-            .any(|delivery| delivery.wake.process_id == WAKE_PROCESS_ID),
+            .any(|delivery| delivery.wake.process_id == wake_process_id()),
         "durable fixture semantic drift: process wake delivery disappeared"
     );
     assert_eq!(
         handles
             .processes
-            .wake_allocation_floor_for_testing(
-                &SessionId::from(SESSION_ID),
-                &ProcessId::from(WAKE_PROCESS_ID)
-            )
+            .wake_allocation_floor_for_testing(&SessionId::from(SESSION_ID), &wake_process_id())
             .await
             .expect("durable fixture drift: wake-allocation-floor read failed"),
         Some(1),
@@ -1753,11 +1784,7 @@ pub async fn assert_semantics(handles: &FixtureHandles, expected: &ExpectedFixtu
         "durable fixture drift: receiver wake-redelivery fence returned {redelivery}"
     );
 
-    match handles
-        .processes
-        .get_process(&ProcessId::from(TOMBSTONE_PROCESS_ID))
-        .await
-    {
+    match handles.processes.get_process(&tombstone_process_id()).await {
         Err(lash_core::PluginError::ProcessNoLongerRetained {
             terminal_label,
             pruned_at_ms,
@@ -2175,9 +2202,9 @@ async fn assert_process_change_feed(processes: &dyn ProcessRegistry) {
     assert_eq!(
         observed,
         BTreeMap::from([
-            (ProcessId::from(PROCESS_ID), "upsert".to_string()),
-            (ProcessId::from(TOMBSTONE_PROCESS_ID), "deleted".to_string()),
-            (ProcessId::from(WAKE_PROCESS_ID), "upsert".to_string()),
+            (waiting_process_id(), "upsert".to_string()),
+            (tombstone_process_id(), "deleted".to_string()),
+            (wake_process_id(), "upsert".to_string()),
         ]),
         "durable fixture semantic drift: ADR-0020 change-feed rows changed"
     );
@@ -2270,7 +2297,7 @@ fn fixture_process_env() -> ProcessExecutionEnvSpec {
 
 pub fn expected_process_lease() -> lash_core::ProcessLease {
     lash_core::facade_support::registry_transitions::acquired_process_lease(
-        &ProcessId::from(PROCESS_ID),
+        &waiting_process_id(),
         &LeaseOwnerIdentity::opaque("durable-read-owner", "durable-read-incarnation"),
         1,
         FIXTURE_WRITE_MS,
@@ -2283,7 +2310,6 @@ pub const PINNED_PROCESS_LEASE_TTL_MS: u64 = 100;
 
 fn waiting_process_registration(env_ref: ProcessExecutionEnvRef) -> ProcessRegistration {
     ProcessRegistration::new(
-        PROCESS_ID,
         ProcessInput::Engine {
             kind: "durable-read-engine".to_string(),
             payload: serde_json::json!({"fixture": "process"}),
@@ -2295,6 +2321,10 @@ fn waiting_process_registration(env_ref: ProcessExecutionEnvRef) -> ProcessRegis
             lash_core::OnParentEnd::Abandon,
         ),
     )
+    .with_start_key(Some(lash_core::StartKey::for_host(
+        lash_core::StartKeyOwner::HOST,
+        WAITING_PROCESS_START_KEY,
+    )))
     .with_execution_env_ref(Some(env_ref))
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
         ProcessIdentity::for_definition(

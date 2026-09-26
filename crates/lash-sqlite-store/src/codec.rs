@@ -3,6 +3,38 @@
 use super::*;
 use lash_sansio::SessionId;
 
+/// Read a stored process id: a column this store only ever wrote from a
+/// minted id, so any other spelling is corrupt stored data.
+pub(crate) fn sql_process_id(
+    column: usize,
+    value: String,
+) -> rusqlite::Result<lash_sansio::ProcessId> {
+    lash_sansio::ProcessId::parse(&value).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(
+            column,
+            rusqlite::types::Type::Text,
+            Box::new(error),
+        )
+    })
+}
+
+/// [`sql_process_id`] for column `column` of `row`.
+pub(crate) fn row_process_id(
+    row: &rusqlite::Row<'_>,
+    column: usize,
+) -> rusqlite::Result<lash_sansio::ProcessId> {
+    sql_process_id(column, row.get(column)?)
+}
+
+/// Parse a stored process id outside a row read, as a store error.
+pub(crate) fn stored_process_id(
+    value: &str,
+) -> Result<lash_sansio::ProcessId, lash_core_execution::PluginError> {
+    lash_sansio::ProcessId::parse(value).map_err(|error| {
+        lash_core_execution::PluginError::Session(format!("corrupt stored process id: {error}"))
+    })
+}
+
 pub(crate) fn encode_json<T: serde::Serialize>(value: &T) -> Result<String, StoreError> {
     serde_json::to_string(value).map_err(|error| StoreError::RecordEncodingFailed {
         record_kind: "persisted JSON record".to_string(),

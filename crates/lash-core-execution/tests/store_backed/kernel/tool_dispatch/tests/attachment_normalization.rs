@@ -562,10 +562,7 @@ async fn orchestrating_tool_output_is_normalized_under_process_ownership() {
     context.tool_registry = Some(context.plugins.tool_registry());
     let _owner = context
         .attachment_store
-        .bind_process_scoped(crate::ProcessRef::new(
-            "orchestrating-process",
-            crate::ProcessIncarnation::from_registration_sequence(1),
-        ));
+        .bind_process_scoped(crate::ProcessId::fixture("orchestrating-process"));
     assert!(
         persistence
             .list_uncommitted(u64::MAX)
@@ -588,7 +585,8 @@ async fn orchestrating_tool_output_is_normalized_under_process_ownership() {
     );
     assert!(matches!(
         &entries[0].owner,
-        Some(crate::AttachmentOwner::Process { id, .. }) if id == "orchestrating-process"
+        Some(crate::AttachmentOwner::Process { process_id })
+            if *process_id == crate::ProcessId::fixture("orchestrating-process")
     ));
     drop(context);
     handler.close().await.expect("close the dispatch handler");
@@ -618,10 +616,7 @@ async fn internal_process_tool_output_is_normalized_under_process_ownership() {
     context.tool_registry = Some(context.plugins.tool_registry());
     let _owner = context
         .attachment_store
-        .bind_process_scoped(crate::ProcessRef::new(
-            "internal-process",
-            crate::ProcessIncarnation::from_registration_sequence(1),
-        ));
+        .bind_process_scoped(crate::ProcessId::fixture("internal-process"));
     assert!(
         persistence
             .list_uncommitted(u64::MAX)
@@ -646,7 +641,8 @@ async fn internal_process_tool_output_is_normalized_under_process_ownership() {
     );
     assert!(matches!(
         &entries[0].owner,
-        Some(crate::AttachmentOwner::Process { id, .. }) if id == "internal-process"
+        Some(crate::AttachmentOwner::Process { process_id })
+            if *process_id == crate::ProcessId::fixture("internal-process")
     ));
     drop(context);
     handler.close().await.expect("close the dispatch handler");

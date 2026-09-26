@@ -9,14 +9,13 @@
 pub const TABLE: &str = "process_wake_deliveries";
 
 /// Every column, in insert order.
-pub const INSERT_COLUMNS: &str =
-    "delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
+pub const INSERT_COLUMNS: &str = "delivery_id, process_id, target_session_id, sequence, state,
                 claim_token, attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
                 discard_reason, delivery_json";
 
-/// A delivery as its report reads it: every column but the three that place it
-/// in a queue (`process_id`, `process_incarnation`, `target_session_id`), all
-/// of which the decoded `delivery_json` already carries.
+/// A delivery as its report reads it: every column but the two that place it
+/// in a queue (`process_id`, `target_session_id`), both of which the decoded
+/// `delivery_json` already carries.
 pub const REPORT_COLUMNS: &str = "delivery_id, state, claim_token, attempts, first_attempt_ms,
                     next_attempt_at_ms, expires_at_ms, discard_reason, delivery_json";
 

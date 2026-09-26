@@ -331,18 +331,14 @@ impl LashlangExecutionTrace {
             let child = TraceLanguageChildExecution {
                 scope: trace.identity.scope.clone(),
                 process_id: started.process_id,
-                incarnation: started.incarnation.registration_sequence(),
                 attempt: started.attempt,
                 module_ref: None,
                 entry_ref: None,
                 entry_name: started.child_entry_name,
             };
-            let child_graph_key = child.graph_key().unwrap_or_else(|| {
-                format!(
-                    "process:{}:incarnation:{}",
-                    child.process_id, child.incarnation
-                )
-            });
+            let child_graph_key = child
+                .graph_key()
+                .unwrap_or_else(|| format!("process:{}", child.process_id));
             trace.emit(TraceLanguageExecution {
                 event_key: format!(
                     "lashlang_execution:{}:child:{}:{}:{}",
@@ -1254,7 +1250,6 @@ impl ExecutionHost for HostBridge<'_> {
                     child: TraceLanguageChildExecution {
                         scope: trace.identity().scope.clone(),
                         process_id: child.process_id,
-                        incarnation: child.incarnation,
                         attempt: child.attempt,
                         module_ref: Some(child.module_ref.to_string()),
                         entry_ref: Some(lashlang::process_ref_key(&child.process_ref)),

@@ -30,7 +30,7 @@ impl crate::ProcessEngine for NeverDrivenEngine {
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
         Ok(
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                serde_json::json!({"process_id": context.registration().id}),
+                serde_json::json!({"process_id": context.process_id()}),
             ))
             .into(),
         )
@@ -42,16 +42,12 @@ fn turn_parent(turn_id: &str) -> crate::ParentScope {
 }
 
 fn cancel_child(
-    process_id: &str,
+    _process_id: &str,
     turn_id: &str,
     env_ref: ProcessExecutionEnvRef,
 ) -> ProcessRegistration {
-    let mut registration = engine_registration(
-        process_id,
-        "immediate-success",
-        env_ref,
-        serde_json::Value::Null,
-    );
+    let mut registration =
+        engine_registration("immediate-success", env_ref, serde_json::Value::Null);
     registration.provenance.originator =
         crate::ProcessOriginator::session(crate::SessionScope::new(SESSION));
     registration.lifecycle =
@@ -120,9 +116,9 @@ async fn recovery_re_derives_a_committed_turns_missing_parent_end_row_exactly_on
     let (worker, registry, env_ref) =
         worker_on_backend(Arc::new(NeverDrivenEngine), &backend).await;
 
-    let committed = ProcessId::from("redrive-committed-child");
-    let interrupted = ProcessId::from("redrive-interrupted-child");
-    registry
+    let committed = crate::ProcessId::fixture("redrive-committed-child");
+    let interrupted = crate::ProcessId::fixture("redrive-interrupted-child");
+    let redrive_committed_child_record = registry
         .register_process(cancel_child(
             committed.as_str(),
             "committed-turn",
@@ -130,7 +126,8 @@ async fn recovery_re_derives_a_committed_turns_missing_parent_end_row_exactly_on
         ))
         .await
         .expect("register the committed turn's child");
-    registry
+    let committed = redrive_committed_child_record.id.clone();
+    let redrive_interrupted_child_record = registry
         .register_process(cancel_child(
             interrupted.as_str(),
             "interrupted-turn",
@@ -138,6 +135,7 @@ async fn recovery_re_derives_a_committed_turns_missing_parent_end_row_exactly_on
         ))
         .await
         .expect("register the interrupted turn's child");
+    let interrupted = redrive_interrupted_child_record.id.clone();
     commit_turn(&backend, "committed-turn", 0).await;
 
     worker
@@ -226,8 +224,8 @@ async fn a_full_page_of_unrecordable_scopes_does_not_starve_the_committed_one() 
             .expect("register a stuck turn's child");
     }
     // Lexically last, so every stuck scope is read before it.
-    let committed = ProcessId::from("zz-committed-child");
-    registry
+    let committed = crate::ProcessId::fixture("zz-committed-child");
+    let zz_committed_child_record = registry
         .register_process(cancel_child(
             committed.as_str(),
             "zz-committed-turn",
@@ -235,6 +233,7 @@ async fn a_full_page_of_unrecordable_scopes_does_not_starve_the_committed_one() 
         ))
         .await
         .expect("register the committed turn's child");
+    let committed = zz_committed_child_record.id.clone();
     commit_turn(&backend, "zz-committed-turn", 0).await;
 
     worker

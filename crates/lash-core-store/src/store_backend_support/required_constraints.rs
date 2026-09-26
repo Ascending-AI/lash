@@ -170,12 +170,12 @@ pub const EXPECTED_CONSTRAINTS: &[ExpectedConstraint] = &[
         rendered(
             "attachment_manifest",
             "ck_attachment_manifest_owner_identity",
-            "(owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL) OR (owner_kind = 'turn' AND owner_id IS NOT NULL AND owner_incarnation IS NULL) OR (owner_kind = 'process' AND owner_id IS NOT NULL AND owner_incarnation IS NOT NULL)",
+            "(owner_kind IS NULL AND owner_id IS NULL) OR (owner_kind IN ('turn', 'process') AND owner_id IS NOT NULL)",
         ),
         rendered(
             "lash_attachment_manifest",
             "ck_lash_attachment_manifest_owner_identity",
-            "(owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL) OR (owner_kind = 'turn' AND owner_id IS NOT NULL AND owner_incarnation IS NULL) OR (owner_kind = 'process' AND owner_id IS NOT NULL AND owner_incarnation IS NOT NULL)",
+            "(owner_kind IS NULL AND owner_id IS NULL) OR (owner_kind IN ('turn', 'process') AND owner_id IS NOT NULL)",
         ),
     ),
     expected_constraint(

@@ -59,7 +59,7 @@ async fn a_settlement_store_failure_is_not_caught_by_the_cell(tier: &JournaledTi
             ))
         });
         let registry = lash_core::Backend::from(backend.clone()).process_registry();
-        register_intent_target(registry.as_ref(), &session_id).await;
+        register_intent_target(registry.as_ref(), &session_id, &theatre).await;
         let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
         let core = oracle_builder(
             backend.into(),

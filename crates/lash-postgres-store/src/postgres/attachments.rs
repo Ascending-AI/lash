@@ -52,7 +52,7 @@ lash_store_sql::statements! {
         /// depends on the other's, so the two orders are left exactly as they
         /// stand rather than unified inside a refactor.
         select_uncommitted = "SELECT attachment_id, session_id, canonical_uri, intent_at_ms,
-                 committed_at_ms, owner_kind, owner_id, owner_incarnation, written_at_ms
+                 committed_at_ms, owner_kind, owner_id, written_at_ms
              FROM attachment_manifest
              WHERE committed_at_ms IS NULL AND intent_at_ms <= ?1
              ORDER BY attachment_id ASC";
@@ -372,19 +372,6 @@ impl AttachmentManifest for PostgresSessionStore {
                 .bind(intent.intent_at_epoch_ms as i64)
                 .bind(intent.owner.as_ref().map(|owner| owner.kind().as_str()))
                 .bind(intent.owner.as_ref().map(|owner| owner.id().to_string()))
-                .bind(
-                    intent
-                        .owner
-                        .as_ref()
-                        .and_then(lash_core_execution::AttachmentOwner::incarnation)
-                        .map(|incarnation| i64::try_from(incarnation.registration_sequence()))
-                        .transpose()
-                        .map_err(|_| {
-                            StoreError::Backend(
-                                "attachment owner incarnation exceeds i64".to_string(),
-                            )
-                        })?,
-                )
                 .bind(write_id.as_hex())
                 .execute(&mut *tx)
                 .await
@@ -511,14 +498,9 @@ impl AttachmentManifest for PostgresSessionStore {
                 .map(|row| {
                     let owner_kind = row.get::<Option<String>, _>(5);
                     let owner_id = row.get::<Option<String>, _>(6);
-                    let owner_incarnation = row
-                        .get::<Option<i64>, _>(7)
-                        .map(|value| u64_from_sql("AttachmentManifest", "owner_incarnation", value))
-                        .transpose()?;
                     let owner = lash_core_execution::store::decode_attachment_owner(
                         owner_kind.as_deref(),
                         owner_id,
-                        owner_incarnation,
                     )?;
                     Ok(AttachmentManifestEntry {
                         attachment_id: attachment_id_from_sql(
@@ -534,7 +516,7 @@ impl AttachmentManifest for PostgresSessionStore {
                             row.get(3),
                         )?,
                         written_at_epoch_ms: row
-                            .get::<Option<i64>, _>(8)
+                            .get::<Option<i64>, _>(7)
                             .map(|value| u64_from_sql("AttachmentManifest", "written_at_ms", value))
                             .transpose()?,
                         committed_at_epoch_ms: row

@@ -37,16 +37,22 @@ impl lash_core::facade_support::OrchestratingToolImplementation for FirstTurnPro
         _args: &serde_json::Value,
         context: &lash_core::facade_support::OrchestrationContext<'_>,
     ) -> lash_core::ToolOutcome {
+        let start_key = match context.start_key(0) {
+            Ok(start_key) => start_key,
+            Err(err) => return lash_core::ToolOutcome::err_fmt(err),
+        };
         match context
-            .start_process(lash_core::ProcessStartRequest::external(
-                "child-first-turn-process",
-                lash_core::ProcessOriginator::host(),
-                serde_json::json!({ "source": "first child turn" }),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
-            ))
+            .start_process(
+                lash_core::ProcessStartRequest::external(
+                    lash_core::ProcessOriginator::host(),
+                    serde_json::json!({ "source": "first child turn" }),
+                    lash_core::ProcessLifecyclePolicy::new(
+                        lash_core::ParentScope::Host,
+                        lash_core::OnParentEnd::Abandon,
+                    ),
+                )
+                .with_start_key(Some(start_key)),
+            )
             .await
         {
             Ok(process) => lash_core::ToolOutcome::ok(serde_json::json!({ "process": process.id })),
@@ -546,10 +552,24 @@ async fn process_registered_during_first_durable_child_turn_remains_listable_aft
 
     let child_handle = RuntimeHandle::new(child_runtime);
     let handles = child_handle.observe().list_all_process_handles().await;
+    let registered = lash_core::ProcessQuery::list_processes(
+        registry.as_ref(),
+        &lash_core::ProcessListFilter {
+            status: lash_core::ProcessStatusFilter::Any,
+            ..lash_core::ProcessListFilter::default()
+        },
+    )
+    .await
+    .expect("list the child's processes");
+    assert_eq!(
+        registered.len(),
+        1,
+        "the first child turn registered one process"
+    );
     assert!(
         handles
             .iter()
-            .any(|handle| handle.process_id == "child-first-turn-process"),
+            .any(|handle| handle.process_id == registered[0].id),
         "the observed process must remain reachable from the durable child frame after commit: {handles:?}"
     );
 }

@@ -108,7 +108,6 @@ async fn process_slot_reservation_is_cancelled_when_the_dispatcher_shuts_down() 
         .await;
     registry
         .register_process(engine_registration(
-            "cancel-blocked-process-slot",
             "gated-success",
             env_ref,
             serde_json::Value::Null,
@@ -154,10 +153,9 @@ async fn continuation_fetch_failure_is_typed_and_the_next_drive_resumes_the_swee
             run_handle,
         )
         .await;
-    for index in 0..2 {
+    for _index in 0..2 {
         registry
             .register_process(engine_registration(
-                format!("continuation-recovery-{index}"),
                 "gated-success",
                 env_ref.clone(),
                 serde_json::Value::Null,
@@ -216,16 +214,19 @@ async fn retry_exhaustion_does_not_strand_an_in_flight_retryable_execution() {
             run_handle,
         )
         .await;
+    let mut ids = std::collections::BTreeMap::new();
+    // Registered in worklist order: a minted id is time-ordered, so the
+    // registration order is the id order the pages walk.
     for process_id in ["a-fast", "b-retry", "c-later-page"] {
-        registry
+        let registered = registry
             .register_process(engine_registration(
-                process_id,
                 "fail-first-retry",
                 env_ref.clone(),
-                serde_json::Value::Null,
+                serde_json::json!({ "name": process_id }),
             ))
             .await
             .expect("register retry-exhaustion fixture");
+        ids.insert(process_id, registered.id.clone());
     }
     test_registry.set_worklist_page_errors(
         1,
@@ -308,7 +309,6 @@ async fn concurrent_drive_rescan_survives_the_initial_fetch_error() {
     .await;
     registry
         .register_process(engine_registration(
-            "concurrent-rescan-survivor",
             "gated-success",
             env_ref,
             serde_json::Value::Null,
@@ -370,7 +370,6 @@ async fn a_failed_scan_consumes_the_pending_rescan_without_a_redundant_pass() {
         .await;
     registry
         .register_process(engine_registration(
-            "consumed-rescan-row",
             "gated-success",
             env_ref,
             serde_json::Value::Null,
@@ -435,7 +434,6 @@ async fn a_dispatcher_unwind_mid_scan_is_drained_by_the_replacement() {
     .await;
     registry
         .register_process(engine_registration(
-            "unwind-drained-row",
             "gated-success",
             env_ref,
             serde_json::Value::Null,
@@ -490,10 +488,9 @@ async fn worklist_intake_fetches_next_page_only_after_dispatch_capacity_frees() 
         run_handle,
     )
     .await;
-    for index in 0..4 {
+    for _index in 0..4 {
         registry
             .register_process(engine_registration(
-                format!("bounded-intake-{index}"),
                 "gated-success",
                 env_ref.clone(),
                 serde_json::Value::Null,
@@ -548,11 +545,9 @@ impl crate::ProcessEngine for FailFirstRetryEngine {
     async fn run(
         &self,
         context: crate::ProcessEngineRunContext<'_>,
-        _payload: serde_json::Value,
+        payload: serde_json::Value,
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
-        if context.registration().id == "b-retry"
-            && self.retry_runs.fetch_add(1, Ordering::SeqCst) == 0
-        {
+        if payload["name"] == "b-retry" && self.retry_runs.fetch_add(1, Ordering::SeqCst) == 0 {
             self.retry_started.notify_one();
             self.fail_retry.notified().await;
             return Err(crate::ProcessInfraError::new(PluginError::Session(
@@ -561,7 +556,7 @@ impl crate::ProcessEngine for FailFirstRetryEngine {
         }
         Ok(
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                serde_json::json!({"process_id": context.registration().id}),
+                serde_json::json!({"process_id": context.process_id()}),
             ))
             .into(),
         )
@@ -588,7 +583,7 @@ impl crate::ProcessEngine for GatedSuccessEngine {
             .forget();
         Ok(
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                serde_json::json!({"process_id": context.registration().id}),
+                serde_json::json!({"process_id": context.process_id()}),
             ))
             .into(),
         )
@@ -614,15 +609,15 @@ async fn a_drive_that_coalesces_onto_an_in_flight_scan_reports_no_intake() {
         run_handle,
     )
     .await;
-    registry
+    let coalesced_intake_row = registry
         .register_process(engine_registration(
-            "coalesced-intake-row",
             "gated-success",
             env_ref,
             serde_json::Value::Null,
         ))
         .await
-        .expect("register the coalesced intake row");
+        .expect("register the coalesced intake row")
+        .id;
 
     let pause = test_registry.pause_next_worklist_page();
     let scanning_drive = {
@@ -654,7 +649,7 @@ async fn a_drive_that_coalesces_onto_an_in_flight_scan_reports_no_intake() {
         ProcessAdmissionIntake::Scanned,
         "the call that read the page owns the intake"
     );
-    assert_eq!(scanned.admitted, vec!["coalesced-intake-row".to_string()]);
+    assert_eq!(scanned.admitted, vec![coalesced_intake_row]);
     wait_for_terminal_count(&registry, 1, "coalesced intake row").await;
 }
 
@@ -670,7 +665,7 @@ fn an_absorbed_nested_report_is_never_re_reported_as_busy() {
     };
     outer.absorb(ProcessAdmissionReport {
         intake: ProcessAdmissionIntake::Scanned,
-        admitted: vec![ProcessId::from("nested-row")],
+        admitted: vec![crate::ProcessId::fixture("nested-row")],
         deferred: Vec::new(),
     });
     assert_eq!(
@@ -683,27 +678,30 @@ fn an_absorbed_nested_report_is_never_re_reported_as_busy() {
     // page's own untouched row.
     outer.absorb(ProcessAdmissionReport {
         intake: ProcessAdmissionIntake::Scanned,
-        admitted: vec![ProcessId::from("outer-row")],
+        admitted: vec![crate::ProcessId::fixture("outer-row")],
         deferred: vec![
             ProcessAdmissionDeferred {
-                process_id: ProcessId::from("nested-row"),
+                process_id: crate::ProcessId::fixture("nested-row"),
                 disposition: ProcessRecoveryAttemptOutcome::Busy,
             },
             ProcessAdmissionDeferred {
-                process_id: ProcessId::from("peer-row"),
+                process_id: crate::ProcessId::fixture("peer-row"),
                 disposition: ProcessRecoveryAttemptOutcome::Busy,
             },
         ],
     });
     assert_eq!(
         outer.admitted,
-        vec!["nested-row".to_string(), "outer-row".to_string()],
+        vec![
+            crate::ProcessId::fixture("nested-row"),
+            crate::ProcessId::fixture("outer-row")
+        ],
         "both legs' admissions belong to the one call"
     );
     assert_eq!(
         outer.deferred,
         vec![ProcessAdmissionDeferred {
-            process_id: ProcessId::from("peer-row"),
+            process_id: crate::ProcessId::fixture("peer-row"),
             disposition: ProcessRecoveryAttemptOutcome::Busy,
         }],
         "another owner's contention survives; this call's own admission does not become it"
@@ -746,26 +744,25 @@ async fn an_idle_dispatcher_rescans_and_runs_a_row_no_poke_announced() {
         )
         .await;
 
-    test_registry
+    let poked_row = test_registry
         .register_process(engine_registration(
-            "poked-row",
             "gated-success",
             env_ref.clone(),
             serde_json::json!({}),
         ))
         .await
-        .expect("register the row that starts the dispatcher");
+        .expect("register the row that starts the dispatcher")
+        .id;
     let report = worker
         .drive_pending_processes()
         .await
         .expect("the poked row is admitted");
-    assert_eq!(report.admitted, vec!["poked-row".to_string()]);
+    assert_eq!(report.admitted, vec![poked_row]);
     wait_for_terminal_count(&registry, 1, "the poked row to run").await;
 
     // Nothing announces this row: no poke, no drive call, no notification.
     test_registry
         .register_process(engine_registration(
-            "unannounced-row",
             "gated-success",
             env_ref,
             serde_json::json!({}),

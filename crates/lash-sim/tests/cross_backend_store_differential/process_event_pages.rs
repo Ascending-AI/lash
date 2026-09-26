@@ -10,13 +10,12 @@ where
     R: lash_core::ProcessEventLog + ?Sized,
 {
     let limit = std::num::NonZeroUsize::new(127).unwrap_or(std::num::NonZeroUsize::MIN);
-    let process_ref = registry.resolve_process_ref(process_id).await?;
     let mut after_sequence = 0;
     let mut expected_sequence = 1;
     let mut page_lengths = Vec::new();
     loop {
         let outcome = registry
-            .event_page_ref(&process_ref, after_sequence, limit, mode)
+            .event_page_after(process_id, after_sequence, limit, mode)
             .await?;
         let lash_core::ProcessEventReadOutcome::Retained(page) = outcome else {
             panic!("seeded event history must remain retained");
@@ -64,10 +63,8 @@ pub(super) async fn compare_bounded_process_event_pages(
 ) {
     // The differential verifies ordered Full/Lite pages of at most 127 events over 10,000 rows on both backends; bounded memory is inferred from the limited SQL reads (rendered-SQL pin), not measured.
     const EVENT_COUNT: u64 = 10_000;
-    let process_id = lash_sansio::ProcessId::from(format!("event-pages-{run_nonce}"));
     let registration = || {
         lash_core::ProcessRegistration::new(
-            process_id.clone(),
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -92,7 +89,11 @@ pub(super) async fn compare_bounded_process_event_pages(
     )
     .await
     .expect("open SQLite process-event page fixture");
-    let postgres_registry = postgres.process_registry();
+    let (sqlite_mint, postgres_mint) = paired_process_id_mints();
+    let sqlite = sqlite.with_process_id_mint_for_testing(sqlite_mint);
+    let postgres_registry = postgres
+        .process_registry()
+        .with_process_id_mint_for_testing(postgres_mint);
     let sqlite_record = sqlite
         .register_process(registration())
         .await
@@ -101,7 +102,11 @@ pub(super) async fn compare_bounded_process_event_pages(
         .register_process(registration())
         .await
         .expect("register PostgreSQL page process");
-    assert_eq!(sqlite_record.incarnation, postgres_record.incarnation);
+    assert_eq!(
+        sqlite_record.id, postgres_record.id,
+        "the paired mints name both rows alike"
+    );
+    let process_id = sqlite_record.id.clone();
 
     let request = || {
         lash_core::ProcessEventAppendRequest::new(
@@ -129,8 +134,8 @@ pub(super) async fn compare_bounded_process_event_pages(
         let mut insert = transaction
             .prepare(
                 "INSERT INTO process_events
-                 (process_id, process_incarnation, sequence, event_type, idempotency_key, event_json)
-                 VALUES (?1, ?2, ?3, ?4, NULL, ?5)",
+                 (process_id, sequence, event_type, idempotency_key, event_json)
+                 VALUES (?1, ?2, ?3, NULL, ?4)",
             )
             .expect("prepare SQLite page seed");
         for sequence in 2..=EVENT_COUNT {
@@ -139,7 +144,6 @@ pub(super) async fn compare_bounded_process_event_pages(
             insert
                 .execute(rusqlite::params![
                     process_id.as_str(),
-                    sqlite_record.incarnation.registration_sequence() as i64,
                     sequence as i64,
                     "page.event",
                     serde_json::to_string(&event).expect("encode SQLite seed event"),
@@ -151,13 +155,12 @@ pub(super) async fn compare_bounded_process_event_pages(
     }
     sqlx::query(
         "INSERT INTO lash_process_events
-         (process_id, process_incarnation, sequence, event_type, idempotency_key, event_json)
-         SELECT $1, $2, sequence, $3, NULL,
-                jsonb_set($4::jsonb, '{sequence}', to_jsonb(sequence))::text
-           FROM generate_series(2, $5) AS sequence",
+         (process_id, sequence, event_type, idempotency_key, event_json)
+         SELECT $1, sequence, $2, NULL,
+                jsonb_set($3::jsonb, '{sequence}', to_jsonb(sequence))::text
+           FROM generate_series(2, $4) AS sequence",
     )
     .bind(process_id.as_str())
-    .bind(postgres_record.incarnation.registration_sequence() as i64)
     .bind("page.event")
     .bind(serde_json::to_string(&first).expect("encode PostgreSQL seed event"))
     .bind(EVENT_COUNT as i64)
@@ -179,10 +182,9 @@ pub(super) async fn compare_bounded_process_event_pages(
         assert_eq!(sqlite_events, postgres_events, "{mode:?} pages diverged");
     }
 
-    let effect_id = lash_sansio::ProcessId::from(format!("effect-pages-{run_nonce}"));
+    let effect_label = format!("effect-pages-{run_nonce}");
     let effect_registration = || {
         lash_core::ProcessRegistration::new(
-            effect_id.clone(),
             lash_core::ProcessInput::Engine {
                 kind: "effect-differential".to_string(),
                 payload: serde_json::Value::Null,
@@ -203,7 +205,7 @@ pub(super) async fn compare_bounded_process_event_pages(
                     "effect-differential",
                     serde_json::Value::Null,
                 ),
-                Some(effect_id.as_str()),
+                Some(effect_label.as_str()),
             ),
         ))
     };
@@ -215,6 +217,11 @@ pub(super) async fn compare_bounded_process_event_pages(
         .register_process(effect_registration())
         .await
         .expect("register PostgreSQL effect process");
+    assert_eq!(
+        sqlite_record.id, postgres_record.id,
+        "the paired mints name both effect rows alike"
+    );
+    let effect_id = sqlite_record.id.clone();
     let owner =
         lash_core::LeaseOwnerIdentity::opaque("effect-differential", "effect-differential:1");
     let sqlite_lease = sqlite

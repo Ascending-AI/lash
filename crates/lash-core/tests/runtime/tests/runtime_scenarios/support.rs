@@ -562,15 +562,15 @@ impl RuntimeQueueIngress {
                         version: lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
                         wake_id: format!("wake:{session_id}:{text}"),
                         target_session_id: SessionId::from(session_id.to_string()),
-                        process_id: ProcessId::from(format!("process:{text}")),
-                        process_incarnation:
-                            lash_core::ProcessIncarnation::from_registration_sequence(1),
+                        process_id: lash_core::ProcessId::fixture(&format!("process:{text}")),
                         sequence: 1,
                         event_type: "process.wake".to_string(),
                         event_invocation: RuntimeInvocation {
                             attribution: RuntimeAttribution::for_session(session_id),
                             subject: RuntimeSubject::ProcessEvent {
-                                process_id: ProcessId::from(format!("process:{text}")),
+                                process_id: lash_core::ProcessId::fixture(&format!(
+                                    "process:{text}"
+                                )),
                                 sequence: 1,
                                 event_type: "process.wake".to_string(),
                             },

@@ -25,7 +25,12 @@ impl ExecutionHost for FluencyHost {
                 Ok(AbilityResult::Value(resource_operation_value(&call, 0)))
             }
             AbilityOp::Await(Value::Record(handle))
-                if handle.get("process_id") == Some(&Value::String("fluency-run".into())) =>
+                if handle.get("process_id")
+                    == Some(&Value::String(
+                        lash_sansio::ProcessId::fixture("fluency-run")
+                            .as_str()
+                            .into(),
+                    )) =>
             {
                 Ok(AbilityResult::Value(Value::Number(2.0)))
             }
@@ -39,11 +44,22 @@ impl ExecutionHost for FluencyHost {
 
 /// The handle record a real host mints for a started process; a bare string
 /// is a resolved value, and awaiting one is a guest error.
-fn process_handle(id: &str) -> Value {
+fn process_handle(label: &str) -> Value {
     let mut handle = lashlang::Record::new();
     handle.insert("__handle__".to_string(), Value::String("lash".into()));
-    handle.insert("id".to_string(), Value::String(format!("p.1.{id}").into()));
-    handle.insert("process_id".to_string(), Value::String(id.into()));
+    let process_id = lash_sansio::ProcessId::fixture(label);
+    handle.insert(
+        "id".to_string(),
+        Value::String(
+            lash_sansio::handle::HandleId::process(&process_id)
+                .as_str()
+                .into(),
+        ),
+    );
+    handle.insert(
+        "process_id".to_string(),
+        Value::String(process_id.as_str().into()),
+    );
     Value::Record(std::sync::Arc::new(handle))
 }
 

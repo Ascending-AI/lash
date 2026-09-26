@@ -12,16 +12,16 @@ pub const TABLE: &str = "attachment_manifest";
 /// Every column, in insert order.
 ///
 /// `write_id` is the identity of the write attempt that owns the row, and the
-/// owner triple is the durable edge that keeps the row alive past its
+/// owner pair is the durable edge that keeps the row alive past its
 /// session's turn.
 pub const INSERT_COLUMNS: &str = "attachment_id, session_id, canonical_uri, intent_at_ms, write_id,
-     written_at_ms, committed_at_ms, owner_kind, owner_id, owner_incarnation";
+     written_at_ms, committed_at_ms, owner_kind, owner_id";
 
 /// What adoption writes: a row that is committed the moment it exists.
 ///
 /// Narrow on purpose, and not for speed. Adoption owns no write attempt, so
 /// `write_id` must stay NULL, and it carries no owner edge, so the owner
-/// triple must stay NULL — `ck_attachment_manifest_owner_identity` refuses any
+/// pair must stay NULL — `ck_attachment_manifest_owner_identity` refuses any
 /// partially filled owner. Naming those four columns in this insert would
 /// invite a later edit to bind one of them.
 pub const ADOPTION_COLUMNS: &str =
@@ -33,30 +33,29 @@ pub const ADOPTION_COLUMNS: &str =
 /// writer and its own superseded attempts; it is meaningless outside the
 /// transaction that minted it, and no caller of the sweep has ever read it.
 pub const ENTRY_COLUMNS: &str = "attachment_id, session_id, canonical_uri, intent_at_ms,
-     committed_at_ms, owner_kind, owner_id, owner_incarnation, written_at_ms";
+     committed_at_ms, owner_kind, owner_id, written_at_ms";
 
 crate::statements! {
     /// `attachment_manifest` statements both backends issue verbatim.
     pub struct ManifestStatements @ "attachment_manifest" {
         /// Record this attempt's intent for `?1` (digest) in `?2` (session),
-        /// `?3` canonical URI, `?4` intent instant, `?5`/`?6`/`?7` the owner
-        /// triple and `?8` this attempt's write identity.
+        /// `?3` canonical URI, `?4` intent instant, `?5`/`?6` the owner
+        /// pair and `?7` this attempt's write identity.
         ///
         /// A fresh attempt has proven nothing, so it takes the row with no
         /// upload stamp and no commit stamp; evidence and commitment already
         /// earned by earlier attempts survive the upsert untouched.
         insert_intent = "INSERT INTO attachment_manifest (
                  attachment_id, session_id, canonical_uri, intent_at_ms, write_id,
-                 written_at_ms, committed_at_ms, owner_kind, owner_id, owner_incarnation
+                 written_at_ms, committed_at_ms, owner_kind, owner_id
              )
-             VALUES (?1, ?2, ?3, ?4, ?8, NULL, NULL, ?5, ?6, ?7)
+             VALUES (?1, ?2, ?3, ?4, ?7, NULL, NULL, ?5, ?6)
              ON CONFLICT (session_id, attachment_id) DO UPDATE SET
                  canonical_uri = excluded.canonical_uri,
                  intent_at_ms = excluded.intent_at_ms,
                  write_id = excluded.write_id,
                  owner_kind = excluded.owner_kind,
-                 owner_id = excluded.owner_id,
-                 owner_incarnation = excluded.owner_incarnation";
+                 owner_id = excluded.owner_id";
 
         /// Adopt digest `?2` into session `?3` at `?1` with canonical URI `?4`
         /// and the uploader's proven instant `?5`.
@@ -191,7 +190,7 @@ crate::statements! {
     /// owner dead.
     ///
     /// A process-owned intent outlives its session's turn, so age cannot
-    /// retire it; what retires it is the absence of the owning incarnation
+    /// retire it; what retires it is the absence of the owning process
     /// from the process registry. Reading that in the *same* statement is the
     /// point — a read-process-then-forget pair would race a registration
     /// across the per-session topology — and on SQLite the registry is a
@@ -230,7 +229,6 @@ crate::statements! {
                             AND NOT EXISTS (
                                 SELECT 1 FROM processes AS process
                                 WHERE process.process_id = manifest.owner_id
-                                  AND process.incarnation = manifest.owner_incarnation
                             )
                         )
                     )
@@ -260,7 +258,6 @@ crate::statements! {
                         AND NOT EXISTS (
                             SELECT 1 FROM processes AS process
                             WHERE process.process_id = manifest.owner_id
-                              AND process.incarnation = manifest.owner_incarnation
                         )
                     )
                )";

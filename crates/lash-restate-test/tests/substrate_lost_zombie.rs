@@ -75,10 +75,7 @@ fn build_core(restate: &RestateTestBackend) -> lash::LashCore {
 }
 
 /// `process main() signals { go: any } { value = wait_signal("go") finish value }`
-async fn publish_process(
-    restate: &RestateTestBackend,
-    process_id: &str,
-) -> lash_core::ProcessStartRequest {
+async fn publish_process(restate: &RestateTestBackend) -> lash_core::ProcessStartRequest {
     let program = b::module(
         vec![b::process_with_signals(
             PROCESS,
@@ -126,7 +123,6 @@ async fn publish_process(
     .into_process_input()
     .expect("the process input serializes");
     lash_core::ProcessStartRequest::new(
-        ProcessId::from(process_id),
         input,
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::host(),
@@ -211,12 +207,12 @@ async fn zombie_after_substrate_lost(first: First, seed: u64) {
         )
         .expect("build the process worker"),
     );
-    let process_id = format!("zombie-{first:?}").to_lowercase();
-    let request = publish_process(&restate, &process_id).await;
-    let process_id = request.id.clone();
+    let request = publish_process(&restate).await;
+    let started = Arc::new(std::sync::Mutex::new(None::<ProcessId>));
     {
         let core = core.clone();
         let request = request.clone();
+        let started = Arc::clone(&started);
         let admitted = lash_core::AdmittedScope::runtime_operation("start".to_owned());
         tokio::time::timeout(
             Duration::from_secs(20),
@@ -225,11 +221,14 @@ async fn zombie_after_substrate_lost(first: First, seed: u64) {
                 Arc::new(move |scoped| {
                     let core = core.clone();
                     let request = request.clone();
+                    let started = Arc::clone(&started);
                     Box::pin(async move {
-                        core.processes()
+                        let record = core
+                            .processes()
                             .start(request, scoped)
                             .await
                             .expect("start the process");
+                        *started.lock().expect("the start slot") = Some(record.id);
                     })
                 }),
             ),
@@ -238,6 +237,11 @@ async fn zombie_after_substrate_lost(first: First, seed: u64) {
         .expect("the start finishes")
         .expect("the start's handler completes");
     }
+    let process_id = started
+        .lock()
+        .expect("the start slot")
+        .clone()
+        .expect("the start minted its process id");
     let parked = tokio::time::timeout(Duration::from_secs(20), async {
         loop {
             if let Ok(Some(process)) = core.processes().get(&process_id).await

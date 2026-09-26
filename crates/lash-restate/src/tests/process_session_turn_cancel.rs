@@ -6,6 +6,7 @@ use super::*;
 async fn run_session_turn(
     worker: &DurableProcessWorker,
     registry: &Arc<dyn ProcessRegistry>,
+    process_id: &ProcessId,
     registration: &ProcessRegistration,
     context: Arc<ReplayableRecordingContext>,
     lent_stop: tokio_util::sync::CancellationToken,
@@ -16,15 +17,16 @@ async fn run_session_turn(
     );
     worker
         .run_process_segment_with_scoped_effect_controller(
+            process_id.clone(),
             registration.clone(),
             ProcessExecutionContext::default(),
             lash_core::ProcessExecutionWriteAuthority::invocation(
-                &registration.id,
+                process_id.clone(),
                 "session-turn-cancel-peek-execution",
             ),
             controller
                 .process_scope_for_test(
-                    recorded_process_admission(registry.as_ref(), &registration.id).await,
+                    recorded_process_admission(registry.as_ref(), process_id).await,
                 )
                 .expect("scope the session-turn process"),
             lent_stop,
@@ -49,11 +51,12 @@ fn is_cancelled(outcome: &Result<lash_core::ProcessRunOutcome, PluginError>) -> 
 #[tokio::test]
 pub(super) async fn a_session_turn_cancel_is_its_recorded_peek_not_its_lent_stop() {
     let registry = process_registry();
-    let registration = rerunnable_session_turn_registration("p16-session-turn-cancel-peek");
-    registry
+    let registration = rerunnable_session_turn_registration();
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register the session-turn process");
+        .expect("register the session-turn process")
+        .id;
     let worker = recovery_worker(Arc::clone(&registry), memory_session_store_factory().await).await;
 
     let context = Arc::new(ReplayableRecordingContext::default());
@@ -61,6 +64,7 @@ pub(super) async fn a_session_turn_cancel_is_its_recorded_peek_not_its_lent_stop
     let first = run_session_turn(
         &worker,
         &registry,
+        &process_id,
         &registration,
         Arc::clone(&context),
         tokio_util::sync::CancellationToken::new(),
@@ -77,6 +81,7 @@ pub(super) async fn a_session_turn_cancel_is_its_recorded_peek_not_its_lent_stop
     let replayed = run_session_turn(
         &worker,
         &registry,
+        &process_id,
         &registration,
         Arc::clone(&context),
         tokio_util::sync::CancellationToken::new(),
@@ -98,6 +103,7 @@ pub(super) async fn a_session_turn_cancel_is_its_recorded_peek_not_its_lent_stop
     let _ = run_session_turn(
         &worker,
         &registry,
+        &process_id,
         &registration,
         Arc::clone(&uncommitted),
         fired,

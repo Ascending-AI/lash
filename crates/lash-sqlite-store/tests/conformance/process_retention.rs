@@ -1,16 +1,11 @@
 use super::*;
 use lash_core_execution::ProcessRetention as _;
-use lash_sansio::ProcessId;
 
 /// Drive one process into `waiting` and assert the retention contract: live rows
 /// are listed as non-terminal and are never prune candidates.
-async fn assert_waiting_process_is_live_not_prunable(
-    registry: &dyn ProcessRegistry,
-    process_id: &ProcessId,
-) {
-    registry
+async fn assert_waiting_process_is_live_not_prunable(registry: &dyn ProcessRegistry) {
+    let process_id = registry
         .register_process(lash_core_execution::ProcessRegistration::new(
-            process_id,
             lash_core_execution::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -22,9 +17,10 @@ async fn assert_waiting_process_is_live_not_prunable(
             ),
         ))
         .await
-        .expect("register waiting retention process");
+        .expect("register waiting retention process")
+        .id;
     let authority = lash_core_execution::ProcessExecutionWriteAuthority::invocation(
-        process_id,
+        process_id.clone(),
         "waiting-retention-run",
     )
     .bind_attempt(1);
@@ -32,12 +28,12 @@ async fn assert_waiting_process_is_live_not_prunable(
         .invocation_started()
         .expect("invocation authority carries its start fact");
     registry
-        .record_first_started_with_authority(process_id, started, &authority)
+        .record_first_started_with_authority(&process_id, started, &authority)
         .await
         .expect("start waiting retention process");
     let waiting = registry
         .set_process_wait_with_authority(
-            process_id,
+            &process_id,
             lash_core_execution::WaitState {
                 since_ms: 1,
                 kind: lash_core_execution::WaitKind::Signal {
@@ -85,7 +81,7 @@ async fn assert_waiting_process_is_live_not_prunable(
     );
     assert!(
         registry
-            .get_process(process_id)
+            .get_process(&process_id)
             .await
             .expect("read waiting retention process")
             .is_some(),
@@ -105,8 +101,7 @@ async fn assert_waiting_process_is_live_not_prunable(
 async fn sqlite_waiting_processes_are_live_not_prunable() {
     let backend = TestBackend::open(SUBSTRATE).await;
     let registry = backend.process_registry();
-    let process_id = ProcessId::from(format!("waiting-retention:{}", uuid::Uuid::new_v4()));
-    assert_waiting_process_is_live_not_prunable(registry.as_ref(), &process_id).await;
+    assert_waiting_process_is_live_not_prunable(registry.as_ref()).await;
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
@@ -116,7 +111,6 @@ async fn sqlite_prune_cleanup_evidence_survives_reopen_until_acknowledged() {
     let registered = registry
         .register_process(
             lash_core_execution::ProcessRegistration::new(
-                "sqlite-prune-cleanup",
                 lash_core_execution::ProcessInput::Engine {
                     kind: "test-engine".to_string(),
                     payload: serde_json::json!({"module_ref": "module-sqlite"}),
@@ -164,13 +158,13 @@ async fn sqlite_prune_cleanup_evidence_survives_reopen_until_acknowledged() {
     assert_eq!(pending[0].env_ref, registered.env_ref);
     assert_eq!(pending[0].input, registered.input);
     let acknowledgement = reopened
-        .complete_process_artifact_cleanup(&registered.id, registered.incarnation)
+        .complete_process_artifact_cleanup(&registered.id)
         .await
         .expect("ack cleanup evidence");
     assert_eq!(
         acknowledgement,
         lash_core_execution::ProcessArtifactCleanupAck::Acknowledged {
-            process_ref: lash_core_execution::ProcessRef::from_record(&registered),
+            process_id: registered.id.clone(),
         }
     );
     assert!(

@@ -826,7 +826,7 @@ mod span_identity_tests {
 
         let invocation = crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
-                crate::ExecutionScope::process("host-process"),
+                crate::ExecutionScope::process(crate::process_id_for_test("host-process")),
                 "process-step",
             )
             .expect("valid process effect address"),
@@ -834,7 +834,7 @@ mod span_identity_tests {
             "descriptive-label",
         )
         .with_caused_by(Some(crate::CausalRef::Process {
-            process_id: crate::ProcessId::from("causal-process"),
+            process_id: crate::process_id_for_test("causal-process"),
         }));
 
         let context = trace_context_for_effect_invocation(base, &invocation);
@@ -864,7 +864,7 @@ mod span_identity_tests {
     #[test]
     fn effect_projection_uses_full_scoped_cause_before_real_turn_fallback() {
         let parent_address = crate::EffectAddress::new(
-            crate::ExecutionScope::process("parent-process"),
+            crate::ExecutionScope::process(crate::process_id_for_test("parent-process")),
             "shared-replay-key",
         )
         .expect("valid causal effect address");

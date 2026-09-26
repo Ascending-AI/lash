@@ -76,16 +76,15 @@ pub async fn a_failed_observer_transfer_leaves_no_partial_mutation(
 ) {
     let from_session = SessionId::from("observer-transfer-from");
     let to_session = SessionId::from("observer-transfer-to");
-    let first = ProcessId::from("observer-transfer-first");
-    let second = ProcessId::from("observer-transfer-second");
-    registry
+    let first = registry
         .register_process(
-            registration(first.as_str())
+            registration("observer-transfer-first")
                 .with_wake_session_id(Some(from_session.clone()))
                 .with_extra_event_types([wake_event_type("producer.wake")]),
         )
         .await
-        .expect("register the first process");
+        .expect("register the first process")
+        .id;
     // A real wake delivery, so the footprint carries a non-empty outbox row
     // to compare against after the failed transfer.
     registry
@@ -99,10 +98,11 @@ pub async fn a_failed_observer_transfer_leaves_no_partial_mutation(
         )
         .await
         .expect("seed a wake delivery");
-    registry
-        .register_process(registration(second.as_str()))
+    let second = registry
+        .register_process(registration("observer-transfer-second"))
         .await
-        .expect("register the second process");
+        .expect("register the second process")
+        .id;
     registry
         .add_observer(
             &from_session,

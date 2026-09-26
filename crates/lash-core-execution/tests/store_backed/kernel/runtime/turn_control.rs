@@ -211,10 +211,8 @@ mod tests {
         host: &'a dyn EffectHost,
         address: &TurnAddress,
     ) -> ScopedEffectController<'a> {
-        host.scoped(
-            AdmittedScope::unpinned(address.execution_scope()).expect("a turn admits unpinned"),
-        )
-        .expect("scope turn controller")
+        host.scoped(AdmittedScope::new(address.execution_scope()))
+            .expect("scope turn controller")
     }
 
     #[tokio::test]
@@ -228,11 +226,11 @@ mod tests {
         let active = ActiveTurnControl::new(host.as_ref(), address.clone())
             .await
             .expect("active process-backed turn control");
-        let process_scope = ExecutionScope::process("process:subagent:scope-probe");
+        let process_scope =
+            ExecutionScope::process(crate::ProcessId::fixture("process:subagent:scope-probe"));
         let scoped = host
-            .scoped(AdmittedScope::process(crate::ProcessRef::new(
+            .scoped(AdmittedScope::process(crate::ProcessId::fixture(
                 "process:subagent:scope-probe",
-                crate::ProcessIncarnation::from_registration_sequence(1),
             )))
             .expect("scope process controller");
 
@@ -1536,9 +1534,7 @@ mod tests {
         };
 
         let scoped = host
-            .scoped(
-                AdmittedScope::unpinned(address.execution_scope()).expect("a turn admits unpinned"),
-            )
+            .scoped(AdmittedScope::new(address.execution_scope()))
             .expect("scope recovered turn controller");
         let recovered = ActiveTurnControl::new(host.as_ref(), address)
             .await

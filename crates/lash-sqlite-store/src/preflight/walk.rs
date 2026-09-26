@@ -42,7 +42,7 @@
 //! reported as [`ScanCoverage::NotScanned`] rather than an error, so a caller
 //! reads "nobody looked" instead of mistaking silence for "nothing here".
 
-use lash_sansio::{ProcessId, SessionId};
+use lash_sansio::SessionId;
 use std::path::Path;
 
 use lash_core_execution::{
@@ -273,7 +273,7 @@ fn read_parked_segments(
         Ok(DurableItem {
             surface: DurableSurface::ParkedSegment,
             cursor: row.get(0)?,
-            process_id: Some(ProcessId::from(row.get::<_, String>(1)?)),
+            process_id: Some(crate::row_process_id(row, 1)?),
             // The handover text is handed over as-is. Its shape is a durable
             // format the manifest describes, not something this walk parses.
             payload: DurablePayload::Json(row.get(2)?),
@@ -293,7 +293,7 @@ fn read_parked_segments(
 /// One start record per live process (FIG-3571), in key order.
 ///
 /// The payload is the process record: its start stamp names the executable
-/// generation the incarnation runs under, and only its input lets the probe
+/// generation the process runs under, and only its input lets the probe
 /// recompute the generation this build would run it as. A process that has not
 /// started yet carries no stamp, and the probe reads nothing from it.
 fn read_started_processes(
@@ -308,12 +308,11 @@ fn read_started_processes(
             .sql(),
     )?;
     let rows = statement.query_map(params![after, limit_binding(limit)], |row| {
-        let process_id: String = row.get(0)?;
         let record: String = row.get(3)?;
         Ok(DurableItem {
             surface: DurableSurface::StartedProcess,
-            cursor: process_id.clone(),
-            process_id: Some(ProcessId::from(process_id)),
+            cursor: row.get(0)?,
+            process_id: Some(crate::row_process_id(row, 0)?),
             status: Some(row.get(1)?),
             session_id: row.get::<_, Option<String>>(2)?.map(SessionId::from),
             owner_record: Some(record.clone()),
@@ -346,7 +345,7 @@ fn read_pending_wakes(
             // `delivery_id` is already the primary key and already text, so it
             // is its own keyset cursor: nothing to pad, nothing to compose.
             cursor: row.get(0)?,
-            process_id: Some(ProcessId::from(row.get::<_, String>(1)?)),
+            process_id: Some(crate::row_process_id(row, 1)?),
             session_id: Some(SessionId::from(row.get::<_, String>(2)?)),
             // The delivery's own state word, reported verbatim so an operator
             // reads the store's vocabulary rather than a translation of it.

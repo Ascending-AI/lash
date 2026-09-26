@@ -336,13 +336,12 @@ fn restore_queued_work_claim(path: &Path) {
 }
 
 fn backstop_wake(session_id: &SessionId) -> lash_core_execution::ProcessWakeDelivery {
-    let process_id = || lash_core_execution::ProcessId::from("backstop-process");
+    let process_id = || lash_core_execution::ProcessId::fixture("backstop-process");
     lash_core_execution::ProcessWakeDelivery {
         version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: "backstop-process-wake-1".to_string(),
         target_session_id: session_id.clone(),
         process_id: process_id(),
-        process_incarnation: lash_core_execution::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "process.wake".to_string(),
         event_invocation: lash_core_execution::RuntimeInvocation {

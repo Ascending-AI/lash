@@ -1,26 +1,31 @@
 use super::*;
 use lash_core_execution::{ProcessInput, ProcessProvenance, ProcessRegistration, RecoveryContract};
 
-// Literal byte order deliberately differs from en_US.utf8 punctuation handling.
-const IDS: [&str; 10] = ["!!a", "!z", "-a", "0", "A", "_a", "a", "a!", "a-", "~a"];
+const REGISTERED: usize = 10;
 
-async fn ordered_ids(registry: &dyn ProcessRegistry) -> Vec<String> {
-    for id in IDS.into_iter().rev() {
-        registry
-            .register_process(ProcessRegistration::new(
-                id,
-                ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
-                RecoveryContract::ExternallyOwned,
-                ProcessProvenance::host(),
-                lash_core_execution::ProcessLifecyclePolicy::new(
-                    lash_core_execution::ParentScope::Host,
-                    lash_core_execution::OnParentEnd::Abandon,
-                ),
-            ))
-            .await
-            .expect("register punctuation fixture");
+/// Registers minted rows and pages the worklist two at a time: the pages must
+/// visit every row once, in byte order of the minted id, on either backend.
+async fn registered_and_paged_ids(registry: &dyn ProcessRegistry) -> (Vec<String>, Vec<String>) {
+    let mut registered = Vec::new();
+    for _ in 0..REGISTERED {
+        registered.push(
+            registry
+                .register_process(ProcessRegistration::new(
+                    ProcessInput::External {
+                        metadata: serde_json::Value::Null,
+                    },
+                    RecoveryContract::ExternallyOwned,
+                    ProcessProvenance::host(),
+                    lash_core_execution::ProcessLifecyclePolicy::new(
+                        lash_core_execution::ParentScope::Host,
+                        lash_core_execution::OnParentEnd::Abandon,
+                    ),
+                ))
+                .await
+                .expect("register worklist fixture")
+                .id
+                .to_string(),
+        );
     }
     let mut ids = Vec::new();
     let mut continuation = None;
@@ -28,25 +33,18 @@ async fn ordered_ids(registry: &dyn ProcessRegistry) -> Vec<String> {
         let page = registry
             .list_non_terminal_page(std::num::NonZeroUsize::new(2).unwrap(), continuation)
             .await
-            .expect("read punctuation page");
-        if let Some(cursor) = &page.continuation {
-            assert_eq!(
-                cursor.through_process_id(),
-                "~a",
-                "maximum must use byte order"
-            );
-        }
+            .expect("read worklist page");
         ids.extend(page.records.into_iter().map(|record| record.id.to_string()));
         continuation = page.continuation;
         if continuation.is_none() {
-            return ids;
+            return (registered, ids);
         }
-        assert!(ids.len() <= IDS.len(), "pagination must advance");
+        assert!(ids.len() <= REGISTERED, "pagination must advance");
     }
 }
 
 #[tokio::test]
-async fn punctuation_worklist_pagination_matches_both_backends() {
+async fn worklist_pagination_is_byte_ordered_on_both_backends() {
     let Some((_database_lock, storage)) = storage().await else {
         return;
     };
@@ -62,11 +60,9 @@ async fn punctuation_worklist_pagination_matches_both_backends() {
             &storage.process_registry() as &dyn ProcessRegistry,
         ),
     ] {
-        assert_eq!(
-            ordered_ids(registry).await,
-            IDS,
-            "{name} worklist byte order"
-        );
+        let (mut registered, paged) = registered_and_paged_ids(registry).await;
+        registered.sort_unstable();
+        assert_eq!(paged, registered, "{name} worklist byte order");
     }
 }
 

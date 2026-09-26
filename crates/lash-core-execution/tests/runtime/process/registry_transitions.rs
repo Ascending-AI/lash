@@ -6,7 +6,7 @@ mod tests {
         PROCESS_LEASE_SCHEMA_VERSION, PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         WakeDeliveryDisposition, WakeDeliveryState, WakeDiscardReason,
     };
-    use lash_core_execution::{LeaseOwnerIdentity, ProcessId, ProcessLease, ProcessStatus};
+    use lash_core_execution::{LeaseOwnerIdentity, ProcessLease, ProcessStatus};
 
     /// Every [`ProcessStatus`] variant, exhaustively, so the retention-label law can
     /// partition the enum instead of a hand-kept sample of it.
@@ -32,7 +32,7 @@ mod tests {
 
     fn lease(now_ms: u64, ttl_ms: u64, fencing_token: u64) -> ProcessLease {
         acquired_process_lease(
-            &ProcessId::from("process"),
+            &lash_core_execution::ProcessId::fixture("process"),
             &owner("worker", "incarnation"),
             fencing_token,
             now_ms,
@@ -125,7 +125,7 @@ mod tests {
     fn authorization_refuses_a_lease_for_another_process() {
         let stored = lease(1_000, 5_000, 3);
         let error = authorize_process_lease_write(
-            &ProcessId::from("other-process"),
+            &lash_core_execution::ProcessId::fixture("other-process"),
             &stored,
             Some(&stored),
             2_000,
@@ -134,7 +134,7 @@ mod tests {
         assert!(
             matches!(
                 &error,
-                PluginError::ProcessLeaseSuperseded { process_id } if process_id == "other-process"
+                PluginError::ProcessLeaseSuperseded { process_id } if process_id == lash_core_execution::ProcessId::fixture("other-process")
             ),
             "unexpected refusal: {error}"
         );
@@ -145,7 +145,7 @@ mod tests {
         let stored = lease(1_000, 5_000, 3);
         assert!(
             authorize_process_lease_write(
-                &ProcessId::from("process"),
+                &lash_core_execution::ProcessId::fixture("process"),
                 &stored,
                 Some(&stored),
                 2_000
@@ -153,16 +153,20 @@ mod tests {
             .is_ok(),
             "the holder's own live lease authorizes its write"
         );
-        let error =
-            authorize_process_lease_write(&ProcessId::from("process"), &stored, None, 2_000)
-                .expect_err("a released lease authorizes nothing");
+        let error = authorize_process_lease_write(
+            &lash_core_execution::ProcessId::fixture("process"),
+            &stored,
+            None,
+            2_000,
+        )
+        .expect_err("a released lease authorizes nothing");
         assert!(
-            matches!(&error, PluginError::ProcessLeaseSuperseded { process_id } if process_id == "process"),
+            matches!(&error, PluginError::ProcessLeaseSuperseded { process_id } if process_id == lash_core_execution::ProcessId::fixture("process")),
             "unexpected refusal: {error}"
         );
         assert!(
             authorize_process_lease_write(
-                &ProcessId::from("process"),
+                &lash_core_execution::ProcessId::fixture("process"),
                 &stored,
                 Some(&stored),
                 6_000
@@ -379,10 +383,13 @@ mod tests {
     #[test]
     fn a_populated_lease_row_projects() {
         let lease = populated_row()
-            .project(&ProcessId::from("process"))
+            .project(&lash_core_execution::ProcessId::fixture("process"))
             .expect("a row with an owner and a token records a holder");
         assert_eq!(lease.schema_version, PROCESS_LEASE_SCHEMA_VERSION);
-        assert_eq!(lease.process_id, "process");
+        assert_eq!(
+            lease.process_id,
+            lash_core_execution::ProcessId::fixture("process")
+        );
         assert_eq!(lease.owner, owner("worker", "incarnation"));
         assert_eq!(lease.lease_token, "token");
         assert_eq!(lease.fencing_token, 7);
@@ -397,7 +404,7 @@ mod tests {
                 owner_id: None,
                 ..populated_row()
             }
-            .project(&ProcessId::from("process"))
+            .project(&lash_core_execution::ProcessId::fixture("process"))
             .is_none()
         );
     }
@@ -409,7 +416,7 @@ mod tests {
                 lease_token: None,
                 ..populated_row()
             }
-            .project(&ProcessId::from("process"))
+            .project(&lash_core_execution::ProcessId::fixture("process"))
             .is_none()
         );
     }
@@ -420,7 +427,7 @@ mod tests {
             incarnation_id: None,
             ..populated_row()
         }
-        .project(&ProcessId::from("process"))
+        .project(&lash_core_execution::ProcessId::fixture("process"))
         .expect("pre-incarnation rows still record a holder");
         assert_eq!(lease.owner, owner("worker", "worker"));
     }
@@ -437,7 +444,9 @@ mod tests {
         };
         let retained = released.fencing_token as u64;
         assert!(
-            released.project(&ProcessId::from("process")).is_none(),
+            released
+                .project(&lash_core_execution::ProcessId::fixture("process"))
+                .is_none(),
             "a released lease is not a holder"
         );
         assert_eq!(
@@ -452,19 +461,23 @@ mod tests {
     #[test]
     fn the_lease_token_preimage_is_pinned() {
         let minted = acquired_process_lease(
-            &ProcessId::from("process-a"),
+            &lash_core_execution::ProcessId::fixture("process-a"),
             &owner("owner-a", "incarnation-a"),
             5,
             1_700_000_000_000,
             30_000,
         );
-        // blake3("process-a:owner-a:incarnation-a:1700000000000:5"). Durable
-        // value: changing this literal changes every backend's lease identity.
+        // blake3("p_c5546c16060677e5a56c42a3a5c9a6fc:owner-a:incarnation-a:1700000000000:5").
+        // Durable value: changing this literal changes every backend's lease
+        // identity.
         assert_eq!(
             minted.lease_token,
-            "c5ee3efb2c743bf08844f73bb3eee1635350b9c6443421a62c5a83e4dc354acc"
+            "a0999326951122cd5d5ab107620a47954584ed70fb1ae0a603684451879ef1e6"
         );
-        assert_eq!(minted.process_id, "process-a");
+        assert_eq!(
+            minted.process_id,
+            lash_core_execution::ProcessId::fixture("process-a")
+        );
         assert_eq!(minted.fencing_token, 5);
         assert_eq!(minted.claimed_at_epoch_ms, 1_700_000_000_000);
         assert_eq!(minted.expires_at_epoch_ms, 1_700_000_030_000);
@@ -473,26 +486,56 @@ mod tests {
 
     #[test]
     fn the_lease_token_preimage_is_field_ordered() {
-        let straight = acquired_process_lease(&ProcessId::from("p"), &owner("a", "b"), 1, 10, 10);
-        let swapped = acquired_process_lease(&ProcessId::from("p"), &owner("b", "a"), 1, 10, 10);
+        let straight = acquired_process_lease(
+            &lash_core_execution::ProcessId::fixture("p"),
+            &owner("a", "b"),
+            1,
+            10,
+            10,
+        );
+        let swapped = acquired_process_lease(
+            &lash_core_execution::ProcessId::fixture("p"),
+            &owner("b", "a"),
+            1,
+            10,
+            10,
+        );
         assert_ne!(
             straight.lease_token, swapped.lease_token,
             "owner id and incarnation id occupy distinct preimage positions"
         );
         for (left, right) in [
             (
-                acquired_process_lease(&ProcessId::from("p"), &owner("a", "b"), 2, 10, 10)
-                    .lease_token,
+                acquired_process_lease(
+                    &lash_core_execution::ProcessId::fixture("p"),
+                    &owner("a", "b"),
+                    2,
+                    10,
+                    10,
+                )
+                .lease_token,
                 straight.lease_token.clone(),
             ),
             (
-                acquired_process_lease(&ProcessId::from("p"), &owner("a", "b"), 1, 11, 10)
-                    .lease_token,
+                acquired_process_lease(
+                    &lash_core_execution::ProcessId::fixture("p"),
+                    &owner("a", "b"),
+                    1,
+                    11,
+                    10,
+                )
+                .lease_token,
                 straight.lease_token.clone(),
             ),
             (
-                acquired_process_lease(&ProcessId::from("q"), &owner("a", "b"), 1, 10, 10)
-                    .lease_token,
+                acquired_process_lease(
+                    &lash_core_execution::ProcessId::fixture("q"),
+                    &owner("a", "b"),
+                    1,
+                    10,
+                    10,
+                )
+                .lease_token,
                 straight.lease_token.clone(),
             ),
         ] {
@@ -502,8 +545,13 @@ mod tests {
 
     #[test]
     fn the_minted_expiry_saturates() {
-        let minted =
-            acquired_process_lease(&ProcessId::from("p"), &owner("a", "b"), 1, u64::MAX - 1, 10);
+        let minted = acquired_process_lease(
+            &lash_core_execution::ProcessId::fixture("p"),
+            &owner("a", "b"),
+            1,
+            u64::MAX - 1,
+            10,
+        );
         assert_eq!(minted.expires_at_epoch_ms, u64::MAX);
     }
 
@@ -512,7 +560,7 @@ mod tests {
     #[test]
     fn a_retained_tombstone_reports_the_pruned_refusal() {
         let error = absent_process_error(
-            &ProcessId::from("process"),
+            &lash_core_execution::ProcessId::fixture("process"),
             Some(ProcessTombstoneStamp {
                 terminal_label: "completed".to_string(),
                 pruned_at_ms: 4_242,
@@ -532,18 +580,18 @@ mod tests {
 
     #[test]
     fn an_unknown_process_id_reports_the_unknown_refusal() {
-        let error = absent_process_error(&ProcessId::from("process"), None);
+        let error = absent_process_error(&lash_core_execution::ProcessId::fixture("process"), None);
         assert!(
             matches!(
                 &error,
-                PluginError::ProcessUnknown { process_id } if process_id == "process"
+                PluginError::ProcessUnknown { process_id } if process_id == lash_core_execution::ProcessId::fixture("process")
             ),
             "unexpected refusal: {error}"
         );
         assert!(
             matches!(
-                unknown_process(&ProcessId::from("other")),
-                PluginError::ProcessUnknown { process_id } if process_id == "other"
+                unknown_process(&lash_core_execution::ProcessId::fixture("other")),
+                PluginError::ProcessUnknown { process_id } if process_id == lash_core_execution::ProcessId::fixture("other")
             ),
             "unknown_process must preserve the refused id"
         );
@@ -670,14 +718,14 @@ mod tests {
             version: PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
             wake_id: format!("wake:v1:sha256:{}", "a".repeat(64)),
             target_session_id: SessionId::from("session"),
-            process_id: ProcessId::from("process"),
-            process_incarnation:
-                lash_core_execution::ProcessIncarnation::from_registration_sequence(1),
+            process_id: lash_core_execution::ProcessId::fixture("process"),
             sequence: 4,
             event_type: "process.wake".to_string(),
             event_invocation: lash_core_execution::RuntimeInvocation::effect(
                 lash_core_execution::EffectAddress::new(
-                    lash_core_execution::ExecutionScope::process("process"),
+                    lash_core_execution::ExecutionScope::process(
+                        lash_core_execution::ProcessId::fixture("process"),
+                    ),
                     "replay",
                 )
                 .expect("valid wake address"),
@@ -743,8 +791,29 @@ mod tests {
             PluginError::ProcessWakeDeliveryFormatVersionMismatch { expected, found }
                 if expected == PROCESS_WAKE_DELIVERY_FORMAT_VERSION && found == 2
         ));
+    }
+
+    /// FIG-3607: a version-3 delivery named its process by a reusable name and
+    /// an incarnation; a minted id names the whole lifetime under version 4.
+    #[test]
+    fn the_immediate_predecessor_wake_delivery_version_is_refused() {
+        let mut payload: serde_json::Value =
+            serde_json::from_str(&wake_delivery_json()).expect("wake delivery JSON");
+        payload["version"] = serde_json::json!(3);
+        let error = WakeDeliveryRow {
+            delivery_json: serde_json::to_string(&payload).expect("wake delivery JSON"),
+            ..wake_row()
+        }
+        .project()
+        .expect_err("a version-3 wake delivery row must be refused");
+
+        assert!(matches!(
+            error,
+            PluginError::ProcessWakeDeliveryFormatVersionMismatch { expected, found }
+                if expected == PROCESS_WAKE_DELIVERY_FORMAT_VERSION && found == 3
+        ));
         assert_eq!(
-            2 + 1,
+            3 + 1,
             PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
             "wake delivery predecessor adjacency pin"
         );
@@ -754,7 +823,7 @@ mod tests {
     fn a_future_wake_delivery_version_is_refused_with_expected_and_found() {
         let mut payload: serde_json::Value =
             serde_json::from_str(&wake_delivery_json()).expect("wake delivery JSON");
-        payload["version"] = serde_json::json!(4);
+        payload["version"] = serde_json::json!(5);
         let error = WakeDeliveryRow {
             delivery_json: serde_json::to_string(&payload).expect("future wake delivery JSON"),
             ..wake_row()
@@ -766,7 +835,7 @@ mod tests {
             matches!(
                 &error,
                 PluginError::ProcessWakeDeliveryFormatVersionMismatch { expected, found }
-                    if *expected == PROCESS_WAKE_DELIVERY_FORMAT_VERSION && *found == 4
+                    if *expected == PROCESS_WAKE_DELIVERY_FORMAT_VERSION && *found == 5
             ),
             "unexpected refusal: {error}"
         );

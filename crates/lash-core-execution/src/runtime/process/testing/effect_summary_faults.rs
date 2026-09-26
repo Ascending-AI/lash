@@ -77,7 +77,6 @@ delegate_process_registrar!(
     EffectSummaryAppendFaults,
     inner,
     registration | _faults,
-    _process_id,
     forwarded | { forwarded.await },
     event | _faults,
     _process_id,
@@ -94,14 +93,6 @@ impl super::super::registry_concerns::ProcessEventLog for EffectSummaryAppendFau
         request: crate::ProcessEventAppendRequest,
     ) -> Result<crate::ProcessEventAppendReceipt, crate::PluginError> {
         self.inner.append_event(process_id, request).await
-    }
-
-    async fn append_event_ref(
-        &self,
-        process_ref: &crate::ProcessRef,
-        request: crate::ProcessEventAppendRequest,
-    ) -> Result<crate::ProcessEventAppendReceipt, crate::PluginError> {
-        self.inner.append_event_ref(process_ref, request).await
     }
 
     async fn append_event_with_authority(
@@ -121,15 +112,15 @@ impl super::super::registry_concerns::ProcessEventLog for EffectSummaryAppendFau
             .await
     }
 
-    async fn event_page_ref(
+    async fn event_page_after(
         &self,
-        process_ref: &crate::ProcessRef,
+        process_id: &crate::ProcessId,
         after_sequence: u64,
         limit: std::num::NonZeroUsize,
         mode: crate::ProcessEventQueryMode,
     ) -> Result<crate::ProcessEventReadOutcome<crate::ProcessEventPage>, crate::PluginError> {
         self.inner
-            .event_page_ref(process_ref, after_sequence, limit, mode)
+            .event_page_after(process_id, after_sequence, limit, mode)
             .await
     }
 
@@ -141,17 +132,6 @@ impl super::super::registry_concerns::ProcessEventLog for EffectSummaryAppendFau
     ) -> Result<u64, crate::PluginError> {
         self.inner
             .count_events_through(process_id, event_type, up_to_sequence)
-            .await
-    }
-
-    async fn count_events_through_ref(
-        &self,
-        process_ref: &crate::ProcessRef,
-        event_type: &str,
-        up_to_sequence: u64,
-    ) -> Result<u64, crate::PluginError> {
-        self.inner
-            .count_events_through_ref(process_ref, event_type, up_to_sequence)
             .await
     }
 

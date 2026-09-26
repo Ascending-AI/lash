@@ -10,24 +10,6 @@ fn restore_frame_node_id(
     })
 }
 
-impl From<lash_core::ProcessRef> for RemoteProcessRef {
-    fn from(value: lash_core::ProcessRef) -> Self {
-        Self {
-            process_id: value.process_id,
-            incarnation: value.incarnation.registration_sequence(),
-        }
-    }
-}
-
-impl From<RemoteProcessRef> for lash_core::ProcessRef {
-    fn from(value: RemoteProcessRef) -> Self {
-        Self::new(
-            value.process_id,
-            lash_core::ProcessIncarnation::from_registration_sequence(value.incarnation),
-        )
-    }
-}
-
 impl From<lash_core::SessionScope> for RemoteSessionScope {
     fn from(value: lash_core::SessionScope) -> Self {
         let lash_core::SessionScope {

@@ -5,7 +5,6 @@
 
 use super::*;
 use lash_core::testing::conformance_support::ActiveTurnControl;
-use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 use pretty_assertions::assert_eq;
@@ -208,7 +207,11 @@ where
 {
     let identities = [
         AwaitEventWaitIdentity::tool_completion(format!("{prefix}-tool")),
-        AwaitEventWaitIdentity::process_signal(format!("{prefix}-process"), "ready", 1),
+        AwaitEventWaitIdentity::process_signal(
+            crate::ProcessId::fixture(&format!("{prefix}-process")),
+            "ready",
+            1,
+        ),
         AwaitEventWaitIdentity::TurnCancelGate,
         AwaitEventWaitIdentity::TurnTerminal,
     ];
@@ -439,7 +442,7 @@ async fn cold_scope_retirement_survives_reopen<F>(make: &F, prefix: &str)
 where
     F: Fn() -> Arc<dyn EffectHost>,
 {
-    let process_id = ProcessId::from(format!("{prefix}-retired-process"));
+    let process_id = crate::ProcessId::fixture(&format!("{prefix}-retired-process"));
     let scope = ExecutionScope::process(process_id.clone());
     let key = make()
         .await_event_key(

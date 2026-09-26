@@ -396,38 +396,39 @@ async fn unknown_attachment_owner_kind_refuses_with_canonical_typed_error() {
 }
 
 #[tokio::test]
-async fn bare_process_attachment_owner_refuses_with_canonical_typed_error() {
+async fn unminted_process_attachment_owner_refuses_with_canonical_typed_error() {
     let dir = tempfile::tempdir().expect("tempdir");
-    let path = dir.path().join("bare-process-attachment-owner.db");
+    let path = dir.path().join("unminted-process-attachment-owner.db");
     let store = Store::open(&path).await.expect("open store");
     store
-        .bind_session(&SessionId::from("bare-process-attachment-owner"))
+        .bind_session(&SessionId::from("unminted-process-attachment-owner"))
         .expect("bind store");
     let raw = rusqlite::Connection::open(&path).expect("open raw connection");
-    raw.pragma_update(None, "ignore_check_constraints", true)
-        .expect("allow predecessor owner injection");
     raw.execute(
         "INSERT INTO attachment_manifest
          (attachment_id, session_id, canonical_uri, intent_at_ms,
-          committed_at_ms, owner_kind, owner_id, owner_incarnation)
-         VALUES ('bare-process-owner', 'bare-process-attachment-owner',
-                 'lash-attachment://bare-process', 0, NULL, 'process', 'process-1', NULL)",
+          committed_at_ms, owner_kind, owner_id)
+         VALUES ('unminted-process-owner', 'unminted-process-attachment-owner',
+                 'lash-attachment://unminted-process', 0, NULL, 'process', 'process-1')",
         [],
     )
-    .expect("insert bare process owner");
+    .expect("insert a process owner no registrar minted");
 
     let error = lash_core_execution::AttachmentManifest::list_uncommitted(&store, 0)
         .await
-        .expect_err("bare SQLite process attachment owner must refuse");
+        .expect_err("an unminted SQLite process attachment owner must refuse");
+    let expected = lash_core_execution::ProcessId::parse("process-1")
+        .expect_err("a host-chosen name is not a process id")
+        .to_string();
     assert!(
         matches!(
             error,
             StoreError::StoredDataCorrupt {
                 record_kind: "AttachmentManifest owner",
                 ref message,
-            } if message == "process attachment owner `process-1` has no incarnation; bare process-owner identities are unsupported"
+            } if *message == expected
         ),
-        "SQLite must return the canonical bare-process-owner refusal, got {error:?}"
+        "SQLite must return the canonical unminted-process-owner refusal, got {error:?}"
     );
 }
 

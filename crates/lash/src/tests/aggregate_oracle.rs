@@ -52,8 +52,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// no assertion in this file depends on its value.
 const RENDEZVOUS_BUDGET: std::time::Duration = std::time::Duration::from_secs(20);
 
-/// The process every declared intent is realized against.
-const INTENT_PROCESS: &str = "aggregate-oracle-intent-target";
 /// The event type a leaf's declared intent emits.
 const INTENT_EVENT: &str = "aggregate.oracle.leaf";
 
@@ -126,9 +124,19 @@ struct OracleTheatre {
     completed_calls: AtomicUsize,
     keys: StdMutex<HashMap<String, lash_core::AwaitEventKey>>,
     latches: StdMutex<HashMap<String, Arc<tokio::sync::watch::Sender<bool>>>>,
+    /// The process every declared intent is realized against: registered up
+    /// front, so its id is the one the registrar minted (ADR 0107).
+    intent_process: std::sync::OnceLock<lash_sansio::ProcessId>,
 }
 
 impl OracleTheatre {
+    fn intent_process(&self) -> lash_sansio::ProcessId {
+        self.intent_process
+            .get()
+            .cloned()
+            .expect("the intent target is registered before the turn runs")
+    }
+
     fn latch(&self, key: &str) -> Arc<tokio::sync::watch::Sender<bool>> {
         Arc::clone(
             self.latches
@@ -417,7 +425,7 @@ impl ToolProvider for OracleTools {
             lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::EmitProcessEvent(
                 lash_core::EmitProcessEventIntent {
                     session_id: SessionId::from(self.session_id.clone()),
-                    process_id: lash_sansio::ProcessId::from(INTENT_PROCESS),
+                    process_id: self.theatre.intent_process(),
                     event_type: if args.refused_intent {
                         UNREGISTERED_EVENT.to_string()
                     } else {
@@ -520,11 +528,14 @@ fn oracle_builder(
 /// The process a declared intent is realized against. Registered up front with
 /// the event type the leaf emits, because an emission against an unregistered
 /// event type is refused and the case would pass for the wrong reason.
-async fn register_intent_target(registry: &dyn ProcessRegistry, session_id: &str) {
-    registry
+async fn register_intent_target(
+    registry: &dyn ProcessRegistry,
+    session_id: &str,
+    theatre: &OracleTheatre,
+) {
+    let intent_process = registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(
-                INTENT_PROCESS,
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -543,7 +554,12 @@ async fn register_intent_target(registry: &dyn ProcessRegistry, session_id: &str
             &[SessionId::from(session_id.to_string())],
         )
         .await
-        .expect("register the intent target process");
+        .expect("register the intent target process")
+        .id;
+    theatre
+        .intent_process
+        .set(intent_process)
+        .expect("one intent target per oracle run");
 }
 
 /// One oracle session whose turn runs on its own task.
@@ -592,7 +608,7 @@ async fn drive_cells(
     let theatre = Arc::new(OracleTheatre::default());
     let backend = tier.backend().await;
     let registry: Arc<dyn ProcessRegistry> = backend.process_registry();
-    register_intent_target(registry.as_ref(), session_id).await;
+    register_intent_target(registry.as_ref(), session_id, &theatre).await;
     let requests = Arc::new(StdMutex::new(Vec::<String>::new()));
     let core = oracle_core(
         backend.into(),
@@ -1192,7 +1208,7 @@ async fn an_aggregate_leafs_declared_intent_is_realized(tier: &JournaledTier) ->
     );
     let events = run
         .registry
-        .recent_events(&lash_sansio::ProcessId::from(INTENT_PROCESS), 16)
+        .recent_events(&run.theatre.intent_process(), 16)
         .await
         .expect("read the intent target's events");
     let emitted = events

@@ -14,7 +14,7 @@ use lash_trace::{
 
 const TICK: &str = "fixture.tick";
 
-fn record(process_id: &str, incarnation: u64, attempt: u32, occurrence: u64) -> TraceRecord {
+fn record(process_id: &ProcessId, attempt: u32, occurrence: u64) -> TraceRecord {
     let payload = if occurrence == 0 {
         TraceLanguageExecutionPayload::ExecutionStarted {
             execution_map: TraceLanguageExecutionMap {
@@ -48,11 +48,11 @@ fn record(process_id: &str, incarnation: u64, attempt: u32, occurrence: u64) -> 
         TraceEvent::LanguageExecution {
             language: "lashlang".to_string(),
             event: TraceLanguageExecution {
-                event_key: format!("{process_id}:{incarnation}:{attempt}:{occurrence}"),
+                event_key: format!("{process_id}:{attempt}:{occurrence}"),
                 identity: TraceLanguageExecutionIdentity {
                     scope: TraceRuntimeScope::none(),
                     subject: TraceRuntimeSubject::Process {
-                        process_id: ProcessId::from(process_id),
+                        process_id: process_id.clone(),
                     },
                     source_identity: "source".to_string(),
                     module_ref: "module".to_string(),
@@ -60,7 +60,7 @@ fn record(process_id: &str, incarnation: u64, attempt: u32, occurrence: u64) -> 
                     entry_ref: None,
                     entry_name: "main".to_string(),
                     engine_execution_id: None,
-                    generation: Some(TraceLanguageExecutionGeneration::new(attempt, incarnation)),
+                    generation: Some(TraceLanguageExecutionGeneration::new(attempt)),
                 },
                 payload,
             },
@@ -68,8 +68,8 @@ fn record(process_id: &str, incarnation: u64, attempt: u32, occurrence: u64) -> 
     )
 }
 
-fn finished_record(process_id: &str, incarnation: u64) -> TraceRecord {
-    let mut finished = record(process_id, incarnation, 1, 1);
+fn finished_record(process_id: &ProcessId) -> TraceRecord {
+    let mut finished = record(process_id, 1, 1);
     let TraceEvent::LanguageExecution { event, .. } = &mut finished.event else {
         unreachable!()
     };
@@ -90,7 +90,7 @@ fn tick_type() -> lash_core::ProcessEventType {
 
 /// An engine process with an execution lease (for runtime-owned summary
 /// events) or a host-owned one (so a test can complete and prune it).
-fn registration(process_id: &ProcessId, leased: bool) -> lash_core::ProcessRegistration {
+fn registration(label: &str, leased: bool) -> lash_core::ProcessRegistration {
     let (input, contract) = if leased {
         (
             lash_core::ProcessInput::Engine {
@@ -108,7 +108,6 @@ fn registration(process_id: &ProcessId, leased: bool) -> lash_core::ProcessRegis
         )
     };
     let registration = lash_core::ProcessRegistration::new(
-        process_id.clone(),
         input,
         contract,
         lash_core::ProcessProvenance::host(),
@@ -127,7 +126,7 @@ fn registration(process_id: &ProcessId, leased: bool) -> lash_core::ProcessRegis
                         "l8-fixture",
                         serde_json::Value::Null,
                     ),
-                    Some(process_id.as_str()),
+                    Some(label),
                 ),
             ))
     } else {
@@ -140,7 +139,6 @@ struct Fixture {
     registry: Arc<dyn ProcessRegistry>,
     hub: Arc<ProcessObservationHub>,
     process_id: ProcessId,
-    process_ref: ProcessRef,
     lease: Option<lash_core::ProcessLease>,
 }
 
@@ -159,11 +157,11 @@ impl Fixture {
             .await
             .expect("open SQLite process registry"),
         );
-        let process_id = ProcessId::from(name);
-        let record = registry
-            .register_process(registration(&process_id, leased))
+        let process_id = registry
+            .register_process(registration(name, leased))
             .await
-            .expect("register L8 process");
+            .expect("register L8 process")
+            .id;
         let lease = if leased {
             registry
                 .claim_process_lease(
@@ -181,14 +179,9 @@ impl Fixture {
             _dir: dir,
             registry,
             hub: Arc::new(ProcessObservationHub::new(config)),
-            process_ref: ProcessRef::from_record(&record),
             process_id,
             lease,
         }
-    }
-
-    fn incarnation(&self) -> u64 {
-        self.process_ref.incarnation.registration_sequence()
     }
 
     /// Commit one durable event; `publish` is the ADR 0017 sink delivering it.
@@ -242,18 +235,13 @@ impl Fixture {
 
     fn live(&self, attempt: u32, occurrence: u64) {
         self.hub
-            .append(&record(
-                self.process_id.as_str(),
-                self.incarnation(),
-                attempt,
-                occurrence,
-            ))
+            .append(&record(&self.process_id, attempt, occurrence))
             .expect("publish a live observation");
     }
 
     async fn subscribe(&self, from: Option<&ProcessCursor>) -> ProcessObservationSubscription {
         self.hub
-            .subscribe(Arc::clone(&self.registry), &self.process_ref, from)
+            .subscribe(Arc::clone(&self.registry), &self.process_id, from)
             .await
             .expect("subscribe")
     }
@@ -274,7 +262,7 @@ impl Fixture {
         let limit = std::num::NonZeroUsize::new(4096).expect("page size");
         let ProcessEventReadOutcome::Retained(page) = self
             .registry
-            .event_page_ref(&self.process_ref, 0, limit, ProcessEventQueryMode::Full)
+            .event_page_after(&self.process_id, 0, limit, ProcessEventQueryMode::Full)
             .await
             .expect("read history")
         else {
@@ -525,7 +513,7 @@ async fn l8_epoch_replacement_lag_and_trim_are_gaps_with_snapshots() {
     let mut after_restart = restarted
         .subscribe(
             Arc::clone(&fixture.registry),
-            &fixture.process_ref,
+            &fixture.process_id,
             Some(&start),
         )
         .await
@@ -586,10 +574,11 @@ async fn l8_epoch_replacement_lag_and_trim_are_gaps_with_snapshots() {
     expect_gap(&next(&mut late).await, ProcessObservationGapReason::Expired);
 }
 
-/// L8: prune, id reuse, another process and an unknown process are typed
-/// gaps; a lifetime that is gone ends the stream after its gap.
+/// L8: prune, a successor started for the same work, another process and an
+/// unknown process are typed gaps; a process that is gone ends the stream
+/// after its gap.
 #[tokio::test]
-async fn l8_prune_and_id_reuse_are_typed_retention_gaps() {
+async fn l8_prune_and_a_successor_are_typed_retention_gaps() {
     let fixture = Fixture::new("l8-prune", false).await;
     let mut first = fixture.subscribe(None).await;
     let start = snapshot_cursor(&next(&mut first).await);
@@ -628,35 +617,32 @@ async fn l8_prune_and_id_reuse_are_typed_retention_gaps() {
         "a pruned lifetime has nothing to follow"
     );
 
-    // The id is reused: the old lifetime is retired, the old cursor names
-    // another incarnation of the new one.
-    let reused = fixture
+    // FIG-3611: an id is never reused. Registering the same process again
+    // mints a new id, and the pruned id's cursor still reads as pruned — it
+    // never follows the successor (ADR 0107).
+    let successor = fixture
         .registry
-        .register_process(registration(&fixture.process_id, false))
+        .register_process(registration("l8-prune", false))
         .await
-        .expect("reuse the id");
-    assert_ne!(reused.incarnation, fixture.process_ref.incarnation);
+        .expect("register a successor");
+    assert_ne!(successor.id, fixture.process_id);
     let mut old = fixture.subscribe(Some(&start)).await;
     let (_, snapshot) = expect_gap(
         &next(&mut old).await,
-        ProcessObservationGapReason::ProcessIdReused,
+        ProcessObservationGapReason::HistoryUnavailable,
     );
     assert!(matches!(
         snapshot.durable,
-        ProcessDurableSnapshot::NoLongerRetained(ProcessEventHistoryRetention::Retired { .. })
+        ProcessDurableSnapshot::NoLongerRetained(ProcessEventHistoryRetention::Pruned { .. })
     ));
     let mut new = fixture
         .hub
-        .subscribe(
-            Arc::clone(&fixture.registry),
-            &ProcessRef::from_record(&reused),
-            Some(&start),
-        )
+        .subscribe(Arc::clone(&fixture.registry), &successor.id, Some(&start))
         .await
-        .expect("subscribe new lifetime");
+        .expect("subscribe the successor");
     expect_gap(
         &next(&mut new).await,
-        ProcessObservationGapReason::ProcessIdReused,
+        ProcessObservationGapReason::CrossProcess,
     );
 
     let other = Fixture::new("l8-other", false).await;
@@ -670,10 +656,7 @@ async fn l8_prune_and_id_reuse_are_typed_retention_gaps() {
         .hub
         .subscribe(
             Arc::clone(&fixture.registry),
-            &ProcessRef::new(
-                ProcessId::from("l8-never-registered"),
-                lash_core::ProcessIncarnation::from_registration_sequence(1),
-            ),
+            &lash_core::mint_process_id(),
             None,
         )
         .await
@@ -816,9 +799,9 @@ async fn publisher_joined_mid_run_never_claims_a_complete_live_graph() {
 async fn finished_processes_release_their_hub_entries_without_subscribers() {
     let hub = Arc::new(ProcessObservationHub::default());
     for index in 0..16 {
-        let id = format!("process:finished:{index}");
-        hub.append(&record(&id, 1, 1, 0)).expect("start");
-        hub.append(&finished_record(&id, 1)).expect("finish");
+        let id = ProcessId::fixture(&format!("process:finished:{index}"));
+        hub.append(&record(&id, 1, 0)).expect("start");
+        hub.append(&finished_record(&id)).expect("finish");
     }
     assert_eq!(hub.states.lock_recover().len(), 0);
 }
@@ -831,11 +814,15 @@ async fn idle_unfinished_processes_are_released_after_the_ttl() {
         ..ProcessObservationConfig::default()
     }));
     for index in 0..8 {
-        hub.append(&record(&format!("process:suspended:{index}"), 1, 1, 0))
-            .expect("publish");
+        hub.append(&record(
+            &ProcessId::fixture(&format!("process:suspended:{index}")),
+            1,
+            0,
+        ))
+        .expect("publish");
     }
     tokio::time::sleep(Duration::from_millis(5)).await;
-    hub.append(&record("process:live", 1, 1, 0))
+    hub.append(&record(&ProcessId::fixture("process:live"), 1, 0))
         .expect("publish");
     let remaining = hub
         .states
@@ -843,15 +830,11 @@ async fn idle_unfinished_processes_are_released_after_the_ttl() {
         .keys()
         .cloned()
         .collect::<Vec<_>>();
-    assert_eq!(remaining, [ProcessId::from("process:live")]);
+    assert_eq!(remaining, [ProcessId::fixture("process:live")]);
 }
 
-fn assert_remote_round_trip(
-    item: ProcessObservationItem,
-    process_id: &ProcessId,
-    incarnation: u64,
-) {
-    let remote = item.into_remote(process_id.clone(), incarnation);
+fn assert_remote_round_trip(item: ProcessObservationItem, process_id: &ProcessId) {
+    let remote = item.into_remote(process_id.clone());
     let wire = remote.encode_json().expect("encode remote item");
     assert_eq!(
         lash_remote_protocol::RemoteProcessObservationItem::decode_json(&wire)
@@ -873,12 +856,11 @@ async fn the_facade_routes_commits_to_the_hub_and_pages_by_cursor() {
     );
     let core = crate::tests::standard_core_over(backend.into());
     let watched = core.process_registry();
-    let process_id = ProcessId::from("l8-facade");
-    let record = watched
-        .register_process(registration(&process_id, false))
+    let process_id = watched
+        .register_process(registration("l8-facade", false))
         .await
-        .expect("register");
-    let process_ref = ProcessRef::from_record(&record);
+        .expect("register")
+        .id;
 
     let read = core
         .processes()
@@ -892,7 +874,7 @@ async fn the_facade_routes_commits_to_the_hub_and_pages_by_cursor() {
     let cursor = read.cursor.clone().expect("cursor");
     let mut subscription = core
         .processes()
-        .subscribe_observation(&process_ref, Some(&cursor))
+        .subscribe_observation(&process_id, Some(&cursor))
         .await
         .expect("subscribe");
     quiet(&mut subscription).await;
@@ -907,15 +889,10 @@ async fn the_facade_routes_commits_to_the_hub_and_pages_by_cursor() {
         .event;
     let item = next(&mut subscription).await;
     expect_committed(&item, committed.sequence);
-    assert_remote_round_trip(
-        item,
-        &process_id,
-        record.incarnation.registration_sequence(),
-    );
+    assert_remote_round_trip(item, &process_id);
 
     let request = lash_remote_protocol::RemoteProcessObservationRequest {
         process_id: process_id.clone(),
-        incarnation: record.incarnation.registration_sequence(),
         cursor: Some(cursor.clone()),
     };
     let request = lash_remote_protocol::RemoteProcessObservationRequest::decode_json(
@@ -939,22 +916,17 @@ async fn the_facade_routes_commits_to_the_hub_and_pages_by_cursor() {
 
     let mut initial = core
         .processes()
-        .subscribe_observation(&process_ref, None)
+        .subscribe_observation(&process_id, None)
         .await
         .expect("subscribe");
     let snapshot = next(&mut initial).await;
     assert_eq!(snapshot.cursor().sequence(), committed.sequence);
-    assert_remote_round_trip(
-        snapshot,
-        &process_id,
-        record.incarnation.registration_sequence(),
-    );
+    assert_remote_round_trip(snapshot, &process_id);
 
     let events = core
         .processes()
         .events_remote(&lash_remote_protocol::RemoteProcessEventsRequest {
             process_id: process_id.clone(),
-            incarnation: record.incarnation.registration_sequence(),
             limit: std::num::NonZeroUsize::new(64).expect("page size"),
             mode: ProcessEventQueryMode::Full,
             cursor: Some(cursor.clone()),

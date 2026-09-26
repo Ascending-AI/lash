@@ -1282,12 +1282,9 @@ impl SessionAttachmentStore {
     /// Bind puts for the lifetime of a recovered ToolCall or Engine process.
     pub fn bind_process_scoped(
         self: &Arc<Self>,
-        process_ref: crate::ProcessRef,
+        process_id: crate::ProcessId,
     ) -> AttachmentOwnerBinding {
-        self.bind_owner_scoped(crate::AttachmentOwner::Process {
-            id: process_ref.process_id.to_string(),
-            incarnation: process_ref.incarnation,
-        })
+        self.bind_owner_scoped(crate::AttachmentOwner::Process { process_id })
     }
 
     fn bind_owner_scoped(

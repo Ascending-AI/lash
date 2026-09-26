@@ -486,14 +486,11 @@ impl EffectRecorder {
             core.backend().effect_host(),
             Arc::new(self.clone()),
         );
-        lash_core::EffectHost::scoped_static(
-            &host,
-            lash_core::AdmittedScope::unpinned(scope).expect("an unpinned scope"),
-        )
-        .expect("scope the recorded controller")
-        .expect("the backend host lends a static controller")
-        .owned_controller()
-        .expect("a static controller is shared")
+        lash_core::EffectHost::scoped_static(&host, lash_core::AdmittedScope::new(scope))
+            .expect("scope the recorded controller")
+            .expect("the backend host lends a static controller")
+            .owned_controller()
+            .expect("a static controller is shared")
     }
 
     /// The scopes this recorder's effects ran under, in first-seen order.

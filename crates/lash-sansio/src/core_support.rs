@@ -424,6 +424,9 @@ mod blake3_domain_tests {
         // printed text, under v4.
         "lash-workflow-source/v3",
         "lashlang-process-start/v2",
+        // FIG-3607: a process id is minted by the registrar, never derived,
+        // so the deterministic Lashlang child-process id is retired.
+        "lashlang-process-start/v3",
     ];
 
     fn rust_sources_below(root: &Path) -> Vec<PathBuf> {

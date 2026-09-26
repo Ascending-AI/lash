@@ -10,8 +10,8 @@ pub enum RemoteOnParentEnd {
 /// The wire form of the shared opener vocabulary inside an owned parent.
 ///
 /// Mirrors `lash_core::EffectOpener` arm for arm so a remote peer names the
-/// exact durable owner — a turn, a queued-work drain, or one process
-/// incarnation — and never a rendered id.
+/// exact durable owner — a turn, a queued-work drain, or one process — and
+/// never a rendered id.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum RemoteEffectOpener {
@@ -25,7 +25,6 @@ pub enum RemoteEffectOpener {
     },
     Process {
         process_id: ProcessId,
-        incarnation: u64,
     },
 }
 
@@ -71,14 +70,7 @@ impl RemoteProcessLifecyclePolicy {
                 require_non_empty(type_name, "parent.opener.drain_id", drain_id)?;
                 require_originating_session(type_name, session_id, originator)?;
             }
-            RemoteParentScope::Owned(RemoteEffectOpener::Process {
-                process_id,
-                incarnation,
-            }) => RemoteProcessRef {
-                process_id: process_id.clone(),
-                incarnation: *incarnation,
-            }
-            .validate(type_name)?,
+            RemoteParentScope::Owned(RemoteEffectOpener::Process { .. }) => {}
             RemoteParentScope::Host => {}
         }
         Ok(())

@@ -41,7 +41,7 @@ pub(super) async fn recent_events(
     process_id: &ProcessId,
     limit: usize,
 ) -> Result<Vec<ProcessEvent>, lash_core_execution::PluginError> {
-    let process_id = ProcessId::from(process_id.to_string());
+    let process_id = process_id.clone();
     registry
         .conn
         .call(move |conn| {
@@ -91,7 +91,7 @@ pub(super) async fn wake_allocation_floor_for_testing(
     process_id: &ProcessId,
 ) -> Result<Option<u64>, lash_core_execution::PluginError> {
     let target_session_id = SessionId::from(target_session_id.to_string());
-    let process_id = ProcessId::from(process_id.to_string());
+    let process_id = process_id.clone();
     registry
         .conn
         .call(move |conn| {
@@ -140,7 +140,7 @@ impl SqliteProcessRegistry {
         }
         let tombstone = conn
             .query_row(
-                process_sql().tombstone.select_latest_terminal.sql(),
+                process_sql().tombstone.select_terminal.sql(),
                 params![process_id.as_str()],
                 |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
             )
@@ -165,107 +165,30 @@ impl SqliteProcessRegistry {
         ))
     }
 
-    pub(crate) fn require_process_ref_conn(
-        conn: &rusqlite::Connection,
-        process_ref: &ProcessRef,
-    ) -> Result<ProcessRecord, lash_core_execution::PluginError> {
-        if let Some(record) = Self::load_process_conn(conn, &process_ref.process_id)? {
-            if record.incarnation == process_ref.incarnation {
-                return Ok(record);
-            }
-            return Err(registry_transitions::process_incarnation_superseded(
-                process_ref,
-                record.incarnation,
-            ));
-        }
-        let exact_tombstone = conn
-            .query_row(
-                process_sql()
-                    .tombstone
-                    .select_terminal_for_incarnation
-                    .sql(),
-                params![
-                    process_ref.process_id.as_str(),
-                    process_ref.incarnation.registration_sequence() as i64,
-                ],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?)),
-            )
-            .optional()
-            .map_err(process_sqlite_error)?;
-        if let Some((terminal_label, pruned_at_ms)) = exact_tombstone {
-            return Err(registry_transitions::process_no_longer_retained(
-                registry_transitions::ProcessTombstoneStamp {
-                    terminal_label,
-                    pruned_at_ms: plugin_u64_from_sql(
-                        "ProcessTombstone",
-                        "pruned_at_ms",
-                        pruned_at_ms,
-                    )?,
-                },
-            ));
-        }
-        let latest_incarnation = conn
-            .query_row(
-                process_sql().tombstone.select_latest_incarnation.sql(),
-                params![process_ref.process_id.as_str()],
-                |row| row.get::<_, i64>(0),
-            )
-            .optional()
-            .map_err(process_sqlite_error)?;
-        match latest_incarnation {
-            Some(incarnation) => Err(registry_transitions::process_incarnation_superseded(
-                process_ref,
-                ProcessIncarnation::from_registration_sequence(plugin_u64_from_sql(
-                    "ProcessTombstone",
-                    "incarnation",
-                    incarnation,
-                )?),
-            )),
-            None => Err(registry_transitions::unknown_process(
-                &process_ref.process_id,
-            )),
-        }
-    }
-
     pub(crate) async fn set_observer(
         &self,
         session_id: &SessionId,
         process_id: &ProcessId,
         by: ProcessObserverBy,
         add: bool,
-        expected_incarnation: Option<ProcessIncarnation>,
     ) -> Result<(), lash_core_execution::PluginError> {
         let session_id = SessionId::from(session_id.to_string());
-        let process_id = ProcessId::from(process_id.to_string());
+        let process_id = process_id.clone();
         let now = self.clock.timestamp_ms();
         let config = self.wake_delivery_config;
         self.conn
             .write_flow(move |tx| {
                 Ok(tx_outcome((|| {
-                    let mut record = match expected_incarnation {
-                        Some(incarnation) => Self::require_process_ref_conn(
-                            tx,
-                            &ProcessRef::new(process_id.clone(), incarnation),
-                        )?,
-                        None => Self::require_process_conn(tx, &process_id)?,
-                    };
+                    let mut record = Self::require_process_conn(tx, &process_id)?;
                     let changed = if add {
                         tx.execute(
                             process_sql().observer_sqlite.insert_if_absent.sql(),
-                            params![
-                                session_id.as_str(),
-                                process_id.as_str(),
-                                record.incarnation.registration_sequence() as i64
-                            ],
+                            params![session_id.as_str(), process_id.as_str()],
                         )
                     } else {
                         tx.execute(
                             process_sql().observer.delete.sql(),
-                            params![
-                                session_id.as_str(),
-                                process_id.as_str(),
-                                record.incarnation.registration_sequence() as i64
-                            ],
+                            params![session_id.as_str(), process_id.as_str()],
                         )
                     }
                     .map_err(process_sqlite_error)?;
@@ -293,7 +216,7 @@ impl SqliteProcessRegistry {
         process_id: &ProcessId,
         target: Option<&str>,
     ) -> Result<(), lash_core_execution::PluginError> {
-        let process_id = ProcessId::from(process_id.to_string());
+        let process_id = process_id.clone();
         let target = target.map(ToOwned::to_owned);
         let now = self.clock.timestamp_ms();
         let config = self.wake_delivery_config;
@@ -418,7 +341,19 @@ impl SqliteProcessRegistry {
             wake_delivery_config: lash_core_execution::WakeDeliveryConfig::default(),
             scope_fence_hosts: lash_core_execution::ProcessScopeFenceHosts::default(),
             location: location.clone(),
+            process_id_mint: lash_core_execution::ProcessIdMint::default(),
         })
+    }
+
+    /// Mint registered process ids from `mint` instead of at random: a fixture
+    /// generator's artifacts regenerate byte-identically only when its ids do.
+    #[doc(hidden)]
+    pub fn with_process_id_mint_for_testing(
+        mut self,
+        mint: lash_core_execution::ProcessIdMint,
+    ) -> Self {
+        self.process_id_mint = mint;
+        self
     }
 
     pub fn with_wake_delivery_config(
@@ -429,13 +364,27 @@ impl SqliteProcessRegistry {
         self
     }
 
+    /// The retained process registered under `start_key`, if any.
+    pub(crate) fn load_process_by_start_key_conn(
+        conn: &Connection,
+        start_key: &lash_core_execution::StartKey,
+    ) -> Result<Option<ProcessRecord>, lash_core_execution::PluginError> {
+        let json: Option<String> = conn
+            .query_row(
+                process_sql().process.select_record_json_by_start_key.sql(),
+                params![start_key.as_str()],
+                |row| row.get(0),
+            )
+            .optional()
+            .map_err(process_sqlite_error)?;
+        json.map(|json| serde_json::from_str(&json).map_err(process_decode_error))
+            .transpose()
+    }
+
     pub(crate) fn load_process_conn(
         conn: &Connection,
         process_id: &ProcessId,
     ) -> Result<Option<ProcessRecord>, lash_core_execution::PluginError> {
-        if let Some(reason) = crate::process_key::invalid_process_key_reason(process_id) {
-            return Err(lash_core_execution::PluginError::Session(reason.into()));
-        }
         let json: Option<String> = conn
             .query_row(
                 process_sql().process.select_record_json_by_id.sql(),
@@ -627,7 +576,6 @@ impl SqliteProcessRegistry {
                     process_sql().event.insert.sql(),
                     params![
                         process_id.as_str(),
-                        event.process_incarnation.registration_sequence() as i64,
                         sequence as i64,
                         event.event_type.as_str(),
                         event.invocation.replay_key(),
@@ -657,12 +605,7 @@ impl SqliteProcessRegistry {
                 if record.is_terminal() {
                     super::parent_end::record_conn(
                         conn,
-                        &lash_core_execution::ParentScope::process(
-                            lash_core_execution::ProcessRef::new(
-                                process_id.clone(),
-                                record.incarnation,
-                            ),
-                        ),
+                        &lash_core_execution::ParentScope::process(process_id.clone()),
                         occurred_at_ms,
                     )?;
                 }
@@ -722,7 +665,6 @@ impl SqliteProcessRegistry {
             params![
                 delivery.delivery_id.as_str(),
                 delivery.wake.process_id.as_str(),
-                delivery.wake.process_incarnation.registration_sequence() as i64,
                 delivery.wake.target_session_id.as_str(),
                 delivery.wake.sequence as i64,
                 delivery.next_attempt_at_ms as i64,
@@ -878,16 +820,6 @@ pub(crate) fn tx_outcome<T>(
     }
 }
 
-/// The journal key of a process scope, as the fence table stores it.
-pub(super) fn process_scope_fence_key(
-    process_id: &ProcessId,
-) -> Result<String, lash_core_execution::PluginError> {
-    lash_core_execution::ExecutionScope::process(process_id)
-        .journal_identity()
-        .map(|identity| identity.key().to_string())
-        .map_err(|error| lash_core_execution::PluginError::Session(error.to_string()))
-}
-
 /// This registry's registration truth for a bound effect host (ADR 0049).
 pub(super) struct SqliteRegistrationProbe {
     pub(super) conn: SqliteConnection,
@@ -899,7 +831,7 @@ impl lash_core_execution::ProcessRegistrationProbe for SqliteRegistrationProbe {
         &self,
         process_id: &ProcessId,
     ) -> Result<bool, lash_core_execution::PluginError> {
-        let process_id = ProcessId::from(process_id.to_string());
+        let process_id = process_id.clone();
         self.conn
             .call(move |connection| {
                 connection.query_row(

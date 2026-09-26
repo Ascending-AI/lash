@@ -40,7 +40,7 @@ pub use control::{
 };
 pub use control::{EffectTaskController, drive_effect_controller_task};
 pub use controller_error::RuntimeEffectControllerError;
-pub use lash_core_store::admitted_scope::{AdmittedScope, AdmittedScopeError};
+pub use lash_core_store::admitted_scope::AdmittedScope;
 pub use lash_core_store::effect_opener::EffectOpener;
 #[cfg(feature = "testing")]
 pub(crate) use process_local::process_terminal_resolution;
@@ -126,17 +126,12 @@ struct WaitControls {
     pub(super) turn_cancel_scope: Option<crate::ExecutionScope>,
 }
 
-/// The process one run is admitted for.
-///
-/// The registration names a *reusable* process; the incarnation is the one the
-/// worker's authority CAS admitted. The logical opener is the pair and never
-/// the name alone (ADR 0099 §1), so they travel together: anything minted per
-/// opener — group and child identity, cancellation and close fences — binds
-/// both, and a re-registered name cannot reach its predecessor's work.
+/// The process one run is admitted for: its registration and the minted id
+/// the registrar gave it, which is the logical opener (ADR 0099 §1).
 #[derive(Clone, Debug)]
 pub struct AdmittedProcess {
     pub registration: crate::ProcessRegistration,
-    pub incarnation: crate::ProcessIncarnation,
+    pub process_id: crate::ProcessId,
 }
 
 #[async_trait::async_trait]

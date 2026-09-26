@@ -1305,8 +1305,8 @@ fn child_tool_context<'run>(
         .parent_invocation(request.attempt_identity.parent_invocation().cloned())
         .orchestrating_sinks(orchestrating_sinks)
         .turn_cancel_wait(turn_cancel_wait);
-    if let Some(process_ref) = request.enclosing_process.as_ref() {
-        builder = builder.enclosing_process(Some(process_ref.process_id.clone()));
+    if let Some(process_id) = request.enclosing_process.as_ref() {
+        builder = builder.enclosing_process(Some(process_id.clone()));
     }
     builder.build()
 }

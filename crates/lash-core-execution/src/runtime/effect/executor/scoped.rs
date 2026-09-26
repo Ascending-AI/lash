@@ -3,15 +3,12 @@ use super::*;
 impl<'run> ScopedEffectController<'run> {
     /// This controller bound to another admitted scope.
     ///
-    /// A rescope changes the claim address, never the admission: the only
-    /// process target this accepts names the same [`ProcessRef`] the
-    /// controller was already admitted under, and a non-process controller has
-    /// no pin a process target could match, so it cannot rescope into a
-    /// process controller. A same-name successor incarnation is refused rather
-    /// than rebound — ADR 0099 §1 rules that "a retired or mismatched
-    /// incarnation is refused, never rebound to the current process carrying
-    /// the same name". Dropping the pin is fine: a process controller may
-    /// rescope onto a turn or any other unpinned scope. The one production
+    /// A rescope changes the claim address, never the admitted process: the
+    /// only process target this accepts is the process the controller was
+    /// already admitted for, so a non-process controller cannot rescope into
+    /// a process controller and a process controller cannot rescope onto
+    /// another process. A process controller may rescope onto a turn or any
+    /// other non-process scope. The one production
     /// rescope — a process-origin child session turn narrowing to the child
     /// session's own turn scope
     /// (`crates/lash-core/src/runtime/session_manager/session_init.rs`) —
@@ -20,13 +17,13 @@ impl<'run> ScopedEffectController<'run> {
         &self,
         admitted: AdmittedScope,
     ) -> Result<ScopedEffectController<'run>, RuntimeError> {
-        if let Some(target) = admitted.process_ref()
-            && self.admitted.process_ref() != Some(target)
+        if let Some(target) = admitted.process_id()
+            && self.admitted.process_id() != Some(target)
         {
             return Err(RuntimeError::new(
                 crate::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
                 format!(
-                    "cannot rescope {existing} onto process incarnation {target}: a scoped controller carries its admission and is never repinned",
+                    "cannot rescope {existing} onto process {target}: a scoped controller carries its admission and is never rebound",
                     existing = self.admitted.scope().id(),
                 ),
             ));
@@ -49,7 +46,7 @@ impl<'run> ScopedEffectController<'run> {
     /// keeps a step under another scope on the handler controller a host
     /// lent it. `None` when the controller is not borrowed, or its engine
     /// binds no scope of its own. Like [`rescope`](Self::rescope), it never
-    /// repins a process incarnation.
+    /// rebinds a controller onto another process.
     pub fn engine_scoped(
         &self,
         admitted: AdmittedScope,
@@ -57,13 +54,13 @@ impl<'run> ScopedEffectController<'run> {
         let ScopedEffectControllerInner::Borrowed(controller) = &self.controller else {
             return None;
         };
-        if let Some(target) = admitted.process_ref()
-            && self.admitted.process_ref() != Some(target)
+        if let Some(target) = admitted.process_id()
+            && self.admitted.process_id() != Some(target)
         {
             return Some(Err(RuntimeError::new(
                 crate::RuntimeErrorCode::ExecutionScopeAdmissionRefused,
                 format!(
-                    "cannot bind {existing} onto process incarnation {target}: a scoped controller carries its admission and is never repinned",
+                    "cannot bind {existing} onto process {target}: a scoped controller carries its admission and is never rebound",
                     existing = self.admitted.scope().id(),
                 ),
             )));
@@ -89,6 +86,7 @@ impl<'run> ScopedEffectController<'run> {
                 controller: ScopedEffectControllerInner::Shared(controller),
                 admitted: self.admitted,
                 journal_guard: self.journal_guard,
+                keyless_starts: self.keyless_starts,
             }),
         }
     }

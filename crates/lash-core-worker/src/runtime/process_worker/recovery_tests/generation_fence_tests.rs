@@ -1,4 +1,4 @@
-//! L6 on the native worker (FIG-3571): an incarnation's start record names
+//! L6 on the native worker (FIG-3571): a process's start record names
 //! the executable generation its engine ran it as, and a claim under a build
 //! whose engine runs another generation — or of a record written before the
 //! stamp existed — parks the process `RetiredGeneration` before its engine is
@@ -36,7 +36,7 @@ impl crate::ProcessEngine for StampedEngine {
         self.runs.fetch_add(1, Ordering::SeqCst);
         Ok(
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                serde_json::json!({"process_id": context.registration().id}),
+                serde_json::json!({"process_id": context.process_id()}),
             ))
             .into(),
         )
@@ -79,16 +79,15 @@ async fn an_incarnation_started_under_another_generation_parks_before_its_engine
             Arc::new(LateBoundProcessWork::default()),
         )
         .await;
-        let process_id = ProcessId::from(format!("generation-fence-{case}"));
-        registry
+        let process_id = registry
             .register_process(engine_registration(
-                process_id.clone(),
                 "stamped",
                 env_ref,
                 serde_json::Value::Null,
             ))
             .await
-            .expect("register the stamped process");
+            .expect("register the stamped process")
+            .id;
         registry
             .record_first_started(
                 &process_id,
@@ -174,16 +173,15 @@ async fn a_fresh_process_is_stamped_with_the_generation_it_runs_as() {
         Arc::new(LateBoundProcessWork::default()),
     )
     .await;
-    let process_id = ProcessId::from("generation-fence-fresh");
-    registry
+    let process_id = registry
         .register_process(engine_registration(
-            process_id.clone(),
             "stamped",
             env_ref,
             serde_json::Value::Null,
         ))
         .await
-        .expect("register the stamped process");
+        .expect("register the stamped process")
+        .id;
     let _ = run_handle
         .enable_and_drive()
         .await

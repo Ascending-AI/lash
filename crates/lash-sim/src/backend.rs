@@ -104,11 +104,10 @@ impl SimEngine {
         build: SimQueuedTurnBuild,
     ) -> Result<lash::Result<lash::QueuedTurnDrain<lash::TurnOutput>>, FixedScriptRunnerError> {
         let drain_id = drain_id.into();
-        let admitted = lash_core::AdmittedScope::unpinned(lash_core::ExecutionScope::queue_drain(
+        let admitted = lash_core::AdmittedScope::new(lash_core::ExecutionScope::queue_drain(
             session.session_id(),
             drain_id.clone(),
-        ))
-        .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        ));
         type Drained = lash::Result<lash::QueuedTurnDrain<lash::TurnOutput>>;
         let slot: Arc<std::sync::Mutex<Option<Drained>>> = Arc::new(std::sync::Mutex::new(None));
         let attempt: lash_restate_test::HandlerAttempt = {
@@ -184,8 +183,7 @@ impl SimEngine {
         build: SimTurnBuild,
     ) -> Result<lash::Result<lash::TurnOutput>, FixedScriptRunnerError> {
         let turn_id = turn_id.into();
-        let admitted = lash_core::AdmittedScope::unpinned(session.turn_scope(turn_id.clone()))
-            .map_err(|err| FixedScriptRunnerError::Runtime(err.to_string()))?;
+        let admitted = lash_core::AdmittedScope::new(session.turn_scope(turn_id.clone()));
         let slot: Arc<std::sync::Mutex<Option<lash::Result<lash::TurnOutput>>>> =
             Arc::new(std::sync::Mutex::new(None));
         let attempt: lash_restate_test::HandlerAttempt = {

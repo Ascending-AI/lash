@@ -38,7 +38,7 @@ fn probe_turn_cause(message_id: &str) -> lash::messages::Message {
             None,
         )]),
         origin: Some(lash::messages::MessageOrigin::Process {
-            process_id: ProcessId::from("probe-producer"),
+            process_id: ProcessId::fixture("probe-producer"),
             event_type: "producer.wake".to_string(),
             sequence: 1,
             wake_id: None,

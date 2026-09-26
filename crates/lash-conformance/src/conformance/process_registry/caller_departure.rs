@@ -14,16 +14,18 @@ pub(super) async fn caller_departed_rows_are_reclaimed_by_retention(
 ) {
     let reclaimed_id = "caller-departure-reclaimed";
     let retained_id = "caller-departure-retained";
-    registry
+    let caller_departure_reclaimed_record = registry
         .register_process(registration(reclaimed_id))
         .await
         .expect("register reclaimable row");
-    registry
+    let reclaimed_id = caller_departure_reclaimed_record.id.clone();
+    let caller_departure_retained_record = registry
         .register_process(registration(retained_id))
         .await
         .expect("register still-running row");
+    let retained_id = caller_departure_retained_record.id.clone();
     let departed = registry
-        .record_caller_departure(&ProcessId::from(reclaimed_id))
+        .record_caller_departure(&reclaimed_id)
         .await
         .expect("record caller departure");
     let (_, projection_cursor) = changes_after_full_relist_if_required(&registry, 4096).await;
@@ -38,14 +40,14 @@ pub(super) async fn caller_departed_rows_are_reclaimed_by_retention(
         .expect("prune retired rows");
     assert!(
         matches!(
-            registry.get_process(&ProcessId::from(reclaimed_id)).await,
+            registry.get_process(&reclaimed_id).await,
             Err(crate::PluginError::ProcessNoLongerRetained { .. })
         ),
         "retention must reclaim a row nothing may ever terminalize"
     );
     assert!(
         registry
-            .get_process(&ProcessId::from(retained_id))
+            .get_process(&retained_id)
             .await
             .expect("read still-running row")
             .is_some(),

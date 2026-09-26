@@ -46,7 +46,7 @@ pub(super) async fn list_non_terminal_page(
         });
     }
     let through_process_id = match continuation.as_ref() {
-        Some(cursor) => cursor.through_process_id().to_string(),
+        Some(cursor) => cursor.through_process_id().clone(),
         None => match sqlx::query_scalar::<_, Option<String>>(
             process_sql()
                 .process_postgres
@@ -57,7 +57,7 @@ pub(super) async fn list_non_terminal_page(
         .await
         .map_err(plugin_sqlx_error)?
         {
-            Some(process_id) => process_id,
+            Some(process_id) => crate::stored_process_id(&process_id)?,
             None => {
                 return Ok(lash_core_execution::ProcessWorklistPage {
                     records: Vec::new(),
@@ -69,8 +69,8 @@ pub(super) async fn list_non_terminal_page(
     let row_limit = i64::try_from(limit.get().saturating_add(1)).unwrap_or(i64::MAX);
     let rows = if let Some(cursor) = continuation.as_ref() {
         sqlx::query(process_sql().process_postgres.list_next_worklist_page.sql())
-            .bind(&through_process_id)
-            .bind(cursor.after_process_id())
+            .bind(through_process_id.as_str())
+            .bind(cursor.after_process_id().as_str())
             .bind(row_limit)
             .fetch_all(&registry.pool)
             .await
@@ -82,7 +82,7 @@ pub(super) async fn list_non_terminal_page(
                 .list_first_worklist_page
                 .sql(),
         )
-        .bind(&through_process_id)
+        .bind(through_process_id.as_str())
         .bind(row_limit)
         .fetch_all(&registry.pool)
         .await

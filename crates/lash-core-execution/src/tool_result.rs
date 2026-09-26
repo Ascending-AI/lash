@@ -88,10 +88,10 @@ impl PendingAnnouncement {
 pub enum PendingResolver {
     /// The terminal of a durable process resolves this wait.
     ///
-    /// The incarnation rides inside the [`ProcessRef`](crate::ProcessRef): a
-    /// wait armed against one incarnation is never resolved by a later one's
+    /// A [`ProcessId`](crate::ProcessId) is minted and never reused, so a
+    /// wait armed against one process is never resolved by another's
     /// terminal.
-    ProcessTerminal { process_ref: crate::ProcessRef },
+    ProcessTerminal { process_id: crate::ProcessId },
 }
 
 /// Configuration carried by a [`ToolOutcome::Pending`] result: how long the runtime
@@ -173,8 +173,8 @@ impl PendingCompletion {
         self
     }
 
-    pub fn resolved_by_process_terminal(self, process_ref: crate::ProcessRef) -> Self {
-        self.resolved_by(PendingResolver::ProcessTerminal { process_ref })
+    pub fn resolved_by_process_terminal(self, process_id: crate::ProcessId) -> Self {
+        self.resolved_by(PendingResolver::ProcessTerminal { process_id })
     }
 }
 
@@ -526,10 +526,7 @@ mod tests {
 
     fn awaited_process() -> crate::PendingResolver {
         crate::PendingResolver::ProcessTerminal {
-            process_ref: crate::ProcessRef::new(
-                crate::ProcessId::from("child-process"),
-                crate::ProcessIncarnation::from_registration_sequence(1),
-            ),
+            process_id: crate::process_id_for_test("child-process"),
         }
     }
 

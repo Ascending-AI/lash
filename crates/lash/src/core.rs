@@ -435,24 +435,15 @@ impl LashCore {
         let mut fork_policy = self.policy.clone();
         fork_policy.provider_id = point.config.provider_id;
         fork_policy.model = point.config.model;
-        let mut selected = std::collections::HashMap::new();
+        let mut selected = std::collections::HashSet::new();
         let mut pending_observer_intents = Vec::new();
-        for process_ref in observed_processes {
-            if let Some(incarnation) =
-                selected.insert(process_ref.process_id.clone(), process_ref.incarnation)
-            {
-                if incarnation != process_ref.incarnation {
-                    return Err(lash_core::StoreError::Backend(format!(
-                        "fork observer selection names conflicting incarnations for process `{}`",
-                        process_ref.process_id
-                    ))
-                    .into());
-                }
+        for process_id in observed_processes {
+            if !selected.insert(process_id.clone()) {
                 continue;
             }
-            pending_observer_intents.push(
-                facade_support::SessionObserverIntent::host_requested_ref(process_ref),
-            );
+            pending_observer_intents.push(facade_support::SessionObserverIntent::host_requested(
+                process_id,
+            ));
         }
         let request = lash_core::ForkSessionRequest {
             session_id,
@@ -1509,7 +1500,7 @@ pub struct ForkRequest {
     pub session_id: SessionId,
     pub node_id: lash_core::NodeId,
     pub relation: lash_core::SessionRelation,
-    pub observed_processes: Vec<lash_core::ProcessRef>,
+    pub observed_processes: Vec<lash_core::ProcessId>,
 }
 
 /// Install `driver` on `port` for the core that `owner` names, and return the

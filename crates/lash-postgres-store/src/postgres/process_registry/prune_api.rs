@@ -25,7 +25,7 @@ async fn select_prunable<'c>(
         .map_err(plugin_sqlx_error)?;
     let mut prunable = Vec::new();
     for row in rows {
-        let process_id: ProcessId = ProcessId::from(row.get::<String, _>(0));
+        let process_id = crate::stored_process_id(&row.get::<String, _>(0))?;
         let record_json: String = row.get(1);
         let record: ProcessRecord =
             serde_json::from_str(&record_json).map_err(process_decode_error)?;
@@ -58,40 +58,18 @@ pub(super) async fn prunable_terminal_processes(
 pub(super) async fn complete_process_artifact_cleanup(
     registry: &PostgresProcessRegistry,
     process_id: &ProcessId,
-    incarnation: lash_core_execution::ProcessIncarnation,
 ) -> Result<lash_core_execution::ProcessArtifactCleanupAck, PluginError> {
-    let (removed, current_incarnation): (bool, Option<i64>) = sqlx::query_as(
-        process_sql()
-            .cleanup_postgres
-            .delete_for_incarnation_reporting_incarnation
-            .sql(),
-    )
-    .bind(process_id.as_str())
-    .bind(incarnation.registration_sequence() as i64)
-    .fetch_one(&registry.pool)
-    .await
-    .map_err(plugin_sqlx_error)?;
-    let process_ref = lash_core_execution::ProcessRef::new(process_id.clone(), incarnation);
-    Ok(match current_incarnation {
-        Some(found) => {
-            let found = lash_core_execution::ProcessIncarnation::from_registration_sequence(
-                plugin_u64_from_sql("ProcessRecord", "incarnation", found)?,
-            );
-            if found != incarnation {
-                lash_core_execution::ProcessArtifactCleanupAck::StaleIncarnation {
-                    expected: process_ref,
-                    found: lash_core_execution::ProcessRef::new(process_id.clone(), found),
-                }
-            } else if removed {
-                lash_core_execution::ProcessArtifactCleanupAck::Acknowledged { process_ref }
-            } else {
-                lash_core_execution::ProcessArtifactCleanupAck::Unknown { process_ref }
-            }
-        }
-        None if removed => {
-            lash_core_execution::ProcessArtifactCleanupAck::Acknowledged { process_ref }
-        }
-        None => lash_core_execution::ProcessArtifactCleanupAck::Unknown { process_ref },
+    let removed = sqlx::query(process_sql().cleanup.delete_for_process.sql())
+        .bind(process_id.as_str())
+        .execute(&registry.pool)
+        .await
+        .map_err(plugin_sqlx_error)?
+        .rows_affected();
+    let process_id = process_id.clone();
+    Ok(if removed == 1 {
+        lash_core_execution::ProcessArtifactCleanupAck::Acknowledged { process_id }
+    } else {
+        lash_core_execution::ProcessArtifactCleanupAck::Unknown { process_id }
     })
 }
 

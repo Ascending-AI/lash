@@ -22,13 +22,11 @@ fn turn_scope(session: &SessionId, turn: &str) -> lash_core::ParentScope {
 async fn register_child(
     registry: &Arc<dyn ProcessRegistry>,
     originator: &SessionScope,
-    id: &str,
     parent: &lash_core::ParentScope,
     on_parent_end: lash_core::OnParentEnd,
 ) -> Result<ProcessRecord, crate::PluginError> {
     registry
         .register_process(ProcessRegistration::new(
-            ProcessId::from(id),
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -53,32 +51,22 @@ pub(super) async fn a_turn_scope_ends_through_its_recorded_ledger_row(
     let turn = turn_scope(&session, "turn-parent-end-turn");
     let other_turn = turn_scope(&session, "turn-parent-end-other-turn");
 
-    for (id, parent, on_parent_end) in [
-        (
-            "turn-parent-end-cancel-a",
-            &turn,
-            lash_core::OnParentEnd::Cancel,
-        ),
-        (
-            "turn-parent-end-cancel-b",
-            &turn,
-            lash_core::OnParentEnd::Cancel,
-        ),
-        (
-            "turn-parent-end-abandon",
-            &turn,
-            lash_core::OnParentEnd::Abandon,
-        ),
-        (
-            "turn-parent-end-other-turn-child",
-            &other_turn,
-            lash_core::OnParentEnd::Cancel,
-        ),
+    let mut children = Vec::new();
+    for (parent, on_parent_end) in [
+        (&turn, lash_core::OnParentEnd::Cancel),
+        (&turn, lash_core::OnParentEnd::Cancel),
+        (&turn, lash_core::OnParentEnd::Abandon),
+        (&other_turn, lash_core::OnParentEnd::Cancel),
     ] {
-        register_child(&registry, &originator, id, parent, on_parent_end)
-            .await
-            .expect("register a child under a live turn scope");
+        children.push(
+            register_child(&registry, &originator, parent, on_parent_end)
+                .await
+                .expect("register a child under a live turn scope")
+                .id,
+        );
     }
+    let [cancel_a, cancel_b, _abandon, _other_turn_child] =
+        <[crate::ProcessId; 4]>::try_from(children).expect("four registered children");
 
     assert!(
         registry
@@ -147,26 +135,19 @@ pub(super) async fn a_turn_scope_ends_through_its_recorded_ledger_row(
             .into_iter()
             .map(|record| record.id)
             .collect::<Vec<_>>(),
-        vec![
-            ProcessId::from("turn-parent-end-cancel-a"),
-            ProcessId::from("turn-parent-end-cancel-b"),
-        ],
+        vec![cancel_a.clone(), cancel_b.clone()],
         "the sweep sees this turn's Cancel children only: not its Abandon child, \
          and not another turn's"
     );
     assert_eq!(
         registry
-            .list_parent_end_children(
-                &turn,
-                Some(&ProcessId::from("turn-parent-end-cancel-a")),
-                PAGE
-            )
+            .list_parent_end_children(&turn, Some(&cancel_a), PAGE)
             .await
             .expect("resume the children page after the first child")
             .into_iter()
             .map(|record| record.id)
             .collect::<Vec<_>>(),
-        vec![ProcessId::from("turn-parent-end-cancel-b")],
+        vec![cancel_b],
         "the children page resumes strictly after the cursor"
     );
 
@@ -175,7 +156,6 @@ pub(super) async fn a_turn_scope_ends_through_its_recorded_ledger_row(
             register_child(
                 &registry,
                 &originator,
-                "turn-parent-end-late-cancel",
                 &turn,
                 lash_core::OnParentEnd::Cancel,
             )
@@ -188,7 +168,6 @@ pub(super) async fn a_turn_scope_ends_through_its_recorded_ledger_row(
     register_child(
         &registry,
         &originator,
-        "turn-parent-end-late-abandon",
         &turn,
         lash_core::OnParentEnd::Abandon,
     )
@@ -263,16 +242,14 @@ pub(super) async fn scopes_that_collide_in_rendering_share_no_ledger_key(
     let first_child = register_child(
         &registry,
         &first_originator,
-        "collision-first-child",
         &first,
         lash_core::OnParentEnd::Cancel,
     )
     .await
     .expect("register a Cancel child under the first colliding scope");
-    register_child(
+    let second_child = register_child(
         &registry,
         &second_originator,
-        "collision-second-child",
         &second,
         lash_core::OnParentEnd::Cancel,
     )
@@ -320,7 +297,7 @@ pub(super) async fn scopes_that_collide_in_rendering_share_no_ledger_key(
             .into_iter()
             .map(|record| record.id)
             .collect::<Vec<_>>(),
-        vec![ProcessId::from("collision-second-child")],
+        vec![second_child.id.clone()],
         "children of a rendering-identical scope are not swept by the other's end"
     );
 }
@@ -343,7 +320,6 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
     let first_child = register_child(
         &registry,
         &originator,
-        "unrecorded-turn-a-cancel",
         &first,
         lash_core::OnParentEnd::Cancel,
     )
@@ -352,16 +328,14 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
     let second_child = register_child(
         &registry,
         &originator,
-        "unrecorded-turn-b-cancel",
         &second,
         lash_core::OnParentEnd::Cancel,
     )
     .await
     .expect("register the second turn's Cancel child");
-    register_child(
+    let sibling = register_child(
         &registry,
         &originator,
-        "unrecorded-turn-b-cancel-sibling",
         &second,
         lash_core::OnParentEnd::Cancel,
     )
@@ -370,7 +344,6 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
     register_child(
         &registry,
         &originator,
-        "unrecorded-turn-c-abandon",
         &abandon_only,
         lash_core::OnParentEnd::Abandon,
     )
@@ -383,7 +356,6 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
     // one here would hand the sweep a candidate it must never write.
     let process_parent = registry
         .register_process(ProcessRegistration::new(
-            ProcessId::from("unrecorded-turn-process-parent"),
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -399,8 +371,7 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
     register_child(
         &registry,
         &originator,
-        "unrecorded-turn-process-child",
-        &lash_core::ParentScope::process(lash_core::ProcessRef::from_record(&process_parent)),
+        &lash_core::ParentScope::process(process_parent.id.clone()),
         lash_core::OnParentEnd::Cancel,
     )
     .await
@@ -453,7 +424,7 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
     for child in [&second_child, &first_child] {
         registry
             .request_process_cancel(
-                &crate::ProcessRef::from_record(child),
+                &child.id.clone(),
                 crate::CancelOrigin::TurnStopped,
                 "conformance".to_string(),
                 None,
@@ -471,13 +442,7 @@ pub(super) async fn an_unrecorded_turn_parent_is_reported_until_its_row_is_writt
     );
     registry
         .request_process_cancel(
-            &crate::ProcessRef::from_record(
-                &registry
-                    .get_process(&ProcessId::from("unrecorded-turn-b-cancel-sibling"))
-                    .await
-                    .expect("read the remaining sibling")
-                    .expect("the sibling is live"),
-            ),
+            &sibling.id,
             crate::CancelOrigin::TurnStopped,
             "conformance".to_string(),
             None,

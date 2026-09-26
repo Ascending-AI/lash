@@ -5,7 +5,6 @@ use crate::facade_support::SessionGraphFacadeOps;
 pub mod attachment_manifest;
 mod checkpoint;
 pub mod namespace;
-pub mod process_key;
 pub use checkpoint::{
     CHECKPOINT_COMPONENT_ENCODING_VERSION, CheckpointComponentDescriptor,
     EXECUTION_STATE_CHECKPOINT_COMPONENT, HydratedCheckpointComponent, HydratedSessionCheckpoint,

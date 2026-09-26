@@ -867,13 +867,14 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
         version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: "wake:source-lock".to_string(),
         target_session_id: SessionId::from(session_id.to_string()),
-        process_id: ProcessId::from("wake-source-lock-process"),
-        process_incarnation: lash_core_execution::ProcessIncarnation::from_registration_sequence(1),
+        process_id: ProcessId::fixture("wake-source-lock-process"),
         sequence: 1,
         event_type: "producer.wake".to_string(),
         event_invocation: lash_core_execution::RuntimeInvocation::effect(
             lash_core_execution::EffectAddress::new(
-                lash_core_execution::ExecutionScope::process("wake-source-lock-process"),
+                lash_core_execution::ExecutionScope::process(ProcessId::fixture(
+                    "wake-source-lock-process",
+                )),
                 "wake-source-lock",
             )
             .expect("valid wake effect address"),
@@ -1146,7 +1147,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
          WHERE session_id = $1 AND process_id = $2",
     )
     .bind(session_id)
-    .bind("wake-source-lock-process")
+    .bind(ProcessId::fixture("wake-source-lock-process").as_str())
     .fetch_one(storage.pool())
     .await
     .expect("read receiver allocation floor");
@@ -1157,7 +1158,7 @@ async fn postgres_wake_enqueue_serializes_with_consumption_when_configured() {
          ) VALUES ($1, $2, $3)",
     )
     .bind(session_id)
-    .bind("wake-source-lock-process")
+    .bind(ProcessId::fixture("wake-source-lock-process").as_str())
     .bind(2_i64)
     .execute(storage.pool())
     .await
@@ -1231,11 +1232,8 @@ async fn postgres_unknown_attachment_owner_kind_refuses_with_canonical_typed_err
              CHECK (owner_kind IN ('turn', 'process')),
          ADD CONSTRAINT ck_lash_attachment_manifest_owner_identity
              CHECK (
-                 (owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL)
-                 OR (owner_kind = 'turn' AND owner_id IS NOT NULL
-                     AND owner_incarnation IS NULL)
-                 OR (owner_kind = 'process' AND owner_id IS NOT NULL
-                     AND owner_incarnation IS NOT NULL)
+                 (owner_kind IS NULL AND owner_id IS NULL)
+                 OR (owner_kind IN ('turn', 'process') AND owner_id IS NOT NULL)
              )",
     )
     .execute(storage.pool())
@@ -1256,62 +1254,49 @@ async fn postgres_unknown_attachment_owner_kind_refuses_with_canonical_typed_err
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-async fn postgres_bare_process_attachment_owner_refuses_with_canonical_typed_error_when_configured()
-{
+async fn postgres_unminted_process_attachment_owner_refuses_with_canonical_typed_error_when_configured()
+ {
     let Some((_database_lock, storage)) = storage().await else {
         eprintln!(
-            "skipping Postgres bare process attachment-owner regression: database URL is not set"
+            "skipping Postgres unminted process attachment-owner regression: database URL is not set"
         );
         return;
     };
     reset(storage.pool()).await;
     sqlx::query(
-        "ALTER TABLE lash_attachment_manifest
-         DROP CONSTRAINT ck_lash_attachment_manifest_owner_identity",
-    )
-    .execute(storage.pool())
-    .await
-    .expect("drop owner-identity CHECK for predecessor injection");
-    sqlx::query(
         "INSERT INTO lash_attachment_manifest
          (attachment_id, session_id, canonical_uri, intent_at_ms,
-          committed_at_ms, owner_kind, owner_id, owner_incarnation)
-         VALUES ('bare-process-owner', 'bare-process-attachment-owner',
-                 'lash-attachment://bare-process', 0, NULL, 'process', 'process-1', NULL)",
+          committed_at_ms, owner_kind, owner_id)
+         VALUES ('unminted-process-owner', 'unminted-process-attachment-owner',
+                 'lash-attachment://unminted-process', 0, NULL, 'process', 'process-1')",
     )
     .execute(storage.pool())
     .await
-    .expect("insert bare process owner");
+    .expect("insert a process owner no registrar minted");
 
-    let store = storage.session_store("bare-process-attachment-owner");
+    let store = storage.session_store("unminted-process-attachment-owner");
     let result = lash_core_execution::AttachmentManifest::list_uncommitted(&store, 0).await;
 
-    sqlx::query("DELETE FROM lash_attachment_manifest WHERE attachment_id = 'bare-process-owner'")
-        .execute(storage.pool())
-        .await
-        .expect("remove bare process-owner row");
     sqlx::query(
-        "ALTER TABLE lash_attachment_manifest
-         ADD CONSTRAINT ck_lash_attachment_manifest_owner_identity CHECK (
-             (owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL)
-             OR (owner_kind = 'turn' AND owner_id IS NOT NULL AND owner_incarnation IS NULL)
-             OR (owner_kind = 'process' AND owner_id IS NOT NULL AND owner_incarnation IS NOT NULL)
-         )",
+        "DELETE FROM lash_attachment_manifest WHERE attachment_id = 'unminted-process-owner'",
     )
     .execute(storage.pool())
     .await
-    .expect("restore owner-identity CHECK");
+    .expect("remove unminted process-owner row");
 
-    let error = result.expect_err("bare Postgres process attachment owner must refuse");
+    let error = result.expect_err("an unminted Postgres process attachment owner must refuse");
+    let expected = lash_core_execution::ProcessId::parse("process-1")
+        .expect_err("a host-chosen name is not a process id")
+        .to_string();
     assert!(
         matches!(
             error,
             StoreError::StoredDataCorrupt {
                 record_kind: "AttachmentManifest owner",
                 ref message,
-            } if message == "process attachment owner `process-1` has no incarnation; bare process-owner identities are unsupported"
+            } if *message == expected
         ),
-        "Postgres must return the canonical bare-process-owner refusal, got {error:?}"
+        "Postgres must return the canonical unminted-process-owner refusal, got {error:?}"
     );
 }
 

@@ -312,6 +312,10 @@ struct ServedSegment {
 #[derive(Default)]
 pub(super) struct ServedSegments {
     segments: Mutex<HashMap<lash_core::ProcessId, ServedSegment>>,
+    /// Bodies served for the process a start keyed so registers: the start
+    /// mints the id, so the law can only name that process by its key, and
+    /// the first execution of it adopts the body under its minted id.
+    by_start_key: Mutex<HashMap<lash_core::StartKey, ServedSegment>>,
     served: tokio::sync::Notify,
 }
 
@@ -336,8 +340,44 @@ impl ServedSegments {
         self.served.notify_waiters();
     }
 
-    /// Whether a law serves `process_id`'s segments.
-    pub(super) fn serves(&self, process_id: &lash_core::ProcessId) -> bool {
+    /// Serves the segments of the process a start keyed `start_key`
+    /// registers with `body` from now on.
+    fn serve_start(
+        &self,
+        start_key: &lash_core::StartKey,
+        body: lash_conformance::ConformanceTurnAttempt,
+    ) {
+        self.by_start_key
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                start_key.clone(),
+                ServedSegment {
+                    body: Some(body),
+                    crash: None,
+                    ends: None,
+                },
+            );
+        self.served.notify_waiters();
+    }
+
+    /// Whether a law serves the segments of `process_id`, registered by
+    /// `registration`: by its id, or by the key of the start that minted it,
+    /// whose served body the id then adopts.
+    pub(super) fn serves(
+        &self,
+        process_id: &lash_core::ProcessId,
+        registration: &lash_core::ProcessRegistration,
+    ) -> bool {
+        if let Some(start_key) = &registration.start_key
+            && let Some(segment) = self
+                .by_start_key
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .remove(start_key)
+        {
+            self.table().insert(process_id.clone(), segment);
+        }
         self.table().contains_key(process_id)
     }
 
@@ -459,6 +499,7 @@ struct OpenInvocation {
 /// and the ingress call of its invocation, which returns once the invocation
 /// completes.
 struct CrashedSegment {
+    process_id: lash_core::ProcessId,
     registration: lash_core::ProcessRegistration,
     call: SegmentCall,
 }
@@ -487,10 +528,15 @@ impl LiveTurnRunner {
     /// Submits segment 0 of `registration` to the endpoint's
     /// `LashProcessWorkflow`, the way a process start schedules it, and
     /// returns the ingress call that completes with the invocation.
-    fn submit_segment(&self, registration: &lash_core::ProcessRegistration) -> SegmentCall {
+    fn submit_segment(
+        &self,
+        process_id: &lash_core::ProcessId,
+        registration: &lash_core::ProcessRegistration,
+    ) -> SegmentCall {
         let ingress = RestateIngressClient::new(self.connection.clone());
-        let key = crate::process::process_segment_workflow_key(&registration.id, 0);
+        let key = crate::process::process_segment_workflow_key(process_id, 0);
         let input = crate::RestateProcessWorkflowInput {
+            process_id: process_id.clone(),
             registration: registration.clone(),
             execution_context: lash_core::ProcessExecutionContext::default(),
             segment_ordinal: 0,
@@ -725,12 +771,10 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
 
     async fn serve_segments(
         &self,
-        process_id: &lash_core::ProcessId,
+        start_key: &lash_core::StartKey,
         body: lash_conformance::ConformanceTurnAttempt,
     ) {
-        self.process_runner
-            .segments()
-            .serve(process_id, Some(body), None, None);
+        self.process_runner.segments().serve_start(start_key, body);
     }
 
     /// The segment runs in the endpoint's real `LashProcessWorkflow`, past its
@@ -738,16 +782,17 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
     /// stays open for Restate to deliver again.
     async fn run_segment_until_crash(
         &self,
+        process_id: &lash_core::ProcessId,
         registration: lash_core::ProcessRegistration,
         body: lash_conformance::ConformanceTurnAttempt,
         crash: lash_conformance::ConformanceCrash,
     ) {
-        let process_id = registration.id.clone();
+        let process_id = process_id.clone();
         let (ends, mut ended) = tokio::sync::mpsc::unbounded_channel();
         self.process_runner
             .segments()
             .serve(&process_id, Some(body), Some(crash), Some(ends));
-        let mut call = self.submit_segment(&registration);
+        let mut call = self.submit_segment(&process_id, &registration);
         tokio::select! {
             biased;
             end = ended.recv() => match end {
@@ -760,10 +805,14 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
                 "the invocation of process `{process_id}` completed before its crash fired: {ran:?}"
             ),
         }
-        self.crashed_segments
-            .lock()
-            .await
-            .insert(process_id, CrashedSegment { registration, call });
+        self.crashed_segments.lock().await.insert(
+            process_id.clone(),
+            CrashedSegment {
+                process_id,
+                registration,
+                call,
+            },
+        );
     }
 
     /// `Replay` lets Restate deliver the crashed invocation again, replaying
@@ -809,7 +858,7 @@ impl lash_conformance::ConformanceTurnRunner for LiveTurnRunner {
                 segments.serve(process_id, Some(body), None, None);
                 tokio::time::timeout(
                     SEGMENT_RECOVERY_TIMEOUT,
-                    self.submit_segment(&crashed.registration),
+                    self.submit_segment(&crashed.process_id, &crashed.registration),
                 )
                 .await
                 .unwrap_or_else(|_| panic!("the fresh segment of process `{process_id}` ended"))

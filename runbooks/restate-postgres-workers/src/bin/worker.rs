@@ -691,10 +691,7 @@ impl AppState {
         let response = TurnResponse {
             workflow_id: request.workflow_id.clone(),
             worker_id: self.worker_id.clone(),
-            process_id: process_ids
-                .first()
-                .cloned()
-                .unwrap_or_else(|| ProcessId::from(String::new())),
+            process_id: process_ids.first().cloned(),
             process_ids,
             attachment_id,
             final_text,
@@ -783,8 +780,8 @@ impl AppState {
         .await
         .map_err(terminal_error)?
         .into_iter()
-        .map(ProcessId::from)
-        .collect())
+        .map(|process_id| ProcessId::parse(&process_id).map_err(terminal_error))
+        .collect::<Result<_, _>>()?)
     }
 
     async fn record(

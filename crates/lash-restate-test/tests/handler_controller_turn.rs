@@ -71,8 +71,7 @@ async fn a_direct_turn_on_the_handlers_controller_runs_its_whole_drive_in_the_ha
         .await
         .expect("open the session");
     let turn_id = lash::TurnId::from("direct-turn");
-    let admitted = lash_core::AdmittedScope::unpinned(session.turn_scope(turn_id.clone()))
-        .expect("admit the turn scope");
+    let admitted = lash_core::AdmittedScope::new(session.turn_scope(turn_id.clone()));
     let outcome = Arc::new(Mutex::new(None));
     let attempt: lash_restate_test::HandlerAttempt = {
         let outcome = Arc::clone(&outcome);

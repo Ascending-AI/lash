@@ -1,5 +1,4 @@
 use super::*;
-use lash_sansio::ProcessId;
 
 const PROCESS_LIST_STRESS_BATCH: usize = 128;
 
@@ -21,14 +20,13 @@ pub(super) async fn run_once_process_list_stress(
         .seed(async {
             let process_count = chat_turns.max(1) * PROCESS_LIST_STRESS_BATCH;
             for index in 0..process_count {
-                let process_id = ProcessId::from(format!("process-list-stress-{index:05}"));
-                registry
+                let process_id = registry
                     .register_process(process_list_stress_registration(
-                        process_id.clone(),
                         session_scope.clone(),
                         index,
                     ))
-                    .await?;
+                    .await?
+                    .id;
                 registry
                     .add_observer(
                         &session_scope.session_id,
@@ -55,12 +53,10 @@ pub(super) async fn run_once_process_list_stress(
             // Dedicated long-lived process for the signal/wait phases: its event log
             // grows across turns, so the phases also expose append-cost growth with
             // log length (the durable-suspension hot path).
-            let signal_process_id = "process-signal-stress";
             let signal_event_type = lash_core::facade_support::process_signal_event_type("stress")?;
-            registry
+            let signal_process_id = registry
                 .register_process(
                     lash_core::ProcessRegistration::new(
-                        signal_process_id,
                         lash_core::ProcessInput::External {
                             metadata: serde_json::json!({ "label": "signal stress" }),
                         },
@@ -77,7 +73,8 @@ pub(super) async fn run_once_process_list_stress(
                         semantics: lash_core::ProcessEventSemanticsSpec::default(),
                     }]),
                 )
-                .await?;
+                .await?
+                .id;
             Ok((process_count, signal_event_type, signal_process_id))
         })
         .await?;
@@ -181,14 +178,14 @@ pub(super) async fn run_once_process_list_stress(
                 for signal_index in 0..SIGNALS_PER_TURN {
                     registry
                         .append_event(
-                            &ProcessId::from(signal_process_id),
+                            &signal_process_id,
                             lash_core::ProcessEventAppendRequest::new(
                                 signal_event_type.clone(),
                                 serde_json::json!({ "turn": turn_index, "n": signal_index }),
                             )
                             .with_replay_key(
                                 lash_core::facade_support::process_signal_wait_key(
-                                    &ProcessId::from(signal_process_id),
+                                    &signal_process_id,
                                     "stress",
                                     format!("{turn_index}:{signal_index}"),
                                 ),
@@ -214,14 +211,14 @@ pub(super) async fn run_once_process_list_stress(
                 let phase_before_memory = process_memory_sample();
                 let waiting = registry
                     .set_process_wait(
-                        &ProcessId::from(signal_process_id),
+                        &signal_process_id,
                         lash_core::WaitState {
                             since_ms: turn_index as u64 + 1,
                             kind: lash_core::WaitKind::Signal {
                                 name: "stress".to_string(),
                                 event_type: signal_event_type.clone(),
                                 key: lash_core::facade_support::process_signal_wait_key(
-                                    &ProcessId::from(signal_process_id),
+                                    &signal_process_id,
                                     "stress",
                                     turn_index + 1,
                                 ),
@@ -233,9 +230,7 @@ pub(super) async fn run_once_process_list_stress(
                 if waiting.wait.is_none() {
                     anyhow::bail!("process_list_stress wait facet did not round-trip");
                 }
-                registry
-                    .clear_process_wait(&ProcessId::from(signal_process_id))
-                    .await?;
+                registry.clear_process_wait(&signal_process_id).await?;
                 phase_profile.insert(
                     "process_list_stress.wait_roundtrip".to_string(),
                     RuntimePerfPhaseRunResult {
@@ -343,12 +338,10 @@ pub(super) async fn run_once_process_list_stress(
 }
 
 fn process_list_stress_registration(
-    process_id: ProcessId,
     session_scope: lash_core::SessionScope,
     index: usize,
 ) -> lash_core::ProcessRegistration {
     lash_core::ProcessRegistration::new(
-        process_id,
         lash_core::ProcessInput::External {
             metadata: serde_json::json!({ "index": index }),
         },
@@ -368,7 +361,6 @@ fn process_list_tool_payload(entries: &[lash_core::ProcessRecord]) -> serde_json
             .map(|record| {
                 lash_core::ProcessHandleView::new(
                     record.id.clone(),
-                    record.incarnation,
                     record.identity.clone(),
                     record.status,
                 )

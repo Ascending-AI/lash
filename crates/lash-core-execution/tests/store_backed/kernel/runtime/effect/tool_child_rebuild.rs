@@ -505,15 +505,12 @@ mod tests {
             ContextSourceInstall::Sole
         );
         let mut request = backend.request(ToolRetryPolicy::Never).await;
-        let opener = crate::ProcessRef::new(
-            "worker",
-            crate::ProcessIncarnation::from_registration_sequence(7),
-        );
+        let opener = crate::ProcessId::fixture("worker");
         request.scope.opener = crate::EffectOpener::process(opener.clone());
         request.enclosing_process = Some(opener);
         request
             .validate()
-            .expect("a process opener enclosing its own incarnation is a legal request");
+            .expect("a process opener enclosing itself is a legal request");
 
         let outcome = run_child(&backend, &worker, envelope(request, "child"))
             .await

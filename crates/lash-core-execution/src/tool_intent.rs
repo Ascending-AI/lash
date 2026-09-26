@@ -187,25 +187,25 @@ pub enum ToolIntentSubmissionAdmission {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
-/// The declaration carries no process id. Realization derives it with
-/// [`ProcessId::from_intent_identity`] from this declaration's own intent
-/// identity, so the id a leaf attempt returns before commit and the id the
-/// executor starts under are the same value on the first run and on every
-/// redrive (FIG-2994).
+/// The declaration carries no process id and no key. Realization derives the
+/// key with [`crate::StartKey::for_tool_intent`] from this declaration's own
+/// intent identity, so every redrive presents the same key and starts the
+/// same process; the registrar mints the id and the realized result carries
+/// it (FIG-2994, ADR 0107).
 pub struct StartProcessIntent {
     /// Session whose authority owns the child.
     pub session_id: SessionId,
-    /// Durable process-start declaration, minus the derived id.
+    /// Durable process-start declaration, minus the derived key.
     pub declaration: crate::ProcessStartDeclaration,
 }
 
 impl StartProcessIntent {
-    /// Both realization routes call this and nothing else, so neither can
-    /// substitute a freshly minted id.
+    /// Both realization routes call this and nothing else, so every redrive
+    /// of one declaration presents the same start key (ADR 0107).
     pub fn into_request(&self, identity: &ToolIntentIdentity) -> crate::ProcessStartRequest {
         self.declaration
             .clone()
-            .into_request(ProcessId::from_intent_identity(identity))
+            .into_request(crate::StartKey::for_tool_intent(identity))
     }
 }
 
@@ -557,18 +557,18 @@ mod tests {
             }
             ToolIntentKind::SignalProcess => ToolIntent::SignalProcess(SignalProcessIntent {
                 session_id,
-                process_id: ProcessId::from("process"),
+                process_id: crate::process_id_for_test("process"),
                 signal_name: "go".to_string(),
                 payload: serde_json::Value::Null,
             }),
             ToolIntentKind::CancelProcess => ToolIntent::CancelProcess(CancelProcessIntent {
                 session_id,
-                process_id: ProcessId::from("process"),
+                process_id: crate::process_id_for_test("process"),
             }),
             ToolIntentKind::EmitProcessEvent => {
                 ToolIntent::EmitProcessEvent(EmitProcessEventIntent {
                     session_id,
-                    process_id: ProcessId::from("process"),
+                    process_id: crate::process_id_for_test("process"),
                     event_type: "note".to_string(),
                     payload: serde_json::Value::Null,
                 })
@@ -784,8 +784,8 @@ mod tests {
         /// Distinct inputs derive distinct replay keys, and equal inputs derive
         /// equal ones.
         ///
-        /// The replay key *is* the process id for a start declaration
-        /// (`ProcessId::from_intent_identity`), so a collision here is two
+        /// The replay key is the start key's preimage for a start declaration
+        /// (`StartKey::for_tool_intent`), so a collision here is two
         /// declarations realizing as one process, and a spurious difference is
         /// a re-submitted declaration starting a second one. The encoder
         /// length-prefixes each field precisely so that `("a", "b")` and
@@ -821,8 +821,8 @@ mod tests {
             let rederived = rederive_tool_intent_identity(&derived).expect("re-derived identity");
             proptest::prop_assert_eq!(&derived, &rederived);
             proptest::prop_assert_eq!(
-                ProcessId::from_intent_identity(&derived),
-                ProcessId::from_intent_identity(&rederived)
+                crate::StartKey::for_tool_intent(&derived),
+                crate::StartKey::for_tool_intent(&rederived)
             );
         }
     }

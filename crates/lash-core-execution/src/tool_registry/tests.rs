@@ -1689,7 +1689,7 @@ async fn pinned_source_preserves_provider_execute_result_and_intents() {
         fn intent() -> crate::ToolIntent {
             crate::ToolIntent::EmitProcessEvent(crate::EmitProcessEventIntent {
                 session_id: SessionId::from("registry-test"),
-                process_id: crate::ProcessId::from("pinned-process"),
+                process_id: crate::process_id_for_test("pinned-process"),
                 event_type: "pinned.intent".to_string(),
                 payload: json!({ "route": "id" }),
             })
@@ -1742,7 +1742,10 @@ async fn pinned_source_preserves_provider_execute_result_and_intents() {
         panic!("the declared intent reaches the caller verbatim")
     };
     assert_eq!(intent.event_type, "pinned.intent");
-    assert_eq!(intent.process_id, crate::ProcessId::from("pinned-process"));
+    assert_eq!(
+        intent.process_id,
+        crate::process_id_for_test("pinned-process")
+    );
     assert_eq!(intent.session_id, SessionId::from("registry-test"));
     assert_eq!(intent.payload, json!({ "route": "id" }));
 }

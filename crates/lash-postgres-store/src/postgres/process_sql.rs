@@ -140,23 +140,24 @@ lash_store_sql::statements! {
              FOR UPDATE";
 
         /// Register a fresh process row, reporting no row when a concurrent
-        /// registrar won.
+        /// start under the same key won.
         ///
-        /// `ON CONFLICT DO NOTHING` is how that race is detected: under
-        /// `READ COMMITTED` the read that decided the row was absent and this
-        /// insert take different snapshots, so the loser has to be told rather
-        /// than raise a primary-key violation. SQLite reads the absence under
-        /// the lock it inserts under and keeps the constraint error.
+        /// `ON CONFLICT DO NOTHING` on the start-key index is how that race is
+        /// detected: under `READ COMMITTED` the read that found no retained
+        /// process for the key and this insert take different snapshots, so
+        /// the loser has to be told rather than raise the unique violation.
+        /// The minted id itself never collides. SQLite reads the absence under
+        /// the lock it inserts under.
         insert_registration = "INSERT INTO processes (
-                process_id, incarnation, registration_fingerprint, originator_id, wake_session_id,
+                process_id, start_key, originator_id, wake_session_id,
                 identity_kind, identity_label,
                 created_at_ms, updated_at_ms, last_event_sequence,
                 change_seq, status,
                 parent_scope_kind, parent_scope_id, on_parent_end, cancel_requested_at_ms,
                 record_json
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
-             ON CONFLICT (process_id) DO NOTHING";
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
+             ON CONFLICT (start_key) WHERE start_key IS NOT NULL DO NOTHING";
 
         /// How many processes are live.
         ///
@@ -265,7 +266,6 @@ lash_store_sql::statements! {
                     'deleted' AS kind,
                     json_build_object(
                         'process_id', process_id,
-                        'incarnation', incarnation,
                         'terminal_label', terminal_label,
                         'pruned_at_ms', pruned_at_ms,
                         'pruned_change_seq', pruned_change_seq
@@ -400,7 +400,6 @@ lash_store_sql::statements! {
         list_observed = "SELECT p.record_json
              FROM process_observers o
              JOIN processes p ON p.process_id = o.process_id
-                                    AND p.incarnation = o.process_incarnation
              WHERE o.session_id = ?1
                AND (?2::TEXT[] IS NULL OR p.status = ANY(?2))
                AND (?3::BIGINT IS NULL OR {{live_process_status(p.status)}}
@@ -450,10 +449,9 @@ lash_store_sql::statements! {
          ),
          inserted_tombstones AS (
              INSERT INTO process_tombstones (
-                 process_id, incarnation, terminal_label, pruned_at_ms, pruned_change_seq
+                 process_id, terminal_label, pruned_at_ms, pruned_change_seq
              )
              SELECT candidate.process_id,
-                    process.incarnation,
                     process.status,
                     ?2,
                     clock.current_seq - (SELECT count(*) FROM candidates) + candidate.ordinality
@@ -463,22 +461,20 @@ lash_store_sql::statements! {
              CROSS JOIN event_count
              WHERE event_count.value >= 0
              ORDER BY candidate.ordinality
-             RETURNING process_id, incarnation
+             RETURNING process_id
          ),
          inserted_artifact_cleanup AS (
              INSERT INTO process_artifact_cleanup (
-                 process_id, incarnation, cleanup_json
+                 process_id, cleanup_json
              )
              SELECT tombstone.process_id,
-                    tombstone.incarnation,
                     jsonb_build_object(
                         'process_id', process.process_id,
-                        'incarnation', process.incarnation,
                         'env_ref', process.record_json::jsonb -> 'env_ref',
                         'input', process.record_json::jsonb -> 'input'
                     )::text
              FROM inserted_tombstones AS tombstone
-             JOIN processes AS process USING (process_id, incarnation)
+             JOIN processes AS process USING (process_id)
              RETURNING process_id
          ),
          deleted_processes AS (
@@ -500,14 +496,8 @@ lash_store_sql::statements! {
     /// `process_observers` statements only PostgreSQL issues.
     pub(crate) struct ObserverPostgresStatements @ "process_observer" {
         /// `ON CONFLICT DO NOTHING` is PostgreSQL's spelling of SQLite's `INSERT OR IGNORE`.
-        insert_if_absent = "INSERT INTO process_observers (session_id, process_id, process_incarnation)
-             VALUES (?1, ?2, ?3) ON CONFLICT DO NOTHING";
-
-        /// The sessions observing process `?1`, at any incarnation.
-        ///
-        /// Unnarrowed, where SQLite's twin filters to the incarnation the
-        /// caller read.
-        list_sessions_for_process = "SELECT session_id FROM process_observers WHERE process_id = ?1 ORDER BY session_id";
+        insert_if_absent = "INSERT INTO process_observers (session_id, process_id)
+             VALUES (?1, ?2) ON CONFLICT DO NOTHING";
     }
 }
 
@@ -602,7 +592,6 @@ lash_store_sql::statements! {
                AND NOT EXISTS (
                    SELECT 1 FROM process_artifact_cleanup AS cleanup
                    WHERE cleanup.process_id = process_tombstones.process_id
-                     AND cleanup.incarnation = process_tombstones.incarnation
                )";
 
         /// Delete exactly the rows
@@ -615,28 +604,7 @@ lash_store_sql::statements! {
                AND NOT EXISTS (
                    SELECT 1 FROM process_artifact_cleanup AS cleanup
                    WHERE cleanup.process_id = process_tombstones.process_id
-                     AND cleanup.incarnation = process_tombstones.incarnation
                )";
-    }
-}
-
-lash_store_sql::statements! {
-    /// `process_artifact_cleanup` statements only PostgreSQL issues.
-    pub(crate) struct ArtifactCleanupPostgresStatements @ "process_artifact_cleanup" {
-        /// Acknowledge the release owed for `?1` / `?2`, reporting whether a
-        /// row was removed and what incarnation the process is on now.
-        ///
-        /// One statement, because the pair decides between "acknowledged",
-        /// "stale incarnation" and "unknown" and a re-registration between two
-        /// reads would answer the wrong one. SQLite asks the two halves under
-        /// its write lock.
-        delete_for_incarnation_reporting_incarnation = "WITH deleted AS (
-             DELETE FROM process_artifact_cleanup
-             WHERE process_id = ?1 AND incarnation = ?2
-             RETURNING 1
-         )
-         SELECT EXISTS(SELECT 1 FROM deleted),
-                (SELECT incarnation FROM processes WHERE process_id = ?1)";
     }
 }
 
@@ -694,10 +662,10 @@ lash_store_sql::statements! {
         /// `ON CONFLICT (delivery_id) DO NOTHING` is PostgreSQL's spelling of SQLite's `INSERT
         /// OR IGNORE`.
         insert_pending = "INSERT INTO process_wake_deliveries (
-            delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
+            delivery_id, process_id, target_session_id, sequence, state,
             claim_token, attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
             discard_reason, delivery_json
-         ) VALUES (?1, ?2, ?3, ?4, ?5, {{pending_wake_delivery_state_value(state)}}, NULL, 0, NULL, ?6, ?7, NULL, ?8)
+         ) VALUES (?1, ?2, ?3, ?4, {{pending_wake_delivery_state_value(state)}}, NULL, 0, NULL, ?5, ?6, NULL, ?7)
          ON CONFLICT (delivery_id) DO NOTHING";
 
         /// The next `?1` claimable wakes at `?2`, skipping any whose ordering
@@ -907,7 +875,6 @@ pub(crate) struct ProcessSql {
     /// `process_artifact_cleanup` statements both backends issue verbatim.
     pub(crate) cleanup: ArtifactCleanupStatements,
     /// `process_artifact_cleanup` statements only PostgreSQL issues.
-    pub(crate) cleanup_postgres: ArtifactCleanupPostgresStatements,
     /// `parent_end_plans` statements both backends issue verbatim.
     pub(crate) plan: ParentEndPlanStatements,
     /// `parent_end_plans` statements only PostgreSQL issues.
@@ -944,7 +911,6 @@ static PROCESS_SQL: LazyLock<ProcessSql> = LazyLock::new(|| {
         park_event: ProcessParkEventStatements::render(dialect),
         park_clock_postgres: ProcessParkClockPostgresStatements::render(dialect),
         cleanup: ArtifactCleanupStatements::render(dialect),
-        cleanup_postgres: ArtifactCleanupPostgresStatements::render(dialect),
         plan: ParentEndPlanStatements::render(dialect),
         plan_postgres: ParentEndPlanPostgresStatements::render(dialect),
         floor: WakeAllocationFloorStatements::render(dialect),

@@ -25,7 +25,7 @@
 # row, and contain structural names/types plus literals that control decoding. Once
 # registered, changing those lines requires every durable backend named by the
 # payload projection to advance its component version.
-version 138
+version 139
 table lash_artifact_owner_retirements
   column owner_id text not-null
   column owner_kind text not-null
@@ -49,7 +49,6 @@ table lash_attachment_manifest
   column committed_at_ms bigint nullable
   column intent_at_ms bigint not-null
   column owner_id text nullable
-  column owner_incarnation bigint nullable
   column owner_kind text nullable
   column session_id text not-null
   column write_id text nullable
@@ -148,10 +147,9 @@ table lash_pending_turn_inputs
   primary-key (enqueue_seq)
 table lash_process_artifact_cleanup
   column cleanup_json text not-null
-  column incarnation bigint not-null
   column process_id text not-null
-  primary-key (process_id, incarnation)
-  foreign-key (process_id, incarnation) references lash_process_tombstones (process_id, incarnation) on delete restrict
+  primary-key (process_id)
+  foreign-key (process_id) references lash_process_tombstones (process_id) on delete restrict
 table lash_process_change_clock
   column current_seq bigint not-null
   column singleton boolean not-null default
@@ -176,11 +174,10 @@ table lash_process_events
   column event_type text not-null
   column idempotency_key text nullable
   column process_id text not-null
-  column process_incarnation bigint not-null
   column sequence bigint not-null
   unique (process_id, idempotency_key) where idempotency_key is not null
-  primary-key (process_id, process_incarnation, sequence)
-  foreign-key (process_id, process_incarnation) references lash_processes (process_id, incarnation) on delete cascade
+  primary-key (process_id, sequence)
+  foreign-key (process_id) references lash_processes (process_id) on delete cascade
 table lash_process_leases
   column lease_claimed_at_ms bigint not-null default
   column lease_expires_at_ms bigint not-null default
@@ -193,10 +190,9 @@ table lash_process_leases
   foreign-key (process_id) references lash_processes (process_id) on delete cascade
 table lash_process_observers
   column process_id text not-null
-  column process_incarnation bigint not-null
   column session_id text not-null
-  primary-key (session_id, process_id, process_incarnation)
-  foreign-key (process_id, process_incarnation) references lash_processes (process_id, incarnation) on delete cascade
+  primary-key (session_id, process_id)
+  foreign-key (process_id) references lash_processes (process_id) on delete cascade
 table lash_process_park_clock
   column compaction_horizon bigint not-null default
   column current_seq bigint not-null default
@@ -284,12 +280,11 @@ table lash_process_segment_handovers
   primary-key (process_id, segment_ordinal)
   foreign-key (process_id) references lash_processes (process_id) on delete cascade
 table lash_process_tombstones
-  column incarnation bigint not-null
   column process_id text not-null
   column pruned_at_ms bigint not-null
   column pruned_change_seq bigint not-null
   column terminal_label text not-null
-  primary-key (process_id, incarnation)
+  primary-key (process_id)
 table lash_process_wake_deliveries
   column attempts bigint not-null default
   column claim_token text nullable
@@ -300,19 +295,17 @@ table lash_process_wake_deliveries
   column first_attempt_ms bigint nullable
   column next_attempt_at_ms bigint not-null
   column process_id text not-null
-  column process_incarnation bigint not-null
   column sequence bigint not-null
   column state text not-null
   column target_session_id text not-null
   primary-key (delivery_id)
-  foreign-key (process_id, process_incarnation) references lash_processes (process_id, incarnation) on delete cascade
+  foreign-key (process_id) references lash_processes (process_id) on delete cascade
 table lash_processes
   column cancel_requested_at_ms bigint nullable
   column change_seq bigint not-null
   column created_at_ms bigint not-null
   column identity_kind text not-null
   column identity_label text nullable
-  column incarnation bigint not-null
   column last_event_sequence bigint not-null
   column on_parent_end text not-null
   column originator_id text not-null
@@ -323,11 +316,11 @@ table lash_processes
   column parked_since_ms bigint nullable
   column process_id text not-null
   column record_json text not-null
-  column registration_fingerprint text not-null
+  column start_key text nullable
   column status text not-null
   column updated_at_ms bigint not-null
   column wake_session_id text nullable
-  unique (process_id, incarnation)
+  unique (start_key) where start_key is not null
   primary-key (process_id)
 table lash_queued_run_members
   column collection_kind text not-null
@@ -1126,7 +1119,6 @@ table lash_session_meta
   primary-key (session_id)
 table lash_session_meta_pending_observer_intents
   column process_id text not-null
-  column process_incarnation bigint nullable
   column process_index bigint not-null
   column session_id text not-null
   unique (session_id, process_index)
@@ -1153,7 +1145,7 @@ table lash_tool_intent_submissions
 table lash_trigger_deliveries
   column created_at_ms bigint not-null
   column occurrence_id text not-null
-  column process_id text not-null
+  column process_id text nullable
   column subscription_id text not-null
   column subscription_incarnation text not-null
   column subscription_revision bigint not-null

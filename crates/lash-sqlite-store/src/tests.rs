@@ -553,7 +553,7 @@ async fn session_listing_statement_count_is_session_count_invariant() {
                 } else {
                     vec![
                         lash_core_execution::facade_support::SessionObserverIntent::host_requested(
-                            format!("intent-process-{index}"),
+                            ProcessId::fixture(&format!("intent-process-{index}")),
                         ),
                     ]
                 },
@@ -749,9 +749,8 @@ async fn checkpoint_component_statement_count_is_depth_invariant() {
     );
 }
 
-fn registration(id: &str) -> ProcessRegistration {
+fn registration() -> ProcessRegistration {
     ProcessRegistration::new(
-        id,
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
@@ -1067,10 +1066,11 @@ async fn segment_handover_persist_keeps_current_input_for_crash_replay() {
         .await
         .expect("memory registry")
         .process_registry();
-    registry
-        .register_process(registration("segment-crash"))
+    let segment_crash_id = registry
+        .register_process(registration())
         .await
-        .expect("register");
+        .expect("register")
+        .id;
     let handover = |segment_ordinal| PersistedSegmentHandover {
         writer: String::new(),
         segment_ordinal,
@@ -1081,17 +1081,17 @@ async fn segment_handover_persist_keeps_current_input_for_crash_replay() {
         },
     };
     registry
-        .put_segment_handover(&ProcessId::from("segment-crash"), handover(1))
+        .put_segment_handover(&segment_crash_id, handover(1))
         .await
         .expect("persist current segment input");
     registry
-        .put_segment_handover(&ProcessId::from("segment-crash"), handover(2))
+        .put_segment_handover(&segment_crash_id, handover(2))
         .await
         .expect("persist successor before send");
 
     assert_eq!(
         registry
-            .get_segment_handover(&ProcessId::from("segment-crash"), 1)
+            .get_segment_handover(&segment_crash_id, 1)
             .await
             .expect("replay read"),
         Some(handover(1)),
@@ -1099,7 +1099,7 @@ async fn segment_handover_persist_keeps_current_input_for_crash_replay() {
     );
     assert_eq!(
         registry
-            .latest_segment_handover(&ProcessId::from("segment-crash"))
+            .latest_segment_handover(&segment_crash_id)
             .await
             .expect("latest handover"),
         Some(handover(2))
@@ -1112,13 +1112,14 @@ async fn terminal_segment_handover_cleanup_removes_continuation_state() {
         .await
         .expect("memory registry")
         .process_registry();
-    registry
-        .register_process(registration("segment-terminal"))
+    let segment_terminal_id = registry
+        .register_process(registration())
         .await
-        .expect("register");
+        .expect("register")
+        .id;
     registry
         .put_segment_handover(
-            &ProcessId::from("segment-terminal"),
+            &segment_terminal_id,
             PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: 1,
@@ -1132,12 +1133,12 @@ async fn terminal_segment_handover_cleanup_removes_continuation_state() {
         .await
         .expect("persist handover");
     registry
-        .delete_segment_handovers(&ProcessId::from("segment-terminal"))
+        .delete_segment_handovers(&segment_terminal_id)
         .await
         .expect("terminal cleanup");
     assert!(
         registry
-            .latest_segment_handover(&ProcessId::from("segment-terminal"))
+            .latest_segment_handover(&segment_terminal_id)
             .await
             .expect("latest handover")
             .is_none()
@@ -1227,26 +1228,27 @@ async fn sqlite_module_cache_does_not_resurrect_artifact_reclaimed_by_another_ha
 async fn sqlite_process_registry_persists_rows_after_reopen() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("processes.db");
-    {
+    let proc_persist_id = {
         let registry = SqliteProcessRegistry::open(&path, dir.path().join("sessions"))
             .await
             .expect("open registry");
         let session_scope = lash_core_execution::SessionScope::new("session");
-        registry
-            .register_process(registration("proc-persist"))
+        let proc_persist_id = registry
+            .register_process(registration())
             .await
-            .expect("register");
+            .expect("register")
+            .id;
         registry
             .add_observer(
                 &session_scope.session_id,
-                &ProcessId::from("proc-persist"),
+                &proc_persist_id,
                 lash_core_execution::ProcessObserverBy::host("sqlite-reopen-test"),
             )
             .await
             .expect("observe");
         registry
             .complete_process(
-                &ProcessId::from("proc-persist"),
+                &proc_persist_id,
                 ProcessAwaitOutput::from_tool_output(lash_core_execution::ToolCallOutput::success(
                     serde_json::json!({"ok": true}),
                 )),
@@ -1254,7 +1256,8 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
             )
             .await
             .expect("complete");
-    }
+        proc_persist_id
+    };
 
     let registry = Arc::new(
         SqliteProcessRegistry::open(&path, dir.path().join("sessions"))
@@ -1263,7 +1266,7 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
     ) as Arc<dyn lash_core_execution::ProcessRegistry>;
     let session_scope = lash_core_execution::SessionScope::new("session");
     let record = registry
-        .get_process(&ProcessId::from("proc-persist"))
+        .get_process(&proc_persist_id)
         .await
         .expect("read process")
         .expect("persisted process");
@@ -1275,7 +1278,7 @@ async fn sqlite_process_registry_persists_rows_after_reopen() {
     );
     assert_eq!(
         lash_core_execution::NativeProcessWork::for_registry(Arc::clone(&registry))
-            .await_terminal(&ProcessId::from("proc-persist"))
+            .await_terminal(&proc_persist_id)
             .await
             .expect("await persisted"),
         ProcessAwaitOutput::from_tool_output(lash_core_execution::ToolCallOutput::success(

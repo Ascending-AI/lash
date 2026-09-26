@@ -851,9 +851,9 @@ finish(result);
         child
             .child_process_id
             .as_str()
-            .starts_with("process:subagent:")
+            .starts_with(lash_sansio::PROCESS_ID_PREFIX),
+        "a subagent's child is named by the id its start minted"
     );
-    assert!(child.child_incarnation > 0);
     assert_eq!(child.child_attempt, None);
 }
 

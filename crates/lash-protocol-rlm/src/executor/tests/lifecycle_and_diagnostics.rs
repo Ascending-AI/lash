@@ -1081,7 +1081,7 @@ impl lash_core::facade_support::TraceSink for NoopTraceSink {
 
 #[test]
 pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation() {
-    let process_id = lash_core::ProcessId::from("rlm-session-turn");
+    let process_id = lash_core::ProcessId::fixture("rlm-session-turn");
     let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
         process_id.clone(),
         "invocation-rlm-cell",
@@ -1091,14 +1091,10 @@ pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation(
     // the process scope needs no journaling host.
     let controller: Arc<dyn lash_core::RuntimeEffectController> =
         Arc::new(lash_core::testing::UnavailableEffectController);
-    let admitted_process = lash_core::ProcessRef::new(
-        process_id.clone(),
-        lash_core::ProcessIncarnation::from_registration_sequence(1),
-    );
     let process_controller = || {
         lash_core::ScopedEffectController::shared(
             Arc::clone(&controller),
-            lash_core::AdmittedScope::process(admitted_process.clone()),
+            lash_core::AdmittedScope::process(process_id.clone()),
         )
         .expect("process scope")
     };
@@ -1136,7 +1132,6 @@ pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation(
         "the RLM trace identity must carry the projector's source identity"
     );
     assert_eq!(trace.identity().attempt(), Some(2));
-    assert_eq!(trace.identity().incarnation(), Some(1));
 
     // The trace identity reads the context alone; the cell never runs, so
     // the context needs no host.
@@ -1165,7 +1160,6 @@ pub(super) fn foreground_trace_carries_the_enclosing_restate_process_invocation(
     )
     .expect("non-process foreground trace");
     assert_eq!(non_process_trace.identity().attempt(), None);
-    assert_eq!(non_process_trace.identity().incarnation(), None);
 }
 
 pub(super) async fn execute_continue_as_with_trace_sink(

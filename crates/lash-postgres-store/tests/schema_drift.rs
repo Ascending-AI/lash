@@ -362,17 +362,16 @@ async fn a_same_column_set_guard_with_another_predicate_is_rejected() {
 async fn a_foreign_key_missing_its_cascade_is_rejected() {
     assert_mutation_is_rejected(
         "ALTER TABLE lash_process_events
-             DROP CONSTRAINT lash_process_events_process_id_process_incarnation_fkey;
+             DROP CONSTRAINT lash_process_events_process_id_fkey;
          ALTER TABLE lash_process_events
-             ADD CONSTRAINT lash_process_events_process_id_process_incarnation_fkey
-             FOREIGN KEY (process_id, process_incarnation)
-             REFERENCES lash_processes(process_id, incarnation)",
+             ADD CONSTRAINT lash_process_events_process_id_fkey
+             FOREIGN KEY (process_id)
+             REFERENCES lash_processes(process_id)",
         &[
             "FOREIGN KEY DRIFT",
-            "lash_process_events: expected foreign key (process_id, process_incarnation) \
-             references lash_processes (process_id, incarnation) on delete cascade, found \
-             (process_id, process_incarnation) references lash_processes (process_id, \
-             incarnation) on delete no action",
+            "lash_process_events: expected foreign key (process_id) references lash_processes \
+             (process_id) on delete cascade, found (process_id) references lash_processes \
+             (process_id) on delete no action",
         ],
         |finding| {
             matches!(
@@ -552,11 +551,11 @@ async fn an_alter_built_equivalent_schema_opens_clean() {
                  ADD CONSTRAINT host_named_subscription_key
                  UNIQUE (owner_scope, subscription_key);
              ALTER TABLE lash_process_observers
-                 DROP CONSTRAINT lash_process_observers_process_id_process_incarnation_fkey;
+                 DROP CONSTRAINT lash_process_observers_process_id_fkey;
              ALTER TABLE lash_process_observers
                  ADD CONSTRAINT host_named_observer_process
-                 FOREIGN KEY (process_id, process_incarnation)
-                 REFERENCES lash_processes(process_id, incarnation)
+                 FOREIGN KEY (process_id)
+                 REFERENCES lash_processes(process_id)
                  ON DELETE CASCADE;
 
              -- The dedup guard rebuilt as a constraint-free index with another
@@ -1919,13 +1918,12 @@ fn corruption_fixture_wake(
     session_id: &SessionId,
     case: &str,
 ) -> lash_core_execution::ProcessWakeDelivery {
-    let process_id = || lash_core_execution::ProcessId::from(format!("corrupt-process-{case}"));
+    let process_id = || lash_core_execution::ProcessId::fixture(&format!("corrupt-process-{case}"));
     lash_core_execution::ProcessWakeDelivery {
         version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("corrupt-wake-{case}"),
         target_session_id: session_id.clone(),
         process_id: process_id(),
-        process_incarnation: lash_core_execution::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "process.wake".to_string(),
         event_invocation: lash_core_execution::RuntimeInvocation {

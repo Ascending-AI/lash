@@ -112,7 +112,6 @@ impl<'a> GraphProjection<'a> {
         let visible_process_ids = snapshot
             .visible_processes
             .into_iter()
-            .map(|process_ref| process_ref.process_id)
             .collect::<BTreeSet<_>>();
 
         let graph_by_key = graphs
@@ -281,12 +280,10 @@ impl<'a> GraphProjection<'a> {
         out: &mut Vec<LashlangGraphLineageEdge>,
     ) {
         let process_id = child.child_process_id.clone();
-        let bridge_graph_key = child.child_graph_key.clone().unwrap_or_else(|| {
-            format!(
-                "process:{process_id}:incarnation:{}",
-                child.child_incarnation
-            )
-        });
+        let bridge_graph_key = child
+            .child_graph_key
+            .clone()
+            .unwrap_or_else(|| format!("process:{process_id}"));
         let process = self.observed_process(&process_id).await;
         if let Some(process) = process.as_ref()
             && let Some(child_session_id) = process.child_session_id.clone()
@@ -375,10 +372,9 @@ impl<'a> GraphProjection<'a> {
                     TraceRuntimeSubject::Process { process_id }
                         if process_id == child.child_process_id
                 ) && graph.history.first().is_some_and(|event| {
-                    event.event.identity.incarnation() == Some(child.child_incarnation)
-                        && child
-                            .child_attempt
-                            .is_none_or(|attempt| event.event.identity.attempt() == Some(attempt))
+                    child
+                        .child_attempt
+                        .is_none_or(|attempt| event.event.identity.attempt() == Some(attempt))
                 })
             })
             .map(|graph| graph.graph_key.clone())
@@ -578,9 +574,8 @@ mod tests {
             lash::plugins::PluginOptions::default(),
         )
         .with_session_id(child_session_id);
-        registry
+        let subagent_process_id = registry
             .register_process(lash::process::ProcessRegistration::new(
-                "subagent-process",
                 RuntimeInput::SessionTurn {
                     definition_key: "agent-workbench-subagent:v1".to_string(),
                     create_request: Box::new(create_request),
@@ -595,7 +590,8 @@ mod tests {
                 ),
             ))
             .await
-            .expect("register subagent process");
+            .expect("register subagent process")
+            .id;
 
         let parent_graph = TraceLashlangGraph {
             schema_version: lash::tracing::TRACE_SCHEMA_VERSION,
@@ -627,8 +623,7 @@ mod tests {
                 parent_graph_key: "effect:root:turn-1:exec-1".to_string(),
                 parent_node_id: "spawn".to_string(),
                 child_graph_key: None,
-                child_process_id: ProcessId::from("subagent-process"),
-                child_incarnation: 1,
+                child_process_id: subagent_process_id.clone(),
                 child_attempt: None,
                 child_module_ref: None,
                 child_entry_ref: None,
@@ -688,10 +683,10 @@ mod tests {
 
         assert_eq!(lineage_edges.len(), 1);
         let edge = &lineage_edges[0];
-        assert_eq!(edge.bridge_process_id.as_deref(), Some("subagent-process"));
+        assert_eq!(edge.bridge_process_id.as_ref(), Some(&subagent_process_id));
         assert_eq!(
             edge.bridge_graph_key,
-            "process:subagent-process:incarnation:1"
+            format!("process:{subagent_process_id}")
         );
         assert_eq!(edge.child_session_id.as_deref(), Some(child_session_id));
         assert_eq!(
@@ -713,9 +708,8 @@ mod tests {
             lash::plugins::PluginOptions::default(),
         )
         .with_session_id(child_session_id);
-        registry
+        let subagent_process_id = registry
             .register_process(lash::process::ProcessRegistration::new(
-                "subagent-process",
                 RuntimeInput::SessionTurn {
                     definition_key: "agent-workbench-subagent:v1".to_string(),
                     create_request: Box::new(create_request),
@@ -732,18 +726,18 @@ mod tests {
                 ),
             ))
             .await
-            .expect("register subagent process");
+            .expect("register subagent process")
+            .id;
         registry
             .add_observer(
                 &SessionId::from(current_session_id),
-                &ProcessId::from("subagent-process"),
+                &subagent_process_id,
                 lash::process::ProcessObserverBy::host("workbench-current"),
             )
             .await
             .expect("observe current process");
-        registry
+        let old_process_id = registry
             .register_process(lash::process::ProcessRegistration::new(
-                "old-process",
                 RuntimeInput::External {
                     metadata: json!({ "old": true }),
                 },
@@ -755,11 +749,12 @@ mod tests {
                 ),
             ))
             .await
-            .expect("register old process");
+            .expect("register old process")
+            .id;
         registry
             .add_observer(
                 &SessionId::from(old_session_id),
-                &ProcessId::from("old-process"),
+                &old_process_id,
                 lash::process::ProcessObserverBy::host("workbench-old"),
             )
             .await
@@ -780,8 +775,7 @@ mod tests {
                 parent_graph_key: "effect:current-session:turn-1:exec-1".to_string(),
                 parent_node_id: "spawn".to_string(),
                 child_graph_key: None,
-                child_process_id: ProcessId::from("subagent-process"),
-                child_incarnation: 1,
+                child_process_id: subagent_process_id.clone(),
                 child_attempt: None,
                 child_module_ref: None,
                 child_entry_ref: None,
@@ -789,10 +783,10 @@ mod tests {
             }],
         );
         let process_graph = test_graph(
-            "process:subagent-process",
+            &format!("process:{subagent_process_id}"),
             old_session_id,
             TraceRuntimeSubject::Process {
-                process_id: ProcessId::from("subagent-process"),
+                process_id: subagent_process_id.clone(),
             },
             Vec::new(),
         );
@@ -810,10 +804,10 @@ mod tests {
             Vec::new(),
         );
         let old_graph = test_graph(
-            "process:old-process",
+            &format!("process:{old_process_id}"),
             old_session_id,
             TraceRuntimeSubject::Process {
-                process_id: ProcessId::from("old-process"),
+                process_id: old_process_id.clone(),
             },
             Vec::new(),
         );
@@ -829,8 +823,8 @@ mod tests {
         let keys = projection.visible_keys;
 
         assert!(keys.contains("effect:current-session:turn-1:exec-1"));
-        assert!(keys.contains("process:subagent-process"));
+        assert!(keys.contains(&format!("process:{subagent_process_id}")));
         assert!(keys.contains("effect:child-session:turn-1:exec-1"));
-        assert!(!keys.contains("process:old-process"));
+        assert!(!keys.contains(&format!("process:{old_process_id}")));
     }
 }

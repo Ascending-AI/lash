@@ -139,7 +139,9 @@ pub enum RemoteTriggerDeliveryEmitOutcome {
 pub struct RemoteTriggerDeliveryEmitReceipt {
     pub occurrence_id: String,
     pub subscription_id: String,
-    pub process_id: ProcessId,
+    /// The process the delivery started; absent when it failed to start.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub process_id: Option<ProcessId>,
     pub outcome: RemoteTriggerDeliveryEmitOutcome,
 }
 

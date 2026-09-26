@@ -185,8 +185,7 @@ fn remote_process_event_semantics_accept_matching_failed_cancelled_and_abandoned
 fn remote_process_cancel_receipt_rejects_status_that_contradicts_its_record() {
     let receipt = RemoteProcessCancelReceipt {
         origin: lash_sansio::CancelOrigin::OperatorRequested,
-        process_id: ProcessId::from("process:1"),
-        incarnation: 1,
+        process_id: lash_sansio::ProcessId::fixture("process:1"),
         status: RemoteProcessStatus::Cancelled,
         record: Some(remote_process_record()),
     };

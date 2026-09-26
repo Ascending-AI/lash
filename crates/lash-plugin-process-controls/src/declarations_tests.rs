@@ -11,11 +11,8 @@ fn tools() -> SessionProcessAdminTools {
     }
 }
 
-fn process_handle(process_id: &str, incarnation: u64) -> Value {
-    lash_core::RuntimeExecutionContext::process_handle_json(&lash_core::ProcessRef::new(
-        process_id,
-        lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
-    ))
+fn process_handle(process_id: &lash_core::ProcessId) -> Value {
+    lash_core::RuntimeExecutionContext::process_handle_json(process_id)
 }
 
 fn intents(outcome: ToolAttemptOutcome) -> (Value, Vec<ToolIntent>) {
@@ -56,7 +53,7 @@ fn attempt_context(enclosing_process: Option<&str>) -> lash_core::ToolContext<'s
         .__with_scoped_effect_controller_for_testing(scoped)
         .__with_attempt_binding_for_testing(
             Some("declaration-call".to_string()),
-            enclosing_process.map(|id| lash_core::ProcessId::from(id.to_string())),
+            enclosing_process.map(lash_core::ProcessId::fixture),
         )
 }
 
@@ -80,7 +77,7 @@ macro_rules! attempt {
 }
 
 #[tokio::test]
-async fn start_process_declares_a_start_and_answers_with_the_unrealized_handle() {
+async fn start_process_declares_a_start_and_answers_with_its_start_slot() {
     let outcome = attempt!(
         "start_process",
         serde_json::json!({
@@ -107,32 +104,17 @@ async fn start_process_declares_a_start_and_answers_with_the_unrealized_handle()
         Some(&serde_json::json!({ "request": { "id": "req-1" } }))
     );
 
-    // FIG-2999 re-pin. The answer is the one handle kind (ADR 0095), not a
-    // `{ id, process_id }` record: `id` is a `HandleId`, and the process id it
-    // carries is the one the declaration's own identity derives, so the
-    // executor starts that same id on the first run and on every redrive.
-    //
-    // The incarnation reads `0` because a declaring attempt cannot know it: the
-    // registry allocates it as a change sequence when the start is realized,
-    // and realization projects the real handle over this one. A record that
-    // escaped without that projection is refused downstream by
-    // `ProcessRef::from_handle_json` ("missing `incarnation`"), so the
-    // unrealized spelling can never be mistaken for a started process.
-    let identity = {
-        let tool_context = attempt_context(None);
-        let context = lash_core::AttemptContext::__for_testing(&tool_context, "declaration-scope");
-        context.intent_identity(0).expect("a derivable identity")
-    };
-    let expected = lash_core::ProcessId::from_intent_identity(&identity);
-    assert_eq!(
-        output.get(lash_sansio::handle::HANDLE_FIELD),
-        Some(&serde_json::json!("lash"))
+    // The answer is a start slot, never a handle (ADR 0107): a declaring
+    // attempt cannot know the id the registrar will mint, so it names its own
+    // intent index, and the attempt coordinator replaces the slot with the
+    // realized start's handle before any model or cell sees the output. The
+    // slot is not a handle record, so an unrealized start can never be
+    // mistaken for a started process.
+    assert_eq!(output, lash_sansio::handle::process_start_slot_json(0));
+    assert!(
+        output.get(lash_sansio::handle::HANDLE_FIELD).is_none(),
+        "the unrealized answer carries no handle"
     );
-    assert_eq!(
-        output.get("id"),
-        Some(&serde_json::json!(format!("p.0.{expected}")))
-    );
-    assert_eq!(output.get("process_id"), Some(&serde_json::json!(expected)));
 }
 
 /// A start outside any chain is a session start, so the calling session is the
@@ -208,7 +190,7 @@ async fn signal_process_declares_the_signal_the_handle_names() {
     let outcome = attempt!(
         "signal_process",
         serde_json::json!({
-            "handle": process_handle("process-7", 3),
+            "handle": process_handle(&lash_core::ProcessId::fixture("process-7")),
             "name": "approved",
             "payload": { "by": "sam" },
         })
@@ -217,7 +199,10 @@ async fn signal_process_declares_the_signal_the_handle_names() {
     let [ToolIntent::SignalProcess(intent)] = declared.as_slice() else {
         panic!("expected one signal declaration, got {declared:?}");
     };
-    assert_eq!(intent.process_id.as_str(), "process-7");
+    assert_eq!(
+        intent.process_id,
+        lash_core::ProcessId::fixture("process-7")
+    );
     assert_eq!(intent.signal_name, "approved");
     assert_eq!(intent.payload, serde_json::json!({ "by": "sam" }));
 }
@@ -257,7 +242,10 @@ async fn emit_process_event_declares_an_append_to_its_own_process() {
     let [ToolIntent::EmitProcessEvent(intent)] = declared.as_slice() else {
         panic!("expected one append declaration, got {declared:?}");
     };
-    assert_eq!(intent.process_id.as_str(), "process-9");
+    assert_eq!(
+        intent.process_id,
+        lash_core::ProcessId::fixture("process-9")
+    );
     assert_eq!(intent.payload, serde_json::json!({ "stage": "approved" }));
 }
 
@@ -352,7 +340,6 @@ async fn a_started_definition_is_the_definition_processes_list_filters_by() {
     assert_eq!(kind, lash_lashlang_runtime::LASHLANG_ENGINE_KIND);
 
     let mut registration = lash_core::ProcessRegistration::new(
-        "process-review",
         start.declaration.input.clone(),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
@@ -367,7 +354,7 @@ async fn a_started_definition_is_the_definition_processes_list_filters_by() {
     registration.identity = identity;
     let record = lash_core::ProcessRecord::from_registration(
         registration,
-        lash_core::ProcessIncarnation::from_registration_sequence(1),
+        lash_core::ProcessId::fixture("process-review"),
     );
 
     let filter = lash_core::ProcessListFilter::decode(&serde_json::json!({

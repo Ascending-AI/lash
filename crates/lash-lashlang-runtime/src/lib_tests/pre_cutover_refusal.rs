@@ -159,9 +159,7 @@ async fn run_counted(
     input: &LashlangProcessInput,
     handover: Option<lash_core::SegmentHandover>,
 ) -> RefusedRun {
-    let process_id = lash_core::ProcessId::from("pre-cutover-process");
     let registration = lash_core::ProcessRegistration::new(
-        process_id.clone(),
         input.to_process_input().expect("valid process input"),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessProvenance::host(),
@@ -173,14 +171,13 @@ async fn run_counted(
     .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
         input.process_identity(),
     ));
-    let incarnation = lash_core::ProcessIncarnation::from_registration_sequence(1);
+    // The refusal lands before the run reads the registry, so the process is
+    // never registered and a fixture id stands in for the one a registrar mints.
+    let process_id = lash_core::ProcessId::fixture("pre-cutover-process");
     let counter = Arc::new(CrossingCounter::default());
     let scoped = lash_core::ScopedEffectController::shared(
         Arc::clone(&counter) as Arc<dyn lash_core::RuntimeEffectController>,
-        lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
-            process_id.clone(),
-            incarnation,
-        )),
+        lash_core::AdmittedScope::process(process_id.clone()),
     )
     .expect("valid process scope");
     let built =
@@ -190,13 +187,15 @@ async fn run_counted(
     let registry: Arc<dyn lash_core::ProcessRegistry> = crate::lib_tests::memory_store_set()
         .await
         .process_registry();
-    let authority =
-        lash_core::ProcessExecutionWriteAuthority::invocation(process_id, "pre-cutover-run")
-            .bind_attempt(1);
+    let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
+        process_id.clone(),
+        "pre-cutover-run",
+    )
+    .bind_attempt(1);
     let runtime_built = Arc::new(AtomicBool::new(false));
     let context = lash_core::ProcessEngineRunContext::new(
         registration,
-        incarnation,
+        process_id.clone(),
         lash_core::ProcessExecutionContext::default().with_execution_write_authority(authority),
         lash_core::testing::process_work_wiring_for_registry(registry),
         lash_core::SessionId::from("pre-cutover-session"),

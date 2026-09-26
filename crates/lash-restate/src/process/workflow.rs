@@ -35,10 +35,10 @@ use super::{
     PROCESS_CANCEL_PROMISE_KEY, RESTATE_PROCESS_JOURNAL_VERSION, RestateProcessAwaitRequest,
     RestateProcessCancelRequest, RestateProcessCancelSignal, RestateProcessCompleteRequest,
     RestateProcessRunner, RestateProcessWorkflowInput, RestateProcessWorkflowOutput,
-    SegmentAdmission, SegmentStarted, admit_segment, boundary_must_be_declined,
-    handler_error_from_plugin, handover_digest, is_replay_mismatch, process_segment_workflow_key,
-    resolve_process_cancel_signal, resolve_process_terminal_promise, restate_now_ms,
-    restate_process_terminal_await_key, restate_process_terminal_output,
+    RestateProcessWorkflowPayload, SegmentAdmission, SegmentStarted, admit_segment,
+    boundary_must_be_declined, handler_error_from_plugin, handover_digest, is_replay_mismatch,
+    process_segment_workflow_key, resolve_process_cancel_signal, resolve_process_terminal_promise,
+    restate_now_ms, restate_process_terminal_await_key, restate_process_terminal_output,
     terminal_completion_workflow_key, terminal_process_output, workflow_key_authority,
 };
 use crate::controller::{
@@ -168,7 +168,7 @@ fn cancelled_output(process_id: &ProcessId) -> ProcessAwaitOutput {
 #[restate_sdk::workflow]
 pub trait LashProcessWorkflow {
     async fn run(
-        input: Json<RestateProcessWorkflowInput>,
+        input: Json<RestateProcessWorkflowPayload>,
     ) -> HandlerResult<Json<RestateProcessWorkflowOutput>>;
 
     #[shared]
@@ -366,18 +366,29 @@ where
     /// This is the one registry write and clock read outside a step: a step
     /// here would be a command, and an in-flight journal of the retired
     /// generation would meet it as a mismatch before it could be refused.
+    ///
+    /// An input whose process id this build cannot read (a retired
+    /// generation's host-chosen name) names no process this store holds, so
+    /// only the invocation is refused.
     async fn refuse_retired_journal(
         &self,
-        process_id: &ProcessId,
+        process_id: Option<&ProcessId>,
         journal_version: u32,
     ) -> HandlerResult<Json<RestateProcessWorkflowOutput>> {
         let found = format!("restate-process-journal-v{journal_version}");
+        let named = process_id.map_or("an unreadable process id", ProcessId::as_str);
         tracing::warn!(
-            process_id = process_id.as_str(),
+            process_id = named,
             found = found.as_str(),
             expected = RESTATE_PROCESS_JOURNAL_VERSION,
             "refusing a process segment built for a retired journal generation"
         );
+        let Some(process_id) = process_id else {
+            return Err(TerminalError::new(format!(
+                "process segment input for {named} carries {found}; this handler journals generation {RESTATE_PROCESS_JOURNAL_VERSION}"
+            ))
+            .into());
+        };
         let stored = complete_process_outcome(
             &self.registry,
             process_id,
@@ -566,13 +577,13 @@ where
     #[cfg(test)]
     pub(crate) async fn run_registration_for_test(
         &self,
+        process_id: ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
         scoped_effect_controller: ScopedEffectController<'_>,
         segment_ordinal: u64,
         handover: Option<lash_core::SegmentHandover>,
     ) -> Result<lash_core::ProcessRunOutcome, HandlerError> {
-        let process_id = registration.id.clone();
         let started = SegmentStarted::for_test(
             scoped_effect_controller.admitted_scope().clone(),
             segment_ordinal,
@@ -580,6 +591,7 @@ where
         );
         match self
             .run_registration(
+                process_id.clone(),
                 registration,
                 execution_context,
                 scoped_effect_controller,
@@ -622,13 +634,13 @@ where
     /// journaled peek of the segment's cancel promise.
     pub(crate) async fn run_registration(
         &self,
+        process_id: ProcessId,
         registration: ProcessRegistration,
         execution_context: ProcessExecutionContext,
         scoped_effect_controller: ScopedEffectController<'_>,
         started: &SegmentStarted,
         handover: Option<lash_core::SegmentHandover>,
     ) -> Result<SegmentRunEnd, HandlerError> {
-        let process_id = registration.id.clone();
         let segment_ordinal = started.segment_ordinal();
         let execution_context =
             execution_context.with_execution_write_authority(started.write_authority().clone());
@@ -664,6 +676,7 @@ where
         let outcome = delivery
             .drive(self.runner.run_process_segment(
                 started,
+                process_id.clone(),
                 registration,
                 execution_context,
                 scoped_effect_controller,
@@ -836,35 +849,15 @@ async fn record_cancel_requested(
     request: &RestateProcessCancelRequest,
 ) -> Result<(), PluginError> {
     registry
-        .append_event_ref(
-            &request.process_ref,
+        .append_event(
+            &request.process_id,
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                &request.process_ref,
+                &request.process_id,
                 &request.request,
             ),
         )
         .await
         .map(|_| ())
-}
-
-/// Refuse a cancel request built for another generation of the `cancel` and
-/// `deliver_cancel` handlers' commands, before journaling anything
-/// (FIG-3673): its journal, if it has one, holds commands this build does not
-/// issue. The refusal is typed and terminal; an in-flight invocation of a
-/// retired generation meets it as a journal mismatch, which the engine's
-/// retry policy bounds, so such invocations are drained or killed at deploy.
-fn refuse_retired_cancel(
-    request: &RestateProcessCancelRequest,
-    handler: &str,
-) -> Result<(), HandlerError> {
-    if request.journal_version == RESTATE_PROCESS_JOURNAL_VERSION {
-        return Ok(());
-    }
-    Err(TerminalError::new(format!(
-        "process `{}` {handler} request carries restate-process-journal-v{}; this handler journals generation {RESTATE_PROCESS_JOURNAL_VERSION}",
-        request.process_ref.process_id, request.journal_version
-    ))
-    .into())
 }
 
 /// Journal `request`'s registry record as a named step of the calling
@@ -896,17 +889,24 @@ where
     async fn run(
         &self,
         ctx: WorkflowContext<'_>,
-        Json(input): Json<RestateProcessWorkflowInput>,
+        Json(payload): Json<RestateProcessWorkflowPayload>,
     ) -> HandlerResult<Json<RestateProcessWorkflowOutput>> {
-        let process_id = input.registration.id.clone();
         // The journal-generation gate runs before the handler journals
-        // anything: an input built for another command prefix is refused typed
+        // anything, and before the input is decoded against this generation's
+        // shape: an input built for another command prefix is refused typed
         // rather than replayed against commands it never recorded (FIG-3588).
-        if input.journal_version != RESTATE_PROCESS_JOURNAL_VERSION {
-            return self
-                .refuse_retired_journal(&process_id, input.journal_version)
-                .await;
-        }
+        let input = match payload {
+            RestateProcessWorkflowPayload::Current(input) => *input,
+            RestateProcessWorkflowPayload::Retired {
+                journal_version,
+                process_id,
+            } => {
+                return self
+                    .refuse_retired_journal(process_id.as_ref(), journal_version)
+                    .await;
+            }
+        };
+        let process_id = input.process_id.clone();
         // Admission is the handler's first journaled work: the verdict, then
         // the start marker, and only the proof the start returns can mint the
         // segment's effect controller or drive its runner (FIG-3588). The
@@ -1131,6 +1131,7 @@ where
             };
             let end = self
                 .run_registration(
+                    process_id.clone(),
                     input.registration.clone(),
                     input.execution_context.clone(),
                     scoped_effect_controller,
@@ -1267,12 +1268,16 @@ where
         // shape only commands after this deployed prefix.
         let request = context
             .workflow_client::<LashProcessWorkflowClient>(successor_key.clone())
-            .run(Json(RestateProcessWorkflowInput {
-                registration: input.registration,
-                execution_context: input.execution_context,
-                segment_ordinal: next_segment_ordinal,
-                journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
-            }));
+            .run(Json(
+                RestateProcessWorkflowInput {
+                    process_id: process_id.clone(),
+                    registration: input.registration,
+                    execution_context: input.execution_context,
+                    segment_ordinal: next_segment_ordinal,
+                    journal_version: RESTATE_PROCESS_JOURNAL_VERSION,
+                }
+                .into(),
+            ));
         request.send().await?;
         // Cancellation can race the gap after the current segment
         // retires its promise but before the successor handover is
@@ -1379,7 +1384,6 @@ where
         ctx: SharedWorkflowContext<'_>,
         Json(request): Json<RestateProcessCancelRequest>,
     ) -> HandlerResult<Json<()>> {
-        refuse_retired_cancel(&request, "cancel")?;
         record_cancel_step(&ctx, &self.registry, &request).await?;
         resolve_process_cancel_signal(&ctx, RestateProcessCancelSignal::CancelRequested)?;
         // A `SessionTurn` process's child turn is asked to stop through its
@@ -1392,7 +1396,7 @@ where
             .run_json_or_retry_send::<Result<(), String>, _>(
                 CANCEL_CHILD_TURN_STEP.to_string(),
                 async move {
-                    let record = match registry.get_process_ref(&cancel.process_ref).await {
+                    let record = match registry.get_process(&cancel.process_id).await {
                         Ok(Some(record)) => record,
                         Ok(None) => return Ok(Ok(())),
                         Err(error) => return step_fault(error),
@@ -1409,7 +1413,7 @@ where
         // The segment that owns the process now is a recorded read: a live
         // one would decide on a redrive whether this handler forwards.
         let continuations = &self.continuations;
-        let process_id = &request.process_ref.process_id;
+        let process_id = &request.process_id;
         let Json(route) = ctx
             .run_json_or_retry_send::<Result<Option<u64>, String>, _>(
                 CANCEL_ROUTE_STEP.to_string(),
@@ -1427,7 +1431,7 @@ where
         if let Some(segment_ordinal) = route.map_err(TerminalError::new)? {
             let deliver = ctx
                 .workflow_client::<LashProcessWorkflowClient>(process_segment_workflow_key(
-                    &request.process_ref.process_id,
+                    &request.process_id,
                     segment_ordinal,
                 ))
                 .deliver_cancel(Json(request.clone()));
@@ -1441,7 +1445,6 @@ where
         ctx: SharedWorkflowContext<'_>,
         Json(request): Json<RestateProcessCancelRequest>,
     ) -> HandlerResult<Json<()>> {
-        refuse_retired_cancel(&request, "deliver_cancel")?;
         record_cancel_step(&ctx, &self.registry, &request).await?;
         resolve_process_cancel_signal(&ctx, RestateProcessCancelSignal::CancelRequested)?;
         Ok(Json(()))

@@ -22,7 +22,7 @@ fn wait_facts_export_closed_otel_attributes() {
     let identity = crate::TraceLanguageExecutionIdentity {
         scope: crate::TraceRuntimeScope::none(),
         subject: crate::TraceRuntimeSubject::Process {
-            process_id: ProcessId::from("process-1"),
+            process_id: ProcessId::fixture("process-1"),
         },
         source_identity: "source".to_string(),
         module_ref: "module".to_string(),
@@ -82,7 +82,7 @@ fn correlation_fields_are_exported_as_otel_attributes() {
     let identity = crate::TraceLanguageExecutionIdentity {
         scope: crate::TraceRuntimeScope::new("session-1"),
         subject: crate::TraceRuntimeSubject::Process {
-            process_id: ProcessId::from("process-1"),
+            process_id: ProcessId::fixture("process-1"),
         },
         source_identity: "source-1".to_string(),
         module_ref: "module-1".to_string(),
@@ -90,7 +90,7 @@ fn correlation_fields_are_exported_as_otel_attributes() {
         entry_ref: Some("component:0".to_string()),
         entry_name: "main".to_string(),
         engine_execution_id: Some("invocation-1".to_string()),
-        generation: Some(crate::TraceLanguageExecutionGeneration::new(2, 3)),
+        generation: Some(crate::TraceLanguageExecutionGeneration::new(2)),
     };
     let language_record = TraceRecord::new(
         TraceContext::default(),
@@ -129,10 +129,6 @@ fn correlation_fields_are_exported_as_otel_attributes() {
         attribute_value(&language_attrs, "lash.language_execution.attempt"),
         &OtelValue::I64(2)
     );
-    assert_eq!(
-        attribute_value(&language_attrs, "lash.language_execution.incarnation"),
-        &OtelValue::I64(3)
-    );
 
     for event in [
         TraceEvent::ToolCallStarted {
@@ -170,7 +166,7 @@ fn node_failure_provenance_is_exported_as_typed_attributes() {
     let identity = crate::TraceLanguageExecutionIdentity {
         scope: crate::TraceRuntimeScope::new("s1"),
         subject: crate::TraceRuntimeSubject::Process {
-            process_id: ProcessId::from("p1"),
+            process_id: ProcessId::fixture("p1"),
         },
         source_identity: "source".into(),
         module_ref: "module".into(),
@@ -178,7 +174,7 @@ fn node_failure_provenance_is_exported_as_typed_attributes() {
         entry_ref: None,
         entry_name: "main".into(),
         engine_execution_id: None,
-        generation: Some(crate::TraceLanguageExecutionGeneration::new(2, 4)),
+        generation: Some(crate::TraceLanguageExecutionGeneration::new(2)),
     };
     let record = |failure| {
         TraceRecord::new(
@@ -230,10 +226,6 @@ fn node_failure_provenance_is_exported_as_typed_attributes() {
     assert_eq!(
         attribute_value(&attrs, "lash.language_execution.attempt"),
         &OtelValue::I64(2)
-    );
-    assert_eq!(
-        attribute_value(&attrs, "lash.language_execution.incarnation"),
-        &OtelValue::I64(4)
     );
 
     let runtime = record(crate::TraceLanguageExecutionFailure::Runtime {
@@ -584,7 +576,7 @@ fn failed_language_execution_yields_error_span() {
     let identity = TraceLanguageExecutionIdentity {
         scope: TraceRuntimeScope::new("s1"),
         subject: TraceRuntimeSubject::Process {
-            process_id: ProcessId::from("p1".to_string()),
+            process_id: ProcessId::fixture("p1"),
         },
         source_identity: "source".to_string(),
         module_ref: "module".to_string(),

@@ -238,7 +238,6 @@ impl CausalColumns {
 /// Backend-neutral representation of one stored observer intent.
 pub struct StoredObserverIntent {
     pub process_id: ProcessId,
-    pub process_incarnation: Option<i64>,
 }
 
 /// Backend-neutral representation of one stored session relation and its lists.
@@ -275,21 +274,8 @@ impl SessionMetaCodec {
                     meta.session_id, intent.process_id
                 )));
             }
-            let process_incarnation = intent
-                .process_incarnation
-                .map(|value| {
-                    i64::try_from(value).map_err(|_| {
-                        StoreError::Backend(format!(
-                            "process incarnation does not fit {}",
-                            self.backend_integer_type
-                        ))
-                    })
-                })
-                .transpose()?;
-
             pending_observer_intents.push(StoredObserverIntent {
                 process_id: intent.process_id.clone(),
-                process_incarnation,
             });
         }
         let mut stored = StoredRelation {
@@ -332,18 +318,19 @@ impl SessionMetaCodec {
     pub fn decode_with_process_rows(
         self,
         mut stored: StoredRelation,
-        observer_intent_rows: Vec<(i64, String, Option<i64>)>,
+        observer_intent_rows: Vec<(i64, String)>,
     ) -> Result<SessionMeta, StoreError> {
-        for (process_index, process_id, process_incarnation) in observer_intent_rows {
+        for (process_index, process_id) in observer_intent_rows {
             if self.read_index(process_index, "observer-intent process_index")?
                 != stored.pending_observer_intents.len()
             {
                 return Err(self.corrupt("observer-intent process indexes are not contiguous"));
             }
-            stored.pending_observer_intents.push(StoredObserverIntent {
-                process_id: process_id.into(),
-                process_incarnation,
-            });
+            let process_id = ProcessId::parse(&process_id)
+                .map_err(|error| self.corrupt(format!("observer-intent process id: {error}")))?;
+            stored
+                .pending_observer_intents
+                .push(StoredObserverIntent { process_id });
         }
         self.decode(stored)
     }
@@ -399,20 +386,8 @@ impl SessionMetaCodec {
         let mut pending_observer_intents =
             Vec::with_capacity(stored.pending_observer_intents.len());
         for intent in stored.pending_observer_intents {
-            let process_incarnation = intent
-                .process_incarnation
-                .map(|value| {
-                    u64::try_from(value).map_err(|_| {
-                        self.corrupt(format!(
-                            "process_incarnation must be non-negative, got {value}"
-                        ))
-                    })
-                })
-                .transpose()?;
-
             pending_observer_intents.push(SessionObserverIntent {
                 process_id: intent.process_id,
-                process_incarnation,
             });
         }
         Ok(SessionMeta {
@@ -548,7 +523,7 @@ mod identity_tests {
         assert!(error.to_string().contains("effect_identity_format_cutover"));
 
         let address = crate::EffectAddress::new(
-            crate::ExecutionScope::process("admitted-process"),
+            crate::ExecutionScope::process(crate::process_id_for_test("admitted-process")),
             "shared-replay-key",
         )
         .expect("valid effect address");
@@ -694,7 +669,7 @@ mod identity_tests {
     fn causal_u64_text_columns_round_trip_the_full_range() {
         let codec = SessionMetaCodec::new("test integer");
         let cause = CausalRef::ProcessEvent {
-            process_id: ProcessId::from("process"),
+            process_id: crate::process_id_for_test("process"),
             sequence: u64::MAX,
         };
         assert_eq!(

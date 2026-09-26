@@ -41,10 +41,7 @@ fn test_session_policy() -> crate::SessionPolicy {
     }
 }
 
-fn session_turn_registration(
-    process_id: &ProcessId,
-    child_session_id: &SessionId,
-) -> ProcessRegistration {
+fn session_turn_registration(child_session_id: &SessionId) -> ProcessRegistration {
     let create_request = crate::SessionCreateRequest::child_session(
         "recovery-test-parent",
         crate::SessionStartPoint::Empty,
@@ -52,7 +49,6 @@ fn session_turn_registration(
     )
     .with_session_id(child_session_id);
     ProcessRegistration::new(
-        process_id,
         ProcessInput::SessionTurn {
             definition_key: "recovery-test-session-turn:v1".to_string(),
             create_request: Box::new(create_request),
@@ -84,18 +80,18 @@ async fn crash_replay_observes_durable_cancellation_before_rerunning_process() {
     let raw_registry = backend.process_registry();
     let watched = crate::watch_process_registry(raw_registry);
     let registry = Arc::clone(watched.registry());
-    let process_id = "cancelled-before-crash-replay";
-    registry
-        .register_process(session_turn_registration(
-            &ProcessId::from(process_id),
-            &SessionId::from("cancelled-before-crash-child"),
-        ))
+    let _process_id = "cancelled-before-crash-replay";
+    let cancelled_before_crash_replay_record = registry
+        .register_process(session_turn_registration(&SessionId::from(
+            "cancelled-before-crash-child",
+        )))
         .await
         .expect("register replay fixture");
+    let process_id = cancelled_before_crash_replay_record.id.clone();
     registry
         .append_event(
-            &ProcessId::from(process_id),
-            crate::ProcessEventAppendRequest::cancel_requested(&registry.resolve_process_ref(&ProcessId::from(process_id)).await.expect("retained cancellation target"),
+            &process_id,
+            crate::ProcessEventAppendRequest::cancel_requested(&registry.require_process_id(&process_id).await.expect("retained cancellation target"),
 &crate::CancelRequest::new(crate::CancelOrigin::OperatorRequested, "actor:fixture:crash_replay_observes_durable_cancellation_before_rerunning_process", 11)),
         )
         .await
@@ -120,9 +116,9 @@ async fn crash_replay_observes_durable_cancellation_before_rerunning_process() {
         .await
         .expect("fresh worker admits cancelled replay");
     assert_eq!(report.admitted, vec![process_id.to_string()]);
-    await_terminal(&registry, &ProcessId::from(process_id)).await;
+    await_terminal(&registry, &process_id).await;
     let record = registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await
         .expect("read replayed process")
         .expect("replayed process remains retained");
@@ -184,14 +180,14 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
         .worker
         .set(worker)
         .unwrap_or_else(|_| panic!("terminal-fence worker binds once"));
-    let process_id = "session-turn-terminal-fence";
-    registry
-        .register_process(session_turn_registration(
-            &ProcessId::from(process_id),
-            &SessionId::from("session-turn-terminal-fence-child"),
-        ))
+    let _process_id = "session-turn-terminal-fence";
+    let session_turn_terminal_fence_record = registry
+        .register_process(session_turn_registration(&SessionId::from(
+            "session-turn-terminal-fence-child",
+        )))
         .await
         .expect("register SessionTurn fence fixture");
+    let process_id = session_turn_terminal_fence_record.id.clone();
 
     let report = run_handle
         .enable_and_drive()
@@ -206,7 +202,7 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
     // precondition separately: cancellation has not yet been committed.
     assert!(
         raw_registry
-            .get_process(&ProcessId::from(process_id))
+            .get_process(&process_id)
             .await
             .expect("read before racing cancellation")
             .expect("retained running target")
@@ -215,8 +211,8 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
     );
     raw_registry
         .append_event(
-            &ProcessId::from(process_id),
-            crate::ProcessEventAppendRequest::cancel_requested(&raw_registry.resolve_process_ref(&ProcessId::from(process_id)).await.expect("retained cancellation target"),
+            &process_id,
+            crate::ProcessEventAppendRequest::cancel_requested(&raw_registry.require_process_id(&process_id).await.expect("retained cancellation target"),
 &crate::CancelRequest::new(crate::CancelOrigin::OperatorRequested, "actor:fixture:committed_session_turn_cancellation_fences_a_successful_runner_terminal", 11)),
         )
         .await
@@ -231,9 +227,9 @@ async fn committed_session_turn_cancellation_fences_a_successful_runner_terminal
     // The runner settles its child turn and returns a successful output, but
     // the committed cancellation outranks it: the recorded terminal is
     // `Cancelled`, and the child session stays retained.
-    await_terminal(&registry, &ProcessId::from(process_id)).await;
+    await_terminal(&registry, &process_id).await;
     let record = registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await
         .expect("read fenced SessionTurn")
         .expect("fenced SessionTurn remains retained");
@@ -250,8 +246,11 @@ async fn dispatcher_unwind_clears_running_latch_and_notifies() {
         ProcessExecutionConcurrency::new(1).expect("valid test concurrency"),
         None,
     ));
-    let continuation =
-        crate::ProcessWorklistCursor::new("test", "after-panic-boundary", "through-panic-boundary");
+    let continuation = crate::ProcessWorklistCursor::new(
+        "test",
+        crate::ProcessId::fixture("after-panic-boundary"),
+        crate::ProcessId::fixture("through-panic-boundary"),
+    );
     {
         let mut state = scheduler.state.lock_recover();
         assert!(state.claim_dispatcher());
@@ -322,7 +321,7 @@ impl crate::ProcessWorkSubstrate for LateBoundProcessWork {
 
     async fn await_process_terminal(
         &self,
-        process_ref: &crate::ProcessRef,
+        process_id: &crate::ProcessId,
     ) -> Result<crate::ProcessTerminalWait, PluginError> {
         crate::NativeProcessWork::for_registry(Arc::clone(
             self.worker
@@ -331,7 +330,7 @@ impl crate::ProcessWorkSubstrate for LateBoundProcessWork {
                 .config
                 .process_registry(),
         ))
-        .await_terminal_ref(process_ref)
+        .await_terminal(process_id)
         .await
         .map(crate::ProcessTerminalWait::Terminal)
     }
@@ -375,12 +374,13 @@ async fn a_reentrant_reconcile_drive_reports_its_row_once_as_admitted() {
         .drive_pending_processes()
         .await
         .expect("sweep dispatches");
+    let process_id = bound_delivery_process(&trigger_store, &delivery).await;
 
     assert_eq!(
         report
             .admitted
             .iter()
-            .filter(|id| *id == delivery.process_id)
+            .filter(|id| id.as_str() == process_id.as_str())
             .count(),
         1,
         "the reconciled row is this call's admission, exactly once: {report:?}"
@@ -389,7 +389,7 @@ async fn a_reentrant_reconcile_drive_reports_its_row_once_as_admitted() {
         !report
             .deferred
             .iter()
-            .any(|entry| entry.process_id == delivery.process_id),
+            .any(|entry| entry.process_id == process_id),
         "a call must never report its own admission as a deferral: {report:?}"
     );
     assert_eq!(
@@ -402,12 +402,8 @@ async fn a_reentrant_reconcile_drive_reports_its_row_once_as_admitted() {
 /// A registration with an explicit disposition; the disposition-driven sweep keys off the
 /// declared disposition, not the input kind, so these unit tests exercise the
 /// verdict without standing up execution infrastructure.
-fn registration_with_disposition(
-    id: &str,
-    disposition: crate::RecoveryContract,
-) -> ProcessRegistration {
+fn registration_with_disposition(disposition: crate::RecoveryContract) -> ProcessRegistration {
     ProcessRegistration::new(
-        id,
         ProcessInput::External {
             metadata: serde_json::json!({}),
         },
@@ -528,7 +524,26 @@ fn recovery_test_trigger_draft(source_key: String) -> crate::TriggerSubscription
     .with_payload_schema(crate::LashSchema::any())
 }
 
-async fn process_count(registry: &Arc<dyn ProcessRegistry>, process_id: &ProcessId) -> usize {
+/// The process a reserved delivery's start bound to it (ADR 0107).
+async fn bound_delivery_process(
+    trigger_store: &Arc<dyn TriggerStore>,
+    delivery: &crate::TriggerDeliveryReservation,
+) -> ProcessId {
+    trigger_store
+        .list_deliveries_by_occurrence_id(&delivery.occurrence.occurrence_id)
+        .await
+        .expect("list the occurrence's deliveries")
+        .into_iter()
+        .find(|reserved| {
+            reserved.subscription.subscription_id == delivery.subscription.subscription_id
+        })
+        .and_then(|reserved| reserved.process_id)
+        .expect("the delivery's start bound its process")
+}
+
+/// Every retained process, whatever its id: a start key that started twice
+/// would show here as a second row.
+async fn all_process_count(registry: &Arc<dyn ProcessRegistry>) -> usize {
     registry
         .list_processes(&ProcessListFilter {
             status: crate::ProcessStatusFilter::Any,
@@ -536,9 +551,7 @@ async fn process_count(registry: &Arc<dyn ProcessRegistry>, process_id: &Process
         })
         .await
         .expect("list processes")
-        .into_iter()
-        .filter(|record| record.id == process_id)
-        .count()
+        .len()
 }
 
 async fn await_terminal(registry: &Arc<dyn ProcessRegistry>, process_id: &ProcessId) {
@@ -583,7 +596,7 @@ impl crate::ProcessEngine for FailOnceArtifactReadEngine {
         }
         Ok(
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
-                serde_json::json!({"process_id": context.registration().id}),
+                serde_json::json!({"process_id": context.process_id()}),
             ))
             .into(),
         )
@@ -771,9 +784,15 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation
             PROCESS_EXECUTION_PERMIT.try_with(|_| ()).is_ok(),
             "production child turn must inherit the outer process execution permit"
         );
-        let process_id = "nested-process";
+        let start_key = match context.start_key(0) {
+            Ok(start_key) => start_key,
+            Err(err) => {
+                return crate::ToolOutcome::err_fmt(format_args!(
+                    "nested process start has no key: {err}"
+                ));
+            }
+        };
         let request = crate::ProcessStartRequest::new(
-            process_id,
             ProcessInput::Engine {
                 kind: "nested-process-test".to_string(),
                 payload: serde_json::Value::Null,
@@ -784,13 +803,17 @@ impl crate::tool_provider::orchestration::OrchestratingToolImplementation
                 crate::ParentScope::Host,
                 crate::OnParentEnd::Abandon,
             ),
-        );
-        if let Err(err) = context.start_process(request).await {
-            return crate::ToolOutcome::err_fmt(format_args!(
-                "failed to start nested process: {err}"
-            ));
-        }
-        match context.await_process(&ProcessId::from(process_id)).await {
+        )
+        .with_start_key(Some(start_key));
+        let process_id = match context.start_process(request).await {
+            Ok(started) => started.process_id,
+            Err(err) => {
+                return crate::ToolOutcome::err_fmt(format_args!(
+                    "failed to start nested process: {err}"
+                ));
+            }
+        };
+        match context.await_process(&process_id).await {
             Ok(ProcessAwaitOutput::Settled { output }) if output.is_success() => {
                 crate::ToolOutcome::ok(serde_json::json!({ "nested": "done" }))
             }
@@ -841,7 +864,7 @@ impl crate::ProcessEngine for ProductionChainEngine {
         context: crate::ProcessEngineRunContext<'_>,
         payload: serde_json::Value,
     ) -> Result<crate::ProcessRunOutcome, crate::ProcessInfraError> {
-        let process_id = context.registration().id.clone();
+        let process_id = context.process_id().clone();
         let role = payload["role"].as_str().expect("chain role");
         let roots = payload["roots"].as_u64().expect("root count") as usize;
         let nodes = payload["nodes"].as_u64().expect("node count") as usize;
@@ -856,7 +879,6 @@ impl crate::ProcessEngine for ProductionChainEngine {
         if role == "launcher" {
             for root in 0..roots {
                 let registration = crate::ProcessStartRequest::new(
-                    format!("10-root-{root:03}"),
                     ProcessInput::Engine {
                         kind: self.kind().to_string(),
                         payload: serde_json::json!({
@@ -876,7 +898,11 @@ impl crate::ProcessEngine for ProductionChainEngine {
                             .expect("runtime parent"),
                         crate::OnParentEnd::Abandon,
                     ),
-                );
+                )
+                .with_start_key(Some(crate::StartKey::for_host(
+                    crate::StartKeyOwner::HOST,
+                    format!("chain-root-{root:03}"),
+                )));
                 let reply = runtime
                     .start_child_process(registration, "test-chain", None)
                     .await;
@@ -927,9 +953,8 @@ impl crate::ProcessEngine for ProductionChainEngine {
 
         if level + 1 < nodes {
             let child_level = level + 1;
-            let child_id = format!("{}-node-{root:03}-{child_level:02}", 20 + child_level);
+            let child_key = format!("{}-node-{root:03}-{child_level:02}", 20 + child_level);
             let registration = crate::ProcessStartRequest::new(
-                child_id.clone(),
                 ProcessInput::Engine {
                     kind: self.kind().to_string(),
                     payload: serde_json::json!({
@@ -949,7 +974,11 @@ impl crate::ProcessEngine for ProductionChainEngine {
                         .expect("runtime parent"),
                     crate::OnParentEnd::Abandon,
                 ),
-            );
+            )
+            .with_start_key(Some(crate::StartKey::for_host(
+                crate::StartKeyOwner::HOST,
+                &child_key,
+            )));
             let reply = runtime
                 .start_child_process(registration, "test-chain", None)
                 .await;
@@ -958,6 +987,8 @@ impl crate::ProcessEngine for ProductionChainEngine {
                 "production child start failed: {:?}",
                 reply.output
             );
+            let child_id = crate::process_id_from_handle_json(&reply.output.value_for_projection())
+                .expect("the start answers the child's handle");
             if level == 0 {
                 let ready = self
                     .state
@@ -979,16 +1010,14 @@ impl crate::ProcessEngine for ProductionChainEngine {
                 let processes = processes.clone();
                 let wait_child_id = child_id.clone();
                 crate::task::spawn(inherit_process_execution_permit(async move {
-                    processes
-                        .await_terminal(&ProcessId::from(wait_child_id))
-                        .await
+                    processes.await_terminal(&wait_child_id).await
                 }))
                 .await
                 .expect("nested child-turn task joins")
                 .expect("nested child-turn task observes child terminal");
             } else {
                 processes
-                    .await_terminal(&ProcessId::from(child_id))
+                    .await_terminal(&child_id)
                     .await
                     .expect("parent observes production-started child terminal");
             }
@@ -1027,9 +1056,8 @@ async fn run_production_chain(
     });
     let (worker, registry, _, env_ref) =
         worker_with_engine(concurrency, engine, Arc::clone(&run_handle)).await;
-    registry
+    let p_00_chain_launcher_record = registry
         .register_process(engine_registration(
-            "00-chain-launcher",
             "production-chain-test",
             env_ref,
             serde_json::json!({
@@ -1072,10 +1100,10 @@ async fn run_production_chain(
         .expect("list production chain");
     for record in records
         .iter()
-        .filter(|record| record.id != "00-chain-launcher")
+        .filter(|record| record.id != p_00_chain_launcher_record.id)
     {
         assert_eq!(record.lifecycle.on_parent_end, crate::OnParentEnd::Abandon);
-        let crate::ParentScope::Owned(crate::EffectOpener::Process { process_ref }) =
+        let crate::ParentScope::Owned(crate::EffectOpener::Process { process_id }) =
             &record.lifecycle.parent
         else {
             panic!(
@@ -1083,11 +1111,10 @@ async fn run_production_chain(
                 record.id
             );
         };
-        let parent = records
+        records
             .iter()
-            .find(|candidate| candidate.id == process_ref.process_id)
+            .find(|candidate| candidate.id == process_id)
             .expect("parent is retained in the chain");
-        assert_eq!(process_ref.incarnation, parent.incarnation);
         assert!(
             !matches!(
                 record.provenance.caused_by,
@@ -1208,9 +1235,8 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
         crate::PluginOptions::default(),
     )
     .with_session_id("nested-wait-child");
-    registry
+    let outer_session_turn_record = registry
         .register_process(ProcessRegistration::new(
-            outer_process_id,
             ProcessInput::SessionTurn {
                 definition_key: "nested-session-turn:v1".to_string(),
                 create_request: Box::new(child_request),
@@ -1226,6 +1252,7 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
         ))
         .await
         .expect("register production session-turn process");
+    let outer_process_id = outer_session_turn_record.id.clone();
 
     tokio::time::timeout(Duration::from_secs(10), async {
         let _ = run_handle
@@ -1237,7 +1264,7 @@ async fn session_turn_process_child_awaits_nested_process_at_concurrency_one() {
     .await
     .expect("production SessionTurn path completes without permit starvation");
     let outer = crate::NativeProcessWork::for_registry(Arc::clone(&registry))
-        .await_terminal(&ProcessId::from(outer_process_id))
+        .await_terminal(&outer_process_id)
         .await
         .expect("outer session-turn process is terminal");
     assert!(
@@ -1287,10 +1314,9 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
         .with_session_policy(policy)
     })
     .expect("valid test native substrate config");
-    registry
+    let registered = registry
         .register_process(
             ProcessRegistration::new(
-                "segmented-process",
                 ProcessInput::Engine {
                     kind: "boundary-test".to_string(),
                     payload: serde_json::json!({}),
@@ -1311,9 +1337,9 @@ async fn segment_boundary_reenters_in_memory_without_premature_terminal() {
         .drive_pending_processes()
         .await
         .expect("drive process");
-    await_terminal(&registry, &ProcessId::from("segmented-process")).await;
+    await_terminal(&registry, &registered.id).await;
     let final_record = registry
-        .get_process(&ProcessId::from("segmented-process"))
+        .get_process(&registered.id)
         .await
         .expect("read process")
         .expect("process exists");
@@ -1327,14 +1353,11 @@ async fn sweep_reconciles_reserved_trigger_delivery_without_process() {
     let registry = backend.process_registry();
     let trigger_store = backend.trigger_store();
     let delivery = seed_reserved_trigger_delivery(&trigger_store).await;
-    assert!(
-        registry
-            .get_process(&delivery.process_id)
-            .await
-            .expect("read process")
-            .is_none(),
-        "test starts in the reserve/start crash window"
+    assert_eq!(
+        delivery.process_id, None,
+        "test starts in the reserve/start crash window: the reservation is unbound"
     );
+    assert_eq!(all_process_count(&registry).await, 0);
 
     let worker = native_worker(
         &backend,
@@ -1346,13 +1369,13 @@ async fn sweep_reconciles_reserved_trigger_delivery_without_process() {
         .await
         .expect("sweep dispatches");
 
+    let process_id = bound_delivery_process(&trigger_store, &delivery).await;
     let record = registry
-        .get_process(&delivery.process_id)
+        .get_process(&process_id)
         .await
         .expect("read process")
         .expect("sweep registers missing trigger delivery process");
-    assert_eq!(record.id, delivery.process_id);
-    assert_eq!(process_count(&registry, &delivery.process_id).await, 1);
+    assert_eq!(all_process_count(&registry).await, 1);
     assert!(matches!(
         record.provenance.caused_by,
         Some(crate::CausalRef::TriggerOccurrence {
@@ -1371,9 +1394,14 @@ async fn sweep_reconciles_reserved_trigger_delivery_without_process() {
         .await
         .expect("second sweep dispatches");
     assert_eq!(
-        process_count(&registry, &delivery.process_id).await,
+        all_process_count(&registry).await,
         1,
         "re-running the sweep must not create a duplicate process row"
+    );
+    assert_eq!(
+        bound_delivery_process(&trigger_store, &delivery).await,
+        process_id,
+        "the reservation stays bound to the process its start key registered"
     );
 }
 
@@ -1496,13 +1524,14 @@ async fn snapshot_recovery_fixture(
 
 #[tokio::test]
 async fn sweep_recovers_reserved_v1_snapshot_after_v2_update_exactly_once() {
-    let (registry, _trigger_store, delivery, payloads, worker) =
+    let (registry, trigger_store, delivery, payloads, worker) =
         snapshot_recovery_fixture(false).await;
 
     let _ = worker.drive_pending_processes().await.expect("recover v1");
-    await_terminal(&registry, &delivery.process_id).await;
+    let process_id = bound_delivery_process(&trigger_store, &delivery).await;
+    await_terminal(&registry, &process_id).await;
     let terminal = registry
-        .get_process(&delivery.process_id)
+        .get_process(&process_id)
         .await
         .expect("read process")
         .expect("recovered delivery process");
@@ -1537,9 +1566,10 @@ async fn sweep_recovers_reserved_v1_snapshot_after_tombstone_exactly_once() {
     );
 
     let _ = worker.drive_pending_processes().await.expect("recover v1");
-    await_terminal(&registry, &delivery.process_id).await;
+    let process_id = bound_delivery_process(&trigger_store, &delivery).await;
+    await_terminal(&registry, &process_id).await;
     let terminal = registry
-        .get_process(&delivery.process_id)
+        .get_process(&process_id)
         .await
         .expect("read process")
         .expect("recovered delivery process");
@@ -1567,12 +1597,8 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
     let registry = backend.process_registry();
     let trigger_store_dyn: Arc<dyn TriggerStore> = trigger_store.clone();
     let delivery = seed_reserved_trigger_delivery(&trigger_store_dyn).await;
-    assert!(
-        registry
-            .get_process(&delivery.process_id)
-            .await
-            .expect("read process")
-            .is_none(),
+    assert_eq!(
+        delivery.process_id, None,
         "test starts in the reserve/start crash window"
     );
 
@@ -1585,19 +1611,20 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
         .drive_pending_processes()
         .await
         .expect("sweep dispatches");
+    let process_id = bound_delivery_process(&trigger_store_dyn, &delivery).await;
     registry
-        .get_process(&delivery.process_id)
+        .get_process(&process_id)
         .await
         .expect("read process")
         .expect("sweep registers missing trigger delivery process");
 
     let terminal = registry
         .complete_process(
-            &delivery.process_id,
+            &process_id,
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::json!({ "done": true }),
             )),
-            crate::ProcessCompletionAuthority::workflow_key(&delivery.process_id),
+            crate::ProcessCompletionAuthority::workflow_key(process_id.as_str()),
         )
         .await
         .expect("complete trigger delivery process");
@@ -1615,14 +1642,14 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
         .expect("reconcile pruned trigger deliveries");
     assert!(
         matches!(
-            registry.get_process(&delivery.process_id).await,
+            registry.get_process(&process_id).await,
             Err(crate::PluginError::ProcessNoLongerRetained { .. })
         ),
         "terminal trigger delivery process is pruned"
     );
     assert!(
         trigger_store
-            .list_deliveries_by_process_id(&delivery.process_id)
+            .list_deliveries_by_process_id(&process_id)
             .await
             .expect("list trigger deliveries after prune")
             .is_empty(),
@@ -1651,7 +1678,7 @@ async fn sweep_does_not_reconcile_trigger_delivery_pruned_with_terminal_process(
         .await
         .expect("post-prune sweep dispatches");
     assert_eq!(
-        process_count(&registry, &delivery.process_id).await,
+        all_process_count(&registry).await,
         0,
         "recovery sweep must not resurrect a delivery whose terminal process was pruned"
     );
@@ -1663,19 +1690,29 @@ async fn sweep_does_not_reconcile_trigger_delivery_when_process_exists() {
     let registry = backend.process_registry();
     let trigger_store = backend.trigger_store();
     let delivery = seed_reserved_trigger_delivery(&trigger_store).await;
-    registry
-        .register_process(ProcessRegistration::new(
-            delivery.process_id.clone(),
-            ProcessInput::External {
-                metadata: serde_json::json!({ "already": "registered" }),
-            },
-            RecoveryContract::Rerunnable,
-            crate::ProcessProvenance::host(),
-            crate::ProcessLifecyclePolicy::new(
-                crate::ParentScope::Host,
-                crate::OnParentEnd::Abandon,
-            ),
-        ))
+    // A process already registered under the delivery's start key: the start
+    // that crashed before binding it (ADR 0107).
+    let start_key = crate::StartKey::for_trigger_delivery(
+        &delivery.occurrence.occurrence_id,
+        &delivery.subscription.subscription_id,
+        &delivery.subscription.incarnation,
+        delivery.subscription.revision,
+    );
+    let existing = registry
+        .register_process(
+            ProcessRegistration::new(
+                ProcessInput::External {
+                    metadata: serde_json::json!({ "already": "registered" }),
+                },
+                RecoveryContract::Rerunnable,
+                crate::ProcessProvenance::host(),
+                crate::ProcessLifecyclePolicy::new(
+                    crate::ParentScope::Host,
+                    crate::OnParentEnd::Abandon,
+                ),
+            )
+            .with_start_key(Some(start_key)),
+        )
         .await
         .expect("pre-register delivery process");
 
@@ -1689,14 +1726,19 @@ async fn sweep_does_not_reconcile_trigger_delivery_when_process_exists() {
         .await
         .expect("sweep dispatches");
 
+    assert_eq!(
+        bound_delivery_process(&trigger_store, &delivery).await,
+        existing.id,
+        "recovery binds the process its start key already registered"
+    );
     let record = registry
-        .get_process(&delivery.process_id)
+        .get_process(&existing.id)
         .await
         .expect("read process")
         .expect("existing process remains");
     assert_eq!(record.provenance.caused_by, None);
     assert_eq!(
-        process_count(&registry, &delivery.process_id).await,
+        all_process_count(&registry).await,
         1,
         "existing process row must be treated as already started"
     );
@@ -1708,9 +1750,8 @@ async fn sweep_does_not_reconcile_trigger_delivery_when_process_exists() {
 async fn sweep_never_claims_externally_owned_rows() {
     let backend = memory_backend().await;
     let registry = backend.process_registry();
-    registry
+    let proc_ext_record = registry
         .register_process(registration_with_disposition(
-            "proc-ext",
             RecoveryContract::ExternallyOwned,
         ))
         .await
@@ -1731,7 +1772,7 @@ async fn sweep_never_claims_externally_owned_rows() {
     assert_eq!(
         report.deferred,
         vec![ProcessAdmissionDeferred {
-            process_id: ProcessId::from("proc-ext"),
+            process_id: proc_ext_record.id.clone(),
             disposition: ProcessRecoveryAttemptOutcome::ExternallyOwned,
         }]
     );
@@ -1745,14 +1786,14 @@ async fn sweep_never_claims_externally_owned_rows() {
     assert_eq!(
         second.deferred,
         vec![ProcessAdmissionDeferred {
-            process_id: ProcessId::from("proc-ext"),
+            process_id: proc_ext_record.id.clone(),
             disposition: ProcessRecoveryAttemptOutcome::ExternallyOwned,
         }]
     );
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let record = registry
-        .get_process(&ProcessId::from("proc-ext"))
+        .get_process(&proc_ext_record.id)
         .await
         .expect("read process")
         .expect("process");
@@ -1762,7 +1803,7 @@ async fn sweep_never_claims_externally_owned_rows() {
     );
     assert!(
         registry
-            .get_process_lease(&ProcessId::from("proc-ext"))
+            .get_process_lease(&proc_ext_record.id)
             .await
             .expect("lease read")
             .is_none(),
@@ -1776,17 +1817,16 @@ async fn sweep_never_claims_externally_owned_rows() {
 async fn sweep_terminalizes_exhausted_attempt_budget_as_engine_gave_up() {
     let backend = memory_backend().await;
     let registry = backend.process_registry();
-    registry
+    let proc_attempts_exhausted_record = registry
         .register_process(
-            registration_with_disposition("proc-attempts-exhausted", RecoveryContract::Rerunnable)
-                .with_max_attempts(Some(1)),
+            registration_with_disposition(RecoveryContract::Rerunnable).with_max_attempts(Some(1)),
         )
         .await
         .expect("register attempt-exhausted process");
     let exhausted_owner = LeaseOwnerIdentity::opaque("exhausted-owner", "exhausted-incarnation");
     registry
         .record_first_started(
-            &ProcessId::from("proc-attempts-exhausted"),
+            &proc_attempts_exhausted_record.id,
             ProcessStarted {
                 owner: exhausted_owner.clone(),
                 fencing_token: 0,
@@ -1807,9 +1847,9 @@ async fn sweep_terminalizes_exhausted_attempt_budget_as_engine_gave_up() {
         .drive_pending_processes()
         .await
         .expect("sweep dispatches exhausted process");
-    await_terminal(&registry, &ProcessId::from("proc-attempts-exhausted")).await;
+    await_terminal(&registry, &proc_attempts_exhausted_record.id).await;
 
-    let evidence = abandoned_evidence(&registry, &ProcessId::from("proc-attempts-exhausted")).await;
+    let evidence = abandoned_evidence(&registry, &proc_attempts_exhausted_record.id).await;
     assert_eq!(evidence.writer, AbandonWriter::EngineGaveUp);
     assert_eq!(
         evidence.owner,
@@ -1824,16 +1864,15 @@ async fn sweep_terminalizes_exhausted_attempt_budget_as_engine_gave_up() {
 async fn sweep_reconciles_externally_owned_abandon_request() {
     let backend = memory_backend().await;
     let registry = backend.process_registry();
-    registry
+    let proc_ext_abandon_record = registry
         .register_process(registration_with_disposition(
-            "proc-ext-abandon",
             RecoveryContract::ExternallyOwned,
         ))
         .await
         .expect("register");
     registry
         .request_process_abandon(
-            &ProcessId::from("proc-ext-abandon"),
+            &proc_ext_abandon_record.id,
             AbandonRequest {
                 requested_by: "operator".to_string(),
                 requested_at_ms: 1,
@@ -1852,9 +1891,9 @@ async fn sweep_reconciles_externally_owned_abandon_request() {
         .drive_pending_processes()
         .await
         .expect("sweep dispatches");
-    await_terminal(&registry, &ProcessId::from("proc-ext-abandon")).await;
+    await_terminal(&registry, &proc_ext_abandon_record.id).await;
 
-    let evidence = abandoned_evidence(&registry, &ProcessId::from("proc-ext-abandon")).await;
+    let evidence = abandoned_evidence(&registry, &proc_ext_abandon_record.id).await;
     assert_eq!(evidence.writer, AbandonWriter::ReconciledRequest);
     assert!(
         evidence.owner.is_none(),
@@ -1868,16 +1907,13 @@ async fn sweep_reconciles_externally_owned_abandon_request() {
 async fn sweep_skips_started_owner_bound_with_silent_holder() {
     let backend = memory_backend().await;
     let registry = backend.process_registry();
-    registry
-        .register_process(registration_with_disposition(
-            "proc-ob-silent",
-            RecoveryContract::OwnerBound,
-        ))
+    let proc_ob_silent_record = registry
+        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
         .await
         .expect("register");
     registry
         .record_first_started(
-            &ProcessId::from("proc-ob-silent"),
+            &proc_ob_silent_record.id,
             ProcessStarted {
                 owner: LeaseOwnerIdentity::opaque("started-worker", "started-incarnation"),
                 fencing_token: 0,
@@ -1891,7 +1927,7 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
     // A live holder keeps the row unavailable until its TTL expires.
     registry
         .claim_process_lease(
-            &ProcessId::from("proc-ob-silent"),
+            &proc_ob_silent_record.id,
             &LeaseOwnerIdentity::opaque("other-worker", "other-incarnation"),
             60_000,
         )
@@ -1912,7 +1948,7 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
     tokio::time::sleep(Duration::from_millis(200)).await;
 
     let record = registry
-        .get_process(&ProcessId::from("proc-ob-silent"))
+        .get_process(&proc_ob_silent_record.id)
         .await
         .expect("read process")
         .expect("process");
@@ -1929,16 +1965,13 @@ async fn sweep_skips_started_owner_bound_with_silent_holder() {
 async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
     let backend = memory_backend().await;
     let registry = backend.process_registry();
-    registry
-        .register_process(registration_with_disposition(
-            "proc-ob-lapse",
-            RecoveryContract::OwnerBound,
-        ))
+    let proc_ob_lapse_record = registry
+        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
         .await
         .expect("register");
     registry
         .record_first_started(
-            &ProcessId::from("proc-ob-lapse"),
+            &proc_ob_lapse_record.id,
             ProcessStarted {
                 owner: LeaseOwnerIdentity::opaque("lapsed-owner", "lapsed-incarnation"),
                 fencing_token: 0,
@@ -1951,7 +1984,7 @@ async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
         .expect("record started");
     registry
         .request_process_abandon(
-            &ProcessId::from("proc-ob-lapse"),
+            &proc_ob_lapse_record.id,
             AbandonRequest {
                 requested_by: "operator".to_string(),
                 requested_at_ms: 2,
@@ -1971,9 +2004,9 @@ async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
         .drive_pending_processes()
         .await
         .expect("sweep dispatches");
-    await_terminal(&registry, &ProcessId::from("proc-ob-lapse")).await;
+    await_terminal(&registry, &proc_ob_lapse_record.id).await;
 
-    let evidence = abandoned_evidence(&registry, &ProcessId::from("proc-ob-lapse")).await;
+    let evidence = abandoned_evidence(&registry, &proc_ob_lapse_record.id).await;
     assert_eq!(evidence.writer, AbandonWriter::ReconciledRequest);
     assert_eq!(
         evidence.owner.as_ref().map(|owner| owner.owner_id.as_str()),
@@ -1990,11 +2023,8 @@ async fn sweep_reconciles_started_owner_bound_after_lease_lapse() {
 async fn owner_bound_unstarted_infra_failure_stays_claimable() {
     let backend = memory_backend().await;
     let registry = backend.process_registry();
-    registry
-        .register_process(registration_with_disposition(
-            "proc-ob-unstarted",
-            RecoveryContract::OwnerBound,
-        ))
+    let proc_ob_unstarted_record = registry
+        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
         .await
         .expect("register");
 
@@ -2010,7 +2040,7 @@ async fn owner_bound_unstarted_infra_failure_stays_claimable() {
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             if registry
-                .get_process(&ProcessId::from("proc-ob-unstarted"))
+                .get_process(&proc_ob_unstarted_record.id)
                 .await
                 .expect("read process")
                 .expect("process")
@@ -2028,7 +2058,7 @@ async fn owner_bound_unstarted_infra_failure_stays_claimable() {
     let reclaimed = tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             match registry
-                .claim_process_lease(&ProcessId::from("proc-ob-unstarted"), &next_owner, 60_000)
+                .claim_process_lease(&proc_ob_unstarted_record.id, &next_owner, 60_000)
                 .await
                 .expect("claim after infrastructure failure")
             {
@@ -2040,7 +2070,7 @@ async fn owner_bound_unstarted_infra_failure_stays_claimable() {
     .await
     .expect("infrastructure failure releases its lease");
     let record = registry
-        .get_process(&ProcessId::from("proc-ob-unstarted"))
+        .get_process(&proc_ob_unstarted_record.id)
         .await
         .expect("read process")
         .expect("process");
@@ -2070,9 +2100,8 @@ async fn missing_engine_configuration_is_retryable_infrastructure_failure() {
         run_handle,
     )
     .await;
-    registry
+    let missing_engine_record = registry
         .register_process(engine_registration(
-            "missing-engine",
             "not-installed",
             env_ref,
             serde_json::Value::Null,
@@ -2087,12 +2116,12 @@ async fn missing_engine_configuration_is_retryable_infrastructure_failure() {
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             let record = registry
-                .get_process(&ProcessId::from("missing-engine"))
+                .get_process(&missing_engine_record.id)
                 .await
                 .expect("read process")
                 .expect("missing engine row");
             let lease = registry
-                .get_process_lease(&ProcessId::from("missing-engine"))
+                .get_process_lease(&missing_engine_record.id)
                 .await
                 .expect("lease read");
             if record.first_started.is_some() && lease.is_none() {
@@ -2107,7 +2136,7 @@ async fn missing_engine_configuration_is_retryable_infrastructure_failure() {
 
     let next = registry
         .claim_process_lease(
-            &ProcessId::from("missing-engine"),
+            &missing_engine_record.id,
             &local_owner("next-worker", "host-b", "next-start"),
             60_000,
         )
@@ -2134,9 +2163,8 @@ async fn transient_engine_artifact_read_retries_and_terminally_commits() {
         run_handle,
     )
     .await;
-    registry
+    let artifact_read_retry_record = registry
         .register_process(engine_registration(
-            "artifact-read-retry",
             "fail-once-artifact-read",
             env_ref,
             serde_json::Value::Null,
@@ -2151,14 +2179,14 @@ async fn transient_engine_artifact_read_retries_and_terminally_commits() {
     tokio::time::timeout(Duration::from_secs(1), async {
         loop {
             let record = registry
-                .get_process(&ProcessId::from("artifact-read-retry"))
+                .get_process(&artifact_read_retry_record.id)
                 .await
                 .expect("read process")
                 .expect("artifact retry row");
             if record.first_started.is_some()
                 && !record.is_terminal()
                 && registry
-                    .get_process_lease(&ProcessId::from("artifact-read-retry"))
+                    .get_process_lease(&artifact_read_retry_record.id)
                     .await
                     .expect("lease read")
                     .is_none()
@@ -2175,9 +2203,9 @@ async fn transient_engine_artifact_read_retries_and_terminally_commits() {
         .enable_and_drive()
         .await
         .expect("drive retry after artifact recovery");
-    await_terminal(&registry, &ProcessId::from("artifact-read-retry")).await;
+    await_terminal(&registry, &artifact_read_retry_record.id).await;
     let record = registry
-        .get_process(&ProcessId::from("artifact-read-retry"))
+        .get_process(&artifact_read_retry_record.id)
         .await
         .expect("read process")
         .expect("terminal artifact retry row");
@@ -2203,16 +2231,13 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
     let worker = native_worker(&backend, owner.clone()).await;
 
     // (a) OwnerBound row this worker started -> drained.
-    registry
-        .register_process(registration_with_disposition(
-            "mine-started",
-            RecoveryContract::OwnerBound,
-        ))
+    let mine_started_record = registry
+        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
         .await
         .expect("register mine-started");
     registry
         .record_first_started(
-            &ProcessId::from("mine-started"),
+            &mine_started_record.id,
             ProcessStarted {
                 owner: owner.clone(),
                 fencing_token: 0,
@@ -2225,16 +2250,13 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
         .expect("record first_started for mine-started");
 
     // (b) OwnerBound row a DIFFERENT owner started -> not ours to drain.
-    registry
-        .register_process(registration_with_disposition(
-            "theirs-started",
-            RecoveryContract::OwnerBound,
-        ))
+    let theirs_started_record = registry
+        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
         .await
         .expect("register theirs-started");
     registry
         .record_first_started(
-            &ProcessId::from("theirs-started"),
+            &theirs_started_record.id,
             ProcessStarted {
                 owner: local_owner("other-host", "host-b", "start-b"),
                 fencing_token: 0,
@@ -2247,26 +2269,20 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
         .expect("record first_started for theirs-started");
 
     // (c) OwnerBound row never started -> still claimable by anyone.
-    registry
-        .register_process(registration_with_disposition(
-            "mine-unstarted",
-            RecoveryContract::OwnerBound,
-        ))
+    let mine_unstarted_record = registry
+        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
         .await
         .expect("register mine-unstarted");
 
     // (d) Rerunnable in-flight row this worker started -> left non-terminal for
     // the next worker (its contract; drain never terminalizes rerunnable work).
-    registry
-        .register_process(registration_with_disposition(
-            "rerunnable",
-            RecoveryContract::Rerunnable,
-        ))
+    let rerunnable_record = registry
+        .register_process(registration_with_disposition(RecoveryContract::Rerunnable))
         .await
         .expect("register rerunnable");
     registry
         .record_first_started(
-            &ProcessId::from("rerunnable"),
+            &rerunnable_record.id,
             ProcessStarted {
                 owner: owner.clone(),
                 fencing_token: 0,
@@ -2279,17 +2295,21 @@ async fn drain_terminalizes_this_hosts_started_owner_bound_work() {
         .expect("record first_started for rerunnable");
 
     let report = worker.drain_owner_bound_work().await.expect("drain");
-    assert_eq!(report.abandoned, vec!["mine-started".to_string()]);
+    assert_eq!(report.abandoned, vec![mine_started_record.id.clone()]);
     assert!(report.deferred.is_empty());
 
-    let evidence = abandoned_evidence(&registry, &ProcessId::from("mine-started")).await;
+    let evidence = abandoned_evidence(&registry, &mine_started_record.id).await;
     assert_eq!(evidence.writer, AbandonWriter::OwnerDrain);
     assert_eq!(evidence.owner.as_ref(), Some(&owner));
 
-    for untouched in ["theirs-started", "mine-unstarted", "rerunnable"] {
+    for (untouched, process_id) in [
+        ("theirs-started", &theirs_started_record.id),
+        ("mine-unstarted", &mine_unstarted_record.id),
+        ("rerunnable", &rerunnable_record.id),
+    ] {
         assert!(
             !registry
-                .get_process(&ProcessId::from(untouched))
+                .get_process(process_id)
                 .await
                 .expect("read process")
                 .expect("row exists")
@@ -2313,17 +2333,13 @@ async fn native_start_records_stable_owner_that_owner_drain_can_match() {
         run_handle,
     )
     .await;
-    let mut registration = engine_registration(
-        "real-native-owner-bound",
-        "paused-infra",
-        env_ref,
-        serde_json::Value::Null,
-    );
+    let mut registration = engine_registration("paused-infra", env_ref, serde_json::Value::Null);
     registration.disposition = RecoveryContract::OwnerBound;
-    registry
+    let process_id = registry
         .register_process(registration)
         .await
-        .expect("register owner-bound engine");
+        .expect("register owner-bound engine")
+        .id;
     let _ = run_handle
         .enable_and_drive()
         .await
@@ -2333,7 +2349,7 @@ async fn native_start_records_stable_owner_that_owner_drain_can_match() {
         .expect("engine starts");
 
     let record = registry
-        .get_process(&ProcessId::from("real-native-owner-bound"))
+        .get_process(&process_id)
         .await
         .expect("read process")
         .expect("started record");
@@ -2346,7 +2362,7 @@ async fn native_start_records_stable_owner_that_owner_drain_can_match() {
     fail.notify_one();
     tokio::time::timeout(Duration::from_secs(1), async {
         while registry
-            .get_process_lease(&ProcessId::from("real-native-owner-bound"))
+            .get_process_lease(&process_id)
             .await
             .expect("lease read")
             .is_some()
@@ -2358,10 +2374,7 @@ async fn native_start_records_stable_owner_that_owner_drain_can_match() {
     .expect("infrastructure failure releases the execution lease");
 
     let report = worker.drain_owner_bound_work().await.expect("owner drain");
-    assert_eq!(
-        report.abandoned,
-        vec!["real-native-owner-bound".to_string()]
-    );
+    assert_eq!(report.abandoned, vec![process_id.to_string()]);
     assert!(report.deferred.is_empty());
 }
 
@@ -2369,17 +2382,15 @@ async fn native_start_records_stable_owner_that_owner_drain_can_match() {
 async fn drain_does_not_report_abandoned_when_terminal_write_fails() {
     let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-write-failure", "host-a", "start-a");
-    let process_id = "owner-bound-terminal-write-failure";
-    registry
-        .register_process(registration_with_disposition(
-            process_id,
-            RecoveryContract::OwnerBound,
-        ))
+    let _process_id = "owner-bound-terminal-write-failure";
+    let owner_bound_terminal_write_failure_record = registry
+        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
         .await
         .expect("register owner-bound row");
+    let process_id = owner_bound_terminal_write_failure_record.id.clone();
     registry
         .record_first_started(
-            &ProcessId::from(process_id),
+            &process_id,
             ProcessStarted {
                 owner: owner.clone(),
                 fencing_token: 0,
@@ -2405,7 +2416,7 @@ async fn drain_does_not_report_abandoned_when_terminal_write_fails() {
     assert_eq!(
         report.deferred,
         vec![ProcessDrainDeferred {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             disposition: ProcessRecoveryAttemptOutcome::BackendError {
                 operation: ProcessRecoveryOperation::WriteTerminal,
                 error: "plugin session error: injected terminal-write failure".to_string(),
@@ -2414,13 +2425,13 @@ async fn drain_does_not_report_abandoned_when_terminal_write_fails() {
     );
     assert_recovery_backend_error_event(
         &capture,
-        &ProcessId::from(process_id),
+        &process_id,
         "write_terminal",
         "plugin session error: injected terminal-write failure",
     );
     assert!(
         !registry
-            .get_process(&ProcessId::from(process_id))
+            .get_process(&process_id)
             .await
             .expect("read process")
             .expect("process exists")

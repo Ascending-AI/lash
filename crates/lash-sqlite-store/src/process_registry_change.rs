@@ -206,11 +206,7 @@ fn prune_process_rows_conn(
         let cleanup_json = serde_json::to_string(&cleanup).map_err(process_decode_error)?;
         conn.execute(
             process_sql().cleanup_sqlite.insert.sql(),
-            params![
-                process_id.as_str(),
-                cleanup.incarnation.registration_sequence() as i64,
-                cleanup_json
-            ],
+            params![process_id.as_str(), cleanup_json],
         )
         .map_err(process_sqlite_error)?;
     }
@@ -278,7 +274,7 @@ pub(crate) fn prunable_terminal_process_ids_conn(
             .as_ref()
             .is_none_or(|filter| filter.matches_record(&record))
         {
-            prunable.push(ProcessId::from(process_id));
+            prunable.push(crate::stored_process_id(&process_id)?);
         }
     }
 
@@ -300,11 +296,9 @@ mod tests {
             .await
             .expect("open prune rollback registry")
             .process_registry();
-        let process_id = ProcessId::from(format!("prune-rollback:{}", uuid::Uuid::new_v4()));
-        let ghost_id = format!("prune-rollback-ghost:{}", uuid::Uuid::new_v4());
-        registry
+        let ghost_id = lash_core_execution::mint_process_id();
+        let process_id = registry
             .register_process(ProcessRegistration::new(
-                &process_id,
                 lash_core_execution::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -316,7 +310,8 @@ mod tests {
                 ),
             ))
             .await
-            .expect("register rollback process");
+            .expect("register rollback process")
+            .id;
         registry
             .complete_process(
                 &process_id,
@@ -350,7 +345,7 @@ mod tests {
             .write_flow(move |tx| {
                 Ok(tx_outcome(prune_process_rows_conn(
                     tx,
-                    &[divergent_process_id, ProcessId::from(ghost_id)],
+                    &[divergent_process_id, ghost_id],
                     123_456,
                 )))
             })

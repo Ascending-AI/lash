@@ -506,7 +506,7 @@ fn trigger_dtos_round_trip_core_values() {
         deliveries: vec![lash_core::facade_support::TriggerDeliveryEmitReceipt {
             occurrence_id: "occurrence:1".to_string(),
             subscription_id: "subscription:1".to_string(),
-            process_id: ProcessId::from("process:1"),
+            process_id: Some(lash_sansio::ProcessId::fixture("process:1")),
             outcome: lash_core::facade_support::TriggerDeliveryEmitOutcome::Started,
         }],
     };
@@ -645,7 +645,6 @@ fn core_and_remote_session_filter_constructors_are_byte_identical() {
 #[test]
 fn process_start_requests_round_trip_core_values() {
     let external = lash_core::ProcessStartRequest::external(
-        "process:external",
         lash_core::ProcessOriginator::host(),
         serde_json::json!({ "label": "External" }),
         lash_core::ProcessLifecyclePolicy::new(
@@ -663,10 +662,7 @@ fn process_start_requests_round_trip_core_values() {
             lash_core::TurnId::from("turn-a"),
         ),
         lash_core::ParentScope::queue_drain(SessionId::from("session-a"), "drain-a".to_string()),
-        lash_core::ParentScope::process(lash_core::ProcessRef::new(
-            ProcessId::from("parent"),
-            lash_core::ProcessIncarnation::from_registration_sequence(23),
-        )),
+        lash_core::ParentScope::process(lash_sansio::ProcessId::fixture("parent")),
     ] {
         let mut scoped = external.clone();
         scoped.originator =
@@ -677,7 +673,6 @@ fn process_start_requests_round_trip_core_values() {
     }
 
     let lashlang = lash_core::ProcessStartRequest::new(
-        "process:lashlang",
         engine_process_input("main", serde_json::json!({ "event": true })),
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::session(lash_core::SessionScope::new("session-a")),
@@ -715,7 +710,6 @@ fn process_start_requests_round_trip_core_values() {
     assert_process_start_roundtrip(lashlang);
 
     let session_turn = lash_core::ProcessStartRequest::new(
-        "process:session-turn",
         lash_core::ProcessInput::SessionTurn {
             definition_key: "remote-session-turn:v1".to_string(),
             create_request: Box::new(
@@ -744,7 +738,7 @@ fn process_start_requests_round_trip_core_values() {
 
 #[test]
 fn process_records_events_snapshots_and_results_round_trip_core_values() {
-    let mut record = process_record(&ProcessId::from("process:record"));
+    let mut record = process_record(&lash_sansio::ProcessId::fixture("process:record"));
     record.status = lash_core::ProcessStatus::Completed;
     record.outcome = Some(lash_core::ProcessAwaitOutput::from_tool_output(
         lash_core::ToolCallOutput::success(serde_json::json!({ "done": true })),
@@ -762,8 +756,7 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     );
 
     let summary = lash_core::ProcessHandleView::new(
-        "process:record",
-        lash_core::ProcessIncarnation::from_registration_sequence(1),
+        lash_sansio::ProcessId::fixture("process:record"),
         lash_core::ProcessIdentity::labelled("external", Some("External".to_string())),
         lash_core::ProcessStatus::Completed,
     )
@@ -779,7 +772,7 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     assert_eq!(core.process_id, summary.process_id);
     assert_eq!(core.status, summary.status);
 
-    let event = process_event(&ProcessId::from("process:record"));
+    let event = process_event(&lash_sansio::ProcessId::fixture("process:record"));
     let remote = RemoteProcessEvent::try_from(event.clone()).expect("remote process event");
     remote
         .validate("RemoteProcessEvent")
@@ -802,10 +795,7 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
 
     let snapshot = lash_core::facade_support::ProcessWorkSnapshot {
         session_id: SessionId::from("session-a"),
-        visible_processes: vec![lash_core::ProcessRef::new(
-            "process:observed",
-            lash_core::ProcessIncarnation::from_registration_sequence(1),
-        )],
+        visible_processes: vec![lash_sansio::ProcessId::fixture("process:observed")],
         items: vec![lash_core::facade_support::ObservedWorkItem {
             process: observed,
             events: vec![lash_core::facade_support::ObservedProcessEvent {
@@ -821,19 +811,24 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     let core =
         lash_core::facade_support::ProcessWorkSnapshot::try_from(remote).expect("core snapshot");
     assert_eq!(core.session_id, snapshot.session_id);
-    assert_eq!(core.items[0].process.process_id, "process:observed");
+    assert_eq!(
+        core.items[0].process.process_id,
+        lash_sansio::ProcessId::fixture("process:observed")
+    );
 
-    let start_result = RemoteProcessStartReceipt::try_from(process_record(&ProcessId::from(
-        "process:start-result",
-    )))
+    let start_result = RemoteProcessStartReceipt::try_from(process_record(
+        &lash_sansio::ProcessId::fixture("process:start-result"),
+    ))
     .expect("start result");
     let core = lash_core::ProcessRecord::try_from(start_result).expect("core start result");
-    assert_eq!(core.id, "process:start-result");
+    assert_eq!(
+        core.id,
+        lash_sansio::ProcessId::fixture("process:start-result")
+    );
 
     let cancel = RemoteProcessCancelReceipt::from(lash_core::ProcessCancelReceipt {
         origin: lash_sansio::CancelOrigin::ModelRequested,
-        process_id: ProcessId::from("process:cancel"),
-        incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
+        process_id: lash_sansio::ProcessId::fixture("process:cancel"),
         status: lash_core::ProcessStatus::Cancelled,
     });
     let core = lash_core::ProcessCancelReceipt::try_from(cancel).expect("core cancel summary");
@@ -841,19 +836,16 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     assert_eq!(core.origin, lash_sansio::CancelOrigin::ModelRequested);
 
     let await_result = RemoteProcessAwaitOutcome::try_from((
-        lash_core::ProcessRef::new(
-            "process:await",
-            lash_core::ProcessIncarnation::from_registration_sequence(1),
-        ),
+        lash_sansio::ProcessId::fixture("process:await"),
         lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::cancelled(
             lash_core::ToolCancellation::runtime("stopped"),
         )),
     ))
     .expect("remote await result");
-    let (process_ref, output) =
-        <(lash_core::ProcessRef, lash_core::ProcessAwaitOutput)>::try_from(await_result)
+    let (process_id, output) =
+        <(lash_core::ProcessId, lash_core::ProcessAwaitOutput)>::try_from(await_result)
             .expect("await result");
-    assert_eq!(process_ref.process_id, "process:await");
+    assert_eq!(process_id, lash_sansio::ProcessId::fixture("process:await"));
     assert!(matches!(
         output,
         lash_core::ProcessAwaitOutput::Settled { ref output }
@@ -861,33 +853,32 @@ fn process_records_events_snapshots_and_results_round_trip_core_values() {
     ));
 
     let events_response = RemoteProcessEventsResponse::try_from((
-        lash_core::ProcessRef::new(
-            "process:record",
-            lash_core::ProcessIncarnation::from_registration_sequence(1),
-        ),
+        lash_sansio::ProcessId::fixture("process:record"),
         lash_core::ProcessEventReadOutcome::Retained(lash_core::ProcessEventPage {
             events: lash_core::ProcessEventPageEvents::Full(vec![event.clone()]),
             more: lash_core::ProcessEventPageMore::Complete,
         }),
         lash_sansio::ProcessCursor::new(
             "epoch",
-            lash_sansio::ProcessCursorReference::for_lifetime(
-                &ProcessId::from("process:record"),
-                1,
-            ),
+            lash_sansio::ProcessCursorReference::for_process(&lash_sansio::ProcessId::fixture(
+                "process:record",
+            )),
             0,
             event.sequence,
         )
         .expect("cursor"),
     ))
     .expect("remote process events");
-    let (process_ref, events, cursor): (
+    let (process_id, events, cursor): (
         _,
         lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
         lash_sansio::ProcessCursor,
     ) = events_response.try_into().expect("events response");
     assert_eq!(cursor.sequence(), event.sequence);
-    assert_eq!(process_ref.process_id, "process:record");
+    assert_eq!(
+        process_id,
+        lash_sansio::ProcessId::fixture("process:record")
+    );
     assert!(
         matches!(events, lash_core::ProcessEventReadOutcome::Retained(page) if page.events.len() == 1)
     );
@@ -972,22 +963,19 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     assert!(core.definition.is_some());
 
     let cancel = RemoteProcessCancelRequest {
-        process_id: ProcessId::from("process:cancel"),
-        incarnation: 1,
+        process_id: lash_sansio::ProcessId::fixture("process:cancel"),
         requester: "actor:remote-host".to_string(),
     };
     cancel.validate().expect("valid cancel");
     let command = lash_core::ProcessCommand::from(cancel);
     assert!(matches!(
         command,
-        lash_core::ProcessCommand::Cancel { process_ref, .. }
-            if process_ref.process_id == "process:cancel"
-                && process_ref.incarnation.registration_sequence() == 1
+        lash_core::ProcessCommand::Cancel { process_id, .. }
+            if process_id == lash_sansio::ProcessId::fixture("process:cancel")
     ));
 
     let signal = RemoteProcessSignalRequest {
-        process_id: ProcessId::from("process:signal"),
-        incarnation: 1,
+        process_id: lash_sansio::ProcessId::fixture("process:signal"),
         signal_name: "ready".to_string(),
         signal_id: "signal:1".to_string(),
         payload: serde_json::json!({ "ok": true }),
@@ -999,24 +987,21 @@ fn process_list_cancel_signal_and_await_requests_convert_to_core_commands() {
     let command = lash_core::ProcessCommand::try_from(signal).expect("signal command");
     assert!(matches!(
         command,
-        lash_core::ProcessCommand::Signal { process_ref, signal_name, signal_id, .. }
-            if process_ref.process_id == "process:signal"
-                && process_ref.incarnation.registration_sequence() == 1
+        lash_core::ProcessCommand::Signal { process_id, signal_name, signal_id, .. }
+            if process_id == lash_sansio::ProcessId::fixture("process:signal")
                 && signal_name == "ready"
                 && signal_id == "signal:1"
     ));
 
     let await_request = RemoteProcessAwaitRequest {
-        process_id: ProcessId::from("process:await"),
-        incarnation: 1,
+        process_id: lash_sansio::ProcessId::fixture("process:await"),
     };
     await_request.validate().expect("valid await");
     let command = lash_core::ProcessCommand::from(await_request);
     assert!(matches!(
         command,
-        lash_core::ProcessCommand::Await { process_ref }
-            if process_ref.process_id == "process:await"
-                && process_ref.incarnation.registration_sequence() == 1
+        lash_core::ProcessCommand::Await { process_id }
+            if process_id == lash_sansio::ProcessId::fixture("process:await")
     ));
 }
 
@@ -1984,7 +1969,7 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
             None,
             lash_core::SessionObservationEventPayload::ProcessChanged {
                 kind: lash_core::SessionProcessEventKind::Started { sequence: 1 },
-                process_ids: vec![ProcessId::from("process-1".to_string())],
+                process_ids: vec![lash_sansio::ProcessId::fixture("process-1")],
             },
         ),
     )
@@ -1994,7 +1979,7 @@ fn remote_session_observation_from_core_maps_all_payload_variants() {
         remote.event,
         RemoteSessionObservationEventPayload::ProcessChanged { kind, process_ids }
             if kind == RemoteSessionProcessEventKind::Started { sequence: 1 }
-                && process_ids == vec!["process-1".to_string()]
+                && process_ids == vec![lash_sansio::ProcessId::fixture("process-1").to_string()]
     ));
 }
 
@@ -2024,7 +2009,7 @@ fn process_definition_identity(process_name: &str) -> serde_json::Value {
     serde_json::json!({
         "module_ref": "lashlang:v2:blake3:module",
         "host_requirements_ref": "lashlang-host-requirements:v1:sha256:host",
-        "process_ref": {
+        "process_id": {
             "component": "process-component",
             "pos": 1
         },
@@ -2123,6 +2108,52 @@ fn trigger_subscription_record() -> lash_core::TriggerSubscriptionRecord {
         created_at_ms: 1,
         updated_at_ms: 2,
     }
+}
+
+/// ADR 0107: a remote caller's raw key is scoped to the start's originator,
+/// and a record's `start_key_digest` echoed back as a caller's key is refused
+/// rather than hashed again into a key that starts a second process.
+#[test]
+fn a_remote_start_key_is_scoped_to_its_originator_and_never_rehashed() {
+    let remote_start = |session: &str, start_key: &str| {
+        let mut remote =
+            RemoteProcessStartRequest::try_from(lash_core::ProcessStartRequest::external(
+                lash_core::ProcessOriginator::session(lash_core::SessionScope::new(session)),
+                serde_json::json!({ "label": "External" }),
+                lash_core::ProcessLifecyclePolicy::new(
+                    lash_core::ParentScope::Host,
+                    lash_core::OnParentEnd::Abandon,
+                ),
+            ))
+            .expect("remote start");
+        remote.start_key = Some(start_key.to_string());
+        remote
+    };
+    let key_of = |remote: RemoteProcessStartRequest| {
+        lash_core::ProcessStartRequest::try_from(remote)
+            .expect("core start")
+            .start_key
+            .expect("a caller's key is kept")
+    };
+    let session_a = key_of(remote_start("session-a", "nightly-report"));
+    assert_eq!(
+        key_of(remote_start("session-a", "nightly-report")),
+        session_a,
+        "one caller's retry re-derives its key"
+    );
+    assert_ne!(
+        key_of(remote_start("session-b", "nightly-report")),
+        session_a,
+        "the same raw key under another originator is another key"
+    );
+
+    let echoed = remote_start("session-a", session_a.as_str());
+    let error = lash_core::ProcessStartRequest::try_from(echoed)
+        .expect_err("an echoed start-key digest is refused");
+    assert!(
+        error.to_string().contains("start_key_digest"),
+        "the refusal names the digest field: {error}"
+    );
 }
 
 fn assert_process_start_roundtrip(request: lash_core::ProcessStartRequest) {

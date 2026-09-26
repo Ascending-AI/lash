@@ -1,24 +1,26 @@
 //! Restate process commands replay by their recorded outcome, not by live
 //! re-execution (FIG-3827).
 //!
-//! Every process command but `Signal` runs as a direct process execution that
-//! records no outcome, and `Signal`'s eager record awaits its body before the
-//! record step: a replay re-runs each against the registry as it is *now*. A
-//! replay after the store moved on (a signalled child pruned, a listed
-//! process ended, a started child retired) answers differently from the run
-//! that wrote the journal, or issues different commands, which Restate
-//! refuses as a journal mismatch and parks the handler.
+//! A start journals its registration (ADR 0107), so its replay reads the
+//! recorded id. Every other process command but `Signal` runs as a direct
+//! process execution that records no outcome, and `Signal`'s eager record
+//! awaits its body before the record step: a replay re-runs each against the
+//! registry as it is *now*. A replay after the store moved on (a signalled
+//! child pruned, a listed process ended) answers differently from the run that
+//! wrote the journal, or issues different commands, which Restate refuses as a
+//! journal mismatch and parks the handler.
 //!
 //! Each law records one command live, moves the store on, replays the same
 //! command against the recorded journal and requires the recorded answer and
-//! the same command sequence. They fail today and are ignored under FIG-3827.
+//! the same command sequence. The start law holds; the others fail today and
+//! are ignored under FIG-3827.
 
 use super::*;
 
 /// Whether the registry still holds `process_id`: a pruned process reads as
 /// no longer retained.
-async fn is_retained(registry: &Arc<dyn ProcessRegistry>, process_id: &str) -> bool {
-    match registry.get_process(&ProcessId::from(process_id)).await {
+async fn is_retained(registry: &Arc<dyn ProcessRegistry>, process_id: &ProcessId) -> bool {
+    match registry.get_process(process_id).await {
         Ok(record) => record.is_some(),
         Err(PluginError::ProcessNoLongerRetained { .. }) => false,
         Err(error) => panic!("read `{process_id}`: {error:?}"),
@@ -26,10 +28,10 @@ async fn is_retained(registry: &Arc<dyn ProcessRegistry>, process_id: &str) -> b
 }
 
 /// End `process_id` and prune it, as terminal retention does.
-async fn end_and_prune(registry: &Arc<dyn ProcessRegistry>, process_id: &str) {
+async fn end_and_prune(registry: &Arc<dyn ProcessRegistry>, process_id: &ProcessId) {
     let ended = registry
         .complete_process(
-            &ProcessId::from(process_id),
+            process_id,
             process_success(serde_json::json!({ "done": true })),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
@@ -80,9 +82,8 @@ pub(super) async fn a_signal_replayed_after_its_target_is_pruned_answers_as_reco
     let context = Arc::new(ReplayableRecordingContext::default());
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
-    let target = "fig3827-signal-target";
     let record = registry
-        .register_process(external_registration(target).with_extra_event_types([
+        .register_process(external_registration().with_extra_event_types([
             lash_core::ProcessEventType {
                 name: "signal.notify".to_string(),
                 payload_schema: lash_core::LashSchema::any(),
@@ -95,7 +96,7 @@ pub(super) async fn a_signal_replayed_after_its_target_is_pruned_answers_as_reco
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, "fig3827-signal"),
             RuntimeEffectCommand::process(ProcessCommand::Signal {
-                process_ref: lash_core::ProcessRef::from_record(&record),
+                process_id: record.id.clone(),
                 signal_name: "notify".to_string(),
                 signal_id: "notify".to_string(),
                 request: lash_core::ProcessEventAppendRequest::new(
@@ -114,7 +115,7 @@ pub(super) async fn a_signal_replayed_after_its_target_is_pruned_answers_as_reco
     let resolved_live = context.events.resolved_events.lock_recover().clone();
     assert_eq!(resolved_live.len(), 1, "the live signal resolves one wait");
 
-    end_and_prune(&registry, target).await;
+    end_and_prune(&registry, &record.id).await;
     context.start_replay();
     let replay_from = context.journal_commands.lock_recover().len();
     let replay = host
@@ -148,15 +149,15 @@ pub(super) async fn a_list_replayed_after_a_listed_process_ended_answers_as_reco
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
     let scope = lash_core::SessionScope::new("fig3827-list-session");
-    let listed = "fig3827-listed";
-    registry
-        .register_process(external_registration(listed))
+    let listed = registry
+        .register_process(external_registration())
         .await
-        .expect("register the listed process");
+        .expect("register the listed process")
+        .id;
     registry
         .add_observer(
             &scope.session_id,
-            &ProcessId::from(listed),
+            &listed,
             lash_core::ProcessObserverBy::host("fig3827-list"),
         )
         .await
@@ -185,7 +186,7 @@ pub(super) async fn a_list_replayed_after_a_listed_process_ended_answers_as_reco
 
     registry
         .complete_process(
-            &ProcessId::from(listed),
+            &listed,
             process_success(serde_json::json!({ "done": true })),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
@@ -209,12 +210,10 @@ pub(super) async fn a_list_replayed_after_a_listed_process_ended_answers_as_reco
 /// start and issues the recorded submission: it never registers the child
 /// again.
 #[tokio::test]
-#[ignore = "FIG-3827: a replayed Start re-runs its registration and submission live against the current registry"]
 pub(super) async fn a_start_replayed_after_its_child_is_pruned_answers_as_recorded() {
     let context = Arc::new(ReplayableRecordingContext::default());
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
-    let child = "fig3827-started-child";
     context
         .defer_process_workflows
         .store(true, std::sync::atomic::Ordering::SeqCst);
@@ -222,7 +221,12 @@ pub(super) async fn a_start_replayed_after_its_child_is_pruned_answers_as_record
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, "fig3827-start"),
             RuntimeEffectCommand::process(ProcessCommand::Start {
-                registration: external_registration(child),
+                registration: external_registration().with_start_key(Some(
+                    lash_core::StartKey::for_host(
+                        lash_core::StartKeyOwner::HOST,
+                        "fig3827-started-child",
+                    ),
+                )),
                 observers: Vec::new(),
                 env_spec: None,
                 execution_context: Box::new(ProcessExecutionContext::default()),
@@ -234,8 +238,15 @@ pub(super) async fn a_start_replayed_after_its_child_is_pruned_answers_as_record
         .await
         .expect("the live start");
     let live_commands = commands_since(&context, 0);
+    let RuntimeEffectOutcome::Process {
+        result: ProcessEffectOutcome::Start { record },
+    } = &first
+    else {
+        panic!("a start outcome: {first:?}");
+    };
+    let child = record.id.clone();
 
-    end_and_prune(&registry, child).await;
+    end_and_prune(&registry, &child).await;
     context.start_replay();
     let replay_from = context.journal_commands.lock_recover().len();
     let replay = host
@@ -249,7 +260,7 @@ pub(super) async fn a_start_replayed_after_its_child_is_pruned_answers_as_record
         "the replay answers the recorded start"
     );
     assert!(
-        !is_retained(&registry, child).await,
+        !is_retained(&registry, &child).await,
         "the replay never registers the pruned child again"
     );
 }
@@ -264,15 +275,15 @@ pub(super) async fn a_transfer_replayed_after_its_process_is_pruned_answers_as_r
     let registry = process_registry();
     let from = lash_core::SessionScope::new("fig3827-transfer-from");
     let to = lash_core::SessionScope::new("fig3827-transfer-to");
-    let moved = "fig3827-transferred";
-    registry
-        .register_process(external_registration(moved))
+    let moved = registry
+        .register_process(external_registration())
         .await
-        .expect("register the transferred process");
+        .expect("register the transferred process")
+        .id;
     registry
         .add_observer(
             &from.session_id,
-            &ProcessId::from(moved),
+            &moved,
             lash_core::ProcessObserverBy::host("fig3827-transfer"),
         )
         .await
@@ -283,7 +294,7 @@ pub(super) async fn a_transfer_replayed_after_its_process_is_pruned_answers_as_r
             RuntimeEffectCommand::process(ProcessCommand::Transfer {
                 from_scope: from.clone(),
                 to_scope: to.clone(),
-                process_ids: vec![ProcessId::from(moved)],
+                process_ids: vec![moved.clone()],
             }),
         )
     };
@@ -293,7 +304,7 @@ pub(super) async fn a_transfer_replayed_after_its_process_is_pruned_answers_as_r
         .expect("the live transfer");
     let live_commands = commands_since(&context, 0);
 
-    end_and_prune(&registry, moved).await;
+    end_and_prune(&registry, &moved).await;
     context.start_replay();
     let replay_from = context.journal_commands.lock_recover().len();
     let replay = host

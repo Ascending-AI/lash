@@ -1462,8 +1462,11 @@ pub(super) fn runtime_failure_after_prints_and_tool_calls_retains_collected_outp
 /// either.
 #[test]
 pub(super) fn process_handle_derivation_matches_runtime_await_authority() {
+    let canonical_id = format!("p.{}", lash_core::ProcessId::fixture("p1"));
     let globals = lashlang::from_json(serde_json::json!({
-        "canonical": { "__handle__": "lash", "id": "p.1.p1" },
+        "canonical": { "__handle__": "lash", "id": canonical_id },
+        // The incarnation-qualified spelling the minted id retired.
+        "retired_incarnation_handle": { "__handle__": "lash", "id": "p.1.p1" },
         // The record part 1 still minted: the incarnation beside the id, and a
         // kind of its own. Part 2 retires both.
         "retired_process_record": { "__handle__": "process", "id": "p1", "incarnation": 1 },
@@ -1816,20 +1819,6 @@ impl lash_core::ToolProvider for ProcessControlToolProvider {
 
 #[async_trait::async_trait]
 impl lash_core::ProcessService for TypeScriptSignalProcessService {
-    /// The durable row, not the caller's pin, decides an already-registered
-    /// child's attempt bound.
-    async fn recorded_max_attempts(
-        &self,
-        _session_id: &SessionId,
-        process_id: &ProcessId,
-    ) -> Result<Option<u32>, lash_core::PluginError> {
-        Ok(self
-            .registry
-            .get_process(process_id)
-            .await?
-            .and_then(|record| record.max_attempts))
-    }
-
     /// FIG-2999: `processes.start` is a declaring leaf tool, so a cell that
     /// starts a process reaches the registry through the recorded-intent route
     /// rather than through the host-bridge arm the executor no longer has.
@@ -1851,7 +1840,9 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
             Some(spec) => Some(
                 lash_core::testing::publish_process_execution_env_for_testing(
                     self.env_store.as_ref(),
-                    &lash_core::ArtifactOwner::process_start(&request.id),
+                    &lash_core::ArtifactOwner::process_start(
+                        &lash_core::ProcessCommand::start_effect_id(request.start_key.as_ref()),
+                    ),
                     &spec,
                 )
                 .await?,
@@ -1871,16 +1862,6 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
                 registration.with_admitted_identity(admitted)
             }
             _ => registration,
-        };
-        // The runtime's own recorded-intent route re-registers with the bound
-        // on the row when one exists, so the fixture does too: a redrive after
-        // the host default moved must not change the registration fingerprint.
-        let registration = match self
-            .recorded_max_attempts(session_id, &registration.id)
-            .await?
-        {
-            Some(recorded) => registration.with_max_attempts(Some(recorded)),
-            None => registration,
         };
         let record = self
             .start(
@@ -1982,7 +1963,9 @@ impl lash_core::ProcessService for TypeScriptSignalProcessService {
         {
             let env_ref = lash_core::testing::publish_process_execution_env_for_testing(
                 self.env_store.as_ref(),
-                &lash_core::ArtifactOwner::process_start(&registration.id),
+                &lash_core::ArtifactOwner::process_start(
+                    &lash_core::ProcessCommand::start_effect_id(registration.start_key.as_ref()),
+                ),
                 spec,
             )
             .await?;

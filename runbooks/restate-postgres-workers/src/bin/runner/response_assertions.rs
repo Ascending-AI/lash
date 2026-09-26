@@ -109,7 +109,7 @@ pub(super) fn assert_signal_suspend_setup_response(response: &TurnResponse) -> R
         .get("process_id")
         .and_then(Value::as_str)
         .context("signal setup submitted no process_id")?;
-    Ok(ProcessId::from(process_id))
+    ProcessId::parse(process_id).context("signal setup submitted a malformed process_id")
 }
 
 pub(super) fn assert_async_completion_response(response: &TurnResponse) -> Result<()> {

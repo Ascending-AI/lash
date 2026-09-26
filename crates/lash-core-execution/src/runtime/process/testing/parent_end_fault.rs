@@ -23,7 +23,7 @@ use crate::runtime::process::registry_delegate::{
 use crate::{
     AbandonRequest, CancelOrigin, ParentEndPlan, ParentScope, PluginError, ProcessAwaitOutput,
     ProcessCompletionAuthority, ProcessCompletionOutcome, ProcessExecutionWriteAuthority,
-    ProcessId, ProcessLease, ProcessRecord, ProcessRef, ProcessStartOutcome, ProcessStarted,
+    ProcessId, ProcessLease, ProcessRecord, ProcessStartOutcome, ProcessStarted,
     RuntimeReplayAttribution, SessionId, StoreRealization, WaitState,
 };
 
@@ -54,7 +54,6 @@ delegate_process_registrar!(
     ParentEndFault,
     inner,
     registration | _watched,
-    _process_id,
     forwarded | {
         let record = forwarded.await?;
         Ok(record)
@@ -172,26 +171,26 @@ impl ProcessLifecycle for ParentEndFault {
 
     async fn request_process_cancel(
         &self,
-        process_ref: &ProcessRef,
+        process_id: &ProcessId,
         origin: CancelOrigin,
         requester: String,
         attribution: Option<RuntimeReplayAttribution>,
     ) -> Result<ProcessRecord, PluginError> {
         self.inner
-            .request_process_cancel(process_ref, origin, requester, attribution)
+            .request_process_cancel(process_id, origin, requester, attribution)
             .await
     }
 
     async fn request_process_cancel_reporting_realization(
         &self,
-        process_ref: &ProcessRef,
+        process_id: &ProcessId,
         origin: CancelOrigin,
         requester: String,
         attribution: Option<RuntimeReplayAttribution>,
     ) -> Result<(ProcessRecord, StoreRealization), PluginError> {
         self.inner
             .request_process_cancel_reporting_realization(
-                process_ref,
+                process_id,
                 origin,
                 requester,
                 attribution,

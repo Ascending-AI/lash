@@ -192,7 +192,7 @@ impl ProcessExecutionWriteAuthority {
             "durable handover predecessor does not match retained execution",
         );
         Err(crate::PluginError::ProcessLeaseSuperseded {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
         })
     }
 
@@ -264,7 +264,7 @@ impl ProcessExecutionWriteAuthority {
                 "presented start identity does not match authority",
             );
             return Err(crate::PluginError::ProcessLeaseSuperseded {
-                process_id: ProcessId::from(process_id.to_string()),
+                process_id: process_id.clone(),
             });
         }
         Ok(())
@@ -297,7 +297,7 @@ impl ProcessExecutionWriteAuthority {
                 "presented write identity does not match retained execution",
             );
             return Err(crate::PluginError::ProcessLeaseSuperseded {
-                process_id: ProcessId::from(process_id.to_string()),
+                process_id: process_id.clone(),
             });
         }
         Ok(())

@@ -4,12 +4,12 @@ use restate_sdk::serde::Json;
 
 /// Version stamped on the Restate-journaled process-command admission payload;
 /// a replay refuses any other version.
-pub const PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION: u32 = 1;
+pub const PROCESS_COMMAND_JOURNAL_PAYLOAD_VERSION: u32 = 2;
 
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 struct JournaledCancelCommandIdentity {
-    process_ref: lash_core::ProcessRef,
+    process_id: lash_core::ProcessId,
     origin: lash_core::CancelOrigin,
     requester: String,
     attribution: Option<lash_core::RuntimeReplayAttribution>,
@@ -35,11 +35,14 @@ struct JournaledCancelAdmission {
     realization: lash_core::StoreRealization,
 }
 
-fn process_command_journal_name(invocation: &RuntimeEffectInvocation, operation: &str) -> String {
+pub(super) fn process_command_journal_name(
+    invocation: &RuntimeEffectInvocation,
+    operation: &str,
+) -> String {
     format!("{}.{operation}:v1", restate_effect_name(invocation))
 }
 
-fn process_command_journal_error(
+pub(super) fn process_command_journal_error(
     operation: &str,
     error: TerminalError,
 ) -> RuntimeEffectControllerError {
@@ -106,14 +109,9 @@ fn validate_process_command_journal_identity<T: PartialEq>(
 /// the refusal is typed, never a missing row read as a pending wait.
 async fn await_existence_guard(
     registry: &dyn ProcessRegistry,
-    process_ref: &lash_core::ProcessRef,
+    process_id: &lash_core::ProcessId,
 ) -> Result<(), PluginError> {
-    match registry.get_process_ref(process_ref).await? {
-        Some(_) => Ok(()),
-        None => Err(lash_core::runtime::registry_transitions::unknown_process(
-            &process_ref.process_id,
-        )),
-    }
+    registry.require_process_id(process_id).await.map(|_| ())
 }
 
 /// The cancel a turn's stop owes the process it was awaiting, as the recorded
@@ -127,12 +125,12 @@ async fn await_existence_guard(
 /// unrecorded and the step runs again.
 async fn turn_stop_process_cancel_admission(
     registry: &dyn ProcessRegistry,
-    process_ref: &lash_core::ProcessRef,
+    process_id: &lash_core::ProcessId,
     requester: String,
 ) -> Result<Option<RestateProcessCancelRequest>, PluginError> {
     let refusal = match registry
         .request_process_cancel(
-            process_ref,
+            process_id,
             lash_core::CancelOrigin::TurnStopped,
             requester,
             None,
@@ -142,7 +140,7 @@ async fn turn_stop_process_cancel_admission(
         Ok(record) => return RestateProcessCancelRequest::from_record(&record).map(Some),
         Err(refusal) => refusal,
     };
-    match registry.get_process_ref(process_ref).await? {
+    match registry.get_process(process_id).await? {
         Some(record) if record.is_terminal() => Ok(None),
         Some(record) if record.cancel_request.is_some() => {
             RestateProcessCancelRequest::from_record(&record).map(Some)
@@ -187,160 +185,100 @@ where
     let turn_cancellation = execution.turn_cancellation;
     let outcome = match command {
         ProcessCommand::Start {
-            mut registration,
+            registration,
             observers,
             env_spec,
             execution_context,
         } => {
+            // A start is addressed by its key, never by the id it will be
+            // minted (ADR 0107); every journaled start carries one.
+            let Some(start_key) = registration.start_key.clone() else {
+                return Err(RuntimeEffectControllerError::foreign(
+                    "process_start_key_missing",
+                    lash_core::TurnFailureCause::Outcome,
+                    "a journaled process start must carry its start key",
+                ));
+            };
             // The marker comes first, before anything the start writes: a
-            // start refused at its live frontier has acted on nothing.
+            // start refused at its live frontier has acted on nothing
+            // (FIG-3779).
             super::live_frontier::pass_process_start_frontier(
                 context,
                 invocation,
-                &registration.id,
+                &start_key,
                 served_only.as_ref(),
-                registry.as_ref(),
             )
             .await?;
-            let staging_owner = lash_core::ArtifactOwner::process_start(&registration.id);
-            let env_artifacts = if let Some(env_spec) = env_spec.as_ref() {
-                let env_store = process_env_store.as_ref().ok_or_else(|| {
-                    RuntimeEffectControllerError::foreign(
-                        "process_env_store_unavailable",
-lash_core::TurnFailureCause::Outcome,
-                        "admitted Restate process start carries an execution environment but the executor has no environment store",
-                    )
-                })?;
-                let expected_ref = env_spec.stable_ref().map_err(|error| {
-                    lash_core::PluginError::Session(format!(
-                        "failed to encode process execution environment: {error}"
-                    ))
-                })?;
-                let bytes = env_spec.to_store_bytes().map_err(|error| {
-                    lash_core::PluginError::Session(format!(
-                        "failed to encode process execution environment: {error}"
-                    ))
-                })?;
-                let (env_ref, staged) = match lash_core::runtime::publish_process_execution_env(
-                    env_store.as_ref(),
-                    &staging_owner,
-                    env_spec,
-                )
-                .await
-                {
-                    Ok(env_ref) => (env_ref, true),
-                    Err(publish_error)
-                        if lash_core::runtime::artifact_owner_is_permanently_retired(
-                            &publish_error,
-                        ) =>
-                    {
-                        (expected_ref, false)
-                    }
-                    Err(publish_error) => return Err(publish_error.into()),
-                };
-                registration = registration.with_execution_env_ref(Some(env_ref.clone()));
-                Some((env_ref, bytes, staged))
-            } else if let Some(env_ref) = registration.env_ref.as_ref() {
-                let env_store = process_env_store.as_ref().ok_or_else(|| {
-                    RuntimeEffectControllerError::foreign(
-                        "process_env_store_unavailable",
-lash_core::TurnFailureCause::Outcome,
-                        "admitted Restate process start references an execution environment but the executor has no environment store",
-                    )
-                })?;
-                let bytes = env_store
-                    .get_process_execution_env(env_ref)
-                    .await?
-                    .ok_or_else(|| {
-                        lash_core::PluginError::Session(format!(
-                            "missing process execution env `{env_ref}`"
-                        ))
-                    })?;
-                let staged = if let Err(publish_error) = env_store
-                    .publish_process_execution_env(&staging_owner, env_ref, &bytes)
-                    .await
-                {
-                    if lash_core::runtime::artifact_owner_is_permanently_retired(&publish_error) {
-                        false
-                    } else {
-                        return Err(publish_error.into());
-                    }
-                } else {
-                    true
-                };
-                Some((env_ref.clone(), bytes, staged))
-            } else {
-                None
-            };
-            let engine_artifacts = match registration.input.as_ref() {
-                lash_core::ProcessInput::Engine { kind, payload } => {
-                    let process_engines = process_engines.as_ref().ok_or_else(|| {
-                        RuntimeEffectControllerError::foreign(
-                            "process_engine_registry_unavailable",
-lash_core::TurnFailureCause::Outcome,
-                            "admitted Restate process start requires an engine but the executor has no process-engine registry",
-                        )
-                    })?;
-                    let engine = process_engines.require(kind)?;
-                    let staged = if let Err(protect_error) = engine
-                        .protect_start_artifacts(&staging_owner, payload)
-                        .await
-                    {
-                        if lash_core::runtime::artifact_owner_is_permanently_retired(&protect_error)
-                        {
-                            false
-                        } else {
-                            return Err(protect_error.into());
+            // Registration runs inside one journaled step (ADR 0107): the
+            // registrar mints an id once per start, and a replay of the
+            // parent reads the recorded registration instead of registering
+            // again, so a replay after the process was pruned still sends to
+            // the recorded id rather than minting a second one. A store fault
+            // ends the attempt unrecorded; a terminal refusal is the start's
+            // recorded outcome. A served-only start whose registration step
+            // runs live goes on only when a retained process already holds its
+            // key: the attempt that issued it registered and died before the
+            // step journaled. With none, nothing was started, and the start
+            // refuses at its live frontier having acted on nothing (FIG-3779
+            // option 3).
+            let live = served_only
+                .clone()
+                .map(super::live_frontier::LiveFrontier::new);
+            let closure_live = live.clone();
+            let stored_registration = registration.clone();
+            let run = context.run_json_or_retry_send(
+                process_command_journal_name(invocation, "process-start-register"),
+                async {
+                    if let Some(live) = &closure_live {
+                        // FIG-3779 option 3: the step runs live, so its result
+                        // was never journaled. A retained process under the
+                        // key is this start, registered by the attempt that
+                        // died before journaling it, and is served; with none,
+                        // the start is needed live.
+                        match registry.get_process_by_start_key(&start_key).await {
+                            Ok(Some(_)) => {}
+                            Ok(None) => return live.reached().await,
+                            Err(error) => return Err(error.to_string()),
                         }
-                    } else {
-                        true
+                    }
+                    let stores = lash_core::runtime::ProcessStartStores {
+                        registry: registry.as_ref(),
+                        env_store: process_env_store.as_ref(),
+                        engines: process_engines.as_ref(),
+                        engines_required: true,
+                        executor: "Restate process start",
                     };
-                    Some((engine, payload.clone(), staged))
-                }
-                _ => None,
+                    match lash_core::runtime::register_process_start(
+                        &stores,
+                        stored_registration,
+                        &observers,
+                        env_spec.as_ref(),
+                    )
+                    .await
+                    {
+                        Ok(started) => Ok(Ok(started)),
+                        Err(error) if error.is_terminal() => Ok(Err(error)),
+                        Err(error) => Err(error.to_string()),
+                    }
+                },
+            );
+            let journaled = match live {
+                None => run.await,
+                Some(live) => live.serve(run).await?,
             };
-            let (record, realization) = match schedule_restate_process(
+            let Json(recorded) = journaled
+                .map_err(|error| process_command_journal_error("start registration", error))?;
+            let started: lash_core::runtime::RegisteredProcessStart = recorded?;
+            let registration = registration.with_execution_env_ref(started.env_ref.clone());
+            let (record, realization) = schedule_restate_process(
                 Arc::clone(&registry),
+                started,
                 registration,
-                observers,
                 *execution_context,
                 context,
+                invocation,
             )
-            .await
-            {
-                Ok(scheduled) => scheduled,
-                // Registration, workflow submission, and external-ref persistence are
-                // separate durable authorities. An error after any one of them is an
-                // unknown/retriable start, not proof that the process was abandoned.
-                // Keep the staging edges so an exact redrive can finish the transfer;
-                // authoritative process retirement owns their eventual permanent fence.
-                Err(error) => return Err(error.into()),
-            };
-            let process_owner =
-                lash_core::ArtifactOwner::process(lash_core::ProcessRef::from_record(&record));
-            if let (Some(store), Some((env_ref, bytes, staged))) =
-                (process_env_store.as_ref(), env_artifacts.as_ref())
-            {
-                lash_core::runtime::settle_started_process_execution_env(
-                    store.as_ref(),
-                    &staging_owner,
-                    &process_owner,
-                    env_ref,
-                    bytes,
-                    *staged,
-                )
-                .await?;
-            }
-            if let Some((engine, payload, staged)) = engine_artifacts {
-                lash_core::runtime::settle_started_process_engine_artifacts(
-                    engine.as_ref(),
-                    &staging_owner,
-                    &process_owner,
-                    &payload,
-                    staged,
-                )
-                .await?;
-            }
+            .await?;
             Ok((
                 ProcessEffectOutcome::Start {
                     record: Box::new(record),
@@ -400,26 +338,24 @@ lash_core::TurnFailureCause::Outcome,
                 lash_core::StoreRealization::Realized,
             ))
         }
-        ProcessCommand::Await { process_ref } => {
-            let process_id = process_ref.process_id.clone();
+        ProcessCommand::Await { process_id } => {
             // The existence guard is a recorded step (FIG-3808): a guard the
             // first execution passed never fails on a replay, even after the
-            // awaited process ended and its row was pruned or its name was
-            // registered again. Its answer is Ok or the typed refusal the
-            // registry gave; a retryable store fault ends the attempt
-            // unrecorded and the step runs again.
+            // awaited process ended and its row was pruned. Its answer is Ok
+            // or the typed refusal the registry gave; a retryable store fault
+            // ends the attempt unrecorded and the step runs again.
             //
             // FIG-790 emits Process::Await before observing state; FIG-1521
             // keeps the pre-journal engine-admission gate pure; world
             // readiness belongs to ProcessEngine::run, after the Start command
             // replays.
             let guard_registry = Arc::clone(&registry);
-            let guard_ref = process_ref.clone();
+            let guard_id = process_id.clone();
             let Json(guarded) = context
                 .run_json_or_retry_send::<Result<(), PluginError>, _>(
                     process_command_journal_name(invocation, "process-await-guard"),
                     async move {
-                        match await_existence_guard(guard_registry.as_ref(), &guard_ref).await {
+                        match await_existence_guard(guard_registry.as_ref(), &guard_id).await {
                             Ok(()) => Ok(Ok(())),
                             Err(error) if error.is_retryable() => Err(error.to_string()),
                             Err(error) => Ok(Err(error)),
@@ -501,7 +437,7 @@ lash_core::TurnFailureCause::Outcome,
                     // recorded answer and issues the same cancel call, never
                     // the store (FIG-3752).
                     let admission_registry = Arc::clone(&registry);
-                    let admission_process_ref = process_ref.clone();
+                    let admission_process_id = process_id.clone();
                     let Json(cancel_request) = context
                         .run_json_or_retry_send(
                             process_command_journal_name(
@@ -511,7 +447,7 @@ lash_core::TurnFailureCause::Outcome,
                             async move {
                                 turn_stop_process_cancel_admission(
                                     admission_registry.as_ref(),
-                                    &admission_process_ref,
+                                    &admission_process_id,
                                     requester,
                                 )
                                 .await
@@ -569,15 +505,15 @@ lash_core::TurnFailureCause::Outcome,
                 lash_core::StoreRealization::Realized,
             ))
         }
-        ProcessCommand::AttachTerminal { process_ref, key } => {
-            // Prove the incarnation still exists before claiming the wait is
+        ProcessCommand::AttachTerminal { process_id, key } => {
+            // Prove the process is still retained before claiming the wait is
             // armed. The same retention exposure the `Await` branch documents
             // applies: a host that prunes a terminal row out from under a
             // waiter breaks the wait, and the refusal here is loud rather than
             // a silent park.
-            registry.get_process_ref(&process_ref).await?;
+            registry.require_process_id(&process_id).await?;
             context
-                .attach_process_terminal(RestateProcessAttachRequest { process_ref, key })
+                .attach_process_terminal(RestateProcessAttachRequest { process_id, key })
                 .await
                 .map_err(|err| {
                     RuntimeEffectControllerError::new(
@@ -591,20 +527,20 @@ lash_core::TurnFailureCause::Outcome,
             ))
         }
         ProcessCommand::Cancel {
-            process_ref,
+            process_id,
             origin,
             requester,
             attribution,
         } => {
             let command_identity = JournaledCancelCommandIdentity {
-                process_ref,
+                process_id,
                 origin,
                 requester,
                 attribution,
             };
             let admission_registry = Arc::clone(&registry);
             let admitted_identity = command_identity.clone();
-            let admission_process_ref = command_identity.process_ref.clone();
+            let admission_process_id = command_identity.process_id.clone();
             let admission_requester = command_identity.requester.clone();
             let admission_attribution = command_identity.attribution.clone();
             let Json(admission_value) = context
@@ -614,7 +550,7 @@ lash_core::TurnFailureCause::Outcome,
                     async move {
                         let admitted = admission_registry
                             .request_process_cancel_reporting_realization(
-                                &admission_process_ref,
+                                &admission_process_id,
                                 origin,
                                 admission_requester,
                                 admission_attribution,
@@ -673,28 +609,24 @@ lash_core::TurnFailureCause::Outcome,
             lash_core::StoreRealization::Realized,
         )),
         ProcessCommand::Signal {
-            process_ref,
+            process_id,
             signal_name,
             request,
             ..
         } => {
-            let result = registry.append_event_ref(&process_ref, request).await?;
+            let result = registry.append_event(&process_id, request).await?;
             let realization = result.realization;
             let ordinal = signal_ordinal_for_event(
                 registry.as_ref(),
-                &process_ref,
+                &process_id,
                 result.event.event_type.as_str(),
                 result.event.sequence,
             )
             .await?;
             let key = restate_await_event_key_for_authority(
                 authority_id,
-                &ExecutionScope::process(process_ref.process_id.clone()),
-                AwaitEventWaitIdentity::process_signal(
-                    process_ref.process_id,
-                    signal_name,
-                    ordinal,
-                ),
+                &ExecutionScope::process(process_id.clone()),
+                AwaitEventWaitIdentity::process_signal(process_id, signal_name, ordinal),
             )
             .map_err(PluginError::Runtime)?;
             context

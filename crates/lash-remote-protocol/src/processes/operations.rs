@@ -6,18 +6,12 @@ use lash_sansio::ProcessId;
 #[serde(deny_unknown_fields)]
 pub struct RemoteProcessCancelRequest {
     pub process_id: ProcessId,
-    pub incarnation: u64,
     pub requester: String,
 }
 
 impl RemoteProcessCancelRequest {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         require_non_empty("RemoteProcessCancelRequest", "process_id", &self.process_id)?;
-        RemoteProcessRef {
-            process_id: self.process_id.clone(),
-            incarnation: self.incarnation,
-        }
-        .validate("RemoteProcessCancelRequest")?;
         require_non_empty("RemoteProcessCancelRequest", "requester", &self.requester)?;
         Ok(())
     }
@@ -27,7 +21,6 @@ impl RemoteProcessCancelRequest {
 pub struct RemoteProcessCancelReceipt {
     pub origin: lash_sansio::CancelOrigin,
     pub process_id: ProcessId,
-    pub incarnation: u64,
     pub status: RemoteProcessStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub record: Option<RemoteProcessRecord>,
@@ -36,11 +29,6 @@ pub struct RemoteProcessCancelReceipt {
 impl RemoteProcessCancelReceipt {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         require_non_empty("RemoteProcessCancelReceipt", "process_id", &self.process_id)?;
-        RemoteProcessRef {
-            process_id: self.process_id.clone(),
-            incarnation: self.incarnation,
-        }
-        .validate("RemoteProcessCancelReceipt")?;
         if let Some(record) = &self.record {
             record.validate("RemoteProcessCancelReceipt")?;
             if record.status != self.status {
@@ -60,7 +48,6 @@ impl RemoteProcessCancelReceipt {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessSignalRequest {
     pub process_id: ProcessId,
-    pub incarnation: u64,
     pub signal_name: String,
     pub signal_id: String,
     #[serde(default)]
@@ -72,11 +59,6 @@ pub struct RemoteProcessSignalRequest {
 impl RemoteProcessSignalRequest {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         require_non_empty("RemoteProcessSignalRequest", "process_id", &self.process_id)?;
-        RemoteProcessRef {
-            process_id: self.process_id.clone(),
-            incarnation: self.incarnation,
-        }
-        .validate("RemoteProcessSignalRequest")?;
         require_non_empty(
             "RemoteProcessSignalRequest",
             "signal_name",
@@ -104,34 +86,23 @@ impl RemoteProcessSignalReceipt {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessAwaitRequest {
     pub process_id: ProcessId,
-    pub incarnation: u64,
 }
 
 impl RemoteProcessAwaitRequest {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        RemoteProcessRef {
-            process_id: self.process_id.clone(),
-            incarnation: self.incarnation,
-        }
-        .validate("RemoteProcessAwaitRequest")
+        Ok(())
     }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessAwaitOutcome {
     pub process_id: ProcessId,
-    pub incarnation: u64,
     pub output: RemoteProcessAwaitOutput,
 }
 
 impl RemoteProcessAwaitOutcome {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
         require_non_empty("RemoteProcessAwaitOutcome", "process_id", &self.process_id)?;
-        RemoteProcessRef {
-            process_id: self.process_id.clone(),
-            incarnation: self.incarnation,
-        }
-        .validate("RemoteProcessAwaitOutcome")?;
         self.output.validate("RemoteProcessAwaitOutcome")
     }
 }
@@ -141,7 +112,6 @@ impl RemoteProcessAwaitOutcome {
 #[cfg(any(feature = "core-conversions", test))]
 pub struct RemoteProcessEventsRequest {
     pub process_id: ProcessId,
-    pub incarnation: u64,
     pub limit: std::num::NonZeroUsize,
     pub mode: lash_core::ProcessEventQueryMode,
     /// The process cursor to read after; absent reads from the start.
@@ -162,17 +132,12 @@ impl RemoteProcessEventsRequest {
     }
 
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        RemoteProcessRef {
-            process_id: self.process_id.clone(),
-            incarnation: self.incarnation,
-        }
-        .validate("RemoteProcessEventsRequest")?;
         if let Some(cursor) = &self.cursor
-            && !cursor.reference().names(&self.process_id, self.incarnation)
+            && !cursor.reference().names(&self.process_id)
         {
             return Err(RemoteProtocolError::InvalidEnvelope {
                 type_name: "RemoteProcessEventsRequest",
-                message: "cursor names another process lifetime".to_string(),
+                message: "cursor names another process".to_string(),
             });
         }
         Ok(())
@@ -184,7 +149,6 @@ impl RemoteProcessEventsRequest {
 #[cfg(any(feature = "core-conversions", test))]
 pub struct RemoteProcessEventsResponse {
     pub process_id: ProcessId,
-    pub incarnation: u64,
     pub outcome: lash_core::ProcessEventReadOutcome<
         lash_core::ProcessEventPage<RemoteProcessEvent, lash_core::ProcessEventLite>,
     >,
@@ -211,19 +175,10 @@ impl RemoteProcessEventsResponse {
             "process_id",
             &self.process_id,
         )?;
-        RemoteProcessRef {
-            process_id: self.process_id.clone(),
-            incarnation: self.incarnation,
-        }
-        .validate("RemoteProcessEventsResponse")?;
-        if !self
-            .cursor
-            .reference()
-            .names(&self.process_id, self.incarnation)
-        {
+        if !self.cursor.reference().names(&self.process_id) {
             return Err(RemoteProtocolError::InvalidEnvelope {
                 type_name: "RemoteProcessEventsResponse",
-                message: "cursor names another process lifetime".to_string(),
+                message: "cursor names another process".to_string(),
             });
         }
         if let lash_core::ProcessEventReadOutcome::Retained(page) = &self.outcome {
@@ -238,12 +193,10 @@ impl RemoteProcessEventsResponse {
             if let lash_core::ProcessEventPageEvents::Full(events) = &page.events {
                 for event in events {
                     event.validate("RemoteProcessEventsResponse")?;
-                    if event.process_id != self.process_id
-                        || event.process_incarnation != self.incarnation
-                    {
+                    if event.process_id != self.process_id {
                         return Err(RemoteProtocolError::InvalidEnvelope {
                             type_name: "RemoteProcessEventsResponse",
-                            message: "event belongs to another process incarnation".to_string(),
+                            message: "event belongs to another process".to_string(),
                         });
                     }
                 }
@@ -255,7 +208,12 @@ impl RemoteProcessEventsResponse {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 pub struct RemoteProcessStartRequest {
-    pub id: ProcessId,
+    /// The caller's idempotency key (ADR 0107): while the process started
+    /// under it is retained, a retry returns that process. Absent, every
+    /// request starts a new process. Never an identity: the registrar mints
+    /// the process id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub start_key: Option<String>,
     pub input: RemoteProcessInput,
     pub disposition: RemoteRecoveryContract,
     pub lifecycle: Option<RemoteProcessLifecyclePolicy>,
@@ -276,7 +234,9 @@ pub struct RemoteProcessStartRequest {
 
 impl RemoteProcessStartRequest {
     pub fn validate(&self) -> Result<(), RemoteProtocolError> {
-        require_non_empty("RemoteProcessStartRequest", "id", &self.id)?;
+        if let Some(start_key) = &self.start_key {
+            require_non_empty("RemoteProcessStartRequest", "start_key", start_key)?;
+        }
         if self.max_attempts == Some(0) {
             return Err(RemoteProtocolError::InvalidEnvelope {
                 type_name: "RemoteProcessStartRequest",

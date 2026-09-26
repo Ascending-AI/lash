@@ -62,7 +62,7 @@ fn queued_events_preserve_typed_payloads_and_refuse_old_peers() {
             RemoteTurnActivity::decode_json(&serde_json::to_vec(&old).unwrap()),
             Err(RemoteProtocolError::UnsupportedProtocolVersion {
                 actual: 52,
-                expected: 99
+                expected: 100
             })
         ));
     }
@@ -110,13 +110,13 @@ fn queued_event_closed_vocabularies_have_independent_literal_pins() {
         ),
         (
             RemoteMessageOrigin::Process {
-                process_id: "p".into(),
+                process_id: lash_sansio::ProcessId::fixture("p"),
                 event_type: "e".into(),
                 sequence: 1,
                 wake_id: None,
                 caused_by: None,
             },
-            serde_json::json!({"kind":"process","process_id":"p","event_type":"e","sequence":1}),
+            serde_json::json!({"kind":"process","process_id":lash_sansio::ProcessId::fixture("p"),"event_type":"e","sequence":1}),
         ),
         (
             RemoteMessageOrigin::TurnInput {

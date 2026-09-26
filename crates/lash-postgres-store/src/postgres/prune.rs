@@ -63,12 +63,10 @@ mod tests {
         let storage = PostgresStorage::connect(&database_url)
             .await
             .expect("connect prune rollback storage");
-        let process_id = ProcessId::from(format!("prune-rollback:{}", uuid::Uuid::new_v4()));
-        let ghost_id = format!("prune-rollback-ghost:{}", uuid::Uuid::new_v4());
+        let ghost_id = lash_core_execution::mint_process_id();
         let registry = storage.process_registry();
-        registry
+        let process_id = registry
             .register_process(ProcessRegistration::new(
-                &process_id,
                 lash_core_execution::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -80,7 +78,8 @@ mod tests {
                 ),
             ))
             .await
-            .expect("register rollback process");
+            .expect("register rollback process")
+            .id;
         registry
             .complete_process(
                 &process_id,
@@ -106,13 +105,9 @@ mod tests {
         .expect("read process clock before divergent prune");
 
         let mut tx = storage.pool().begin().await.expect("begin divergent prune");
-        let error = prune_process_rows_tx(
-            &mut tx,
-            &[process_id.clone(), ProcessId::from(ghost_id)],
-            123_456,
-        )
-        .await
-        .expect_err("candidate/tombstone divergence must abort the prune transaction");
+        let error = prune_process_rows_tx(&mut tx, &[process_id.clone(), ghost_id], 123_456)
+            .await
+            .expect_err("candidate/tombstone divergence must abort the prune transaction");
         assert!(
             error.to_string().contains("candidate/tombstone divergence"),
             "unexpected divergence error: {error}"

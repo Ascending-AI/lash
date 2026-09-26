@@ -145,10 +145,10 @@ fn wake_delivery_statements_keep_their_previous_bytes() {
     assert_eq!(
         sql.wake_sqlite.insert_pending.sql(),
         "INSERT OR IGNORE INTO process_wake_deliveries (
-                delivery_id, process_id, process_incarnation, target_session_id, sequence, state,
+                delivery_id, process_id, target_session_id, sequence, state,
                 claim_token, attempts, first_attempt_ms, next_attempt_at_ms, expires_at_ms,
                 discard_reason, delivery_json
-             ) VALUES (?1, ?2, ?3, ?4, ?5, 'pending', NULL, 0, NULL, ?6, ?7, NULL, ?8)"
+             ) VALUES (?1, ?2, ?3, ?4, 'pending', NULL, 0, NULL, ?5, ?6, NULL, ?7)"
     );
     let claimable = sql.wake_sqlite.select_claimable.sql();
     assert!(claimable.contains("WHERE candidate.state = 'pending'\n"));

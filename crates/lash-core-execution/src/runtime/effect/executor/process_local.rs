@@ -3,10 +3,10 @@ use tracing::Instrument as _;
 
 async fn await_process_terminal(
     process_work: &dyn crate::ProcessWorkSubstrate,
-    process_ref: &crate::ProcessRef,
+    process_id: &crate::ProcessId,
 ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
     loop {
-        match process_work.await_process_terminal(process_ref).await? {
+        match process_work.await_process_terminal(process_id).await? {
             crate::ProcessTerminalWait::Terminal(output) => return Ok(output),
             crate::ProcessTerminalWait::Reattach => continue,
         }
@@ -55,156 +55,32 @@ impl ProcessLocalExecution {
         } = self;
         let outcome = match command {
             ProcessCommand::Start {
-                mut registration,
+                registration,
                 observers,
                 env_spec,
                 execution_context: _,
             } => {
-                let staging_owner = crate::ArtifactOwner::process_start(&registration.id);
-                let env_artifacts = if let Some(env_spec) = env_spec.as_ref() {
-                    let env_store = process_env_store.as_ref().ok_or_else(|| {
-                        RuntimeEffectControllerError::foreign(
-                            "process_env_store_unavailable",
-crate::TurnFailureCause::Outcome,
-                            "admitted process start carries an execution environment but the local executor has no environment store",
-                        )
-                    })?;
-                    let expected_ref = env_spec.stable_ref().map_err(|error| {
-                        crate::PluginError::Session(format!(
-                            "failed to encode process execution environment: {error}"
-                        ))
-                    })?;
-                    let bytes = env_spec.to_store_bytes().map_err(|error| {
-                        crate::PluginError::Session(format!(
-                            "failed to encode process execution environment: {error}"
-                        ))
-                    })?;
-                    let (env_ref, staged) = match crate::publish_process_execution_env(
-                        env_store.as_ref(),
-                        &staging_owner,
-                        env_spec,
-                    )
-                    .await
-                    {
-                        Ok(env_ref) => (env_ref, true),
-                        Err(publish_error)
-                            if crate::artifact_owner_is_permanently_retired(&publish_error) =>
-                        {
-                            (expected_ref, false)
-                        }
-                        Err(publish_error) => return Err(publish_error.into()),
-                    };
-                    registration = registration.with_execution_env_ref(Some(env_ref.clone()));
-                    Some((env_ref, bytes, staged))
-                } else if let Some(env_ref) = registration.env_ref.as_ref() {
-                    let env_store = process_env_store.as_ref().ok_or_else(|| {
-                        RuntimeEffectControllerError::foreign(
-                            "process_env_store_unavailable",
-crate::TurnFailureCause::Outcome,
-                            "admitted process start references an execution environment but the local executor has no environment store",
-                        )
-                    })?;
-                    let bytes = env_store
-                        .get_process_execution_env(env_ref)
-                        .await?
-                        .ok_or_else(|| {
-                            crate::PluginError::Session(format!(
-                                "missing process execution env `{env_ref}`"
-                            ))
-                        })?;
-                    let staged = if let Err(publish_error) = env_store
-                        .publish_process_execution_env(&staging_owner, env_ref, &bytes)
-                        .await
-                    {
-                        if crate::artifact_owner_is_permanently_retired(&publish_error) {
-                            false
-                        } else {
-                            return Err(publish_error.into());
-                        }
-                    } else {
-                        true
-                    };
-                    Some((env_ref.clone(), bytes, staged))
-                } else {
-                    None
-                };
-                let engine_artifacts = match registration.input.as_ref() {
-                    crate::ProcessInput::Engine { kind, payload } if process_engines.is_some() => {
-                        #[expect(
-                            clippy::expect_used,
-                            reason = "the match guard checked this option"
-                        )]
-                        let engine = process_engines
-                            .as_ref()
-                            .expect("checked above")
-                            .require(kind)?;
-                        let staged = if let Err(protect_error) = engine
-                            .protect_start_artifacts(&staging_owner, payload)
-                            .await
-                        {
-                            if crate::artifact_owner_is_permanently_retired(&protect_error) {
-                                false
-                            } else {
-                                return Err(protect_error.into());
-                            }
-                        } else {
-                            true
-                        };
-                        Some((engine, payload.clone(), staged))
-                    }
-                    _ => None,
-                };
                 // Registering the row is the whole start: the registry's
                 // non-terminal row is the durable work queue, and the
-                // host-owned process-work substrate is its sole executor. The
-                // realization reports whether the registry inserted the row or
-                // returned one it already held under the same registration
-                // fingerprint (FIG-3070).
-                let (record, realization) = match registry
-                    .register_process_reporting_disposition(registration, &observers)
-                    .await
-                    .map(|outcome| {
-                        let realization = crate::StoreRealization::from_wrote(outcome.is_created());
-                        (outcome.record, realization)
-                    }) {
-                    Ok(outcome) => outcome,
-                    Err(error) => {
-                        if let Some(env_store) = process_env_store.as_ref() {
-                            env_store
-                                .retire_process_execution_env_owner(&staging_owner)
-                                .await?;
-                        }
-                        if let Some((engine, _, _)) = engine_artifacts.as_ref() {
-                            engine.retire_artifact_owner(&staging_owner).await?;
-                        }
-                        return Err(error.into());
-                    }
-                };
-                let process_owner =
-                    crate::ArtifactOwner::process(crate::ProcessRef::from_record(&record));
-                if let (Some(env_store), Some((env_ref, bytes, staged))) =
-                    (process_env_store.as_ref(), env_artifacts.as_ref())
-                {
-                    crate::settle_started_process_execution_env(
-                        env_store.as_ref(),
-                        &staging_owner,
-                        &process_owner,
-                        env_ref,
-                        bytes,
-                        *staged,
-                    )
-                    .await?;
-                }
-                if let Some((engine, payload, staged)) = engine_artifacts {
-                    crate::settle_started_process_engine_artifacts(
-                        engine.as_ref(),
-                        &staging_owner,
-                        &process_owner,
-                        &payload,
-                        staged,
-                    )
-                    .await?;
-                }
+                // host-owned process-work substrate is its sole executor. A
+                // runtime start derives its key from its admitted operation,
+                // and a host start from its caller or its admitted scope
+                // (ADR 0107).
+                let started = crate::runtime::register_process_start(
+                    &crate::runtime::ProcessStartStores {
+                        registry: registry.as_ref(),
+                        env_store: process_env_store.as_ref(),
+                        engines: process_engines.as_ref(),
+                        engines_required: false,
+                        executor: "process start on the local executor",
+                    },
+                    registration,
+                    &observers,
+                    env_spec.as_ref(),
+                )
+                .await?;
+                let realization = started.realization();
+                let record = started.record;
                 // The poke is advisory. Registration already committed the
                 // durable row, and the row is the work queue: the native
                 // worker's idle dispatcher rescans pending rows on the
@@ -279,8 +155,8 @@ crate::TurnFailureCause::Outcome,
                     crate::StoreRealization::Realized,
                 ))
             }
-            ProcessCommand::Await { process_ref } => {
-                let await_terminal = || await_process_terminal(process_work.as_ref(), &process_ref);
+            ProcessCommand::Await { process_id } => {
+                let await_terminal = || await_process_terminal(process_work.as_ref(), &process_id);
                 let output = if let Some(turn_cancellation) = turn_cancellation {
                     tokio::select! {
                         biased;
@@ -289,7 +165,7 @@ crate::TurnFailureCause::Outcome,
                             #[expect(clippy::expect_used, reason = "execution scopes are plain string identities")]
                             registry
                                 .request_process_cancel(
-                                    &process_ref,
+                                    &process_id,
                                     crate::CancelOrigin::TurnStopped,
                                     serde_json::to_string(&turn_cancellation.scope)
                                         .expect("execution scopes contain only serializable identities"),
@@ -309,7 +185,7 @@ crate::TurnFailureCause::Outcome,
                     crate::StoreRealization::Realized,
                 ))
             }
-            ProcessCommand::AttachTerminal { process_ref, key } => {
+            ProcessCommand::AttachTerminal { process_id, key } => {
                 // The in-process boundary has no separate invocation to hand
                 // the wait to, so it arms a task: await the terminal, then
                 // resolve the key through the same resolver the parked turn
@@ -336,27 +212,30 @@ crate::TurnFailureCause::Outcome,
                 )]
                 tokio::spawn(
                     async move {
-                        let resolution =
-                            match await_process_terminal(process_work.as_ref(), &process_ref).await
-                            {
-                                Ok(output) => process_terminal_resolution(output),
-                                Err(error) => {
-                                    Resolution::Err(crate::runtime::ExternalCompletionError {
-                                        code: crate::TurnFailureCode::from_wire(
-                                            "process_terminal_unobservable",
-                                        )
-                                        .into(),
-                                        message: error.to_string(),
-                                        raw: None,
-                                    })
-                                }
-                            };
+                        let resolution = match await_process_terminal(
+                            process_work.as_ref(),
+                            &process_id,
+                        )
+                        .await
+                        {
+                            Ok(output) => process_terminal_resolution(output),
+                            Err(error) => {
+                                Resolution::Err(crate::runtime::ExternalCompletionError {
+                                    code: crate::TurnFailureCode::from_wire(
+                                        "process_terminal_unobservable",
+                                    )
+                                    .into(),
+                                    message: error.to_string(),
+                                    raw: None,
+                                })
+                            }
+                        };
                         if let Err(error) = effect_controller
                             .resolve_await_event(&key, resolution)
                             .await
                         {
                             tracing::warn!(
-                                process_id = %process_ref.process_id,
+                                process_id = %process_id,
                                 key_id = %key.key_id,
                                 "armed process terminal could not resolve its durable wait: {error}"
                             );
@@ -370,7 +249,7 @@ crate::TurnFailureCause::Outcome,
                 ))
             }
             ProcessCommand::Cancel {
-                process_ref,
+                process_id,
                 origin,
                 requester,
                 attribution,
@@ -379,7 +258,7 @@ crate::TurnFailureCause::Outcome,
                 // same cancellation already recorded (FIG-3070).
                 let (record, realization) = registry
                     .request_process_cancel_reporting_realization(
-                        &process_ref,
+                        &process_id,
                         origin,
                         requester,
                         attribution,
@@ -397,7 +276,7 @@ crate::TurnFailureCause::Outcome,
                 crate::StoreRealization::Realized,
             )),
             ProcessCommand::Signal {
-                process_ref,
+                process_id,
                 signal_name,
                 request,
                 ..
@@ -408,11 +287,11 @@ crate::TurnFailureCause::Outcome,
                         "local process signal execution requires its effect controller",
                     )
                 })?;
-                let result = registry.append_event_ref(&process_ref, request).await?;
+                let result = registry.append_event(&process_id, request).await?;
                 let realization = result.realization;
                 let waiting_ordinal =
                     registry
-                        .get_process_ref(&process_ref)
+                        .get_process(&process_id)
                         .await?
                         .and_then(|record| match record.wait {
                             Some(crate::WaitState {
@@ -433,8 +312,8 @@ crate::TurnFailureCause::Outcome,
                     Some(ordinal) => ordinal,
                     None => {
                         registry
-                            .count_events_through_ref(
-                                &process_ref,
+                            .count_events_through(
+                                &process_id,
                                 result.event.event_type.as_str(),
                                 result.event.sequence,
                             )
@@ -444,9 +323,9 @@ crate::TurnFailureCause::Outcome,
                 if ordinal > 0 {
                     let key = effect_controller
                         .await_event_key(
-                            &crate::ExecutionScope::process(&process_ref.process_id),
+                            &crate::ExecutionScope::process(&process_id),
                             crate::AwaitEventWaitIdentity::process_signal(
-                                &process_ref.process_id,
+                                &process_id,
                                 &signal_name,
                                 ordinal,
                             ),
@@ -551,9 +430,9 @@ mod terminal_wait_tests {
 
         async fn await_process_terminal(
             &self,
-            process_ref: &crate::ProcessRef,
+            process_id: &crate::ProcessId,
         ) -> Result<crate::ProcessTerminalWait, crate::PluginError> {
-            assert_eq!(process_ref.process_id, "reattach-process");
+            assert_eq!(process_id, &crate::process_id_for_test("reattach-process"));
             if self.waits.fetch_add(1, Ordering::SeqCst) == 0 {
                 Ok(crate::ProcessTerminalWait::Reattach)
             } else {
@@ -572,15 +451,9 @@ mod terminal_wait_tests {
             terminal: terminal.clone(),
         };
 
-        let output = await_process_terminal(
-            &port,
-            &crate::ProcessRef::new(
-                "reattach-process",
-                crate::ProcessIncarnation::from_registration_sequence(1),
-            ),
-        )
-        .await
-        .expect("reattachment reaches terminal output");
+        let output = await_process_terminal(&port, &crate::process_id_for_test("reattach-process"))
+            .await
+            .expect("reattachment reaches terminal output");
 
         assert_eq!(output, terminal);
         assert_eq!(port.waits.load(Ordering::SeqCst), 2);

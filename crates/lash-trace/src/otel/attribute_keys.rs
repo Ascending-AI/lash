@@ -51,8 +51,6 @@ pub(super) const LASH_LANGUAGE_EXECUTION_CHILD_ATTEMPT: &str =
     "lash.language_execution.child_attempt";
 pub(super) const LASH_LANGUAGE_EXECUTION_CHILD_GRAPH_KEY: &str =
     "lash.language_execution.child_graph_key";
-pub(super) const LASH_LANGUAGE_EXECUTION_CHILD_INCARNATION: &str =
-    "lash.language_execution.child_incarnation";
 pub(super) const LASH_LANGUAGE_EXECUTION_CHILD_PROCESS_ID: &str =
     "lash.language_execution.child_process_id";
 pub(super) const LASH_LANGUAGE_EXECUTION_EDGE_COUNT: &str = "lash.language_execution.edge_count";
@@ -91,7 +89,6 @@ pub(super) const LASH_LANGUAGE_EXECUTION_NODE_ID: &str = "lash.language_executio
 pub(super) const LASH_LANGUAGE_EXECUTION_NODE_KIND: &str = "lash.language_execution.node_kind";
 pub(super) const LASH_LANGUAGE_EXECUTION_OCCURRENCE: &str = "lash.language_execution.occurrence";
 pub(super) const LASH_LANGUAGE_EXECUTION_ATTEMPT: &str = "lash.language_execution.attempt";
-pub(super) const LASH_LANGUAGE_EXECUTION_INCARNATION: &str = "lash.language_execution.incarnation";
 pub(super) const LASH_LANGUAGE_EXECUTION_PARENT_NODE_ID: &str =
     "lash.language_execution.parent_node_id";
 pub(super) const LASH_LANGUAGE_EXECUTION_PROCESS_ID: &str = "lash.language_execution.process_id";

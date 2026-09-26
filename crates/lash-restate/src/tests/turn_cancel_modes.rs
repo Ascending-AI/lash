@@ -317,27 +317,23 @@ async fn restate_await_rejects_cancel_scope_for_a_different_physical_turn() {
 async fn after_step_during_a_parked_process_await_lets_the_process_finish() {
     let context = Arc::new(RecordingContext::default());
     let registry = process_registry();
-    let process_id = "fig635-awaited-process";
-    registry
-        .register_process(rerunnable_registration(process_id))
+    let process_id = registry
+        .register_process(rerunnable_registration())
         .await
-        .expect("register the awaited process");
+        .expect("register the awaited process")
+        .id;
     let cancellation = tokio_util::sync::CancellationToken::new();
     let wait = {
         let context = Arc::clone(&context);
         let registry = Arc::clone(&registry);
         let cancellation = cancellation.clone();
+        let process_id = process_id.clone();
         tokio::spawn(async move {
             RestateRuntimeEffectController::new_for_test(context)
                 .execute_effect(
                     RuntimeEffectEnvelope::new(
                         runtime_invocation(RuntimeEffectKind::Process, "fig635-process-await"),
-                        RuntimeEffectCommand::process(ProcessCommand::Await {
-                            process_ref: lash_core::ProcessRef::new(
-                                process_id,
-                                lash_core::ProcessIncarnation::from_registration_sequence(1),
-                            ),
-                        }),
+                        RuntimeEffectCommand::process(ProcessCommand::Await { process_id }),
                     ),
                     registry_local_executor(registry).with_process_turn_cancellation(
                         lash_core::facade_support::ProcessTurnCancellation::new(
@@ -368,7 +364,7 @@ async fn after_step_during_a_parked_process_await_lets_the_process_finish() {
     );
 
     let terminal = process_success(serde_json::json!({ "finished": true }));
-    context.resolve_process_terminal(&ProcessId::from(process_id), &terminal);
+    context.resolve_process_terminal(&process_id, &terminal);
     let outcome = tokio::time::timeout(Duration::from_secs(2), wait)
         .await
         .expect("the process terminal resolves the wait")
@@ -510,17 +506,14 @@ async fn deferred_wake_during_a_parked_sleep_reparks_on_the_escalation_promise()
 // awaiting the terminal.
 #[tokio::test]
 async fn deferred_wake_during_a_parked_process_await_never_cancels_the_process() {
-    let process_id = "fig635-process-await-deferred";
-    let (endpoint, _registry) = fig790_process_await_endpoint(&ProcessId::from(process_id)).await;
+    let key = "fig635-process-await-deferred";
+    let (endpoint, _registry, process_id) = fig790_process_await_endpoint().await;
     let input = Fig790ProcessAwaitRedriveInput {
-        process_ref: lash_core::ProcessRef::new(
-            process_id,
-            lash_core::ProcessIncarnation::from_registration_sequence(1),
-        ),
+        process_id: process_id.clone(),
         cancel_on_suspend_wake: false,
     };
-    let guard = process_await_guard(&endpoint, process_id, &input).await;
-    let raced = process_await_after_guard(&endpoint, process_id, &input, &guard).await;
+    let guard = process_await_guard(&endpoint, key, &input).await;
+    let raced = process_await_after_guard(&endpoint, key, &input, &guard).await;
     let parked_await = restate_call_frames(&raced)
         .expect("decode the await's race")
         .into_iter()
@@ -528,7 +521,7 @@ async fn deferred_wake_during_a_parked_process_await_never_cancels_the_process()
         .expect("the await's call");
     assert_eq!(parked_await.handler, "await_terminal");
     let replay = encode_call_replay(
-        process_id,
+        key,
         &input,
         &[(parked_await, None)],
         Some((17, deferred_wake_signal())),

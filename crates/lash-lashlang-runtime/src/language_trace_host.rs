@@ -295,7 +295,6 @@ fn public_payload(
             child: lash_trace::TraceLanguageChildExecution {
                 scope: TraceRuntimeScope::none(),
                 process_id: child.process_id,
-                incarnation: child.incarnation,
                 attempt: child.attempt,
                 module_ref: Some(child.module_ref.to_string()),
                 entry_ref: Some(lashlang::process_ref_key(&child.process_ref)),

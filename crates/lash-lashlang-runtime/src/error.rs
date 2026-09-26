@@ -165,12 +165,6 @@ pub enum LashlangRuntimeError {
     /// Process arguments do not match the immutable target signature.
     #[error("invalid process argument `{path}`: {message}")]
     InvalidProcessArgument { path: String, message: String },
-    /// Deriving the deterministic process identifier failed.
-    #[error("failed to derive deterministic process id: {source}")]
-    DeriveProcessId {
-        #[source]
-        source: serde_json::Error,
-    },
     /// Encoding the process input failed.
     #[error("failed to encode process input: {source}")]
     EncodeProcessInput {

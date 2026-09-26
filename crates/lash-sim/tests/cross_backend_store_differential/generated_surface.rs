@@ -327,7 +327,7 @@ impl SurfaceRunner {
                 };
                 self.process_registry
                     .append_event(
-                        &ProcessId::from("prop-process-0"),
+                        &self.scenario.slot_process_id(0),
                         lash_core::ProcessEventAppendRequest::new("property.signal", payload)
                             .with_replay_key("surface-zero-replay"),
                     )
@@ -425,6 +425,9 @@ async fn surface_runners(
     let sqlite_trigger_path = root.join("trigger.db");
     let sqlite_runtime: Arc<dyn RuntimePersistence> =
         Arc::new(SqliteStore::open(&sqlite_runtime_path).await.unwrap());
+    // The two registrars mint the same ids in the same order, so the
+    // generated slots name the same process on both backends.
+    let (sqlite_mint, postgres_mint) = super::paired_process_id_mints();
     let sqlite_registry = Arc::new(
         SqliteProcessRegistry::open_with_clock(
             &sqlite_process_path,
@@ -432,7 +435,8 @@ async fn surface_runners(
             root.join("sessions"),
         )
         .await
-        .unwrap(),
+        .unwrap()
+        .with_process_id_mint_for_testing(sqlite_mint),
     );
     let sqlite_triggers = Arc::new(
         SqliteTriggerStore::open_with_clock(&sqlite_trigger_path, Arc::clone(&clock))
@@ -445,7 +449,12 @@ async fn surface_runners(
             .session_store("prop-runtime-session")
             .with_clock(Arc::clone(&clock)),
     );
-    let postgres_registry = Arc::new(storage.process_registry().with_clock(Arc::clone(&clock)));
+    let postgres_registry = Arc::new(
+        storage
+            .process_registry()
+            .with_clock(Arc::clone(&clock))
+            .with_process_id_mint_for_testing(postgres_mint),
+    );
     let postgres_triggers = Arc::new(storage.trigger_store());
 
     vec![

@@ -1333,10 +1333,10 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
             call_id: "call".to_string(),
         },
         CausalRef::Process {
-            process_id: ProcessId::from("process"),
+            process_id: ProcessId::fixture("process"),
         },
         CausalRef::ProcessEvent {
-            process_id: ProcessId::from("process"),
+            process_id: ProcessId::fixture("process"),
             sequence: 1,
         },
         CausalRef::TriggerOccurrence {
@@ -1478,7 +1478,7 @@ fn registered_constraint_vocabularies_match_the_rust_writers() {
     exhaustive_loser_policy(LoserPolicy::Cancel);
     exhaustive_session_relation(&SessionRelation::Root);
     exhaustive_causal_ref(&CausalRef::Process {
-        process_id: ProcessId::from("process"),
+        process_id: ProcessId::fixture("process"),
     });
 }
 

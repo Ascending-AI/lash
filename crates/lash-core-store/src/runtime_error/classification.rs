@@ -217,7 +217,6 @@ impl RuntimeErrorCode {
             // the target was replaced by a retention tombstone.
             Self::ProcessNoLongerRetained => Terminal,
             // a newer incarnation durably superseded this one.
-            Self::ProcessIncarnationSuperseded => Terminal,
             // no process execution is wired for this call.
             Self::ProcessRegistryUnavailable => Terminal,
             // the durable signal wait settled cancelled.

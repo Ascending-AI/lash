@@ -676,7 +676,7 @@ fn journal_identity_is_typed_and_session_qualified() {
         ExecutionScope::turn("session", "shared"),
         ExecutionScope::queue_drain("session", "shared"),
         ExecutionScope::session_delete("session"),
-        ExecutionScope::process("shared"),
+        ExecutionScope::process(crate::process_id_for_test("shared")),
         ExecutionScope::runtime_operation("shared"),
     ];
     let identities = scopes
@@ -712,7 +712,7 @@ fn every_scope_variant_round_trips_through_its_journal_key() {
         ExecutionScope::turn("session", "shared"),
         ExecutionScope::queue_drain("session", "shared"),
         ExecutionScope::session_delete("session"),
-        ExecutionScope::process("shared"),
+        ExecutionScope::process(crate::process_id_for_test("shared")),
         ExecutionScope::runtime_operation("shared"),
     ] {
         let key = scope
@@ -867,7 +867,7 @@ fn the_drive_loop_polls_each_request_once_per_task_poll() {
         .send(EffectControllerTaskRequest::AwaitEventKey {
             scope: scope.clone(),
             wait: AwaitEventWaitIdentity::process_signal(
-                crate::ProcessId::from("drive-loop-process"),
+                crate::process_id_for_test("drive-loop-process"),
                 "exit",
                 1,
             ),

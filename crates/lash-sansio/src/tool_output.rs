@@ -1,4 +1,3 @@
-use crate::ProcessId;
 use crate::SessionId;
 use std::collections::BTreeMap;
 
@@ -73,21 +72,6 @@ pub struct ToolIntentIdentity {
     /// `None` for host-submitted intents, whose identity binds no emission.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub minting_emission_replay_key: Option<String>,
-}
-
-impl ProcessId {
-    /// The process id a start declaration made under `identity` realizes as.
-    ///
-    /// The declaration's replay key *is* the process id, so a re-submitted
-    /// declaration starts the same process instead of a second one, and an
-    /// attempt can name its child before the start commits. This is the only
-    /// constructor on the start-declaration path: both realization routes —
-    /// core's recorded-intent seam in `tool_dispatch/intent_executor.rs` and
-    /// the host facade's `ProcessCommand` front door — derive the id here, so
-    /// the executor and the attempt cannot drift apart (FIG-2876, FIG-2994).
-    pub fn from_intent_identity(identity: &ToolIntentIdentity) -> Self {
-        Self::from(identity.replay_key.clone())
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]

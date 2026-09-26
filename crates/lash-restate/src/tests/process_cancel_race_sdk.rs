@@ -50,7 +50,7 @@ fn race_label<T>(outcome: RestateTurnCancelRaceOutcome<T>) -> String {
 fn probe_wait_request() -> Result<RestateDurableWaitAwaitRequest, TerminalError> {
     let key = restate_await_event_key_for_authority(
         &test_restate_authority_id(),
-        &ExecutionScope::process("p16-race-probe"),
+        &ExecutionScope::process(ProcessId::fixture("p16-race-probe")),
         AwaitEventWaitIdentity::Custom {
             key: "probe".to_string(),
         },
@@ -92,7 +92,7 @@ impl P16RaceProbe for P16RaceProbeImpl {
             "process" => race_label(
                 RestateControllerContext::await_process_terminal_or_turn_cancel(
                     &ctx,
-                    ProcessId::from("p16-race-probe-child"),
+                    ProcessId::fixture("p16-race-probe-child"),
                     None,
                     ProcessCancelRace::Raced,
                 )

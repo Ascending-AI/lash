@@ -332,10 +332,8 @@ impl TurnBuilder {
         binding: EffectBinding<'_>,
     ) -> Result<TurnReport> {
         let turn_id = self.resolved_turn_id(None).unwrap_or_else(fresh_turn_id);
-        let scoped_effect_controller = binding.scoped(
-            lash_core::AdmittedScope::unpinned(self.turn_scope(&turn_id))
-                .map_err(lash_core::RuntimeError::from)?,
-        )?;
+        let scoped_effect_controller =
+            binding.scoped(lash_core::AdmittedScope::new(self.turn_scope(&turn_id)))?;
         self.stream_to_with_scope(events, scoped_effect_controller, Some(turn_id))
             .await
     }
@@ -360,10 +358,7 @@ impl TurnBuilder {
     fn stream_with_effect_host(self, effect_host: &dyn EffectHost) -> Result<TurnStream> {
         let turn_id = self.resolved_turn_id(None).unwrap_or_else(fresh_turn_id);
         let scoped_effect_controller = effect_host
-            .scoped_static(
-                lash_core::AdmittedScope::unpinned(self.turn_scope(&turn_id))
-                    .map_err(lash_core::RuntimeError::from)?,
-            )?
+            .scoped_static(lash_core::AdmittedScope::new(self.turn_scope(&turn_id)))?
             .ok_or(EmbedError::StaticTurnStreamRequiresStaticEffectHost)?;
         self.stream_with_scope(scoped_effect_controller, Some(turn_id))
     }

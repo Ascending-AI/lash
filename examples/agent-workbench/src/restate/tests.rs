@@ -191,6 +191,17 @@ impl lash::triggers::TriggerStore for OccurrenceFailureTriggerStore {
         self.inner.list_deliveries().await
     }
 
+    async fn bind_delivery_process(
+        &self,
+        occurrence_id: &str,
+        subscription_id: &str,
+        process_id: &ProcessId,
+    ) -> Result<(), lash::plugins::PluginError> {
+        self.inner
+            .bind_delivery_process(occurrence_id, subscription_id, process_id)
+            .await
+    }
+
     async fn list_delivery_process_ids(
         &self,
     ) -> Result<Vec<ProcessId>, lash::plugins::PluginError> {

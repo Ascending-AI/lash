@@ -129,9 +129,11 @@ impl ExecutionHost for AggregateProcessHost {
                 handle.insert(
                     "id".to_string(),
                     Value::String(
-                        lash_sansio::handle::HandleId::process("h", 1)
-                            .as_str()
-                            .into(),
+                        lash_sansio::handle::HandleId::process(&lash_sansio::ProcessId::fixture(
+                            "h",
+                        ))
+                        .as_str()
+                        .into(),
                     ),
                 );
                 Ok(AbilityResult::Value(Value::Record(Arc::new(handle))))
@@ -283,9 +285,16 @@ async fn a_handle_nested_inside_a_literal_element_is_carried_through() {
     .await;
     assert_eq!(
         value.to_string(),
-        r#"[[{"__handle__":"lash","id":"p.1.h"}],7]"#
+        r#"[[{"__handle__":"lash","id":"p.1.h"}],7]"#.replace("p.1.h", &handle_h())
     );
     assert_eq!(host.awaits.load(Ordering::SeqCst), 0);
+}
+
+/// The handle id the aggregate host mints for the process named `h`.
+fn handle_h() -> String {
+    lash_sansio::handle::HandleId::process(&lash_sansio::ProcessId::fixture("h"))
+        .as_str()
+        .to_string()
 }
 
 /// A container bound to a name is a plain value in an awaited aggregate: only
@@ -343,7 +352,11 @@ async fn bound_process_containers_are_carried_through_unsettled() {
     ] {
         let host = AggregateProcessHost::default();
         let value = aggregate_process_finish(&host, program).await;
-        assert_eq!(value.to_string(), expected, "{label}");
+        assert_eq!(
+            value.to_string(),
+            expected.replace("p.1.h", &handle_h()),
+            "{label}"
+        );
         assert_eq!(host.awaits.load(Ordering::SeqCst), 0, "{label}");
     }
 }

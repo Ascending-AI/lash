@@ -2,9 +2,7 @@ use crate::ProcessId;
 use std::sync::Arc;
 use std::time::Duration;
 
-use crate::{
-    PluginError, ProcessAwaitOutput, ProcessEvent, ProcessRef, ProcessRegistry, WorkCadencePolicy,
-};
+use crate::{PluginError, ProcessAwaitOutput, ProcessEvent, ProcessRegistry, WorkCadencePolicy};
 
 use super::super::process::ProcessChangeHub;
 
@@ -55,35 +53,15 @@ impl NativeProcessAwaiter {
         self
     }
 
-    #[cfg(any(test, feature = "testing"))]
     pub async fn await_terminal(
         &self,
         process_id: &ProcessId,
     ) -> Result<ProcessAwaitOutput, PluginError> {
-        match self.registry.resolve_process_ref(process_id).await {
-            Ok(process_ref) => self.await_terminal_ref(&process_ref).await,
-            Err(PluginError::ProcessNoLongerRetained {
-                terminal_label,
-                pruned_at_ms,
-            }) => Ok(ProcessAwaitOutput::NoLongerRetained {
-                terminal_label,
-                pruned_at_ms,
-            }),
-            Err(error) => Err(error),
-        }
-    }
-
-    pub async fn await_terminal_ref(
-        &self,
-        process_ref: &ProcessRef,
-    ) -> Result<ProcessAwaitOutput, PluginError> {
-        if let Some(output) = self.try_terminal_ref(process_ref).await? {
+        if let Some(output) = self.try_terminal(process_id).await? {
             return Ok(output);
         }
         lash_core_ids::execution_permit::release_process_execution_permit_while(
-            self.wait_for(&process_ref.process_id, || {
-                self.try_terminal_ref(process_ref)
-            }),
+            self.wait_for(process_id, || self.try_terminal(process_id)),
         )
         .await
     }
@@ -94,26 +72,15 @@ impl NativeProcessAwaiter {
         event_type: &str,
         after_sequence: u64,
     ) -> Result<ProcessEvent, PluginError> {
-        let process_ref = self.registry.resolve_process_ref(process_id).await?;
-        self.await_event_ref(&process_ref, event_type, after_sequence)
-            .await
-    }
-
-    pub async fn await_event_ref(
-        &self,
-        process_ref: &ProcessRef,
-        event_type: &str,
-        after_sequence: u64,
-    ) -> Result<ProcessEvent, PluginError> {
         if let Some(event) = self
-            .read_event_ref(process_ref, event_type, after_sequence)
+            .read_event(process_id, event_type, after_sequence)
             .await?
         {
             return Ok(event);
         }
         lash_core_ids::execution_permit::release_process_execution_permit_while(
-            self.wait_for(&process_ref.process_id, || {
-                self.read_event_ref(process_ref, event_type, after_sequence)
+            self.wait_for(process_id, || {
+                self.read_event(process_id, event_type, after_sequence)
             }),
         )
         .await
@@ -157,15 +124,15 @@ impl NativeProcessAwaiter {
         }
     }
 
-    async fn try_terminal_ref(
+    async fn try_terminal(
         &self,
-        process_ref: &ProcessRef,
+        process_id: &ProcessId,
     ) -> Result<Option<ProcessAwaitOutput>, PluginError> {
-        let record = match self.registry.get_process_ref(process_ref).await {
+        let record = match self.registry.get_process(process_id).await {
             Ok(Some(record)) => record,
             Ok(None) => {
                 return Err(PluginError::ProcessUnknown {
-                    process_id: process_ref.process_id.clone(),
+                    process_id: process_id.clone(),
                 });
             }
             Err(PluginError::ProcessNoLongerRetained {
@@ -181,15 +148,15 @@ impl NativeProcessAwaiter {
         };
         if record.status == crate::ProcessStatus::CallerDeparted {
             return Err(PluginError::ProcessCallerDeparted {
-                process_id: process_ref.process_id.clone(),
+                process_id: process_id.clone(),
             });
         }
         Ok(record.outcome)
     }
 
-    async fn read_event_ref(
+    async fn read_event(
         &self,
-        process_ref: &ProcessRef,
+        process_id: &ProcessId,
         event_type: &str,
         after_sequence: u64,
     ) -> Result<Option<ProcessEvent>, PluginError> {
@@ -198,8 +165,8 @@ impl NativeProcessAwaiter {
         loop {
             let outcome = self
                 .registry
-                .event_page_ref(
-                    process_ref,
+                .event_page_after(
+                    process_id,
                     after_sequence,
                     limit,
                     crate::ProcessEventQueryMode::Full,
@@ -216,18 +183,6 @@ impl NativeProcessAwaiter {
                     return Err(PluginError::ProcessNoLongerRetained {
                         terminal_label,
                         pruned_at_ms,
-                    });
-                }
-                crate::ProcessEventReadOutcome::NoLongerRetained(
-                    crate::ProcessEventHistoryRetention::Retired {
-                        requested_incarnation,
-                        current_incarnation,
-                    },
-                ) => {
-                    return Err(PluginError::ProcessIncarnationSuperseded {
-                        process_id: process_ref.process_id.clone(),
-                        requested_incarnation,
-                        current_incarnation,
                     });
                 }
             };

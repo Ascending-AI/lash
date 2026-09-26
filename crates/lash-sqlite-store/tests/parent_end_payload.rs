@@ -46,7 +46,6 @@ async fn a_ledger_row_decodes_its_typed_payload() {
 
     let process_parent = registry
         .register_process(lash_core_execution::ProcessRegistration::new(
-            "payload-parent",
             lash_core_execution::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -61,9 +60,7 @@ async fn a_ledger_row_decodes_its_typed_payload() {
         ))
         .await
         .expect("register the process parent");
-    let scope = lash_core_execution::ParentScope::process(
-        lash_core_execution::ProcessRef::from_record(&process_parent),
-    );
+    let scope = lash_core_execution::ParentScope::process(process_parent.id.clone());
     registry
         .record_parent_end(&scope)
         .await

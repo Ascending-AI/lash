@@ -8,11 +8,15 @@ async fn drive_sleeping_process(
     context: &Arc<ReplayableRecordingContext>,
     execution_write_authority: &lash_core::ProcessExecutionWriteAuthority,
 ) -> Result<lash_core::ProcessRunOutcome, HandlerError> {
-    let (registry, continuations) = process_stores();
-    registry
+    // Fresh stores mint the sequential ids, so every drive registers the
+    // process under the id its journal was recorded for.
+    let (registry, continuations) = sequential_process_stores();
+    let registered = registry
         .register_process(registration.clone())
         .await
-        .expect("register sleeping process");
+        .expect("register sleeping process")
+        .id;
+    assert_eq!(&registered, process_id);
     let worker = recovery_worker(Arc::clone(&registry), memory_session_store_factory().await).await;
     let workflow = LashProcessWorkflowImpl::new_for_test(
         Arc::new(RestateCoreProcessRunner::new(worker)),
@@ -25,11 +29,14 @@ async fn drive_sleeping_process(
     );
     workflow
         .run_registration_for_test(
+            process_id.clone(),
             registration.clone(),
             ProcessExecutionContext::default()
                 .with_execution_write_authority(execution_write_authority.clone()),
             controller
-                .process_scope_for_test(durable_admission(&ExecutionScope::process(process_id)))
+                .process_scope_for_test(durable_admission(&ExecutionScope::process(
+                    process_id.clone(),
+                )))
                 .expect("sleeping process scope"),
             0,
             None,
@@ -51,12 +58,12 @@ fn is_cancelled_terminal(outcome: &lash_core::ProcessRunOutcome) -> bool {
 /// carries the cancellation settles cancelled too, from the journal alone.
 #[tokio::test]
 pub(super) async fn a_process_sleep_that_lost_to_the_cancel_promise_replays_cancelled() {
-    let process_id = ProcessId::from("sleep-cancel-race-replay");
-    let registration = sleeping_process_registration(&process_id).await;
+    let process_id = lash_core::ProcessIdMint::sequential_id_for_testing(1);
+    let registration = sleeping_process_registration().await;
     let context = Arc::new(ReplayableRecordingContext::default());
     context.park_sleeps();
     let execution_write_authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-        &process_id,
+        process_id.clone(),
         "sleep-cancel-race-replay-invocation",
     );
     let live = {
@@ -121,11 +128,11 @@ pub(super) async fn a_process_sleep_that_lost_to_the_cancel_promise_replays_canc
 /// the replay reaches the same settled terminal the live drive did.
 #[tokio::test]
 pub(super) async fn a_cancel_committed_after_the_timer_won_does_not_rewrite_the_replayed_wake() {
-    let process_id = ProcessId::from("sleep-cancel-race-late");
-    let registration = sleeping_process_registration(&process_id).await;
+    let process_id = lash_core::ProcessIdMint::sequential_id_for_testing(1);
+    let registration = sleeping_process_registration().await;
     let context = Arc::new(ReplayableRecordingContext::default());
     let execution_write_authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-        &process_id,
+        process_id.clone(),
         "sleep-cancel-race-late-invocation",
     );
     let outcome = tokio::time::timeout(

@@ -1,8 +1,7 @@
 //! Live behavioral checks for the PostgreSQL/server-clock boundary.
 
 use lash_core_execution::{ProcessLeases as _, ProcessLifecycle as _, ProcessRegistrar as _};
-use lash_sansio::ProcessId;
-use lash_sansio::SessionId;
+use lash_sansio::{ProcessId, SessionId};
 use std::sync::Arc;
 
 use lash_core_execution::runtime::{QueuedWorkBatchDraft, QueuedWorkClaimBoundary};
@@ -323,13 +322,12 @@ fn lint_postgres_clock_contract_paths_never_use_client_wall_clock() {
 }
 
 fn clock_contract_wake(session_id: &SessionId) -> lash_core_execution::ProcessWakeDelivery {
-    let process_id = || ProcessId::from("clock-contract-wake-process");
+    let process_id = || ProcessId::fixture("clock-contract-wake-process");
     lash_core_execution::ProcessWakeDelivery {
         version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: "clock-contract-wake-1".to_string(),
         target_session_id: session_id.clone(),
         process_id: process_id(),
-        process_incarnation: lash_core_execution::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "process.wake".to_string(),
         event_invocation: lash_core_execution::RuntimeInvocation {
@@ -562,15 +560,13 @@ async fn process_lease_decisions_follow_the_postgres_clock() {
     else {
         return;
     };
-    let process_id = unique_id("clock-contract-process");
     let server_now = db_now_ms(&storage).await;
     let clock = Arc::new(TestClock::new(server_now));
     let registry = storage
         .process_registry()
         .with_clock(Arc::clone(&clock) as Arc<dyn Clock>);
-    registry
+    let process_id = registry
         .register_process(ProcessRegistration::new(
-            &process_id,
             ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -582,10 +578,11 @@ async fn process_lease_decisions_follow_the_postgres_clock() {
             ),
         ))
         .await
-        .expect("register process for clock contract");
+        .expect("register process for clock contract")
+        .id;
     let owner_a = LeaseOwnerIdentity::opaque("clock-process-a", "clock-process-a:i");
     let lease = registry
-        .claim_process_lease(&ProcessId::from(process_id.clone()), &owner_a, 60_000)
+        .claim_process_lease(&process_id, &owner_a, 60_000)
         .await
         .expect("claim process lease")
         .acquired()
@@ -605,7 +602,7 @@ async fn process_lease_decisions_follow_the_postgres_clock() {
     );
     assert!(matches!(
         registry
-            .reclaim_process_lease(&ProcessId::from(process_id.clone()), &owner_b, &renewed, 60_000)
+            .reclaim_process_lease(&process_id, &owner_b, &renewed, 60_000)
             .await
             .expect("competing process lease reclaim decision"),
         ProcessLeaseClaimOutcome::Busy { holder }
@@ -614,7 +611,7 @@ async fn process_lease_decisions_follow_the_postgres_clock() {
     ));
     assert!(matches!(
         registry
-            .claim_process_lease(&ProcessId::from(process_id), &owner_b, 60_000)
+            .claim_process_lease(&process_id, &owner_b, 60_000)
             .await
             .expect("competing process lease decision"),
         ProcessLeaseClaimOutcome::Busy { holder }

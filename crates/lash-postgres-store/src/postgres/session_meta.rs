@@ -9,8 +9,8 @@ use lash_core_execution::store_backend_support::{CausalColumns, SessionMetaCodec
 
 const SESSION_META_CODEC: SessionMetaCodec = SessionMetaCodec::new("PostgreSQL BIGINT");
 
-pub(crate) fn stored_relation_from_row(row: &PgRow) -> StoredRelation {
-    StoredRelation {
+pub(crate) fn stored_relation_from_row(row: &PgRow) -> Result<StoredRelation, StoreError> {
+    Ok(StoredRelation {
         session_id: SessionId::from(row.get::<String, _>("session_id")),
         relation_kind: row.get("relation_kind"),
         parent_session_id: row
@@ -28,7 +28,13 @@ pub(crate) fn stored_relation_from_row(row: &PgRow) -> StoredRelation {
             call_id: row.get("caused_by_call_id"),
             process_id: row
                 .get::<Option<String>, _>("caused_by_process_id")
-                .map(ProcessId::from),
+                .map(|value| {
+                    ProcessId::parse(&value).map_err(|error| StoreError::StoredDataCorrupt {
+                        record_kind: "SessionMeta caused_by_process_id",
+                        message: error.to_string(),
+                    })
+                })
+                .transpose()?,
             process_event_sequence: row.get("caused_by_process_event_sequence"),
             occurrence_id: row.get("caused_by_occurrence_id"),
             subscription_id: row.get("caused_by_subscription_id"),
@@ -41,7 +47,7 @@ pub(crate) fn stored_relation_from_row(row: &PgRow) -> StoredRelation {
             .map(SessionId::from),
         source_node_id: row.get("source_node_id"),
         pending_observer_intents: Vec::new(),
-    }
+    })
 }
 
 pub(crate) fn decode_catalog_relation(
@@ -148,7 +154,6 @@ pub(crate) async fn write_session_meta_tx(
                 "observer-intent process",
             )?)
             .bind(intent.process_id.as_str())
-            .bind(intent.process_incarnation)
             .execute(&mut **tx)
             .await
             .map_err(store_sqlx_error)?;
@@ -188,15 +193,14 @@ pub(crate) async fn load_session_meta(
         tx.commit().await.map_err(store_sqlx_error)?;
         return Ok(None);
     };
-    let mut stored = stored_relation_from_row(&row);
-    let observer_rows = sqlx::query_as::<_, (i64, String, Option<i64>)>(
-        session_sql().observer_intents.select_for_session.sql(),
-    )
-    .bind(stored.session_id.as_str())
-    .fetch_all(&mut *tx)
-    .await
-    .map_err(store_sqlx_error)?;
-    for (process_index, process_id, process_incarnation) in observer_rows {
+    let mut stored = stored_relation_from_row(&row)?;
+    let observer_rows =
+        sqlx::query_as::<_, (i64, String)>(session_sql().observer_intents.select_for_session.sql())
+            .bind(stored.session_id.as_str())
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(store_sqlx_error)?;
+    for (process_index, process_id) in observer_rows {
         let process_index = SessionMetaCodec::read_index(
             SESSION_META_CODEC,
             process_index,
@@ -210,8 +214,12 @@ pub(crate) async fn load_session_meta(
         }
         stored.pending_observer_intents.push(
             lash_core_execution::store_backend_support::StoredObserverIntent {
-                process_id: ProcessId::from(process_id),
-                process_incarnation,
+                process_id: ProcessId::parse(&process_id).map_err(|error| {
+                    StoreError::StoredDataCorrupt {
+                        record_kind: "SessionMeta observer intent",
+                        message: error.to_string(),
+                    }
+                })?,
             },
         );
     }

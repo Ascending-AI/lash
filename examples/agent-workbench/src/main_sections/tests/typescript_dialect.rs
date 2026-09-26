@@ -317,7 +317,6 @@ const HANDLE_MARKER_KIND: &str = "lash";
 
 /// The process the one process-starting tutorial starts.
 const TUTORIAL_PROCESS_ID: &str = "workbench-tutorial-process";
-const TUTORIAL_PROCESS_INCARNATION: u64 = 1;
 
 /// The handle record the runtime hands back from a process start.
 ///
@@ -325,7 +324,7 @@ const TUTORIAL_PROCESS_INCARNATION: u64 = 1;
 /// is the facade's own minting authority, so `await handle` refuses any
 /// record whose id this module did not produce.
 fn tutorial_process_handle() -> serde_json::Value {
-    let id = lash::process::HandleId::process(TUTORIAL_PROCESS_ID, TUTORIAL_PROCESS_INCARNATION);
+    let id = lash::process::HandleId::process(&lash::ProcessId::fixture(TUTORIAL_PROCESS_ID));
     let mut record = serde_json::Map::new();
     record.insert(
         HANDLE_MARKER_FIELD.to_string(),

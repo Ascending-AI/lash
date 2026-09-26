@@ -351,7 +351,7 @@ impl lash_core::ToolProvider for ReplayScalarPendingTools {
                     lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::SignalProcess(
                         lash_core::SignalProcessIntent {
                             session_id: SessionId::from(call.context.session_id()),
-                            process_id: ProcessId::from("restate-recorded-intent-target"),
+                            process_id: restate_recorded_intent_target(),
                             signal_name: "resume".to_string(),
                             payload: serde_json::json!({"source": "recorded-scalar-attempt"}),
                         },
@@ -385,6 +385,12 @@ impl lash_core::ToolProvider for ReplayScalarPendingTools {
     fn attempt_may_defer(&self, tool_id: &lash_core::ToolId) -> bool {
         tool_id == Self::pending_definition().id()
     }
+}
+
+/// The signal target the scripted replay tool names: the first id a
+/// sequential-mint registry hands out.
+fn restate_recorded_intent_target() -> ProcessId {
+    lash_core::ProcessIdMint::sequential_id_for_testing(1)
 }
 
 #[tokio::test]
@@ -486,13 +492,12 @@ finish(await handle);
     let initial_state = replay_test_state(&SessionId::from(session_id), &policy);
     let context = Arc::new(ReplayableRecordingContext::default());
     bind_restate_test_effect_host(&mut host, &context);
-    let process_registry = process_registry()
+    let process_registry = sequential_process_registry()
         .with_runtime_clock(corpus_clock)
         .expect("SQLite process registry accepts the fixed corpus clock");
-    process_registry
+    let restate_recorded_intent_target_id = process_registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(
-                "restate-recorded-intent-target",
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -511,7 +516,13 @@ finish(await handle);
             &[SessionId::from(session_id.to_string())],
         )
         .await
-        .expect("register the recorded-intent signal target");
+        .expect("register the recorded-intent signal target")
+        .id;
+    assert_eq!(
+        restate_recorded_intent_target_id,
+        restate_recorded_intent_target(),
+        "the scripted tool names the first minted process"
+    );
     let watched = lash_core::facade_support::watch_process_registry(Arc::clone(&process_registry));
     let process_worker =
         DurableProcessWorker::new(lash_core_worker::DurableProcessWorkerConfig::new(
@@ -530,8 +541,12 @@ finish(await handle);
     ));
     let signal_wait_key = signal_wait_controller
         .await_event_key(
-            &ExecutionScope::process("restate-recorded-intent-target"),
-            AwaitEventWaitIdentity::process_signal("restate-recorded-intent-target", "resume", 1),
+            &ExecutionScope::process(restate_recorded_intent_target_id.clone()),
+            AwaitEventWaitIdentity::process_signal(
+                restate_recorded_intent_target_id.clone(),
+                "resume",
+                1,
+            ),
         )
         .await
         .expect("mint captured-journal process-signal wait");
@@ -658,7 +673,7 @@ finish(await handle);
         .stable_hash()
         .expect("signal command envelope hash");
     let first_intent_events = process_registry
-        .full_event_window(&ProcessId::from("restate-recorded-intent-target"), 0)
+        .full_event_window(&restate_recorded_intent_target_id, 0)
         .await
         .expect("read the first recorded-intent event set")
         .into_iter()
@@ -674,7 +689,7 @@ finish(await handle);
         serde_json::to_vec(&first_intent_events).expect("serialize first intent events");
     process_registry
         .complete_process(
-            &ProcessId::from("restate-recorded-intent-target"),
+            &restate_recorded_intent_target_id,
             process_success(serde_json::json!("live state mutated after drain")),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
@@ -791,7 +806,7 @@ finish(await handle);
         "the redriven process-command frame must be byte-identical"
     );
     let replayed_intent_events = process_registry
-        .full_event_window(&ProcessId::from("restate-recorded-intent-target"), 0)
+        .full_event_window(&restate_recorded_intent_target_id, 0)
         .await
         .expect("read redriven recorded-intent events")
         .into_iter()
@@ -827,7 +842,10 @@ pub(super) async fn restate_controller_schedules_process_workflow_without_runnin
     let context = Arc::new(RecordingContext::default());
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
-    let registration = external_registration("task-1");
+    let registration = external_registration().with_start_key(Some(lash_core::StartKey::for_host(
+        lash_core::StartKeyOwner::HOST,
+        "background-start",
+    )));
     let outcome = host
         .execute_effect(
             RuntimeEffectEnvelope::new(
@@ -849,24 +867,25 @@ pub(super) async fn restate_controller_schedules_process_workflow_without_runnin
     else {
         panic!("wrong outcome");
     };
+    let process_id = record.id.clone();
 
     assert_eq!(
         record
             .external_ref
             .as_ref()
             .map(|external| external.id.as_str()),
-        Some("LashProcessWorkflow/task-1")
+        Some(format!("LashProcessWorkflow/{process_id}").as_str())
     );
     assert_eq!(
         registry
-            .get_process(&ProcessId::from("task-1"))
+            .get_process(&process_id)
             .await
             .expect("read process")
             .expect("get")
             .external_ref
             .as_ref()
             .map(|external| external.id.as_str()),
-        Some("LashProcessWorkflow/task-1")
+        Some(format!("LashProcessWorkflow/{process_id}").as_str())
     );
     assert_eq!(
         registry
@@ -890,7 +909,7 @@ pub(super) async fn restate_controller_schedules_process_workflow_without_runnin
             )),
         Some((
             "restate".to_string(),
-            Some(serde_json::json!("invocation-task-1"))
+            Some(serde_json::json!(format!("invocation-{process_id}")))
         ))
     );
     assert_eq!(
@@ -898,20 +917,22 @@ pub(super) async fn restate_controller_schedules_process_workflow_without_runnin
             .started
             .lock_recover()
             .iter()
-            .map(|registration| registration.id.as_str())
+            .map(|registration| registration.start_key.clone())
             .collect::<Vec<_>>(),
-        vec!["task-1"]
+        vec![Some(lash_core::StartKey::for_host(
+            lash_core::StartKeyOwner::HOST,
+            "background-start"
+        ))]
     );
-    assert_eq!(
-        context.runs.lock_recover().len(),
-        1,
-        "process workflow scheduling must not call Restate context from inside ctx.run: \
-         the start journals only its frontier marker (FIG-3779)"
-    );
-    assert!(
-        context.runs.lock_recover()[0].ends_with(":frontier"),
-        "the start's one run is its frontier marker"
-    );
+    // The start journals its frontier marker (FIG-3779), its registration
+    // (ADR 0107) and, after the send, its external reference: each a run of
+    // its own, and the workflow send a journaled command between them, never
+    // a Restate call from inside a run.
+    let runs = context.runs.lock_recover().clone();
+    assert_eq!(runs.len(), 3, "the start's runs: {runs:?}");
+    assert!(runs[0].ends_with(":frontier"), "{runs:?}");
+    assert!(runs[1].contains("process-start-register"), "{runs:?}");
+    assert!(runs[2].contains("process-start-external-ref"), "{runs:?}");
 }
 
 /// FIG-2964: a workflow-submission failure after registration cancels the row
@@ -931,7 +952,7 @@ pub(super) async fn restate_workflow_submission_failure_cancels_the_row_it_regis
     let stores = memory_process_stores().await;
     let registry = Arc::clone(&stores.registry);
     let env_store = Arc::clone(&stores.env_store);
-    let process_id = ProcessId::from("restate-start-failed-cancels");
+    let start_key = "restate-start-failed-cancels";
     let spec = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::empty(),
         recovery_session_policy(),
@@ -940,17 +961,13 @@ pub(super) async fn restate_workflow_submission_failure_cancels_the_row_it_regis
 
     let injected_error = host
         .execute_effect(
-            start_recovery_effect(&process_id, &spec),
+            start_recovery_effect(start_key, &spec),
             registry_local_executor(registry.clone()).with_process_env_store(env_store.clone()),
         )
         .await
         .expect_err("the submission failure must reach the caller as an error");
 
-    let record = registry
-        .get_process(&process_id)
-        .await
-        .expect("read committed process")
-        .expect("registration committed before the injected failure");
+    let record = the_only_process(registry.as_ref()).await;
     assert!(
         record.is_terminal(),
         "the compensated row must be terminal, got {:?}; error: {injected_error}",
@@ -1005,7 +1022,7 @@ pub(super) async fn restate_failed_start_compensation_returns_the_registered_rec
         "injected cancel-request write failure".to_string(),
     ));
     let env_store = Arc::clone(&stores.env_store);
-    let process_id = ProcessId::from("restate-start-failed-compensation-fails");
+    let start_key = "restate-start-failed-compensation-fails";
     let spec = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::empty(),
         recovery_session_policy(),
@@ -1013,7 +1030,7 @@ pub(super) async fn restate_failed_start_compensation_returns_the_registered_rec
 
     let outcome = host
         .execute_effect(
-            start_recovery_effect(&process_id, &spec),
+            start_recovery_effect(start_key, &spec),
             registry_local_executor(registry.clone()).with_process_env_store(env_store.clone()),
         )
         .await
@@ -1024,13 +1041,9 @@ pub(super) async fn restate_failed_start_compensation_returns_the_registered_rec
     else {
         panic!("wrong start outcome")
     };
-    assert_eq!(record.id, process_id);
+    assert_eq!(record.id, the_only_process(registry.as_ref()).await.id);
 
-    let stored = registry
-        .get_process(&process_id)
-        .await
-        .expect("read committed process")
-        .expect("the row stands");
+    let stored = the_only_process(registry.as_ref()).await;
     assert!(
         !stored.is_terminal(),
         "the uncompensated row must stay nonterminal so the sweep can resubmit it"
@@ -1055,7 +1068,7 @@ pub(super) async fn restate_external_ref_write_failure_preserves_inputs_for_exac
         "injected external-ref write failure".to_string(),
     ));
     let env_store = Arc::clone(&stores.env_store);
-    let process_id = ProcessId::from("restate-start-recovery-external-ref");
+    let start_key = "restate-start-recovery-external-ref";
     let spec = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::empty(),
         recovery_session_policy(),
@@ -1065,14 +1078,10 @@ pub(super) async fn restate_external_ref_write_failure_preserves_inputs_for_exac
         || registry_local_executor(registry.clone()).with_process_env_store(env_store.clone());
 
     let injected_error = host
-        .execute_effect(start_recovery_effect(&process_id, &spec), executor())
+        .execute_effect(start_recovery_effect(start_key, &spec), executor())
         .await
         .expect_err("injected post-registration start failure");
-    let record = registry
-        .get_process(&process_id)
-        .await
-        .expect("read committed process")
-        .expect("registration committed before the injected failure");
+    let record = the_only_process(registry.as_ref()).await;
     assert!(
         !record.is_terminal(),
         "a row Restate already accepted must not be cancelled; error: {injected_error}"
@@ -1087,7 +1096,7 @@ pub(super) async fn restate_external_ref_write_failure_preserves_inputs_for_exac
     );
 
     let outcome = host
-        .execute_effect(start_recovery_effect(&process_id, &spec), executor())
+        .execute_effect(start_recovery_effect(start_key, &spec), executor())
         .await
         .expect("exact start retry completes ownership transfer");
     let RuntimeEffectOutcome::Process {
@@ -1116,7 +1125,7 @@ pub(super) async fn restate_ambiguous_submission_failure_leaves_the_row_for_reco
     let stores = memory_process_stores().await;
     let registry = Arc::clone(&stores.registry);
     let env_store = Arc::clone(&stores.env_store);
-    let process_id = ProcessId::from("restate-start-ambiguous");
+    let start_key = "restate-start-ambiguous";
     let spec = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::empty(),
         recovery_session_policy(),
@@ -1124,7 +1133,7 @@ pub(super) async fn restate_ambiguous_submission_failure_leaves_the_row_for_reco
 
     let outcome = host
         .execute_effect(
-            start_recovery_effect(&process_id, &spec),
+            start_recovery_effect(start_key, &spec),
             registry_local_executor(registry.clone()).with_process_env_store(env_store.clone()),
         )
         .await
@@ -1135,13 +1144,9 @@ pub(super) async fn restate_ambiguous_submission_failure_leaves_the_row_for_reco
     else {
         panic!("wrong start outcome")
     };
-    assert_eq!(record.id, process_id);
+    assert_eq!(record.id, the_only_process(registry.as_ref()).await.id);
 
-    let stored = registry
-        .get_process(&process_id)
-        .await
-        .expect("read committed process")
-        .expect("the row stands");
+    let stored = the_only_process(registry.as_ref()).await;
     assert!(
         !stored.is_terminal(),
         "a submission that may be running must not be terminalised, got {:?}",
@@ -1157,7 +1162,7 @@ pub(super) async fn restate_ambiguous_submission_failure_leaves_the_row_for_reco
 /// FIG-2964: an exact retry whose submission fails must not cancel the row the
 /// first attempt registered.
 ///
-/// Registration is idempotent by fingerprint on every backend, so the second
+/// Registration is idempotent by start key on every backend, so the second
 /// call's registration succeeds by returning the first call's row. Treating
 /// that as "I created this" would let a retry write a terminal onto a row whose
 /// first attempt may already be running.
@@ -1168,7 +1173,7 @@ pub(super) async fn restate_exact_retry_start_failure_does_not_cancel_the_first_
     let stores = memory_process_stores().await;
     let registry = Arc::clone(&stores.registry);
     let env_store = Arc::clone(&stores.env_store);
-    let process_id = ProcessId::from("restate-exact-retry-start-failure");
+    let start_key = "restate-exact-retry-start-failure";
     let spec = lash_core::ProcessExecutionEnvSpec::new(
         lash_core::PluginOptions::empty(),
         recovery_session_policy(),
@@ -1184,21 +1189,17 @@ pub(super) async fn restate_exact_retry_start_failure_does_not_cancel_the_first_
         "injected external-ref write failure".to_string(),
     ));
     let _ = host
-        .execute_effect(start_recovery_effect(&process_id, &spec), executor())
+        .execute_effect(start_recovery_effect(start_key, &spec), executor())
         .await
         .expect_err("the first attempt's reference write fails");
-    let first = registry
-        .get_process(&process_id)
-        .await
-        .expect("read process")
-        .expect("the first attempt's row stands");
+    let first = the_only_process(registry.as_ref()).await;
     assert!(first.external_ref.is_none() && !first.is_terminal());
 
     // The second attempt is an exact repeat: registration returns the existing
     // row, and this submission is definitively refused.
     context.fail_next_process_workflow_start();
     let outcome = host
-        .execute_effect(start_recovery_effect(&process_id, &spec), executor())
+        .execute_effect(start_recovery_effect(start_key, &spec), executor())
         .await
         .expect("a retry that did not create the row returns it rather than cancelling it");
     let RuntimeEffectOutcome::Process {
@@ -1207,13 +1208,9 @@ pub(super) async fn restate_exact_retry_start_failure_does_not_cancel_the_first_
     else {
         panic!("wrong start outcome")
     };
-    assert_eq!(record.id, process_id);
+    assert_eq!(record.id, the_only_process(registry.as_ref()).await.id);
 
-    let stored = registry
-        .get_process(&process_id)
-        .await
-        .expect("read process")
-        .expect("the row stands");
+    let stored = the_only_process(registry.as_ref()).await;
     assert!(
         !stored.is_terminal(),
         "a retry must never terminalise the row an earlier attempt created, got {:?}",
@@ -1223,75 +1220,17 @@ pub(super) async fn restate_exact_retry_start_failure_does_not_cancel_the_first_
         stored.cancel_request.is_none(),
         "a retry must record no cancellation against the first attempt's row"
     );
-    assert_eq!(stored.incarnation, first.incarnation);
-}
-
-/// FIG-2964: a registration conflict is a refusal, and never cancels the row
-/// it collided with.
-///
-/// Compensation is reachable only after *this* call created the row. A conflict
-/// means someone else owns the id, so cancelling on the way out would let any
-/// caller kill a live process by starting one that collides with it.
-#[tokio::test]
-pub(super) async fn restate_registration_conflict_refuses_without_cancelling_the_existing_row() {
-    use lash_core::ProcessRegistrar as _;
-
-    let context = Arc::new(RecordingContext::default());
-    // The workflow start would fail if it were reached; the refusal must land
-    // before that, so no compensation path can run.
-    context.fail_next_process_workflow_start();
-    let host = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
-    let stores = memory_process_stores().await;
-    let registry = Arc::clone(&stores.registry);
-    let process_id = ProcessId::from("restate-registration-conflict");
-    let existing = registry
-        .register_process(rerunnable_registration(process_id.as_str()))
-        .await
-        .expect("the incumbent row registers first");
-    let spec = lash_core::ProcessExecutionEnvSpec::new(
-        lash_core::PluginOptions::empty(),
-        recovery_session_policy(),
-    );
-
-    let error = host
-        .execute_effect(
-            start_recovery_effect(&process_id, &spec),
-            registry_local_executor(registry.clone())
-                .with_process_env_store(Arc::clone(&stores.env_store)),
-        )
-        .await
-        .expect_err("a colliding registration is refused");
-    assert!(
-        error.to_string().contains("registration fingerprint"),
-        "the refusal must name the conflict, got: {error}"
-    );
-
-    let stored = registry
-        .get_process(&process_id)
-        .await
-        .expect("read process")
-        .expect("the incumbent row stands");
-    assert_eq!(stored.incarnation, existing.incarnation);
-    assert!(
-        !stored.is_terminal(),
-        "a refused start must never terminalise someone else's row, got {:?}",
-        stored.status
-    );
-    assert!(
-        stored.cancel_request.is_none(),
-        "a refused start must never request cancel on someone else's row"
-    );
+    assert_eq!(stored.id, first.id);
 }
 
 fn start_recovery_effect(
-    process_id: &ProcessId,
+    start_key: &str,
     spec: &lash_core::ProcessExecutionEnvSpec,
 ) -> RuntimeEffectEnvelope {
     let registration = ProcessRegistration::new(
-        process_id.clone(),
         ProcessInput::ToolCall {
             call: lash_core::PreparedToolCall::from_parts(
-                format!("{process_id}-call"),
+                format!("{start_key}-call"),
                 "tool:recovery",
                 "recovery",
                 serde_json::Value::Null,
@@ -1305,9 +1244,13 @@ fn start_recovery_effect(
             lash_core::ParentScope::Host,
             lash_core::OnParentEnd::Abandon,
         ),
-    );
+    )
+    .with_start_key(Some(lash_core::StartKey::for_host(
+        lash_core::StartKeyOwner::HOST,
+        start_key,
+    )));
     RuntimeEffectEnvelope::new(
-        runtime_invocation(RuntimeEffectKind::Process, process_id.as_str()),
+        runtime_invocation(RuntimeEffectKind::Process, start_key),
         RuntimeEffectCommand::process(ProcessCommand::Start {
             registration,
             observers: vec![SessionId::from("session")],
@@ -1317,18 +1260,36 @@ fn start_recovery_effect(
     )
 }
 
+/// The one row a start-failure law registered: its id was minted inside the
+/// failed start, so the law reads it back from the registry.
+async fn the_only_process(registry: &dyn ProcessRegistry) -> lash_core::ProcessRecord {
+    let mut records = registry
+        .list_processes(&lash_core::ProcessListFilter {
+            status: lash_core::ProcessStatusFilter::Any,
+            ..Default::default()
+        })
+        .await
+        .expect("list registered processes");
+    assert_eq!(records.len(), 1, "the law registers exactly one process");
+    records.remove(0)
+}
+
 #[tokio::test]
 pub(super) async fn restate_controller_replays_process_start_await_command_sequence() {
     let context = Arc::new(RecordingContext::default());
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
-    let process_id = "task-start-await-replay";
 
     let start = || {
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, "process-start-replay"),
             RuntimeEffectCommand::process(ProcessCommand::Start {
-                registration: external_registration(process_id),
+                registration: external_registration().with_start_key(Some(
+                    lash_core::StartKey::for_host(
+                        lash_core::StartKeyOwner::HOST,
+                        "process-start-replay",
+                    ),
+                )),
                 observers: Vec::new(),
                 env_spec: None,
                 execution_context: Box::new(ProcessExecutionContext::default()),
@@ -1337,30 +1298,33 @@ pub(super) async fn restate_controller_replays_process_start_await_command_seque
     };
     let terminal = process_success(serde_json::json!({ "done": true }));
 
-    host.execute_effect(start(), registry_local_executor(registry.clone()))
+    let RuntimeEffectOutcome::Process {
+        result: ProcessEffectOutcome::Start { record },
+    } = host
+        .execute_effect(start(), registry_local_executor(registry.clone()))
         .await
-        .expect("first start");
-    let process_ref = registry
-        .resolve_process_ref(&ProcessId::from(process_id))
-        .await
-        .expect("resolve started process incarnation");
+        .expect("first start")
+    else {
+        panic!("the start must report the started process");
+    };
+    let process_id = record.id;
     let await_terminal = || {
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, "process-await-replay"),
             RuntimeEffectCommand::process(ProcessCommand::Await {
-                process_ref: process_ref.clone(),
+                process_id: process_id.clone(),
             }),
         )
     };
     registry
         .complete_process(
-            &ProcessId::from(process_id),
+            &process_id,
             terminal.clone(),
             lash_core::ProcessCompletionAuthority::external_owner(),
         )
         .await
         .expect("complete child process");
-    context.resolve_process_terminal(&ProcessId::from(process_id), &terminal);
+    context.resolve_process_terminal(&process_id, &terminal);
     host.execute_effect(await_terminal(), registry_local_executor(registry.clone()))
         .await
         .expect("first await");
@@ -1411,21 +1375,17 @@ pub(super) async fn restate_controller_replays_process_attach_to_one_keyed_waite
     let context = Arc::new(RecordingContext::default());
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
-    let process_id = "task-attach-replay";
-    registry
-        .register_process(external_registration(process_id))
+    let process_id = registry
+        .register_process(external_registration())
         .await
-        .expect("register the process the parked call waits on");
-    let process_ref = registry
-        .resolve_process_ref(&ProcessId::from(process_id))
-        .await
-        .expect("resolve the awaited process incarnation");
+        .expect("register the process the parked call waits on")
+        .id;
     let key = attach_key("attach-replay");
     let attach = || {
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, "process-attach-replay"),
             RuntimeEffectCommand::process(ProcessCommand::AttachTerminal {
-                process_ref: process_ref.clone(),
+                process_id: process_id.clone(),
                 key: key.clone(),
             }),
         )
@@ -1453,7 +1413,7 @@ pub(super) async fn restate_controller_replays_process_attach_to_one_keyed_waite
         attachments,
         vec![
             crate::process_attach::RestateProcessAttachRequest {
-                process_ref: process_ref.clone(),
+                process_id: process_id.clone(),
                 key: key.clone(),
             };
             2
@@ -1479,24 +1439,21 @@ pub(super) async fn restate_controller_replays_process_attach_to_one_keyed_waite
 }
 
 /// An attach for a process the registry never registered must refuse: arming a
-/// waiter on an unknown incarnation would park the caller on a wait nothing can
+/// waiter on an unknown process would park the caller on a wait nothing can
 /// ever resolve.
 #[tokio::test]
 pub(super) async fn restate_controller_refuses_attach_for_an_unregistered_process() {
     let context = Arc::new(RecordingContext::default());
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
-    let process_ref = lash_core::ProcessRef::new(
-        ProcessId::from("task-attach-unknown"),
-        lash_core::ProcessIncarnation::from_registration_sequence(1),
-    );
+    let process_id = ProcessId::fixture("task-attach-unknown");
 
     let error = host
         .execute_effect(
             RuntimeEffectEnvelope::new(
                 runtime_invocation(RuntimeEffectKind::Process, "process-attach-unknown"),
                 RuntimeEffectCommand::process(ProcessCommand::AttachTerminal {
-                    process_ref,
+                    process_id,
                     key: attach_key("attach-unknown"),
                 }),
             ),
@@ -1510,20 +1467,95 @@ pub(super) async fn restate_controller_refuses_attach_for_an_unregistered_proces
     );
 }
 
+/// FIG-3611 L5 on Restate: a start under a key whose process was pruned starts
+/// a new process, and its workflow is keyed by the new minted id, so Restate
+/// never coalesces it onto the pruned run's workflow (ADR 0107).
+///
+/// Before the minted id the workflow key was the host-chosen process name, so
+/// the restart's send addressed the pruned run's workflow and Restate
+/// coalesced it onto the finished invocation.
+#[tokio::test]
+pub(super) async fn restate_controller_start_after_prune_sends_a_new_workflow() {
+    let context = Arc::new(RecordingContext::default());
+    let host = RestateRuntimeEffectController::new_for_test(context.clone());
+    let registry = process_registry();
+    let start = |effect_id: &'static str| {
+        RuntimeEffectEnvelope::new(
+            runtime_invocation(RuntimeEffectKind::Process, effect_id),
+            RuntimeEffectCommand::process(ProcessCommand::Start {
+                registration: external_registration().with_start_key(Some(
+                    lash_core::StartKey::for_host(
+                        lash_core::StartKeyOwner::HOST,
+                        "restart-after-prune",
+                    ),
+                )),
+                observers: Vec::new(),
+                env_spec: None,
+                execution_context: Box::new(ProcessExecutionContext::default()),
+            }),
+        )
+    };
+    let started = |outcome: RuntimeEffectOutcome| {
+        let RuntimeEffectOutcome::Process {
+            result: ProcessEffectOutcome::Start { record },
+        } = outcome
+        else {
+            panic!("a start reports its process");
+        };
+        record.id
+    };
+
+    let first = started(
+        host.execute_effect(
+            start("first-start"),
+            registry_local_executor(registry.clone()),
+        )
+        .await
+        .expect("first start"),
+    );
+    registry
+        .complete_process(
+            &first,
+            process_success(serde_json::json!({ "run": "first" })),
+            lash_core::ProcessCompletionAuthority::external_owner(),
+        )
+        .await
+        .expect("complete the first run");
+    registry
+        .prune_terminal_processes(u64::MAX, None, lash_core::ProjectionWatermark::NoProjector)
+        .await
+        .expect("prune the first run");
+
+    let restarted = started(
+        host.execute_effect(start("restart"), registry_local_executor(registry.clone()))
+            .await
+            .expect("restart under the same key"),
+    );
+    assert_ne!(restarted, first, "the restart is minted a new id");
+    assert_eq!(
+        context.process_command_log.lock_recover().as_slice(),
+        &[format!("send:{first}"), format!("send:{restarted}")],
+        "the restart sends its own workflow, never the pruned run's"
+    );
+}
+
 #[tokio::test]
 pub(super) async fn restate_controller_start_emits_send_when_external_ref_already_exists() {
     let context = Arc::new(RecordingContext::default());
     let host = RestateRuntimeEffectController::new_for_test(context.clone());
     let registry = process_registry();
-    let process_id = "task-start-existing-ref";
-    let registration = external_registration(process_id);
-    registry
+    let registration = external_registration().with_start_key(Some(lash_core::StartKey::for_host(
+        lash_core::StartKeyOwner::HOST,
+        "process-start-existing-ref",
+    )));
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register process");
+        .expect("register process")
+        .id;
     registry
         .set_external_ref(
-            &ProcessId::from(process_id),
+            &process_id,
             ProcessExternalRef {
                 backend: "restate".to_string(),
                 id: format!("LashProcessWorkflow/{process_id}"),
@@ -1564,30 +1596,43 @@ pub(super) async fn run_parent_shaped_start_await_suspend_flow(
     process_id: &ProcessId,
     suspend_key: AwaitEventKey,
 ) {
-    host.execute_effect(
-        RuntimeEffectEnvelope::new(
-            runtime_invocation(RuntimeEffectKind::Process, "parent-flow-start-child"),
-            RuntimeEffectCommand::process(ProcessCommand::Start {
-                registration: external_registration(process_id),
-                observers: Vec::new(),
-                env_spec: None,
-                execution_context: Box::new(ProcessExecutionContext::default()),
-            }),
-        ),
-        registry_local_executor(registry.clone()),
-    )
-    .await
-    .expect("parent flow start child");
-
-    let process_ref = registry
-        .resolve_process_ref(process_id)
+    let started = host
+        .execute_effect(
+            RuntimeEffectEnvelope::new(
+                runtime_invocation(RuntimeEffectKind::Process, "parent-flow-start-child"),
+                RuntimeEffectCommand::process(ProcessCommand::Start {
+                    registration: external_registration().with_start_key(Some(
+                        lash_core::StartKey::for_host(
+                            lash_core::StartKeyOwner::HOST,
+                            "parent-flow-child",
+                        ),
+                    )),
+                    observers: Vec::new(),
+                    env_spec: None,
+                    execution_context: Box::new(ProcessExecutionContext::default()),
+                }),
+            ),
+            registry_local_executor(registry.clone()),
+        )
         .await
-        .expect("resolve parent-flow child incarnation");
+        .expect("parent flow start child");
+    let RuntimeEffectOutcome::Process {
+        result: ProcessEffectOutcome::Start { record },
+    } = started
+    else {
+        panic!("parent flow start must report the started child");
+    };
+    assert_eq!(
+        &record.id, process_id,
+        "every replay of the keyed start must name the one minted child"
+    );
 
     host.execute_effect(
         RuntimeEffectEnvelope::new(
             runtime_invocation(RuntimeEffectKind::Process, "parent-flow-await-child"),
-            RuntimeEffectCommand::process(ProcessCommand::Await { process_ref }),
+            RuntimeEffectCommand::process(ProcessCommand::Await {
+                process_id: process_id.clone(),
+            }),
         ),
         registry_local_executor(registry),
     )

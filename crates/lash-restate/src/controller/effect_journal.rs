@@ -72,7 +72,12 @@ use serde::{Deserialize, Serialize};
 /// `turn-config:{root}` step at its start, ahead of every effect the root
 /// records, so a replay adopts the config the first execution ran under
 /// (FIG-3600 S6).
-pub const EFFECT_JOURNAL_VERSION: u32 = 12;
+/// 13: a process is named by the id its registrar minted (FIG-3607): a
+/// journaled process command carries a bare `process_id` where it carried an
+/// incarnation-qualified reference, a start is addressed by its start key and
+/// journals its registration, a process start's frontier marker records its
+/// start key, and a recorded process event carries no incarnation.
+pub const EFFECT_JOURNAL_VERSION: u32 = 13;
 
 /// The entry field the generation is stamped under.
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";
@@ -247,14 +252,14 @@ fn generation_refusal(
 /// its `lash:{replay_key}:frontier` step marks, ahead of an effect that acts
 /// outside a `ctx.run` closure.
 ///
-/// A process start records its idempotency key — the process id its
-/// registration is idempotent under and its workflow send is keyed by — so a
-/// served marker names the row an earlier attempt may have registered. A
-/// timer records only that it is a sleep.
+/// A process start records its start key — the idempotency key its
+/// registration is addressed by — so a served marker names the retained
+/// process an earlier attempt may have registered under it. A timer records
+/// only that it is a sleep.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "frontier", rename_all = "snake_case", deny_unknown_fields)]
 pub(crate) enum FrontierMark {
-    ProcessStart { process_id: lash_core::ProcessId },
+    ProcessStart { start_key: lash_core::StartKey },
     Sleep,
 }
 

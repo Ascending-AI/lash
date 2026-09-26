@@ -754,13 +754,12 @@ async fn exhausted_input_root_resumes_or_is_withdrawn_without_new_input() -> Res
 /// One durable process wake for `session_id`: queued work, not an accepted
 /// next-turn input, so its drive runs a queued root.
 fn exhaustion_wake(session_id: &SessionId) -> crate::persistence::QueuedWorkBatchDraft {
-    let process_id = || lash_core::ProcessId::from("exhausted-wake-process");
+    let process_id = || lash_core::ProcessId::fixture("exhausted-wake-process");
     lash_core::runtime::process_wake_batch_draft(lash_core::ProcessWakeDelivery {
         version: lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: "exhausted-wake-process-wake-1".to_string(),
         target_session_id: session_id.clone(),
         process_id: process_id(),
-        process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "process.wake".to_string(),
         event_invocation: lash_core::RuntimeInvocation {

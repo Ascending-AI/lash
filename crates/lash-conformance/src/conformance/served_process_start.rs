@@ -354,7 +354,54 @@ async fn start_marker_key(
         markers.next().is_none(),
         "the probe's turn journaled one start marker: {keys:#?}"
     );
-    marker.replace(probe_session.as_str(), session_id.as_str())
+    // The start is keyed by its call's admitted scope, so the real session's
+    // marker names another start key (ADR 0107): find the call id the probe's
+    // key was derived from among the marker's segments, and re-derive the key
+    // under the real session's scope.
+    let key_at = marker
+        .find("process-start-key:")
+        .unwrap_or_else(|| panic!("the marker names its start key: {marker}"));
+    let probe_key_text = marker[key_at..]
+        .splitn(6, ':')
+        .take(5)
+        .collect::<Vec<_>>()
+        .join(":");
+    let probe_key = crate::StartKey::parse(&probe_key_text)
+        .unwrap_or_else(|error| panic!("the marker's start key parses: {error}"));
+    // A cell's leaf call id is `lashlang:v2:{opener}:{len}:{execution}:{ordinal}`
+    // (`LashlangHostIdentities::call_id`), and the cell's execution key leads
+    // the marker's replay key: find the execution and ordinal the probe's key
+    // was derived from, then re-derive both under the real session.
+    let call_id = |session: &SessionId, execution: &str, ordinal: u64| {
+        let opener = crate::EffectOpener::turn(session.clone(), turn_id.clone());
+        format!(
+            "lashlang:v2:{}:{}:{execution}:{ordinal:010}",
+            opener.identity_encoding(),
+            execution.len()
+        )
+    };
+    let segments = marker[..key_at].split(':').collect::<Vec<_>>();
+    let (execution, ordinal) = (1..=segments.len())
+        .map(|end| segments[..end].join(":"))
+        .flat_map(|execution| (0..16_u64).map(move |ordinal| (execution.clone(), ordinal)))
+        .find(|(execution, ordinal)| {
+            crate::StartKey::for_orchestration_call(
+                &scope,
+                &call_id(probe_session, execution, *ordinal),
+                0,
+            ) == probe_key
+        })
+        .unwrap_or_else(|| panic!("the probe's start key names its cell's call: {marker}"));
+    let real_execution = execution.replace(probe_session.as_str(), session_id.as_str());
+    let real_call_id = call_id(session_id, &real_execution, ordinal);
+    let real_key = crate::StartKey::for_orchestration_call(
+        &crate::ExecutionScope::turn(session_id, turn_id),
+        &real_call_id,
+        0,
+    );
+    marker
+        .replace(probe_session.as_str(), session_id.as_str())
+        .replace(probe_key.as_str(), real_key.as_str())
 }
 
 /// Runs the law's first attempt under the recorded capabilities, cut at

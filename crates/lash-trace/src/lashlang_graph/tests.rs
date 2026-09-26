@@ -1,5 +1,4 @@
 use chrono::{TimeZone, Utc};
-use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::TurnId;
 
@@ -196,22 +195,19 @@ fn node_failed(event_key: &str, occurrence: u64, error: &str) -> TraceLanguageEx
 }
 
 #[test]
-fn failed_occurrence_one_is_distinct_across_attempts_and_reused_incarnations() {
-    let failure = |attempt, incarnation, message: &str| {
+fn failed_occurrence_one_is_distinct_across_attempts_and_processes() {
+    let failure = |attempt, process: &str, message: &str| {
         let mut event = node_failed("same-publication-key", 1, message);
         event.identity.subject = TraceRuntimeSubject::Process {
-            process_id: ProcessId::from("worker"),
+            process_id: lash_sansio::ProcessId::fixture(process),
         };
-        event.identity.generation = Some(crate::TraceLanguageExecutionGeneration::new(
-            attempt,
-            incarnation,
-        ));
+        event.identity.generation = Some(crate::TraceLanguageExecutionGeneration::new(attempt));
         event
     };
     let records = [
-        record_at(failure(1, 7, "first attempt"), 1_000),
-        record_at(failure(2, 7, "retried segment"), 2_000),
-        record_at(failure(1, 8, "new incarnation"), 3_000),
+        record_at(failure(1, "worker-a", "first attempt"), 1_000),
+        record_at(failure(2, "worker-a", "retried segment"), 2_000),
+        record_at(failure(1, "worker-b", "another process"), 3_000),
     ];
     let store = TraceLashlangGraphStore::default();
     // A repeated delivery of the first invocation is still one observation.
@@ -228,12 +224,13 @@ fn failed_occurrence_one_is_distinct_across_attempts_and_reused_incarnations() {
         3,
         "same node and occurrence must not merge generations"
     );
-    for (attempt, incarnation, expected_message) in [
-        (1, 7, "first attempt"),
-        (2, 7, "retried segment"),
-        (1, 8, "new incarnation"),
+    for (attempt, process, expected_message) in [
+        (1, "worker-a", "first attempt"),
+        (2, "worker-a", "retried segment"),
+        (1, "worker-b", "another process"),
     ] {
-        let key = format!("process:worker:incarnation:{incarnation}:attempt:{attempt}");
+        let process_id = lash_sansio::ProcessId::fixture(process);
+        let key = format!("process:{process_id}:attempt:{attempt}");
         let graph = store.graph(&key).expect("generation graph");
         assert!(matches!(
             &graph.nodes[0].observation,
@@ -562,8 +559,7 @@ fn graph_store_records_child_links() {
                 occurrence: 1,
                 child: TraceLanguageChildExecution {
                     scope: TraceRuntimeScope::new("session-1"),
-                    process_id: ProcessId::from("process:child".to_string()),
-                    incarnation: 7,
+                    process_id: lash_sansio::ProcessId::fixture("process:child"),
                     attempt: Some(2),
                     module_ref: Some("module-1".to_string()),
                     entry_ref: Some("process:0".to_string()),
@@ -578,24 +574,29 @@ fn graph_store_records_child_links() {
     assert_eq!(graph.children[0].parent_node_id, "spawn");
     assert_eq!(
         graph.children[0].child_graph_key.as_deref(),
-        Some("process:process:child:incarnation:7:attempt:2")
+        Some(
+            format!(
+                "process:{}:attempt:2",
+                lash_sansio::ProcessId::fixture("process:child")
+            )
+            .as_str()
+        )
     );
     assert_eq!(graph.children[0].child_entry_name.as_deref(), Some("child"));
 }
 
 #[test]
-fn child_links_join_exact_attempts_and_reused_process_incarnations() {
+fn child_links_join_exact_attempts_and_processes() {
     let store = TraceLashlangGraphStore::default();
-    let child_link = |occurrence, incarnation, attempt| TraceLanguageExecution {
-        event_key: format!("child-{incarnation}-{attempt}"),
+    let child_link = |occurrence, process: &str, attempt| TraceLanguageExecution {
+        event_key: format!("child-{process}-{attempt}"),
         identity: identity(),
         payload: TraceLanguageExecutionPayload::ChildStarted {
             parent_node_id: "spawn".to_string(),
             occurrence,
             child: TraceLanguageChildExecution {
                 scope: TraceRuntimeScope::new("session-1"),
-                process_id: ProcessId::from("worker"),
-                incarnation,
+                process_id: lash_sansio::ProcessId::fixture(process),
                 attempt: Some(attempt),
                 module_ref: Some("module-1".to_string()),
                 entry_ref: Some("process:0".to_string()),
@@ -603,31 +604,32 @@ fn child_links_join_exact_attempts_and_reused_process_incarnations() {
             },
         },
     };
-    append_at(&store, child_link(1, 7, 2), 1_000);
-    append_at(&store, child_link(2, 8, 1), 1_100);
+    append_at(&store, child_link(1, "worker-a", 2), 1_000);
+    append_at(&store, child_link(2, "worker-b", 1), 1_100);
 
-    for (incarnation, attempt, timestamp) in [(7, 2, 2_000), (8, 1, 3_000)] {
-        let mut child = started_event(&format!("child-start-{incarnation}-{attempt}"));
+    for (process, attempt, timestamp) in [("worker-a", 2, 2_000), ("worker-b", 1, 3_000)] {
+        let mut child = started_event(&format!("child-start-{process}-{attempt}"));
         child.identity.subject = TraceRuntimeSubject::Process {
-            process_id: ProcessId::from("worker"),
+            process_id: lash_sansio::ProcessId::fixture(process),
         };
-        child.identity.generation = Some(crate::TraceLanguageExecutionGeneration::new(
-            attempt,
-            incarnation,
-        ));
+        child.identity.generation = Some(crate::TraceLanguageExecutionGeneration::new(attempt));
         append_at(&store, child, timestamp);
     }
 
     let parent = store.graph(EFFECT_GRAPH_KEY).expect("parent graph");
     assert_eq!(parent.children.len(), 2);
-    assert_eq!(
-        parent.children[0].child_graph_key.as_deref(),
-        Some("process:worker:incarnation:7:attempt:2")
-    );
-    assert_eq!(
-        parent.children[1].child_graph_key.as_deref(),
-        Some("process:worker:incarnation:8:attempt:1")
-    );
+    for (process, attempt) in [("worker-a", 2), ("worker-b", 1)] {
+        let process_id = lash_sansio::ProcessId::fixture(process);
+        let child = parent
+            .children
+            .iter()
+            .find(|child| child.child_process_id == process_id)
+            .expect("child link");
+        assert_eq!(
+            child.child_graph_key,
+            Some(format!("process:{process_id}:attempt:{attempt}"))
+        );
+    }
 }
 
 #[test]

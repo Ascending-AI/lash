@@ -204,9 +204,10 @@ impl LinkedTestProcess {
         .process_identity()
     }
 
-    fn start_request(&self, process_id: &ProcessId) -> lash_core::ProcessStartRequest {
+    /// A host start of this process, keyed by `start_key` so a replay of the
+    /// same request answers the process the key minted (ADR 0107).
+    fn start_request(&self, start_key: &str) -> lash_core::ProcessStartRequest {
         lash_core::ProcessStartRequest::new(
-            process_id,
             self.process_input(),
             lash_core::RecoveryContract::Rerunnable,
             lash_core::ProcessOriginator::host(),
@@ -215,6 +216,10 @@ impl LinkedTestProcess {
                 lash_core::OnParentEnd::Abandon,
             ),
         )
+        .with_start_key(Some(lash_core::StartKey::for_host(
+            lash_core::StartKeyOwner::HOST,
+            start_key,
+        )))
         .with_env_spec(process_env_spec())
         .with_extra_event_types(
             lash_lashlang_runtime::lashlang_process_event_types()
@@ -468,7 +473,6 @@ async fn process_prune_recovery_case(failing_store: &str) -> Result<()> {
             failing_store == "engine",
         )),
     });
-    let process_id = ProcessId::from(format!("prune-recovery-{failing_store}"));
     let shared_owner = lash_core::ArtifactOwner::host(format!("shared-{failing_store}"));
     let env_spec = process_env_spec();
     let env_ref = env_spec.stable_ref().expect("stable environment ref");
@@ -480,7 +484,6 @@ async fn process_prune_recovery_case(failing_store: &str) -> Result<()> {
     let registered = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                process_id.clone(),
                 lash_core::ProcessInput::Engine {
                     kind: engine.kind().to_string(),
                     payload: serde_json::json!({"artifact_ref": "shared-bytes"}),
@@ -495,8 +498,7 @@ async fn process_prune_recovery_case(failing_store: &str) -> Result<()> {
             .with_execution_env_ref(Some(env_ref.clone())),
         )
         .await?;
-    let process_owner =
-        lash_core::ArtifactOwner::process(lash_core::ProcessRef::from_record(&registered));
+    let process_owner = lash_core::ArtifactOwner::process(registered.id.clone());
     env_store
         .publish_process_execution_env(&process_owner, &env_ref, &env_bytes)
         .await?;
@@ -507,7 +509,7 @@ async fn process_prune_recovery_case(failing_store: &str) -> Result<()> {
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
-            lash_core::ProcessCompletionAuthority::workflow_key(process_id.to_string()),
+            lash_core::ProcessCompletionAuthority::workflow_key(registered.id.to_string()),
         )
         .await?;
 
@@ -536,7 +538,7 @@ async fn process_prune_recovery_case(failing_store: &str) -> Result<()> {
             .load(std::sync::atomic::Ordering::SeqCst),
     );
     assert!(matches!(
-        registry.get_process(&process_id).await,
+        registry.get_process(&registered.id).await,
         Err(lash_core::PluginError::ProcessNoLongerRetained { .. })
     ));
     assert_eq!(pending_after_first.len(), 1);
@@ -601,11 +603,9 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
     let backend = memory_backend().await;
     let registry: Arc<dyn lash_core::ProcessRegistry> = backend.process_registry();
     let core = process_test_core(backend.clone().into())?;
-    let process_id = ProcessId::from("process-prune-turn-cancel-closure-pin");
-    registry
+    let process_id = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                process_id.clone(),
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -620,7 +620,8 @@ async fn process_prune_waits_for_process_scoped_turn_cancel_closure() -> Result<
                 lash_core::ProcessIdentity::new("test"),
             )),
         )
-        .await?;
+        .await?
+        .id;
     registry
         .complete_process(
             &process_id,
@@ -894,11 +895,9 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
         ))
         .await?;
     assert_eq!(ingress.reservations.len(), 1);
-    let process_id = ingress.reservations[0].process_id.clone();
-    registry
+    let process_id = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                process_id.clone(),
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -911,7 +910,19 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
             )
             .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
                 lash_core::ProcessIdentity::new("test"),
+            ))
+            .with_start_key(Some(
+                lash_core::facade_support::trigger_delivery_start_key(&ingress.reservations[0]),
             )),
+        )
+        .await?
+        .id;
+    // The router binds the delivery to the process its start minted.
+    trigger_store
+        .bind_delivery_process(
+            &ingress.reservations[0].occurrence.occurrence_id,
+            &ingress.reservations[0].subscription.subscription_id,
+            &process_id,
         )
         .await?;
     registry
@@ -983,11 +994,9 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
         ))
         .await?;
     assert_eq!(orphaned.reservations.len(), 1);
-    let orphaned_process_id = orphaned.reservations[0].process_id.clone();
-    registry
+    let orphaned_process_id = registry
         .register_process(
             lash_core::ProcessRegistration::new(
-                orphaned_process_id.clone(),
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -1000,7 +1009,18 @@ async fn sqlite_facade_prune_removes_tombstoned_process_delivery() -> Result<()>
             )
             .with_admitted_identity(lash_core::AdmittedProcessIdentity::for_testing(
                 lash_core::ProcessIdentity::new("test"),
+            ))
+            .with_start_key(Some(
+                lash_core::facade_support::trigger_delivery_start_key(&orphaned.reservations[0]),
             )),
+        )
+        .await?
+        .id;
+    trigger_store
+        .bind_delivery_process(
+            &orphaned.reservations[0].occurrence.occurrence_id,
+            &orphaned.reservations[0].subscription.subscription_id,
+            &orphaned_process_id,
         )
         .await?;
     registry
@@ -1068,13 +1088,15 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
     )
     .await;
 
-    let start_request = process.start_request(&ProcessId::from("sessionless-direct"));
-    core.processes()
+    let start_request = process.start_request("sessionless-direct");
+    let sessionless_direct_id = core
+        .processes()
         .start(
             start_request.clone(),
             runtime_operation_scope(&core, "sessionless-direct-start"),
         )
-        .await?;
+        .await?
+        .id;
     core.processes()
         .start(
             start_request,
@@ -1082,13 +1104,12 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
         )
         .await
         .expect("public start replay discovers process ownership after staging retirement");
-    let waiting =
-        wait_for_waiting_signal(&core, &ProcessId::from("sessionless-direct"), "ready").await;
+    let waiting = wait_for_waiting_signal(&core, &sessionless_direct_id, "ready").await;
     assert!(matches!(
         waiting.originator,
         lash_core::ProcessOriginator::Host { .. }
     ));
-    let waiting_events = full_events(&core, &ProcessId::from("sessionless-direct")).await?;
+    let waiting_events = full_events(&core, &sessionless_direct_id).await?;
     assert!(
         waiting_events
             .iter()
@@ -1098,14 +1119,14 @@ async fn host_owned_processes_run_without_application_session() -> Result<()> {
     let cancelled = core
         .processes()
         .cancel(
-            &ProcessId::from("sessionless-direct"),
+            &sessionless_direct_id,
             runtime_operation_scope(&core, "sessionless-direct-cancel"),
         )
         .await?;
     assert_eq!(cancelled.status, lash_core::ProcessStatus::Waiting);
     wait_for_terminal(
         &core,
-        &ProcessId::from("sessionless-direct"),
+        &sessionless_direct_id,
         lash_core::ProcessStatus::Cancelled,
     )
     .await;
@@ -1306,26 +1327,23 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
     .await;
     let process_id = "signal-validation";
 
-    core.processes()
+    let process_id = core
+        .processes()
         .start(
-            process.start_request(&ProcessId::from(process_id)),
+            process.start_request(process_id),
             runtime_operation_scope(&core, "signal-validation-start"),
         )
-        .await?;
-    wait_for_waiting_signal(&core, &ProcessId::from(process_id), "ready").await;
+        .await?
+        .id;
+    wait_for_waiting_signal(&core, &process_id, "ready").await;
 
     let undeclared = core
         .processes()
         .signal(
-            &ProcessId::from(process_id),
+            &process_id,
             "nope",
             "undeclared-1",
-            signal_request(
-                &ProcessId::from(process_id),
-                "nope",
-                "undeclared-1",
-                serde_json::json!("x"),
-            ),
+            signal_request(&process_id, "nope", "undeclared-1", serde_json::json!("x")),
             runtime_operation_scope(&core, "signal-validation-undeclared"),
         )
         .await;
@@ -1338,11 +1356,11 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
     let mistyped = core
         .processes()
         .signal(
-            &ProcessId::from(process_id),
+            &process_id,
             "ready",
             "mistyped-1",
             signal_request(
-                &ProcessId::from(process_id),
+                &process_id,
                 "ready",
                 "mistyped-1",
                 serde_json::json!({ "not": "a string" }),
@@ -1356,10 +1374,10 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
     );
 
     // Both rejected sends left the process parked with nothing consumed.
-    let still_waiting = wait_for_waiting_signal(&core, &ProcessId::from(process_id), "ready").await;
+    let still_waiting = wait_for_waiting_signal(&core, &process_id, "ready").await;
     assert_eq!(still_waiting.lifecycle, lash_core::ProcessStatus::Waiting);
     assert!(
-        full_events(&core, &ProcessId::from(process_id))
+        full_events(&core, &process_id)
             .await?
             .iter()
             .all(|event| event.event_type != "signal.ready" && event.event_type != "signal.nope")
@@ -1367,22 +1385,14 @@ async fn signal_validation_rejects_undeclared_names_and_mistyped_payloads() -> R
 
     core.processes()
         .signal(
-            &ProcessId::from(process_id),
+            &process_id,
             "ready",
             "valid-1",
-            signal_request(
-                &ProcessId::from(process_id),
-                "ready",
-                "valid-1",
-                serde_json::json!("done"),
-            ),
+            signal_request(&process_id, "ready", "valid-1", serde_json::json!("done")),
             runtime_operation_scope(&core, "signal-validation-valid"),
         )
         .await?;
-    let output = core
-        .processes()
-        .await_output(&ProcessId::from(process_id))
-        .await?;
+    let output = core.processes().await_output(&process_id).await?;
     let output = output.into_tool_output();
     let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
         panic!("process did not succeed after valid signal: {output:#?}");
@@ -1424,43 +1434,35 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
     .await;
     let process_id = "repeated-waits";
 
-    core.processes()
+    let process_id = core
+        .processes()
         .start(
-            process.start_request(&ProcessId::from(process_id)),
+            process.start_request(process_id),
             runtime_operation_scope(&core, "repeated-waits-start"),
         )
-        .await?;
+        .await?
+        .id;
 
-    let first_wait = wait_for_waiting_signal(&core, &ProcessId::from(process_id), "ready").await;
+    let first_wait = wait_for_waiting_signal(&core, &process_id, "ready").await;
     let lash_core::WaitKind::Signal { ordinal, .. } =
         first_wait.wait.expect("first wait facet").kind;
     assert_eq!(ordinal, 1, "first wait must use ordinal 1");
     core.processes()
         .signal(
-            &ProcessId::from(process_id),
+            &process_id,
             "ready",
             "order-1",
-            signal_request(
-                &ProcessId::from(process_id),
-                "ready",
-                "order-1",
-                serde_json::json!(1),
-            ),
+            signal_request(&process_id, "ready", "order-1", serde_json::json!(1)),
             runtime_operation_scope(&core, "repeated-waits-signal-1"),
         )
         .await?;
 
-    let second_wait = wait_for_process(
-        &core,
-        &ProcessId::from(process_id),
-        "second signal wait",
-        |process| {
-            matches!(
-                process.wait.as_ref().map(|wait| &wait.kind),
-                Some(lash_core::WaitKind::Signal { ordinal, .. }) if *ordinal == 2
-            )
-        },
-    )
+    let second_wait = wait_for_process(&core, &process_id, "second signal wait", |process| {
+        matches!(
+            process.wait.as_ref().map(|wait| &wait.kind),
+            Some(lash_core::WaitKind::Signal { ordinal, .. }) if *ordinal == 2
+        )
+    })
     .await;
     let lash_core::WaitKind::Signal {
         key: second_key, ..
@@ -1471,23 +1473,15 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
     );
     core.processes()
         .signal(
-            &ProcessId::from(process_id),
+            &process_id,
             "ready",
             "order-2",
-            signal_request(
-                &ProcessId::from(process_id),
-                "ready",
-                "order-2",
-                serde_json::json!(2),
-            ),
+            signal_request(&process_id, "ready", "order-2", serde_json::json!(2)),
             runtime_operation_scope(&core, "repeated-waits-signal-2"),
         )
         .await?;
 
-    let output = core
-        .processes()
-        .await_output(&ProcessId::from(process_id))
-        .await?;
+    let output = core.processes().await_output(&process_id).await?;
     let output = output.into_tool_output();
     let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
         panic!("process did not succeed: {output:#?}");
@@ -1498,7 +1492,7 @@ async fn repeated_waits_on_one_signal_consume_in_order() -> Result<()> {
     );
 
     // The suspension history is on the event log: two waits, two resumes.
-    let events = full_events(&core, &ProcessId::from(process_id)).await?;
+    let events = full_events(&core, &process_id).await?;
     let waiting = events
         .iter()
         .filter(|event| event.event_type == "process.waiting")
@@ -1531,16 +1525,15 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
     .await;
     let process_id = "parent-joins-child";
 
-    core.processes()
+    let process_id = core
+        .processes()
         .start(
-            process.start_request(&ProcessId::from(process_id)),
+            process.start_request(process_id),
             runtime_operation_scope(&core, "parent-joins-child-start"),
         )
-        .await?;
-    let output = core
-        .processes()
-        .await_output(&ProcessId::from(process_id))
-        .await?;
+        .await?
+        .id;
+    let output = core.processes().await_output(&process_id).await?;
     let output = output.into_tool_output();
     let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
         panic!("parent process did not succeed: {output:#?}");
@@ -1576,7 +1569,7 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
         "child process record"
     );
     let parent = registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await?
         .expect("parent record");
     let child_id = &all
@@ -1589,10 +1582,7 @@ async fn process_starts_and_awaits_child_process() -> Result<()> {
     assert_eq!(
         child.lifecycle,
         lash_core::ProcessLifecyclePolicy::new(
-            lash_core::ParentScope::process(lash_core::ProcessRef::new(
-                parent.id,
-                parent.incarnation,
-            )),
+            lash_core::ParentScope::process(parent.id),
             lash_core::OnParentEnd::Abandon,
         )
     );
@@ -1619,12 +1609,12 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
     )
     .await;
     let session = core.session(session_id).open().await?;
-    session
+    let process_id = session
         .admin()
         .processes()
         .start(
             {
-                let mut request = process.start_request(&ProcessId::from(process_id));
+                let mut request = process.start_request(process_id);
                 request.originator =
                     lash_core::ProcessOriginator::session(lash_core::SessionScope::new(session_id));
                 request
@@ -1633,13 +1623,9 @@ async fn process_children_inherit_session_chain_provenance() -> Result<()> {
             .with_observers([session_id.to_string()]),
             runtime_operation_scope(&core, "chain-parent-start"),
         )
-        .await?;
-    wait_for_terminal(
-        &core,
-        &ProcessId::from(process_id),
-        lash_core::ProcessStatus::Completed,
-    )
-    .await;
+        .await?
+        .process_id;
+    wait_for_terminal(&core, &process_id, lash_core::ProcessStatus::Completed).await;
 
     // The child inherited the session originator and indexed wake target. Under
     // FIG-2346, session-originated descendants propagate the root-session
@@ -1708,17 +1694,18 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
     )
     .await;
     let session = core.session(session_id).open().await?;
-    session
+    let process_id = session
         .admin()
         .processes()
         .start(
             process
-                .start_request(&ProcessId::from(process_id))
+                .start_request(process_id)
                 .with_observers([session_id.to_string()]),
             runtime_operation_scope(&core, "outliving-process-start"),
         )
-        .await?;
-    wait_for_waiting_signal(&core, &ProcessId::from(process_id), "ready").await;
+        .await?
+        .process_id;
+    wait_for_waiting_signal(&core, &process_id, "ready").await;
     drop(session);
 
     let report = delete_bound_session(&core, session_id).await?;
@@ -1732,12 +1719,12 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
             .items
             .is_empty()
     );
-    let still_waiting = wait_for_waiting_signal(&core, &ProcessId::from(process_id), "ready").await;
+    let still_waiting = wait_for_waiting_signal(&core, &process_id, "ready").await;
     assert!(still_waiting.env_ref.is_some());
 
     let wake_after_delete = registry
         .append_event(
-            &ProcessId::from(process_id),
+            &process_id,
             lash_core::ProcessEventAppendRequest::new(
                 "process.wake",
                 serde_json::json!({ "text": "wake after deleted session" }),
@@ -1746,7 +1733,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
         .await?;
     assert_eq!(wake_after_delete.event.event_type, "process.wake");
     assert!(
-        full_events(&core, &ProcessId::from(process_id))
+        full_events(&core, &process_id)
             .await?
             .iter()
             .any(|event| event.payload["text"] == "wake after deleted session")
@@ -1761,11 +1748,11 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
 
     core.processes()
         .signal(
-            &ProcessId::from(process_id),
+            &process_id,
             "ready",
             "outliving-host-signal",
             signal_request(
-                &ProcessId::from(process_id),
+                &process_id,
                 "ready",
                 "outliving-host-signal",
                 serde_json::json!({ "after_delete": true }),
@@ -1773,10 +1760,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
             runtime_operation_scope(&core, "outliving-process-signal"),
         )
         .await?;
-    let output = core
-        .processes()
-        .await_output(&ProcessId::from(process_id))
-        .await?;
+    let output = core.processes().await_output(&process_id).await?;
     let output = output.into_tool_output();
     let lash_core::ToolCallOutcome::Success(value) = output.outcome else {
         panic!("outliving process did not succeed: {output:#?}");
@@ -1786,12 +1770,7 @@ async fn process_outlives_deleted_session_and_resumes_from_host_signal() -> Resu
         value,
         serde_json::json!({ "resumed": { "after_delete": true } })
     );
-    wait_for_terminal(
-        &core,
-        &ProcessId::from(process_id),
-        lash_core::ProcessStatus::Completed,
-    )
-    .await;
+    wait_for_terminal(&core, &process_id, lash_core::ProcessStatus::Completed).await;
     Ok(())
 }
 
@@ -2047,7 +2026,6 @@ async fn durable_start_survives_artifact_store_outage_and_redrives_after_restart
     .into_process_input()
     .expect("durable witness input serializes");
     let start_request = lash_core::ProcessStartRequest::new(
-        "intent-executor-replaces-this-id",
         process_input,
         lash_core::RecoveryContract::Rerunnable,
         lash_core::ProcessOriginator::host(),

@@ -57,13 +57,13 @@ pub use envelope::{
 };
 /// Effect-executor contracts, including process and trigger local-execution capabilities.
 pub use executor::{
-    AdmittedScope, AdmittedScopeError, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity,
-    BoundaryReason, CommandJournalGuard, CompletionKeyPreparation, EffectHost,
-    EffectJournalIdentity, EffectJournalRetirement, EffectOpener, EffectRetirementGate,
-    ExecutionScope, ExternalCompletionError, IndependentEffectWork, ProcessDriveStep,
-    ProcessLocalExecution, ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition,
-    QueuedLaneAttempt, QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, RecordedJournal,
-    RecordedKeyFence, RefusedWriteRange, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
+    AdmittedScope, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, BoundaryReason,
+    CommandJournalGuard, CompletionKeyPreparation, EffectHost, EffectJournalIdentity,
+    EffectJournalRetirement, EffectOpener, EffectRetirementGate, ExecutionScope,
+    ExternalCompletionError, IndependentEffectWork, ProcessDriveStep, ProcessLocalExecution,
+    ProcessOutcomeObserver, ProcessTurnCancellation, QueuedLaneAcquisition, QueuedLaneAttempt,
+    QueuedLaneGuard, QueuedLaneHolder, QueuedLaneProbe, RecordedJournal, RecordedKeyFence,
+    RefusedWriteRange, Resolution, ResolveOutcome, RuntimeAwaitEventOptions,
     RuntimeEffectController, RuntimeEffectControllerError, RuntimeEffectLocalExecutor,
     RuntimeSleepOptions, ScopeBoundController, ScopedEffectController, SegmentProgress,
     ServedOnlyRange, ToolIntentOutcomeSink, ToolIntentPreparation, ToolIntentSubmissionGuard,
@@ -111,7 +111,6 @@ mod tests {
     #[test]
     fn process_effect_envelope_round_trips_prepared_tool_call() {
         let registration = crate::ProcessRegistration::new(
-            "call-123",
             crate::ProcessInput::ToolCall {
                 call: crate::PreparedToolCall {
                     call_id: "call-123".to_string(),

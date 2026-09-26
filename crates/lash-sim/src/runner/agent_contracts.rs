@@ -1456,37 +1456,28 @@ fn normalize_contract_tool_output(value: Value) -> Value {
     let Some(object) = value.as_object() else {
         return value;
     };
-    // A started process hands back a live handle whose id carries the turn's
-    // tool-intent replay key. That key is stable across a replay of one turn
-    // and deliberately distinct between two independent executions, so a
-    // contract payload that kept the digest would compare two fresh runs on an
-    // identity neither is meant to share. Keep the handle's shape -- the
-    // sequence prefix and the replay-key scheme -- and mask the digest, the
-    // same way process refs and labels already travel as masked hashes. The
-    // prefix's number is the registry's incarnation, which counts every
-    // registration the backend admitted before this one; parallel starts take
-    // theirs in whatever order the backend's writes land, so the number is
-    // masked too and only its shape kept.
+    // A started process hands back a live handle naming the process its
+    // registrar minted. The id is a fresh UUIDv7 in production and a
+    // registration-order counter in the simulator, and parallel starts
+    // register in whatever order the backend's writes land, so a contract
+    // payload that kept it would compare two fresh runs on an identity
+    // neither is meant to share. Keep the handle's shape -- the `p.` prefix,
+    // that the handle names the process it carries, and that the id is a
+    // minted spelling -- and mask the id itself.
     if object.contains_key("__handle__") && object.contains_key("process_id") {
         let process_id = object.get("process_id").and_then(Value::as_str);
         let id = object.get("id").and_then(Value::as_str);
-        let id_prefix = id
-            .and_then(|id| process_id.and_then(|key| id.strip_suffix(key)))
-            .unwrap_or_default();
-        let incarnation_masked = id_prefix
-            .strip_prefix("p.")
-            .and_then(|rest| rest.strip_suffix('.'))
-            .filter(|number| !number.is_empty() && number.bytes().all(|b| b.is_ascii_digit()))
-            .map_or_else(|| id_prefix.to_string(), |_| "p.<incarnation>.".to_string());
+        let names_its_process = id
+            .zip(process_id)
+            .is_some_and(|(id, process_id)| id.strip_prefix("p.") == Some(process_id));
         return json!({
             "__handle__": object.get("__handle__").cloned().unwrap_or(Value::Null),
-            "id_prefix": incarnation_masked,
-            "process_id_scheme": process_id
-                .and_then(|key| key.rsplit_once(':').map(|(scheme, _)| scheme))
+            "id_prefix": id
+                .and_then(|id| id.split_once('.').map(|(tag, _)| format!("{tag}.")))
                 .unwrap_or_default(),
-            "process_id_digest_present": process_id
-                .and_then(|key| key.rsplit_once(':').map(|(_, digest)| !digest.is_empty()))
-                .unwrap_or(false),
+            "names_its_process": names_its_process,
+            "process_id_minted": process_id
+                .is_some_and(|process_id| lash_core::ProcessId::parse(process_id).is_ok()),
         });
     }
     if !object.contains_key("full_output_path") {

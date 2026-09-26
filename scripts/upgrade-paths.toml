@@ -127,9 +127,9 @@ constant_path = "crates/lash-core-store/src/store/semantic_boundary.rs"
 note = "content address: a stored identity is verified under the family it names"
 
 [[surface]]
-constant = "PROCESS_REGISTRATION_FAMILY_VERSION"
-constant_path = "crates/lash-core-execution/src/runtime/process/validation.rs"
-note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
+constant = "START_KEY_FAMILY_VERSION"
+constant_path = "crates/lash-core-store/src/process_identity.rs"
+note = "idempotency-key family: a start key renders its family, so keys of both families coexist in the start-key index during the roll window; a retained start is found only under the family that wrote it"
 
 [[surface]]
 constant = "TRIGGER_COMMAND_FAMILY_VERSION"
@@ -153,11 +153,6 @@ note = "content-addressed identity family: new identities mint under the new fam
 
 [[surface]]
 constant = "TRIGGER_SOURCE_FAMILY_VERSION"
-constant_path = "crates/lash-core-execution/src/triggers/router.rs"
-note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
-
-[[surface]]
-constant = "TRIGGER_DELIVERY_PROCESS_FAMILY_VERSION"
 constant_path = "crates/lash-core-execution/src/triggers/router.rs"
 note = "content-addressed identity family: new identities mint under the new family after finalize; a stored identity is verified under the family it names"
 

@@ -32,6 +32,7 @@ impl RestateProcessRunner for DivergingRunner {
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
+        _process_id: ProcessId,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
@@ -55,8 +56,12 @@ impl RestateProcessRunner for DivergingRunner {
     }
 }
 
-fn run_input(registration: &ProcessRegistration) -> RestateProcessWorkflowInput {
+fn run_input(
+    process_id: &ProcessId,
+    registration: &ProcessRegistration,
+) -> RestateProcessWorkflowInput {
     RestateProcessWorkflowInput {
+        process_id: process_id.clone(),
         registration: registration.clone(),
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
@@ -88,14 +93,14 @@ async fn process_feed(
 /// on the retry whose build can replay its journal.
 #[tokio::test]
 pub(super) async fn a_diverged_process_body_parks_once_and_completes_when_restored() {
-    let process_id = ProcessId::from("r0b-diverged-body");
     let stores = memory_process_stores().await;
     let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
-    let registration = rerunnable_registration(process_id.as_str());
-    registry
+    let registration = rerunnable_registration();
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register the process");
+        .expect("register the process")
+        .id;
     let endpoint = Endpoint::builder()
         .bind(
             LashProcessWorkflowImpl::new_for_test(
@@ -109,7 +114,7 @@ pub(super) async fn a_diverged_process_body_parks_once_and_completes_when_restor
             .serve(),
         )
         .build();
-    let input = run_input(&registration);
+    let input = run_input(&process_id, &registration);
     let diverged_reason = |record: &lash_core::ProcessRecord| {
         record
             .park
@@ -253,6 +258,7 @@ impl RestateProcessRunner for GenerationRunner {
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
+        _process_id: ProcessId,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         _scoped_effect_controller: lash_core::ScopedEffectController<'_>,
@@ -287,14 +293,14 @@ pub(super) async fn a_segment_retried_under_another_generation_parks_before_its_
         ("stampless", None, Some("blake3:new-build")),
         ("unnamed", Some("blake3:admitting-build"), None),
     ] {
-        let process_id = ProcessId::from(format!("l6-generation-{case}"));
         let stores = memory_process_stores().await;
         let registry: Arc<dyn ProcessRegistry> = stores.registry.clone();
-        let registration = rerunnable_registration(process_id.as_str());
-        registry
+        let registration = rerunnable_registration();
+        let process_id = registry
             .register_process(registration.clone())
             .await
-            .expect("register the process");
+            .expect("register the process")
+            .id;
         let runner = Arc::new(GenerationRunner {
             generation: std::sync::Mutex::new(None),
             runs: AtomicUsize::new(0),
@@ -310,7 +316,7 @@ pub(super) async fn a_segment_retried_under_another_generation_parks_before_its_
                 .serve(),
             )
             .build();
-        let input = run_input(&registration);
+        let input = run_input(&process_id, &registration);
 
         let first =
             invoke_process_workflow_endpoint(&endpoint, "run", process_id.as_str(), &input, true)

@@ -115,10 +115,9 @@ impl StaticToolExecute for SessionProcessAdminTools {
                 call.name()
             )));
         }
-        let Some(process_id) = cancel_target(call.args) else {
-            return done_without_intents(ToolOutcome::err_fmt(
-                "cancel_process requires `handle` or `process_id`",
-            ));
+        let process_id = match cancel_target(call.args) {
+            Ok(process_id) => process_id,
+            Err(refusal) => return done_without_intents(ToolOutcome::err_fmt(refusal)),
         };
         lash_core::ToolAttemptOutcome::done(
             lash_core::ToolOutcomeDone::ok(serde_json::json!({
@@ -128,7 +127,7 @@ impl StaticToolExecute for SessionProcessAdminTools {
             lash_core::ToolIntents::v3(vec![lash_core::ToolIntent::CancelProcess(
                 lash_core::CancelProcessIntent {
                     session_id: SessionId::from(call.context.session_id()),
-                    process_id: ProcessId::from(process_id),
+                    process_id,
                 },
             )]),
         )
@@ -141,17 +140,21 @@ impl StaticToolExecute for SessionProcessAdminTools {
 /// it too and reads it through the one handle parser. The bare `process_id`
 /// stays for a host that holds an id and never held a handle — an
 /// Externally-Owned run the host launched and reported by id, for instance.
-fn cancel_target(args: &Value) -> Option<String> {
-    if let Some(handle) = args.get("handle")
-        && let Ok(process_ref) = lash_core::ProcessRef::from_handle_json(handle)
-    {
-        return Some(process_ref.process_id.to_string());
+///
+/// A value that is present but names no process is refused with the reason,
+/// never passed over for the other spelling: a retired handle or an id no
+/// registrar minted says so.
+fn cancel_target(args: &Value) -> Result<ProcessId, String> {
+    if let Some(handle) = args.get("handle") {
+        return lash_core::process_id_from_handle_json(handle)
+            .map_err(|refusal| format!("cancel_process `handle`: {refusal}"));
     }
-    args.get("process_id")
-        .and_then(Value::as_str)
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(str::to_string)
+    match args.get("process_id") {
+        Some(Value::String(value)) => ProcessId::parse(value.trim())
+            .map_err(|refusal| format!("cancel_process `process_id`: {refusal}")),
+        Some(_) => Err("cancel_process `process_id` must be a string".to_string()),
+        None => Err("cancel_process requires `handle` or `process_id`".to_string()),
+    }
 }
 
 pub(crate) fn done_without_intents(result: ToolOutcome) -> lash_core::ToolAttemptOutcome {
@@ -309,15 +312,15 @@ pub fn execute_process_await_tool_call(
     let Some(handle) = args.get("handle") else {
         return done_without_intents(ToolOutcome::err_fmt("await_process requires `handle`"));
     };
-    let process_ref = match lash_core::ProcessRef::from_handle_json(handle) {
-        Ok(process_ref) => process_ref,
+    let process_id = match lash_core::process_id_from_handle_json(handle) {
+        Ok(process_id) => process_id,
         Err(err) => return done_without_intents(ToolOutcome::err_fmt(err)),
     };
     if let Err(err) = context.completion_key() {
         return done_without_intents(ToolOutcome::err_fmt(err));
     }
     lash_core::ToolAttemptOutcome::pending(
-        lash_core::PendingCompletion::new().resolved_by_process_terminal(process_ref),
+        lash_core::PendingCompletion::new().resolved_by_process_terminal(process_id),
     )
 }
 
@@ -345,8 +348,7 @@ pub async fn execute_process_list_tool_call(
 /// `list_output_contract_matches_the_handle_view` fails if they drift. The
 /// previous hand-written schema had already drifted — it advertised a
 /// `descriptor` object and a `{name}` definition that no handle view has ever
-/// carried, and omitted the `incarnation` a process handle needs to be
-/// awaitable.
+/// carried.
 fn process_list_output_schema() -> Value {
     serde_json::json!({
         "type": "array",
@@ -372,10 +374,6 @@ pub fn process_handle_view_schema() -> Value {
                 "type": "string",
                 "description": "The process this handle names, for tools that ask for a process_id."
             },
-            "incarnation": {
-                "type": "integer",
-                "description": "Registration incarnation this handle pins, so the handle cannot rebind to a later run of the same id."
-            },
             "kind": {
                 "type": "string",
                 "description": "Engine kind that owns the run."
@@ -400,7 +398,7 @@ pub fn process_handle_view_schema() -> Value {
                 "enum": ["running", "waiting", "completed", "failed", "cancelled", "abandoned", "caller_departed"]
             }
         },
-        "required": ["__handle__", "id", "process_id", "incarnation", "kind", "status"],
+        "required": ["__handle__", "id", "process_id", "kind", "status"],
         "additionalProperties": false
     })
 }
@@ -451,8 +449,7 @@ mod tests {
         // real `ProcessHandleView` serialization is what catches the drift the
         // previous hand-written schema had already accumulated.
         let view = lash_core::ProcessHandleView::new(
-            "process-1",
-            lash_core::ProcessIncarnation::from_registration_sequence(4),
+            lash_core::ProcessId::fixture("process-1"),
             lash_core::ProcessIdentity::for_definition(
                 lash_core::ProcessDefinitionRef::unclaimed(
                     "lashlang",
@@ -506,7 +503,7 @@ mod tests {
         let result = tools
             .execute(ToolCall::new(
                 &manifest_for(&tools, "cancel_process"),
-                &serde_json::json!({ "handle": handle_json("handle-process", 2) }),
+                &serde_json::json!({ "handle": handle_json(&lash_core::ProcessId::fixture("handle-process")) }),
                 &context,
             ))
             .await;
@@ -516,7 +513,10 @@ mod tests {
         let [lash_core::ToolIntent::CancelProcess(intent)] = intents.intents.as_slice() else {
             panic!("expected one cancel declaration, got {intents:?}");
         };
-        assert_eq!(intent.process_id.as_str(), "handle-process");
+        assert_eq!(
+            intent.process_id,
+            lash_core::ProcessId::fixture("handle-process")
+        );
     }
 
     #[test]
@@ -540,7 +540,7 @@ mod tests {
         let result = tools
             .execute(ToolCall::new(
                 &manifest_for(&tools, "cancel_process"),
-                &serde_json::json!({"process_id": "literal-process"}),
+                &serde_json::json!({"process_id": lash_core::ProcessId::fixture("literal-process")}),
                 &context,
             ))
             .await;
@@ -550,7 +550,7 @@ mod tests {
         assert_eq!(
             result.into_output().value_for_projection(),
             serde_json::json!({
-                "process_id": "literal-process",
+                "process_id": lash_core::ProcessId::fixture("literal-process"),
                 "status": "cancelled",
             })
         );
@@ -560,7 +560,10 @@ mod tests {
             panic!("processes.cancel must declare CancelProcess")
         };
         assert_eq!(intent.session_id, "test-session");
-        assert_eq!(intent.process_id, "literal-process");
+        assert_eq!(
+            intent.process_id,
+            lash_core::ProcessId::fixture("literal-process")
+        );
     }
 
     fn parked_attempt_context<'run>(
@@ -582,13 +585,9 @@ mod tests {
     /// The process-handle record a cell actually holds.
     ///
     /// Minted rather than spelled out: a copy of the record drifts from the
-    /// mint the moment the mint changes, which is exactly what happened when
-    /// ADR 0095 folded the incarnation into the id.
-    fn handle_json(id: &str, incarnation: u64) -> serde_json::Value {
-        lash_core::RuntimeExecutionContext::process_handle_json(&lash_core::ProcessRef::new(
-            id,
-            lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
-        ))
+    /// mint the moment the mint changes.
+    fn handle_json(process_id: &lash_core::ProcessId) -> serde_json::Value {
+        lash_core::RuntimeExecutionContext::process_handle_json(process_id)
     }
 
     #[tokio::test]
@@ -601,22 +600,21 @@ mod tests {
         let outcome = tools
             .execute(ToolCall::new(
                 &manifest_for(&tools, "await_process"),
-                &serde_json::json!({ "handle": handle_json("proc-1", 3) }),
+                &serde_json::json!({ "handle": handle_json(&lash_core::ProcessId::fixture("proc-1")) }),
                 &context,
             ))
             .await;
         let lash_core::ToolAttemptOutcome::Pending(pending) = outcome else {
             panic!("processes.await must park instead of answering inline")
         };
-        let Some(lash_core::PendingResolver::ProcessTerminal { process_ref }) = pending.resolved_by
+        let Some(lash_core::PendingResolver::ProcessTerminal { process_id }) = pending.resolved_by
         else {
             panic!("a parked processes.await must name the process terminal as its resolver")
         };
-        assert_eq!(process_ref.process_id, "proc-1");
         assert_eq!(
-            process_ref.incarnation.registration_sequence(),
-            3,
-            "the arming must pin the incarnation the caller held, not the id alone"
+            process_id,
+            lash_core::ProcessId::fixture("proc-1"),
+            "the arming names the process the caller held"
         );
     }
 
@@ -637,7 +635,7 @@ mod tests {
                 serde_json::json!({ "handle": { "id": "x", "incarnation": 1 } }),
             ),
             (
-                "a handle with no incarnation",
+                "a retired process-kind handle",
                 serde_json::json!({ "handle": { "__handle__": "process", "id": "x" } }),
             ),
         ] {
@@ -738,5 +736,31 @@ mod tests {
         assert!(standard_names.contains(&"cancel_process".to_string()));
         assert!(rlm_names.contains(&"list_process_handles".to_string()));
         assert!(!rlm_names.contains(&"cancel_process".to_string()));
+    }
+
+    /// A handle or id that is present but names no process is refused with
+    /// its reason, never reported as a missing argument.
+    #[test]
+    fn a_cancel_target_that_names_no_process_is_refused_with_its_reason() {
+        let retired = serde_json::json!({
+            "handle": { "__handle__": "lash", "id": "p.1.old-name" },
+            "process_id": lash_core::process_id_for_test("fallback").as_str(),
+        });
+        let refusal = cancel_target(&retired).expect_err("a retired handle names no process");
+        assert!(refusal.contains("retired spelling"), "{refusal}");
+
+        let unminted = serde_json::json!({ "process_id": "host-chosen-name" });
+        let refusal = cancel_target(&unminted).expect_err("a host name is no minted id");
+        assert!(
+            refusal.starts_with("cancel_process `process_id`"),
+            "{refusal}"
+        );
+
+        let refusal = cancel_target(&serde_json::json!({})).expect_err("nothing named");
+        assert_eq!(refusal, "cancel_process requires `handle` or `process_id`");
+
+        let minted = lash_core::process_id_for_test("minted");
+        let named = serde_json::json!({ "process_id": minted.as_str() });
+        assert_eq!(cancel_target(&named), Ok(minted));
     }
 }

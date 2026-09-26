@@ -6,11 +6,9 @@ use pretty_assertions::assert_eq;
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn ProcessRegistry>) {
-    let process_id = "filter-target";
     let record = registry
         .register_process(
             ProcessRegistration::new(
-                process_id,
                 ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -40,9 +38,10 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
         )
         .await
         .expect("register filter target");
+    let process_id = record.id.clone();
     registry
         .set_process_wait(
-            &ProcessId::from(process_id),
+            &process_id,
             WaitState {
                 since_ms: record.created_at_ms,
                 kind: WaitKind::Signal {
@@ -55,10 +54,11 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
         )
         .await
         .expect("set filter target waiting");
-    registry
+    let decoy_id = registry
         .register_process(registration("filter-decoy"))
         .await
-        .expect("register filter decoy");
+        .expect("register filter decoy")
+        .id;
 
     let matches = registry
         .list_processes(&ProcessListFilter {
@@ -126,6 +126,6 @@ pub async fn list_filters_match_extracted_and_json_fields(registry: Arc<dyn Proc
             .await
             .expect("status set query");
         assert_eq!(records.iter().any(|row| row.id == process_id), target);
-        assert_eq!(records.iter().any(|row| row.id == "filter-decoy"), decoy);
+        assert_eq!(records.iter().any(|row| row.id == decoy_id), decoy);
     }
 }

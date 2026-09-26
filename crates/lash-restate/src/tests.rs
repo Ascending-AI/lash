@@ -36,9 +36,9 @@ use lash_core::{
     AbandonWriter, AwaitEventKey, AwaitEventResolver, AwaitEventWaitIdentity, Clock, EffectAddress,
     EffectHost, ExecutionScope, PluginError, ProcessAwaitOutput, ProcessCommand,
     ProcessEffectOutcome, ProcessExecutionContext, ProcessExecutionEnvStore, ProcessExternalRef,
-    ProcessQuery as _, ProcessRegistry, Resolution, ResolveOutcome, RuntimeAttribution,
-    RuntimeEffectCommand, RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectInvocation,
-    RuntimeEffectKind, RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController,
+    ProcessRegistry, Resolution, ResolveOutcome, RuntimeAttribution, RuntimeEffectCommand,
+    RuntimeEffectController, RuntimeEffectEnvelope, RuntimeEffectInvocation, RuntimeEffectKind,
+    RuntimeEffectLocalExecutor, RuntimeEffectOutcome, ScopedEffectController,
     facade_support::TurnAddress, facade_support::TurnAttach,
 };
 use lash_core::{ProcessInput, ProcessRegistration, TriggerStore};
@@ -201,13 +201,13 @@ async fn restate_scope_controller_refuses_wrong_scope_before_index_or_local_exec
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let scoped = controller
         .process_scope_for_test(durable_admission(&ExecutionScope::process(
-            "admitted-restate-process",
+            lash_core::ProcessId::fixture("admitted-restate-process"),
         )))
         .expect("scoped Restate controller");
     let envelope = RuntimeEffectEnvelope::new(
         lash_core::RuntimeEffectInvocation::new(
             lash_core::EffectAddress::new(
-                ExecutionScope::process("wrong-restate-process"),
+                ExecutionScope::process(lash_core::ProcessId::fixture("wrong-restate-process")),
                 "shared-replay-key",
             )
             .expect("wrong-scope effect address"),
@@ -246,13 +246,13 @@ async fn deployment_host_raw_scoped_controller_refuses_wrong_scope_before_ingres
     );
     let scoped = host
         .scoped(durable_admission(&ExecutionScope::process(
-            "admitted-deployment-process",
+            lash_core::ProcessId::fixture("admitted-deployment-process"),
         )))
         .expect("scoped deployment host");
     let envelope = RuntimeEffectEnvelope::new(
         lash_core::RuntimeEffectInvocation::new(
             lash_core::EffectAddress::new(
-                ExecutionScope::process("wrong-deployment-process"),
+                ExecutionScope::process(lash_core::ProcessId::fixture("wrong-deployment-process")),
                 "wrong-deployment-effect",
             )
             .expect("wrong-scope deployment address"),
@@ -293,7 +293,8 @@ async fn deployment_host_raw_scoped_controller_refuses_wrong_scope_before_ingres
 async fn restate_scope_controller_refuses_wrong_scope_group_before_index_or_handoff() {
     let context = Arc::new(RecordingContext::default());
     let controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
-    let admitted = ExecutionScope::process("admitted-restate-process");
+    let admitted =
+        ExecutionScope::process(lash_core::ProcessId::fixture("admitted-restate-process"));
     let scoped = controller
         .process_scope_for_test(durable_admission(&admitted))
         .expect("scoped Restate controller");
@@ -301,7 +302,7 @@ async fn restate_scope_controller_refuses_wrong_scope_group_before_index_or_hand
     let child = RuntimeEffectEnvelope::new(
         lash_core::RuntimeEffectInvocation::new(
             lash_core::EffectAddress::new(
-                ExecutionScope::process("wrong-restate-process"),
+                ExecutionScope::process(lash_core::ProcessId::fixture("wrong-restate-process")),
                 format!("{group_key}:child:0"),
             )
             .expect("wrong-scope child address"),
@@ -907,7 +908,8 @@ impl RestateProcessRunner for Fig779SuspendingProcessRunner {
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
-        registration: ProcessRegistration,
+        process_id: lash_core::ProcessId,
+        _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         scoped_effect_controller: ScopedEffectController<'_>,
         _handover: Option<lash_core::SegmentHandover>,
@@ -940,10 +942,7 @@ impl RestateProcessRunner for Fig779SuspendingProcessRunner {
                 if error.code == lash_core::RuntimeErrorCode::RuntimeEffectSleepCancelled =>
             {
                 Ok(process_cancellation(
-                    format!(
-                        "process `{}` observed durable cancellation",
-                        registration.id
-                    ),
+                    format!("process `{process_id}` observed durable cancellation"),
                     None,
                 )
                 .into())
@@ -971,6 +970,7 @@ impl RestateProcessRunner for Fig788TerminalRedriveRunner {
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
+        _process_id: lash_core::ProcessId,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         scoped_effect_controller: ScopedEffectController<'_>,
@@ -1015,6 +1015,7 @@ impl RestateProcessRunner for Fig788SegmentBoundaryRunner {
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
+        _process_id: lash_core::ProcessId,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         _scoped_effect_controller: ScopedEffectController<'_>,
@@ -1046,6 +1047,7 @@ impl RestateProcessRunner for Fig788OrdinalOneTerminalRunner {
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
+        _process_id: lash_core::ProcessId,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         _scoped_effect_controller: ScopedEffectController<'_>,
@@ -1079,6 +1081,7 @@ impl RestateProcessRunner for Fig811EffectfulOrdinalOneTerminalRunner {
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
+        _process_id: lash_core::ProcessId,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         scoped_effect_controller: ScopedEffectController<'_>,
@@ -1408,6 +1411,7 @@ mod process_recovery;
 mod process_registry_core;
 mod process_registry_replay;
 mod process_session_turn_cancel;
+mod process_start_replay_on_the_double;
 mod process_workflow;
 mod recording_context;
 mod restate_redrive;

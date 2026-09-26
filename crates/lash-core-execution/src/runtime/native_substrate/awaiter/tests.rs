@@ -5,7 +5,6 @@
 use std::time::Duration;
 
 use super::*;
-use crate::ProcessId;
 
 #[test]
 fn backoff_schedule_uses_work_cadence_poll_bounds() {
@@ -44,14 +43,14 @@ fn backoff_schedule_uses_work_cadence_poll_bounds() {
 #[tokio::test]
 async fn hub_subscribe_then_notify_wakes_and_gc_drops_empty_entry() {
     let hub = ProcessChangeHub::new();
-    let mut rx = hub.subscribe(&ProcessId::from("proc"));
-    hub.notify(&ProcessId::from("proc"));
+    let mut rx = hub.subscribe(&crate::process_id_for_test("proc"));
+    hub.notify(&crate::process_id_for_test("proc"));
     tokio::time::timeout(Duration::from_millis(100), rx.changed())
         .await
         .expect("notify should wake")
         .expect("sender remains open");
 
     drop(rx);
-    hub.notify(&ProcessId::from("proc"));
+    hub.notify(&crate::process_id_for_test("proc"));
     assert_eq!(hub.tracked_processes(), 0);
 }

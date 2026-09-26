@@ -6,13 +6,12 @@
 use super::*;
 
 fn new_arrival_wake() -> lash_core_execution::ProcessWakeDelivery {
-    let process_id = || lash_core_execution::ProcessId::from("refusal-probe-process");
+    let process_id = || lash_core_execution::ProcessId::fixture("refusal-probe-process");
     lash_core_execution::ProcessWakeDelivery {
         version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: "refusal-probe-process-wake-1".to_string(),
         target_session_id: SessionId::from("refusal-probe"),
         process_id: process_id(),
-        process_incarnation: lash_core_execution::ProcessIncarnation::from_registration_sequence(1),
         sequence: 1,
         event_type: "process.wake".to_string(),
         event_invocation: lash_core_execution::RuntimeInvocation {

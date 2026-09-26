@@ -57,9 +57,8 @@ async fn connect() -> PostgresStorage {
 
 /// An external placeholder row whose rerunnable disposition permits the two
 /// simulated hosts to record and fence local execution attempts.
-fn registration(id: &str) -> ProcessRegistration {
+fn registration() -> ProcessRegistration {
     ProcessRegistration::new(
-        id,
         ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
@@ -74,16 +73,6 @@ fn registration(id: &str) -> ProcessRegistration {
 
 fn owner(owner_id: &str) -> LeaseOwnerIdentity {
     LeaseOwnerIdentity::opaque(owner_id, format!("{owner_id}:incarnation"))
-}
-
-/// A hermetic process id per run so this test never collides with conformance
-/// fixtures or a prior run — no destructive TRUNCATE of a shared database.
-fn unique_process_id() -> String {
-    let nanos = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .expect("system clock after epoch")
-        .as_nanos();
-    format!("proc-lease-multiconn-{}-{nanos}", std::process::id())
 }
 
 /// The authoritative clock: read epoch-ms straight from the database, exactly as
@@ -163,11 +152,13 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
     let reg_b = host_b.process_registry();
     let reg_c = observer.process_registry();
 
-    let process_id = unique_process_id();
-    reg_a
-        .register_process(registration(&process_id))
+    // The registrar mints a fresh id per run, so this test never collides
+    // with conformance fixtures or a prior run on the shared database.
+    let process_id = reg_a
+        .register_process(registration())
         .await
-        .expect("host A registers the process");
+        .expect("host A registers the process")
+        .id;
 
     let owner_a = owner("host-a-owner");
     let owner_b = owner("host-b-owner");
@@ -182,7 +173,7 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
         generation: None,
     };
     reg_a
-        .record_first_started(&ProcessId::from(process_id.clone()), started.clone())
+        .record_first_started(&process_id, started.clone())
         .await
         .expect("host A records first_started");
 
@@ -196,7 +187,7 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
 
     // (2) Host A claims the lease with a short-but-real TTL.
     let first_lease_a = reg_a
-        .claim_process_lease(&ProcessId::from(process_id.clone()), &owner_a, A_TTL_MS)
+        .claim_process_lease(&process_id, &owner_a, A_TTL_MS)
         .await
         .expect("host A claim")
         .acquired()
@@ -210,17 +201,13 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
     // The returned lease must expose the newly persisted expiry, not the stale
     // expiry from the pre-update row.
     let lease_a = reg_a
-        .claim_process_lease(
-            &ProcessId::from(process_id.clone()),
-            &owner_a,
-            A_REENTRY_TTL_MS,
-        )
+        .claim_process_lease(&process_id, &owner_a, A_REENTRY_TTL_MS)
         .await
         .expect("host A re-enters its own lease")
         .acquired()
         .expect("the current incarnation re-acquires its own live lease");
     let persisted_lease_a = reg_c
-        .get_process_lease(&ProcessId::from(process_id.clone()))
+        .get_process_lease(&process_id)
         .await
         .expect("observer reads host A's extended lease")
         .expect("host A's extended lease remains persisted");
@@ -236,7 +223,7 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
     // Host B's competing plain claim while A's lease is live is refused, and the
     // refusal names A as the current holder (the `Busy { holder }` shape).
     match reg_b
-        .claim_process_lease(&ProcessId::from(process_id.clone()), &owner_b, B_TTL_MS)
+        .claim_process_lease(&process_id, &owner_b, B_TTL_MS)
         .await
         .expect("host B claim while A is live")
     {
@@ -268,17 +255,12 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
     // through its OWN connection, then reclaims. The fencing token strictly
     // increases across the reclaim.
     let observed = reg_b
-        .get_process_lease(&ProcessId::from(process_id.clone()))
+        .get_process_lease(&process_id)
         .await
         .expect("host B reads the current holder")
         .expect("a holder is present to observe");
     let lease_b = reg_b
-        .reclaim_process_lease(
-            &ProcessId::from(process_id.clone()),
-            &owner_b,
-            &observed,
-            B_TTL_MS,
-        )
+        .reclaim_process_lease(&process_id, &owner_b, &observed, B_TTL_MS)
         .await
         .expect("host B reclaim after real-time expiry")
         .acquired()
@@ -332,7 +314,7 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
     // Re-read via the THIRD connection: the row is NOT terminal, and B's lease is
     // untouched by A's fenced attempts.
     let mid_record = reg_c
-        .get_process(&ProcessId::from(process_id.clone()))
+        .get_process(&process_id)
         .await
         .expect("read process")
         .expect("observer reads the record");
@@ -341,7 +323,7 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
         "a fenced host's failed writes must not terminalize the process"
     );
     let live_lease = reg_c
-        .get_process_lease(&ProcessId::from(process_id.clone()))
+        .get_process_lease(&process_id)
         .await
         .expect("observer reads the lease")
         .expect("host B still holds a lease");
@@ -354,7 +336,7 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
         "host B remains the holder after A's fenced attempts"
     );
     assert_eq!(
-        terminal_event_count(&observer, &ProcessId::from(process_id.clone())).await,
+        terminal_event_count(&observer, &process_id).await,
         0,
         "no terminal event may exist after only a fenced host tried to complete"
     );
@@ -374,14 +356,14 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
 
     // Exactly one terminal event exists (A's earlier attempts wrote none).
     assert_eq!(
-        terminal_event_count(&observer, &ProcessId::from(process_id.clone())).await,
+        terminal_event_count(&observer, &process_id).await,
         1,
         "exactly one terminal event exists after B completes"
     );
     // The lease is released.
     assert!(
         reg_c
-            .get_process_lease(&ProcessId::from(process_id.clone()))
+            .get_process_lease(&process_id)
             .await
             .expect("observer reads the released lease")
             .is_none(),
@@ -390,7 +372,7 @@ async fn postgres_lease_clock_and_fencing_hold_across_independent_connections() 
     // A's first_started fact is unchanged, observed across a third connection —
     // immutability holds regardless of which connection reads it.
     let final_record = reg_c
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await
         .expect("read process")
         .expect("observer final read");

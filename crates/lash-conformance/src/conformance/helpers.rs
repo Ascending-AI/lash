@@ -15,19 +15,12 @@ pub(crate) fn assert_fresh_instances<T: ?Sized>(left: &Arc<T>, right: &Arc<T>, s
 /// directly, so this stands in for the admission authority's answer — a
 /// process scope pins the fabricated first-registration incarnation the
 /// fixture fabricates for it.
-#[expect(
-    clippy::expect_used,
-    reason = "conformance-law fixture: a non-process scope always admits unpinned"
-)]
 pub(crate) fn admit(scope: crate::ExecutionScope) -> crate::AdmittedScope {
     match &scope {
         crate::ExecutionScope::Process { process_id } => {
-            crate::AdmittedScope::process(crate::ProcessRef::new(
-                process_id.clone(),
-                crate::ProcessIncarnation::from_registration_sequence(1),
-            ))
+            crate::AdmittedScope::process(process_id.clone())
         }
-        _ => crate::AdmittedScope::unpinned(scope).expect("a non-process scope admits unpinned"),
+        _ => crate::AdmittedScope::new(scope),
     }
 }
 
@@ -73,15 +66,15 @@ pub(crate) async fn acknowledge_pending_process_artifact_cleanup(
         .expect("list pending process artifact cleanup")
     {
         let acknowledgement = registry
-            .complete_process_artifact_cleanup(&cleanup.process_id, cleanup.incarnation)
+            .complete_process_artifact_cleanup(&cleanup.process_id)
             .await
             .expect("acknowledge process artifact cleanup");
         assert_eq!(
             acknowledgement,
             crate::ProcessArtifactCleanupAck::Acknowledged {
-                process_ref: crate::ProcessRef::new(cleanup.process_id, cleanup.incarnation),
+                process_id: cleanup.process_id,
             },
-            "cleanup without a successor must acknowledge its exact incarnation"
+            "cleanup acknowledges its exact process"
         );
     }
 }
@@ -135,13 +128,12 @@ pub(crate) fn process_wake_work(
     text: &str,
     delivery_policy: crate::DeliveryPolicy,
 ) -> crate::QueuedWorkBatchDraft {
-    let process_id = crate::ProcessId::from(process);
+    let process_id = crate::ProcessId::fixture(process);
     let wake = crate::ProcessWakeDelivery {
         version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("wake:{session_id}:{process}:{sequence}"),
         target_session_id: session_id.clone(),
         process_id: process_id.clone(),
-        process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
         sequence,
         event_type: "process.wake".to_string(),
         event_invocation: crate::RuntimeInvocation {

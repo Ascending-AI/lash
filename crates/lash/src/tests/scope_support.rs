@@ -11,20 +11,14 @@ pub(super) fn host_scope(
         .expect("effect host supplies an owned scope")
 }
 
-/// Process scope on the core's own effect host, pinned to the incarnation a
-/// registry's first registration mints (registration sequence 1). Tests that
-/// drive process entry points directly stand in for the worker's admission.
+/// Process scope on the core's own effect host, for the process a registrar
+/// minted `process_id` for. Tests that drive process entry points directly
+/// stand in for the worker's admission.
 pub(super) fn process_scope(
     core: &LashCore,
-    process_id: impl Into<lash_core::ProcessId>,
+    process_id: &lash_core::ProcessId,
 ) -> lash_core::ScopedEffectController<'static> {
-    host_scope(
-        core,
-        lash_core::AdmittedScope::process(lash_core::ProcessRef::new(
-            process_id,
-            lash_core::ProcessIncarnation::from_registration_sequence(1),
-        )),
-    )
+    host_scope(core, lash_core::AdmittedScope::process(process_id.clone()))
 }
 
 /// Turn scope admitted on the core's own effect host — a turn's group

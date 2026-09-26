@@ -390,7 +390,7 @@ fn chat_context_projector_projects_event_context_as_user_messages() {
         id: "wake:abc".to_string(),
         event_type: "process.wake".to_string(),
         origin: crate::MessageOrigin::Process {
-            process_id: ProcessId::from("process-1".to_string()),
+            process_id: ProcessId::from_minted(0x0000_0000_0000_7000_8000_0000_0000_0000 | 1),
             event_type: "process.wake".to_string(),
             sequence: 7,
             wake_id: Some("wake:abc".to_string()),

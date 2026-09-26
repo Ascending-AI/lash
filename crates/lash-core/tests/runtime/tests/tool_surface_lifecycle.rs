@@ -127,7 +127,7 @@ fn runtime_environment(
 }
 
 struct AllowNamedProcess {
-    allowed: String,
+    allowed: Arc<std::sync::OnceLock<lash_core::ProcessId>>,
 }
 
 impl lash_core::facade_support::ProcessToolVisibilityFilter for AllowNamedProcess {
@@ -138,12 +138,12 @@ impl lash_core::facade_support::ProcessToolVisibilityFilter for AllowNamedProces
     ) -> Vec<lash_core::ProcessId> {
         let mut narrowed = candidates
             .iter()
-            .filter(|process_id| *process_id == &self.allowed)
+            .filter(|process_id| Some(*process_id) == self.allowed.get())
             .cloned()
             .collect::<Vec<_>>();
         // A foreign id proves the runtime intersects the answer with the
         // already edge-visible candidate set instead of trusting widening.
-        narrowed.push(ProcessId::from("foreign-process"));
+        narrowed.push(lash_core::ProcessId::fixture("foreign-process"));
         narrowed
     }
 }
@@ -663,6 +663,7 @@ async fn equal_tool_access_is_a_no_op_after_freshness_reload() {
 #[tokio::test]
 async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes() {
     let backend = memory_backend().await;
+    let allowed = Arc::new(std::sync::OnceLock::new());
     let session_id = "filter-session";
     let registry = backend.process_registry();
     let factory = backend.session_store_factory();
@@ -678,7 +679,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     let core = test_host_config(&backend)
         .core
         .with_process_tool_visibility_filter(Arc::new(AllowNamedProcess {
-            allowed: "allowed-process".to_string(),
+            allowed: Arc::clone(&allowed),
         }));
     let env = lash_core::facade_support::RuntimeEnvironment::builder(core)
         .with_plugin_host(dynamic_plugin_host(Arc::new(DynamicToolSurface::default())))
@@ -697,9 +698,9 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     .await
     .expect("runtime with process tool filter");
 
-    for process_id in ["allowed-process", "filtered-process", "filtered-cancel"] {
+    let mut ids = std::collections::BTreeMap::new();
+    for label in ["allowed-process", "filtered-process", "filtered-cancel"] {
         let mut registration = lash_core::ProcessRegistration::new(
-            process_id,
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -710,7 +711,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
                 lash_core::OnParentEnd::Abandon,
             ),
         );
-        if process_id == "filtered-process" {
+        if label == "filtered-process" {
             registration = registration
                 .with_extra_event_types([
                     lash_core::ProcessEventType {
@@ -734,14 +735,19 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
                 ])
                 .with_wake_session_id(Some(SessionId::from(session_id.to_string())));
         }
-        registry
+        let process_id = registry
             .register_process_with_observers(
                 registration,
                 &[SessionId::from(session_id.to_string())],
             )
             .await
-            .expect("register observed filter process");
+            .expect("register observed filter process")
+            .id;
+        ids.insert(label, process_id);
     }
+    allowed
+        .set(ids["allowed-process"].clone())
+        .expect("the allowed process is registered once");
 
     let host_service = runtime.process_service().expect("host process service");
     let service = runtime
@@ -755,13 +761,9 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
             &TurnId::from(uuid::Uuid::new_v4().to_string()),
         ))
     };
-    let unknown_process_id = "host-unknown-process";
+    let unknown_process_id = lash_core::ProcessId::fixture("host-unknown-process");
     let unknown_process = host_service
-        .cancel(
-            &SessionId::from(session_id),
-            &ProcessId::from(unknown_process_id),
-            scope(),
-        )
+        .cancel(&SessionId::from(session_id), &unknown_process_id, scope())
         .await
         .expect_err("cancelling an unknown process must be refused");
     assert!(matches!(
@@ -780,23 +782,23 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     assert_eq!(
         listed
             .iter()
-            .map(|record| record.id.as_str())
+            .map(|record| record.id.clone())
             .collect::<Vec<_>>(),
-        vec!["allowed-process"],
+        vec![ids["allowed-process"].clone()],
         "the filter must narrow and must not widen with a foreign id"
     );
     let filtered_cancel = async {
         service
             .validate_visible(
                 &SessionId::from(session_id),
-                &[ProcessId::from("filtered-process")],
+                &[ids["filtered-process"].clone()],
                 scope(),
             )
             .await?;
         service
             .cancel(
                 &SessionId::from(session_id),
-                &ProcessId::from("filtered-process"),
+                &ids["filtered-process"],
                 scope(),
             )
             .await
@@ -807,14 +809,14 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         service
             .validate_visible(
                 &SessionId::from(session_id),
-                &[ProcessId::from("filtered-process")],
+                &[ids["filtered-process"].clone()],
                 scope(),
             )
             .await?;
         service
             .signal_possessed(
                 &SessionId::from(session_id),
-                &ProcessId::from("filtered-process"),
+                &ids["filtered-process"],
                 "ready".to_string(),
                 "filter-signal".to_string(),
                 serde_json::Value::Null,
@@ -828,7 +830,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         service
             .validate_visible(
                 &SessionId::from(session_id),
-                &[ProcessId::from("filtered-process")],
+                &[ids["filtered-process"].clone()],
                 scope(),
             )
             .await
@@ -841,7 +843,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
             matches!(
                 error,
                 lash_core::PluginError::ProcessNotVisible { ref process_id }
-                    if process_id == "filtered-process"
+                    if process_id == ids["filtered-process"].clone()
             ),
             "signal/cancel/await validation must share the exact typed visibility miss: {error}"
         );
@@ -849,7 +851,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     let unobserved_error = service
         .validate_visible(
             &SessionId::from(session_id),
-            &[ProcessId::from("never-observed")],
+            &[lash_core::ProcessId::fixture("never-observed")],
             scope(),
         )
         .await
@@ -858,7 +860,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
         matches!(
             unobserved_error,
             lash_core::PluginError::ProcessNotVisible { ref process_id }
-                if process_id == "never-observed"
+                if process_id == lash_core::ProcessId::fixture("never-observed")
         ),
         "edge and filter misses must have the same exact typed error: {unobserved_error}"
     );
@@ -879,7 +881,7 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     host_service
         .signal_possessed(
             &SessionId::from(session_id),
-            &ProcessId::from("filtered-process"),
+            &ids["filtered-process"],
             "ready".to_string(),
             "host-signal".to_string(),
             serde_json::Value::Null,
@@ -890,14 +892,14 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
     host_service
         .cancel(
             &SessionId::from(session_id),
-            &ProcessId::from("filtered-cancel"),
+            &ids["filtered-cancel"],
             scope(),
         )
         .await
         .expect("host cancel bypasses model-tool filter");
     registry
         .append_event(
-            &ProcessId::from("filtered-process"),
+            &ids["filtered-process"],
             lash_core::ProcessEventAppendRequest::new(
                 "filter.wake",
                 serde_json::json!({"wake_input": "still deliver"}),
@@ -945,7 +947,6 @@ async fn process_tool_filter_narrows_only_session_tools_and_never_internal_wakes
 async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() {
     let backend = memory_backend().await;
     let session_id = "pruned-model-handle-session";
-    let process_id = "pruned-previous-turn-process";
     let registry = backend.process_registry();
     let env =
         lash_core::facade_support::RuntimeEnvironment::builder(test_host_config(&backend).core)
@@ -964,10 +965,9 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
     )
     .await
     .expect("runtime with process registry");
-    registry
+    let pruned_previous_turn_process_record = registry
         .register_process_with_observers(
             lash_core::ProcessRegistration::new(
-                process_id,
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -987,9 +987,10 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
         )
         .await
         .expect("register process observed by the model session");
+    let process_id = pruned_previous_turn_process_record.id.clone();
     let terminal = registry
         .complete_process(
-            &ProcessId::from(process_id),
+            &process_id,
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::json!("previous turn result"),
             )),
@@ -1020,13 +1021,13 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
     service
         .validate_visible(
             &SessionId::from(session_id),
-            &[ProcessId::from(process_id.to_string())],
+            std::slice::from_ref(&process_id),
             scope(),
         )
         .await
         .expect("a retained tombstone must pass model-handle validation");
     let await_output = service
-        .await_process(&ProcessId::from(process_id), scope())
+        .await_process(&process_id, scope())
         .await
         .expect("await must reach the tombstone-aware registry path");
     assert!(matches!(
@@ -1048,17 +1049,13 @@ async fn pruned_previous_turn_model_handle_preserves_typed_operation_outcomes() 
 
     for error in [
         service
-            .cancel(
-                &SessionId::from(session_id),
-                &ProcessId::from(process_id),
-                scope(),
-            )
+            .cancel(&SessionId::from(session_id), &process_id, scope())
             .await
             .expect_err("cancel must return its tombstone outcome"),
         service
             .signal_possessed(
                 &SessionId::from(session_id),
-                &ProcessId::from(process_id),
+                &process_id,
                 "ready".to_string(),
                 "previous-turn-signal".to_string(),
                 serde_json::Value::Null,
@@ -1102,6 +1099,7 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     .expect("runtime with process registry");
 
     let process_service = runtime.process_service().expect("process service");
+    let mut started = std::collections::BTreeMap::new();
     for (process_id, options) in [
         ("default-start", lash_core::ProcessStartOptions::new()),
         (
@@ -1109,11 +1107,10 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
             lash_core::ProcessStartOptions::new().with_initial_observer(parent_session_id),
         ),
     ] {
-        process_service
+        let record = process_service
             .start(
                 &SessionId::from(parent_session_id),
                 lash_core::ProcessRegistration::new(
-                    process_id,
                     lash_core::ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
@@ -1123,7 +1120,11 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
                         lash_core::ParentScope::Host,
                         lash_core::OnParentEnd::Abandon,
                     ),
-                ),
+                )
+                .with_start_key(Some(lash_core::StartKey::for_host(
+                    lash_core::StartKeyOwner::HOST,
+                    process_id,
+                ))),
                 options,
                 lash_core::ProcessOpScope::new(backend_turn_scope(
                     &backend,
@@ -1133,12 +1134,13 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
             )
             .await
             .expect("start process with explicit observer options");
+        started.insert(process_id, record.id);
     }
     assert!(
         !registry
             .is_observer(
                 &SessionId::from(parent_session_id),
-                &ProcessId::from("default-start")
+                &started["default-start"]
             )
             .await
             .expect("read default start observer"),
@@ -1148,17 +1150,17 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
         registry
             .is_observer(
                 &SessionId::from(parent_session_id),
-                &ProcessId::from("explicit-start")
+                &started["explicit-start"]
             )
             .await
             .expect("read explicit start observer"),
         "only the explicitly named initial observer must receive an edge"
     );
 
+    let mut ids = std::collections::BTreeMap::new();
     for process_id in ["named-process", "unnamed-process", "pruned-process"] {
-        registry
+        let registered = registry
             .register_process(lash_core::ProcessRegistration::new(
-                process_id,
                 lash_core::ProcessInput::External {
                     metadata: serde_json::Value::Null,
                 },
@@ -1171,10 +1173,11 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
             ))
             .await
             .expect("register observer test process");
+        ids.insert(process_id, registered.id.clone());
     }
     let pruned = registry
         .complete_process(
-            &ProcessId::from("pruned-process"),
+            &ids["pruned-process"],
             lash_core::ProcessAwaitOutput::from_tool_output(lash_core::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
@@ -1190,12 +1193,6 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
         )
         .await
         .expect("prune terminal process");
-    let named_incarnation = registry
-        .get_process(&ProcessId::from("named-process"))
-        .await
-        .expect("read named process")
-        .expect("named process retained")
-        .incarnation;
 
     let child = runtime
         .session_lifecycle_service()
@@ -1208,9 +1205,9 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
             )
             .with_session_id("observer-child")
             .with_observed_processes([
-                "named-process",
-                "missing-process",
-                "pruned-process",
+                ids["named-process"].clone(),
+                lash_core::ProcessId::fixture("missing-process"),
+                ids["pruned-process"].clone(),
             ]),
         )
         .await
@@ -1220,21 +1217,22 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     assert_eq!(
         child.observed_processes[0],
         lash_core::testing::runtime_internals::SessionObservedProcessReceipt {
-            process_id: ProcessId::from("named-process"),
+            process_id: ids["named-process"].clone(),
             outcome:
-                lash_core::testing::runtime_internals::SessionObservedProcessOutcome::Observed {
-                    incarnation: named_incarnation,
-                },
+                lash_core::testing::runtime_internals::SessionObservedProcessOutcome::Observed {},
         }
     );
     assert_eq!(
         child.observed_processes[1],
         lash_core::testing::runtime_internals::SessionObservedProcessReceipt {
-            process_id: ProcessId::from("missing-process"),
+            process_id: lash_core::ProcessId::fixture("missing-process"),
             outcome: lash_core::testing::runtime_internals::SessionObservedProcessOutcome::NotFound,
         }
     );
-    assert_eq!(child.observed_processes[2].process_id, "pruned-process");
+    assert_eq!(
+        child.observed_processes[2].process_id,
+        ids["pruned-process"]
+    );
     assert!(matches!(
         &child.observed_processes[2].outcome,
         lash_core::testing::runtime_internals::SessionObservedProcessOutcome::NoLongerRetained {
@@ -1244,25 +1242,19 @@ async fn session_creation_applies_only_named_process_observers_with_typed_outcom
     ));
     assert!(
         registry
-            .is_observer(
-                &SessionId::from("observer-child"),
-                &ProcessId::from("named-process")
-            )
+            .is_observer(&SessionId::from("observer-child"), &ids["named-process"])
             .await
             .expect("read named edge")
     );
     assert!(
         !registry
-            .is_observer(
-                &SessionId::from("observer-child"),
-                &ProcessId::from("unnamed-process")
-            )
+            .is_observer(&SessionId::from("observer-child"), &ids["unnamed-process"])
             .await
             .expect("read unnamed edge"),
         "session creation must not mint an edge the host did not name"
     );
     let observer_events = registry
-        .full_event_window(&ProcessId::from("named-process"), 0)
+        .full_event_window(&ids["named-process"], 0)
         .await
         .expect("read observer audit events")
         .into_iter()
@@ -2116,12 +2108,11 @@ fn payload_gated_scope(
 
 fn payload_gated_request(
     session_id: &SessionId,
-    process_id: &ProcessId,
+    label: &str,
     kind: &str,
     payload: serde_json::Value,
 ) -> lash_core::ProcessStartRequest {
     lash_core::ProcessStartRequest::new(
-        process_id,
         lash_core::ProcessInput::Engine {
             kind: kind.to_string(),
             payload,
@@ -2138,6 +2129,10 @@ fn payload_gated_request(
         standard_test_policy(),
     ))
     .with_observers([session_id])
+    .with_start_key(Some(lash_core::StartKey::for_host(
+        lash_core::StartKeyOwner::HOST,
+        label,
+    )))
 }
 
 async fn started_row_identity(
@@ -2151,14 +2146,21 @@ async fn started_row_identity(
         .identity
 }
 
-async fn no_rows_registered(registry: &Arc<dyn lash_core::ProcessRegistry>, process_ids: &[&str]) {
-    for process_id in process_ids {
+async fn no_rows_registered(registry: &Arc<dyn lash_core::ProcessRegistry>, labels: &[&str]) {
+    let rows = lash_core::ProcessQuery::list_processes(
+        registry.as_ref(),
+        &lash_core::ProcessListFilter {
+            status: lash_core::ProcessStatusFilter::Any,
+            ..lash_core::ProcessListFilter::default()
+        },
+    )
+    .await
+    .expect("read registered rows");
+    for label in labels {
+        let key = lash_core::StartKey::for_host(lash_core::StartKeyOwner::HOST, label);
         assert!(
-            lash_core::ProcessQuery::get_process(registry.as_ref(), &ProcessId::from(*process_id))
-                .await
-                .expect("read refused row")
-                .is_none(),
-            "a refused start must journal and register nothing: {process_id}"
+            rows.iter().all(|row| row.start_key.as_ref() != Some(&key)),
+            "a refused start must journal and register nothing: {label}"
         );
     }
 }
@@ -2176,10 +2178,10 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
         .runtime_session_services()
         .expect("runtime session services")
         .model_tool_process_service();
-    let request = |process_id: &ProcessId, payload: serde_json::Value| {
+    let request = |label: &str, payload: serde_json::Value| {
         payload_gated_request(
             &SessionId::from(session_id),
-            process_id,
+            label,
             PAYLOAD_GATED_ENGINE_KIND,
             payload,
         )
@@ -2191,7 +2193,7 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
     let direct_refusal = service
         .start_from_request(
             &SessionId::from(session_id),
-            request(&ProcessId::from("direct-invalid"), invalid_payload.clone()),
+            request("direct-invalid", invalid_payload.clone()),
             payload_gated_scope(&backend, &SessionId::from(session_id)),
         )
         .await
@@ -2199,10 +2201,7 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
     let recorded_refusal = service
         .start_from_recorded_intent(
             &SessionId::from(session_id),
-            request(
-                &ProcessId::from("recorded-invalid"),
-                invalid_payload.clone(),
-            ),
+            request("recorded-invalid", invalid_payload.clone()),
             payload_gated_scope(&backend, &SessionId::from(session_id)),
         )
         .await
@@ -2227,7 +2226,7 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
     let direct = service
         .start_from_request(
             &SessionId::from(session_id),
-            request(&ProcessId::from("direct-valid"), valid_payload.clone()),
+            request("direct-valid", valid_payload.clone()),
             payload_gated_scope(&backend, &SessionId::from(session_id)),
         )
         .await
@@ -2235,7 +2234,7 @@ async fn recorded_intent_engine_start_crosses_the_same_validation_and_identity_g
     let recorded = service
         .start_from_recorded_intent(
             &SessionId::from(session_id),
-            request(&ProcessId::from("recorded-valid"), valid_payload.clone()),
+            request("recorded-valid", valid_payload.clone()),
             payload_gated_scope(&backend, &SessionId::from(session_id)),
         )
         .await
@@ -2266,10 +2265,10 @@ async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct
         .runtime_session_services()
         .expect("runtime session services")
         .model_tool_process_service();
-    let request = |process_id: &ProcessId| {
+    let request = |label: &str| {
         payload_gated_request(
             &SessionId::from(session_id),
-            process_id,
+            label,
             "fig1488-never-registered",
             json!({"program": "known"}),
         )
@@ -2280,7 +2279,7 @@ async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct
             service
                 .start_from_request(
                     &SessionId::from(session_id),
-                    request(&ProcessId::from("direct-unregistered")),
+                    request("direct-unregistered"),
                     payload_gated_scope(&backend, &SessionId::from(session_id)),
                 )
                 .await
@@ -2291,7 +2290,7 @@ async fn recorded_intent_start_refuses_an_unregistered_engine_kind_like_a_direct
             service
                 .start_from_recorded_intent(
                     &SessionId::from(session_id),
-                    request(&ProcessId::from("recorded-unregistered")),
+                    request("recorded-unregistered"),
                     payload_gated_scope(&backend, &SessionId::from(session_id)),
                 )
                 .await
@@ -2321,10 +2320,10 @@ async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
         .expect("runtime session services")
         .model_tool_process_service();
     let valid_payload = json!({"program": "known"});
-    let no_env = |process_id: &ProcessId| {
+    let no_env = |label: &str| {
         let mut request = payload_gated_request(
             &SessionId::from(session_id),
-            process_id,
+            label,
             PAYLOAD_GATED_ENGINE_KIND,
             valid_payload.clone(),
         );
@@ -2344,7 +2343,7 @@ async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
     let direct_no_env = service
         .start_from_request(
             &SessionId::from(session_id),
-            no_env(&ProcessId::from("direct-no-env")),
+            no_env("direct-no-env"),
             payload_gated_scope(&backend, &SessionId::from(session_id)),
         )
         .await
@@ -2357,14 +2356,17 @@ async fn engine_start_without_an_env_spec_keeps_its_per_route_semantics() {
     let recorded_no_env = service
         .start_from_recorded_intent(
             &SessionId::from(session_id),
-            no_env(&ProcessId::from("recorded-no-env")),
+            no_env("recorded-no-env"),
             payload_gated_scope(&backend, &SessionId::from(session_id)),
         )
         .await
         .expect_err("a recorded start carries its own env or none at all");
     assert!(
         matches!(&recorded_no_env, lash_core::PluginError::Session(message)
-            if message == "process `recorded-no-env` requires a captured execution env"),
+        if *message == format!(
+            "process `start {}` requires a captured execution env",
+            lash_core::StartKey::for_host(lash_core::StartKeyOwner::HOST, "recorded-no-env")
+        )),
         "the no-env recorded refusal keeps the pre-existing typed shape: {recorded_no_env}"
     );
     no_rows_registered(&registry, &["recorded-no-env"]).await;

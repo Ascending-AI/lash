@@ -60,10 +60,10 @@ impl<'scope> ProcessCommandRunner<'scope> {
 
     async fn await_process_ref(
         &self,
-        process_ref: crate::ProcessRef,
+        process_id: crate::ProcessId,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
         match self
-            .run(crate::ProcessCommand::Await { process_ref })
+            .run(crate::ProcessCommand::Await { process_id })
             .await?
         {
             crate::ProcessEffectOutcome::Await { output } => Ok(*output),
@@ -73,11 +73,11 @@ impl<'scope> ProcessCommandRunner<'scope> {
 
     async fn attach_process_terminal(
         &self,
-        process_ref: crate::ProcessRef,
+        process_id: crate::ProcessId,
         key: crate::AwaitEventKey,
     ) -> Result<(), crate::PluginError> {
         match self
-            .run(crate::ProcessCommand::AttachTerminal { process_ref, key })
+            .run(crate::ProcessCommand::AttachTerminal { process_id, key })
             .await?
         {
             crate::ProcessEffectOutcome::AttachTerminal => Ok(()),
@@ -109,9 +109,9 @@ impl<'scope> ProcessCommandRunner<'scope> {
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
     ) -> Result<crate::ProcessRecord, crate::PluginError> {
-        let command = match self.registry.resolve_process_ref(process_id).await {
-            Ok(process_ref) => crate::ProcessCommand::Cancel {
-                process_ref,
+        let command = match self.registry.require_process_id(process_id).await {
+            Ok(process_id) => crate::ProcessCommand::Cancel {
+                process_id,
                 origin,
                 requester,
                 attribution,
@@ -136,14 +136,14 @@ impl<'scope> ProcessCommandRunner<'scope> {
 
     async fn signal(
         &self,
-        process_ref: crate::ProcessRef,
+        process_id: crate::ProcessId,
         signal_name: String,
         signal_id: String,
         request: crate::ProcessEventAppendRequest,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
         match self
             .run(crate::ProcessCommand::Signal {
-                process_ref,
+                process_id,
                 signal_name,
                 signal_id,
                 request,
@@ -157,12 +157,12 @@ impl<'scope> ProcessCommandRunner<'scope> {
 
     async fn signal_recorded(
         &self,
-        process_ref: crate::ProcessRef,
+        process_id: crate::ProcessId,
         signal_name: String,
         signal_id: String,
         request: crate::ProcessEventAppendRequest,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
-        self.signal(process_ref, signal_name, signal_id, request)
+        self.signal(process_id, signal_name, signal_id, request)
             .await
     }
 
@@ -173,7 +173,7 @@ impl<'scope> ProcessCommandRunner<'scope> {
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
         match self
             .run(crate::ProcessCommand::EmitEvent {
-                process_id: ProcessId::from(process_id.to_string()),
+                process_id: process_id.clone(),
                 request,
             })
             .await?
@@ -386,21 +386,6 @@ impl ProcessCapability {
         }
     }
 
-    /// Reads the attempt bound already recorded for a process id, if a row exists.
-    pub(in crate::runtime::session_manager) async fn recorded_max_attempts(
-        &self,
-        current: &CurrentSessionCapability,
-        process_id: &ProcessId,
-    ) -> Result<Option<u32>, crate::PluginError> {
-        let Some(registry) = current.host.process_registry() else {
-            return Ok(None);
-        };
-        Ok(registry
-            .get_process(process_id)
-            .await?
-            .and_then(|record| record.max_attempts))
-    }
-
     pub(in crate::runtime::session_manager) async fn start_process(
         &self,
         current: &CurrentSessionCapability,
@@ -516,20 +501,9 @@ impl ProcessCapability {
         let registration = request.into_registration(None).with_process_provenance(
             crate::ProcessProvenance::new(originator).with_caused_by(caused_by),
         );
-        // The registry row, not the declaration, is the durable truth for an
-        // already-registered child's attempt bound (FIG-2966). A declaring
-        // start stamps the host default in force when the attempt ran; a
-        // redrive of that same attempt after the operator moved the default
-        // would otherwise re-register the same deterministic id under a
-        // different registration fingerprint and conflict forever. Only a child
-        // with no row yet keeps the bound its declaration carried.
-        let registration = match self
-            .recorded_max_attempts(current, &registration.id)
-            .await?
-        {
-            Some(recorded) => registration.with_max_attempts(Some(recorded)),
-            None => registration,
-        };
+        // A redrive presents the same start key, and the registrar returns the
+        // retained process untouched (ADR 0107): its recorded attempt bound
+        // stands whatever this declaration carried.
         // A recorded intent declares its own execution env, so the engine gate
         // runs against the recorded spec instead of a stored env ref. It must
         // run here: once the start command crosses the journal the entry is
@@ -573,7 +547,7 @@ impl ProcessCapability {
         let Some(env_spec) = env_spec else {
             return Err(crate::PluginError::Session(format!(
                 "process `{}` requires a captured execution env",
-                registration.id
+                registration.refusal_name()
             )));
         };
         let identity = current
@@ -591,14 +565,14 @@ impl ProcessCapability {
         process_id: &ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
-        let process_ref = match current
+        let process_id = match current
             .host
             .process_registry()
             .ok_or_else(|| crate::PluginError::Session("process registry unavailable".to_string()))?
-            .resolve_process_ref(process_id)
+            .require_process_id(process_id)
             .await
         {
-            Ok(process_ref) => process_ref,
+            Ok(process_id) => process_id,
             Err(crate::PluginError::ProcessNoLongerRetained {
                 terminal_label,
                 pruned_at_ms,
@@ -610,31 +584,31 @@ impl ProcessCapability {
             }
             Err(error) => return Err(error),
         };
-        self.await_process_ref(current, process_ref, scope).await
+        self.await_process_ref(current, process_id, scope).await
     }
 
     pub(in crate::runtime::session_manager) async fn await_process_ref(
         &self,
         current: &CurrentSessionCapability,
-        process_ref: crate::ProcessRef,
+        process_id: crate::ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
         self.command_runner(current, &scope)?
-            .await_process_ref(process_ref)
+            .await_process_ref(process_id)
             .await
     }
 
-    /// Arm the terminal of `process_ref` as the resolver of `key`, through the
+    /// Arm the terminal of `process_id` as the resolver of `key`, through the
     /// journaled process seam, and return without waiting for it.
     pub(in crate::runtime::session_manager) async fn attach_process_terminal(
         &self,
         current: &CurrentSessionCapability,
-        process_ref: crate::ProcessRef,
+        process_id: crate::ProcessId,
         key: crate::AwaitEventKey,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
         self.command_runner(current, &scope)?
-            .attach_process_terminal(process_ref, key)
+            .attach_process_terminal(process_id, key)
             .await
     }
 
@@ -864,7 +838,7 @@ impl ProcessCapability {
             .ok_or_else(|| crate::runtime::registry_transitions::unknown_process(process_id))?;
         if record.is_terminal() {
             return Err(crate::PluginError::ProcessAlreadyTerminal {
-                process_id: ProcessId::from(process_id.to_string()),
+                process_id: process_id.clone(),
                 status: record.status,
             });
         }
@@ -873,12 +847,7 @@ impl ProcessCapability {
             crate::process_signal_wait_key(process_id, &signal_name, &signal_id),
         );
         runner
-            .signal(
-                crate::ProcessRef::from_record(&record),
-                signal_name,
-                signal_id,
-                request,
-            )
+            .signal(record.id.clone(), signal_name, signal_id, request)
             .await
     }
 
@@ -897,9 +866,9 @@ impl ProcessCapability {
             crate::process_signal_wait_key(process_id, &signal_name, &signal_id),
         );
         let runner = self.command_runner(current, &scope)?;
-        let process_ref = runner.registry().resolve_process_ref(process_id).await?;
+        let process_id = runner.registry().require_process_id(process_id).await?;
         runner
-            .signal_recorded(process_ref, signal_name, signal_id, request)
+            .signal_recorded(process_id, signal_name, signal_id, request)
             .await
     }
 
@@ -1100,6 +1069,6 @@ impl ProcessCapability {
 
 fn process_visibility_miss(process_id: &ProcessId) -> crate::PluginError {
     crate::PluginError::ProcessNotVisible {
-        process_id: ProcessId::from(process_id.to_string()),
+        process_id: process_id.clone(),
     }
 }

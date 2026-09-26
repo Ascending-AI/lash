@@ -163,7 +163,8 @@ mod tests {
     #[test]
     fn orphan_recovery_preserves_previously_admitted_physical_scope() {
         let address = crate::TurnAddress::new("session", "turn");
-        let process_scope = crate::ExecutionScope::process("original-process");
+        let process_scope =
+            crate::ExecutionScope::process(crate::process_id_for_test("original-process"));
 
         assert_eq!(
             admitted_turn_cancel_scope(

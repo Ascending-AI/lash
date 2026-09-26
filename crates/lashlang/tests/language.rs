@@ -56,9 +56,11 @@ impl ExecutionHost for TestHost {
                 handle.insert(
                     "id".to_string(),
                     Value::String(
-                        lash_sansio::handle::HandleId::process("language", 1)
-                            .as_str()
-                            .into(),
+                        lash_sansio::handle::HandleId::process(&lash_sansio::ProcessId::fixture(
+                            "language",
+                        ))
+                        .as_str()
+                        .into(),
                     ),
                 );
                 handle.insert("value".to_string(), value);

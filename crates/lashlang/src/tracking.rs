@@ -169,7 +169,6 @@ pub enum ProcessBranchSelection {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LashlangExecutionChild {
     pub process_id: ProcessId,
-    pub incarnation: u64,
     pub attempt: Option<u32>,
     pub module_ref: ModuleRef,
     pub process_ref: ProcessRef,

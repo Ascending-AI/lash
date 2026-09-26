@@ -18,7 +18,7 @@ use std::time::Duration;
 
 use lash_core::llm::transport::LlmTransportError;
 use lash_core::llm::types::{LlmRequest, LlmResponse};
-use lash_core::{ProcessEventLogTestSupport as _, ProcessId, StoreSet as _};
+use lash_core::{ProcessEventLogTestSupport as _, StoreSet as _};
 use lash_restate_test::{RestateTestBackend, ServerConfig};
 
 const CODE: &str = "process_segment_admission_invariant";
@@ -84,9 +84,7 @@ async fn admission_invariant_ends_the_process_failed(step: Step, seed: u64) {
         )
         .expect("build the process worker"),
     );
-    let process_id = ProcessId::from(format!("admission-invariant-{step:?}").to_lowercase());
     let registration = lash_core::ProcessRegistration::new(
-        process_id.clone(),
         lash_core::ProcessInput::External {
             metadata: serde_json::Value::Null,
         },
@@ -98,10 +96,11 @@ async fn admission_invariant_ends_the_process_failed(step: Step, seed: u64) {
         ),
     );
     let registry = restate.lash_backend().process_registry();
-    registry
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register the process");
+        .expect("register the process")
+        .id;
     // Segment 1's handover is retained, but no execution start is: the
     // process never recorded the start every later segment continues.
     let continuations = restate.stores().process_continuations();
@@ -142,6 +141,7 @@ async fn admission_invariant_ends_the_process_failed(step: Step, seed: u64) {
                 &format!("{process_id}#1"),
                 "run",
                 &lash_restate::RestateProcessWorkflowInput {
+                    process_id: process_id.clone(),
                     registration,
                     execution_context: lash_core::ProcessExecutionContext::default(),
                     segment_ordinal: 1,

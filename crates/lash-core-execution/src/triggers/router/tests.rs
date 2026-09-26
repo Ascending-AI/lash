@@ -17,20 +17,6 @@ fn residual_trigger_projection_identity_goldens() {
     );
 
     assert_eq!(
-        hex(&trigger_delivery_process_preimage(
-            "trigger:key:a:b",
-            "subscription\0x",
-            "inc:λ",
-            42,
-        )),
-        "6c6173682d737461626c652d6964656e746974790201000000000000001d6c6173682e747269676765722d64656c69766572792d70726f63657373000000000000000f747269676765723a6b65793a613a62000000000000000e737562736372697074696f6e00780000000000000006696e633acebb000000000000002a"
-    );
-    assert_eq!(
-        deterministic_delivery_process_id("trigger:key:a:b", "subscription\0x", "inc:λ", 42,)
-            .unwrap(),
-        "process:trigger-delivery:v1:blake3:7ff0a51d9a9d0e1e854502116f8b2d9a1b467b0169a5ad7b1cbc4b74e87e2919"
-    );
-    assert_eq!(
         derived_trigger_subscription_key("worker\0name", "source:λ", "key\0route"),
         "derived/v3/5737eff4c14bed2a7dc7e7eb4a68c5b9968dd56a4aac8cffcfb9e0f64436d443"
     );

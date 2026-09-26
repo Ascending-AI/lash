@@ -750,7 +750,7 @@ mod tests {
             .insert("host_key".to_string(), serde_json::json!("kept"));
         let invocation = crate::RuntimeEffectInvocation::new(
             crate::EffectAddress::new(
-                crate::ExecutionScope::process("effect-trace-process"),
+                crate::ExecutionScope::process(crate::process_id_for_test("effect-trace-process")),
                 "effect-trace",
             )
             .expect("valid effect address"),
@@ -758,7 +758,7 @@ mod tests {
             "effect-trace",
         )
         .with_caused_by(Some(crate::CausalRef::Process {
-            process_id: crate::ProcessId::from("cause-process"),
+            process_id: crate::process_id_for_test("cause-process"),
         }));
         let trace = RuntimeEffectReplayTrace::for_divergence(
             Some(&sink_dyn),

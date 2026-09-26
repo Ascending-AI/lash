@@ -317,7 +317,6 @@ async fn execute_one(
             if let Some(hook) = child_trace_hook {
                 hook.child_process_started(crate::tool_provider::ToolChildProcessStarted {
                     process_id: summary.process_id.clone(),
-                    incarnation: summary.incarnation,
                     attempt: None,
                     child_entry_name: None,
                 });
@@ -633,12 +632,11 @@ fn error_message(error: &crate::PluginError) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ProcessId;
 
     fn signal(session_id: &SessionId, payload: serde_json::Value) -> crate::ToolIntent {
         crate::ToolIntent::SignalProcess(crate::SignalProcessIntent {
             session_id: SessionId::from(session_id.to_string()),
-            process_id: ProcessId::from("process-1"),
+            process_id: crate::process_id_for_test("process-1"),
             signal_name: "continue".to_string(),
             payload,
         })

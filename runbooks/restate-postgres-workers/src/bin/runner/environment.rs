@@ -634,7 +634,7 @@ pub(super) async fn submit_signal_workflow(
         fail_once: false,
         scenario: TurnScenario::SignalProcess,
         signal: Some(ProcessSignalRequest {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             signal_name: signal_name.to_string(),
             signal_id: signal_id.to_string(),
             payload,
@@ -870,7 +870,7 @@ pub(super) fn response_from_row(
     Ok(TurnResponse {
         workflow_id,
         worker_id,
-        process_id: ProcessId::from(process_id),
+        process_id: ProcessId::parse(&process_id).ok(),
         process_ids: Vec::new(),
         attachment_id,
         final_text,

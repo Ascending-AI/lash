@@ -3,6 +3,11 @@
 //! The row freezes the subscription as it stood when the firing reserved the
 //! delivery (`subscription_snapshot_json`), so a later edit to the
 //! subscription cannot retroactively change what was delivered.
+//!
+//! `process_id` is the delivery's binding: `NULL` while the reservation's
+//! start has not completed, and the minted id of the process its start key
+//! registered once it has (ADR 0107). A bound delivery is never started
+//! again.
 
 /// The table's unprefixed name.
 pub const TABLE: &str = "trigger_deliveries";
@@ -61,12 +66,19 @@ crate::statements! {
     /// `trigger_deliveries` statements both backends issue verbatim.
     pub struct DeliveryStatements @ "trigger_delivery" {
         /// Reserve the delivery of occurrence `?1` to subscription `?2`,
-        /// freezing the subscription as `?6`.
+        /// freezing the subscription as `?5`. The reservation starts unbound.
         insert = "INSERT INTO trigger_deliveries (
                 occurrence_id, subscription_id, process_id, subscription_incarnation,
                 subscription_revision, subscription_snapshot_json, created_at_ms
              )
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)";
+             VALUES (?1, ?2, NULL, ?3, ?4, ?5, ?6)";
+
+        /// Bind delivery `?1`/`?2` to the process `?3` its start registered.
+        /// Matches only an unbound row or a row already bound to `?3`, so a
+        /// caller reads zero affected rows as a conflicting binding.
+        bind_process = "UPDATE trigger_deliveries SET process_id = ?3
+             WHERE occurrence_id = ?1 AND subscription_id = ?2
+               AND (process_id IS NULL OR process_id = ?3)";
 
         /// The reservations occurrence `?1` already holds, for an ingress that
         /// found the occurrence durable and is reporting it again.
@@ -74,15 +86,18 @@ crate::statements! {
              FROM trigger_deliveries
              WHERE occurrence_id = ?1";
 
-        /// Every process a delivery ever started.
+        /// Every process a bound delivery started.
         select_distinct_process_ids = "SELECT DISTINCT process_id
              FROM trigger_deliveries
+             WHERE process_id IS NOT NULL
              ORDER BY process_id ASC";
 
-        /// Every delivery's identity, for a retention pass to compare against
-        /// the process registry.
+        /// Every bound delivery's identity, for a retention pass to compare
+        /// against the process registry. An unbound reservation is not a
+        /// candidate: its start still owes the delivery a process.
         select_retention_candidates = "SELECT occurrence_id, subscription_id, process_id
              FROM trigger_deliveries
+             WHERE process_id IS NOT NULL
              ORDER BY occurrence_id ASC, subscription_id ASC";
 
         /// Every reservation in the store.

@@ -24,14 +24,13 @@ fn wake_delivery(sequence: u64) -> crate::ProcessWakeDelivery {
         version: crate::process_identity::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("wake-{sequence}"),
         target_session_id: session(),
-        process_id: ProcessId::from("process"),
-        process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
+        process_id: crate::process_id_for_test("process"),
         sequence,
         event_type: "process.wake".to_string(),
         event_invocation: crate::RuntimeInvocation {
             attribution: crate::effect_identity::RuntimeAttribution::for_session("session"),
             subject: crate::effect_identity::RuntimeSubject::ProcessEvent {
-                process_id: ProcessId::from("process"),
+                process_id: crate::process_id_for_test("process"),
                 sequence,
                 event_type: "process.wake".to_string(),
             },
@@ -486,7 +485,10 @@ fn delivered_wakes_complete_and_raise_the_floor_and_the_rest_defer() {
         },
     };
     let plan = plan_ingress_settlement(&settlement, &fence(), &observed, &[]).expect("plan");
-    assert_eq!(plan.floor_raises, vec![(ProcessId::from("process"), 1)]);
+    assert_eq!(
+        plan.floor_raises,
+        vec![(crate::process_id_for_test("process"), 1)]
+    );
     assert_eq!(
         plan.writes,
         vec![
@@ -682,7 +684,10 @@ fn a_withdrawal_tombstones_unless_a_live_claim_holds_the_item() {
             record,
             ..
         } => {
-            assert_eq!(floor_raise, Some((ProcessId::from("process"), 4)));
+            assert_eq!(
+                floor_raise,
+                Some((crate::process_id_for_test("process"), 4))
+            );
             assert_eq!(record.disposition, IngressUndeliveredDisposition::Drop);
         }
         other => panic!("an interrupted hold never blocks a withdrawal: {other:?}"),

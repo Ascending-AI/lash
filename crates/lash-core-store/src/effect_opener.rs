@@ -1,32 +1,19 @@
-//! The logical opener of durable work: a turn, or one process incarnation
-//! (ADR 0099 §1).
+//! The logical opener of durable work: a turn, a queued-work drain, or one
+//! process (ADR 0099 §1).
 //!
-//! # Why this is not an `ExecutionScope`
+//! # A process opener is its minted process id
 //!
-//! ADR 0099 §1 states the identity plainly: "An opener is `Turn(session_id,
-//! turn_id)` or `Process(ProcessRef { process_id, incarnation })`. Its identity
-//! is stable across worker attempts and segments, and it changes on process
-//! re-registration. Group identity, retained authority, cancellation, usage
-//! attribution and retirement all bind that exact opener. A retired or
-//! mismatched incarnation is refused, never rebound to the current process
-//! carrying the same name."
-//!
-//! [`ExecutionScope`](crate::ExecutionScope) cannot express that.
-//! `ExecutionScope::Process` carries `process_id` alone
-//! (`crates/lash-sansio/src/effect_identity.rs`), while
-//! [`ProcessRef`] exists precisely to "Pin a reusable process name to one
-//! store-minted incarnation". A scope is therefore a *claim address* — the
-//! right thing to fence a journal row on — and not an opener identity. Retaining
-//! a scope where the contract calls for an opener leaves recovery with nothing
-//! to validate, and lets a process re-registered under the same name alias its
-//! predecessor's groups, closes and cancellation fences.
+//! A process id is minted by the registrar and never reused (ADR 0107), so the
+//! id alone names one process for as long as anything retains work it opened:
+//! a process registered later can never share the id and alias its groups,
+//! closes or cancellation fences. There is no incarnation to pin beside it.
 //!
 //! # Why it is an enum and not a rendered string
 //!
 //! Because the two arms can spell each other. A turn's scope identity is a
 //! free-form string — an effect graph key, or a host-chosen session id when the
-//! work runs outside an effect — so it can contain exactly the
-//! `{process_id}#{incarnation}` text a process opener renders to. An untagged
+//! work runs outside an effect — so it can contain exactly the text a process
+//! opener renders to. An untagged
 //! rendering therefore admits two distinct openers that mint one identity, which
 //! is the aliasing §1 refuses. Serialized here with an explicit `kind` tag, and
 //! compared as a value rather than as text, that collision is unrepresentable.
@@ -44,7 +31,6 @@
 use serde::{Deserialize, Serialize};
 
 use crate::admitted_scope::AdmittedScope;
-use crate::process_identity::ProcessRef;
 use crate::{SessionId, TurnId};
 
 /// The exact logical opener that durable work binds (ADR 0099 §1).
@@ -82,10 +68,10 @@ pub enum EffectOpener {
         /// refuses an empty scope id.
         drain_id: String,
     },
-    /// One process incarnation. The reusable name alone is not the opener.
+    /// One process.
     Process {
-        /// The name bound to the store-minted incarnation that owns this work.
-        process_ref: ProcessRef,
+        /// The minted id of the process that owns this work.
+        process_id: crate::ProcessId,
     },
 }
 
@@ -108,10 +94,10 @@ impl EffectOpener {
         }
     }
 
-    /// The opener of one process incarnation.
+    /// The opener of one process.
     #[must_use]
-    pub fn process(process_ref: ProcessRef) -> Self {
-        Self::Process { process_ref }
+    pub fn process(process_id: crate::ProcessId) -> Self {
+        Self::Process { process_id }
     }
 
     /// The session this opener attributes its work to, when it has one.
@@ -128,12 +114,12 @@ impl EffectOpener {
         }
     }
 
-    /// The process incarnation this opener is, when it is one.
+    /// The process this opener is, when it is one.
     #[must_use]
-    pub fn process_ref(&self) -> Option<&ProcessRef> {
+    pub fn process_id(&self) -> Option<&crate::ProcessId> {
         match self {
             Self::Turn { .. } | Self::QueueDrain { .. } => None,
-            Self::Process { process_ref } => Some(process_ref),
+            Self::Process { process_id } => Some(process_id),
         }
     }
 
@@ -148,23 +134,6 @@ impl EffectOpener {
     /// carries unambiguous component boundaries. Nothing parses either
     /// projection back into an `EffectOpener`; the value is the identity.
     ///
-    /// # Why the separator is `:` and not `#`
-    ///
-    /// A rendered opener is embedded in identities that are themselves
-    /// embedded in identities. The Lashlang host bridges mint a tool-call id
-    /// under the opener (FIG-3394), and the subagent spawn tool then builds a
-    /// child's `SessionId` and `ProcessId` out of that call id verbatim
-    /// (`crates/lash-subagents/src/rlm.rs`). `#` and `/` are both reserved
-    /// there: `invalid_process_key_reason`
-    /// (`crates/lash-core-store/src/store/process_key.rs`) refuses any process
-    /// id containing `#` as a "reserved segment separator", and ADR 0094's
-    /// retired `ParentScope` storage codec split a stored turn scope on `/`
-    /// and a stored process scope on `#` — the shape FIG-3418 replaced with
-    /// [`EffectOpener::identity_encoding`] precisely because delimiters make a
-    /// key unparseable-but-collidable.
-    /// A `#` here therefore does not misparse — it makes the child process
-    /// unregistrable, which surfaces as the parent turn never finishing.
-    /// Measured: it turned every subagent spawn into `Stopped(MaxTurns)`.
     #[must_use]
     pub fn render(&self) -> String {
         match self {
@@ -176,10 +145,7 @@ impl EffectOpener {
                 session_id,
                 drain_id,
             } => format!("drain:{session_id}:{drain_id}"),
-            Self::Process { process_ref } => format!(
-                "process:{}:incarnation:{}",
-                process_ref.process_id, process_ref.incarnation
-            ),
+            Self::Process { process_id } => format!("process:{process_id}"),
         }
     }
 
@@ -197,9 +163,7 @@ impl EffectOpener {
     /// the minted identity stays readable.
     ///
     /// The encoding introduces only digits and `:` — never `#` or `/` — so an
-    /// identity built on it remains embeddable in a `SessionId`/`ProcessId`
-    /// (the separator note on [`EffectOpener::render`] covers why that
-    /// matters).
+    /// identity built on it remains embeddable in another identity.
     #[must_use]
     pub fn identity_encoding(&self) -> String {
         fn push_component(encoding: &mut String, component: &str) {
@@ -228,11 +192,9 @@ impl EffectOpener {
                 push_component(&mut encoding, drain_id);
                 encoding
             }
-            Self::Process { process_ref } => {
+            Self::Process { process_id } => {
                 let mut encoding = String::from("process:");
-                push_component(&mut encoding, process_ref.process_id.as_str());
-                encoding.push_str(":incarnation:");
-                encoding.push_str(&process_ref.incarnation.to_string());
+                push_component(&mut encoding, process_id.as_str());
                 encoding
             }
         }
@@ -244,29 +206,22 @@ impl EffectOpener {
     /// Every surface that must name the owner of durable work — the lifecycle
     /// parent a child start declares, the host identities the Lashlang bridges
     /// mint, the recorded attempt a tool body runs inside — derives through
-    /// here. There is deliberately no registry parameter: an [`AdmittedScope`]
-    /// already carries the `ProcessRef` the admission authority bound, and
-    /// resolving the reusable name again is exactly the defect ADR 0099 §1
-    /// closes — a same-name successor must not rebind work its predecessor
-    /// still owns. A recovery path that must validate a *retained* pair uses
-    /// `ProcessQuery::get_process_ref`, which answers the exact
-    /// `(process_id, incarnation)` or refuses it; `resolve_process_ref` — a
-    /// name lookup — is not an owner derivation.
+    /// here. There is deliberately no registry parameter: the admitted scope
+    /// already names its owner, and a process scope names the minted id of
+    /// its process.
     ///
     /// A queued turn is a real production shape, not an edge one: a turn
     /// started with `drain_id` and no turn id runs its whole effect tree under
     /// `ExecutionScope::QueueDrain`, so a drain is an opener in its own right.
     /// And a cell under `ExecutionScope::Process` — the shape every
-    /// `agents.spawn` child takes — is opened by the process incarnation, not
-    /// by any turn inside it: a worker retry keeps the incarnation and reuses
-    /// the journal, while a re-registration is a different opener.
+    /// `agents.spawn` child takes — is opened by the process, not by any turn
+    /// inside it.
     ///
     /// # Errors
     ///
     /// The administrative scope kinds (`SessionDelete`, `RuntimeOperation`)
     /// are refused — widening what an opener is is a contract decision, not a
-    /// fallback. A process scope with no incarnation cannot reach this
-    /// function: [`AdmittedScope`] refuses it at construction.
+    /// fallback.
     pub fn for_scope(scope: &AdmittedScope) -> Result<Self, EffectOpenerError> {
         match scope.scope() {
             crate::ExecutionScope::Turn {
@@ -277,16 +232,7 @@ impl EffectOpener {
                 session_id,
                 drain_id,
             } => Ok(Self::queue_drain(session_id.clone(), drain_id.clone())),
-            crate::ExecutionScope::Process { .. } => {
-                #[expect(
-                    clippy::expect_used,
-                    reason = "an AdmittedScope cannot pair a Process scope with no incarnation — its only construction checks the pair"
-                )]
-                let process_ref = scope
-                    .process_ref()
-                    .expect("an admitted process scope carries its incarnation");
-                Ok(Self::process(process_ref.clone()))
-            }
+            crate::ExecutionScope::Process { process_id } => Ok(Self::process(process_id.clone())),
             crate::ExecutionScope::SessionDelete { .. } => Err(EffectOpenerError::NotAnOpener {
                 scope_kind: "session-delete",
             }),
@@ -306,7 +252,7 @@ pub enum EffectOpenerError {
     /// A scope kind that is not an opener at all. `SessionDelete` and
     /// `RuntimeOperation` run administrative work and own no durable effects.
     #[error(
-        "{scope_kind} scope names no opener: neither a turn, a queued-work drain nor a process incarnation"
+        "{scope_kind} scope names no opener: neither a turn, a queued-work drain nor a process"
     )]
     NotAnOpener {
         /// The scope kind, for the diagnostic.
@@ -317,24 +263,19 @@ pub enum EffectOpenerError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::process_identity::ProcessIncarnation;
-
-    fn process_opener(name: &str, incarnation: u64) -> EffectOpener {
-        EffectOpener::process(ProcessRef::new(
-            name,
-            ProcessIncarnation::from_registration_sequence(incarnation),
-        ))
+    fn process(n: u128) -> crate::ProcessId {
+        crate::ProcessId::from_minted(0x0000_0000_0000_7000_8000_0000_0000_0000 | n)
     }
 
-    /// The defect §1 names: a name reused after re-registration is a different
-    /// opener, and must not compare equal to its predecessor.
+    fn process_opener(n: u128) -> EffectOpener {
+        EffectOpener::process(process(n))
+    }
+
+    /// Two processes are two openers, whatever either was labelled.
     #[test]
-    fn a_reregistered_process_name_is_a_different_opener() {
-        assert_ne!(process_opener("indexer", 1), process_opener("indexer", 2));
-        assert_ne!(
-            process_opener("indexer", 1).render(),
-            process_opener("indexer", 2).render()
-        );
+    fn distinct_processes_are_distinct_openers() {
+        assert_ne!(process_opener(1), process_opener(2));
+        assert_ne!(process_opener(1).render(), process_opener(2).render());
     }
 
     /// The reason the rendering is tagged. A turn scope is free-form text and
@@ -342,8 +283,8 @@ mod tests {
     /// identity.
     #[test]
     fn a_turn_whose_ids_spell_a_process_opener_still_renders_distinctly() {
-        let masquerading = EffectOpener::turn("process:indexer", "1");
-        let real = process_opener("indexer", 1);
+        let masquerading = EffectOpener::turn("process", "p_00000000000070008000000000000001");
+        let real = process_opener(1);
         assert_ne!(masquerading, real);
         assert_ne!(masquerading.render(), real.render());
     }
@@ -360,7 +301,7 @@ mod tests {
         for opener in [
             EffectOpener::turn("session-1", "turn-7"),
             EffectOpener::queue_drain("session-1", "drain-3"),
-            process_opener("indexer", 3),
+            process_opener(3),
         ] {
             for projection in [opener.render(), opener.identity_encoding()] {
                 assert!(
@@ -415,8 +356,8 @@ mod tests {
             "turn:1:a:3:b:c"
         );
         assert_eq!(
-            process_opener("indexer", 3).identity_encoding(),
-            "process:7:indexer:incarnation:3"
+            process_opener(3).identity_encoding(),
+            "process:34:p_00000000000070008000000000000003"
         );
     }
 
@@ -447,18 +388,18 @@ mod tests {
             EffectOpener::turn("session-1", "drain-3").render()
         );
         assert_eq!(drain.session_id().map(SessionId::as_str), Some("session-1"));
-        assert!(drain.process_ref().is_none());
+        assert!(drain.process_id().is_none());
     }
 
     /// Kind-tagged on the wire, so a decoded opener cannot change arm.
     #[test]
-    fn an_opener_round_trips_its_kind_and_its_incarnation() {
-        for opener in [EffectOpener::turn("s", "t"), process_opener("indexer", 7)] {
+    fn an_opener_round_trips_its_kind_and_its_process() {
+        for opener in [EffectOpener::turn("s", "t"), process_opener(7)] {
             let json = serde_json::to_string(&opener).expect("an opener serializes");
             let decoded: EffectOpener = serde_json::from_str(&json).expect("an opener decodes");
             assert_eq!(decoded, opener);
         }
-        let json = serde_json::to_string(&process_opener("indexer", 7)).expect("serializes");
+        let json = serde_json::to_string(&process_opener(7)).expect("serializes");
         assert!(
             json.contains("\"kind\":\"process\""),
             "the kind tag is what keeps the two arms apart, got {json}"
@@ -475,14 +416,9 @@ mod tests {
                 .map(SessionId::as_str),
             Some("s")
         );
-        assert!(process_opener("indexer", 1).session_id().is_none());
-        assert!(EffectOpener::turn("s", "t").process_ref().is_none());
-        assert_eq!(
-            process_opener("indexer", 1)
-                .process_ref()
-                .map(|r| r.incarnation.registration_sequence()),
-            Some(1)
-        );
+        assert!(process_opener(1).session_id().is_none());
+        assert!(EffectOpener::turn("s", "t").process_id().is_none());
+        assert_eq!(process_opener(1).process_id(), Some(&process(1)));
     }
 
     // -----------------------------------------------------------------------
@@ -504,15 +440,13 @@ mod tests {
         );
     }
 
-    /// A process scope plus its pinned incarnation is a process opener — the
-    /// incarnation is what the derivation adds to the reusable name.
+    /// A process scope is the opener of its process.
     #[test]
-    fn a_process_scope_plus_its_pin_is_a_process_opener() {
-        let pin = ProcessRef::new("worker", ProcessIncarnation::from_registration_sequence(3));
+    fn a_process_scope_is_a_process_opener() {
         assert_eq!(
-            EffectOpener::for_scope(&AdmittedScope::process(pin.clone()))
-                .expect("the pinned incarnation is the opener"),
-            EffectOpener::process(pin)
+            EffectOpener::for_scope(&AdmittedScope::process(process(3)))
+                .expect("a process is an opener"),
+            EffectOpener::process(process(3))
         );
     }
 

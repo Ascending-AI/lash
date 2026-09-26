@@ -37,7 +37,7 @@ const IN_FLIGHT_OPERATION: &str = "in-flight-runtime-operation";
 /// Admit a non-process scope: these tests mint runtime-operation scopes
 /// directly, so this stands in for the facade's admission.
 fn admitted(scope: ExecutionScope) -> lash_core::AdmittedScope {
-    lash_core::AdmittedScope::unpinned(scope).expect("a runtime operation admits unpinned")
+    lash_core::AdmittedScope::new(scope)
 }
 
 /// What a task left behind under its facade-minted scope: the scope's journal

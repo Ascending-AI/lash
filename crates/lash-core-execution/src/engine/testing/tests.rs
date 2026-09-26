@@ -307,8 +307,7 @@ fn sleep_envelope(key: &str, duration_ms: u64) -> RuntimeEffectEnvelope {
 }
 
 fn admitted() -> AdmittedScope {
-    AdmittedScope::unpinned(ExecutionScope::turn("determinism-session", "turn-1"))
-        .unwrap_or_else(|error| panic!("{error}"))
+    AdmittedScope::new(ExecutionScope::turn("determinism-session", "turn-1"))
 }
 
 static CONTROLLER_BODIES: AtomicUsize = AtomicUsize::new(0);

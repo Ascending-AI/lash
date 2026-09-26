@@ -24,7 +24,7 @@ fn effect_cause_message(scope: crate::ExecutionScope) -> crate::SessionAppendNod
             "parts": [{"id":"", "kind":"Text", "content":"effect wake"}],
             "origin": {
                 "kind": "process",
-                "process_id": "target-process",
+                "process_id": "p_0192f000000070008000000000000002",
                 "event_type": "signal.resume",
                 "sequence": 7,
                 "caused_by": {
@@ -42,7 +42,9 @@ fn effect_cause_message(scope: crate::ExecutionScope) -> crate::SessionAppendNod
 
 pub(super) fn effect_identity_rows() -> String {
     let turn_node = effect_cause_message(crate::ExecutionScope::turn("session", "turn"));
-    let process_node = effect_cause_message(crate::ExecutionScope::process("process"));
+    let process_node = effect_cause_message(crate::ExecutionScope::process(
+        crate::process_id_for_test("process"),
+    ));
     let turn_request = append_request_identity_bytes(
         &operation("effect-cause"),
         Some("ancestor"),

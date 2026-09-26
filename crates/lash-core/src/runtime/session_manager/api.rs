@@ -237,18 +237,6 @@ impl crate::ProcessService for RuntimeSessionProcessService {
         Ok(crate::ProcessHandleView::from_record(record))
     }
 
-    async fn recorded_max_attempts(
-        &self,
-        session_id: &SessionId,
-        process_id: &crate::ProcessId,
-    ) -> Result<Option<u32>, crate::PluginError> {
-        let _ = session_id;
-        self.services
-            .processes
-            .recorded_max_attempts(&self.services.current, process_id)
-            .await
-    }
-
     async fn start(
         &self,
         session_id: &SessionId,
@@ -311,18 +299,18 @@ impl crate::ProcessService for RuntimeSessionProcessService {
 
     async fn await_process_ref(
         &self,
-        process_ref: &crate::ProcessRef,
+        process_id: &crate::ProcessId,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
         self.services
             .processes
-            .await_process_ref(&self.services.current, process_ref.clone(), scope)
+            .await_process_ref(&self.services.current, process_id.clone(), scope)
             .await
     }
 
     async fn attach_process_terminal(
         &self,
-        process_ref: &crate::ProcessRef,
+        process_id: &crate::ProcessId,
         key: &crate::AwaitEventKey,
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), crate::PluginError> {
@@ -330,7 +318,7 @@ impl crate::ProcessService for RuntimeSessionProcessService {
             .processes
             .attach_process_terminal(
                 &self.services.current,
-                process_ref.clone(),
+                process_id.clone(),
                 key.clone(),
                 scope,
             )
@@ -384,32 +372,6 @@ impl crate::ProcessService for RuntimeSessionProcessService {
                 )
                 .await
         }
-    }
-
-    async fn validate_visible_refs(
-        &self,
-        session_id: &SessionId,
-        process_refs: &[crate::ProcessRef],
-        scope: crate::ProcessOpScope<'_>,
-    ) -> Result<(), crate::PluginError> {
-        let process_ids = process_refs
-            .iter()
-            .map(|process_ref| process_ref.process_id.clone())
-            .collect::<Vec<_>>();
-        self.validate_visible(session_id, &process_ids, scope)
-            .await?;
-        let registry = self
-            .services
-            .current
-            .host
-            .process_registry()
-            .ok_or_else(|| {
-                crate::PluginError::Session("process registry unavailable".to_string())
-            })?;
-        for process_ref in process_refs {
-            registry.get_process_ref(process_ref).await?;
-        }
-        Ok(())
     }
 
     async fn cancel(

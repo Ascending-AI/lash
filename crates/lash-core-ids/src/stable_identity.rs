@@ -47,6 +47,11 @@ pub(crate) const FAMILY_DOMAINS: &[&str] = &[
     "lash.trigger-subscription-definition",
     "lash.trigger-subscription-key",
     "lash.turn-input-submission",
+    // FIG-3607: the idempotency key of one process start. The registration
+    // fingerprint (`lash.process-registration-definition`) and the derived
+    // trigger-delivery process id (`lash.trigger-delivery-process`) are
+    // retired with it and stay reserved above.
+    "lash.process-start-key",
 ];
 
 /// Grandfathered families whose preimages omit the framing header (ADR 0097).

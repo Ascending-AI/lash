@@ -71,13 +71,12 @@ pub(super) async fn prepare(store: Arc<dyn RuntimePersistence>, entry: Entry) ->
 }
 
 fn wake(sequence: u64, text: &str) -> lash_core::runtime::ProcessWakeDelivery {
-    let process_id = || lash_core::runtime::ProcessId::from("atomicity-process");
+    let process_id = || lash_core::runtime::ProcessId::fixture("atomicity-process");
     lash_core::runtime::ProcessWakeDelivery {
         version: lash_core::runtime::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("atomicity-process-wake-{sequence}"),
         target_session_id: SessionId::from("root"),
         process_id: process_id(),
-        process_incarnation: lash_core::runtime::ProcessIncarnation::from_registration_sequence(1),
         sequence,
         event_type: "process.wake".to_string(),
         event_invocation: lash_core::runtime::RuntimeInvocation {

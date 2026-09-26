@@ -27,6 +27,8 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ProcessId;
+
 /// The field naming a record as a handle.
 pub const HANDLE_FIELD: &str = "__handle__";
 
@@ -53,12 +55,9 @@ pub enum HandleTarget {
     /// so there is nothing to keep in step: a handle from an earlier cell, or
     /// one written by hand, simply does not name a live request.
     Tool { execution_nonce: u64, request: u32 },
-    /// A durable process and the incarnation of it this handle was taken
-    /// against.
-    Process {
-        process_id: String,
-        incarnation: u64,
-    },
+    /// A durable process. Its minted id is never reused, so the id alone
+    /// names one process for as long as anything can hold the handle.
+    Process { process_id: ProcessId },
 }
 
 const TOOL_TAG: char = 't';
@@ -74,25 +73,20 @@ impl HandleId {
         ))
     }
 
-    /// Mints the handle for `incarnation` of the process `process_id`.
-    ///
-    /// The process id is spelled last because it is host-supplied and may
-    /// itself contain a separator; everything after the third field is part of
-    /// it.
-    pub fn process(process_id: &str, incarnation: u64) -> Self {
-        Self(format!(
-            "{PROCESS_TAG}{SEPARATOR}{incarnation:x}{SEPARATOR}{process_id}"
-        ))
+    /// Mints the handle for the process `process_id`.
+    pub fn process(process_id: &ProcessId) -> Self {
+        Self(format!("{PROCESS_TAG}{SEPARATOR}{process_id}"))
     }
 
     /// A `None` here is the whole refusal: a hand-written handle, a handle from
     /// a previous execution and a handle whose text was tampered with all fail
     /// to name live work, and the caller reports that in its own terms.
+    ///
+    /// A process handle is `p.<process id>` and nothing else: the retired
+    /// `p.<incarnation>.<name>` spelling, whose name was host-chosen, names no
+    /// process because no minted id contains the separator.
     pub fn target(&self) -> Option<HandleTarget> {
-        let mut parts = self.0.splitn(3, SEPARATOR);
-        let tag = parts.next()?;
-        let second = parts.next()?;
-        let third = parts.next()?;
+        let (tag, rest) = self.0.split_once(SEPARATOR)?;
         let tag = {
             let mut chars = tag.chars();
             let tag = chars.next()?;
@@ -103,6 +97,7 @@ impl HandleId {
         };
         match tag {
             TOOL_TAG => {
+                let (second, third) = rest.split_once(SEPARATOR)?;
                 if second.len() != 16 {
                     return None;
                 }
@@ -111,15 +106,9 @@ impl HandleId {
                     request: u32::from_str_radix(third, 16).ok()?,
                 })
             }
-            PROCESS_TAG => {
-                if third.is_empty() {
-                    return None;
-                }
-                Some(HandleTarget::Process {
-                    incarnation: u64::from_str_radix(second, 16).ok()?,
-                    process_id: third.to_string(),
-                })
-            }
+            PROCESS_TAG => Some(HandleTarget::Process {
+                process_id: ProcessId::parse(rest).ok()?,
+            }),
             _ => None,
         }
     }
@@ -148,10 +137,8 @@ impl std::fmt::Display for HandleId {
 /// `kind` is the record's [`HANDLE_FIELD`] and `id` its `id`, as the caller's own value type
 /// spells them.
 ///
-/// There is one kind and one place the parts live. A record that spells its
-/// incarnation beside the id is not a handle: the incarnation belongs inside
-/// the id, so a handle that names an incarnation it was not taken against
-/// cannot be built.
+/// There is one kind and one place the parts live: a field spelled beside the
+/// id is never consulted.
 pub fn parse_handle(kind: &str, id: &str) -> Option<HandleId> {
     (kind == HANDLE_KIND).then(|| HandleId::from_text(id))
 }
@@ -174,6 +161,29 @@ pub fn handle_record_json(id: &HandleId) -> serde_json::Value {
     serde_json::json!({ HANDLE_FIELD: HANDLE_KIND, "id": id.as_str() })
 }
 
+/// The field of the internal result slot a process-start attempt answers with.
+///
+/// A start's process id is minted when the declared start is realized, after
+/// the attempt sealed its output, so the attempt cannot answer a handle. It
+/// answers `{"__start_slot__": <intent index>}` instead, and the realization
+/// replaces the slot with the handle of the process that start registered
+/// before the output reaches a model or a cell (ADR 0107). A slot is never a
+/// handle and never survives to a holder.
+pub const PROCESS_START_SLOT_FIELD: &str = "__start_slot__";
+
+/// The unrealized slot for the declared start at `intent_index`.
+pub fn process_start_slot_json(intent_index: u32) -> serde_json::Value {
+    serde_json::json!({ PROCESS_START_SLOT_FIELD: intent_index })
+}
+
+/// The intent index a slot record names, if `value` is one.
+pub fn process_start_slot(value: &serde_json::Value) -> Option<u32> {
+    value
+        .get(PROCESS_START_SLOT_FIELD)?
+        .as_u64()
+        .and_then(|index| u32::try_from(index).ok())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,23 +203,20 @@ mod tests {
         }
     }
 
+    /// A minted id carrying `n`'s bits under the UUIDv7 version and variant.
+    fn process(n: u128) -> ProcessId {
+        let version_and_variant = (0xf_u128 << 76) | (0b11_u128 << 62);
+        ProcessId::from_minted((n & !version_and_variant) | (0x7_u128 << 76) | (0b10_u128 << 62))
+    }
+
     #[test]
-    fn process_handles_round_trip_including_ids_that_contain_the_separator() {
-        // Process ids are host-supplied and really do contain separators:
-        // `tool:call-01JZ...` and `subagent:session-01JZ...` are the two the
-        // process-controls catalogue teaches.
-        for process_id in [
-            "p-1",
-            "tool:call-01JZK7G4QP9Q4J7W3Q2E1H6M9C",
-            "a.b.c.d",
-            "..",
-        ] {
-            let id = HandleId::process(process_id, 3);
+    fn process_handles_round_trip_through_their_text() {
+        for n in [0, 1, u128::MAX, 0x0192_0000_0000_7000_8000_0000_0000_0001] {
+            let id = HandleId::process(&process(n));
             assert_eq!(
                 id.target(),
                 Some(HandleTarget::Process {
-                    process_id: process_id.to_string(),
-                    incarnation: 3,
+                    process_id: process(n),
                 }),
                 "process handle {id} lost its parts"
             );
@@ -218,7 +225,7 @@ mod tests {
 
     #[test]
     fn a_tool_handle_and_a_process_handle_never_share_an_id() {
-        assert_ne!(HandleId::tool(1, 2), HandleId::process("1", 2));
+        assert_ne!(HandleId::tool(1, 2), HandleId::process(&process(1)));
     }
 
     #[test]
@@ -242,6 +249,11 @@ mod tests {
             "t.0000000000000000.zz",
             "p.0.",
             "p.zz.a",
+            "p.",
+            "p.p-7",
+            // The retired incarnation-bearing spelling, even around a minted id.
+            "p.2.p-7",
+            "p.2.p_00000000000070008000000000000007",
         ] {
             assert_eq!(
                 HandleId::from_text(text).target(),
@@ -302,23 +314,21 @@ mod tests {
     }
 
     #[test]
-    fn a_process_handle_is_the_one_record_and_carries_its_incarnation_inside_the_id() {
-        let id = HandleId::process("p-7", 2);
+    fn a_process_handle_is_the_one_record_and_its_id_is_the_minted_process_id() {
+        let id = HandleId::process(&process(7));
         let record = handle_record_json(&id);
         assert_eq!(
             record,
-            serde_json::json!({ "__handle__": "lash", "id": "p.2.p-7" })
+            serde_json::json!({ "__handle__": "lash", "id": "p.p_00000000000070008000000000000007" })
         );
         assert_eq!(parse_handle_json(&record), Some(id.clone()));
         assert_eq!(
             id.target(),
             Some(HandleTarget::Process {
-                process_id: "p-7".to_string(),
-                incarnation: 2,
+                process_id: process(7),
             })
         );
-        // An incarnation spelled beside the id is not consulted, so it cannot
-        // disagree with the one the handle was taken against.
+        // A field spelled beside the id is not consulted.
         let mut shouted = handle_record_json(&id);
         shouted["incarnation"] = serde_json::json!(99);
         assert_eq!(parse_handle_json(&shouted), Some(id));

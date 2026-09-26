@@ -5,7 +5,7 @@
   "trace": "trace.json",
   "generator_version": "lash-sim.generated-workload.v11",
   "source": "Generated live through lash-sim run and write_trace on 2026-09-26 with lash-sim.generated-workload.v11, every turn and effect boundary on the lash-restate-test server double.",
-  "source_trace_sha256": "f551322277b9996a2efda7a1387614c7c7d4dd45e3689cc6b973b7173150c943",
+  "source_trace_sha256": "22290f1ffda263f54b4b3e5a44a3b7fd2b4f2d86666576f7d1e4c8da239a565b",
   "historical_production_regression": false,
   "regression_contract": "active-turn queued input stays hidden, then cancellation terminalizes the pending row before any later idle claim can surface it",
   "required_boundary_kinds": [

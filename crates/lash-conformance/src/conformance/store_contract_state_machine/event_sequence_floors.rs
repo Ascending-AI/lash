@@ -104,8 +104,11 @@ mod floor_tests {
         (backend, handles)
     }
 
+    /// A slot re-registered after its run was pruned starts a new process:
+    /// a new id whose first event is its own first, with no sender floor
+    /// carried over from the pruned run (ADR 0107).
     #[tokio::test]
-    async fn first_event_after_process_reuse_jumps_past_retained_sender_floor() {
+    async fn a_restart_after_prune_starts_a_new_process_at_its_own_first_event() {
         let (_backend, handles) = memory_handles().await;
         let registry = Arc::clone(&handles.registry);
         let mut scenario = StoreContractScenario::new(handles);
@@ -129,26 +132,30 @@ mod floor_tests {
         ] {
             scenario.apply(&operation).await.expect("initial lifecycle");
         }
-        let id = process_id(0);
-        let retained = registry
-            .get_process(&id)
-            .await
-            .unwrap()
-            .unwrap()
-            .last_event_sequence;
-        assert!(retained > 0);
+        let pruned = scenario.slot_process_id(0);
+        assert!(
+            registry
+                .get_process(&pruned)
+                .await
+                .unwrap()
+                .unwrap()
+                .last_event_sequence
+                > 0
+        );
         scenario
             .apply(&StoreContractOp::Prune { watermark: false })
             .await
             .unwrap();
         assert!(matches!(
-            registry.get_process(&id).await,
+            registry.get_process(&pruned).await,
             Err(crate::PluginError::ProcessNoLongerRetained { .. })
         ));
         scenario.apply(&register).await.unwrap();
+        let restarted = scenario.slot_process_id(0);
+        assert_ne!(restarted, pruned, "the restart is minted a new id");
         assert_eq!(
             registry
-                .get_process(&id)
+                .get_process(&restarted)
                 .await
                 .unwrap()
                 .unwrap()
@@ -163,19 +170,23 @@ mod floor_tests {
             .await
             .unwrap();
         let actual = registry
-            .get_process(&id)
+            .get_process(&restarted)
             .await
             .unwrap()
             .unwrap()
             .last_event_sequence;
-        assert_eq!(actual, retained + 1);
+        assert_eq!(actual, 1, "the new process's first event is its own first");
         assert_eq!(
-            scenario.model.processes[&id]
+            scenario.model.processes[&restarted]
                 .expected()
                 .unwrap()
                 .last_event_sequence,
             actual
         );
+        assert!(matches!(
+            registry.get_process(&pruned).await,
+            Err(crate::PluginError::ProcessNoLongerRetained { .. })
+        ));
     }
     #[tokio::test]
     async fn prune_removes_settled_process_wakes_but_preserves_floor() {

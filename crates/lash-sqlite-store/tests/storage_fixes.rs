@@ -250,14 +250,13 @@ async fn gc_keeps_live_committed_checkpoint_blobs() {
 }
 
 fn exclusive_draft(session_id: &SessionId, text: &str) -> QueuedWorkBatchDraft {
-    let process_id = ProcessId::from(format!("process:{text}"));
+    let process_id = ProcessId::fixture(&format!("process:{text}"));
     let sequence = 1;
     let wake = ProcessWakeDelivery {
         version: lash_core_execution::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("wake:{text}"),
         target_session_id: SessionId::from(session_id.to_string()),
         process_id: process_id.clone(),
-        process_incarnation: lash_core_execution::ProcessIncarnation::from_registration_sequence(1),
         sequence,
         event_type: "process.wake".to_string(),
         event_invocation: RuntimeInvocation {
@@ -598,8 +597,8 @@ async fn unsupported_schema_error_reports_real_versions() {
         "error must report the found version 99: {message}"
     );
     assert!(
-        message.contains("schema version 97"),
-        "error must report the real expected version 97: {message}"
+        message.contains("schema version 98"),
+        "error must report the real expected version 98: {message}"
     );
     assert!(
         !message.contains("version 1 only"),
@@ -635,7 +634,7 @@ fn concurrent_first_open_never_observes_version_zero_schema() {
     let user_version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .expect("read user_version");
-    assert_eq!(user_version, 97);
+    assert_eq!(user_version, 98);
     let payload_hash_not_null: i32 = conn
         .query_row(
             "SELECT \"notnull\" FROM pragma_table_info('usage_deltas')
@@ -689,8 +688,7 @@ async fn unwired_sqlite_factory_keeps_process_owned_intents_immortal() {
         canonical_uri: "lash-attachment://unwired-process-attachment".to_string(),
         intent_at_epoch_ms: 1,
         owner: Some(lash_core_execution::AttachmentOwner::Process {
-            id: "missing-process".to_string(),
-            incarnation: lash_core_execution::ProcessIncarnation::from_registration_sequence(1),
+            process_id: ProcessId::fixture("missing-process"),
         }),
     };
     let lash_core_execution::AttachmentWriteFence::Granted(permit) = store
@@ -760,7 +758,7 @@ async fn plugin_state_cutover_refuses_snapshot_predecessor_without_mutation() {
         Err(error) => error.to_string(),
     };
     assert!(
-        error.contains("schema version 97") && error.contains("version 51"),
+        error.contains("schema version 98") && error.contains("version 51"),
         "{error}"
     );
     let conn = rusqlite::Connection::open(&path).unwrap();

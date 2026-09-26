@@ -29,10 +29,9 @@ pub async fn process_prune_reclaims_content_aliased_checkpoint_roots(
     registry: Arc<dyn crate::ProcessRegistry>,
     probe: Arc<dyn SessionDeleteBlobProbe>,
 ) {
-    const PROCESS_ID: &str = "prune-reclaims-content-aliased-roots";
-    register_process(registry.as_ref(), &ProcessId::from(PROCESS_ID)).await;
+    let process_id = register_process(registry.as_ref()).await;
     let [aliased_session_id, dependent_session_id] =
-        crate::process_runtime_session_ids(&ProcessId::from(PROCESS_ID));
+        crate::process_runtime_session_ids(&process_id);
     let roots = commit_content_aliased_checkpoint_roots(
         &factory,
         &dependent_session_id,
@@ -48,7 +47,7 @@ pub async fn process_prune_reclaims_content_aliased_checkpoint_roots(
         "{backend}: the content-aliased root must exist before process prune"
     );
 
-    prune_completed_process(registry.as_ref(), &ProcessId::from(PROCESS_ID)).await;
+    prune_completed_process(registry.as_ref(), &process_id).await;
     assert!(
         !probe.blob_exists(&roots.aliased_root).await,
         "{backend}: process prune must reclaim root B after severing root A's edge"
@@ -72,11 +71,9 @@ pub async fn process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
     registry: Arc<dyn crate::ProcessRegistry>,
     probe: Arc<dyn SessionDeleteBlobProbe>,
 ) {
-    const PROCESS_ID: &str = "prune-reclaims-checkpoint-blobs";
+    let process_id = register_process(registry.as_ref()).await;
     let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
-    let process_session_id =
-        crate::process_runtime_session_ids(&ProcessId::from(PROCESS_ID))[0].clone();
-    register_process(registry.as_ref(), &ProcessId::from(PROCESS_ID)).await;
+    let process_session_id = crate::process_runtime_session_ids(&process_id)[0].clone();
     let store = create_store(&factory, &process_session_id, &policy).await;
     let mut state = crate::RuntimeSessionState {
         session_id: process_session_id.clone(),
@@ -104,7 +101,7 @@ pub async fn process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
 
     let terminal = registry
         .complete_process(
-            &ProcessId::from(PROCESS_ID),
+            &process_id,
             crate::ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
@@ -128,7 +125,7 @@ pub async fn process_prune_reclaims_checkpoint_blobs_and_propagates_failure(
     );
     assert!(
         registry
-            .get_process(&ProcessId::from(PROCESS_ID))
+            .get_process(&process_id)
             .await
             .expect("read process after failed prune")
             .is_some(),
@@ -172,8 +169,8 @@ pub async fn process_prune_reclaims_tombstones_owned_by_deleted_sessions(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
 ) {
-    const PROCESS_ID: &str = "prune-reclaims-outside-owner";
     const OWNER_SESSION_ID: &str = "prune-reclaim-outside-owner-session";
+    let process_id = register_process(registry.as_ref()).await;
     let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
 
     let owner_store = create_store(&factory, &SessionId::from(OWNER_SESSION_ID), &policy).await;
@@ -186,9 +183,7 @@ pub async fn process_prune_reclaims_tombstones_owned_by_deleted_sessions(
 
     // The process session forks at the owner's tip and grows its own node, so
     // the owner's node has a live child owned by another session.
-    let process_session_id =
-        crate::process_runtime_session_ids(&ProcessId::from(PROCESS_ID))[0].clone();
-    register_process(registry.as_ref(), &ProcessId::from(PROCESS_ID)).await;
+    let process_session_id = crate::process_runtime_session_ids(&process_id)[0].clone();
     fork_and_advance(
         &factory,
         &owner_leaf,
@@ -206,7 +201,7 @@ pub async fn process_prune_reclaims_tombstones_owned_by_deleted_sessions(
         .await
         .expect("delete the outside owner session");
 
-    prune_completed_process(registry.as_ref(), &ProcessId::from(PROCESS_ID)).await;
+    prune_completed_process(registry.as_ref(), &process_id).await;
 
     let report = owner_store
         .vacuum()
@@ -232,13 +227,11 @@ pub async fn process_prune_records_deletions_for_later_reclaim(
     factory: Arc<dyn crate::SessionStoreFactory>,
     registry: Arc<dyn crate::ProcessRegistry>,
 ) {
-    const PROCESS_ID: &str = "prune-records-deleted-set";
     const FORK_SESSION_ID: &str = "prune-recorded-fork-child-session";
+    let process_id = register_process(registry.as_ref()).await;
     let policy = crate::SessionPolicy::new(crate::TurnBudget::Unbounded);
 
-    let process_session_id =
-        crate::process_runtime_session_ids(&ProcessId::from(PROCESS_ID))[0].clone();
-    register_process(registry.as_ref(), &ProcessId::from(PROCESS_ID)).await;
+    let process_session_id = crate::process_runtime_session_ids(&process_id)[0].clone();
     let process_store = create_store(&factory, &process_session_id, &policy).await;
     let process_leaf = commit_root_node(process_store.as_ref(), &process_session_id, &policy).await;
 
@@ -251,7 +244,7 @@ pub async fn process_prune_records_deletions_for_later_reclaim(
     )
     .await;
 
-    prune_completed_process(registry.as_ref(), &ProcessId::from(PROCESS_ID)).await;
+    prune_completed_process(registry.as_ref(), &process_id).await;
     assert!(
         factory
             .session_was_deleted(&process_session_id)
@@ -388,10 +381,9 @@ async fn fork_and_advance(
     clippy::expect_used,
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
-async fn register_process(registry: &dyn crate::ProcessRegistry, process_id: &ProcessId) {
+async fn register_process(registry: &dyn crate::ProcessRegistry) -> ProcessId {
     registry
         .register_process(crate::ProcessRegistration::new(
-            process_id,
             crate::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -403,7 +395,8 @@ async fn register_process(registry: &dyn crate::ProcessRegistry, process_id: &Pr
             ),
         ))
         .await
-        .expect("register the pruned process");
+        .expect("register the pruned process")
+        .id
 }
 
 #[expect(

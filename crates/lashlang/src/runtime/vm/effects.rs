@@ -995,7 +995,6 @@ fn collect_awaited_process_ids(value: &Value, process_ids: &mut Vec<lash_sansio:
             if let Some(lash_sansio::handle::HandleTarget::Process { process_id, .. }) =
                 parse_handle_record(record).and_then(|id| id.target())
             {
-                let process_id = lash_sansio::ProcessId::from(process_id);
                 if !process_ids.contains(&process_id) {
                     process_ids.push(process_id);
                 }

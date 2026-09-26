@@ -896,14 +896,13 @@ pub fn queued_process_wake_draft(
         version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("wake:{session_id}:{text}"),
         target_session_id: session_id.clone(),
-        process_id: ProcessId::from(format!("process:{text}")),
-        process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
+        process_id: crate::ProcessId::fixture(&format!("process:{text}")),
         sequence: 1,
         event_type: "process.wake".to_string(),
         event_invocation: RuntimeInvocation {
             attribution: RuntimeAttribution::for_session(session_id),
             subject: RuntimeSubject::ProcessEvent {
-                process_id: ProcessId::from(format!("process:{text}")),
+                process_id: crate::ProcessId::fixture(&format!("process:{text}")),
                 sequence: 1,
                 event_type: "process.wake".to_string(),
             },
@@ -921,10 +920,10 @@ pub fn queued_process_wake_draft(
         crate::TurnWorkPayload::process_wake(wake),
     )
     .with_source_key(crate::process_wake_source_key(
-        &ProcessId::from(format!("process:{text}")),
+        &crate::ProcessId::fixture(&format!("process:{text}")),
         1,
     ))
-    .with_process_wake_source(ProcessId::from(format!("process:{text}")), 1)
+    .with_process_wake_source(crate::ProcessId::fixture(&format!("process:{text}")), 1)
 }
 
 /// Some queued turn work carrying `text`: a process wake, the one turn-work
@@ -956,13 +955,17 @@ pub(super) fn keyed_queued_draft(
 }
 
 /// The `key` a [`keyed_queued_draft`] row was enqueued under, read back from
-/// its wake source key.
+/// its wake. The source key names the wake's minted-form process id, so the
+/// label is read from the wake id (`wake:<session>:<key>:<sequence>`), which
+/// carries it verbatim.
 pub(super) fn keyed_source(batch: &QueuedWorkBatch) -> Option<&str> {
-    batch
-        .source_key
-        .as_deref()
-        .and_then(|key| key.strip_prefix("process:"))
-        .and_then(|key| key.strip_suffix(":event:1:wake"))
+    match &batch.items.first()?.payload {
+        QueuedWorkPayload::ProcessWake { wake } => {
+            let (rest, _sequence) = wake.wake_id.rsplit_once(':')?;
+            rest.rsplit_once(':').map(|(_, key)| key)
+        }
+        QueuedWorkPayload::SessionCommand { .. } => None,
+    }
 }
 
 pub(super) fn queued_session_command_draft(

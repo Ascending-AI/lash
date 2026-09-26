@@ -1,4 +1,3 @@
-use lash_sansio::ProcessId;
 use std::collections::BTreeMap;
 
 use super::*;
@@ -81,15 +80,15 @@ pub async fn live_reference_summary_tracks_non_terminal_reference_counts(
     let definition_b = serde_json::json!({ "module": "beta", "process": "main" });
     let env_a = ProcessExecutionEnvRef::new("process-env:alpha");
     let env_b = ProcessExecutionEnvRef::new("process-env:beta");
-    for (process_id, definition, env_ref) in [
+    let mut ids = std::collections::BTreeMap::new();
+    for (label, definition, env_ref) in [
         ("proc-ref-a1", definition_a.clone(), env_a.clone()),
         ("proc-ref-a2", definition_a.clone(), env_a.clone()),
         ("proc-ref-b", definition_b.clone(), env_b.clone()),
     ] {
-        registry
+        let registered = registry
             .register_process(
                 ProcessRegistration::new(
-                    process_id,
                     ProcessInput::Engine {
                         kind: "reference-test".to_string(),
                         payload: serde_json::Value::Null,
@@ -111,6 +110,7 @@ pub async fn live_reference_summary_tracks_non_terminal_reference_counts(
             )
             .await
             .expect("register reference process");
+        ids.insert(label, registered.id);
         conservation.record_spawn();
         assert_process_count_conservation(&registry, conservation)
             .await
@@ -129,7 +129,7 @@ pub async fn live_reference_summary_tracks_non_terminal_reference_counts(
 
     registry
         .complete_process(
-            &ProcessId::from("proc-ref-a1"),
+            &ids["proc-ref-a1"],
             ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                 serde_json::Value::Null,
             )),
@@ -150,14 +150,14 @@ pub async fn live_reference_summary_tracks_non_terminal_reference_counts(
         Some(&1)
     );
 
-    for process_id in ["proc-ref-a2", "proc-ref-b"] {
+    for label in ["proc-ref-a2", "proc-ref-b"] {
         registry
             .complete_process(
-                &ProcessId::from(process_id),
+                &ids[label],
                 ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(
                     serde_json::Value::Null,
                 )),
-                crate::ProcessCompletionAuthority::workflow_key(process_id),
+                crate::ProcessCompletionAuthority::workflow_key(label),
             )
             .await
             .expect("complete remaining process");

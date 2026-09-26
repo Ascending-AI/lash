@@ -126,7 +126,7 @@ pub async fn every_billed_provider_attempt_is_conserved_once_on_its_opener(
             definitions: leaf_definitions(),
             observation: Arc::clone(&observation),
             session_id: session_id.clone(),
-            intent_target: crate::ProcessId::from("unused-in-usage"),
+            intent_target: crate::ProcessId::fixture("unused-in-usage"),
             start_metadata: serde_json::Value::Null,
         })
     };

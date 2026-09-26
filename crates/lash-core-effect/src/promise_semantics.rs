@@ -290,8 +290,12 @@ mod tests {
                 AwaitEventWaitIdentity::tool_completion("x:y"),
             ),
             (
-                ExecutionScope::process("zero"),
-                AwaitEventWaitIdentity::process_signal("zero", "ready", 1),
+                ExecutionScope::process(lash_sansio::ProcessId::fixture("zero")),
+                AwaitEventWaitIdentity::process_signal(
+                    lash_sansio::ProcessId::fixture("zero"),
+                    "ready",
+                    1,
+                ),
             ),
             (
                 ExecutionScope::queue_drain("same", "same"),
@@ -327,8 +331,8 @@ mod tests {
                 "await-event:v3:blake3:d7e95d92b4200240106ef9948b49c44bfd235084fb18aefcf5fae75ec8860823",
             ),
             (
-                "6c6173682d737461626c652d6964656e74697479020300000000000000106c6173682e61776169742d6576656e740200000000000000047a65726f0200000000000000047a65726f000000000000000572656164790000000000000001",
-                "await-event:v3:blake3:3848a134359ec6ceee1e97b83d066a4b382ba848271060108ceffe363ef98465",
+                "6c6173682d737461626c652d6964656e74697479020300000000000000106c6173682e61776169742d6576656e74020000000000000022705f3639633135363366643637353732373762383036653938663666376262663762020000000000000022705f3639633135363366643637353732373762383036653938663666376262663762000000000000000572656164790000000000000001",
+                "await-event:v3:blake3:0087a0f8ff0e6e7ab2432ca14a6ca3cf0f1e750cc13d8e86dd31d06a879c0af2",
             ),
             (
                 "6c6173682d737461626c652d6964656e74697479020300000000000000106c6173682e61776169742d6576656e7403000000000000000473616d65000000000000000473616d6503",

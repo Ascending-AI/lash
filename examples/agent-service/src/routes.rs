@@ -277,8 +277,8 @@ pub(crate) async fn fork_chat(
         )
         .await
         .map_err(|error| AppError::internal(error.to_string()))?
-        .iter()
-        .map(lash::process::ProcessRef::from_record)
+        .into_iter()
+        .map(|record| record.id)
         .collect();
     let target_chat_id = uuid::Uuid::new_v4().to_string();
     state

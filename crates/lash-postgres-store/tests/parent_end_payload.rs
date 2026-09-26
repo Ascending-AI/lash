@@ -75,7 +75,6 @@ async fn a_ledger_row_decodes_its_typed_payload() {
 
     let process_parent = registry
         .register_process(lash_core_execution::ProcessRegistration::new(
-            "pg-payload-parent",
             lash_core_execution::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -90,9 +89,7 @@ async fn a_ledger_row_decodes_its_typed_payload() {
         ))
         .await
         .expect("register the process parent");
-    let scope = lash_core_execution::ParentScope::process(
-        lash_core_execution::ProcessRef::from_record(&process_parent),
-    );
+    let scope = lash_core_execution::ParentScope::process(process_parent.id.clone());
     registry
         .record_parent_end(&scope)
         .await
@@ -105,7 +102,7 @@ async fn a_ledger_row_decodes_its_typed_payload() {
         .expect("the row exists");
     assert_eq!(
         plan.parent, scope,
-        "the ledger decodes the typed parent — incarnation included — from its payload"
+        "the ledger decodes the typed parent from its payload"
     );
 
     // Leave no pending row behind on the shared database: a later ledger

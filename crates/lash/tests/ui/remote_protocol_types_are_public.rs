@@ -36,7 +36,7 @@ fn main() {
         deliveries: vec![lash::remote::triggers::RemoteTriggerDeliveryEmitReceipt {
             occurrence_id: "occurrence:1".to_string(),
             subscription_id: "subscription:1".to_string(),
-            process_id: ProcessId::from("process:1"),
+            process_id: Some(ProcessId::parse("p_0192a3b4c5d670008000000000000001").unwrap()),
             outcome: lash::remote::triggers::RemoteTriggerDeliveryEmitOutcome::Started,
         }],
     };
@@ -82,11 +82,11 @@ fn main() {
             kind: lash::remote::observations::RemoteSessionProcessEventKind::Started {
                 sequence: 1,
             },
-            process_ids: vec![ProcessId::from("process")],
+            process_ids: vec![ProcessId::parse("p_0192a3b4c5d670008000000000000001").unwrap()],
         };
 
     let process_start = lash::remote::processes::RemoteProcessStartRequest {
-        id: ProcessId::from("process"),
+        start_key: Some("start-key".to_string()),
         input: lash::remote::processes::RemoteProcessInput::External {
             metadata: serde_json::json!({}),
         },

@@ -349,8 +349,8 @@ impl RuntimeExecutionContext<'_> {
                 completion_routing,
                 session_facts.clone(),
             );
-            if let Some(process_ref) = opener.process_ref() {
-                request = request.with_enclosing_process(process_ref.clone());
+            if let Some(process_id) = opener.process_id() {
+                request = request.with_enclosing_process(process_id.clone());
             }
             envelopes.push(crate::RuntimeEffectEnvelope::new(
                 crate::RuntimeEffectInvocation::new(

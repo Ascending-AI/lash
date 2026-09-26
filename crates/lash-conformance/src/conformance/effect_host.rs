@@ -1,7 +1,6 @@
 //! [`EffectHost`] scope-factory and effect-controller replay conformance.
 
 use super::*;
-use lash_sansio::ProcessId;
 use lash_sansio::SessionId;
 use lash_sansio::sync::MutexExt;
 use pretty_assertions::assert_eq;
@@ -1016,8 +1015,8 @@ pub async fn effect_host_retires_session_journal(host: &dyn EffectHost) {
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn effect_host_retires_process_journal(host: &dyn EffectHost) {
-    let process_id = "retired-journal-process";
-    let scope = ExecutionScope::process(process_id);
+    let process_id = crate::ProcessId::fixture("retired-journal-process");
+    let scope = ExecutionScope::process(process_id.clone());
     let controller = host
         .scoped(admit(scope.clone()))
         .expect("retired process scope");
@@ -1226,10 +1225,11 @@ async fn effect_host_preserves_scope_metadata(host: Arc<dyn EffectHost>) {
 }
 
 async fn effect_host_rejects_missing_scope_ids(host: Arc<dyn EffectHost>) {
+    // A process scope carries a minted id, which is never empty, so only the
+    // string-keyed scopes can name a missing id.
     let invalid_scopes = [
         ExecutionScope::turn("", "turn"),
         ExecutionScope::turn("session", ""),
-        ExecutionScope::process(""),
         ExecutionScope::queue_drain("session", ""),
         ExecutionScope::session_delete(""),
         ExecutionScope::runtime_operation(""),
@@ -1435,7 +1435,7 @@ async fn effect_host_await_event_revokes_session_scope(host: Arc<dyn EffectHost>
 )]
 async fn effect_host_await_event_reinstate_lifts_process_scope_fence(host: Arc<dyn EffectHost>) {
     let suffix = uuid::Uuid::new_v4().simple();
-    let process_id = ProcessId::from(format!("await-event-reinstated-process-{suffix}"));
+    let process_id = crate::ProcessId::fixture(&format!("await-event-reinstated-process-{suffix}"));
     let scope = ExecutionScope::process(process_id.clone());
     host.await_event_key(
         &scope,
@@ -1805,7 +1805,8 @@ async fn effect_host_await_event_retires_non_session_scopes(host: Arc<dyn Effect
     let suffix = uuid::Uuid::new_v4().simple();
     let retired_op = format!("await-event-retired-op-{suffix}");
     let retired_scope = ExecutionScope::runtime_operation(retired_op.clone());
-    let survivor_process = format!("await-event-surviving-process-{suffix}");
+    let survivor_process =
+        crate::ProcessId::fixture(&format!("await-event-surviving-process-{suffix}"));
     let survivor_scope = ExecutionScope::process(survivor_process.clone());
     let retired_key = host
         .await_event_key(

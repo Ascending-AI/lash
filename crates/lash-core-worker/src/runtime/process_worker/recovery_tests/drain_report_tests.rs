@@ -8,17 +8,15 @@ use crate::ProcessLeases as _;
 async fn drain_reports_claim_backend_error_and_retries() {
     let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-claim-failure", "host-a", "start-a");
-    let process_id = "owner-bound-claim-failure";
-    registry
-        .register_process(registration_with_disposition(
-            process_id,
-            RecoveryContract::OwnerBound,
-        ))
+    let _process_id = "owner-bound-claim-failure";
+    let owner_bound_claim_failure_record = registry
+        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
         .await
         .expect("register owner-bound row");
+    let process_id = owner_bound_claim_failure_record.id.clone();
     registry
         .record_first_started(
-            &ProcessId::from(process_id),
+            &process_id,
             ProcessStarted {
                 owner: owner.clone(),
                 fencing_token: 0,
@@ -40,7 +38,7 @@ async fn drain_reports_claim_backend_error_and_retries() {
     assert_eq!(
         report.deferred,
         vec![ProcessDrainDeferred {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             disposition: ProcessRecoveryAttemptOutcome::BackendError {
                 operation: ProcessRecoveryOperation::ClaimLease,
                 error: "plugin session error: injected claim failure".to_string(),
@@ -49,7 +47,7 @@ async fn drain_reports_claim_backend_error_and_retries() {
     );
     assert_recovery_backend_error_event(
         &capture,
-        &ProcessId::from(process_id),
+        &process_id,
         "claim_lease",
         "plugin session error: injected claim failure",
     );
@@ -67,17 +65,15 @@ async fn drain_reports_claim_backend_error_and_retries() {
 async fn drain_reports_lease_renewal_backend_error_and_retries() {
     let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-renew-failure", "host-a", "start-a");
-    let process_id = "owner-bound-renew-failure";
-    registry
-        .register_process(registration_with_disposition(
-            process_id,
-            RecoveryContract::OwnerBound,
-        ))
+    let _process_id = "owner-bound-renew-failure";
+    let owner_bound_renew_failure_record = registry
+        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
         .await
         .expect("register owner-bound row");
+    let process_id = owner_bound_renew_failure_record.id.clone();
     registry
         .record_first_started(
-            &ProcessId::from(process_id),
+            &process_id,
             ProcessStarted {
                 owner: owner.clone(),
                 fencing_token: 0,
@@ -99,7 +95,7 @@ async fn drain_reports_lease_renewal_backend_error_and_retries() {
     assert_eq!(
         report.deferred,
         vec![ProcessDrainDeferred {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             disposition: ProcessRecoveryAttemptOutcome::BackendError {
                 operation: ProcessRecoveryOperation::RenewLease,
                 error: "plugin session error: injected lease-renewal failure".to_string(),
@@ -108,7 +104,7 @@ async fn drain_reports_lease_renewal_backend_error_and_retries() {
     );
     assert_recovery_backend_error_event(
         &capture,
-        &ProcessId::from(process_id),
+        &process_id,
         "renew_lease",
         "plugin session error: injected lease-renewal failure",
     );
@@ -126,17 +122,15 @@ async fn drain_reports_lease_renewal_backend_error_and_retries() {
 async fn drain_reports_registry_read_error_instead_of_absent() {
     let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-read-failure", "host-a", "start-a");
-    let process_id = "owner-bound-read-failure";
-    registry
-        .register_process(registration_with_disposition(
-            process_id,
-            RecoveryContract::OwnerBound,
-        ))
+    let _process_id = "owner-bound-read-failure";
+    let owner_bound_read_failure_record = registry
+        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
         .await
         .expect("register owner-bound row");
+    let process_id = owner_bound_read_failure_record.id.clone();
     registry
         .record_first_started(
-            &ProcessId::from(process_id),
+            &process_id,
             ProcessStarted {
                 owner: owner.clone(),
                 fencing_token: 0,
@@ -158,7 +152,7 @@ async fn drain_reports_registry_read_error_instead_of_absent() {
     assert_eq!(
         report.deferred,
         vec![ProcessDrainDeferred {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             disposition: ProcessRecoveryAttemptOutcome::BackendError {
                 operation: ProcessRecoveryOperation::ReadProcess,
                 error: "plugin session error: injected registry read failure".to_string(),
@@ -167,7 +161,7 @@ async fn drain_reports_registry_read_error_instead_of_absent() {
     );
     assert_recovery_backend_error_event(
         &capture,
-        &ProcessId::from(process_id),
+        &process_id,
         "read_process",
         "plugin session error: injected registry read failure",
     );
@@ -189,17 +183,15 @@ async fn drain_reports_registry_read_error_instead_of_absent() {
 async fn drain_reports_release_failure_over_absent() {
     let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-release-failure", "host-a", "start-a");
-    let process_id = "owner-bound-release-failure";
-    registry
-        .register_process(registration_with_disposition(
-            process_id,
-            RecoveryContract::OwnerBound,
-        ))
+    let _process_id = "owner-bound-release-failure";
+    let owner_bound_release_failure_record = registry
+        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
         .await
         .expect("register owner-bound row");
+    let process_id = owner_bound_release_failure_record.id.clone();
     registry
         .record_first_started(
-            &ProcessId::from(process_id),
+            &process_id,
             ProcessStarted {
                 owner: owner.clone(),
                 fencing_token: 0,
@@ -222,7 +214,7 @@ async fn drain_reports_release_failure_over_absent() {
     assert_eq!(
         report.deferred,
         vec![ProcessDrainDeferred {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             disposition: ProcessRecoveryAttemptOutcome::BackendError {
                 operation: ProcessRecoveryOperation::ReleaseLease,
                 error: "plugin session error: injected release failure".to_string(),
@@ -231,7 +223,7 @@ async fn drain_reports_release_failure_over_absent() {
     );
     assert_recovery_backend_error_event(
         &capture,
-        &ProcessId::from(process_id),
+        &process_id,
         "release_lease",
         "plugin session error: injected release failure",
     );
@@ -241,17 +233,16 @@ async fn drain_reports_release_failure_over_absent() {
 async fn drain_distinguishes_busy_and_absent_rows() {
     let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-legitimate-deferrals", "host-a", "start-a");
+    let mut ids = std::collections::BTreeMap::new();
     for process_id in ["owner-bound-busy", "owner-bound-absent"] {
-        registry
-            .register_process(registration_with_disposition(
-                process_id,
-                RecoveryContract::OwnerBound,
-            ))
+        let registered = registry
+            .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
             .await
             .expect("register owner-bound row");
+        ids.insert(process_id, registered.id.clone());
         registry
             .record_first_started(
-                &ProcessId::from(process_id),
+                &registered.id,
                 ProcessStarted {
                     owner: owner.clone(),
                     fencing_token: 0,
@@ -265,7 +256,7 @@ async fn drain_distinguishes_busy_and_absent_rows() {
     }
     registry
         .claim_process_lease(
-            &ProcessId::from("owner-bound-busy"),
+            &ids["owner-bound-busy"],
             &LeaseOwnerIdentity::opaque("live-peer", "live-peer-incarnation"),
             60_000,
         )
@@ -279,23 +270,21 @@ async fn drain_distinguishes_busy_and_absent_rows() {
     assert_eq!(
         busy.deferred,
         vec![ProcessDrainDeferred {
-            process_id: ProcessId::from("owner-bound-busy"),
+            process_id: ids["owner-bound-busy"].clone(),
             disposition: ProcessRecoveryAttemptOutcome::Busy,
         }]
     );
-    assert_eq!(busy.abandoned, vec!["owner-bound-absent".to_string()]);
+    assert_eq!(busy.abandoned, vec![ids["owner-bound-absent"].clone()]);
 
-    let absent_id = "owner-bound-read-as-absent";
-    registry
-        .register_process(registration_with_disposition(
-            absent_id,
-            RecoveryContract::OwnerBound,
-        ))
+    let _absent_id = "owner-bound-read-as-absent";
+    let owner_bound_read_as_absent_record = registry
+        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
         .await
         .expect("register read-as-absent row");
+    let absent_id = owner_bound_read_as_absent_record.id.clone();
     registry
         .record_first_started(
-            &ProcessId::from(absent_id),
+            &absent_id,
             ProcessStarted {
                 owner: worker.config().lease_owner.clone(),
                 fencing_token: 0,
@@ -312,11 +301,11 @@ async fn drain_distinguishes_busy_and_absent_rows() {
         absent.deferred,
         vec![
             ProcessDrainDeferred {
-                process_id: ProcessId::from("owner-bound-busy"),
+                process_id: ids["owner-bound-busy"].clone(),
                 disposition: ProcessRecoveryAttemptOutcome::Busy,
             },
             ProcessDrainDeferred {
-                process_id: ProcessId::from(absent_id.to_string()),
+                process_id: absent_id.clone(),
                 disposition: ProcessRecoveryAttemptOutcome::Absent,
             },
         ]

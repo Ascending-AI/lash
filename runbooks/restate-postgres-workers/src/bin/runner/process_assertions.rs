@@ -222,7 +222,7 @@ pub(super) async fn emit_button_event(
         .get("started_process_id")
         .and_then(Value::as_str)
         .context("trigger occurrence did not start a process")?;
-    Ok(ProcessId::from(started.to_string()))
+    ProcessId::parse(started).context("trigger occurrence started an unminted process id")
 }
 
 pub(super) fn signal_process_output_value(await_output: Value) -> Result<Value> {

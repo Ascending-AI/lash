@@ -1674,17 +1674,6 @@ write lock for its whole prune transaction and needs no second statement.
 """
 
 [[dialect_only]]
-statement = "process.select_incarnation"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite reads the live incarnation as its own statement while acknowledging an
-artifact cleanup, under the write lock the whole acknowledgement runs in.
-PostgreSQL folds the same question into the CTE that deletes the cleanup row,
-because it cannot hold the two reads together otherwise.
-"""
-
-[[dialect_only]]
 statement = "process.select_record_json_for_update"
 backends = ["postgres"]
 kind = "FOR UPDATE"
@@ -1702,26 +1691,6 @@ reason = """
 SQLite writes one cleanup row per pruned candidate. PostgreSQL writes the same
 rows from inside process_registry.prune_rows, derived from the tombstones that
 statement just inserted.
-"""
-
-[[dialect_only]]
-statement = "process_artifact_cleanup.delete_for_incarnation"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite deletes the cleanup row and reads the live incarnation as two statements
-under its write lock; PostgreSQL asks both in one CTE, which is the entry
-below.
-"""
-
-[[dialect_only]]
-statement = "process_artifact_cleanup.delete_for_incarnation_reporting_incarnation"
-backends = ["postgres"]
-kind = "operation exists on one backend only"
-reason = """
-The PostgreSQL counterpart of the SQLite pair above: the delete and the
-incarnation read have to see one snapshot, because together they decide between
-"acknowledged", "stale incarnation" and "unknown".
 """
 
 [[dialect_only]]
@@ -1881,22 +1850,6 @@ reason = """
 INSERT OR IGNORE on SQLite, ON CONFLICT DO NOTHING on PostgreSQL: the same
 idempotent insert, spelled by each dialect's own clause.
 """
-
-[[dialect_only]]
-statement = "process_observer.list_sessions_for_incarnation"
-backends = ["sqlite"]
-kind = "operation exists on one backend only"
-reason = """
-SQLite narrows the observer list to the incarnation it read under its write
-lock; PostgreSQL reports every incarnation's observers, having refused an
-unknown process first.
-"""
-
-[[dialect_only]]
-statement = "process_observer.list_sessions_for_process"
-backends = ["postgres"]
-kind = "operation exists on one backend only"
-reason = "The PostgreSQL counterpart of process_observer.list_sessions_for_incarnation."
 
 [[dialect_only]]
 statement = "process_registry.list_observed"

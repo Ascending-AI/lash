@@ -2,18 +2,21 @@ use super::*;
 
 #[tokio::test]
 async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
-    let process_id = "restate-process-tool-replay";
     let executions = Arc::new(AtomicUsize::new(0));
     let registry = process_registry();
     let store_factory: Arc<dyn lash_core::SessionStoreFactory> =
         memory_session_store_factory().await;
     let env_ref = persist_recovery_env_ref().await;
-    let registration =
-        counting_tool_registration(process_id, lash_core::RecoveryContract::Rerunnable, env_ref);
-    registry
+    let registration = counting_tool_registration(
+        "restate-process-tool-replay",
+        lash_core::RecoveryContract::Rerunnable,
+        env_ref,
+    );
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register replay process");
+        .expect("register replay process")
+        .id;
     let worker = recovery_worker_with_plugins(
         Arc::clone(&registry),
         store_factory,
@@ -24,16 +27,15 @@ async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
 
     let first_controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let first_scope = first_controller
-        .process_scope_for_test(
-            recorded_process_admission(registry.as_ref(), &ProcessId::from(process_id)).await,
-        )
+        .process_scope_for_test(recorded_process_admission(registry.as_ref(), &process_id).await)
         .expect("scope first process execution");
     let first = worker
         .run_process_segment_with_scoped_effect_controller(
+            process_id.clone(),
             registration.clone(),
             ProcessExecutionContext::default(),
             lash_core::ProcessExecutionWriteAuthority::invocation(
-                process_id,
+                process_id.clone(),
                 "process-tool-replay-execution",
             ),
             first_scope,
@@ -52,16 +54,15 @@ async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
     context.start_replay();
     let replay_controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let replay_scope = replay_controller
-        .process_scope_for_test(
-            recorded_process_admission(registry.as_ref(), &ProcessId::from(process_id)).await,
-        )
+        .process_scope_for_test(recorded_process_admission(registry.as_ref(), &process_id).await)
         .expect("scope replayed process execution");
     let replayed = worker
         .run_process_segment_with_scoped_effect_controller(
+            process_id.clone(),
             registration,
             ProcessExecutionContext::default(),
             lash_core::ProcessExecutionWriteAuthority::invocation(
-                process_id,
+                process_id.clone(),
                 "process-tool-replay-execution",
             ),
             replay_scope,
@@ -91,18 +92,21 @@ async fn restate_replay_does_not_reexecute_process_owned_tool_call() {
 /// terminal failure of the attempt.
 #[tokio::test]
 async fn a_redrive_after_the_terminal_is_stored_replays_the_runner() {
-    let process_id = "restate-process-redrive-after-complete";
     let executions = Arc::new(AtomicUsize::new(0));
     let registry = process_registry();
     let store_factory: Arc<dyn lash_core::SessionStoreFactory> =
         memory_session_store_factory().await;
     let env_ref = persist_recovery_env_ref().await;
-    let registration =
-        counting_tool_registration(process_id, lash_core::RecoveryContract::Rerunnable, env_ref);
-    registry
+    let registration = counting_tool_registration(
+        "restate-process-redrive-after-complete",
+        lash_core::RecoveryContract::Rerunnable,
+        env_ref,
+    );
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register redriven process");
+        .expect("register redriven process")
+        .id;
     let worker = recovery_worker_with_plugins(
         Arc::clone(&registry),
         store_factory,
@@ -111,20 +115,20 @@ async fn a_redrive_after_the_terminal_is_stored_replays_the_runner() {
     .await;
     let context = Arc::new(ReplayableRecordingContext::default());
     let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-        process_id,
+        process_id.clone(),
         "process-redrive-after-complete-execution",
     );
 
     let first_controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let first = worker
         .run_process_segment_with_scoped_effect_controller(
+            process_id.clone(),
             registration.clone(),
             ProcessExecutionContext::default(),
             authority.clone(),
             first_controller
                 .process_scope_for_test(
-                    recorded_process_admission(registry.as_ref(), &ProcessId::from(process_id))
-                        .await,
+                    recorded_process_admission(registry.as_ref(), &process_id).await,
                 )
                 .expect("scope first process execution"),
             tokio_util::sync::CancellationToken::new(),
@@ -139,9 +143,9 @@ async fn a_redrive_after_the_terminal_is_stored_replays_the_runner() {
     // that proposed it is acknowledged.
     registry
         .complete_process(
-            &ProcessId::from(process_id),
+            &process_id,
             (**output).clone(),
-            workflow_key_authority(&ProcessId::from(process_id)),
+            workflow_key_authority(&process_id),
         )
         .await
         .expect("store the terminal");
@@ -150,13 +154,13 @@ async fn a_redrive_after_the_terminal_is_stored_replays_the_runner() {
     let replay_controller = RestateRuntimeEffectController::new_for_test(Arc::clone(&context));
     let replayed = worker
         .run_process_segment_with_scoped_effect_controller(
+            process_id.clone(),
             registration,
             ProcessExecutionContext::default(),
             authority,
             replay_controller
                 .process_scope_for_test(
-                    recorded_process_admission(registry.as_ref(), &ProcessId::from(process_id))
-                        .await,
+                    recorded_process_admission(registry.as_ref(), &process_id).await,
                 )
                 .expect("scope redriven process execution"),
             tokio_util::sync::CancellationToken::new(),
@@ -171,7 +175,7 @@ async fn a_redrive_after_the_terminal_is_stored_replays_the_runner() {
     assert_eq!(executions.load(Ordering::SeqCst), 1);
 }
 
-async fn signal_waiting_process_registration(process_id: &ProcessId) -> ProcessRegistration {
+async fn signal_waiting_process_registration() -> ProcessRegistration {
     let environment = lashlang::LashlangHostEnvironment::new(
         lashlang::LashlangHostCatalog::new(),
         lashlang::LashlangAbilities::all(),
@@ -197,7 +201,6 @@ async fn signal_waiting_process_registration(process_id: &ProcessId) -> ProcessR
     let worker = sole_lifted_process_name(&linked.artifact);
     let env_ref = persist_recovery_env_ref().await;
     ProcessRegistration::new(
-        process_id,
         lashlang_process_input(lash_lashlang_runtime::LashlangProcessInput {
             module_ref: linked.artifact.module_ref().clone(),
             process_ref: linked
@@ -227,20 +230,20 @@ async fn signal_waiting_process_registration(process_id: &ProcessId) -> ProcessR
 /// reaches the same terminal (FIG-3673).
 #[tokio::test]
 async fn a_wait_signal_body_redriven_over_its_stored_terminal_replays_its_wait_steps() {
-    let process_id = ProcessId::from("restate-process-wait-signal-redrive");
     let registry = process_registry();
     let store_factory: Arc<dyn lash_core::SessionStoreFactory> =
         memory_session_store_factory().await;
-    let registration = signal_waiting_process_registration(&process_id).await;
-    registry
+    let registration = signal_waiting_process_registration().await;
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register the signal-waiting process");
+        .expect("register the signal-waiting process")
+        .id;
     let worker = recovery_worker(Arc::clone(&registry), store_factory).await;
     let context = Arc::new(ReplayableRecordingContext::default());
     let signal_key = restate_await_event_key_for_authority(
         &test_restate_authority_id(),
-        &ExecutionScope::process(&process_id),
+        &ExecutionScope::process(process_id.clone()),
         AwaitEventWaitIdentity::process_signal(&process_id, "go", 1),
     )
     .expect("the signal wait's key");
@@ -251,7 +254,7 @@ async fn a_wait_signal_body_redriven_over_its_stored_terminal_replays_its_wait_s
             resolution: Resolution::Ok(serde_json::json!({ "go": true })),
         });
     let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-        &process_id,
+        process_id.clone(),
         "process-wait-signal-redrive-execution",
     );
     let run = |context: Arc<ReplayableRecordingContext>| {
@@ -267,6 +270,7 @@ async fn a_wait_signal_body_redriven_over_its_stored_terminal_replays_its_wait_s
             );
             worker
                 .run_process_segment_with_scoped_effect_controller(
+                    process_id.clone(),
                     registration,
                     ProcessExecutionContext::default(),
                     authority,
@@ -333,18 +337,21 @@ async fn a_wait_signal_body_redriven_over_its_stored_terminal_replays_its_wait_s
 /// carries no park: the terminal fold clears it.
 #[tokio::test]
 async fn a_redrive_after_the_records_mutable_state_moved_replays_the_run_unchanged() {
-    let process_id = "restate-process-pre-run-read-invariant";
     let executions = Arc::new(AtomicUsize::new(0));
     let registry = process_registry();
     let store_factory: Arc<dyn lash_core::SessionStoreFactory> =
         memory_session_store_factory().await;
     let env_ref = persist_recovery_env_ref().await;
-    let registration =
-        counting_tool_registration(process_id, lash_core::RecoveryContract::Rerunnable, env_ref);
-    registry
+    let registration = counting_tool_registration(
+        "restate-process-pre-run-read-invariant",
+        lash_core::RecoveryContract::Rerunnable,
+        env_ref,
+    );
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register the process");
+        .expect("register the process")
+        .id;
     let worker = recovery_worker_with_plugins(
         Arc::clone(&registry),
         store_factory,
@@ -353,7 +360,7 @@ async fn a_redrive_after_the_records_mutable_state_moved_replays_the_run_unchang
     .await;
     let context = Arc::new(ReplayableRecordingContext::default());
     let authority = lash_core::ProcessExecutionWriteAuthority::invocation(
-        process_id,
+        process_id.clone(),
         "process-pre-run-read-invariant-execution",
     );
     let run = |context: Arc<ReplayableRecordingContext>| {
@@ -361,20 +368,18 @@ async fn a_redrive_after_the_records_mutable_state_moved_replays_the_run_unchang
         let registry = Arc::clone(&registry);
         let registration = registration.clone();
         let authority = authority.clone();
+        let process_id = process_id.clone();
         async move {
             let controller = RestateRuntimeEffectController::new_for_test(context);
             worker
                 .run_process_segment_with_scoped_effect_controller(
+                    process_id.clone(),
                     registration,
                     ProcessExecutionContext::default(),
                     authority,
                     controller
                         .process_scope_for_test(
-                            recorded_process_admission(
-                                registry.as_ref(),
-                                &ProcessId::from(process_id),
-                            )
-                            .await,
+                            recorded_process_admission(registry.as_ref(), &process_id).await,
                         )
                         .expect("scope the process"),
                     tokio_util::sync::CancellationToken::new(),
@@ -387,7 +392,7 @@ async fn a_redrive_after_the_records_mutable_state_moved_replays_the_run_unchang
     let first = run(Arc::clone(&context)).await.expect("run the process");
     let recorded_steps = context.runs();
     let before = registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await
         .expect("read the record")
         .expect("the record stands");
@@ -395,9 +400,9 @@ async fn a_redrive_after_the_records_mutable_state_moved_replays_the_run_unchang
     // The record's mutable state moves on between attempts.
     registry
         .append_event(
-            &ProcessId::from(process_id),
+            &process_id,
             lash_core::ProcessEventAppendRequest::cancel_requested(
-                &lash_core::ProcessRef::from_record(&before),
+                &before.id,
                 &lash_core::CancelRequest::new(
                     lash_core::CancelOrigin::OperatorRequested,
                     "actor:fixture:pre-run-read",
@@ -409,7 +414,7 @@ async fn a_redrive_after_the_records_mutable_state_moved_replays_the_run_unchang
         .expect("record a cancel request");
     registry
         .park_process_with_authority(
-            &ProcessId::from(process_id),
+            &process_id,
             lash_core::store::ParkReason::ReplayDivergence {
                 message: "parked between attempts".to_string(),
             }
@@ -420,7 +425,7 @@ async fn a_redrive_after_the_records_mutable_state_moved_replays_the_run_unchang
         .expect("park the process");
     registry
         .set_external_ref(
-            &ProcessId::from(process_id),
+            &process_id,
             lash_core::ProcessExternalRef {
                 backend: "restate".to_string(),
                 id: "LashProcessWorkflow/elsewhere".to_string(),
@@ -446,7 +451,7 @@ async fn a_redrive_after_the_records_mutable_state_moved_replays_the_run_unchang
     );
     assert_eq!(executions.load(Ordering::SeqCst), 1);
     let after = registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await
         .expect("read the record")
         .expect("the record stands");

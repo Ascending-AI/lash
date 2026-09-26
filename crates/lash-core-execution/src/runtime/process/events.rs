@@ -601,7 +601,6 @@ pub fn validate_process_signal_name(signal_name: &str) -> Result<(), crate::Plug
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ProcessEvent {
     pub process_id: ProcessId,
-    pub process_incarnation: ProcessIncarnation,
     pub sequence: u64,
     pub event_type: String,
     pub payload: serde_json::Value,
@@ -737,13 +736,6 @@ pub enum ProcessEventHistoryRetention {
         terminal_label: String,
         pruned_at_ms: u64,
     },
-    /// The reusable process id now names a later incarnation.
-    Retired {
-        #[schemars(with = "u64")]
-        requested_incarnation: ProcessIncarnation,
-        #[schemars(with = "u64")]
-        current_incarnation: ProcessIncarnation,
-    },
 }
 
 /// Result of reading a process-event history without collapsing retention into
@@ -843,11 +835,11 @@ impl ProcessEventAppendRequest {
         self
     }
 
-    /// Build a cancellation event keyed by process lifetime, origin, and requester.
+    /// Build a cancellation event keyed by process, origin, and requester.
     /// Retrying with a fresh clock retains the first accepted cancellation fact.
-    pub fn cancel_requested(process_ref: &ProcessRef, request: &CancelRequest) -> Self {
+    pub fn cancel_requested(process_id: &ProcessId, request: &CancelRequest) -> Self {
         Self::new("process.cancel_requested", serde_json::json!(request))
-            .with_replay_key(cancellation_replay_key(process_ref, request))
+            .with_replay_key(cancellation_replay_key(process_id, request))
     }
 
     /// Builds a first-start event for process-store implementors keyed by attempt number so a retry
@@ -1013,18 +1005,19 @@ impl ProcessEventAppendRequest {
     }
 }
 
-const PROCESS_CANCELLATION_FAMILY_VERSION: u8 = 2;
+/// Version 3 drops the process incarnation: a minted process id names one
+/// process (ADR 0107).
+const PROCESS_CANCELLATION_FAMILY_VERSION: u8 = 3;
 
 /// Permanent cancellation origin tags: TurnStopped=0, ParentEnded=1,
 /// OperatorRequested=2, ModelRequested=3, StartFailed=4. Clock readings are
-/// excluded: origin and requester identify the request on this incarnation.
-fn cancellation_replay_preimage(process_ref: &ProcessRef, request: &CancelRequest) -> Vec<u8> {
+/// excluded: origin and requester identify the request on this process.
+fn cancellation_replay_preimage(process_id: &ProcessId, request: &CancelRequest) -> Vec<u8> {
     let mut identity = crate::stable_identity::IdentityEncoder::new(
         "lash.process-cancellation-request",
         PROCESS_CANCELLATION_FAMILY_VERSION,
     );
-    identity.string(&process_ref.process_id);
-    identity.u64(process_ref.incarnation.registration_sequence());
+    identity.string(process_id);
     identity.tag(match request.origin {
         CancelOrigin::TurnStopped => 0,
         CancelOrigin::ParentEnded => 1,
@@ -1036,11 +1029,11 @@ fn cancellation_replay_preimage(process_ref: &ProcessRef, request: &CancelReques
     identity.finish()
 }
 
-fn cancellation_replay_key(process_ref: &ProcessRef, request: &CancelRequest) -> String {
+fn cancellation_replay_key(process_id: &ProcessId, request: &CancelRequest) -> String {
     crate::stable_identity::rendered_hash(
         "process-cancellation",
         PROCESS_CANCELLATION_FAMILY_VERSION,
-        &cancellation_replay_preimage(process_ref, request),
+        &cancellation_replay_preimage(process_id, request),
     )
 }
 
@@ -1180,10 +1173,7 @@ mod cancellation_identity_tests {
 
     #[test]
     fn cancellation_replay_identity_has_pinned_bounded_grammar() {
-        let process_ref = ProcessRef::new(
-            "process\0id",
-            ProcessIncarnation::from_registration_sequence(1),
-        );
+        let process_ref = ProcessId::from_minted(0x0000_0000_0000_7000_8000_0000_0000_0000 | 1);
         let request = CancelRequest::new(CancelOrigin::OperatorRequested, "λ".repeat(3_200), 10);
         let key = cancellation_replay_key(&process_ref, &request);
         assert_eq!(
@@ -1193,12 +1183,12 @@ mod cancellation_identity_tests {
         );
         assert_eq!(
             key,
-            "process-cancellation:v2:blake3:8c20e92daee0b9dcc19707479719f071c47906266c5e843aeaacc7004a840b17"
+            "process-cancellation:v3:blake3:88f852453064ce3fe2c7aa1c45fd73d10a4053d73cb2305ea4a656b46f34070c"
         );
         let empty = CancelRequest::new(CancelOrigin::OperatorRequested, "", 10);
         assert_eq!(
             hex(&cancellation_replay_preimage(&process_ref, &empty)),
-            "6c6173682d737461626c652d6964656e74697479020200000000000000216c6173682e70726f636573732d63616e63656c6c6174696f6e2d72657175657374000000000000000a70726f636573730069640000000000000001020000000000000000"
+            "6c6173682d737461626c652d6964656e74697479020300000000000000216c6173682e70726f636573732d63616e63656c6c6174696f6e2d726571756573740000000000000022705f3030303030303030303030303730303038303030303030303030303030303031020000000000000000"
         );
         let retry = CancelRequest {
             requested_at_ms: 99,
@@ -1210,11 +1200,8 @@ mod cancellation_identity_tests {
             ..request.clone()
         };
         assert_ne!(key, cancellation_replay_key(&process_ref, &other_origin));
-        let other_incarnation = ProcessRef::new(
-            "process\0id",
-            ProcessIncarnation::from_registration_sequence(2),
-        );
-        assert_ne!(key, cancellation_replay_key(&other_incarnation, &request));
+        let other_process = ProcessId::from_minted(0x0000_0000_0000_7000_8000_0000_0000_0000 | 2);
+        assert_ne!(key, cancellation_replay_key(&other_process, &request));
     }
 
     #[test]

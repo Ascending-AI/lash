@@ -82,6 +82,9 @@ struct ExpandMigration {
 /// admitted root's start marker, and becomes 138 (FIG-3815). Newer schema
 /// generations append to this list; steps are never
 /// removed or edited — the ledger names them permanently.
+/// Component 139 (FIG-3607) re-keys the process relations, which is no
+/// expand step, so nothing chains from 138: a 133–138 catalog plans to the
+/// typed recreate refusal.
 static EXPAND_MIGRATIONS: &[ExpandMigration] = &[
     ExpandMigration {
         id: "0134-migrations-ledger",

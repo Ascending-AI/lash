@@ -4,7 +4,9 @@
 //! the submit failure path owns a compensation: these two functions keep that
 //! pairing in one place.
 
+use super::process_command::{process_command_journal_error, process_command_journal_name};
 use super::*;
+use restate_sdk::serde::Json;
 
 /// Why a process workflow submission did not return an invocation id.
 ///
@@ -38,30 +40,28 @@ impl ProcessWorkflowStartFailure {
 
 pub(super) async fn schedule_restate_process<'ctx, C>(
     registry: Arc<dyn ProcessRegistry>,
+    started: lash_core::runtime::RegisteredProcessStart,
     registration: lash_core::ProcessRegistration,
-    observers: Vec<SessionId>,
     execution_context: lash_core::ProcessExecutionContext,
     context: &C,
-) -> Result<(ProcessRecord, lash_core::StoreRealization), PluginError>
+    invocation: &RuntimeEffectInvocation,
+) -> Result<(ProcessRecord, lash_core::StoreRealization), RuntimeEffectControllerError>
 where
     C: RestateControllerContext<'ctx> + ?Sized,
 {
-    let process_id = registration.id.clone();
-    // A differing registration fingerprint is a refusal, and an exact repeat is
-    // idempotent: it returns the row an earlier call created rather than
-    // failing. Compensation below may only touch a row *this* call created, so
-    // the disposition -- not the mere success of the registration -- is what
-    // licenses it.
-    let registered = registry
-        .register_process_reporting_disposition(registration.clone(), &observers)
-        .await?;
-    let created_here = registered.is_created();
-    // The registry's own verdict, carried out to the caller so a coalesced
-    // redelivery is reported as a replay rather than a fresh start (FIG-3070).
-    let realization = lash_core::StoreRealization::from_wrote(created_here);
-    let record = registered.record;
+    // The registration is the recorded one: a start under a retained key is
+    // idempotent and returns the row an earlier call created, whatever this
+    // call's content (ADR 0107). Compensation below may only touch a row
+    // *this* start created, so the recorded disposition -- not the mere
+    // success of the registration -- is what licenses it. Every registry
+    // write after the send is journaled too, so a replay after the process
+    // was pruned reads what the live start wrote and never the store.
+    let realization = started.realization();
+    let created_here = started.created;
+    let record = started.record;
+    let process_id = record.id.clone();
     let invocation_id = match context
-        .start_process_workflow(registration, execution_context)
+        .start_process_workflow(process_id.clone(), registration, execution_context)
         .await
     {
         Ok(invocation_id) => invocation_id,
@@ -81,7 +81,7 @@ where
             // Two things withhold that write. An ambiguous failure carries no
             // proof the run was refused, so an invocation may be executing and
             // terminalising the row would make the workflow's own terminal
-            // write fail. And a row this call did not create belongs to the
+            // write fail. And a row this start did not create belongs to the
             // attempt that did: cancelling it would let a retry kill the work
             // its predecessor started.
             if !failure.proves_nothing_is_running() || !created_here {
@@ -94,61 +94,97 @@ where
                 );
                 return Ok((record, realization));
             }
-            return match compensate_failed_process_submission(
-                registry.as_ref(),
-                &record,
-                &submit_error,
-            )
-            .await
-            {
-                Ok(()) => Err(submit_error),
-                // The compensation write itself failed. The row is now exactly
-                // the shape the recovery sweep resubmits — nonterminal, no
-                // external reference, no cancel request — so the honest answer
-                // is the record: the start stands and recovery owns the run.
-                Err(compensation_error) => {
-                    tracing::error!(
-                        process_id = %process_id,
-                        submit_error = %submit_error,
-                        error = %compensation_error,
-                        "Restate process submission failed and its start-failed compensation could not be written; recovery owns the row"
-                    );
-                    Ok((record, realization))
-                }
+            let compensation_registry = Arc::clone(&registry);
+            let compensation_record = record.clone();
+            let compensation_error = submit_error.to_string();
+            let Json(compensated) = context
+                .run_json_or_retry_send(
+                    process_command_journal_name(invocation, "process-start-compensate"),
+                    async move {
+                        // The compensation write failing leaves the row
+                        // exactly the shape the recovery sweep resubmits --
+                        // nonterminal, no external reference, no cancel
+                        // request -- so that answer is recorded, not retried:
+                        // the start stands and recovery owns the run.
+                        Ok::<_, String>(
+                            match compensate_failed_process_submission(
+                                compensation_registry.as_ref(),
+                                &compensation_record,
+                                &compensation_error,
+                            )
+                            .await
+                            {
+                                Ok(()) => true,
+                                Err(error) => {
+                                    tracing::error!(
+                                        process_id = %compensation_record.id,
+                                        submit_error = %compensation_error,
+                                        %error,
+                                        "Restate process submission failed and its start-failed compensation could not be written; recovery owns the row"
+                                    );
+                                    false
+                                }
+                            },
+                        )
+                    },
+                )
+                .await
+                .map_err(|error| process_command_journal_error("start compensation", error))?;
+            return if compensated {
+                Err(submit_error.into())
+            } else {
+                Ok((record, realization))
             };
         }
     };
-    registry
-        .set_external_ref(
-            &process_id,
-            ProcessExternalRef {
-                backend: "restate".to_string(),
-                id: format!(
-                    "{}/{}",
-                    crate::LashService::ProcessWorkflow.name(),
-                    crate::process::process_segment_workflow_key(&process_id, 0)
-                ),
-                metadata: Some(serde_json::json!({ "invocation_id": invocation_id })),
-                // A live start always schedules the first segment; a later
-                // segment's reference is written by the handover path or the
-                // recovery sweep and supersedes this one.
-                segment_ordinal: Some(0),
+    let Json(record) = context
+        .run_json_or_retry_send(
+            process_command_journal_name(invocation, "process-start-external-ref"),
+            async move {
+                registry
+                    .set_external_ref(
+                        &process_id,
+                        ProcessExternalRef {
+                            backend: "restate".to_string(),
+                            id: format!(
+                                "{}/{}",
+                                crate::LashService::ProcessWorkflow.name(),
+                                crate::process::process_segment_workflow_key(&process_id, 0)
+                            ),
+                            metadata: Some(serde_json::json!({ "invocation_id": invocation_id })),
+                            // A live start always schedules the first segment;
+                            // a later segment's reference is written by the
+                            // handover path or the recovery sweep and
+                            // supersedes this one.
+                            segment_ordinal: Some(0),
+                        },
+                    )
+                    .await
+                    .map_or_else(
+                        |error| {
+                            if error.is_terminal() {
+                                Ok(Err(RuntimeEffectControllerError::from(error)))
+                            } else {
+                                Err(error.to_string())
+                            }
+                        },
+                        |record| Ok(Ok(record)),
+                    )
             },
         )
         .await
-        .map(|record| (record, realization))
+        .map_err(|error| process_command_journal_error("start external reference", error))?;
+    Ok((record?, realization))
 }
 
-/// Record the StartFailed cancellation for a row whose workflow submission
-/// failed after registration.
 async fn compensate_failed_process_submission(
     registry: &dyn ProcessRegistry,
     record: &ProcessRecord,
-    submit_error: &PluginError,
+    submit_error: &str,
 ) -> Result<(), PluginError> {
     registry
         .request_process_cancel(
-            &lash_core::ProcessRef::from_record(record),
+            &record.id,
             lash_core::CancelOrigin::StartFailed,
             format!("restate:start-failed:{}", record.id),
             None,

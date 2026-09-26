@@ -122,10 +122,13 @@ delegate_process_registrar!(
     WatchedProcessRegistry,
     inner,
     registration | watched,
-    process_id,
     forwarded | {
         let record = forwarded.await?;
-        watched.hub.notify(&process_id);
+        watched.hub.notify(
+            crate::runtime::process::registry_delegate::RegisteredProcess::registered_process_id(
+                &record,
+            ),
+        );
         Ok(record)
     },
     event | watched,

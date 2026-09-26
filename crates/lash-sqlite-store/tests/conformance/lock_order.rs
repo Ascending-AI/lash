@@ -27,7 +27,9 @@ const ROUNDS: usize = 200;
 const OPERATION_BOUND: Duration = Duration::from_secs(5);
 
 fn scope(round: usize) -> ExecutionScope {
-    ExecutionScope::process(format!("lock-order-process-{round}"))
+    ExecutionScope::process(lash_core_execution::ProcessId::fixture(&format!(
+        "lock-order-process-{round}"
+    )))
 }
 
 fn bounded(started: Instant, what: &str) {
@@ -96,9 +98,11 @@ async fn retention_sweeps_and_process_scope_promises_never_wait_on_each_other() 
             if round % 4 == 0 {
                 let started = Instant::now();
                 writer
-                    .retire_effect_journal(EffectJournalRetirement::process(format!(
-                        "lock-order-process-{round}"
-                    )))
+                    .retire_effect_journal(EffectJournalRetirement::process(
+                        lash_core_execution::ProcessId::fixture(&format!(
+                            "lock-order-process-{round}"
+                        )),
+                    ))
                     .await
                     .expect("fence a process scope");
                 bounded(started, "a process-scope fence");

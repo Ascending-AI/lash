@@ -276,10 +276,7 @@ async fn put_attachment_intent(
     );
     let _owner_binding = match owner_kind % 3 {
         1 => Some(facade.bind_turn_scoped(owner_id)),
-        2 => Some(facade.bind_process_scoped(crate::ProcessRef::new(
-            owner_id,
-            crate::ProcessIncarnation::from_registration_sequence(1),
-        ))),
+        2 => Some(facade.bind_process_scoped(crate::ProcessId::fixture(&owner_id))),
         _ => None,
     };
     let attachment = facade

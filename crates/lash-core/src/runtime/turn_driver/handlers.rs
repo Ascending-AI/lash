@@ -861,7 +861,7 @@ mod tests {
         let process = RuntimeInvocation {
             attribution: RuntimeAttribution::for_turn("session-1", "turn-1", 2, 3),
             subject: crate::RuntimeSubject::Process {
-                process_id: crate::ProcessId::from("process-1".to_string()),
+                process_id: crate::ProcessId::fixture("process-1"),
             },
             caused_by: None,
             replay: None,

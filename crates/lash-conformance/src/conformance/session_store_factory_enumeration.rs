@@ -113,7 +113,7 @@ pub(super) async fn session_store_factory_enumeration_is_read_only_and_keeps_tom
     let uncaused = factory
         .list_sessions(&crate::SessionListFilter {
             caused_by: Some(crate::CausalRef::Process {
-                process_id: crate::ProcessId::from("enumeration-absent-process"),
+                process_id: crate::ProcessId::fixture("enumeration-absent-process"),
             }),
             ..crate::SessionListFilter::default()
         })

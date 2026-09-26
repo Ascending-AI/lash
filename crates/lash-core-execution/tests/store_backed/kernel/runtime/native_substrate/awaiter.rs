@@ -25,9 +25,8 @@ mod tests {
         (Arc::clone(watched.registry()), watched.hub().clone())
     }
 
-    fn registration(process_id: &ProcessId) -> ProcessRegistration {
+    fn registration() -> ProcessRegistration {
         ProcessRegistration::new(
-            process_id,
             ProcessInput::External {
                 metadata: serde_json::json!({}),
             },
@@ -48,12 +47,8 @@ mod tests {
         }
     }
 
-    fn registration_with_events(
-        process_id: &ProcessId,
-        event_types: &[&str],
-    ) -> ProcessRegistration {
-        registration(process_id)
-            .with_extra_event_types(event_types.iter().map(|name| plain_event_type(name)))
+    fn registration_with_events(event_types: &[&str]) -> ProcessRegistration {
+        registration().with_extra_event_types(event_types.iter().map(|name| plain_event_type(name)))
     }
 
     #[derive(Clone, Default)]
@@ -80,90 +75,6 @@ mod tests {
         ProcessAwaitOutput::from_tool_output(crate::ToolCallOutput::success(value))
     }
 
-    #[tokio::test]
-    async fn superseded_await_receipt_is_refused_instead_of_returning_the_successor_outcome() {
-        let registry = memory_registry().await;
-        let old = registry
-            .register_process(registration(&ProcessId::from("reused-await")))
-            .await
-            .expect("register old incarnation");
-        let old_ref = crate::ProcessRef::from_record(&old);
-        registry
-            .complete_process(
-                &old.id,
-                success(serde_json::json!("old")),
-                crate::ProcessCompletionAuthority::external_owner(),
-            )
-            .await
-            .expect("complete old incarnation");
-        registry
-            .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
-            .await
-            .expect("prune old incarnation");
-        let current = registry
-            .register_process(registration(&ProcessId::from("reused-await")))
-            .await
-            .expect("register successor incarnation");
-        registry
-            .complete_process(
-                &current.id,
-                success(serde_json::json!("successor")),
-                crate::ProcessCompletionAuthority::external_owner(),
-            )
-            .await
-            .expect("complete successor incarnation");
-        let awaiter = NativeProcessAwaiter::for_registry(registry);
-
-        let result = awaiter.await_terminal_ref(&old_ref).await;
-
-        assert!(
-            matches!(
-                result,
-                Err(crate::PluginError::ProcessIncarnationSuperseded { .. })
-            ),
-            "old await receipt must refuse the successor, got {result:?}"
-        );
-    }
-
-    #[tokio::test]
-    async fn superseded_event_await_is_refused_instead_of_polling_the_successor() {
-        let registry = memory_registry().await;
-        let old = registry
-            .register_process(registration(&ProcessId::from("reused-event-await")))
-            .await
-            .expect("register old incarnation");
-        let old_ref = crate::ProcessRef::from_record(&old);
-        registry
-            .complete_process(
-                &old.id,
-                success(serde_json::json!("old")),
-                crate::ProcessCompletionAuthority::external_owner(),
-            )
-            .await
-            .expect("complete old incarnation");
-        registry
-            .prune_terminal_processes(u64::MAX, None, ProjectionWatermark::NoProjector)
-            .await
-            .expect("prune old incarnation");
-        registry
-            .register_process(registration(&ProcessId::from("reused-event-await")))
-            .await
-            .expect("register successor incarnation");
-        let awaiter = NativeProcessAwaiter::for_registry(registry);
-
-        let result = awaiter
-            .await_event_ref(&old_ref, "process.completed", 0)
-            .await;
-
-        assert!(
-            matches!(
-                result,
-                Err(crate::PluginError::ProcessIncarnationSuperseded { .. })
-            ),
-            "old event await must refuse the successor, got {result:?}"
-        );
-    }
-
     /// ADR 0016 pins the default awaiter cadence while allowing native backends
     /// to tune both bounds through `WorkCadencePolicy`.
     ///
@@ -176,12 +87,12 @@ mod tests {
     async fn polling_awaiter_uses_configured_work_cadence_floor() {
         let registry = memory_registry().await;
         let registered = registry
-            .register_process(registration(&ProcessId::from("configured-cadence")))
+            .register_process(registration())
             .await
             .expect("register");
         registry
             .complete_process(
-                &ProcessId::from("configured-cadence"),
+                &registered.id,
                 success(serde_json::json!("done")),
                 crate::ProcessCompletionAuthority::external_owner(),
             )
@@ -196,9 +107,8 @@ mod tests {
         };
         let awaiter = NativeProcessAwaiter::for_registry(Arc::new(faults.clone()))
             .with_work_cadence(work_cadence);
-        let process_ref = crate::ProcessRef::from_record(&registered);
-        let waiter =
-            crate::task::spawn(async move { awaiter.await_terminal_ref(&process_ref).await });
+        let process_id = registered.id.clone();
+        let waiter = crate::task::spawn(async move { awaiter.await_terminal(&process_id).await });
         tokio::task::yield_now().await;
         let parked = faults.process_point_reads();
         assert!(
@@ -253,27 +163,27 @@ mod tests {
     async fn prune_through_decorator_does_not_bump_the_hub() {
         let raw = memory_registry().await;
         let (registry, hub) = watched_parts(watch_process_registry(raw));
-        registry
-            .register_process(registration(&ProcessId::from("proc-terminal")))
+        let proc_terminal_record = registry
+            .register_process(registration())
             .await
             .expect("register terminal");
         registry
             .complete_process(
-                &ProcessId::from("proc-terminal"),
+                &proc_terminal_record.id,
                 success(serde_json::json!("done")),
                 crate::ProcessCompletionAuthority::external_owner(),
             )
             .await
             .expect("complete");
-        registry
-            .register_process(registration(&ProcessId::from("proc-live")))
+        let proc_live_record = registry
+            .register_process(registration())
             .await
             .expect("register live");
 
         // Subscribe after the mutations above so only post-subscription bumps
         // are observable.
-        let mut terminal_rx = hub.subscribe(&ProcessId::from("proc-terminal"));
-        let mut live_rx = hub.subscribe(&ProcessId::from("proc-live"));
+        let mut terminal_rx = hub.subscribe(&proc_terminal_record.id);
+        let mut live_rx = hub.subscribe(&proc_live_record.id);
         terminal_rx.mark_unchanged();
         live_rx.mark_unchanged();
 
@@ -297,16 +207,16 @@ mod tests {
     async fn await_event_returns_historical_event_immediately() {
         let raw = memory_registry().await;
         let (registry, hub) = watched_parts(watch_process_registry(raw));
-        registry
-            .register_process(registration(&ProcessId::from("proc")))
+        let proc_record = registry
+            .register_process(registration())
             .await
             .expect("register");
         let appended = registry
             .append_event(
-                &ProcessId::from("proc"),
+                &proc_record.id,
                 ProcessEventAppendRequest::cancel_requested(
                     &registry
-                        .resolve_process_ref(&ProcessId::from("proc"))
+                        .require_process_id(&proc_record.id)
                         .await
                         .expect("retained cancellation target"),
                     &crate::CancelRequest::new(
@@ -320,7 +230,7 @@ mod tests {
             .expect("append");
 
         let event = NativeProcessAwaiter::new(Arc::clone(&registry), hub)
-            .await_event(&ProcessId::from("proc"), "process.cancel_requested", 0)
+            .await_event(&proc_record.id, "process.cancel_requested", 0)
             .await
             .expect("await event");
         assert_eq!(event.sequence, appended.event.sequence);
@@ -330,13 +240,13 @@ mod tests {
     async fn await_terminal_unknown_process_errors() {
         let registry = memory_registry().await;
         let err = NativeProcessAwaiter::for_registry(registry)
-            .await_terminal(&ProcessId::from("missing"))
+            .await_terminal(&crate::ProcessId::fixture("missing"))
             .await
             .expect_err("unknown process should error");
         assert!(
             matches!(
                 err,
-                PluginError::ProcessUnknown { ref process_id } if process_id == "missing"
+                PluginError::ProcessUnknown { ref process_id } if process_id == crate::ProcessId::fixture("missing")
             ),
             "unknown process should return ProcessUnknown, got: {err:?}"
         );
@@ -349,7 +259,7 @@ mod tests {
             "process store read failed".to_string(),
         )));
         let err = NativeProcessAwaiter::for_registry(registry)
-            .await_terminal(&ProcessId::from("unreadable"))
+            .await_terminal(&crate::ProcessId::fixture("unreadable"))
             .await
             .expect_err("store read failure should surface");
         assert!(
@@ -364,16 +274,17 @@ mod tests {
     #[tokio::test]
     async fn polling_awaiter_resolves_via_backoff() {
         let registry = memory_registry().await;
-        registry
-            .register_process(registration(&ProcessId::from("proc")))
+        let proc_record = registry
+            .register_process(registration())
             .await
             .expect("register");
         let writer = Arc::clone(&registry);
+        let process_id = proc_record.id.clone();
         crate::task::spawn(async move {
             tokio::time::sleep(Duration::from_millis(10)).await;
             writer
                 .complete_process(
-                    &ProcessId::from("proc"),
+                    &process_id,
                     success(serde_json::json!({ "ok": true })),
                     crate::ProcessCompletionAuthority::external_owner(),
                 )
@@ -383,7 +294,7 @@ mod tests {
 
         let output = tokio::time::timeout(
             Duration::from_secs(1),
-            NativeProcessAwaiter::for_registry(registry).await_terminal(&ProcessId::from("proc")),
+            NativeProcessAwaiter::for_registry(registry).await_terminal(&proc_record.id),
         )
         .await
         .expect("polling await timeout")
@@ -395,18 +306,16 @@ mod tests {
     async fn watched_awaiter_observes_terminal_without_lost_wakeup() {
         let raw = memory_registry().await;
         let (registry, hub) = watched_parts(watch_process_registry(raw));
-        registry
-            .register_process(registration(&ProcessId::from("proc")))
+        let proc_record = registry
+            .register_process(registration())
             .await
             .expect("register");
         let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
-        let waiter =
-            crate::task::spawn(
-                async move { awaiter.await_terminal(&ProcessId::from("proc")).await },
-            );
+        let process_id = proc_record.id.clone();
+        let waiter = crate::task::spawn(async move { awaiter.await_terminal(&process_id).await });
         registry
             .complete_process(
-                &ProcessId::from("proc"),
+                &proc_record.id,
                 success(serde_json::json!("done")),
                 crate::ProcessCompletionAuthority::external_owner(),
             )
@@ -425,22 +334,20 @@ mod tests {
     async fn watched_registry_bumps_on_mutations() {
         let raw = memory_registry().await;
         let (registry, hub) = watched_parts(watch_process_registry(raw));
-        let mut rx = hub.subscribe(&ProcessId::from("proc"));
-        registry
-            .register_process(registration(&ProcessId::from("proc")))
+        let proc_record = registry
+            .register_process(registration())
             .await
             .expect("register");
-        tokio::time::timeout(Duration::from_millis(100), rx.changed())
-            .await
-            .expect("register bump")
-            .expect("sender remains open");
+        // A minted id exists only once registered, so the subscription starts
+        // after it and witnesses the mutations that follow.
+        let mut rx = hub.subscribe(&proc_record.id);
 
         registry
             .append_event(
-                &ProcessId::from("proc"),
+                &proc_record.id,
                 ProcessEventAppendRequest::cancel_requested(
                     &registry
-                        .resolve_process_ref(&ProcessId::from("proc"))
+                        .require_process_id(&proc_record.id)
                         .await
                         .expect("retained cancellation target"),
                     &crate::CancelRequest::new(
@@ -466,23 +373,20 @@ mod tests {
             raw,
             Some(Arc::new(sink.clone())),
         ));
-        registry
-            .register_process(registration_with_events(
-                &ProcessId::from("proc"),
-                &["producer.a", "producer.b"],
-            ))
+        let proc_record = registry
+            .register_process(registration_with_events(&["producer.a", "producer.b"]))
             .await
             .expect("register");
         registry
             .append_event(
-                &ProcessId::from("proc"),
+                &proc_record.id,
                 ProcessEventAppendRequest::new("producer.a", serde_json::json!({})),
             )
             .await
             .expect("append a");
         registry
             .append_event(
-                &ProcessId::from("proc"),
+                &proc_record.id,
                 ProcessEventAppendRequest::new("producer.b", serde_json::json!({})),
             )
             .await
@@ -504,16 +408,13 @@ mod tests {
     async fn sink_absent_leaves_appends_unchanged() {
         let raw = memory_registry().await;
         let (registry, _hub) = watched_parts(watch_process_registry_with_sink(raw, None));
-        registry
-            .register_process(registration_with_events(
-                &ProcessId::from("proc"),
-                &["producer.a"],
-            ))
+        let proc_record = registry
+            .register_process(registration_with_events(&["producer.a"]))
             .await
             .expect("register");
         let appended = registry
             .append_event(
-                &ProcessId::from("proc"),
+                &proc_record.id,
                 ProcessEventAppendRequest::new("producer.a", serde_json::json!({})),
             )
             .await
@@ -529,23 +430,20 @@ mod tests {
             raw,
             Some(Arc::new(sink.clone())),
         ));
-        registry
-            .register_process(registration_with_events(
-                &ProcessId::from("proc"),
-                &["producer.a"],
-            ))
+        let proc_record = registry
+            .register_process(registration_with_events(&["producer.a"]))
             .await
             .expect("register");
         registry
             .append_event(
-                &ProcessId::from("proc"),
+                &proc_record.id,
                 ProcessEventAppendRequest::new("producer.a", serde_json::json!({})),
             )
             .await
             .expect("explicit append");
         registry
             .complete_process(
-                &ProcessId::from("proc"),
+                &proc_record.id,
                 success(serde_json::json!("done")),
                 crate::ProcessCompletionAuthority::external_owner(),
             )
@@ -576,7 +474,6 @@ mod tests {
             Some(Arc::new(sink.clone())),
         ));
         let mut lifecycle_registration = ProcessRegistration::new(
-            "proc",
             ProcessInput::Engine {
                 kind: "test".to_string(),
                 payload: serde_json::json!({}),
@@ -590,13 +487,14 @@ mod tests {
         );
         lifecycle_registration.env_ref =
             Some(crate::ProcessExecutionEnvRef::new("process-env:test"));
-        registry
+        let lifecycle_id = registry
             .register_process(lifecycle_registration)
             .await
-            .expect("register");
+            .expect("register")
+            .id;
         registry
             .record_first_started(
-                &ProcessId::from("proc"),
+                &lifecycle_id,
                 ProcessStarted {
                     owner: crate::LeaseOwnerIdentity::opaque("owner", "incarnation"),
                     fencing_token: 0,
@@ -617,16 +515,16 @@ mod tests {
             since_ms: 2,
         };
         registry
-            .set_process_wait(&ProcessId::from("proc"), wait)
+            .set_process_wait(&lifecycle_id, wait)
             .await
             .expect("enter wait");
         registry
-            .clear_process_wait(&ProcessId::from("proc"))
+            .clear_process_wait(&lifecycle_id)
             .await
             .expect("clear wait");
         registry
             .set_external_ref(
-                &ProcessId::from("proc"),
+                &lifecycle_id,
                 ProcessExternalRef {
                     backend: "test".to_string(),
                     id: "external".to_string(),
@@ -638,7 +536,7 @@ mod tests {
             .expect("set external ref");
         registry
             .request_process_abandon(
-                &ProcessId::from("proc"),
+                &lifecycle_id,
                 AbandonRequest {
                     requested_by: "test".to_string(),
                     requested_at_ms: 3,
@@ -648,12 +546,12 @@ mod tests {
             .await
             .expect("request abandon");
 
-        let process_ref = registry
-            .resolve_process_ref(&ProcessId::from("proc"))
+        let process_id = registry
+            .require_process_id(&lifecycle_id)
             .await
             .expect("retained lifecycle target");
         let before_cancel = registry
-            .get_process_ref(&process_ref)
+            .get_process(&process_id)
             .await
             .expect("read before cancel")
             .expect("retained target");
@@ -661,7 +559,7 @@ mod tests {
         assert!(before_cancel.cancel_request.is_none());
         let cancelled = registry
             .request_process_cancel(
-                &process_ref,
+                &process_id,
                 crate::CancelOrigin::OperatorRequested,
                 "actor:lifecycle-sink".to_string(),
                 None,
@@ -678,7 +576,7 @@ mod tests {
         );
         let repeated = registry
             .request_process_cancel(
-                &process_ref,
+                &process_id,
                 crate::CancelOrigin::OperatorRequested,
                 "actor:lifecycle-sink".to_string(),
                 None,
@@ -718,21 +616,16 @@ mod tests {
         let sink = CollectingSink::default();
         let (registry, hub) =
             watched_parts(watch_process_registry_with_sink(raw, Some(Arc::new(sink))));
-        let mut rx = hub.subscribe(&ProcessId::from("proc"));
-        registry
-            .register_process(registration_with_events(
-                &ProcessId::from("proc"),
-                &["producer.a"],
-            ))
+        let proc_record = registry
+            .register_process(registration_with_events(&["producer.a"]))
             .await
             .expect("register");
-        tokio::time::timeout(Duration::from_millis(100), rx.changed())
-            .await
-            .expect("register bump")
-            .expect("sender remains open");
+        // A minted id exists only once registered, so the subscription starts
+        // after it and witnesses the mutations that follow.
+        let mut rx = hub.subscribe(&proc_record.id);
         registry
             .append_event(
-                &ProcessId::from("proc"),
+                &proc_record.id,
                 ProcessEventAppendRequest::new("producer.a", serde_json::json!({})),
             )
             .await
@@ -748,13 +641,13 @@ mod tests {
         let raw = memory_registry().await;
         let (registry, hub) = watched_parts(watch_process_registry(raw));
         let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
-        registry
-            .register_process(registration(&ProcessId::from("proc")))
+        let proc_record = registry
+            .register_process(registration())
             .await
             .expect("register");
         registry
             .complete_process(
-                &ProcessId::from("proc"),
+                &proc_record.id,
                 success(serde_json::json!("ready")),
                 crate::ProcessCompletionAuthority::external_owner(),
             )
@@ -762,7 +655,7 @@ mod tests {
             .expect("complete");
 
         let output = awaiter
-            .await_terminal(&ProcessId::from("proc"))
+            .await_terminal(&proc_record.id)
             .await
             .expect("await terminal");
         assert_eq!(output, success(serde_json::json!("ready")));
@@ -774,23 +667,23 @@ mod tests {
         let raw = memory_registry().await;
         let (registry, hub) = watched_parts(watch_process_registry(raw));
         let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
-        registry
-            .register_process(registration(&ProcessId::from("proc")))
+        let proc_record = registry
+            .register_process(registration())
             .await
             .expect("register");
         registry
-            .record_caller_departure(&ProcessId::from("proc"))
+            .record_caller_departure(&proc_record.id)
             .await
             .expect("record caller departure");
 
         let error = awaiter
-            .await_terminal(&ProcessId::from("proc"))
+            .await_terminal(&proc_record.id)
             .await
             .expect_err("awaiting a caller-departed row must be refused, not parked");
         assert!(
             matches!(
                 error,
-                PluginError::ProcessCallerDeparted { ref process_id } if process_id == "proc"
+                PluginError::ProcessCallerDeparted { ref process_id } if process_id == proc_record.id.clone()
             ),
             "unexpected refusal: {error}"
         );
@@ -806,29 +699,29 @@ mod tests {
         ));
         let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub);
 
-        registry
-            .register_process(registration(&ProcessId::from("proc-departed")))
+        let proc_departed_record = registry
+            .register_process(registration())
             .await
             .expect("register");
 
         let mut record = registry
-            .get_process(&ProcessId::from("proc-departed"))
+            .get_process(&proc_departed_record.id)
             .await
             .expect("get_process")
             .expect("record exists");
-        let process_ref = crate::ProcessRef::from_record(&record);
+        let process_id = record.id.clone();
         record.status = crate::ProcessStatus::CallerDeparted;
         record.outcome = Some(success(serde_json::json!("completed-value")));
 
         raw.set_process_read_override(record);
         let awaiter_err = awaiter
-            .await_terminal_ref(&process_ref)
+            .await_terminal(&process_id)
             .await
             .expect_err("awaiter must refuse CallerDeparted even if outcome is present");
         assert!(
             matches!(
                 awaiter_err,
-                PluginError::ProcessCallerDeparted { ref process_id } if process_id == "proc-departed"
+                PluginError::ProcessCallerDeparted { ref process_id } if process_id == proc_departed_record.id.clone()
             ),
             "awaiter expected ProcessCallerDeparted refusal, got: {awaiter_err:?}"
         );
@@ -842,8 +735,8 @@ mod tests {
     async fn concurrent_waiters_all_resolve_with_identical_output_on_completion() {
         let raw = memory_registry().await;
         let (registry, hub) = watched_parts(watch_process_registry(raw));
-        registry
-            .register_process(registration(&ProcessId::from("proc")))
+        let proc_record = registry
+            .register_process(registration())
             .await
             .expect("register");
 
@@ -853,9 +746,10 @@ mod tests {
         for _ in 0..WAITERS {
             let awaiter = NativeProcessAwaiter::new(Arc::clone(&registry), hub.clone());
             let barrier = Arc::clone(&barrier);
+            let process_id = proc_record.id.clone();
             waiters.push(crate::task::spawn(async move {
                 barrier.wait().await;
-                awaiter.await_terminal(&ProcessId::from("proc")).await
+                awaiter.await_terminal(&process_id).await
             }));
         }
         // Release every waiter, then complete at once so completion races their
@@ -864,7 +758,7 @@ mod tests {
         let output = success(serde_json::json!({ "raced": true }));
         registry
             .complete_process(
-                &ProcessId::from("proc"),
+                &proc_record.id,
                 output.clone(),
                 crate::ProcessCompletionAuthority::external_owner(),
             )
@@ -913,11 +807,8 @@ mod tests {
             raw,
             Some(Arc::new(sink.clone())),
         ));
-        registry
-            .register_process(registration_with_events(
-                &ProcessId::from("proc"),
-                &["producer.step"],
-            ))
+        let proc_record = registry
+            .register_process(registration_with_events(&["producer.step"]))
             .await
             .expect("register");
 
@@ -925,7 +816,7 @@ mod tests {
         for _ in 0..EVENTS {
             registry
                 .append_event(
-                    &ProcessId::from("proc"),
+                    &proc_record.id,
                     ProcessEventAppendRequest::new("producer.step", serde_json::json!({})),
                 )
                 .await
@@ -934,7 +825,7 @@ mod tests {
         // Terminal events remain durable for reconciliation if that push is dropped.
         registry
             .complete_process(
-                &ProcessId::from("proc"),
+                &proc_record.id,
                 success(serde_json::json!("done")),
                 crate::ProcessCompletionAuthority::external_owner(),
             )
@@ -951,7 +842,7 @@ mod tests {
             "the sink observed fewer events than were appended"
         );
         let reconciled = registry
-            .full_event_window(&ProcessId::from("proc"), 0)
+            .full_event_window(&proc_record.id, 0)
             .await
             .expect("events")
             .into_iter()

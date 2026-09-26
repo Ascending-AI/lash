@@ -18,10 +18,10 @@ use lash_sansio::sync::MutexExt;
 
 async fn await_process_terminal(
     process_work: &dyn lash_core::ProcessWorkSubstrate,
-    process_ref: &lash_core::ProcessRef,
+    process_id: &ProcessId,
 ) -> std::result::Result<lash_core::ProcessAwaitOutput, lash_core::PluginError> {
     loop {
-        match process_work.await_process_terminal(process_ref).await? {
+        match process_work.await_process_terminal(process_id).await? {
             lash_core::ProcessTerminalWait::Terminal(output) => return Ok(output),
             lash_core::ProcessTerminalWait::Reattach => continue,
         }
@@ -133,6 +133,17 @@ impl lash_core::TriggerStore for SurveyedTriggerStore<'_> {
         self.inner.list_deliveries().await
     }
 
+    async fn bind_delivery_process(
+        &self,
+        occurrence_id: &str,
+        subscription_id: &str,
+        process_id: &ProcessId,
+    ) -> std::result::Result<(), lash_core::PluginError> {
+        self.inner
+            .bind_delivery_process(occurrence_id, subscription_id, process_id)
+            .await
+    }
+
     async fn list_delivery_process_ids(
         &self,
     ) -> std::result::Result<Vec<ProcessId>, lash_core::PluginError> {
@@ -236,13 +247,13 @@ impl Processes {
     /// it; otherwise the first item is a gap with a snapshot and a new cursor.
     pub async fn subscribe_observation(
         &self,
-        process_ref: &lash_core::ProcessRef,
+        process_id: &ProcessId,
         cursor: Option<&crate::process_observation::ProcessCursor>,
     ) -> Result<crate::process_observation::ProcessObservationSubscription> {
         Ok(self
             .core
             .process_observation_hub
-            .subscribe(self.registry(), process_ref, cursor)
+            .subscribe(self.registry(), process_id, cursor)
             .await?)
     }
 
@@ -252,11 +263,7 @@ impl Processes {
         request: &lash_remote_protocol::RemoteProcessObservationRequest,
     ) -> Result<crate::process_observation::ProcessObservationSubscription> {
         request.validate()?;
-        let process_ref = lash_core::ProcessRef::new(
-            request.process_id.clone(),
-            lash_core::ProcessIncarnation::from_registration_sequence(request.incarnation),
-        );
-        self.subscribe_observation(&process_ref, request.cursor.as_ref())
+        self.subscribe_observation(&request.process_id, request.cursor.as_ref())
             .await
     }
 
@@ -362,11 +369,10 @@ impl Processes {
         // discover the already-transferred process edge on an exact replay.
         let env_spec = request.env_spec.clone();
         let observers = request.observers.clone();
-        let registration = request.into_registration(None);
-        // A host-named process id may be one the registry pruned earlier: its
-        // scope fence has been refusing every redrive since. The registry
-        // lifts that fence inside the registration write itself (ADR 0049),
-        // so this route, like every other registrant, only registers.
+        // The registrar mints the id; the key only makes the start idempotent.
+        let registration = request
+            .keyed_in(&scoped_effect_controller)
+            .into_registration(None);
         let command = lash_core::ProcessCommand::Start {
             registration,
             observers,
@@ -473,21 +479,15 @@ impl Processes {
         request: &lash_remote_protocol::RemoteProcessEventsRequest,
     ) -> Result<lash_remote_protocol::RemoteProcessEventsResponse> {
         request.validate()?;
-        let process_ref = lash_core::ProcessRef::new(
-            request.process_id.clone(),
-            lash_core::ProcessIncarnation::from_registration_sequence(request.incarnation),
-        );
+        let process_id = &request.process_id;
         let registry = self.registry();
         let cursor = match request.cursor.clone() {
             Some(cursor) => cursor,
             None => {
-                let (epoch, position) = self.core.process_observation_hub.route(&process_ref);
+                let (epoch, position) = self.core.process_observation_hub.route(process_id);
                 crate::process_observation::ProcessCursor::new(
                     epoch,
-                    lash_sansio::ProcessCursorReference::for_lifetime(
-                        &request.process_id,
-                        request.incarnation,
-                    ),
+                    lash_sansio::ProcessCursorReference::for_process(process_id),
                     position,
                     0,
                 )
@@ -497,7 +497,7 @@ impl Processes {
             }
         };
         let outcome = registry
-            .event_page_ref(&process_ref, cursor.sequence(), request.limit, request.mode)
+            .event_page_after(process_id, cursor.sequence(), request.limit, request.mode)
             .await?;
         let cursor = match &outcome {
             lash_core::ProcessEventReadOutcome::Retained(page) => page
@@ -505,20 +505,20 @@ impl Processes {
                 .map_or_else(|| cursor.clone(), |sequence| cursor.with_sequence(sequence)),
             lash_core::ProcessEventReadOutcome::NoLongerRetained(_) => cursor,
         };
-        Ok((process_ref, outcome, cursor).try_into()?)
+        Ok((process_id.clone(), outcome, cursor).try_into()?)
     }
 
     pub async fn await_output(
         &self,
         process_id: &ProcessId,
     ) -> Result<lash_core::ProcessAwaitOutput> {
-        let process_ref = self
+        let process_id = self
             .core
             .process_registry()
-            .resolve_process_ref(process_id)
+            .require_process_id(process_id)
             .await?;
         let process_work = Arc::clone(self.core.substrate_slot.ports().await.process.port());
-        Ok(await_process_terminal(process_work.as_ref(), &process_ref).await?)
+        Ok(await_process_terminal(process_work.as_ref(), &process_id).await?)
     }
 
     /// Requests cancellation of the identified process.
@@ -527,10 +527,10 @@ impl Processes {
         process_id: &ProcessId,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessCancelReceipt> {
-        let process_ref = self
+        let process_id = self
             .core
             .process_registry()
-            .resolve_process_ref(process_id)
+            .require_process_id(process_id)
             .await?;
         #[expect(
             clippy::expect_used,
@@ -538,7 +538,7 @@ impl Processes {
                       serialization has no failing case"
         )]
         let command = lash_core::ProcessCommand::Cancel {
-            process_ref,
+            process_id,
             origin: lash_core::CancelOrigin::OperatorRequested,
             requester: serde_json::to_string(scoped_effect_controller.execution_scope()).expect(
                 "an execution scope is a struct of opaque string identities, whose \
@@ -566,13 +566,13 @@ impl Processes {
         request: lash_core::ProcessEventAppendRequest,
         scoped_effect_controller: ScopedEffectController<'_>,
     ) -> Result<lash_core::ProcessEvent> {
-        let process_ref = self
+        let process_id = self
             .core
             .process_registry()
-            .resolve_process_ref(process_id)
+            .require_process_id(process_id)
             .await?;
         let command = lash_core::ProcessCommand::Signal {
-            process_ref,
+            process_id,
             signal_name: signal_name.into(),
             signal_id: signal_id.into(),
             request,
@@ -700,18 +700,6 @@ impl Processes {
                 .store_factory
                 .retire_turn_cancel_closure_scope(&process_scope)
                 .await?;
-            let staging_owner = lash_core::ArtifactOwner::process_start(&process_id);
-            self.core
-                .env
-                .core
-                .durability
-                .process_env_store
-                .retire_process_execution_env_owner(&staging_owner)
-                .await?;
-            self.core
-                .host_process_engines
-                .retire_artifact_owner(&staging_owner)
-                .await?;
             // The process journal and the worker's trigger-delivery reconcile
             // scope for the same process: that runtime operation exists only
             // to admit this process, so nothing can replay it once the row is
@@ -719,11 +707,20 @@ impl Processes {
             // await-event promises and leave the scope fence (FIG-2499). The
             // registry's verdict is the unreachability proof, so the
             // owner-terminal gate applies and in-flight rows go with the rest.
-            let reconcile_scope =
-                lash_core::facade_support::trigger_delivery_reconcile_scope(&process_id);
+            // The reconcile scope is addressed by the start key, since the
+            // delivery's start had no id yet (ADR 0107).
+            let start_key = registry
+                .get_process(&process_id)
+                .await?
+                .and_then(|record| record.start_key);
+            let reconcile_scope = start_key
+                .as_ref()
+                .map(lash_core::facade_support::trigger_delivery_reconcile_scope);
             let retirements = [
                 lash_core::EffectJournalRetirement::for_scope(&process_scope),
-                lash_core::EffectJournalRetirement::for_scope(&reconcile_scope),
+                reconcile_scope
+                    .as_ref()
+                    .and_then(lash_core::EffectJournalRetirement::for_scope),
             ];
             for retirement in retirements.into_iter().flatten() {
                 if let Err(err) = self
@@ -768,22 +765,28 @@ impl Processes {
         // the process owner. Thus a failure at either store is resumable by the
         // next prune call even when this call has no newly eligible rows.
         for cleanup in registry.pending_process_artifact_cleanup().await? {
-            let staging_owner = lash_core::ArtifactOwner::process_start(&cleanup.process_id);
-            self.core
-                .env
-                .core
-                .durability
-                .process_env_store
-                .retire_process_execution_env_owner(&staging_owner)
-                .await?;
-            self.core
-                .host_process_engines
-                .retire_artifact_owner(&staging_owner)
-                .await?;
-            let owner = lash_core::ArtifactOwner::process(lash_core::ProcessRef::new(
-                cleanup.process_id.clone(),
-                cleanup.incarnation,
-            ));
+            // The start's staging owner is keyed by its start key (ADR 0107);
+            // the durable cleanup job carries the key past the row's prune. A
+            // process registered without a key staged nothing under a key, and
+            // the keyless owner is shared by every such start, so it is never
+            // fenced here.
+            if let Some(start_key) = cleanup.start_key.as_ref() {
+                let staging_owner = lash_core::ArtifactOwner::process_start(
+                    &lash_core::ProcessCommand::start_effect_id(Some(start_key)),
+                );
+                self.core
+                    .env
+                    .core
+                    .durability
+                    .process_env_store
+                    .retire_process_execution_env_owner(&staging_owner)
+                    .await?;
+                self.core
+                    .host_process_engines
+                    .retire_artifact_owner(&staging_owner)
+                    .await?;
+            }
+            let owner = lash_core::ArtifactOwner::process(cleanup.process_id.clone());
             if let Some(env_ref) = cleanup.env_ref.as_ref() {
                 self.core
                     .env
@@ -798,7 +801,7 @@ impl Processes {
                 .release_pruned_process_artifacts(&cleanup)
                 .await?;
             let acknowledgement = registry
-                .complete_process_artifact_cleanup(&cleanup.process_id, cleanup.incarnation)
+                .complete_process_artifact_cleanup(&cleanup.process_id)
                 .await?;
             report
                 .artifact_cleanup_acknowledgements
@@ -1011,9 +1014,12 @@ mod terminal_wait_tests {
 
         async fn await_process_terminal(
             &self,
-            process_ref: &lash_core::ProcessRef,
+            process_id: &lash_core::ProcessId,
         ) -> std::result::Result<lash_core::ProcessTerminalWait, lash_core::PluginError> {
-            assert_eq!(process_ref.process_id, "admin-reattach-process");
+            assert_eq!(
+                process_id,
+                &lash_core::ProcessId::fixture("admin-reattach-process")
+            );
             if self.waits.fetch_add(1, Ordering::SeqCst) == 0 {
                 Ok(lash_core::ProcessTerminalWait::Reattach)
             } else {
@@ -1036,10 +1042,7 @@ mod terminal_wait_tests {
 
         let output = await_process_terminal(
             &port,
-            &lash_core::ProcessRef::new(
-                "admin-reattach-process",
-                lash_core::ProcessIncarnation::from_registration_sequence(1),
-            ),
+            &lash_core::ProcessId::fixture("admin-reattach-process"),
         )
         .await
         .expect("reattachment reaches terminal output");

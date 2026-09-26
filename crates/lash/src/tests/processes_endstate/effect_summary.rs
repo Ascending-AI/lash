@@ -210,25 +210,27 @@ async fn paged_summary(
     (table, folded)
 }
 
+/// Starts `program` on `host` under `start_key`, answering the minted id.
 async fn start_process(
     host: &SummaryHost,
     backend: &SummaryBackend,
-    process_id: &ProcessId,
+    start_key: &str,
     program: lashlang::Program,
-) {
+) -> ProcessId {
     let artifact = lash_lashlang_runtime::LashlangArtifacts::of_backend(&backend.backend().await);
     let process =
         LinkedTestProcess::new_with_catalog(&artifact, program, "main", summary_catalog()).await;
-    let mut start_request = process.start_request(process_id);
+    let mut start_request = process.start_request(start_key);
     start_request.originator = lash_core::ProcessOriginator::host_scoped("effect-summary-test");
     host.core
         .processes()
         .start(
             start_request,
-            runtime_operation_scope(&host.core, format!("start-{process_id}")),
+            runtime_operation_scope(&host.core, format!("start-{start_key}")),
         )
         .await
-        .expect("start the effect-summary process");
+        .expect("start the effect-summary process")
+        .id
 }
 
 /// Drives a process whose effect-summary appends of kind `fault` "crash" on
@@ -238,15 +240,15 @@ async fn start_process(
 /// terminal state.
 async fn run_through_append_crash(
     backend: &SummaryBackend,
-    process_id: &ProcessId,
+    start_key: &str,
     program: lashlang::Program,
     fault: &'static str,
     terminal: lash_core::ProcessStatus,
-) -> SummaryHost {
+) -> (SummaryHost, ProcessId) {
     let crashed = backend
         .host("effect-summary-crashed", Some((fault, usize::MAX)))
         .await;
-    start_process(&crashed, backend, process_id, program).await;
+    let process_id = &start_process(&crashed, backend, start_key, program).await;
     let worker_fault = wait_for_worker_fault(&crashed.sink, process_id).await;
     assert!(
         matches!(
@@ -288,7 +290,16 @@ async fn run_through_append_crash(
     )
     .await;
     assert_eq!(settled.lifecycle, terminal, "{settled:?}");
-    recovered
+    (recovered, process_id.clone())
+}
+
+/// `value` with every spelling of `process_id` replaced by a placeholder: two
+/// runs of one program on two stores mint two ids, and each run's replay keys
+/// name its own (ADR 0107).
+fn without_process_id<T: serde::Serialize>(value: &T, process_id: &ProcessId) -> String {
+    serde_json::to_string(value)
+        .expect("encode for comparison")
+        .replace(process_id.as_str(), "<process>")
 }
 
 /// Effect-summary events by replay key; a duplicate append would collide.
@@ -316,11 +327,10 @@ async fn paged_process_effect_summary_matches_durable_replay_rows() -> Result<()
     let temp = tempfile::tempdir().expect("effect-summary tempdir");
     let backend = SummaryBackend::Sqlite(temp.path().to_path_buf());
     let host = backend.host("effect-summary-host", None).await;
-    let process_id = ProcessId::from("effect-summary-facade");
-    start_process(
+    let process_id = start_process(
         &host,
         &backend,
-        &process_id,
+        "effect-summary-facade",
         b::module(
             vec![
                 b::process("child", Vec::new(), b::finish(b::string("child done"))),
@@ -487,12 +497,16 @@ fn capped_program() -> lashlang::Program {
 #[tokio::test]
 async fn effect_summary_is_bounded_on_the_write_side_and_a_redrive_rewrites_it_identically()
 -> Result<()> {
-    let process_id = ProcessId::from("effect-summary-capped");
-
     let clean_dir = tempfile::tempdir().expect("clean tempdir");
     let clean = SummaryBackend::Sqlite(clean_dir.path().to_path_buf());
     let clean_host = clean.host("effect-summary-clean", None).await;
-    start_process(&clean_host, &clean, &process_id, capped_program()).await;
+    let process_id = start_process(
+        &clean_host,
+        &clean,
+        "effect-summary-capped",
+        capped_program(),
+    )
+    .await;
     wait_for_terminal(
         &clean_host.core,
         &process_id,
@@ -535,19 +549,22 @@ async fn effect_summary_is_bounded_on_the_write_side_and_a_redrive_rewrites_it_i
     // count from the recorded effects and writes the identical record.
     let crash_dir = tempfile::tempdir().expect("crash tempdir");
     let crashed = SummaryBackend::Sqlite(crash_dir.path().to_path_buf());
-    let recovered = run_through_append_crash(
+    let (recovered, recovered_id) = run_through_append_crash(
         &crashed,
-        &process_id,
+        "effect-summary-capped",
         capped_program(),
         lash_core::PROCESS_EFFECT_OMISSIONS_EVENT_TYPE,
         lash_core::ProcessStatus::Completed,
     )
     .await;
-    let (recovered_table, recovered_events) = paged_summary(&recovered.core, &process_id).await;
-    assert_eq!(recovered_table, clean_table);
+    let (recovered_table, recovered_events) = paged_summary(&recovered.core, &recovered_id).await;
     assert_eq!(
-        events_by_key(&recovered_events),
-        events_by_key(&clean_events)
+        without_process_id(&format!("{recovered_table:?}"), &recovered_id),
+        without_process_id(&format!("{clean_table:?}"), &process_id)
+    );
+    assert_eq!(
+        without_process_id(&events_by_key(&recovered_events), &recovered_id),
+        without_process_id(&events_by_key(&clean_events), &process_id)
     );
     Ok(())
 }
@@ -587,10 +604,9 @@ fn crash_window_program(batch_first: bool) -> lashlang::Program {
 }
 
 async fn assert_crash_window_recovers_once(backend: &SummaryBackend, batch_first: bool) {
-    let process_id = ProcessId::from(format!("effect-summary-crash-batch-first-{batch_first}"));
-    let recovered = run_through_append_crash(
+    let (recovered, process_id) = run_through_append_crash(
         backend,
-        &process_id,
+        &format!("effect-summary-crash-batch-first-{batch_first}"),
         crash_window_program(batch_first),
         lash_core::PROCESS_EFFECT_OUTCOME_EVENT_TYPE,
         lash_core::ProcessStatus::Completed,

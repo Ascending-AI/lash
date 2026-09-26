@@ -504,12 +504,9 @@ async fn run_high_traffic_operation(
         .with_source(serde_json::json!({}))
         .for_session(session.session_id());
         let effect_host = core.effect_host();
-        let controller = effect_host.scoped(
-            lash_core::AdmittedScope::unpinned(
-                session.turn_scope(format!("runtime-perf-load-trigger-emission-{ordinal}")),
-            )
-            .map_err(anyhow::Error::from)?,
-        )?;
+        let controller = effect_host.scoped(lash_core::AdmittedScope::new(
+            session.turn_scope(format!("runtime-perf-load-trigger-emission-{ordinal}")),
+        ))?;
         let delivery_report = core.triggers().emit(request, controller).await?;
         let delivery_process_ids = delivery_report.started_process_ids();
         if delivery_process_ids.is_empty() {

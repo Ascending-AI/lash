@@ -10,7 +10,7 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
     fn try_from(value: RemoteProcessStartRequest) -> Result<Self, Self::Error> {
         value.validate()?;
         let RemoteProcessStartRequest {
-            id,
+            start_key,
             input,
             disposition,
             lifecycle,
@@ -23,18 +23,36 @@ impl TryFrom<RemoteProcessStartRequest> for lash_core::ProcessStartRequest {
             event_types,
         } = value;
         let mut request = lash_core::ProcessStartRequest::new(
-            id,
             input.try_into()?,
             disposition.into(),
             originator.try_into()?,
             lifecycle
                 .expect("validated required lifecycle")
                 .try_into()?,
-        )
-        .with_max_attempts(max_attempts)
-        .with_wake_session_id(wake_session_id)
-        .with_observers(observers)
-        .with_event_types(event_types.into_iter().map(Into::into));
+        );
+        // A remote caller's key lands in the host namespace, scoped to the
+        // start's originator, where no key lash derives for its own starts
+        // can reach (ADR 0107).
+        if let Some(start_key) = start_key {
+            // A record reports its key's digest (`start_key_digest`), never a
+            // caller's key. A caller that echoes that digest back as its key
+            // would have it hashed again into a different key and silently
+            // start a second process, so the digest spelling is refused.
+            if lash_core::StartKey::parse(&start_key).is_ok() {
+                return Err(RemoteProtocolError::InvalidEnvelope {
+                    type_name: "RemoteProcessStartRequest",
+                    message: "start_key is a derived start-key digest (a record's \
+                              `start_key_digest`); send the caller's own raw key"
+                        .to_string(),
+                });
+            }
+            request = request.with_host_start_key(start_key);
+        }
+        let mut request = request
+            .with_max_attempts(max_attempts)
+            .with_wake_session_id(wake_session_id)
+            .with_observers(observers)
+            .with_event_types(event_types.into_iter().map(Into::into));
         if let Some(identity) = identity {
             request = request.with_declared_identity(identity.into());
         }
@@ -48,7 +66,7 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
 
     fn try_from(value: lash_core::ProcessStartRequest) -> Result<Self, Self::Error> {
         let lash_core::ProcessStartRequest {
-            id,
+            start_key,
             input,
             disposition,
             lifecycle,
@@ -60,8 +78,18 @@ impl TryFrom<lash_core::ProcessStartRequest> for RemoteProcessStartRequest {
             observers,
             event_types,
         } = value;
+        // A core key is already derived: its host bytes cannot be recovered,
+        // and a derived key must never cross as a caller's key.
+        if start_key.is_some() {
+            return Err(RemoteProtocolError::InvalidEnvelope {
+                type_name: "RemoteProcessStartRequest",
+                message:
+                    "a derived start key cannot cross the wire; a remote caller sends its own key"
+                        .to_string(),
+            });
+        }
         Ok(Self {
-            id,
+            start_key: None,
             input: input.try_into()?,
             disposition: disposition.into(),
             lifecycle: Some(lifecycle.into()),
@@ -216,14 +244,10 @@ impl From<RemoteProcessCancelRequest> for lash_core::ProcessCommand {
     fn from(value: RemoteProcessCancelRequest) -> Self {
         let RemoteProcessCancelRequest {
             process_id,
-            incarnation,
             requester,
         } = value;
         Self::Cancel {
-            process_ref: lash_core::ProcessRef::new(
-                process_id,
-                lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
-            ),
+            process_id,
             requester,
             origin: lash_core::CancelOrigin::OperatorRequested,
             attribution: None,
@@ -235,13 +259,11 @@ impl From<lash_core::ProcessCancelReceipt> for RemoteProcessCancelReceipt {
     fn from(value: lash_core::ProcessCancelReceipt) -> Self {
         let lash_core::ProcessCancelReceipt {
             process_id,
-            incarnation,
             status,
             origin,
         } = value;
         Self {
             process_id,
-            incarnation: incarnation.registration_sequence(),
             status: status.into(),
             origin,
             record: None,
@@ -256,14 +278,12 @@ impl TryFrom<RemoteProcessCancelReceipt> for lash_core::ProcessCancelReceipt {
         value.validate()?;
         let RemoteProcessCancelReceipt {
             process_id,
-            incarnation,
             status,
             origin,
             record: _,
         } = value;
         Ok(Self {
             process_id,
-            incarnation: lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
             status: status.into(),
             origin,
         })
@@ -277,7 +297,6 @@ impl TryFrom<RemoteProcessSignalRequest> for lash_core::ProcessEventAppendReques
         value.validate()?;
         let RemoteProcessSignalRequest {
             process_id: _,
-            incarnation: _,
             signal_name,
             signal_id: _,
             payload,
@@ -307,15 +326,12 @@ impl TryFrom<RemoteProcessSignalRequest> for lash_core::ProcessCommand {
 
     fn try_from(value: RemoteProcessSignalRequest) -> Result<Self, Self::Error> {
         value.validate()?;
-        let process_ref = lash_core::ProcessRef::new(
-            value.process_id.clone(),
-            lash_core::ProcessIncarnation::from_registration_sequence(value.incarnation),
-        );
+        let process_id = value.process_id.clone();
         let signal_name = value.signal_name.clone();
         let signal_id = value.signal_id.clone();
         let request = value.try_into()?;
         Ok(Self::Signal {
-            process_ref,
+            process_id,
             signal_name,
             signal_id,
             request,
@@ -345,56 +361,37 @@ impl TryFrom<RemoteProcessSignalReceipt> for lash_core::ProcessEvent {
 
 impl From<RemoteProcessAwaitRequest> for lash_core::ProcessCommand {
     fn from(value: RemoteProcessAwaitRequest) -> Self {
-        let RemoteProcessAwaitRequest {
-            process_id,
-            incarnation,
-        } = value;
-        Self::Await {
-            process_ref: lash_core::ProcessRef::new(
-                process_id,
-                lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
-            ),
-        }
+        let RemoteProcessAwaitRequest { process_id } = value;
+        Self::Await { process_id }
     }
 }
 
-impl TryFrom<(lash_core::ProcessRef, lash_core::ProcessAwaitOutput)> for RemoteProcessAwaitOutcome {
+impl TryFrom<(lash_core::ProcessId, lash_core::ProcessAwaitOutput)> for RemoteProcessAwaitOutcome {
     type Error = RemoteProtocolError;
 
     fn try_from(
-        (process_ref, output): (lash_core::ProcessRef, lash_core::ProcessAwaitOutput),
+        (process_id, output): (lash_core::ProcessId, lash_core::ProcessAwaitOutput),
     ) -> Result<Self, Self::Error> {
         Ok(Self {
-            process_id: process_ref.process_id,
-            incarnation: process_ref.incarnation.registration_sequence(),
+            process_id,
             output: output.try_into()?,
         })
     }
 }
 
-impl TryFrom<RemoteProcessAwaitOutcome> for (lash_core::ProcessRef, lash_core::ProcessAwaitOutput) {
+impl TryFrom<RemoteProcessAwaitOutcome> for (lash_core::ProcessId, lash_core::ProcessAwaitOutput) {
     type Error = RemoteProtocolError;
 
     fn try_from(value: RemoteProcessAwaitOutcome) -> Result<Self, Self::Error> {
         value.validate()?;
-        let RemoteProcessAwaitOutcome {
-            process_id,
-            incarnation,
-            output,
-        } = value;
-        Ok((
-            lash_core::ProcessRef::new(
-                process_id,
-                lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
-            ),
-            output.try_into()?,
-        ))
+        let RemoteProcessAwaitOutcome { process_id, output } = value;
+        Ok((process_id, output.try_into()?))
     }
 }
 
 impl
     TryFrom<(
-        lash_core::ProcessRef,
+        lash_core::ProcessId,
         lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
         lash_sansio::ProcessCursor,
     )> for RemoteProcessEventsResponse
@@ -402,8 +399,8 @@ impl
     type Error = RemoteProtocolError;
 
     fn try_from(
-        (process_ref, outcome, cursor): (
-            lash_core::ProcessRef,
+        (process_id, outcome, cursor): (
+            lash_core::ProcessId,
             lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
             lash_sansio::ProcessCursor,
         ),
@@ -433,8 +430,7 @@ impl
             }
         };
         let response = Self {
-            process_id: process_ref.process_id,
-            incarnation: process_ref.incarnation.registration_sequence(),
+            process_id,
             outcome,
             cursor,
         };
@@ -445,7 +441,7 @@ impl
 
 impl TryFrom<RemoteProcessEventsResponse>
     for (
-        lash_core::ProcessRef,
+        lash_core::ProcessId,
         lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
         lash_sansio::ProcessCursor,
     )
@@ -456,7 +452,6 @@ impl TryFrom<RemoteProcessEventsResponse>
         value.validate()?;
         let RemoteProcessEventsResponse {
             process_id,
-            incarnation,
             outcome,
             cursor,
         } = value;
@@ -484,14 +479,7 @@ impl TryFrom<RemoteProcessEventsResponse>
                 })
             }
         };
-        Ok((
-            lash_core::ProcessRef::new(
-                process_id,
-                lash_core::ProcessIncarnation::from_registration_sequence(incarnation),
-            ),
-            outcome,
-            cursor,
-        ))
+        Ok((process_id, outcome, cursor))
     }
 }
 

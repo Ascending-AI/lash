@@ -308,9 +308,8 @@ fn build_core(backend: &lash_core::Backend) -> LashCore {
         .expect("build the core under certification")
 }
 
-fn worker_registration(input: lash_core::ProcessInput, id: &str) -> lash_core::ProcessRegistration {
+fn worker_registration(input: lash_core::ProcessInput) -> lash_core::ProcessRegistration {
     lash_core::ProcessRegistration::new(
-        id,
         input,
         // Worker-rebuild recovery tests need the row to be re-executable.
         lash_core::RecoveryContract::Rerunnable,
@@ -349,8 +348,8 @@ async fn open_mutate_and_restart(
     core: &LashCore,
     register: Option<lash_core::ProcessRegistration>,
     registry: &Arc<dyn lash_core::ProcessRegistry>,
-) {
-    open_mutate_and_restart_with_prompt(core, "register rebuild trigger", register, registry).await;
+) -> Option<lash_core::ProcessId> {
+    open_mutate_and_restart_with_prompt(core, "register rebuild trigger", register, registry).await
 }
 
 async fn open_mutate_and_restart_with_prompt(
@@ -358,7 +357,7 @@ async fn open_mutate_and_restart_with_prompt(
     prompt: &str,
     register: Option<lash_core::ProcessRegistration>,
     registry: &Arc<dyn lash_core::ProcessRegistry>,
-) {
+) -> Option<lash_core::ProcessId> {
     let session = core.session(SESSION_ID).open().await.expect("open session");
     let output = session
         .turn(lash_core::TurnInput::text(prompt))
@@ -366,12 +365,16 @@ async fn open_mutate_and_restart_with_prompt(
         .await
         .expect("register trigger route");
     assert_eq!(output.final_value(), Some(&serde_json::json!("registered")));
-    if let Some(registration) = register {
-        registry
-            .register_process(registration)
-            .await
-            .expect("register out-of-turn process");
-    }
+    let registered = match register {
+        Some(registration) => Some(
+            registry
+                .register_process(registration)
+                .await
+                .expect("register out-of-turn process")
+                .id,
+        ),
+        None => None,
+    };
     drop(session);
     // Reopen from cold storage — spawns the default work runner and forces the
     // worker to reconstruct the trigger-mutated surface purely from persistence.
@@ -379,6 +382,7 @@ async fn open_mutate_and_restart_with_prompt(
         .open()
         .await
         .expect("reopen session");
+    registered
 }
 
 async fn await_success(
@@ -725,22 +729,21 @@ async fn trigger_triggered_process_wake_provenance_survives_restart(backend: las
 async fn worker_recovers_tool_call_process_in_restarted_session(backend: lash_core::Backend) {
     let core = build_core(&backend);
     let registry = core.process_registry();
-    let registration = worker_registration(
-        lash_core::ProcessInput::ToolCall {
-            call: lash_core::PreparedToolCall::from_parts(
-                "rebuild-tool-call",
-                "tool:rebuild_echo",
-                "rebuild_echo",
-                serde_json::json!({ "value": "recovered" }),
-                None,
-                serde_json::Value::Null,
-            ),
-        },
-        "proc-tool-call",
-    );
+    let registration = worker_registration(lash_core::ProcessInput::ToolCall {
+        call: lash_core::PreparedToolCall::from_parts(
+            "rebuild-tool-call",
+            "tool:rebuild_echo",
+            "rebuild_echo",
+            serde_json::json!({ "value": "recovered" }),
+            None,
+            serde_json::Value::Null,
+        ),
+    });
     let registration = attach_rebuild_process_env(&core, registration).await;
-    open_mutate_and_restart(&core, Some(registration), &registry).await;
-    await_success(&registry, &lash_core::ProcessId::from("proc-tool-call")).await;
+    let process_id = open_mutate_and_restart(&core, Some(registration), &registry)
+        .await
+        .expect("registered process");
+    await_success(&registry, &process_id).await;
 }
 
 async fn worker_recovers_session_turn_process_in_restarted_session(backend: lash_core::Backend) {
@@ -750,20 +753,19 @@ async fn worker_recovers_session_turn_process_in_restarted_session(backend: lash
         model: rebuild_model(),
         ..lash_core::SessionPolicy::new(lash_core::TurnBudget::Unbounded)
     };
-    let registration = worker_registration(
-        lash_core::ProcessInput::SessionTurn {
-            definition_key: "lash-testing-session-turn:v1".to_string(),
-            create_request: Box::new(lash_core::SessionCreateRequest::child(
-                SESSION_ID,
-                lash_core::SessionStartPoint::Empty,
-                child_policy,
-                lash_core::PluginOptions::default(),
-            )),
-            turn_input: Box::new(lash_core::TurnInput::text("run child")),
-            output_contract: lash_core::ToolOutputContract::Static,
-        },
-        "proc-session-turn",
-    );
-    open_mutate_and_restart(&core, Some(registration), &registry).await;
-    await_success(&registry, &lash_core::ProcessId::from("proc-session-turn")).await;
+    let registration = worker_registration(lash_core::ProcessInput::SessionTurn {
+        definition_key: "lash-testing-session-turn:v1".to_string(),
+        create_request: Box::new(lash_core::SessionCreateRequest::child(
+            SESSION_ID,
+            lash_core::SessionStartPoint::Empty,
+            child_policy,
+            lash_core::PluginOptions::default(),
+        )),
+        turn_input: Box::new(lash_core::TurnInput::text("run child")),
+        output_contract: lash_core::ToolOutputContract::Static,
+    });
+    let process_id = open_mutate_and_restart(&core, Some(registration), &registry)
+        .await
+        .expect("registered process");
+    await_success(&registry, &process_id).await;
 }

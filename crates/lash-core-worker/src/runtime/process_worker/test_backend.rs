@@ -101,7 +101,7 @@ async fn the_faulted_double_faults_the_engine_and_the_backend_alike() {
     let through_backend = double
         .lash_backend()
         .process_registry()
-        .get_process(&crate::ProcessId::from("absent"))
+        .get_process(&crate::ProcessId::fixture("absent"))
         .await
         .expect_err("the backend's registry reads through the fault layer");
     assert!(
@@ -113,7 +113,7 @@ async fn the_faulted_double_faults_the_engine_and_the_backend_alike() {
         .restate()
         .store_set()
         .process_registry()
-        .get_process(&crate::ProcessId::from("absent"))
+        .get_process(&crate::ProcessId::fixture("absent"))
         .await
         .expect_err("the engine's store set reads through the fault layer");
     assert!(through_engine.to_string().contains("injected read failure"));
@@ -132,7 +132,7 @@ async fn the_faulted_doubles_engine_stores_carry_the_faults() {
     let decorated = double
         .engine_stores()
         .process_registry()
-        .get_process(&crate::ProcessId::from("absent"))
+        .get_process(&crate::ProcessId::fixture("absent"))
         .await
         .expect_err("the engine's decorated store set reads through the fault layer");
     assert!(decorated.to_string().contains("injected read failure"));
@@ -142,7 +142,7 @@ async fn the_faulted_doubles_engine_stores_carry_the_faults() {
     let pre_decoration = double
         .stores()
         .process_registry()
-        .get_process(&crate::ProcessId::from("absent"))
+        .get_process(&crate::ProcessId::fixture("absent"))
         .await
         .expect("the pre-decoration set's registry reads past the fault layer");
     assert!(pre_decoration.is_none());

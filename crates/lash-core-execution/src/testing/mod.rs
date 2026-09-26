@@ -986,12 +986,13 @@ pub fn with_engine_child_max_attempts(
 #[cfg(any(test, feature = "testing"))]
 pub fn code_execution_context_for_process<'run>(
     ports: impl Into<TestExecutionPorts<'run>>,
+    process_id: crate::ProcessId,
     registration: &crate::ProcessRegistration,
 ) -> crate::RuntimeExecutionContext<'run> {
     TestExecutionContextBuilder::new(ports.into())
         .build()
         .into_runtime()
-        .with_process_execution(registration, None)
+        .with_process_execution(process_id, registration, None)
 }
 
 /// Build an empty code-execution context whose cancellation is already visible.
@@ -1479,27 +1480,24 @@ pub fn process_engine_run_context_for_validation(
     tool_catalog: Arc<crate::ToolCatalog>,
     process_registry_available: bool,
 ) -> crate::ProcessEngineRunContext<'static> {
-    let process_id = registration.id.clone();
+    let process_id = crate::mint_process_id();
     let process_work = process_work_wiring_for_registry(backend.process_registry());
     let plugins = crate::PluginHost::new(test_standard_protocol_factories())
         .build_session("engine-validation-test")
         .expect("test protocol session builds");
     let scoped_effect_controller = backend
         .effect_host()
-        .scoped_static(crate::AdmittedScope::process(crate::ProcessRef::new(
-            process_id.clone(),
-            crate::ProcessIncarnation::from_registration_sequence(1),
-        )))
+        .scoped_static(crate::AdmittedScope::process(process_id.clone()))
         .expect("valid process scope")
         .expect("the backend's effect host lends a static controller");
     let execution_context = crate::ProcessExecutionContext::default()
         .with_execution_write_authority(crate::ProcessExecutionWriteAuthority::invocation(
-            process_id,
+            process_id.clone(),
             "engine-validation-test-execution",
         ));
     crate::ProcessEngineRunContext::new(
         registration,
-        crate::ProcessIncarnation::from_registration_sequence(1),
+        process_id,
         execution_context,
         process_work,
         SessionId::from("engine-validation-test"),
@@ -1546,9 +1544,9 @@ impl EffectBackedProcessService {
         requester: String,
         attribution: Option<crate::RuntimeReplayAttribution>,
     ) -> Result<crate::ProcessCommand, crate::PluginError> {
-        match self.registry.resolve_process_ref(process_id).await {
-            Ok(process_ref) => Ok(crate::ProcessCommand::Cancel {
-                process_ref,
+        match self.registry.require_process_id(process_id).await {
+            Ok(process_id) => Ok(crate::ProcessCommand::Cancel {
+                process_id,
                 origin,
                 requester,
                 attribution,
@@ -1556,7 +1554,7 @@ impl EffectBackedProcessService {
             Err(refusal @ crate::PluginError::ProcessUnknown { .. })
             | Err(refusal @ crate::PluginError::ProcessNoLongerRetained { .. }) => {
                 Ok(crate::ProcessCommand::CancelRefused {
-                    process_id: ProcessId::from(process_id.to_string()),
+                    process_id: process_id.clone(),
                     origin,
                     requester,
                     refusal,
@@ -1676,18 +1674,6 @@ impl crate::ProcessService for EffectBackedProcessService {
         self.start_from_request(session_id, request, scope).await
     }
 
-    async fn recorded_max_attempts(
-        &self,
-        _session_id: &SessionId,
-        process_id: &ProcessId,
-    ) -> Result<Option<u32>, crate::PluginError> {
-        Ok(self
-            .registry
-            .get_process(process_id)
-            .await?
-            .and_then(|record| record.max_attempts))
-    }
-
     async fn start(
         &self,
         _session_id: &SessionId,
@@ -1731,10 +1717,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessAwaitOutput, crate::PluginError> {
         let command = crate::ProcessCommand::Await {
-            process_ref: crate::ProcessRef::new(
-                process_id,
-                crate::ProcessIncarnation::from_registration_sequence(1),
-            ),
+            process_id: process_id.clone(),
         };
         match self.execute(scope, command).await? {
             crate::ProcessEffectOutcome::Await { output } => Ok(*output),
@@ -1834,9 +1817,9 @@ impl crate::ProcessService for EffectBackedProcessService {
         let request = crate::ProcessEventAppendRequest::new(event_type, payload).with_replay_key(
             crate::process_signal_wait_key(process_id, &signal_name, &signal_id),
         );
-        let process_ref = self.registry.resolve_process_ref(process_id).await?;
+        let process_id = self.registry.require_process_id(process_id).await?;
         let command = crate::ProcessCommand::Signal {
-            process_ref,
+            process_id,
             signal_name,
             signal_id,
             request,
@@ -1877,7 +1860,7 @@ impl crate::ProcessService for EffectBackedProcessService {
         scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessEvent, crate::PluginError> {
         let command = crate::ProcessCommand::EmitEvent {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             request: crate::ProcessEventAppendRequest::new(event_type, payload)
                 .with_replay_key(replay_key),
         };
@@ -2053,7 +2036,7 @@ pub struct MockSessionManager {
     /// leaves the resolution to the test standing in for the process: a test
     /// that resolves the recorded key is the terminal, and one that never does
     /// is a process that never ended.
-    pub terminal_attachments: Mutex<Vec<(crate::ProcessRef, crate::AwaitEventKey)>>,
+    pub terminal_attachments: Mutex<Vec<(crate::ProcessId, crate::AwaitEventKey)>>,
 }
 
 impl Default for MockSessionManager {
@@ -2205,13 +2188,13 @@ impl crate::plugin::SessionGraphService for MockSessionManager {}
 impl crate::ProcessService for MockSessionManager {
     async fn attach_process_terminal(
         &self,
-        process_ref: &crate::ProcessRef,
+        process_id: &crate::ProcessId,
         key: &crate::AwaitEventKey,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<(), PluginError> {
         self.terminal_attachments
             .lock_recover()
-            .push((process_ref.clone(), key.clone()));
+            .push((process_id.clone(), key.clone()));
         Ok(())
     }
 
@@ -2243,7 +2226,6 @@ impl crate::ProcessService for MockSessionManager {
         options: crate::ProcessStartOptions,
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, PluginError> {
-        let id = registration.id.clone();
         // The mock stands in as the journaled start effect: a spec-carrying
         // start is stamped with the content-addressed reference the executor's
         // publish would produce, since registration validation requires it.
@@ -2260,15 +2242,18 @@ impl crate::ProcessService for MockSessionManager {
         // This mock stands in as the executor, so it completes the row under the
         // authority its declared disposition permits: externally-owned rows close
         // via their external owner, lash-executed rows via the workflow-key path.
-        let authority = if registration.disposition == crate::RecoveryContract::ExternallyOwned {
+        let externally_owned = registration.disposition == crate::RecoveryContract::ExternallyOwned;
+        let observers = options.initial_observers;
+        let id = self
+            .registry()?
+            .register_process_with_observers(registration, &observers)
+            .await?
+            .id;
+        let authority = if externally_owned {
             crate::ProcessCompletionAuthority::external_owner()
         } else {
             crate::ProcessCompletionAuthority::workflow_key(&id)
         };
-        let observers = options.initial_observers;
-        self.registry()?
-            .register_process_with_observers(registration, &observers)
-            .await?;
         self.registry()?
             .complete_process(
                 &id,
@@ -2350,10 +2335,10 @@ impl crate::ProcessService for MockSessionManager {
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, PluginError> {
         let registry = self.registry()?;
-        let process_ref = registry.resolve_process_ref(process_id).await?;
+        let process_id = registry.require_process_id(process_id).await?;
         registry
             .request_process_cancel(
-                &process_ref,
+                &process_id,
                 crate::CancelOrigin::OperatorRequested,
                 serde_json::to_string(_scope.effect_controller.scoped().execution_scope())
                     .expect("serializable effect scope"),
@@ -2370,10 +2355,10 @@ impl crate::ProcessService for MockSessionManager {
         _scope: crate::ProcessOpScope<'_>,
     ) -> Result<crate::ProcessRecord, PluginError> {
         let registry = self.registry()?;
-        let process_ref = registry.resolve_process_ref(process_id).await?;
+        let process_id = registry.require_process_id(process_id).await?;
         registry
             .request_process_cancel(
-                &process_ref,
+                &process_id,
                 crate::CancelOrigin::ModelRequested,
                 identity.replay_key.clone(),
                 Some(crate::RuntimeReplayAttribution::ToolIntent(identity)),

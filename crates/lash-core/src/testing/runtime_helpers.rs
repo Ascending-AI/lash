@@ -108,20 +108,13 @@ pub fn backend_queued_scope(
     )
 }
 
-/// `backend_admitted_scope` for the process scope a registry's first
-/// registration mints (registration sequence 1), standing in for the worker's
-/// admission step.
+/// `backend_admitted_scope` for a process scope, standing in for the
+/// worker's admission step.
 pub fn backend_process_scope(
     backend: &crate::Backend,
-    process_id: impl Into<ProcessId>,
+    process_id: &ProcessId,
 ) -> crate::ScopedEffectController<'static> {
-    backend_admitted_scope(
-        backend,
-        crate::AdmittedScope::process(crate::ProcessRef::new(
-            process_id,
-            crate::ProcessIncarnation::from_registration_sequence(1),
-        )),
-    )
+    backend_admitted_scope(backend, crate::AdmittedScope::process(process_id.clone()))
 }
 
 /// `host_admitted_scope` for a turn scope.
@@ -145,20 +138,13 @@ pub fn host_queued_scope(
     )
 }
 
-/// `host_admitted_scope` for the process scope a test registry's first
-/// registration mints (registration sequence 1), standing in for the worker's
+/// `host_admitted_scope` for a process scope, standing in for the worker's
 /// admission step.
 pub fn host_process_scope(
     config: &crate::RuntimeHostConfig,
-    process_id: impl Into<ProcessId>,
+    process_id: &ProcessId,
 ) -> crate::ScopedEffectController<'static> {
-    host_admitted_scope(
-        config,
-        crate::AdmittedScope::process(crate::ProcessRef::new(
-            process_id,
-            crate::ProcessIncarnation::from_registration_sequence(1),
-        )),
-    )
+    host_admitted_scope(config, crate::AdmittedScope::process(process_id.clone()))
 }
 
 pub trait ReadModelState {

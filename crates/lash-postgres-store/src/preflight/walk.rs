@@ -103,7 +103,7 @@ pub(crate) async fn scan_durable(
 
 /// One start record per live process (FIG-3571), in key order. The payload is
 /// the process record: its start stamp names the executable generation the
-/// incarnation runs under, and only its input lets the probe recompute the
+/// process runs under, and only its input lets the probe recompute the
 /// generation this build would run it as.
 async fn scan_started_processes(
     pool: &PgPool,
@@ -129,8 +129,8 @@ async fn scan_started_processes(
         .map(
             |(process_id, status, wake_session_id, record_json)| DurableItem {
                 surface: DurableSurface::StartedProcess,
-                cursor: process_id.clone(),
-                process_id: Some(ProcessId::from(process_id)),
+                process_id: ProcessId::parse(&process_id).ok(),
+                cursor: process_id,
                 session_id: wake_session_id.map(SessionId::from),
                 status: Some(status),
                 owner_record: Some(record_json.clone()),
@@ -217,11 +217,11 @@ async fn scan_parked_segments(
         .into_iter()
         .map(
             |(process_id, segment_ordinal, handover_json, status, wake_session_id, record_json)| {
-                let process_id = ProcessId::from(process_id);
+                let process_id = ProcessId::parse(&process_id).ok();
                 DurableItem {
                     surface: DurableSurface::ParkedSegment,
-                    cursor: segment_cursor(&process_id, segment_ordinal),
-                    process_id: Some(process_id),
+                    cursor: segment_cursor(process_id.as_ref(), segment_ordinal),
+                    process_id,
                     // The session the process wakes into, which is the identity
                     // an operator draining a stuck continuation looks for.
                     session_id: wake_session_id.map(SessionId::from),
@@ -267,7 +267,7 @@ async fn scan_pending_wakes(
             |(delivery_id, process_id, target_session_id, state, delivery_json)| DurableItem {
                 surface: DurableSurface::PendingWake,
                 cursor: delivery_id,
-                process_id: Some(ProcessId::from(process_id)),
+                process_id: ProcessId::parse(&process_id).ok(),
                 session_id: Some(SessionId::from(target_session_id)),
                 // The delivery's own state word, verbatim: an operator reading
                 // `enqueuing` learns the claim lapsed mid-flight, which a
@@ -636,7 +636,8 @@ fn page_cursor(scan: &DurableScan, last: Option<String>, returned: usize) -> Opt
 /// do, which keeps a cursor an operator sees in a report meaningful rather than
 /// arbitrary. Paging itself never relies on that: see the family's
 /// `process_segment_handover.list_parked_segments`.
-fn segment_cursor(process_id: &ProcessId, segment_ordinal: i64) -> String {
+fn segment_cursor(process_id: Option<&ProcessId>, segment_ordinal: i64) -> String {
+    let process_id = process_id.map_or("", ProcessId::as_str);
     format!("{process_id}:{segment_ordinal:020}")
 }
 
@@ -736,22 +737,12 @@ mod tests {
 
     #[test]
     fn a_minted_segment_cursor_round_trips_through_its_split() {
-        let cursor = segment_cursor(&ProcessId::from("proc-7"), 42);
-        assert_eq!(cursor, "proc-7:00000000000000000042");
+        let process_id = ProcessId::fixture("proc-7");
+        let cursor = segment_cursor(Some(&process_id), 42);
+        assert_eq!(cursor, format!("{process_id}:00000000000000000042"));
         assert_eq!(
             split_segment_cursor(&cursor).expect("a minted cursor parses"),
-            ("proc-7".to_string(), 42)
-        );
-    }
-
-    #[test]
-    fn a_process_id_containing_the_separator_still_round_trips() {
-        // The reason the split is from the right: the ordinal cannot contain a
-        // separator, the process id can, so the last one is always ours.
-        let cursor = segment_cursor(&ProcessId::from("tenant:a:proc-1"), 3);
-        assert_eq!(
-            split_segment_cursor(&cursor).expect("a minted cursor parses"),
-            ("tenant:a:proc-1".to_string(), 3)
+            (process_id.to_string(), 42)
         );
     }
 

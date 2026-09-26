@@ -25,9 +25,11 @@ async fn real_aggregate_child_await_names_both_without_fold_conflict() {
                     record.insert(
                         "id".to_string(),
                         lashlang::Value::String(
-                            lash_sansio::handle::HandleId::process(&format!("child-{ordinal}"), 1)
-                                .as_str()
-                                .into(),
+                            lash_sansio::handle::HandleId::process(&lash_core::ProcessId::fixture(
+                                &format!("child-{ordinal}"),
+                            ))
+                            .as_str()
+                            .into(),
                         ),
                     );
                     Ok(lashlang::AbilityResult::Value(lashlang::Value::Record(
@@ -67,7 +69,7 @@ async fn real_aggregate_child_await_names_both_without_fold_conflict() {
     let identity = TraceLanguageExecutionIdentity {
         scope: lash_trace::TraceRuntimeScope::none(),
         subject: lash_trace::TraceRuntimeSubject::Process {
-            process_id: lash_core::ProcessId::from("parent"),
+            process_id: lash_core::ProcessId::fixture("parent"),
         },
         source_identity: "source".to_string(),
         module_ref: "module".to_string(),
@@ -111,8 +113,8 @@ async fn real_aggregate_child_await_names_both_without_fold_conflict() {
             awaited: TraceNodeAwaited::ChildProcesses { process_ids },
             ..
         } if process_ids == &vec![
-            lash_core::ProcessId::from("child-1"),
-            lash_core::ProcessId::from("child-2"),
+            lash_core::ProcessId::fixture("child-1"),
+            lash_core::ProcessId::fixture("child-2"),
         ]
     )));
 }
@@ -145,9 +147,11 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
                     record.insert(
                         "id".to_string(),
                         lashlang::Value::String(
-                            lash_sansio::handle::HandleId::process("child", 1)
-                                .as_str()
-                                .into(),
+                            lash_sansio::handle::HandleId::process(&lash_core::ProcessId::fixture(
+                                "child",
+                            ))
+                            .as_str()
+                            .into(),
                         ),
                     );
                     Ok(lashlang::AbilityResult::Value(lashlang::Value::Record(
@@ -188,7 +192,7 @@ async fn public_trace_host_reports_a_parked_await_cancelled_after_partial_comple
     let identity = TraceLanguageExecutionIdentity {
         scope: lash_trace::TraceRuntimeScope::none(),
         subject: lash_trace::TraceRuntimeSubject::Process {
-            process_id: lash_core::ProcessId::from("parent"),
+            process_id: lash_core::ProcessId::fixture("parent"),
         },
         source_identity: "source".to_string(),
         module_ref: "module".to_string(),
@@ -355,7 +359,7 @@ async fn real_loop_branch_skips_the_untaken_arm_in_each_iteration() {
     let identity = TraceLanguageExecutionIdentity {
         scope: lash_trace::TraceRuntimeScope::none(),
         subject: lash_trace::TraceRuntimeSubject::Process {
-            process_id: lash_core::ProcessId::from("loop-branch"),
+            process_id: lash_core::ProcessId::fixture("loop-branch"),
         },
         source_identity: output.artifact.source_identity(),
         module_ref: output.module_ref.to_string(),

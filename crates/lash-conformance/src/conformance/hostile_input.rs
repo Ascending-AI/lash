@@ -1,6 +1,5 @@
 //! Hostile identifiers must fail before namespace lookup or mutation.
 use super::*;
-use lash_sansio::ProcessId;
 use pretty_assertions::assert_eq;
 
 fn malformed_attachment_ids() -> Vec<String> {
@@ -209,56 +208,75 @@ pub async fn process_environment_namespace(store: Arc<dyn crate::ProcessExecutio
     reason = "conformance-law fixture: each result is established by the setup above"
 )]
 pub async fn process_namespace(registry: Arc<dyn crate::ConformanceProcessRegistry>) {
-    for raw in ["", " ", "nul\0process", "reserved#segment"] {
+    // A process id is minted, never chosen (ADR 0107): no string a caller
+    // writes is one, so no hostile id can reach a registrar at all.
+    for raw in [
+        "",
+        " ",
+        "nul\0process",
+        "reserved#segment",
+        "canary",
+        "../canary",
+        "'; DROP TABLE lash_processes; --",
+    ] {
         assert!(
-            registry
-                .register_process(crate::ProcessRegistration::new(
-                    raw,
-                    crate::ProcessInput::External {
-                        metadata: serde_json::Value::Null
-                    },
-                    crate::RecoveryContract::ExternallyOwned,
-                    crate::ProcessProvenance::host(),
-                    lash_core::ProcessLifecyclePolicy::new(
-                        lash_core::ParentScope::Host,
-                        lash_core::OnParentEnd::Abandon
-                    ),
-                ))
-                .await
-                .is_err(),
-            "malformed process id must be rejected before registration"
-        );
-        assert!(
-            registry.get_process(&ProcessId::from(raw)).await.is_err(),
-            "malformed process id must be rejected before lookup"
+            crate::ProcessId::parse(raw).is_err(),
+            "a string no registrar minted is not a process id: {raw:?}"
         );
     }
-    for raw in ["canary", "../canary", "'; DROP TABLE lash_processes; --"] {
-        registry
-            .register_process(crate::ProcessRegistration::new(
-                raw,
-                crate::ProcessInput::External {
-                    metadata: serde_json::Value::Null,
-                },
-                crate::RecoveryContract::ExternallyOwned,
-                crate::ProcessProvenance::host(),
-                lash_core::ProcessLifecyclePolicy::new(
-                    lash_core::ParentScope::Host,
-                    lash_core::OnParentEnd::Abandon,
-                ),
-            ))
+    // Caller bytes reach the registrar only as a start key, which must be
+    // stored opaquely: each hostile key finds its own process again and no
+    // two alias.
+    let registration = |raw: &str| {
+        crate::ProcessRegistration::new(
+            crate::ProcessInput::External {
+                metadata: serde_json::Value::Null,
+            },
+            crate::RecoveryContract::ExternallyOwned,
+            crate::ProcessProvenance::host(),
+            lash_core::ProcessLifecyclePolicy::new(
+                lash_core::ParentScope::Host,
+                lash_core::OnParentEnd::Abandon,
+            ),
+        )
+        .with_start_key(Some(crate::StartKey::for_host(
+            crate::StartKeyOwner::HOST,
+            raw,
+        )))
+    };
+    let hostile = ["canary", "../canary", "'; DROP TABLE lash_processes; --"];
+    let mut ids = std::collections::BTreeMap::new();
+    for raw in hostile {
+        let registered = registry
+            .register_process(registration(raw))
             .await
-            .expect("register opaque process key");
+            .expect("register under a hostile start key");
+        ids.insert(raw, registered.id.clone());
     }
-    for raw in ["canary", "../canary", "'; DROP TABLE lash_processes; --"] {
+    assert_eq!(
+        ids.values()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len(),
+        hostile.len(),
+        "hostile start keys never alias one another"
+    );
+    for raw in hostile {
+        let again = registry
+            .register_process(registration(raw))
+            .await
+            .expect("repeat a hostile start key");
+        assert_eq!(
+            again.id, ids[raw],
+            "a hostile start key is stored opaquely and finds its own process"
+        );
         assert_eq!(
             registry
-                .get_process(&ProcessId::from(raw))
+                .get_process(&ids[raw])
                 .await
-                .expect("read opaque process key")
-                .expect("canary exists")
+                .expect("read the hostile-key process")
+                .expect("the hostile-key process exists")
                 .id,
-            raw
+            ids[raw]
         );
     }
 }

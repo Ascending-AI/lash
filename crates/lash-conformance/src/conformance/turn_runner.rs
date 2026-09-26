@@ -246,34 +246,37 @@ pub trait ConformanceTurnRunner: Send + Sync {
         panic!("this tier's turn runner cannot cut a turn at {cut:?}");
     }
 
-    /// Serves every execution of `process_id`'s segments with `body`, in
-    /// place of any body served before: the tier runs a fresh `body` on the
-    /// process-scoped controller its engine lends each execution, and a body
-    /// that ends [`Settled`](ConformanceTurnEnd::Settled) settles the process
+    /// Serves every execution of the segments of the process a start keyed
+    /// `start_key` registers with `body`, in place of any body served before:
+    /// the tier runs a fresh `body` on the process-scoped controller its
+    /// engine lends each execution, and a body that ends
+    /// [`Settled`](ConformanceTurnEnd::Settled) settles the process
     /// successfully. For a process the law starts some other way — a child
-    /// that one of its effects starts. A runner that cannot run process
-    /// segments says so by panicking.
-    async fn serve_segments(&self, process_id: &crate::ProcessId, _body: ConformanceTurnAttempt) {
-        panic!("this tier's turn runner cannot serve the segments of process `{process_id}`");
+    /// that one of its effects starts, whose id the start mints, so the law
+    /// names it by the key it started it under (ADR 0107). A runner that
+    /// cannot run process segments says so by panicking.
+    async fn serve_segments(&self, start_key: &crate::StartKey, _body: ConformanceTurnAttempt) {
+        panic!(
+            "this tier's turn runner cannot serve the segments of the process started under `{start_key}`"
+        );
     }
 
     /// Starts `registration` on the tier's engine, serving its segment with
     /// `body` until `crash` fires, then kills that execution where it stands,
     /// the way the process running it dies, and leaves the segment open for
     /// [`recover_segment`](Self::recover_segment). The registration must
-    /// already be recorded in the process registry the tier's engine reads.
+    /// already be recorded, as `process_id`, in the process registry the
+    /// tier's engine reads.
     /// Panics when the segment ended before the crash fired. A runner that
     /// cannot run process segments says so by panicking.
     async fn run_segment_until_crash(
         &self,
-        registration: crate::ProcessRegistration,
+        process_id: &crate::ProcessId,
+        _registration: crate::ProcessRegistration,
         _body: ConformanceTurnAttempt,
         _crash: ConformanceCrash,
     ) {
-        panic!(
-            "this tier's turn runner cannot crash a segment of process `{}`",
-            registration.id
-        );
+        panic!("this tier's turn runner cannot crash a segment of process `{process_id}`");
     }
 
     /// Recovers the segment of `process_id` a crash left open, the way

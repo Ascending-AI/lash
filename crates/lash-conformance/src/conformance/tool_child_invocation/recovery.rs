@@ -161,7 +161,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
                     definitions: leaf_definitions(),
                     observation: Arc::clone(&observation),
                     session_id: session_id.clone(),
-                    intent_target: crate::ProcessId::from("unused-in-recovery"),
+                    intent_target: crate::ProcessId::fixture("unused-in-recovery"),
                     start_metadata: serde_json::Value::Null,
                 });
                 let _guard = register_opener(
@@ -311,7 +311,7 @@ pub async fn an_unregistered_opener_leaves_the_child_accepted(
         definitions: leaf_definitions(),
         observation: Arc::clone(&observation),
         session_id: session_id.clone(),
-        intent_target: crate::ProcessId::from("unused-in-recovery"),
+        intent_target: crate::ProcessId::fixture("unused-in-recovery"),
         start_metadata: serde_json::Value::Null,
     });
     let registry = (fixture.make_processes)().await.process_registry();

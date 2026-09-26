@@ -14,21 +14,15 @@ enum HandleAuthority {
 }
 
 impl RuntimeExecutionContext<'_> {
-    /// The incarnation rides inside the id rather than beside it, so a handle
-    /// cannot name an incarnation it was not taken against, and the coordinator
-    /// no longer has to back-fill one onto a handle a plugin returned.
-    ///
     /// `process_id` rides beside the opaque id for the same reason
     /// [`ProcessHandleView`](crate::ProcessHandleView) carries it: the process
     /// tools take a `process_id`, and reading one out of the handle id is
     /// exactly what the opaque id forbids.
-    pub fn process_handle_json(process_ref: &crate::ProcessRef) -> serde_json::Value {
-        let mut record =
-            lash_sansio::handle::handle_record_json(&lash_sansio::handle::HandleId::process(
-                process_ref.process_id.as_str(),
-                process_ref.incarnation.registration_sequence(),
-            ));
-        record["process_id"] = json!(process_ref.process_id.as_str());
+    pub fn process_handle_json(process_id: &crate::ProcessId) -> serde_json::Value {
+        let mut record = lash_sansio::handle::handle_record_json(
+            &lash_sansio::handle::HandleId::process(process_id),
+        );
+        record["process_id"] = json!(process_id.as_str());
         record
     }
 
@@ -43,23 +37,23 @@ impl RuntimeExecutionContext<'_> {
     /// (ADR 0095), so core and the language agree on what a handle is.
     pub(super) fn parse_process_handle(
         handle: &serde_json::Value,
-    ) -> Result<crate::ProcessRef, String> {
-        crate::ProcessRef::from_handle_json(handle)
+    ) -> Result<crate::ProcessId, String> {
+        crate::process_id_from_handle_json(handle)
     }
 
     /// FIG-653: observer validation enforces subscription relationships, not authorization.
     async fn authorize_handle(
         &self,
-        process_ref: &crate::ProcessRef,
+        process_id: &crate::ProcessId,
     ) -> Result<HandleAuthority, crate::PluginError> {
-        if self.is_run_local_process(&process_ref.process_id) {
+        if self.is_run_local_process(process_id) {
             return Ok(HandleAuthority::RunLocalPossession);
         }
         self.dispatch
             .processes
-            .validate_visible_refs(
+            .validate_visible(
                 &self.session_id,
-                std::slice::from_ref(process_ref),
+                std::slice::from_ref(process_id),
                 self.process_scope(self.parent_invocation.clone()),
             )
             .await?;
@@ -92,14 +86,18 @@ impl RuntimeExecutionContext<'_> {
             }
         };
         let registration = ProcessRegistration::session_start_draft(
-            handle_id.clone(),
             ProcessInput::ToolCall {
                 call: prepared_call.clone(),
             },
-            // Tool-call rows are journaled and idempotent by process id, so
-            // recovery may re-execute them (ADR 0019).
+            // Tool-call rows are journaled and idempotent by their start
+            // key, so recovery may re-execute them (ADR 0019, ADR 0107).
             crate::RecoveryContract::Rerunnable,
-        );
+        )
+        .with_start_key(Some(crate::StartKey::for_orchestration_call(
+            self.admitted_scope().scope(),
+            &handle_id,
+            0,
+        )));
         let (registration, env_spec) = self.process_start_execution_env(registration);
         let started = match self
             .dispatch
@@ -118,7 +116,7 @@ impl RuntimeExecutionContext<'_> {
             Err(err) => return ToolInvocationReply::error(json!(err.to_string())),
         };
 
-        let handle_value = Self::process_handle_json(&crate::ProcessRef::from_record(&started));
+        let handle_value = Self::process_handle_json(&started.id.clone());
         let record = ToolCallRecord {
             call_id: Some(call_id),
             tool: prepared_call.tool_name,
@@ -159,18 +157,18 @@ impl RuntimeExecutionContext<'_> {
         handle: serde_json::Value,
     ) -> ToolInvocationReply {
         let args = json!({ "handle": handle.clone() });
-        let process_ref = match Self::parse_process_handle(&handle) {
+        let process_id = match Self::parse_process_handle(&handle) {
             Ok(parsed) => parsed,
             Err(err) => {
                 return Self::recorded_process_error(call_id, "await_process", args, err);
             }
         };
-        if let Err(err) = self.authorize_handle(&process_ref).await {
+        if let Err(err) = self.authorize_handle(&process_id).await {
             return Self::recorded_process_error(call_id, "await_process", args, err.to_string());
         }
         let output = self
             .await_process_with_cancellation(
-                &process_ref,
+                &process_id,
                 self.parent_invocation.clone(),
                 self.cancellation_token.clone(),
             )
@@ -206,13 +204,13 @@ impl RuntimeExecutionContext<'_> {
             "signal_name": signal_name.clone(),
             "payload": payload.clone()
         });
-        let process_ref = match Self::parse_process_handle(&handle) {
+        let process_id = match Self::parse_process_handle(&handle) {
             Ok(parsed) => parsed,
             Err(err) => {
                 return Self::recorded_process_error(call_id, "signal_process", args, err);
             }
         };
-        if let Err(err) = self.authorize_handle(&process_ref).await {
+        if let Err(err) = self.authorize_handle(&process_id).await {
             return Self::recorded_process_error(call_id, "signal_process", args, err.to_string());
         }
         let signal_id = format!("process-{call_id}");
@@ -221,7 +219,7 @@ impl RuntimeExecutionContext<'_> {
             .processes
             .signal_possessed(
                 &self.session_id,
-                &process_ref.process_id,
+                &process_id,
                 signal_name,
                 signal_id,
                 payload,
@@ -244,13 +242,13 @@ impl RuntimeExecutionContext<'_> {
         handle: serde_json::Value,
     ) -> ToolInvocationReply {
         let args = json!({ "handle": handle.clone() });
-        let process_ref = match Self::parse_process_handle(&handle) {
+        let process_id = match Self::parse_process_handle(&handle) {
             Ok(parsed) => parsed,
             Err(err) => {
                 return Self::recorded_process_error(call_id, "cancel_process", args, err);
             }
         };
-        if let Err(err) = self.authorize_handle(&process_ref).await {
+        if let Err(err) = self.authorize_handle(&process_id).await {
             return Self::recorded_process_error(call_id, "cancel_process", args, err.to_string());
         }
         let result = self
@@ -258,7 +256,7 @@ impl RuntimeExecutionContext<'_> {
             .processes
             .cancel(
                 &self.session_id,
-                &process_ref.process_id,
+                &process_id,
                 self.process_scope(self.parent_invocation.clone()),
             )
             .await;

@@ -304,23 +304,18 @@ fn agent_scenario_awaited_process_attachment_is_a_parent_commit_gc_root() -> Res
             )
             .response(typescript_block(
                 r#"
-const handle = { __handle__: "lash", id: "p.1.awaited-attachment-child" };
+const handle = { __handle__: "lash", id: "@precompleted-process-handle@" };
 const attachment = await handle;
 finish(attachment);"#,
             ))
             .seeded_attachment_write(
                 lash_core::AttachmentId::parse("awaited-child-only").expect("valid attachment id"),
             )
-            .precompleted_process(
-                "awaited-attachment-child",
-                lash_core::ProcessAwaitOutput::from_tool_output(
-                    lash_core::ToolCallOutput::success_tool_value(
-                        lash_core::ToolValue::Attachment(lash_core::AttachmentSource::stored(
-                            attachment.clone(),
-                        )),
-                    ),
-                ),
-            ),
+            .precompleted_process(lash_core::ProcessAwaitOutput::from_tool_output(
+                lash_core::ToolCallOutput::success_tool_value(lash_core::ToolValue::Attachment(
+                    lash_core::AttachmentSource::stored(attachment.clone()),
+                )),
+            )),
         )
         .await?;
         let parent_tool_calls = &run
@@ -731,15 +726,9 @@ fn assert_lashlang_process_ids_unique_for_labels<const N: usize>(
         if process.kind != lash_lashlang_runtime::LASHLANG_ENGINE_KIND {
             continue;
         }
-        // A leaf `processes.start` derives the child's id from the declaring
-        // intent's identity (FIG-2994, ADR 0095), so the deterministic id a
-        // redrive reproduces is the tool-intent one, not the retired
-        // `process:lashlang:` start-site spelling.
-        assert!(
-            process.process_id.starts_with("tool-intent:v2:blake3:"),
-            "lashlang process `{}` did not use a deterministic process id",
-            process.process_id
-        );
+        // A leaf `processes.start` keys the child's start by the declaring
+        // intent's identity (ADR 0107): a redrive returns the same minted
+        // process, so the minted ids stay distinct per start.
         assert!(
             ids.insert(process.process_id.as_str()),
             "duplicate lashlang process id `{}`",

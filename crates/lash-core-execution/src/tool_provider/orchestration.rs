@@ -77,6 +77,20 @@ impl<'run> OrchestrationContext<'run> {
         Ok(crate::ParentScope::from_owner(&opener))
     }
 
+    /// The start key of this body's `ordinal`th process start: the call's
+    /// admitted scope and id, so every redrive of the body starts the same
+    /// process (ADR 0107).
+    pub fn start_key(&self, ordinal: u32) -> Result<crate::StartKey, PluginError> {
+        let call_id = self.tool_call_id().ok_or_else(|| {
+            PluginError::Session("an orchestrated process start needs its tool call id".into())
+        })?;
+        Ok(crate::StartKey::for_orchestration_call(
+            self.context.effect_controller.scoped().execution_scope(),
+            call_id,
+            ordinal,
+        ))
+    }
+
     pub async fn start_process(
         &self,
         request: crate::ProcessStartRequest,
@@ -115,13 +129,12 @@ impl<'run> OrchestrationContext<'run> {
 
     pub fn emit_child_process_started(
         &self,
-        process_id: impl Into<ProcessId>,
-        incarnation: crate::ProcessIncarnation,
+        process_id: ProcessId,
         attempt: Option<u32>,
         child_entry_name: Option<String>,
     ) {
         self.context
-            .emit_child_process_started(process_id, incarnation, attempt, child_entry_name);
+            .emit_child_process_started(process_id, attempt, child_entry_name);
     }
 
     pub async fn call_tool_batch(
@@ -254,9 +267,7 @@ async fn coordinate_nested_tool_batch<'run>(
         )
     });
     let cancellation_token = body_context.cancellation_token().cloned();
-    let enclosing_process = body_context
-        .enclosing_process()
-        .map(|process_id| ProcessId::from(process_id.to_string()));
+    let enclosing_process = body_context.enclosing_process().cloned();
     let parent_invocation = dispatch.parent_invocation.clone();
     // The body call these calls nest under — the parent link their
     // `ToolCallStarted`/`ToolCallCompleted` activities carry, the same

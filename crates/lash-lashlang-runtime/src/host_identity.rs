@@ -10,14 +10,14 @@
 //! ordinal it took when it left the VM, never by the call site that issued
 //! it. The call site's node id and occurrence are trace metadata only.
 
-use lash_core::{EffectOpener, ProcessRef};
+use lash_core::{EffectOpener, ProcessId};
 
 use crate::replay_run::LashlangReplayNamespace;
 
 /// The identities one Lashlang host mints.
 ///
 /// Two facts, and only one of them is the opener. [`EffectOpener`] is the
-/// lifecycle owner (ADR 0099 §1) — a turn, or one process incarnation — and it
+/// lifecycle owner (ADR 0099 §1) — a turn, or one process — and it
 /// is the shared type, never a second spelling of it. `execution` is the part
 /// of the identity the opener is deliberately too coarse to supply: a turn runs
 /// many cells, and two cells of one turn each count their ordinals from zero,
@@ -42,10 +42,10 @@ impl LashlangHostIdentities {
     }
 
     /// The identities one process body mints, for the whole life of the
-    /// incarnation.
-    pub fn process_body(process_ref: ProcessRef) -> Self {
+    /// process.
+    pub fn process_body(process_id: ProcessId) -> Self {
         Self {
-            opener: EffectOpener::process(process_ref),
+            opener: EffectOpener::process(process_id),
             execution: None,
         }
     }
@@ -89,10 +89,10 @@ impl LashlangHostIdentities {
     /// The id of the call the program issued at `ordinal`: the tool call's
     /// id, and the reply id of an awaited handle.
     ///
-    /// The subagent spawn tool builds a child `ProcessId` out of this id
-    /// verbatim (`process:subagent:{call_id}`), so it is what keeps a redriven
-    /// spawn from starting a second child: it moves only when the command's
-    /// position in the run moves.
+    /// The subagent spawn tool keys its child's start on this id (through its
+    /// recorded call), so it is what keeps a redriven spawn from starting a
+    /// second child: it moves only when the command's position in the run
+    /// moves.
     pub fn call_id(&self, ordinal: u64) -> String {
         format!("lashlang:v2:{}:{ordinal:010}", self.scope())
     }
@@ -113,22 +113,14 @@ impl LashlangHostIdentities {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use lash_core::{
-        AdmittedScope, AdmittedScopeError, ExecutionScope, ProcessId, ProcessIncarnation, SessionId,
-    };
+    use lash_core::{AdmittedScope, ExecutionScope, ProcessId, SessionId};
 
-    fn process_opener(name: &str, incarnation: u64) -> LashlangHostIdentities {
-        LashlangHostIdentities::process_body(ProcessRef::new(
-            name,
-            ProcessIncarnation::from_registration_sequence(incarnation),
-        ))
+    fn process_id(label: &str) -> ProcessId {
+        lash_core::process_id_for_test(label)
     }
 
-    fn process_ref(name: &str, incarnation: u64) -> ProcessRef {
-        ProcessRef::new(
-            name,
-            ProcessIncarnation::from_registration_sequence(incarnation),
-        )
+    fn process_opener(label: &str) -> LashlangHostIdentities {
+        LashlangHostIdentities::process_body(process_id(label))
     }
 
     /// A cell of a process-backed session turn is opened by its process.
@@ -141,124 +133,73 @@ mod tests {
     /// its cap, and the parent read `Stopped(MaxTurns)` instead of the child's
     /// own reason.
     #[test]
-    fn a_cell_under_a_process_scope_opens_on_the_admitted_incarnation() {
-        let admitted = process_ref("process:subagent:call-1", 3);
+    fn a_cell_under_a_process_scope_opens_on_the_process() {
+        let admitted = process_id("subagent-child");
 
         let opener = EffectOpener::for_scope(&AdmittedScope::process(admitted.clone()))
             .expect("a process is an opener");
 
-        assert_eq!(opener, EffectOpener::process(admitted));
-        assert_eq!(
-            opener.render(),
-            "process:process:subagent:call-1:incarnation:3"
-        );
+        assert_eq!(opener, EffectOpener::process(admitted.clone()));
+        assert_eq!(opener.render(), format!("process:{admitted}"));
     }
 
-    /// The incarnation is what keeps a reused process name apart, so two
-    /// incarnations of one process-backed turn mint different identities while
-    /// a worker retry of the same incarnation mints the same ones.
+    /// The minted id is what keeps two processes apart, so two processes
+    /// running one process-backed turn mint different identities while a
+    /// worker retry of the same process mints the same ones.
     #[test]
-    fn two_incarnations_of_one_process_backed_cell_mint_distinct_identities() {
-        let identities = |incarnation| {
+    fn two_processes_running_one_process_backed_cell_mint_distinct_identities() {
+        let identities = |label| {
             LashlangHostIdentities::cell(
-                EffectOpener::for_scope(&AdmittedScope::process(process_ref(
-                    "process:subagent:call-1",
-                    incarnation,
-                )))
-                .expect("a process is an opener"),
+                EffectOpener::for_scope(&AdmittedScope::process(process_id(label)))
+                    .expect("a process is an opener"),
                 "cell:1",
             )
         };
 
         assert_ne!(
-            identities(1).call_id(0),
-            identities(2).call_id(0),
-            "a re-registered process is a different opener (ADR 0099 §1)"
+            identities("first").call_id(0),
+            identities("second").call_id(0),
+            "two processes are two openers (ADR 0099 §1)"
         );
         assert_eq!(
-            identities(1).call_id(0),
-            identities(1).call_id(0),
-            "a worker retry keeps the incarnation, so it re-derives the same identity"
+            identities("first").call_id(0),
+            identities("first").call_id(0),
+            "a worker retry keeps the process id, so it re-derives the same identity"
         );
     }
 
-    /// The name alone is never the opener.
-    ///
-    /// `ExecutionScope::Process` carries the reusable name, and the admitted
-    /// scope refuses to admit it without the incarnation — refused at
-    /// admission, rather than silently aliasing every earlier incarnation of
-    /// that name.
+    /// ADR 0099 §1: two processes are two openers, even when a host labels
+    /// them alike. The minted id is the whole opener; nothing a caller names
+    /// reaches it.
     #[test]
-    fn a_process_scope_without_an_admitted_incarnation_is_refused() {
-        let error = AdmittedScope::new(ExecutionScope::process("worker"), None)
-            .expect_err("the reusable name is not admitted");
-
-        assert!(
-            matches!(
-                &error,
-                AdmittedScopeError::ProcessIncarnationMissing { process_id }
-                    if *process_id == "worker"
-            ),
-            "unexpected refusal: {error}"
-        );
-    }
-
-    /// An incarnation of another process cannot open this one's work.
-    #[test]
-    fn an_admitted_incarnation_of_another_process_is_refused() {
-        let error = AdmittedScope::new(
-            ExecutionScope::process("worker"),
-            Some(process_ref("indexer", 1)),
-        )
-        .expect_err("the admitted process must be the scope's process");
-
-        assert!(
-            matches!(
-                &error,
-                AdmittedScopeError::ProcessPinMismatch { process_id, pinned }
-                    if *process_id == "worker" && *pinned == "indexer"
-            ),
-            "unexpected refusal: {error}"
-        );
-    }
-
-    /// ADR 0099 §1: a re-registered process name is a different opener.
-    ///
-    /// Red on the parent commit, where the process tier scoped every identity
-    /// on the process id alone: the second incarnation re-minted the first
-    /// one's keys, so a group, a close or a cancellation fence the predecessor
-    /// left behind was reachable from a process that only happens to carry the
-    /// same name.
-    #[test]
-    fn a_re_registered_process_name_is_a_different_opener() {
-        let first = process_opener("worker", 1);
-        let second = process_opener("worker", 2);
+    fn two_processes_are_two_openers() {
+        let first = process_opener("worker-a");
+        let second = process_opener("worker-b");
 
         assert_ne!(
             first.call_id(0),
             second.call_id(0),
-            "two incarnations of one process name must not share a leaf identity"
+            "two processes must not share a leaf identity"
         );
         assert_ne!(
             first.child_call_id(0, 0),
             second.child_call_id(0, 0),
-            "two incarnations of one process name must not share a child identity"
+            "two processes must not share a child identity"
         );
+        let id = process_id("worker-a");
         assert!(
-            first.call_id(0).contains("process:6:worker:incarnation:1"),
-            "the incarnation is bound, not merely mixed in"
+            first.call_id(0).contains(id.as_str()),
+            "the minted id is bound, not merely mixed in"
         );
     }
 
     /// A minted identity must carry neither reserved separator.
     ///
-    /// `#` is refused outright inside a process id
-    /// (`invalid_process_key_reason`), and the subagent spawn tool builds a
-    /// child `ProcessId` out of one of these call ids verbatim, so a `#` here
-    /// makes the child unregistrable rather than merely ugly.
+    /// A call id is embedded in effect and reply ids, whose grammars reserve
+    /// `#` and `/`, so a minted one must carry neither.
     #[test]
     fn a_minted_identity_carries_no_reserved_separator() {
-        let minted = process_opener("worker", 1).call_id(0);
+        let minted = process_opener("worker").call_id(0);
         assert!(!minted.contains('#'), "{minted}");
         assert!(!minted.contains('/'), "{minted}");
     }
@@ -274,7 +215,7 @@ mod tests {
 
         assert_ne!(
             turn.call_id(0),
-            process_opener("worker", 1).call_id(0),
+            process_opener("worker").call_id(0),
             "a turn whose ids spell a process opener must still not collide with it"
         );
     }
@@ -325,10 +266,8 @@ mod tests {
     #[test]
     fn two_cells_of_one_queued_drain_mint_distinct_identities() {
         let scope = ExecutionScope::queue_drain("session-1", "drain-3");
-        let opener = EffectOpener::for_scope(
-            &AdmittedScope::unpinned(scope).expect("a non-process scope admits unpinned"),
-        )
-        .expect("a queued-work drain is an opener");
+        let opener = EffectOpener::for_scope(&AdmittedScope::new(scope))
+            .expect("a queued-work drain is an opener");
         assert_eq!(opener, EffectOpener::queue_drain("session-1", "drain-3"));
         let first = LashlangHostIdentities::cell(opener.clone(), "exec-code:1");
         let second = LashlangHostIdentities::cell(opener.clone(), "exec-code:2");
@@ -350,10 +289,10 @@ mod tests {
         );
         assert_ne!(
             opener,
-            EffectOpener::for_scope(
-                &AdmittedScope::unpinned(ExecutionScope::turn("session-1", "drain-3"))
-                    .expect("a turn admits unpinned"),
-            )
+            EffectOpener::for_scope(&AdmittedScope::new(ExecutionScope::turn(
+                "session-1",
+                "drain-3"
+            )),)
             .expect("a turn is an opener"),
             "a drain is not a turn that happens to spell its id"
         );
@@ -423,10 +362,8 @@ mod tests {
     fn a_delimiter_bearing_session_id_round_trips() {
         let spawned_session = "session:subagent:lashlang:turn:1:x:1:y";
         let scope = ExecutionScope::turn(spawned_session, "turn-1");
-        let opener = EffectOpener::for_scope(
-            &AdmittedScope::unpinned(scope).expect("a non-process scope admits unpinned"),
-        )
-        .expect("a turn is an opener");
+        let opener =
+            EffectOpener::for_scope(&AdmittedScope::new(scope)).expect("a turn is an opener");
 
         assert_eq!(
             opener.session_id().map(SessionId::as_str),
@@ -449,50 +386,11 @@ mod tests {
         );
     }
 
-    /// The real embedding chain, two process ids deep.
-    ///
-    /// A minted call id becomes the child's whole `ProcessId`
-    /// (`process:subagent:{call_id}`), which becomes the child's opener under
-    /// `ExecutionScope::Process`, whose own minted call id becomes the
-    /// grandchild's `ProcessId` in turn. Every link must pass
-    /// `invalid_process_key_reason` — the canonical encoding may carry `:` but
-    /// never `#`, which is refused inside a process id.
-    #[test]
-    fn a_call_id_nested_two_process_ids_deep_is_admitted() {
-        let parent_leaf =
-            LashlangHostIdentities::cell(EffectOpener::turn("session-1", "turn-7"), "exec-code:1")
-                .call_id(0);
-
-        let child_process_id = ProcessId::from(format!("process:subagent:{parent_leaf}"));
-        assert_eq!(
-            lash_core::store::process_key::invalid_process_key_reason(child_process_id.as_str()),
-            None,
-            "a minted call id embedded in a child process id must be registrable"
-        );
-
-        let child_opener = EffectOpener::for_scope(&AdmittedScope::process(process_ref(
-            child_process_id.as_str(),
-            4,
-        )))
-        .expect("the spawned child process is an opener");
-        let grandchild_leaf = LashlangHostIdentities::cell(child_opener, "exec-code:1").call_id(0);
-        let grandchild_process_id = ProcessId::from(format!("process:subagent:{grandchild_leaf}"));
-
-        assert_eq!(
-            lash_core::store::process_key::invalid_process_key_reason(
-                grandchild_process_id.as_str()
-            ),
-            None,
-            "a call id nested two process ids deep must still be registrable: \
-             {grandchild_process_id}"
-        );
-    }
-
     /// Two aggregates are separated by the ordinals they were issued at, and
     /// the leaves of one aggregate by their first-appearance index in it.
     #[test]
     fn two_aggregates_mint_four_child_identities() {
-        let identities = process_opener("worker", 1);
+        let identities = process_opener("worker");
         let minted = [3u64, 4]
             .into_iter()
             .flat_map(|ordinal| {

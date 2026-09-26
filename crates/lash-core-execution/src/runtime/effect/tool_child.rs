@@ -109,7 +109,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::tool_dispatch::ToolAttemptEffectIdentity;
 use crate::{
-    AdmittedScope, EffectOpener, FrameNodeId, PreparedToolCall, ProcessExecutionEnvRef, ProcessRef,
+    AdmittedScope, EffectOpener, FrameNodeId, PreparedToolCall, ProcessExecutionEnvRef, ProcessId,
     SessionId, ToolExecutionGrant, ToolManifest, ToolRetryPolicy, TurnControlBindingId,
 };
 
@@ -170,7 +170,12 @@ use super::executor::RuntimeEffectControllerError;
 /// unrecordable sources its opener had — so a child runs under the same
 /// authority whether its opener lends its context or the deployment builds
 /// one. A v8 request is refused.
-pub const TOOL_CHILD_REQUEST_VERSION: u16 = 9;
+///
+/// Version 10 (FIG-3607) names an enclosing or opening process by its minted
+/// id alone: the incarnation-qualified process reference is retired, so a v9
+/// request is refused, typed and before any effect, at
+/// [`ToolChildRequest::validate`].
+pub const TOOL_CHILD_REQUEST_VERSION: u16 = 10;
 
 mod session_facts;
 pub use session_facts::{ToolChildRebuildRefusal, ToolChildSessionFacts, UnrecordedSessionSources};
@@ -360,7 +365,7 @@ impl ToolChildScope {
 /// | [`admission`](Self::admission) | group formation, from the grant or the admitted catalog manifest | the driver, for authority, retry policy and argument projection, without the live catalog |
 /// | [`attempt_identity`](Self::attempt_identity) | group formation, as the identity the leaf's attempts derive from | the driver, to derive each attempt's replay key and causal parent |
 /// | [`scope`](Self::scope) | group formation, as the opener, claim scope, session and frame | recovery (FIG-3396 §1) validates the opener; the driver reconstructs the admitted controller and its session-scoped services |
-/// | [`enclosing_process`](Self::enclosing_process) | group formation, when the opener is a process, as a `ProcessRef` | the driver, to set the call's enclosing process incarnation |
+/// | [`enclosing_process`](Self::enclosing_process) | group formation, when the opener is a process, as a `ProcessId` | the driver, to set the call's enclosing process incarnation |
 /// | [`cancellation_authority`](Self::cancellation_authority) | group formation, from the opener's turn-control binding | the cooperative cancel path (FIG-2266) and the cancel disposition (FIG-3409) |
 /// | [`execution_env`](Self::execution_env) | group formation, from `captured_process_execution_env_ref` (required) | the driver, to resolve the captured environment; retained under `ArtifactOwner::Execution` until the last dependency |
 /// | [`completion_routing`](Self::completion_routing) | group formation, from the admitted deferral and routing facts | the driver and recovery, to refuse a key nothing can resolve |
@@ -397,7 +402,7 @@ pub struct ToolChildRequest {
     /// The process **incarnation** this call executes inside, when the opener
     /// is a process.
     ///
-    /// A [`ProcessRef`], not a `ProcessId`, for §1's reason: the enclosing
+    /// A [`ProcessId`], not a `ProcessId`, for §1's reason: the enclosing
     /// process a recovered child reports must be the incarnation it was
     /// admitted under, never whatever process currently carries that name.
     /// `None` for a non-process opener, which encloses no process — and
@@ -409,7 +414,7 @@ pub struct ToolChildRequest {
     /// [`scope.admitted_scope`](ToolChildScope::admitted_scope), the checked
     /// pair; nothing here re-pins a claim.
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub enclosing_process: Option<ProcessRef>,
+    pub enclosing_process: Option<ProcessId>,
     /// The turn-cancellation authority that may cancel this child.
     ///
     /// This is the identity `turn_control_binding_id_for_scope` mints and
@@ -499,8 +504,8 @@ impl ToolChildRequest {
     }
 
     #[must_use]
-    pub fn with_enclosing_process(mut self, process_ref: ProcessRef) -> Self {
-        self.enclosing_process = Some(process_ref);
+    pub fn with_enclosing_process(mut self, process_id: ProcessId) -> Self {
+        self.enclosing_process = Some(process_id);
         self
     }
 
@@ -535,18 +540,17 @@ impl ToolChildRequest {
         }
         self.scope.validate()?;
         match (&self.scope.opener, self.enclosing_process.as_ref()) {
-            (EffectOpener::Process { process_ref }, Some(enclosing))
-                if process_ref == enclosing => {}
-            (EffectOpener::Process { process_ref }, enclosing) => {
+            (EffectOpener::Process { process_id }, Some(enclosing)) if process_id == enclosing => {}
+            (EffectOpener::Process { process_id }, enclosing) => {
                 return Err(RuntimeEffectControllerError::new(
                     crate::RuntimeErrorCode::RuntimeEffectToolChildRequestOpener,
                     format!(
                         "retained tool-child request opens under process incarnation \
-                         `{process_ref}` but records {enclosing} as its enclosing process; \
+                         `{process_id}` but records {enclosing} as its enclosing process; \
                          a process opener's child executes inside the opener's own \
                          incarnation, so the two are one fact",
                         enclosing = enclosing
-                            .map(|process_ref| format!("`{process_ref}`"))
+                            .map(|process_id| format!("`{process_id}`"))
                             .unwrap_or_else(|| "no incarnation".to_string()),
                     ),
                 ));

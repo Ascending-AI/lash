@@ -227,7 +227,6 @@ pub enum RuntimeErrorCode {
     /// ADR 0051 effect-host implementor diagnostic for a process-command
     /// refusal whose terminal target has been replaced by a retention tombstone.
     ProcessNoLongerRetained,
-    ProcessIncarnationSuperseded,
     ProcessRegistryUnavailable,
     ProcessSignalWaitCancelled,
     ProcessSignalWaitTimeout,
@@ -611,7 +610,6 @@ impl RuntimeErrorCode {
             Self::ProcessCancelConflict => "process_cancel_conflict",
             Self::DurableIdentityConflict => "durable_identity_conflict",
             Self::ProcessNoLongerRetained => "process_no_longer_retained",
-            Self::ProcessIncarnationSuperseded => "process_incarnation_superseded",
             Self::ProcessRegistryUnavailable => "process_registry_unavailable",
             Self::ProcessSignalWaitCancelled => "process_signal_wait_cancelled",
             Self::ProcessSignalWaitTimeout => "process_signal_wait_timeout",
@@ -873,7 +871,6 @@ impl RuntimeErrorCode {
         Self::ProcessCancelConflict,
         Self::DurableIdentityConflict,
         Self::ProcessNoLongerRetained,
-        Self::ProcessIncarnationSuperseded,
         Self::ProcessRegistryUnavailable,
         Self::ProcessSignalWaitCancelled,
         Self::ProcessSignalWaitTimeout,
@@ -1073,7 +1070,6 @@ impl RuntimeErrorCode {
             "process_cancel_conflict" => Self::ProcessCancelConflict,
             "durable_identity_conflict" => Self::DurableIdentityConflict,
             "process_no_longer_retained" => Self::ProcessNoLongerRetained,
-            "process_incarnation_superseded" => Self::ProcessIncarnationSuperseded,
             "process_registry_unavailable" => Self::ProcessRegistryUnavailable,
             "process_signal_wait_cancelled" => Self::ProcessSignalWaitCancelled,
             "process_signal_wait_timeout" => Self::ProcessSignalWaitTimeout,

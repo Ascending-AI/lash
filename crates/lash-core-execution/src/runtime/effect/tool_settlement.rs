@@ -140,7 +140,10 @@ use crate::{LlmCallId, PluginMessage, ProcessId, TokenUsage};
 /// text-only results and call-bound attachment parts are refused.
 /// Version 7 (FIG-3712) carries the stream events of a child that ran with no
 /// live opener ([`ToolSettlement::stream`]); a v6 settlement is refused.
-pub const TOOL_SETTLEMENT_VERSION: u16 = 7;
+/// Version 8 (FIG-3607) carries process handles and possessions by minted
+/// process id alone; a v7 settlement's incarnation-qualified process
+/// references are refused.
+pub const TOOL_SETTLEMENT_VERSION: u16 = 8;
 
 /// The durable format version of one atomic attempt's captured facts.
 ///
@@ -154,7 +157,9 @@ pub const TOOL_SETTLEMENT_VERSION: u16 = 7;
 /// Version 4 carries the same message cutover as settlement version 5.
 /// Version 5 carries the same one-result-per-call cutover as settlement
 /// version 6.
-pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 5;
+/// Version 6 carries the same minted-process-id cutover as settlement
+/// version 7.
+pub const TOOL_ATTEMPT_CAPTURE_VERSION: u16 = 6;
 
 /// One provider spend attributable to one attempt of a tool child.
 ///
@@ -410,9 +415,7 @@ pub(crate) fn settlement_possession(
             crate::ToolIntentExecutionOutcome::Executed { kind, result, .. }
                 if *kind == crate::ToolIntentKind::StartProcess =>
             {
-                crate::ProcessRef::from_handle_json(result)
-                    .ok()
-                    .map(|process_ref| process_ref.process_id)
+                crate::process_id_from_handle_json(result).ok()
             }
             _ => None,
         })

@@ -2,17 +2,12 @@
 //! that spell it.
 
 use super::*;
-use lash_sansio::ProcessId;
 
 /// Drive one process into `waiting` and assert the retention contract: live rows
 /// are listed as non-terminal and are never prune candidates.
-async fn assert_waiting_process_is_live_not_prunable(
-    registry: &dyn ProcessRegistry,
-    process_id: &ProcessId,
-) {
-    registry
+async fn assert_waiting_process_is_live_not_prunable(registry: &dyn ProcessRegistry) {
+    let process_id = &registry
         .register_process(lash_core_execution::ProcessRegistration::new(
-            process_id,
             lash_core_execution::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -24,7 +19,8 @@ async fn assert_waiting_process_is_live_not_prunable(
             ),
         ))
         .await
-        .expect("register waiting retention process");
+        .expect("register waiting retention process")
+        .id;
     let authority = lash_core_execution::ProcessExecutionWriteAuthority::invocation(
         process_id,
         "waiting-retention-run",
@@ -107,8 +103,7 @@ async fn postgres_waiting_processes_are_live_not_prunable_when_configured() {
     };
     reset(storage.pool()).await;
     let registry = storage.process_registry();
-    let process_id = ProcessId::from(format!("waiting-retention:{}", uuid::Uuid::new_v4()));
-    assert_waiting_process_is_live_not_prunable(&registry, &process_id).await;
+    assert_waiting_process_is_live_not_prunable(&registry).await;
 }
 
 /// Lexical half of the retention contract, mirroring

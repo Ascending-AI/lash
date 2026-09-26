@@ -198,7 +198,7 @@ fn segment_item(process: &str, session: &str, segment: u32, continuation: u32) -
     DurableItem {
         surface: DurableSurface::ParkedSegment,
         cursor: format!("{process}:0"),
-        process_id: Some(ProcessId::from(process.to_string())),
+        process_id: Some(ProcessId::fixture(process)),
         session_id: Some(SessionId::from(session.to_string())),
         status: Some("waiting".to_string()),
         owner_record: None,
@@ -216,7 +216,7 @@ fn wake_item(delivery: &str, process: &str, version: u32) -> DurableItem {
     DurableItem {
         surface: DurableSurface::PendingWake,
         cursor: delivery.to_string(),
-        process_id: Some(ProcessId::from(process.to_string())),
+        process_id: Some(ProcessId::fixture(process)),
         session_id: Some(SessionId::from("s-1")),
         status: None,
         owner_record: None,
@@ -762,7 +762,10 @@ async fn a_segment_from_another_build_refuses_and_lands_on_the_drain_list() {
 
     assert_eq!(report.drain.len(), 1, "{:?}", report.drain);
     let blocker = &report.drain[0];
-    assert_eq!(blocker.process_id.as_deref(), Some("p-1"));
+    assert_eq!(
+        blocker.process_id.as_deref(),
+        Some(ProcessId::fixture("p-1").as_str())
+    );
     assert_eq!(blocker.session_id.as_deref(), Some("s-1"));
     assert_eq!(blocker.status.as_deref(), Some("waiting"));
     assert_eq!(blocker.found, Some(LASHLANG_SEGMENT_STATE_VERSION - 1));
@@ -1159,7 +1162,10 @@ async fn the_serialized_report_carries_every_field_a_gate_asserts_on() {
     assert_eq!(json["mode"], "summary");
     assert_eq!(json["backend"], "sqlite (/srv/lash/durable-core.db)");
     assert_eq!(json["schema"]["outcome"], "ready");
-    assert_eq!(json["drain"][0]["process_id"], "p-1");
+    assert_eq!(
+        json["drain"][0]["process_id"],
+        ProcessId::fixture("p-1").as_str()
+    );
     assert_eq!(
         json["drain"][0]["found"],
         LASHLANG_SEGMENT_STATE_VERSION - 1

@@ -61,7 +61,7 @@ lash_store_sql::statements! {
         /// depends on the other's, so the two orders are left exactly as they
         /// stand rather than unified inside a refactor.
         select_uncommitted = "SELECT attachment_id, session_id, canonical_uri, intent_at_ms,
-                 committed_at_ms, owner_kind, owner_id, owner_incarnation, written_at_ms
+                 committed_at_ms, owner_kind, owner_id, written_at_ms
              FROM attachment_manifest
              WHERE committed_at_ms IS NULL AND intent_at_ms <= ?1
              ORDER BY intent_at_ms ASC";
@@ -493,15 +493,6 @@ impl AttachmentManifest for Store {
             let intent_at_ms = intent.intent_at_epoch_ms as i64;
             let owner_kind = intent.owner.as_ref().map(|owner| owner.kind().as_str());
             let owner_id = intent.owner.as_ref().map(|owner| owner.id().to_string());
-            let owner_incarnation = intent
-                .owner
-                .as_ref()
-                .and_then(lash_core_execution::AttachmentOwner::incarnation)
-                .map(|incarnation| i64::try_from(incarnation.registration_sequence()))
-                .transpose()
-                .map_err(|_| {
-                    StoreError::Backend("attachment owner incarnation exceeds i64".to_string())
-                })?;
             let write_id = lash_core_execution::AttachmentWriteToken::new();
             self.conn
                 .write_flow(move |tx| {
@@ -567,7 +558,6 @@ impl AttachmentManifest for Store {
                                 intent_at_ms,
                                 owner_kind,
                                 owner_id,
-                                owner_incarnation,
                                 write_id.as_hex()
                             ],
                         )
@@ -726,17 +716,10 @@ impl AttachmentManifest for Store {
                         let committed_at_ms: Option<i64> = row.get(4)?;
                         let owner_kind: Option<String> = row.get(5)?;
                         let owner_id: Option<String> = row.get(6)?;
-                        let owner_incarnation = row
-                            .get::<_, Option<i64>>(7)?
-                            .map(|value| {
-                                u64_from_sql("AttachmentManifest", "owner_incarnation", value)
-                            })
-                            .transpose()?;
-                        let written_at_ms: Option<i64> = row.get(8)?;
+                        let written_at_ms: Option<i64> = row.get(7)?;
                         let owner = lash_core_execution::store::decode_attachment_owner(
                             owner_kind.as_deref(),
                             owner_id,
-                            owner_incarnation,
                         )
                         .map_err(sqlite_conversion_error)?;
                         Ok(AttachmentManifestEntry {
@@ -897,7 +880,6 @@ mod cross_database_plan_tests {
             AND NOT EXISTS (
                 SELECT 1 FROM process_registry.processes AS process
                 WHERE process.process_id = manifest.owner_id
-                  AND process.incarnation = manifest.owner_incarnation
             )
         )"
         );
@@ -937,7 +919,6 @@ mod cross_database_plan_tests {
                             AND NOT EXISTS (
                                 SELECT 1 FROM process_registry.processes AS process
                                 WHERE process.process_id = manifest.owner_id
-                                  AND process.incarnation = manifest.owner_incarnation
                             )
                         )"
         );
@@ -1001,12 +982,11 @@ mod cross_database_plan_tests {
                  )
                  INSERT INTO attachment_manifest (
                      attachment_id, session_id, canonical_uri, intent_at_ms,
-                     owner_kind, owner_id, owner_incarnation
+                     owner_kind, owner_id
                  )
                  SELECT printf('blake3:%064d', i), printf('session-%04d', i), 'uri', i,
                         CASE WHEN i % 2 = 0 THEN 'turn' ELSE 'process' END,
-                        printf('owner-%04d', i),
-                        CASE WHEN i % 2 = 0 THEN NULL ELSE i END
+                        printf('owner-%04d', i)
                  FROM n;
                  ANALYZE;",
             )
@@ -1112,12 +1092,11 @@ mod cross_database_plan_tests {
         connection
             .execute_batch(
                 "INSERT INTO attachment_manifest
-                     (attachment_id, session_id, canonical_uri, intent_at_ms, owner_kind, owner_id,
-                      owner_incarnation)
+                     (attachment_id, session_id, canonical_uri, intent_at_ms, owner_kind, owner_id)
                  VALUES
-                     ('blake3:aged-host', 's1', 'uri', 10, NULL, NULL, NULL),
-                     ('blake3:live-turn', 's2', 'uri', 10, 'turn', 't2', NULL),
-                     ('blake3:dead-process', 's3', 'uri', 10, 'process', 'p3', 7);",
+                     ('blake3:aged-host', 's1', 'uri', 10, NULL, NULL),
+                     ('blake3:live-turn', 's2', 'uri', 10, 'turn', 't2'),
+                     ('blake3:dead-process', 's3', 'uri', 10, 'process', 'p3');",
             )
             .expect("seed the three owner classes");
 

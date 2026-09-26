@@ -181,8 +181,7 @@ async fn session_catalog(
 
 /// The admitted request of one tool in the batch.
 fn tool_request(scope: &ExecutionScope) -> lash_core::runtime::effect::ToolChildRequest {
-    let admitted =
-        lash_core::AdmittedScope::unpinned(scope.clone()).expect("a turn scope admits unpinned");
+    let admitted = lash_core::AdmittedScope::new(scope.clone());
     let definition = lash_core::ToolDefinition::raw(
         "tool:tool",
         "tool",

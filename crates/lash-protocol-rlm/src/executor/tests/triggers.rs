@@ -1007,7 +1007,6 @@ pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
     block_on(async {
         let mut state = RlmExecutionState::new();
         let registration = lash_core::ProcessRegistration::new(
-            "unscoped-host-process",
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -1026,6 +1025,7 @@ pub(super) fn triggerless_execution_requires_no_trigger_namespace() {
             .expect("open the cell's handler");
         let context = lash_core::testing::code_execution_context_for_process(
             crate::testing::double_ports(&double, &handler),
+            lash_core::ProcessId::fixture("host-process"),
             &registration,
         );
         let owner_error = context
@@ -1239,7 +1239,6 @@ async fn execute_trigger_process_with_originator(
 pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
     block_on(async {
         let registration = lash_core::ProcessRegistration::new(
-            "bare-host-trigger-process",
             lash_core::ProcessInput::External {
                 metadata: serde_json::Value::Null,
             },
@@ -1258,6 +1257,7 @@ pub(super) fn bare_host_process_trigger_is_refused_before_store_mutation() {
             .expect("open the cell's handler");
         let context = lash_core::testing::code_execution_context_for_process(
             crate::testing::double_ports(&double, &handler),
+            lash_core::ProcessId::fixture("host-process"),
             &registration,
         );
         let owner_error = context

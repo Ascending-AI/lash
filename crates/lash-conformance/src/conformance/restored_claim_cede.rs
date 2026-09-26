@@ -188,14 +188,13 @@ async fn admit_checkpoint_row(
             .input_id
             .to_string(),
         CheckpointRow::QueuedWork => {
-            let process_id = format!("{SESSION_ID}-producer");
+            let process_id = crate::ProcessId::fixture(&format!("{SESSION_ID}-producer"));
             let wake_id = format!("wake:{SESSION_ID}:1");
             let wake = crate::ProcessWakeDelivery {
                 version: crate::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
                 wake_id: wake_id.clone(),
                 target_session_id: SessionId::from(SESSION_ID),
-                process_id: crate::ProcessId::from(process_id.clone()),
-                process_incarnation: crate::ProcessIncarnation::from_registration_sequence(1),
+                process_id: process_id.clone(),
                 sequence: 1,
                 event_type: "producer.wake".to_string(),
                 event_invocation: crate::RuntimeInvocation::effect(

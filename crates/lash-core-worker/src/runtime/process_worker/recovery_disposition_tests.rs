@@ -44,16 +44,13 @@ fn peer_completed_record(mut record: ProcessRecord) -> ProcessRecord {
 
 async fn seed_started_owner_bound(
     registry: &Arc<crate::testing::ProcessRegistryFaults>,
-    process_id: &ProcessId,
     owner: &LeaseOwnerIdentity,
 ) -> ProcessRecord {
-    registry
-        .register_process(registration_with_disposition(
-            process_id,
-            RecoveryContract::OwnerBound,
-        ))
+    let process_id = &registry
+        .register_process(registration_with_disposition(RecoveryContract::OwnerBound))
         .await
-        .expect("register owner-bound row");
+        .expect("register owner-bound row")
+        .id;
     registry
         .record_first_started(
             process_id,
@@ -78,10 +75,9 @@ async fn seed_started_owner_bound(
 async fn drain_reports_superseded_terminal_as_peer_settled() {
     let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-superseded", "host-a", "start-a");
-    let process_id = "owner-bound-superseded";
-    let peer = peer_completed_record(
-        seed_started_owner_bound(&registry, &ProcessId::from(process_id), &owner).await,
-    );
+    let seeded = seed_started_owner_bound(&registry, &owner).await;
+    let process_id = seeded.id.clone();
+    let peer = peer_completed_record(seeded.clone());
     registry.set_process_terminal_write_outcome(crate::ProcessCompletionOutcome::Superseded {
         stored: peer,
     });
@@ -99,7 +95,7 @@ async fn drain_reports_superseded_terminal_as_peer_settled() {
     assert_eq!(
         report.deferred,
         vec![ProcessDrainDeferred {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             disposition: ProcessRecoveryAttemptOutcome::SettledByPeer {
                 terminal_status: ProcessStatus::Completed,
             },
@@ -107,7 +103,7 @@ async fn drain_reports_superseded_terminal_as_peer_settled() {
     );
     assert!(
         registry
-            .get_process_lease(&ProcessId::from(process_id))
+            .get_process_lease(&process_id)
             .await
             .expect("read lease")
             .is_none(),
@@ -119,8 +115,9 @@ async fn drain_reports_superseded_terminal_as_peer_settled() {
 async fn drain_does_not_claim_an_already_applied_terminal_as_this_pass() {
     let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-already-applied", "host-a", "start-a");
-    let process_id = "owner-bound-already-applied";
-    let stored = seed_started_owner_bound(&registry, &ProcessId::from(process_id), &owner).await;
+    let seeded = seed_started_owner_bound(&registry, &owner).await;
+    let process_id = seeded.id.clone();
+    let stored = seeded.clone();
     registry.set_process_terminal_write_outcome(crate::ProcessCompletionOutcome::AlreadyApplied {
         stored: ProcessRecord {
             status: ProcessStatus::Abandoned,
@@ -138,7 +135,7 @@ async fn drain_does_not_claim_an_already_applied_terminal_as_this_pass() {
     assert_eq!(
         report.deferred,
         vec![ProcessDrainDeferred {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             disposition: ProcessRecoveryAttemptOutcome::AlreadyApplied {
                 terminal_status: ProcessStatus::Abandoned,
             },
@@ -146,7 +143,7 @@ async fn drain_does_not_claim_an_already_applied_terminal_as_this_pass() {
     );
     assert!(
         registry
-            .get_process_lease(&ProcessId::from(process_id))
+            .get_process_lease(&process_id)
             .await
             .expect("read lease")
             .is_none(),
@@ -158,10 +155,9 @@ async fn drain_does_not_claim_an_already_applied_terminal_as_this_pass() {
 async fn drain_reports_already_terminal_completed_as_peer_settled() {
     let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-already-terminal", "host-a", "start-a");
-    let process_id = "owner-bound-already-terminal";
-    let peer = peer_completed_record(
-        seed_started_owner_bound(&registry, &ProcessId::from(process_id), &owner).await,
-    );
+    let seeded = seed_started_owner_bound(&registry, &owner).await;
+    let process_id = seeded.id.clone();
+    let peer = peer_completed_record(seeded.clone());
     registry.set_process_read_override(peer);
 
     let report = native_worker(&backend, owner)
@@ -174,7 +170,7 @@ async fn drain_reports_already_terminal_completed_as_peer_settled() {
     assert_eq!(
         report.deferred,
         vec![ProcessDrainDeferred {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             disposition: ProcessRecoveryAttemptOutcome::SettledByPeer {
                 terminal_status: ProcessStatus::Completed,
             },
@@ -186,10 +182,11 @@ async fn drain_reports_already_terminal_completed_as_peer_settled() {
 async fn drain_reports_renewal_supersession_as_lease_lost() {
     let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-renew-superseded", "host-a", "start-a");
-    let process_id = "owner-bound-renew-superseded";
-    seed_started_owner_bound(&registry, &ProcessId::from(process_id), &owner).await;
+    let seeded = seed_started_owner_bound(&registry, &owner).await;
+    let process_id = seeded.id.clone();
+
     registry.set_process_lease_renew_error(Some(PluginError::ProcessLeaseSuperseded {
-        process_id: ProcessId::from(process_id.to_string()),
+        process_id: process_id.clone(),
     }));
 
     let worker = native_worker(&backend, owner).await;
@@ -200,7 +197,7 @@ async fn drain_reports_renewal_supersession_as_lease_lost() {
     assert_eq!(
         report.deferred,
         vec![ProcessDrainDeferred {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             disposition: ProcessRecoveryAttemptOutcome::LeaseLost {
                 operation: ProcessRecoveryOperation::RenewLease,
             },
@@ -208,9 +205,9 @@ async fn drain_reports_renewal_supersession_as_lease_lost() {
     );
     assert_recovery_lease_lost_event(
         &capture,
-        &ProcessId::from(process_id),
+        &process_id,
         "renew_lease",
-        "process lease for `owner-bound-renew-superseded` is missing or expired (superseded)",
+        &format!("process lease for `{process_id}` is missing or expired (superseded)"),
     );
     assert!(capture.named("process_recovery.backend_error").is_empty());
 }
@@ -219,10 +216,11 @@ async fn drain_reports_renewal_supersession_as_lease_lost() {
 async fn drain_reports_terminal_write_supersession_as_lease_lost() {
     let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-write-superseded", "host-a", "start-a");
-    let process_id = "owner-bound-write-superseded";
-    seed_started_owner_bound(&registry, &ProcessId::from(process_id), &owner).await;
+    let seeded = seed_started_owner_bound(&registry, &owner).await;
+    let process_id = seeded.id.clone();
+
     registry.set_process_terminal_write_error(Some(PluginError::ProcessLeaseSuperseded {
-        process_id: ProcessId::from(process_id.to_string()),
+        process_id: process_id.clone(),
     }));
 
     let worker = native_worker(&backend, owner).await;
@@ -233,7 +231,7 @@ async fn drain_reports_terminal_write_supersession_as_lease_lost() {
     assert_eq!(
         report.deferred,
         vec![ProcessDrainDeferred {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             disposition: ProcessRecoveryAttemptOutcome::LeaseLost {
                 operation: ProcessRecoveryOperation::WriteTerminal,
             },
@@ -241,9 +239,9 @@ async fn drain_reports_terminal_write_supersession_as_lease_lost() {
     );
     assert_recovery_lease_lost_event(
         &capture,
-        &ProcessId::from(process_id),
+        &process_id,
         "write_terminal",
-        "process lease for `owner-bound-write-superseded` is missing or expired (superseded)",
+        &format!("process lease for `{process_id}` is missing or expired (superseded)"),
     );
     assert!(capture.named("process_recovery.backend_error").is_empty());
 }
@@ -252,8 +250,9 @@ async fn drain_reports_terminal_write_supersession_as_lease_lost() {
 async fn drain_release_failure_overrides_absent_disposition() {
     let (backend, registry) = faulted_memory_backend().await;
     let owner = local_owner("drain-release-failure", "host-a", "start-a");
-    let process_id = "owner-bound-release-failure";
-    seed_started_owner_bound(&registry, &ProcessId::from(process_id), &owner).await;
+    let seeded = seed_started_owner_bound(&registry, &owner).await;
+    let process_id = seeded.id.clone();
+
     registry.set_process_read_absent(true);
     registry.set_process_lease_release_error(Some(PluginError::Session(
         "injected lease-release failure".to_string(),
@@ -266,7 +265,7 @@ async fn drain_release_failure_overrides_absent_disposition() {
     assert_eq!(
         report.deferred,
         vec![ProcessDrainDeferred {
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             disposition: ProcessRecoveryAttemptOutcome::BackendError {
                 operation: ProcessRecoveryOperation::ReleaseLease,
                 error: "plugin session error: injected lease-release failure".to_string(),
@@ -275,7 +274,7 @@ async fn drain_release_failure_overrides_absent_disposition() {
     );
     assert_recovery_backend_error_event(
         &capture,
-        &ProcessId::from(process_id),
+        &process_id,
         "release_lease",
         "plugin session error: injected lease-release failure",
     );
@@ -292,18 +291,18 @@ async fn recovered_nested_registry_read_uses_backend_error_telemetry() {
         run_handle,
     )
     .await;
-    let process_id = "nested-recovery-read-failure";
-    registry
+    let _process_id = "nested-recovery-read-failure";
+    let paused_infra_record = registry
         .register_process(engine_registration(
-            process_id,
             "paused-infra",
             env_ref,
             serde_json::Value::Null,
         ))
         .await
         .expect("register process");
+    let process_id = paused_infra_record.id.clone();
     let record = registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await
         .expect("read process")
         .expect("process exists");
@@ -316,7 +315,7 @@ async fn recovered_nested_registry_read_uses_backend_error_telemetry() {
 
     assert_recovery_backend_error_event(
         &capture,
-        &ProcessId::from(process_id),
+        &process_id,
         "read_process",
         "plugin session error: injected nested registry read failure",
     );
@@ -339,18 +338,18 @@ async fn recovered_live_renewal_uses_backend_error_telemetry() {
         Some(timings),
     )
     .await;
-    let process_id = "live-recovery-renewal-failure";
-    registry
+    let _process_id = "live-recovery-renewal-failure";
+    let paused_infra_record = registry
         .register_process(engine_registration(
-            process_id,
             "paused-infra",
             env_ref,
             serde_json::Value::Null,
         ))
         .await
         .expect("register process");
+    let process_id = paused_infra_record.id.clone();
     let record = registry
-        .get_process(&ProcessId::from(process_id))
+        .get_process(&process_id)
         .await
         .expect("read process")
         .expect("process exists");
@@ -362,13 +361,13 @@ async fn recovered_live_renewal_uses_backend_error_telemetry() {
 
     assert_recovery_backend_error_event(
         &capture,
-        &ProcessId::from(process_id),
+        &process_id,
         "renew_lease",
         "plugin session error: injected live lease-renewal failure",
     );
     assert!(
         registry
-            .get_process_lease(&ProcessId::from(process_id))
+            .get_process_lease(&process_id)
             .await
             .expect("read lease")
             .is_none(),

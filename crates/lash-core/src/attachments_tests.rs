@@ -1603,15 +1603,12 @@ async fn nested_owner_binding_restores_the_previous_owner() {
         manifest.clone(),
         "session-1",
     ));
-    let process_binding = store.bind_process_scoped(crate::ProcessRef::new(
-        "process-1",
-        crate::ProcessIncarnation::from_registration_sequence(7),
-    ));
+    let process_binding = store.bind_process_scoped(crate::ProcessId::fixture("process-1"));
     let turn_binding = store.bind_turn_scoped("turn-1");
 
     let turn_ref = store.put(vec![1], meta()).await.expect("turn put");
     drop(turn_binding);
-    let process_ref = store.put(vec![2], meta()).await.expect("process put");
+    let process_id = store.put(vec![2], meta()).await.expect("process put");
     drop(process_binding);
     let host_ref = store.put(vec![3], meta()).await.expect("host put");
 
@@ -1626,13 +1623,12 @@ async fn nested_owner_binding_restores_the_previous_owner() {
         })
     );
     let process = entries
-        .get(&(SessionId::from("session-1"), process_ref.id))
+        .get(&(SessionId::from("session-1"), process_id.id))
         .expect("process entry");
     assert_eq!(
         process.owner,
         Some(crate::AttachmentOwner::Process {
-            id: "process-1".to_string(),
-            incarnation: crate::ProcessIncarnation::from_registration_sequence(7),
+            process_id: crate::ProcessId::fixture("process-1"),
         })
     );
     let host = entries

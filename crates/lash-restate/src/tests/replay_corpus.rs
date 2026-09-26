@@ -194,19 +194,21 @@ async fn drive_scalar_lashlang_tool_attempt(
 /// running the tool, and the durable effect summary is written from the
 /// journaled outcome — the record a redrive after an interruption rebuilds.
 async fn drive_lashlang_effect_summary(context: Arc<ReplayableRecordingContext>, replaying: bool) {
-    let process_id = ProcessId::from("replay-corpus-effect-summary");
-    let registry = process_registry();
-    let registration =
-        super::process_effect_summary::counting_lashlang_registration(&process_id).await;
-    registry
+    // The journal keys its effects by the process id, so the recording and
+    // every replay register under the same sequential test id.
+    let registry = sequential_process_registry();
+    let registration = super::process_effect_summary::counting_lashlang_registration().await;
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register the effect-summary process");
+        .expect("register the effect-summary process")
+        .id;
     let executions = Arc::new(AtomicUsize::new(0));
     let outcome = super::process_effect_summary::run_invocation(
         Arc::clone(&registry),
         &executions,
         &context,
+        &process_id,
         &registration,
     )
     .await

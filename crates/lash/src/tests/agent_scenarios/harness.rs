@@ -40,7 +40,9 @@ pub(super) struct AgentScenario {
     pub(super) install_process_controls: bool,
     pub(super) install_process_composition: bool,
     pub(super) max_turns: Option<usize>,
-    pub(super) precompleted_process: Option<(ProcessId, lash_core::ProcessAwaitOutput)>,
+    /// A process the harness registers and completes before the turn, whose
+    /// handle a scripted response names as [`PRECOMPLETED_PROCESS_HANDLE`].
+    pub(super) precompleted_process: Option<lash_core::ProcessAwaitOutput>,
     /// Digests whose bytes a scenario pretends were already uploaded by some
     /// other writer (a child process, a peer session). Adoption is gated on
     /// recorded upload evidence, so the scenario must record it rather than
@@ -131,12 +133,8 @@ impl AgentScenario {
         self
     }
 
-    pub(super) fn precompleted_process(
-        mut self,
-        process_id: impl Into<ProcessId>,
-        output: lash_core::ProcessAwaitOutput,
-    ) -> Self {
-        self.precompleted_process = Some((process_id.into(), output));
+    pub(super) fn precompleted_process(mut self, output: lash_core::ProcessAwaitOutput) -> Self {
+        self.precompleted_process = Some(output);
         self
     }
 
@@ -295,10 +293,12 @@ impl AgentScenarioSetup {
             lash_core::testing::checkpoint_observer::CheckpointWriteCollector::default();
         let graph_store = Arc::new(crate::tracing::TraceLashlangGraphStore::default());
         let prompt_captures = Arc::new(StdMutex::new(Vec::new()));
+        let response_substitutions = Arc::new(StdMutex::new(Vec::new()));
         let provider = scripted_provider(
             self.scripted_provider_responses,
             self.scripted_provider_usage,
             Arc::clone(&prompt_captures),
+            Arc::clone(&response_substitutions),
         );
         let observed_writes = checkpoint_writes.clone();
         let backend = DecoratedBackend::over(memory_backend().await.into()).session_store_factory(
@@ -357,6 +357,7 @@ impl AgentScenarioSetup {
             graph_store,
             process_registry,
             prompt_captures,
+            response_substitutions,
             checkpoint_writes,
         })
     }
@@ -368,6 +369,10 @@ struct AgentScenarioRuntime {
     graph_store: Arc<crate::tracing::TraceLashlangGraphStore>,
     process_registry: Arc<dyn ProcessRegistry>,
     prompt_captures: Arc<StdMutex<Vec<LlmRequest>>>,
+    /// Placeholders the scripted provider replaces in each response it serves,
+    /// for values the harness learns only after the runtime is built, such as
+    /// a minted process id (ADR 0107).
+    response_substitutions: Arc<StdMutex<Vec<(String, String)>>>,
     checkpoint_writes: lash_core::testing::checkpoint_observer::CheckpointWriteCollector,
 }
 
@@ -444,12 +449,11 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
             .await?;
         }
     }
-    if let Some((process_id, output)) = case.precompleted_process.clone() {
-        runtime
+    if let Some(output) = case.precompleted_process.clone() {
+        let process_id = runtime
             .process_registry
             .register_process_with_observers(
                 lash_core::ProcessRegistration::new(
-                    process_id.clone(),
                     lash_core::ProcessInput::External {
                         metadata: serde_json::Value::Null,
                     },
@@ -469,7 +473,8 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
                 ),
                 std::slice::from_ref(&case.session_id),
             )
-            .await?;
+            .await?
+            .id;
         runtime
             .process_registry
             .complete_process(
@@ -478,6 +483,12 @@ pub(super) async fn run_agent_turn_scenario_without_success_assertions(
                 lash_core::ProcessCompletionAuthority::external_owner(),
             )
             .await?;
+        runtime.response_substitutions.lock_recover().push((
+            PRECOMPLETED_PROCESS_HANDLE.to_string(),
+            lash_core::HandleId::process(&process_id)
+                .as_str()
+                .to_string(),
+        ));
     }
     let events = Arc::new(RecordingEvents::default());
 
@@ -685,7 +696,6 @@ fn observed_process_summary(
 ) -> lash_core::ProcessHandleView {
     lash_core::ProcessHandleView::new(
         process.process_id,
-        process.incarnation,
         process.identity.clone(),
         process.lifecycle,
     )
@@ -748,7 +758,6 @@ async fn assert_remote_process_dto_surface(
         .expect("list process records for remote DTO round trip");
     for record in records {
         let process_id = record.id.clone();
-        let process_ref = lash_core::ProcessRef::from_record(&record);
         let remote_record = lash_remote_protocol::RemoteProcessRecord::try_from(record)
             .expect("process record should convert to remote DTO");
         remote_record
@@ -760,8 +769,8 @@ async fn assert_remote_process_dto_surface(
         assert_eq!(round_trip_record.id, process_id);
 
         let outcome = registry
-            .event_page_ref(
-                &process_ref,
+            .event_page_after(
+                &process_id,
                 0,
                 std::num::NonZeroUsize::new(32).expect("nonzero page limit"),
                 lash_core::ProcessEventQueryMode::Full,
@@ -781,16 +790,13 @@ async fn assert_remote_process_dto_surface(
         let expected_more = page.more.clone();
         let cursor = lash_sansio::ProcessCursor::new(
             lash_sansio::PROCESS_CURSOR_UNROUTED_EPOCH,
-            lash_sansio::ProcessCursorReference::for_lifetime(
-                &process_ref.process_id,
-                process_ref.incarnation.registration_sequence(),
-            ),
+            lash_sansio::ProcessCursorReference::for_process(&process_id),
             0,
             page_events.last().map_or(0, |event| event.sequence),
         )
         .expect("scenario cursor");
         let remote_events = lash_remote_protocol::RemoteProcessEventsResponse::try_from((
-            process_ref.clone(),
+            process_id.clone(),
             outcome,
             cursor.clone(),
         ))
@@ -798,8 +804,8 @@ async fn assert_remote_process_dto_surface(
         remote_events
             .validate()
             .expect("remote process event page should validate");
-        let (round_trip_process_ref, round_trip_outcome, round_trip_cursor): (
-            lash_core::ProcessRef,
+        let (round_trip_process_id, round_trip_outcome, round_trip_cursor): (
+            lash_core::ProcessId,
             lash_core::ProcessEventReadOutcome<lash_core::ProcessEventPage>,
             lash_sansio::ProcessCursor,
         ) = remote_events
@@ -817,7 +823,7 @@ async fn assert_remote_process_dto_surface(
             .iter()
             .map(|event| (event.sequence, event.event_type.clone()))
             .collect::<Vec<_>>();
-        assert_eq!(round_trip_process_ref, process_ref);
+        assert_eq!(round_trip_process_id, process_id);
         assert_eq!(round_trip_cursor, cursor);
         assert_eq!(round_trip_tail, expected_tail);
         assert_eq!(round_trip_page.more, expected_more);
@@ -839,7 +845,6 @@ fn assert_remote_process_summaries_round_trip(summaries: &[lash_core::ProcessHan
 struct AgentSessionTurnProcessScenario {
     session_id: SessionId,
     child_session_id: SessionId,
-    process_id: ProcessId,
 }
 
 impl Default for AgentSessionTurnProcessScenario {
@@ -847,7 +852,6 @@ impl Default for AgentSessionTurnProcessScenario {
         Self {
             session_id: SessionId::from("agent-scenario-session-turn-root"),
             child_session_id: SessionId::from("agent-scenario-session-turn-child"),
-            process_id: ProcessId::from("agent-scenario-session-turn-process"),
         }
     }
 }
@@ -864,13 +868,14 @@ impl AgentSessionTurnProcessScenario {
             .processes()
             .start(
                 self.start_request(),
-                process_scope(&runtime.core, self.process_id.clone()),
+                runtime_operation_scope(&runtime.core, "agent-scenario-session-turn-start"),
             )
             .await?;
-        assert_eq!(handle.process_id, self.process_id);
+        // The registrar minted the id; the start answers it (ADR 0107).
+        let process_id = handle.process_id;
         session.refresh_background_graph().await?;
-        self.assert_process_output(&runtime).await?;
-        self.assert_agent_contracts(&runtime).await?;
+        self.assert_process_output(&runtime, &process_id).await?;
+        self.assert_agent_contracts(&runtime, &process_id).await?;
         Ok(())
     }
 
@@ -885,7 +890,6 @@ impl AgentSessionTurnProcessScenario {
 
     fn start_request(&self) -> lash_core::ProcessStartRequest {
         lash_core::ProcessStartRequest::new(
-            self.process_id.clone(),
             lash_core::ProcessInput::SessionTurn {
                 definition_key: "agent-scenario-session-turn:v1".to_string(),
                 create_request: Box::new(self.child_create_request()),
@@ -916,10 +920,14 @@ impl AgentSessionTurnProcessScenario {
         .with_session_id(self.child_session_id.clone())
     }
 
-    async fn assert_process_output(&self, runtime: &AgentScenarioRuntime) -> Result<()> {
+    async fn assert_process_output(
+        &self,
+        runtime: &AgentScenarioRuntime,
+        process_id: &ProcessId,
+    ) -> Result<()> {
         let registry: Arc<dyn lash_core::ProcessRegistry> = runtime.process_registry.clone();
         let await_output = lash_core::NativeProcessWork::for_registry(registry)
-            .await_terminal(&self.process_id)
+            .await_terminal(process_id)
             .await?;
         let output = await_output.into_tool_output();
         assert!(
@@ -947,7 +955,11 @@ impl AgentSessionTurnProcessScenario {
         Ok(())
     }
 
-    async fn assert_agent_contracts(&self, runtime: &AgentScenarioRuntime) -> Result<()> {
+    async fn assert_agent_contracts(
+        &self,
+        runtime: &AgentScenarioRuntime,
+        process_id: &ProcessId,
+    ) -> Result<()> {
         let final_process_list = runtime.final_process_list().await?;
         assert_remote_process_dto_surface(
             &runtime.core,
@@ -971,7 +983,7 @@ impl AgentSessionTurnProcessScenario {
         };
         assert_eq!(run.prompt_captures.len(), 1);
         assert_all_processes_terminal(&run.final_process_list);
-        assert_session_turn_child_graph(&run, &self.child_session_id, &self.process_id);
+        assert_session_turn_child_graph(&run, &self.child_session_id, process_id);
         Ok(())
     }
 }
@@ -1271,10 +1283,16 @@ finish(await handle);"#,
     Ok(())
 }
 
+/// The placeholder a scripted response writes for the handle id of the
+/// scenario's precompleted process, whose id the registrar mints only after
+/// the responses are scripted.
+pub(super) const PRECOMPLETED_PROCESS_HANDLE: &str = "@precompleted-process-handle@";
+
 fn scripted_provider(
     responses: Vec<String>,
     usage: LlmUsage,
     prompt_captures: Arc<StdMutex<Vec<LlmRequest>>>,
+    substitutions: Arc<StdMutex<Vec<(String, String)>>>,
 ) -> ProviderHandle {
     let responses = Arc::new(TokioMutex::new(VecDeque::from(responses)));
     crate::testing::TestProvider::builder()
@@ -1283,13 +1301,17 @@ fn scripted_provider(
             let responses = Arc::clone(&responses);
             let usage = usage.clone();
             let prompt_captures = Arc::clone(&prompt_captures);
+            let substitutions = Arc::clone(&substitutions);
             async move {
                 prompt_captures.lock_recover().push(request.clone());
-                let Some(text) = responses.lock().await.pop_front() else {
+                let Some(mut text) = responses.lock().await.pop_front() else {
                     return Err(lash_core::llm::transport::LlmTransportError::new(
                         "scripted agent scenario provider exhausted its expected responses",
                     ));
                 };
+                for (placeholder, value) in substitutions.lock_recover().iter() {
+                    text = text.replace(placeholder.as_str(), value);
+                }
                 Ok(LlmResponse {
                     parts: vec![LlmOutputPart::Text {
                         text,

@@ -143,7 +143,7 @@ fn event_is_failed_identifies_all_failure_outcomes() {
                 identity: TraceLanguageExecutionIdentity {
                     scope: TraceRuntimeScope::new("s1"),
                     subject: TraceRuntimeSubject::Process {
-                        process_id: ProcessId::from("p1".to_string()),
+                        process_id: lash_sansio::ProcessId::fixture("p1"),
                     },
                     source_identity: "source".to_string(),
                     module_ref: "m".to_string(),

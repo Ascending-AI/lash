@@ -180,6 +180,9 @@ const CONFIG_REVISION_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
 const FOLLOW_ON_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-128-8ef0aea502/postgres-expected.json",
 ];
+const PROCESS_IDENTITY_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
+    "../lash-core/tests/fixtures/durable-read-predecessors/schema-129-5f42c383a/postgres-expected.json",
+];
 const FRESHEST_FROZEN_PREDECESSOR_EXPECTED_RELATIVE_PATHS: &[&str] = &[
     "../lash-core/tests/fixtures/durable-read-predecessors/schema-78-a9506225c8c1/postgres-expected.json",
 ];
@@ -320,7 +323,7 @@ async fn postgres_prior_component_encoding_fixture_is_refused_at_hydration_when_
     // is the tripwire FIG-3414 tripped: the constant went 105 -> 106 without
     // this literal following, so the assertion failed before the payload-level
     // refusal below was ever reached.
-    assert_eq!(PostgresStorage::schema_version(), 138);
+    assert_eq!(PostgresStorage::schema_version(), 139);
     let fixture_database_url = fixture_database_url(&database_url);
     // The committed dump was captured at the previous component; advance it
     // the way a deployment does (FIG-3816).
@@ -538,20 +541,16 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
          ALTER TABLE lash_attachment_manifest
              ADD COLUMN IF NOT EXISTS write_id TEXT,
              ADD COLUMN IF NOT EXISTS written_at_ms BIGINT,
-             ADD COLUMN IF NOT EXISTS owner_incarnation BIGINT,
              DROP CONSTRAINT IF EXISTS lash_attachment_manifest_check,
-             DROP CONSTRAINT IF EXISTS ck_lash_attachment_manifest_owner_identity,
-             ADD CONSTRAINT ck_lash_attachment_manifest_owner_identity
-                 CHECK ((owner_kind IS NULL AND owner_id IS NULL AND owner_incarnation IS NULL)
-                     OR (owner_kind = 'turn' AND owner_id IS NOT NULL
-                         AND owner_incarnation IS NULL)
-                     OR (owner_kind = 'process' AND owner_id IS NOT NULL
-                         AND owner_incarnation IS NOT NULL));
+             DROP CONSTRAINT IF EXISTS ck_lash_attachment_manifest_owner_identity;
          DROP INDEX IF EXISTS idx_lash_attachment_manifest_owner;
+         ALTER TABLE lash_attachment_manifest
+             DROP COLUMN IF EXISTS owner_incarnation,
+             ADD CONSTRAINT ck_lash_attachment_manifest_owner_identity
+                 CHECK ((owner_kind IS NULL AND owner_id IS NULL)
+                     OR (owner_kind IN ('turn', 'process') AND owner_id IS NOT NULL));
          CREATE INDEX idx_lash_attachment_manifest_owner
-             ON lash_attachment_manifest(
-                 session_id, owner_kind, owner_id, owner_incarnation, committed_at_ms
-             );
+             ON lash_attachment_manifest(session_id, owner_kind, owner_id, committed_at_ms);
          DROP INDEX IF EXISTS idx_lash_attachment_manifest_written;
          CREATE INDEX idx_lash_attachment_manifest_written
              ON lash_attachment_manifest(attachment_id, written_at_ms);
@@ -601,6 +600,17 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     .execute(&pool)
     .await
     .expect("remove retired observer selection from the refusal fixture catalog");
+    // Component 132 (FIG-3607) names a process by its minted id alone: a
+    // pending observer intent carries no incarnation, and a trigger delivery
+    // names its process only once the delivery's start binds it.
+    sqlx::raw_sql(
+        "ALTER TABLE lash_session_meta_pending_observer_intents
+             DROP COLUMN IF EXISTS process_incarnation;
+         ALTER TABLE lash_trigger_deliveries ALTER COLUMN process_id DROP NOT NULL;",
+    )
+    .execute(&pool)
+    .await
+    .expect("cut the refusal fixture catalog over to minted process ids");
     // Component 116 (FIG-3544) adds the immutable submission columns. The
     // refusal fixture's pending input predates them, so this author-time
     // refresh writes what admission would have: its ingress as submitted and
@@ -741,6 +751,13 @@ async fn regenerate_postgres_prior_component_fixture_catalog() {
     .expect("refresh refusal fixture head schema without changing its checkpoint");
     upgrade_prior_fixture_checkpoint_manifests(&pool).await;
     upgrade_prior_fixture_graph_node_bodies(&pool).await;
+    // Opens verify and run no DDL (FIG-3797), so the refresh applies the
+    // committed artifact itself: it is creation-only and idempotent, and it
+    // lands the seed rows a catalog provisioned by `lash migrate` carries.
+    sqlx::raw_sql(PostgresStorage::schema_ddl())
+        .execute(&pool)
+        .await
+        .expect("provision the refreshed refusal fixture catalog from schema.sql");
     pool.close().await;
     let storage = PostgresStorage::connect(&fixture_database_url)
         .await
@@ -1188,7 +1205,10 @@ fn open_handles(storage: &PostgresStorage, timestamp_ms: u64) -> fixture::Fixtur
     let processes = Arc::new(
         storage
             .process_registry()
-            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>),
+            .with_clock(Arc::clone(&clock) as Arc<dyn lash_core_execution::Clock>)
+            .with_process_id_mint_for_testing(
+                lash_core_execution::ProcessIdMint::sequential_for_testing(),
+            ),
     );
     let process_envs = Arc::new(storage.process_env_store());
     let triggers = Arc::new(

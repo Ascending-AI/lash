@@ -20,6 +20,7 @@ impl RestateProcessRunner for BoundaryPolicyProbeRunner {
     async fn run_process_segment(
         &self,
         _started: &SegmentStarted,
+        _process_id: ProcessId,
         _registration: ProcessRegistration,
         _execution_context: ProcessExecutionContext,
         scoped_effect_controller: ScopedEffectController<'_>,
@@ -43,13 +44,13 @@ impl RestateProcessRunner for BoundaryPolicyProbeRunner {
 /// moves its cut.
 #[tokio::test]
 pub(super) async fn a_boundary_policy_change_between_attempts_replays_the_recorded_cut() {
-    let process_id = "p16-boundary-policy-recorded";
     let registry = process_registry();
-    let registration = rerunnable_registration(process_id);
-    registry
+    let registration = rerunnable_registration();
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register the policy probe process");
+        .expect("register the policy probe process")
+        .id;
     let endpoint_with_budget = |budget: u64| {
         Endpoint::builder()
             .bind(
@@ -64,6 +65,7 @@ pub(super) async fn a_boundary_policy_change_between_attempts_replays_the_record
             .build()
     };
     let input = RestateProcessWorkflowInput {
+        process_id: process_id.clone(),
         registration,
         execution_context: ProcessExecutionContext::default(),
         segment_ordinal: 0,
@@ -72,7 +74,7 @@ pub(super) async fn a_boundary_policy_change_between_attempts_replays_the_record
 
     // Admitted under a host that cuts every two effects.
     let admitting = endpoint_with_budget(2);
-    let admission = admission_journal(&admitting, process_id, &input)
+    let admission = admission_journal(&admitting, process_id.as_str(), &input)
         .await
         .expect("the first attempt admits its segment");
 
@@ -82,7 +84,8 @@ pub(super) async fn a_boundary_policy_change_between_attempts_replays_the_record
         &redriving,
         "LashProcessWorkflow",
         "run",
-        admitted_invocation_body(process_id, &input, &admission).expect("splice the admission"),
+        admitted_invocation_body(process_id.as_str(), &input, &admission)
+            .expect("splice the admission"),
         Vec::new(),
     )
     .await

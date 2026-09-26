@@ -54,7 +54,6 @@ struct RawObserverIntentProcessRow {
     session_id: SessionId,
     process_index: i64,
     process_id: ProcessId,
-    process_incarnation: Option<i64>,
 }
 
 #[derive(Clone, Debug)]
@@ -206,13 +205,13 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
             meta: child(
                 &SessionId::from("layout-child-process-literal"),
                 Some(CausalRef::Process {
-                    process_id: ProcessId::from("layout-cause-process-literal"),
+                    process_id: ProcessId::fixture("layout-cause-process-literal"),
                 }),
             ),
             row: RawSessionMetaRow {
                 parent_session_id: Some(SessionId::from("layout-parent-literal")),
                 caused_by_kind: Some("process".to_string()),
-                caused_by_process_id: Some(ProcessId::from("layout-cause-process-literal")),
+                caused_by_process_id: Some(ProcessId::fixture("layout-cause-process-literal")),
                 ..RawSessionMetaRow::literal(
                     &SessionId::from("layout-child-process-literal"),
                     "child",
@@ -224,14 +223,14 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
             meta: child(
                 &SessionId::from("layout-child-process-event-literal"),
                 Some(CausalRef::ProcessEvent {
-                    process_id: ProcessId::from("layout-event-process-literal"),
+                    process_id: ProcessId::fixture("layout-event-process-literal"),
                     sequence: u64::MAX,
                 }),
             ),
             row: RawSessionMetaRow {
                 parent_session_id: Some(SessionId::from("layout-parent-literal")),
                 caused_by_kind: Some("process_event".to_string()),
-                caused_by_process_id: Some(ProcessId::from("layout-event-process-literal")),
+                caused_by_process_id: Some(ProcessId::fixture("layout-event-process-literal")),
                 caused_by_process_event_sequence: Some("18446744073709551615".to_string()),
                 ..RawSessionMetaRow::literal(
                     &SessionId::from("layout-child-process-event-literal"),
@@ -327,11 +326,8 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
         SessionMetaLayoutCase {
             meta: SessionMeta {
                 pending_observer_intents: vec![
-                    lash_core::facade_support::SessionObserverIntent::host_requested_ref(
-                        lash_core::ProcessRef::new(
-                            "layout-pending-selected-literal",
-                            lash_core::ProcessIncarnation::from_registration_sequence(42),
-                        ),
+                    lash_core::facade_support::SessionObserverIntent::host_requested(
+                        ProcessId::fixture("layout-pending-selected-literal"),
                     ),
                 ],
                 session_id: SessionId::from("layout-fork-selected-literal"),
@@ -351,20 +347,18 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
             pending_observer_intents: vec![RawObserverIntentProcessRow {
                 session_id: SessionId::from("layout-fork-selected-literal"),
                 process_index: 0,
-                process_id: ProcessId::from("layout-pending-selected-literal"),
-                process_incarnation: Some(42),
+                process_id: ProcessId::fixture("layout-pending-selected-literal"),
             }],
         },
         SessionMetaLayoutCase {
             meta: SessionMeta {
                 pending_observer_intents: vec![
                     lash_core::facade_support::SessionObserverIntent::host_requested(
-                        "layout-observer-root-a-literal",
+                        ProcessId::fixture("layout-observer-root-a-literal"),
                     ),
-                    lash_core::facade_support::SessionObserverIntent {
-                        process_id: ProcessId::from("layout-observer-root-b-literal"),
-                        process_incarnation: Some(42),
-                    },
+                    lash_core::facade_support::SessionObserverIntent::host_requested(
+                        ProcessId::fixture("layout-observer-root-b-literal"),
+                    ),
                 ],
                 session_id: SessionId::from("layout-observer-root-literal"),
                 relation: SessionRelation::Root,
@@ -377,14 +371,12 @@ fn session_meta_layout_cases() -> Vec<SessionMetaLayoutCase> {
                 RawObserverIntentProcessRow {
                     session_id: SessionId::from("layout-observer-root-literal"),
                     process_index: 0,
-                    process_id: ProcessId::from("layout-observer-root-a-literal"),
-                    process_incarnation: None,
+                    process_id: ProcessId::fixture("layout-observer-root-a-literal"),
                 },
                 RawObserverIntentProcessRow {
                     session_id: SessionId::from("layout-observer-root-literal"),
                     process_index: 1,
-                    process_id: ProcessId::from("layout-observer-root-b-literal"),
-                    process_incarnation: Some(42),
+                    process_id: ProcessId::fixture("layout-observer-root-b-literal"),
                 },
             ],
         },
@@ -409,7 +401,7 @@ fn sqlite_raw_session_meta_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawS
         caused_by_turn_id: row.get::<_, Option<String>>(5)?.map(TurnId::from),
         caused_by_effect_id: row.get(6)?,
         caused_by_call_id: row.get(7)?,
-        caused_by_process_id: row.get::<_, Option<String>>(8)?.map(ProcessId::from),
+        caused_by_process_id: row.get::<_, Option<String>>(8)?.map(stored_process_id),
         caused_by_process_event_sequence: row.get(9)?,
         caused_by_occurrence_id: row.get(10)?,
         caused_by_subscription_id: row.get(11)?,
@@ -431,7 +423,7 @@ fn postgres_raw_session_meta_row(row: sqlx::postgres::PgRow) -> RawSessionMetaRo
         caused_by_turn_id: row.get::<Option<String>, _>(5).map(TurnId::from),
         caused_by_effect_id: row.get(6),
         caused_by_call_id: row.get(7),
-        caused_by_process_id: row.get::<Option<String>, _>(8).map(ProcessId::from),
+        caused_by_process_id: row.get::<Option<String>, _>(8).map(stored_process_id),
         caused_by_process_event_sequence: row.get(9),
         caused_by_occurrence_id: row.get(10),
         caused_by_subscription_id: row.get(11),
@@ -468,7 +460,7 @@ fn assert_sqlite_raw_session_meta_layout(path: &Path, cases: &[SessionMetaLayout
         let pending_observer_intents = {
             let mut statement = connection
                 .prepare(
-                    "SELECT session_id, process_index, process_id, process_incarnation
+                    "SELECT session_id, process_index, process_id
                      FROM session_meta_pending_observer_intents
                      WHERE session_id = ?1 ORDER BY process_index",
                 )
@@ -478,8 +470,7 @@ fn assert_sqlite_raw_session_meta_layout(path: &Path, cases: &[SessionMetaLayout
                     Ok(RawObserverIntentProcessRow {
                         session_id: SessionId::from(row.get::<_, String>(0)?),
                         process_index: row.get(1)?,
-                        process_id: ProcessId::from(row.get::<_, String>(2)?),
-                        process_incarnation: row.get(3)?,
+                        process_id: stored_process_id(row.get::<_, String>(2)?),
                     })
                 })
                 .expect("read SQLite observer-intent layout")
@@ -514,8 +505,8 @@ async fn assert_postgres_raw_session_meta_layout(pool: &PgPool, cases: &[Session
             case.row.session_id
         );
 
-        let pending_observer_intents = sqlx::query_as::<_, (String, i64, String, Option<i64>)>(
-            "SELECT session_id, process_index, process_id, process_incarnation
+        let pending_observer_intents = sqlx::query_as::<_, (String, i64, String)>(
+            "SELECT session_id, process_index, process_id
              FROM lash_session_meta_pending_observer_intents
              WHERE session_id = $1 ORDER BY process_index",
         )
@@ -525,13 +516,10 @@ async fn assert_postgres_raw_session_meta_layout(pool: &PgPool, cases: &[Session
         .expect("read PostgreSQL observer-intent layout")
         .into_iter()
         .map(
-            |(session_id, process_index, process_id, process_incarnation)| {
-                RawObserverIntentProcessRow {
-                    session_id: SessionId::from(session_id),
-                    process_index,
-                    process_id: ProcessId::from(process_id),
-                    process_incarnation,
-                }
+            |(session_id, process_index, process_id)| RawObserverIntentProcessRow {
+                session_id: SessionId::from(session_id),
+                process_index,
+                process_id: stored_process_id(process_id),
             },
         )
         .collect::<Vec<_>>();
@@ -605,13 +593,12 @@ fn replace_sqlite_session_meta_with_raw_rows(path: &Path, cases: &[SessionMetaLa
             transaction
                 .execute(
                     "INSERT INTO session_meta_pending_observer_intents
-                     (session_id, process_index, process_id, process_incarnation)
-                     VALUES (?1, ?2, ?3, ?4)",
+                     (session_id, process_index, process_id)
+                     VALUES (?1, ?2, ?3)",
                     rusqlite::params![
                         row.session_id.as_str(),
                         row.process_index,
                         row.process_id.as_str(),
-                        row.process_incarnation,
                     ],
                 )
                 .expect("insert literal SQLite observer-intent row");
@@ -699,13 +686,12 @@ async fn replace_postgres_session_meta_with_raw_rows(
         for row in &case.pending_observer_intents {
             sqlx::query(
                 "INSERT INTO lash_session_meta_pending_observer_intents
-                 (session_id, process_index, process_id, process_incarnation)
-                 VALUES ($1, $2, $3, $4)",
+                 (session_id, process_index, process_id)
+                 VALUES ($1, $2, $3)",
             )
             .bind(row.session_id.as_str())
             .bind(row.process_index)
             .bind(row.process_id.as_str())
-            .bind(row.process_incarnation)
             .execute(&mut *transaction)
             .await
             .expect("insert literal PostgreSQL observer-intent row");
@@ -788,4 +774,12 @@ pub(super) async fn verify_independent_session_meta_layout(
     }
 
     delete_postgres_session_meta_rows(postgres.pool(), &cases).await;
+}
+
+#[expect(
+    clippy::expect_used,
+    reason = "test support: a stored process id that does not decode is a layout defect the law must surface"
+)]
+fn stored_process_id(id: String) -> ProcessId {
+    ProcessId::parse(&id).expect("a stored process id is minted")
 }

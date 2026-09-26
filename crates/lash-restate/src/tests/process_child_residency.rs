@@ -6,13 +6,13 @@ use super::*;
 /// row remains and reopens through the ordinary store open.
 #[tokio::test]
 pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run() {
-    let process_id = ProcessId::from("session-turn-child-liveness");
     let (registry, continuations) = process_stores();
-    let registration = rerunnable_session_turn_registration("session-turn-child-liveness");
-    registry
+    let registration = rerunnable_session_turn_registration();
+    let process_id = registry
         .register_process(registration.clone())
         .await
-        .expect("register session turn");
+        .expect("register session turn")
+        .id;
 
     // A worker like `recovery_worker`, with a scripted provider so the child
     // turn completes instead of failing on provider resolution.
@@ -73,7 +73,8 @@ pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run(
     let _ = lash_core::runtime::take_spawned_child_runtimes();
     let outcome = workflow
         .run_registration_for_test(
-            registration,
+            process_id.clone(),
+            registration.clone(),
             ProcessExecutionContext::default()
                 .with_execution_write_authority(execution_write_authority),
             RestateRuntimeEffectController::new_for_test(context)
@@ -93,7 +94,19 @@ pub(super) async fn session_turn_child_runtime_does_not_outlive_the_process_run(
         "the child turn completed: {outcome:#?}"
     );
 
-    let spawned = lash_core::runtime::take_spawned_child_runtimes();
+    // The seam is process-global and other tests run session turns
+    // concurrently: keep this run's child, named by its create request.
+    let lash_core::ProcessInput::SessionTurn { create_request, .. } = &*registration.input else {
+        unreachable!("a session-turn registration");
+    };
+    let child = create_request
+        .session_id
+        .clone()
+        .expect("the child create request names its session");
+    let spawned = lash_core::runtime::take_spawned_child_runtimes()
+        .into_iter()
+        .filter(|(session_id, _)| *session_id == child)
+        .collect::<Vec<_>>();
     assert_eq!(spawned.len(), 1, "the run minted exactly one child runtime");
     let child_session_id = spawned[0].0.clone();
     assert!(

@@ -521,8 +521,7 @@ try {
     let session = core.session(&session_id).open().await.unwrap();
     let scope = lash::durability::EffectHost::scoped_static(
         effect_host.as_ref(),
-        lash::runtime::AdmittedScope::unpinned(session.turn_scope("async-turn"))
-            .expect("a turn scope admits unpinned"),
+        lash::runtime::AdmittedScope::new(session.turn_scope("async-turn")),
     )
     .unwrap()
     .unwrap();
@@ -560,8 +559,7 @@ try {
     );
     let scope = lash::durability::EffectHost::scoped_static(
         effect_host.as_ref(),
-        lash::runtime::AdmittedScope::unpinned(session.turn_scope("async-turn"))
-            .expect("a turn scope admits unpinned"),
+        lash::runtime::AdmittedScope::new(session.turn_scope("async-turn")),
     )
     .unwrap()
     .unwrap();

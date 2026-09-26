@@ -22,10 +22,11 @@ pub(super) async fn filter_unregistered_process_ids(
                     )
                     .map_err(process_sqlite_error)?;
                 let rows = stmt
-                    .query_map(params![process_ids_json], |row| row.get::<_, String>(0))
+                    .query_map(params![process_ids_json], |row| {
+                        crate::row_process_id(row, 0)
+                    })
                     .map_err(process_sqlite_error)?;
                 rows.collect::<Result<Vec<_>, _>>()
-                    .map(|ids: Vec<String>| ids.into_iter().map(ProcessId::from).collect())
                     .map_err(process_sqlite_error)
             })())
         })
@@ -54,10 +55,11 @@ pub(super) async fn filter_tombstoned_process_ids(
                     )
                     .map_err(process_sqlite_error)?;
                 let rows = stmt
-                    .query_map(params![process_ids_json], |row| row.get::<_, String>(0))
+                    .query_map(params![process_ids_json], |row| {
+                        crate::row_process_id(row, 0)
+                    })
                     .map_err(process_sqlite_error)?;
                 rows.collect::<Result<Vec<_>, _>>()
-                    .map(|ids: Vec<String>| ids.into_iter().map(ProcessId::from).collect())
                     .map_err(process_sqlite_error)
             })())
         })

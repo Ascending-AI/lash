@@ -98,7 +98,7 @@ fn every_cancellation_origin_survives_record_observation_and_output_transport() 
         lash_sansio::CancelOrigin::StartFailed,
     ] {
         let request = lash_sansio::CancelRequest::new(origin, "actor:transport-law", 11);
-        let mut record = process_record(&ProcessId::from("typed-cancel-transport"));
+        let mut record = process_record(&lash_sansio::ProcessId::fixture("typed-cancel-transport"));
         assert!(record.cancel_request.is_none());
         record.cancel_request = Some(Box::new(request.clone()));
         record.status = lash_core::ProcessStatus::Cancelled;

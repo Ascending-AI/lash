@@ -34,7 +34,7 @@ impl<'run> InternalProcessContext<'run> {
     }
 
     /// Read the durable process id assigned to this internal body.
-    pub fn process_id(&self) -> Option<&str> {
+    pub fn process_id(&self) -> Option<&ProcessId> {
         self.context.enclosing_process()
     }
 
@@ -256,7 +256,7 @@ impl InternalProcessAdmin<'_> {
         ExternalLaunchAudit {
             processes: Arc::clone(&self.processes),
             session_id: self.session_id.clone(),
-            process_id: ProcessId::from(process_id.to_string()),
+            process_id: process_id.clone(),
             armed: true,
         }
     }
@@ -271,7 +271,7 @@ impl InternalProcessAdmin<'_> {
         self.processes
             .validate_visible(
                 &self.session_id,
-                &[ProcessId::from(process_id.to_string())],
+                std::slice::from_ref(process_id),
                 self.process_scope(),
             )
             .await?;
@@ -307,7 +307,7 @@ impl InternalProcessAdmin<'_> {
         self.processes
             .validate_visible(
                 &self.session_id,
-                &[ProcessId::from(process_id.to_string())],
+                std::slice::from_ref(process_id),
                 self.process_scope(),
             )
             .await?;
@@ -333,7 +333,7 @@ impl InternalProcessAdmin<'_> {
         self.processes
             .validate_visible(
                 &self.session_id,
-                &[ProcessId::from(process_id.to_string())],
+                std::slice::from_ref(process_id),
                 self.process_scope(),
             )
             .await?;
@@ -359,7 +359,7 @@ impl InternalProcessAdmin<'_> {
         self.processes
             .validate_visible(
                 &self.session_id,
-                &[ProcessId::from(process_id.to_string())],
+                std::slice::from_ref(process_id),
                 self.process_scope(),
             )
             .await?;

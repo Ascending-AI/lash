@@ -70,7 +70,7 @@ fn register_facade_contracts(t: &trybuild::TestCases) {
     t.compile_fail("tests/ui/scoped_turn_builders_are_not_prelude.rs");
     t.compile_fail("tests/ui/taxonomy_types_are_not_root.rs");
     t.compile_fail("tests/ui/process_start_requires_scope.rs");
-    t.compile_fail("tests/ui/process_scope_requires_admitted_incarnation.rs");
+    t.compile_fail("tests/ui/process_scope_requires_admission.rs");
     t.compile_fail("tests/ui/queue_operations_left_lash_session.rs");
     t.compile_fail("tests/ui/session_store_factory_requires_by_id_lookup.rs");
     t.compile_fail("tests/ui/session_store_factory_requires_unsettled_turn_count.rs");

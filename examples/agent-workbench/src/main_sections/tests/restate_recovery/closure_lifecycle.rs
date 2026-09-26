@@ -1,19 +1,9 @@
 use super::*;
 
 /// Admit a scope this e2e fixture mints directly, standing in for the store
-/// admission step the real worker performs: process scopes pin the fabricated
-/// first-registration incarnation, everything else admits unpinned.
+/// admission step the real worker performs.
 fn live_restate_admission(scope: &lash::runtime::ExecutionScope) -> lash::runtime::AdmittedScope {
-    match scope {
-        lash::runtime::ExecutionScope::Process { process_id } => {
-            lash::runtime::AdmittedScope::process(lash::process::ProcessRef::new(
-                process_id.clone(),
-                lash::process::ProcessIncarnation::from_registration_sequence(1),
-            ))
-        }
-        _ => lash::runtime::AdmittedScope::unpinned(scope.clone())
-            .expect("a non-process scope admits unpinned"),
-    }
+    lash::runtime::AdmittedScope::new(scope.clone())
 }
 
 async fn authorize_restate_completion_closure(
@@ -260,9 +250,9 @@ fn live_restate_participant_protocol_crash_child() {
         });
         let factory = lash_sqlite_store::SqliteSessionStoreFactory::new(catalog);
         factory.bind_effect_host(&host);
-        let scope = lash::runtime::ExecutionScope::process(format!(
+        let scope = lash::runtime::ExecutionScope::process(lash::ProcessId::fixture(&format!(
             "live-restate-participant-crash-{scenario}"
-        ));
+        )));
         if boundary == RestateParticipantCrashBoundary::AfterOwnerRegister {
             let (store, lease, authorization) = authorize_restate_completion_closure(
                 &host,
@@ -338,8 +328,9 @@ async fn prove_live_restate_participant_crash_windows(
     let register_scenario = "register";
     let register_catalog = data_dir.join("participant-crash-register-catalog");
     let register_marker = data_dir.join("participant-crash-after-register");
-    let register_scope =
-        lash::runtime::ExecutionScope::process("live-restate-participant-crash-register");
+    let register_scope = lash::runtime::ExecutionScope::process(lash::ProcessId::fixture(
+        "live-restate-participant-crash-register",
+    ));
     kill_live_restate_participant_child(
         &register_catalog,
         register_scenario,
@@ -383,8 +374,9 @@ async fn prove_live_restate_participant_crash_windows(
     let release_catalog = data_dir.join("participant-crash-release-catalog");
     let release_factory = lash_sqlite_store::SqliteSessionStoreFactory::new(&release_catalog);
     release_factory.bind_effect_host(effect_host);
-    let release_scope =
-        lash::runtime::ExecutionScope::process("live-restate-participant-crash-release");
+    let release_scope = lash::runtime::ExecutionScope::process(lash::ProcessId::fixture(
+        "live-restate-participant-crash-release",
+    ));
     let (store, lease, authorization) = authorize_restate_completion_closure(
         effect_host,
         &release_factory,
@@ -498,7 +490,9 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
         factory_a.bind_effect_host(&effect_host);
         factory_b.bind_effect_host(&effect_host);
 
-        let scope = lash::runtime::ExecutionScope::process("live-restate-shared-owner");
+        let scope = lash::runtime::ExecutionScope::process(lash::ProcessId::fixture(
+            "live-restate-shared-owner",
+        ));
         let (store_a, lease_a, authorization_a) = authorize_restate_completion_closure(
             &effect_host,
             &factory_a,
@@ -549,7 +543,9 @@ fn live_restate_closure_participants_serialize_direct_index_retirement() {
             .await
             .expect("live Restate index retires after every participant releases");
 
-        let late_scope = lash::runtime::ExecutionScope::process("live-restate-retire-first");
+        let late_scope = lash::runtime::ExecutionScope::process(lash::ProcessId::fixture(
+            "live-restate-retire-first",
+        ));
         let late_address = lash::TurnAddress::new("live-restate-late-catalog", "turn");
         let late_store = factory_a
             .create_store(&lash::persistence::SessionStoreCreateRequest {

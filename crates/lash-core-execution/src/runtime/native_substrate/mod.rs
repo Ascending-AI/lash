@@ -95,11 +95,11 @@ pub trait ProcessWorkSubstrate: Send + Sync {
     /// There is no polling fallback and no "attach if provided". [`ProcessTerminalWait::Reattach`]
     /// is recoverable: the port bounded one transport attachment while the
     /// durable wait stayed live, so the caller re-enters with the same explicit
-    /// `process_ref` (never an implicit "latest" process). The caller owns the
+    /// `process_id`. The caller owns the
     /// overall wait bound through its cancellation select.
     async fn await_process_terminal(
         &self,
-        process_ref: &crate::ProcessRef,
+        process_id: &crate::ProcessId,
     ) -> Result<ProcessTerminalWait, PluginError>;
 }
 

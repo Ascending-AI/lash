@@ -381,13 +381,12 @@ pub(super) fn queued_work_stress_wake(
     input: &str,
     sequence: u64,
 ) -> lash_core::ProcessWakeDelivery {
-    let process_id = ProcessId::from(format!("runtime-perf-process-{sequence}"));
+    let process_id = ProcessId::fixture(&format!("runtime-perf-process-{sequence}"));
     lash_core::ProcessWakeDelivery {
         version: lash_core::PROCESS_WAKE_DELIVERY_FORMAT_VERSION,
         wake_id: format!("wake:{session_id}:{sequence}"),
         target_session_id: SessionId::from(session_id.to_string()),
         process_id: process_id.clone(),
-        process_incarnation: lash_core::ProcessIncarnation::from_registration_sequence(sequence),
         sequence,
         event_type: "process.wake".to_string(),
         event_invocation: lash_core::RuntimeInvocation {

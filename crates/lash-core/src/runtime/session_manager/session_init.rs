@@ -1219,10 +1219,9 @@ async fn run_initialized_session_turn(
     let mut runtime_guard = runtime.runtime.lock().await;
     let scoped_effect_controller = match scoped_effect_controller.execution_scope() {
         crate::ExecutionScope::Turn { turn_id, .. } => scoped_effect_controller
-            .rescope(
-                crate::AdmittedScope::unpinned(runtime_guard.state.turn_scope(turn_id.clone()))
-                    .map_err(|err| crate::PluginError::Session(err.to_string()))?,
-            )
+            .rescope(crate::AdmittedScope::new(
+                runtime_guard.state.turn_scope(turn_id.clone()),
+            ))
             .map_err(crate::PluginError::Runtime)?,
         crate::ExecutionScope::Process { .. } => scoped_effect_controller,
         scope => {
@@ -1323,7 +1322,7 @@ mod tests {
 
     #[test]
     fn process_turn_validation_attaches_invocation_correlation() {
-        let process_id = crate::ProcessId::from("process:subagent:call");
+        let process_id = crate::ProcessId::fixture("process:subagent:call");
         let authority = crate::ProcessExecutionWriteAuthority::invocation(
             process_id.clone(),
             "invocation:subagent:call",
@@ -1332,10 +1331,7 @@ mod tests {
         let controller = crate::testing::UnavailableEffectController;
         let scoped_effect_controller = crate::ScopedEffectController::borrowed(
             &controller,
-            crate::AdmittedScope::process(crate::ProcessRef::new(
-                process_id.clone(),
-                crate::ProcessIncarnation::from_registration_sequence(1),
-            )),
+            crate::AdmittedScope::process(process_id.clone()),
         )
         .expect("process scope");
 
