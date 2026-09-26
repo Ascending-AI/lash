@@ -633,12 +633,12 @@ impl SessionStoreFactory for SqliteSessionStoreFactory {
         conn.call(move |conn| {
             let sql = &crate::session_roots::session_roots_sql().verbs;
             let mut statement = conn.prepare(sql.sessions.sql())?;
-            Ok(statement
+            statement
                 .query_map(params![after, limit.get() as i64], |row| {
                     row.get::<_, String>(0)
                 })?
                 .map(|row| row.map(SessionId::from))
-                .collect::<Result<Vec<_>, _>>()?)
+                .collect::<Result<Vec<_>, _>>()
         })
         .await
         .map_err(sqlite_error)

@@ -1142,6 +1142,7 @@ mod tests {
             )),
             RestateSessionDriverSlot::new(),
             BuildGeneration::for_test("t0"),
+            Arc::new(lash_core::engine::NoEngineControl),
         );
         let first = work.await_drive(&session, &request).await;
         assert!(matches!(first, Err(DriveAbort::Retry(ref error)) if error.code == busy.code));

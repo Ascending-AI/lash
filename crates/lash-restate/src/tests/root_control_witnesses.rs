@@ -1,8 +1,4 @@
 //! Control operations against the same handlers on the double and live server.
-#![expect(
-    clippy::expect_used,
-    reason = "witness preconditions and outcomes are assertions"
-)]
 use super::effect_group_conformance::{HarnessServer, LiveConformanceHarness};
 use lash_core::engine::*;
 use lash_core::store::*;
@@ -316,7 +312,10 @@ async fn live_pause_reconcile_resume_preserves_the_journal_and_clears_the_park()
 async fn a_paused_admission_is_resumed_without_a_root_park() {
     let f = Fixture::new(HarnessServer::in_process(), true).await;
     let report = f.reconcile_until(true).await;
-    assert_eq!(report.resumed_drives, [f.driver.session.clone()]);
+    assert_eq!(
+        report.resumed_drives,
+        std::slice::from_ref(&f.driver.session)
+    );
     assert!(
         f.driver
             .store
@@ -574,7 +573,7 @@ async fn released_then_next(server: HarnessServer) {
         .await
         .expect("drive");
     assert!(
-        matches!(outcome.ran.as_slice(), [RootOutcome::Released { root }, RootOutcome::Committed { root: committed, .. }] if root == &f.driver.root && committed == &next)
+        matches!(outcome.ran.as_slice(), [RootOutcome::Released { root }, RootOutcome::Committed { root: committed, .. }] if *root == f.driver.root && *committed == next)
     );
     assert_eq!(outcome.stop, DriveStop::Idle);
     assert_eq!(f.driver.commits.load(Ordering::SeqCst), 1);
