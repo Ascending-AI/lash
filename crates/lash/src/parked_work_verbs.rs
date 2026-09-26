@@ -118,7 +118,9 @@ impl ParkedWork {
                     .await
                     .map_err(|error| {
                         let code = match &error {
-                            lash_core::engine::EngineRefusal::Permanent { code, .. } => *code,
+                            lash_core::engine::EngineRefusal::Permanent { code, .. } => {
+                                code.clone()
+                            }
                             _ => lash_core::RuntimeErrorCode::PluginSessionManager,
                         };
                         ParkVerbRefused::SubstrateRefused {

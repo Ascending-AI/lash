@@ -454,23 +454,7 @@ impl SessionWorkEngine for RestateSessionWork {
         }
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {
             let ingress = self.ingress.clone();
-            runtime.spawn(async move {
-                if let Err(error) = ingress
-                    .send_object_json_idempotent(
-                        crate::LashService::Reconcile.name(),
-                        "recovery",
-                        "tick",
-                        &crate::session_reconcile::ReconcileRequest {
-                            version: LASH_SESSION_DRIVE_VERSION,
-                            sequence: 0,
-                        },
-                        &format!("reconcile-start:{LASH_SESSION_DRIVE_VERSION}"),
-                    )
-                    .await
-                {
-                    tracing::warn!(%error, "could not start session reconcile");
-                }
-            });
+            runtime.spawn(crate::session_reconcile::start_reconciliation(ingress));
         }
         installed
     }

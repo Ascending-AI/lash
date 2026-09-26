@@ -22,3 +22,12 @@ crate::statements! {
         delete_by_session = "DELETE FROM session_root_inputs WHERE session_id = ?1";
     }
 }
+
+crate::statements! {
+    /// Statements for parked-root control and recovery.
+    pub struct RootInputVerbStatements @ "session_root_input" {
+        bound_inputs = "SELECT b.input_id FROM session_root_inputs b JOIN pending_turn_inputs i ON i.session_id = b.session_id AND i.input_id = b.input_id WHERE b.session_id = ?1 AND b.root = ?2 AND {{nonterminal_turn_input_state(i.state)}}";
+        rebind = "UPDATE session_root_inputs SET root = ?3 WHERE session_id = ?1 AND input_id = ?2";
+        unbind = "DELETE FROM session_root_inputs WHERE session_id = ?1 AND input_id = ?2";
+    }
+}

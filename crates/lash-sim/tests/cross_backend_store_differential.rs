@@ -2356,7 +2356,7 @@ fn render_divergence(
 #[test]
 fn generated_catalog_covers_required_adversarial_shapes() {
     let cases = generated_cases();
-    assert_eq!(cases.len(), 30);
+    assert_eq!(cases.len(), 32);
     assert!(cases.iter().all(|case| !case.operations.is_empty()));
     assert_eq!(
         cases

@@ -390,13 +390,28 @@ fn control_intent_summary(
         }
         other => format!("{other:?}"),
     };
+    let kind = match &intent.kind {
+        lash_core::store::ControlIntentKind::Cancel { root, .. } => {
+            format!("Cancel {{ root: {root} }}")
+        }
+        lash_core::store::ControlIntentKind::Redrive { root, .. } => {
+            format!("Redrive {{ root: {root} }}")
+        }
+        lash_core::store::ControlIntentKind::Fork { root, new_root, .. } => format!(
+            "Fork {{ root: {root}, direct: {}, derived_root: {} }}",
+            new_root.is_some(),
+            new_root
+                .as_ref()
+                .is_none_or(|new| *new == lash_core::store::forked_root(root, intent.id)),
+        ),
+        other => format!("{other:?}"),
+    };
     format!(
-        "own={} own_session={} format={} kind={:?} state={state} attempts={} created_at_ms={} \
+        "own={} own_session={} format={} kind={kind} state={state} attempts={} created_at_ms={} \
          engine={:?}",
         Some(intent.id) == own,
         intent.session_id == *session_id,
         intent.format,
-        intent.kind,
         intent.attempts,
         intent.created_at_ms,
         intent.engine,
@@ -1267,7 +1282,16 @@ impl BackendRunner {
             SurfaceMethod::RootBinding => {
                 let input = lash_core::InputId::from(format!("{session_id}:input"));
                 match store.root_binding(&session_id, &input).await? {
-                    Some(root) => format!("bound={root}"),
+                    Some(root) => {
+                        let forked = self.surface.close_intent.is_some_and(|intent| {
+                            root == lash_core::store::forked_root(&SURFACE_ROOT_ID.into(), intent)
+                        });
+                        if forked {
+                            "bound=own_fork".to_string()
+                        } else {
+                            format!("bound={root}")
+                        }
+                    }
                     None => "bound=none".to_string(),
                 }
             }
@@ -1391,6 +1415,12 @@ impl BackendRunner {
                         lash_core::store::RootIntentRefused::Store(error) => error,
                         error => StoreError::Backend(format!("root intent refused: {error}")),
                     })?;
+                let returned_park = match &intent.kind {
+                    lash_core::store::ControlIntentKind::Cancel { park, .. }
+                    | lash_core::store::ControlIntentKind::Fork { park, .. } => *park,
+                    other => panic!("unexpected root intent: {other:?}"),
+                };
+                assert_eq!(returned_park, request.park);
                 self.surface.close_intent = Some(intent.id);
                 control_intent_summary(&intent, &session_id, self.surface.close_intent)
             }

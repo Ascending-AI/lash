@@ -72,3 +72,31 @@ impl LashReconcile for LashReconcileImpl {
         Ok(())
     }
 }
+
+/// Keep the startup send alive while deployment registration catches up.
+/// After acceptance, the durable object owns every subsequent tick.
+pub(crate) async fn start_reconciliation(ingress: crate::RestateIngressClient) {
+    let request = ReconcileRequest {
+        version: crate::LASH_SESSION_DRIVE_VERSION,
+        sequence: 0,
+    };
+    let key = format!("reconcile-start:{}", request.version);
+    let mut delay = std::time::Duration::from_millis(250);
+    loop {
+        match ingress
+            .send_object_json_idempotent(
+                crate::LashService::Reconcile.name(),
+                "recovery",
+                "tick",
+                &request,
+                &key,
+            )
+            .await
+        {
+            Ok(_) => return,
+            Err(error) => tracing::warn!(%error, "session reconcile startup send will retry"),
+        }
+        tokio::time::sleep(delay).await;
+        delay = (delay * 2).min(std::time::Duration::from_secs(5));
+    }
+}

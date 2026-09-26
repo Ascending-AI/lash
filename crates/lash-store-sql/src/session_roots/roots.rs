@@ -46,36 +46,64 @@ crate::statements! {
     }
 }
 
+/// Terminal evidence plus its key, for the cross-session reconciliation cursor.
+/// This is the complete terminal record; no input bindings or intent bodies are read.
+pub const TERMINAL_PAGE_COLUMNS: &str =
+    "session_id, root, terminal_kind, terminal_cause_json, terminal_head_revision, terminal_at_ms";
+
+/// Rendered statements used by a parked-root control transaction.
+pub struct RootVerbStatements {
+    pub bound_inputs: crate::Rendered,
+    pub rebind: crate::Rendered,
+    pub unbind: crate::Rendered,
+    pub set_kind: crate::Rendered,
+    pub raise_epoch: crate::Rendered,
+    pub input: crate::Rendered,
+    pub release_inputs: crate::Rendered,
+    pub release_batches: crate::Rendered,
+    pub delete_batch_items: crate::Rendered,
+    pub delete_batch: crate::Rendered,
+    pub terminals: crate::Rendered,
+    pub sessions: crate::Rendered,
+    pub intents: crate::Rendered,
+}
+
+impl RootVerbStatements {
+    /// Render each statement through its table owner.
+    #[must_use]
+    pub fn render(dialect: crate::Dialect) -> Self {
+        let group0 = crate::session_roots::root_inputs::RootInputVerbStatements::render(dialect);
+        let group1 = crate::session_roots::control_intents::ControlVerbStatements::render(dialect);
+        let group2 = crate::session::meta::MetaRootVerbStatements::render(dialect);
+        let group3 =
+            crate::turn_ingress::pending_inputs::PendingRootVerbStatements::render(dialect);
+        let group4 = crate::turn_ingress::queued_batches::BatchRootVerbStatements::render(dialect);
+        let group5 = crate::turn_ingress::queued_items::ItemRootVerbStatements::render(dialect);
+        let group6 = crate::session_roots::roots::TerminalPageStatements::render(dialect);
+        Self {
+            bound_inputs: group0.bound_inputs,
+            rebind: group0.rebind,
+            unbind: group0.unbind,
+            set_kind: group1.set_kind,
+            intents: group1.intents,
+            raise_epoch: group2.raise_epoch,
+            sessions: group2.sessions,
+            input: group3.input,
+            release_inputs: group3.release_inputs,
+            release_batches: group4.release_batches,
+            delete_batch: group4.delete_batch,
+            delete_batch_items: group5.delete_batch_items,
+            terminals: group6.terminals,
+        }
+    }
+}
+
 crate::statements! {
-    /// Atomic parked-root control writes, shared by both stores.
-    pub struct RootVerbStatements @ "root_verb" {
-        bound_inputs = "SELECT b.input_id FROM session_root_inputs b JOIN pending_turn_inputs i ON i.session_id = b.session_id AND i.input_id = b.input_id WHERE b.session_id = ?1 AND b.root = ?2 AND {{nonterminal_turn_input_state(i.state)}}";
-        rebind = "UPDATE session_root_inputs SET root = ?3 WHERE session_id = ?1 AND input_id = ?2";
-        unbind = "DELETE FROM session_root_inputs WHERE session_id = ?1 AND input_id = ?2";
-        set_kind = "UPDATE control_intents SET kind_json = ?2 WHERE intent_id = ?1";
-        raise_epoch = "UPDATE session_meta SET drive_epoch = drive_epoch + 1, drive_admission_id = ?2, drive_root_start = NULL WHERE session_id = ?1 AND closing_intent IS NULL";
-        input = "UPDATE pending_turn_inputs SET state = ?3,
-            claim_id = NULL, claim_owner_id = NULL, claim_owner_incarnation_id = NULL,
-            claim_token = NULL, claim_session_lease_generation = 0,
-            claim_bound_turn_id = NULL, claim_bound_receipt_input_id = NULL
-            WHERE session_id = ?1 AND input_id = ?2 AND {{nonterminal_turn_input_state(state)}}";
-        release_inputs = "UPDATE pending_turn_inputs SET
-            claim_id = NULL, claim_owner_id = NULL, claim_owner_incarnation_id = NULL,
-            claim_token = NULL, claim_session_lease_generation = 0,
-            claim_bound_turn_id = NULL, claim_bound_receipt_input_id = NULL
-            WHERE session_id = ?1 AND claim_token IS NOT NULL";
-        release_batches = "UPDATE queued_work_batches SET
-            claim_id = NULL,
-            claim_token = NULL, claim_session_lease_generation = 0
-            WHERE session_id = ?1 AND claim_token IS NOT NULL";
-        delete_batch_items = "DELETE FROM queued_work_items WHERE batch_id = ?1";
-        delete_batch = "DELETE FROM queued_work_batches WHERE session_id = ?1 AND batch_id = ?2";
+    /// Statements for parked-root control and recovery.
+    pub struct TerminalPageStatements @ "session_root" {
         terminals = "SELECT session_id, root, terminal_kind, terminal_cause_json, terminal_head_revision, terminal_at_ms
             FROM session_roots WHERE terminal_kind IS NOT NULL
               AND (session_id > ?1 OR (session_id = ?1 AND root > ?2))
             ORDER BY session_id, root LIMIT ?3";
-        sessions = "SELECT session_id FROM session_meta WHERE session_id > ?1 AND closing_intent IS NULL ORDER BY session_id LIMIT ?2";
-        intents = "SELECT intent_id, session_id, format, kind_json, state_json, attempts, created_at_ms, engine_ref
-            FROM control_intents WHERE intent_id > ?1 ORDER BY intent_id LIMIT ?2";
     }
 }

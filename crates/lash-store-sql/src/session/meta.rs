@@ -174,3 +174,11 @@ crate::statements! {
         delete_by_session = "DELETE FROM session_meta WHERE session_id = ?1";
     }
 }
+
+crate::statements! {
+    /// Statements for parked-root control and recovery.
+    pub struct MetaRootVerbStatements @ "session_meta" {
+        raise_epoch = "UPDATE session_meta SET drive_epoch = drive_epoch + 1, drive_admission_id = ?2, drive_root_start = NULL WHERE session_id = ?1 AND closing_intent IS NULL";
+        sessions = "SELECT session_id FROM session_meta WHERE session_id > ?1 AND closing_intent IS NULL ORDER BY session_id LIMIT ?2";
+    }
+}

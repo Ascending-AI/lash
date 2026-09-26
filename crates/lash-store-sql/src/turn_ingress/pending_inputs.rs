@@ -316,3 +316,19 @@ crate::statements! {
         delete_by_session = "DELETE FROM pending_turn_inputs WHERE session_id = ?1";
     }
 }
+
+crate::statements! {
+    /// Statements for parked-root control and recovery.
+    pub struct PendingRootVerbStatements @ "pending_turn_input" {
+        input = "UPDATE pending_turn_inputs SET state = ?3,
+            claim_id = NULL, claim_owner_id = NULL, claim_owner_incarnation_id = NULL,
+            claim_token = NULL, claim_session_lease_generation = 0,
+            claim_bound_turn_id = NULL, claim_bound_receipt_input_id = NULL
+            WHERE session_id = ?1 AND input_id = ?2 AND {{nonterminal_turn_input_state(state)}}";
+        release_inputs = "UPDATE pending_turn_inputs SET
+            claim_id = NULL, claim_owner_id = NULL, claim_owner_incarnation_id = NULL,
+            claim_token = NULL, claim_session_lease_generation = 0,
+            claim_bound_turn_id = NULL, claim_bound_receipt_input_id = NULL
+            WHERE session_id = ?1 AND claim_token IS NOT NULL";
+    }
+}
