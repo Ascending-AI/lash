@@ -234,8 +234,11 @@ pub(super) async fn fork_at_in_catalog(
             // writer consult; this transaction writes durable head/meta rows,
             // so it reads the deployment's generation rather than a build
             // constant.
-            let fleet_format =
-                crate::fleet_format::read_recorded(tx).map_err(sqlite_error)?;
+            let fleet_format = crate::fleet_format::read_recorded(
+                tx,
+                lash_core_execution::FleetFormat::writable_range(),
+            )
+            .map_err(sqlite_error)?;
             // Keep the fork fences in the shared order: exists -> deleted ->
             // retained -> live -> frame.
             let exists = tx

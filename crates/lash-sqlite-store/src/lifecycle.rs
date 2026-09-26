@@ -143,7 +143,12 @@ impl Store {
             SqliteConnection::open_with_policy(core.target(), options.connection_policy).await?;
         ensure_versioned_schema(&conn, SqliteDatabase::DurableCore).await?;
         let fleet_format = conn
-            .call(|conn| crate::fleet_format::read_recorded(conn))
+            .call(|conn| {
+                crate::fleet_format::read_recorded(
+                    conn,
+                    lash_core_execution::FleetFormat::writable_range(),
+                )
+            })
             .await?;
         let process_registry_attached = if let Some(process_registry) = process_registry {
             attach_process_registry(&conn, process_registry, options.connection_policy).await?;

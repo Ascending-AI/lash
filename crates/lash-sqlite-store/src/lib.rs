@@ -330,7 +330,7 @@ fn sqlite_graph_node_insert_error(
     sqlite_error(err)
 }
 
-fn sqlite_conversion_error(error: StoreError) -> rusqlite::Error {
+pub(crate) fn sqlite_conversion_error(error: StoreError) -> rusqlite::Error {
     rusqlite::Error::ToSqlConversionFailure(Box::new(error))
 }
 

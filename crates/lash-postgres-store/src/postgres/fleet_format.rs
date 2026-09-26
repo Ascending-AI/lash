@@ -14,6 +14,8 @@
 //! outside this build's writable range is refused with a typed error rather
 //! than allowed to emit a format the fleet has retired.
 
+use std::ops::RangeInclusive;
+
 use lash_core_execution::{FleetFormat, FleetFormatState, StoreError};
 use sqlx::{PgPool, Postgres, Transaction};
 
@@ -41,26 +43,23 @@ async fn read_in_tx(tx: &mut Transaction<'_, Postgres>) -> Result<Option<i32>, s
         .await
 }
 
-/// The fleet format a recorded `format_version` names, checked against this
-/// build's writable range.
+/// The fleet format a recorded `format_version` names, admitted against the
+/// writable range `writable` of the build doing the opening.
 ///
 /// Before the first format upgrade the range is one version wide, so any other
 /// recorded value means the fleet has moved past — or never agreed with — this
 /// build, and the open is refused with the typed error an operator can route.
-fn recorded_fleet_format(version: i64) -> Result<FleetFormat, StoreError> {
+fn recorded_fleet_format(
+    version: i64,
+    writable: RangeInclusive<u32>,
+) -> Result<FleetFormat, StoreError> {
     let Ok(version) = u32::try_from(version) else {
         return Err(StoreError::StoredDataCorrupt {
             record_kind: "lash_fleet_format.format_version",
             message: format!("not a fleet-format version: {version}"),
         });
     };
-    if version != lash_core_execution::FLEET_FORMAT_VERSION {
-        return Err(StoreError::FleetFormatOutsideWritableRange {
-            recorded: version,
-            current: lash_core_execution::FLEET_FORMAT_VERSION,
-        });
-    }
-    Ok(FleetFormat::from_version(version))
+    FleetFormat::admit_recorded(version, writable)
 }
 
 /// Provision and read the fleet-format row inside the open transaction that
@@ -87,7 +86,9 @@ pub(crate) async fn admit(tx: &mut Transaction<'_, Postgres>) -> Result<FleetFor
             .map_err(crate::store_sqlx_error)?;
     }
     match read_in_tx(tx).await {
-        Ok(Some(version)) => recorded_fleet_format(i64::from(version)),
+        Ok(Some(version)) => {
+            recorded_fleet_format(i64::from(version), FleetFormat::writable_range())
+        }
         Ok(None) => Ok(FleetFormat::current()),
         Err(err) if missing_relation(&err) => Ok(FleetFormat::current()),
         Err(err) => Err(crate::store_sqlx_error(err)),

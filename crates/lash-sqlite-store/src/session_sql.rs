@@ -637,23 +637,21 @@ lash_store_sql::statements! {
 }
 
 lash_store_sql::statements! {
-    /// `fleet_format` statements. All of them fork: SQLite's singleton flag is
-    /// the integer `1` and PostgreSQL's is `TRUE`, and this side *upserts* the
-    /// row where PostgreSQL inserts only — a single-process SQLite deployment
-    /// finalizes the fleet format on open, while the shared backend leaves the
-    /// recorded value alone until `finalize-upgrade` moves it (ADR 0106 §1,
-    /// FIG-3796/FIG-3800).
+    /// `fleet_format` statements. All of them fork on the singleton flag —
+    /// SQLite's is the integer `1` and PostgreSQL's is `TRUE` — and both sides
+    /// insert the row only when absent: `F` moves forward alone, so a build
+    /// reopening a store that recorded a newer generation sees it rather than
+    /// winding the fleet back (ADR 0106 §1, FIG-3796/FIG-3800).
     pub(crate) struct FleetFormatStatements @ "fleet_format" {
         /// The recorded fleet format.
         select_fleet_format = "SELECT format_version FROM fleet_format WHERE singleton = 1";
 
-        /// Finalizes on open: the row always records this build's own fleet
-        /// format once the open transaction commits.
-        upsert = "INSERT INTO fleet_format (
+        /// Provisions on open: the row records this build's own fleet format
+        /// when nothing has recorded one, and a recorded row wins.
+        insert_if_absent = "INSERT INTO fleet_format (
              singleton, format_version
          ) VALUES (1, ?1)
-         ON CONFLICT(singleton) DO UPDATE SET
-             format_version = excluded.format_version";
+         ON CONFLICT(singleton) DO NOTHING";
     }
 }
 
