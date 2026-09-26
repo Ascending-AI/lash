@@ -42,6 +42,13 @@ const NATIVE_CALL: &str = "native-probe-1";
 /// How long a law waits for a park an engine writes on its own.
 const PARK_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
 
+/// How long an attempt waits for the session's execution lane to become
+/// admissible: a hang detector for a durable fact, not a latency expectation.
+const LANE_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Poll interval for the lane wait's durable read.
+const LANE_POLL: std::time::Duration = std::time::Duration::from_millis(25);
+
 /// Which group children call the drifted tool.
 #[derive(Clone, Copy, Debug)]
 enum Shape {
@@ -172,15 +179,7 @@ fn attempt(
         let answers = answers.clone();
         Box::pin(async move {
             let started = world.executions.load(Ordering::SeqCst);
-            let mut runtime = build_runtime(&world, shape, &session_id, store, probe).await;
-            let mut input = crate::TurnInput::text("call the probe");
-            input.trace_turn_id = Some(turn_id);
-            let turn = runtime
-                .stream_turn(
-                    input,
-                    crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope),
-                )
-                .await;
+            let turn = drive(&world, shape, &session_id, &turn_id, &store, probe, scope).await;
             let end = crate::ConformanceTurnEnd::of(&turn);
             if let Some(answers) = answers {
                 let _ = answers.send((turn, started));
@@ -188,6 +187,73 @@ fn attempt(
             end
         })
     })
+}
+
+/// Drive the attempt's turn, retrying the retryable `SessionExecutionLaneBusy`
+/// refusal until the lane admits it.
+///
+/// The redrive reaches admission on the engine's own schedule — a Restate
+/// redelivery of the cut invocation — which can land before the crashed
+/// attempt's lane release has: a dropped runtime's lease guard publishes it on
+/// a spawned best-effort task. A caller that gets `SessionExecutionLaneBusy`
+/// is meant to retry, so the attempt waits the lane out and drives again
+/// rather than reporting the refusal as the redrive's answer.
+async fn drive(
+    world: &World,
+    shape: Shape,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+    store: &Arc<dyn crate::RuntimePersistence>,
+    probe: Probe,
+    scope: crate::ScopedEffectController<'_>,
+) -> Result<crate::AssembledTurn, crate::RuntimeError> {
+    loop {
+        let mut runtime = build_runtime(world, shape, session_id, Arc::clone(store), probe).await;
+        let mut input = crate::TurnInput::text("call the probe");
+        input.trace_turn_id = Some(turn_id.clone());
+        let turn = runtime
+            .stream_turn(
+                input,
+                crate::TurnOptions::new(tokio_util::sync::CancellationToken::new(), scope.clone()),
+            )
+            .await;
+        let busy = matches!(
+            &turn,
+            Err(error) if error.code == crate::RuntimeErrorCode::SessionExecutionLaneBusy
+        );
+        if !busy {
+            return turn;
+        }
+        until_lane_claimable(store, session_id).await;
+    }
+}
+
+/// Wait until `session_id`'s execution lane is admissible again: released, or
+/// held past its expiry at the store's own observation time, which the next
+/// claim displaces. Bounded by [`LANE_WAIT`] as a hang detector — the wait
+/// `drain_end`'s interrupted-drain retry does on the dead drain's lane.
+#[expect(
+    clippy::expect_used,
+    reason = "conformance-law fixture: each read is established by the setup"
+)]
+async fn until_lane_claimable(store: &Arc<dyn crate::RuntimePersistence>, session_id: &SessionId) {
+    tokio::time::timeout(LANE_WAIT, async {
+        loop {
+            let observation = store
+                .get_session_execution_lease(session_id)
+                .await
+                .expect("read the session's execution lease");
+            if observation
+                .lease
+                .is_none_or(|lease| lease.expires_at_epoch_ms <= observation.observed_at_epoch_ms)
+            {
+                return;
+            }
+            tokio::time::sleep(LANE_POLL).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("`{session_id}`'s execution lane becomes claimable"));
 }
 
 /// Where the law cuts the first attempt.
