@@ -165,7 +165,6 @@ pub(crate) fn restate_effect_execution(
         | RuntimeEffectCommand::Trigger { .. }
         | RuntimeEffectCommand::LanguageRuntimeValue { .. }
         | RuntimeEffectCommand::AcceptTurnInput { .. }
-        | RuntimeEffectCommand::ClaimAcceptedTurnInput { .. }
         // A root's session config: the resident config it runs under,
         // captured at the funnel; nothing it does can fault (FIG-3600 S6).
         | RuntimeEffectCommand::ResolveTurnConfig { .. }
@@ -190,9 +189,12 @@ pub(crate) fn restate_effect_execution(
         // A drive's admission and its seal read and write the session's
         // store: a store that did not answer is this attempt's fault, so the
         // step runs again, and only a verdict is ever recorded (FIG-3600).
+        // A root's claim is the same: its re-admitted root would replay a
+        // recorded store fault on every later drive.
         command @ (RuntimeEffectCommand::LoadExecutionEnv { .. }
         | RuntimeEffectCommand::AdmitDrive { .. }
         | RuntimeEffectCommand::SealDriveAdmission { .. }
+        | RuntimeEffectCommand::ClaimAcceptedTurnInput { .. }
         | RuntimeEffectCommand::AssistantResponseHooks { .. }
         | RuntimeEffectCommand::SyncExecutionEnvironment
         | RuntimeEffectCommand::LlmCall { .. }) => RestateEffectExecution::JournaledRun {

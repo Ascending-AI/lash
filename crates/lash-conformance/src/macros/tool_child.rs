@@ -139,6 +139,7 @@ macro_rules! drive_admission_tests {
             (parked_root_blocks_admission, "drive-parked-root"),
             (fence_is_not_in_the_envelope_hash, "drive-fence-envelope"),
             (every_driver_turn_is_owned_by_its_root, "drive-owned-root"),
+            (a_store_fault_at_the_root_claim_is_retried_not_recorded, "drive-claim-fault-retried"),
         ]);
     };
     (@laws $attrs:tt $fixture:block; [$($(#[$law_attr:meta])* ( $law:ident, $label:literal )),* $(,)?]) => {

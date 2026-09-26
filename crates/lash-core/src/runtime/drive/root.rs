@@ -533,15 +533,17 @@ impl RuntimeEffectLocalRunner for RootInputClaimRunner {
                 ),
             ));
         }
-        // A store failure here is journaled with the effect under a durable
-        // engine, so it must not carry a retryable code: every retry of the
-        // invocation would replay the same failure. Like the acceptance
-        // write, it surfaces as a store-commit failure.
+        // A store that did not answer is this attempt's fault, never the
+        // claim's recorded outcome: the admission re-admits this same root
+        // first, so a recorded fault would replay under `drive-claim:{root}`
+        // on every later drive and wedge the session. Like admission and the
+        // seal, the step runs again; only a claim or a refusal is recorded.
         let drive = self.claim().await.map_err(|err| {
-            crate::RuntimeEffectControllerError::new(
-                RuntimeErrorCode::StoreCommitFailed,
-                format!("root input claim failed: {err}"),
-            )
+            let mut fault = crate::RuntimeEffectControllerError::from(
+                crate::runtime::runtime_error_from_store_commit(err),
+            );
+            fault.message = format!("root input claim failed: {}", fault.message);
+            fault.retryable_uncommitted_derivation()
         })?;
         Ok(crate::RuntimeEffectOutcome::ClaimAcceptedTurnInput { drive })
     }
@@ -591,7 +593,7 @@ impl RootInputClaimRunner {
                             .collect::<Vec<_>>(),
                     }),
                 );
-                return self.admit(claim).await;
+                return self.admit_or_release(claim).await;
             }
             self.emit(
                 "turn_input.claim_abandoned",
@@ -616,7 +618,7 @@ impl RootInputClaimRunner {
                 if turn_id == self.root =>
             {
                 match self.reclaim_bound_drive().await? {
-                    Some(claim) => self.admit(claim).await?,
+                    Some(claim) => self.admit_or_release(claim).await?,
                     None => crate::AcceptedTurnInputDrive::Refused {
                         refusal: crate::AcceptedTurnInputRefusal::HeldByLiveClaim,
                     },
@@ -629,6 +631,29 @@ impl RootInputClaimRunner {
                 refusal: crate::AcceptedTurnInputRefusal::SettledOrRemoved,
             },
         })
+    }
+
+    /// [`Self::admit`], handing the rows back when it fails: the failed
+    /// attempt is retried, and its retry must find them claimable rather than
+    /// held by a claim nothing will drive.
+    async fn admit_or_release(
+        &self,
+        claim: crate::TurnInputClaim,
+    ) -> Result<crate::AcceptedTurnInputDrive, crate::StoreError> {
+        match self.admit(claim.clone()).await {
+            Ok(drive) => Ok(drive),
+            Err(error) => {
+                if let Err(release) = self.store.abandon_turn_input_claim(&claim).await {
+                    tracing::warn!(
+                        %release,
+                        claim_id = %claim.claim_id,
+                        "failed to hand back a root claim whose admission failed; \
+                         the rows are claimable again once this lease generation ends"
+                    );
+                }
+                Err(error)
+            }
+        }
     }
 
     /// Record the head the root is admitted on and its turn index with the
