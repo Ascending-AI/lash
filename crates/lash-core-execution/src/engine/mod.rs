@@ -59,8 +59,9 @@ pub use contracts::{
     UpgradePolicy,
 };
 pub use drive::{
-    DriveAbort, DriveOutcome, DriveStop, RootOutcome, admission_body, drive_admission_replay_key,
-    drive_admission_scope, drive_root_scope, drive_root_start_replay_key, drive_seal_replay_key,
+    DriveAbort, DriveLoop, DriveOutcome, DriveStop, RootOutcome, admission_body,
+    drive_admission_replay_key, drive_admission_scope, drive_root_scope,
+    drive_root_start_replay_key, drive_seal_replay_key,
 };
 pub use groups::{DriveGroups, GroupClosed, GroupKey};
 

@@ -22,7 +22,7 @@ use std::time::Duration;
 
 use lash_core::engine::{
     AdmitVerdict, Admitted, DriveAbort, DriveOutcome, DriveRequest, DriveRequestId, DriveStop,
-    RootOutcome, admission_body, drive_admission_replay_key,
+    RootOutcome, SealVerdict, admission_body, drive_admission_replay_key,
 };
 use lash_core::{
     EffectAddress, RuntimeAttribution, RuntimeEffectCommand, RuntimeEffectEnvelope,
@@ -60,10 +60,33 @@ struct AdmissionGate {
     release: tokio::sync::Notify,
 }
 
+/// How the run of a scripted item's root ends, when it does not consume
+/// the item.
+#[derive(Clone, Copy, Debug)]
+enum RootScript {
+    /// The run is refused terminally (`DriveAbort::Refused`) and consumes
+    /// nothing: the item stays open.
+    Refuse,
+    /// Another driver sealed the session after this admission: the seal is
+    /// superseded and nothing runs, which is what the kernel answers a root
+    /// whose drive lost the seal race.
+    Supersede,
+    /// A queued run that finds nothing it can claim: it cedes, the item
+    /// stays due, and admission mints a fresh root for it every time.
+    Cede,
+}
+
 #[derive(Default)]
 struct ScriptedDriver {
     ledgers: Mutex<BTreeMap<SessionId, Ledger>>,
     gate: Mutex<Option<Arc<AdmissionGate>>>,
+    scripts: Mutex<BTreeMap<String, RootScript>>,
+}
+
+/// The item a scripted root was admitted for: a ceded item's roots are
+/// `{item}@{request}#{ordinal}`.
+fn item_of(root: &TurnId) -> &str {
+    root.as_str().split('@').next().unwrap_or_default()
 }
 
 impl ScriptedDriver {
@@ -75,6 +98,19 @@ impl ScriptedDriver {
             .or_default()
             .open
             .push_back(item.to_owned());
+    }
+
+    fn script(&self, item: &str, script: RootScript) {
+        self.scripts.lock().unwrap().insert(item.to_owned(), script);
+    }
+
+    /// Another driver answered `item`: it leaves the open items, unscripted.
+    fn answer_elsewhere(&self, session: &SessionId, item: &str) {
+        self.scripts.lock().unwrap().remove(item);
+        let mut ledgers = self.ledgers.lock().unwrap();
+        let ledger = ledgers.entry(session.clone()).or_default();
+        ledger.open.retain(|open| open != item);
+        ledger.consumed.push(item.to_owned());
     }
 
     fn ledger(&self, session: &SessionId) -> Ledger {
@@ -117,10 +153,20 @@ impl ScriptedDriver {
             gate.reached.notify_one();
             gate.release.notified().await;
         }
+        let ceded = next.as_ref().is_some_and(|item| {
+            matches!(
+                self.scripts.lock().unwrap().get(item),
+                Some(RootScript::Cede)
+            )
+        });
         Ok(match next {
             Some(item) => AdmitVerdict::Admit(admission_body::admitted(
                 request.session.clone(),
-                TurnId::from(item.clone()),
+                TurnId::from(if ceded {
+                    format!("{item}@{}#{ordinal}", request.request.as_str())
+                } else {
+                    item.clone()
+                }),
                 request.request.clone(),
                 lash_core::engine::AdmissionId::new(format!(
                     "{}:{ordinal}",
@@ -190,10 +236,26 @@ impl SessionDriver for ScriptedDriver {
         admitted: Admitted,
     ) -> Result<RootOutcome, DriveAbort> {
         let root = admitted.root().clone();
+        let script = self.scripts.lock().unwrap().get(item_of(&root)).copied();
         {
             let mut ledgers = self.ledgers.lock().unwrap();
             let ledger = ledgers.entry(admitted.session().clone()).or_default();
             ledger.root_runs += 1;
+            match script {
+                Some(RootScript::Refuse) => {
+                    return Err(DriveAbort::Refused(runtime_error(format!(
+                        "root {root} is refused"
+                    ))));
+                }
+                Some(RootScript::Supersede) => {
+                    return Ok(RootOutcome::Refused {
+                        root,
+                        verdict: SealVerdict::Superseded { epoch: 2 },
+                    });
+                }
+                Some(RootScript::Cede) => return Ok(RootOutcome::Ceded { root }),
+                None => {}
+            }
             // Idempotent, like a commit fenced by its admission: a redrive of
             // a root that already consumed its item consumes nothing.
             if ledger.open.front().map(String::as_str) == Some(root.as_str()) {
@@ -256,8 +318,40 @@ fn committed_roots(outcome: &DriveOutcome) -> Vec<String> {
                 panic!("root {root} was refused: {verdict:?}")
             }
             RootOutcome::Ceded { root } => panic!("root {root} ceded"),
+            RootOutcome::Released { root } => panic!("root {root} was released"),
         })
         .collect()
+}
+
+/// The `LashTurn` invocations whose `handler` the engine ran.
+fn turn_invocations(backend: &RestateTestBackend, handler: &str) -> usize {
+    backend
+        .server()
+        .invocations()
+        .iter()
+        .filter(|view| {
+            view.target.starts_with(TURN_DRIVER_SERVICE)
+                && view.target.ends_with(&format!("/{handler}"))
+        })
+        .count()
+}
+
+/// Every `LashSession` invocation ended with an outcome, none with a
+/// failure.
+fn no_drive_failed(backend: &RestateTestBackend) {
+    for view in backend.server().invocations() {
+        if view.target.starts_with(SESSION_DRIVER_SERVICE) {
+            assert_eq!(view.status, "completed", "{view:?}");
+            assert!(
+                backend
+                    .server()
+                    .outcome(&view.id)
+                    .is_some_and(|outcome| outcome.is_ok()),
+                "{} failed: {view:?}",
+                view.target
+            );
+        }
+    }
 }
 
 /// Waits until the engine has no invocation left running.
@@ -481,6 +575,96 @@ async fn a_request_of_another_generation_is_refused_before_any_journal_command()
         );
     }
     assert_eq!(driver.ledger(&session).root_runs, 0);
+}
+
+/// HIGH-1 (a): a root whose `LashTurn` already ended is admitted again, by
+/// the same drive and by the next one. Neither calls its key a second time
+/// into a failure: the first drive consumes the released root and stops
+/// `RootAborted` when admission names it again; the next drive's call finds
+/// the key already run and attaches to the outcome the run recorded. No
+/// drive fails and the root runs once.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_root_whose_turn_already_ended_is_readmitted_without_a_second_run() {
+    let (backend, driver) = fixture(18).await;
+    let session = SessionId::from("drive-ended-root");
+    driver.accept(&session, "a");
+    driver.script("a", RootScript::Refuse);
+    let engine = Arc::clone(backend.restate().session_work_engine());
+    let root = TurnId::from("a");
+    engine.schedule_drive(&session, request("r1"));
+    let first = attach(&backend, &session, "r1").await;
+    assert_eq!(first.ran, [RootOutcome::Released { root: root.clone() }]);
+    assert_eq!(first.stop, DriveStop::RootAborted { root: root.clone() });
+    engine.schedule_drive(&session, request("r2"));
+    let second = attach(&backend, &session, "r2").await;
+    assert_eq!(second, first, "the next drive attaches to the recorded end");
+    settle(&backend).await;
+    no_drive_failed(&backend);
+    assert_eq!(driver.ledger(&session).root_runs, 1, "the root ran once");
+    assert_eq!(driver.ledger(&session).open, ["a"], "nothing consumed it");
+    assert_eq!(turn_invocations(&backend, "run"), 1, "one LashTurn run");
+    assert_eq!(
+        turn_invocations(&backend, "outcome"),
+        2,
+        "each drive read the run's recorded end, the second after a 409"
+    );
+}
+
+/// HIGH-1 (b): a queued root that cedes stops the drive. Admission would
+/// mint a fresh root for the still-due queue on every ordinal; the drive
+/// stops `Yielded` after the first instead of starting a `LashTurn` per
+/// ordinal.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_queued_root_that_cedes_stops_the_drive() {
+    let (backend, driver) = fixture(19).await;
+    let session = SessionId::from("drive-ceded-root");
+    driver.accept(&session, "q");
+    driver.script("q", RootScript::Cede);
+    backend
+        .restate()
+        .session_work_engine()
+        .schedule_drive(&session, request("r1"));
+    let outcome = attach(&backend, &session, "r1").await;
+    let root = TurnId::from("q@r1#0");
+    assert_eq!(outcome.ran, [RootOutcome::Ceded { root: root.clone() }]);
+    assert_eq!(outcome.stop, DriveStop::Yielded { root });
+    settle(&backend).await;
+    no_drive_failed(&backend);
+    assert_eq!(driver.ledger(&session).root_runs, 1);
+    assert_eq!(turn_invocations(&backend, "run"), 1, "one LashTurn");
+}
+
+/// HIGH-1 (c): another driver seals the session after `LashSession`
+/// admitted a root, so the root's seal is superseded and nothing runs. The
+/// drive stops `Yielded`, fails nothing and burns no second `LashTurn`; once
+/// the other driver answered the item, the session's next drive is idle.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_drive_whose_seal_another_driver_superseded_stops_cleanly() {
+    let (backend, driver) = fixture(20).await;
+    let session = SessionId::from("drive-superseded");
+    driver.accept(&session, "a");
+    driver.script("a", RootScript::Supersede);
+    let engine = Arc::clone(backend.restate().session_work_engine());
+    engine.schedule_drive(&session, request("r1"));
+    let outcome = attach(&backend, &session, "r1").await;
+    let root = TurnId::from("a");
+    assert_eq!(
+        outcome.ran,
+        [RootOutcome::Refused {
+            root: root.clone(),
+            verdict: SealVerdict::Superseded { epoch: 2 },
+        }]
+    );
+    assert_eq!(outcome.stop, DriveStop::Yielded { root });
+    driver.answer_elsewhere(&session, "a");
+    engine.schedule_drive(&session, request("r2"));
+    let next = attach(&backend, &session, "r2").await;
+    assert!(next.ran.is_empty(), "{next:?}");
+    assert_eq!(next.stop, DriveStop::Idle);
+    settle(&backend).await;
+    no_drive_failed(&backend);
+    assert_eq!(driver.ledger(&session).root_runs, 1);
+    assert_eq!(turn_invocations(&backend, "run"), 1, "one LashTurn");
 }
 
 /// A drive scheduled before any core installed its driver runs once one
