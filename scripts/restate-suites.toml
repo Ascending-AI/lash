@@ -51,14 +51,8 @@ redelivery_laws = [
 ]
 
 [suites.effect-group.replay]
-# The replay leg reports and does not gate yet: the presented tool result's
-# wall-clock `command.duration_ms` reaches journaled identities (its effect
-# hash and the replay key of the child's follow-on call), so any tool-child
-# law can diverge on replay when two measurements differ by a millisecond.
-# The laws held back under replay diverge on every run or have been seen to
-# (scripts/restate-divergences/); the rest pass unless that measurement
-# drifts. Gate it once the measurement leaves them.
-report_only = "tool-result durations reach journaled identities (FIG-3672); see scripts/restate-suites.toml"
+# Every replay failure gates the suite. Remaining held-back laws have their
+# own ticket and reason in scripts/restate-divergences/.
 
 [suites.agent-workbench]
 label = "//examples/agent-workbench:agent-workbench__unit_test"
