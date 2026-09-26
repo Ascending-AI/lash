@@ -80,6 +80,11 @@ pub struct TurnParkWrite {
     pub turn_id: TurnId,
     /// Why it parked.
     pub reason: ParkReason,
+    /// The drain generation of the build whose checkpoint the park resumes
+    /// (FIG-3795): the generation stamped on the parked work's journal, when
+    /// the writer knows it. `None` is a checkpoint without a recorded build
+    /// generation — the drain never derives one.
+    pub build_generation: Option<crate::build_generation::BuildGeneration>,
     /// Host-clock epoch milliseconds at which the refusal was recorded.
     pub at_ms: u64,
     /// The engine's handle on the stopped execution, when the engine parked
@@ -91,13 +96,15 @@ pub struct TurnParkWrite {
 
 impl TurnParkWrite {
     /// The park the aborting execution itself writes for `root`: no engine
-    /// handle.
+    /// handle, and no build generation — the checkpoint's stamp is recorded
+    /// by the generation-fence entry path (FIG-3795 E), never derived here.
     #[must_use]
     pub fn refusal(session_id: SessionId, root: TurnId, reason: ParkReason, at_ms: u64) -> Self {
         Self {
             session_id,
             turn_id: root,
             reason,
+            build_generation: None,
             at_ms,
             engine: None,
         }
@@ -201,6 +208,11 @@ pub struct TurnPark {
     /// of the same root clears it (P3), so an operator can redrive again.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub resume_intent: Option<super::ControlIntentId>,
+    /// The drain generation of the build whose checkpoint the park resumes
+    /// (FIG-3795), as the park's writer recorded it; `None` when the parked
+    /// journal carries no build-generation stamp.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_generation: Option<crate::build_generation::BuildGeneration>,
 }
 
 /// Why a turn parked. Each arm carries the refusal's operator-facing message:
@@ -700,6 +712,11 @@ pub struct ParkFeedEvent<Target> {
     pub park_id: ParkId,
     /// The transition.
     pub kind: ParkEventKind,
+    /// The drain generation stamped on the checkpoint a `Parked` transition
+    /// records (FIG-3795): the build generation of the build whose checkpoint
+    /// the park resumes, `None` on the closing transitions and on feeds that
+    /// stamp none.
+    pub build_generation: Option<crate::build_generation::BuildGeneration>,
 }
 
 /// Opaque position in one store's park feed.
@@ -806,16 +823,28 @@ pub struct ProcessPark {
     /// the process itself (an exhausted retry loop, FIG-3675).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub engine: Option<EnginePark>,
+    /// The drain generation of the build whose checkpoint the park resumes
+    /// (FIG-3795), as the park's writer recorded it: a `RetiredGeneration`
+    /// park names the generation the segment's journal was written under.
+    /// `None` when the parked work carries no recorded build generation —
+    /// the drain never derives one.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub build_generation: Option<crate::build_generation::BuildGeneration>,
 }
 
-/// What a process park write records: the refusal, and the engine's handle
-/// on the stopped execution when the engine parked the work itself.
+/// What a process park write records: the refusal, the engine's handle
+/// on the stopped execution when the engine parked the work itself, and the
+/// drain generation of the build whose checkpoint the park resumes
+/// (FIG-3795), when the writer knows it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct ProcessParkWrite {
     /// Why the process parked.
     pub reason: ParkReason,
     /// The engine's handle on the stopped execution, if any.
     pub engine: Option<EnginePark>,
+    /// The drain generation of the build whose checkpoint the park resumes,
+    /// when the writer knows it.
+    pub build_generation: Option<crate::build_generation::BuildGeneration>,
 }
 
 impl From<ParkReason> for ProcessParkWrite {
@@ -823,6 +852,7 @@ impl From<ParkReason> for ProcessParkWrite {
         Self {
             reason,
             engine: None,
+            build_generation: None,
         }
     }
 }
@@ -899,6 +929,7 @@ impl TurnPark {
         attempts: u32,
         engine_ref: Option<String>,
         resume_intent: Option<u64>,
+        build_generation: Option<&str>,
     ) -> Result<Self, crate::StoreError> {
         let reason: ParkReason = serde_json::from_str(reason_json).map_err(|error| {
             crate::StoreError::StoredDataCorrupt {
@@ -918,6 +949,19 @@ impl TurnPark {
                 ),
             });
         }
+        let build_generation = build_generation
+            .map(|stored| {
+                crate::build_generation::BuildGeneration::parse(stored).map_err(|error| {
+                    crate::StoreError::StoredDataCorrupt {
+                        record_kind: "TurnPark",
+                        message: format!(
+                            "stored turn park for session `{session_id}` carries \
+                             park_build_generation `{stored}`: {error}"
+                        ),
+                    }
+                })
+            })
+            .transpose()?;
         Ok(Self {
             session_id,
             turn_id,
@@ -928,6 +972,7 @@ impl TurnPark {
             attempts,
             engine: engine_ref.map(EnginePark::new),
             resume_intent: resume_intent.map(super::ControlIntentId::from_sequence),
+            build_generation,
         })
     }
 }

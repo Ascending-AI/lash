@@ -359,12 +359,15 @@ CREATE TABLE IF NOT EXISTS turn_parks (
     attempts INTEGER NOT NULL CONSTRAINT ck_turn_parks_attempts CHECK (attempts >= 1),
     park_executable_generation TEXT,
     engine_ref TEXT,
-    resume_intent INTEGER
+    resume_intent INTEGER,
+    park_build_generation TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_turn_parks_since
     ON turn_parks(since_ms, session_id);
 CREATE INDEX IF NOT EXISTS idx_turn_parks_executable_generation
     ON turn_parks(park_executable_generation) WHERE park_executable_generation IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_turn_parks_build_generation
+    ON turn_parks(park_build_generation) WHERE park_build_generation IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS turn_park_clock (
     singleton           INTEGER PRIMARY KEY CONSTRAINT ck_turn_park_clock_singleton CHECK (singleton = 1),
@@ -385,6 +388,7 @@ CREATE TABLE IF NOT EXISTS turn_park_events (
     cause       TEXT,
     reason_json TEXT,
     at_ms       INTEGER NOT NULL,
+    park_build_generation TEXT,
     CONSTRAINT ck_turn_park_events_parked_reason CHECK ((kind = 'parked' AND reason_json IS NOT NULL AND cause IS NULL) OR (kind <> 'parked' AND reason_json IS NULL AND cause IS NOT NULL))
 );
 
@@ -980,6 +984,12 @@ CREATE TABLE IF NOT EXISTS fleet_format (
 /// park gains `engine_ref` and `resume_intent`, and a park event may be
 /// `redrive_requested`. A pre-99 database is rejected at open and recreated;
 /// it is not migrated.
+/// Version 99 also lets a parked turn record the drain generation of the
+/// build whose checkpoint it resumes (FIG-3795, changed in place under the
+/// pre-1.0 version freeze, FIG-3846): `turn_parks` and `turn_park_events`
+/// gain the projected `park_build_generation` column, and `turn_parks` the
+/// partial index drain status counts it by. A database written before the
+/// change lacks the columns; recreate it.
 pub(crate) const SCHEMA_VERSION: i32 = 99;
 
 pub(crate) const PROCESS_SCHEMA: &str = "
@@ -1002,6 +1012,8 @@ CREATE TABLE IF NOT EXISTS processes (
     parked_since_ms       INTEGER,
     parked_reason_code    TEXT,
     park_executable_generation TEXT,
+    park_build_generation TEXT,
+    segment_generation    TEXT,
     record_json           TEXT NOT NULL,
     CONSTRAINT ck_processes_parked CHECK ((parked_since_ms IS NULL) = (parked_reason_code IS NULL)),
     CONSTRAINT ck_processes_status CHECK (status IN ('running', 'waiting', 'completed', 'failed', 'cancelled', 'abandoned', 'caller_departed')),
@@ -1067,6 +1079,16 @@ CREATE INDEX IF NOT EXISTS idx_processes_parked
 -- drain counts retired process parks per executable generation off it.
 CREATE INDEX IF NOT EXISTS idx_processes_park_executable_generation
     ON processes(park_executable_generation) WHERE park_executable_generation IS NOT NULL;
+-- The build generation of the parked checkpoint a park resumes (FIG-3795):
+-- drain status counts retired parks by it.
+CREATE INDEX IF NOT EXISTS idx_processes_park_build_generation
+    ON processes(park_build_generation) WHERE park_build_generation IS NOT NULL;
+-- The build generation that admitted each live process's current segment
+-- (FIG-3795 S2): the drain routes a refused redrive to the build that wrote
+-- the segment's journal. Partial: a terminal segment's writer is no route,
+-- and a NULL stamp is no lookup key.
+CREATE INDEX IF NOT EXISTS idx_processes_live_generation
+    ON processes(segment_generation) WHERE status IN ('running', 'waiting') AND segment_generation IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS process_park_clock (
     singleton           INTEGER PRIMARY KEY CONSTRAINT ck_process_park_clock_singleton CHECK (singleton = 1),
@@ -1086,6 +1108,7 @@ CREATE TABLE IF NOT EXISTS process_park_events (
     cause       TEXT,
     reason_json TEXT,
     at_ms       INTEGER NOT NULL,
+    park_build_generation TEXT,
     CONSTRAINT ck_process_park_events_parked_reason CHECK ((kind = 'parked' AND reason_json IS NOT NULL AND cause IS NULL) OR (kind <> 'parked' AND reason_json IS NULL AND cause IS NOT NULL))
 );
 
@@ -1186,9 +1209,15 @@ CREATE TABLE IF NOT EXISTS process_segment_handovers (
     segment_ordinal  INTEGER NOT NULL,
     handover_json    TEXT NOT NULL,
     started_json     TEXT,
+    written_generation TEXT,
+    route            TEXT NOT NULL,
     PRIMARY KEY (process_id, segment_ordinal),
     FOREIGN KEY (process_id) REFERENCES processes(process_id) ON DELETE CASCADE
 );
+-- The route a retained handover's successor was sent under (FIG-3795 S3):
+-- drain re-routing finds every successor addressed to a retired deployment.
+CREATE INDEX IF NOT EXISTS idx_process_segment_handovers_route
+    ON process_segment_handovers(route);
 
 -- One row per ended parent scope, keyed by the scope itself rather than by a
 -- process row: a turn-scoped parent has no process row at all, and a
@@ -1326,6 +1355,18 @@ CREATE INDEX IF NOT EXISTS idx_tool_intent_submissions_scope
 /// session, and `parent_end_plans` admits a session scope. A registry written
 /// before the change holds ADR 0094 lifecycle policies this build does not
 /// read; recreate it.
+///
+/// Version 44 also stamps process rows with drain generations (FIG-3795,
+/// changed in place under the same freeze): `processes` gains
+/// `segment_generation` — the build generation that admitted the process's
+/// current segment — and `park_build_generation` — the build generation of
+/// the checkpoint a parked process resumes — each indexed; and
+/// `process_segment_handovers` gains `written_generation` and `route`.
+/// `written_generation` stays nullable for parity with the Postgres store:
+/// a missing stamp is never derived, and the two backends must accept the
+/// same writes. `route` is non-null — every write names the route its send
+/// took. A registry written before the change lacks the columns; recreate
+/// it.
 pub(crate) const PROCESS_SCHEMA_VERSION: i32 = 44;
 
 pub(crate) const TRIGGER_SCHEMA: &str = "

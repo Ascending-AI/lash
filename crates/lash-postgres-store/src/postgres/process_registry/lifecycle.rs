@@ -249,6 +249,20 @@ impl lash_core_execution::ProcessLifecycle for PostgresProcessRegistry {
             self.fleet_format,
         )
         .await?;
+        // The root admission's build-generation stamp projects onto the
+        // process row in the same transaction (FIG-3795 S2): the drain's
+        // live-generation index reads it without unfolding the event.
+        sqlx::query(process_sql().process.set_segment_generation.sql())
+            .bind(process_id.as_str())
+            .bind(
+                started
+                    .build_generation
+                    .as_ref()
+                    .map(|generation| generation.as_str()),
+            )
+            .execute(&mut *tx)
+            .await
+            .map_err(plugin_sqlx_error)?;
         tx.commit().await.map_err(plugin_sqlx_error)?;
         Ok(ProcessStartOutcome::Started(record))
     }

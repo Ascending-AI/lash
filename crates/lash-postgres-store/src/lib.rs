@@ -612,6 +612,21 @@ async fn acquire_runtime_connection(pool: &PgPool) -> Result<PoolConnection<Post
 // `idx_lash_processes_lifetime_pending`, and `lash_parent_end_plans` admits
 // the `session` scope kind. A catalog provisioned before the change fails the
 // open-time shape check and is recreated.
+//
+// Version 141 also stamps drain generations across the process and turn-park
+// relations (FIG-3795), changed in place under the pre-1.0 version freeze
+// (FIG-3846): `lash_processes` gains `segment_generation` — the build
+// generation that admitted the process's current segment — and
+// `park_build_generation` — the build generation of the checkpoint a parked
+// process resumes — each indexed; `lash_turn_parks`,
+// `lash_turn_park_events` and `lash_process_park_events` gain
+// `park_build_generation`; and `lash_process_segment_handovers` gains
+// `written_generation` (nullable: rows a pre-stamp build wrote never
+// recorded the writer's generation, and a missing stamp is never derived)
+// and `route` (non-null: every write names the route its send took — a
+// pre-lane build could only send under the stable workflow name). A catalog
+// provisioned before the change fails the open-time shape check and is
+// recreated.
 const SCHEMA_VERSION: i32 = 141;
 
 /// The oldest component schema version this build admits at open (FIG-3797).

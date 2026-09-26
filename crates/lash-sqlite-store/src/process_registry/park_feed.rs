@@ -37,15 +37,22 @@ fn allocate_process_park_seq_conn(
 /// Append `transitions` — what one event append did to the process's park,
 /// as [`process_park_transitions`](lash_core_execution::runtime::process_park_transitions)
 /// computed it — to the process park feed, in the append's transaction.
+/// `build_generation` stamps the `Parked` transition with the drain
+/// generation of the checkpoint the park resumes (FIG-3795); the closing
+/// transitions name no checkpoint and write NULL.
 pub(crate) fn log_process_park_transitions_conn(
     conn: &Connection,
     key: &ProcessParkKey,
     transitions: &[(ParkId, ParkEventKind)],
     at_ms: u64,
+    build_generation: Option<&str>,
 ) -> Result<(), lash_core_execution::PluginError> {
     for (park_id, kind) in transitions {
         let seq = allocate_process_park_seq_conn(conn)?;
         let (cause, reason_json) = kind.encode_columns();
+        let generation = matches!(kind, ParkEventKind::Parked { .. })
+            .then_some(build_generation)
+            .flatten();
         conn.execute(
             process_sql().park_event.insert_event.sql(),
             params![
@@ -56,6 +63,7 @@ pub(crate) fn log_process_park_transitions_conn(
                 cause,
                 reason_json,
                 crate::clamp_epoch_ms(at_ms),
+                generation,
             ],
         )
         .map_err(process_sqlite_error)?;
@@ -155,6 +163,7 @@ pub(super) async fn process_park_feed(
                             row.get::<_, Option<String>>(4)?,
                             row.get::<_, Option<String>>(5)?,
                             row.get::<_, i64>(6)?,
+                            row.get::<_, Option<String>>(7)?,
                         ))
                     })
                     .map_err(process_sqlite_error)?;
@@ -163,9 +172,29 @@ pub(super) async fn process_park_feed(
                     next: after,
                 };
                 for row in rows {
-                    let (seq, process_id, park_id, kind, cause, reason_json, at_ms) =
-                        row.map_err(process_sqlite_error)?;
+                    let (
+                        seq,
+                        process_id,
+                        park_id,
+                        kind,
+                        cause,
+                        reason_json,
+                        at_ms,
+                        build_generation,
+                    ) = row.map_err(process_sqlite_error)?;
                     let seq = plugin_u64_from_sql("ProcessParkEvent", "seq", seq)?;
+                    let build_generation = build_generation
+                        .map(|stored: String| {
+                            lash_core_execution::engine::BuildGeneration::parse(&stored).map_err(
+                                |error| lash_core_execution::PluginError::StoredDataCorrupt {
+                                    record_kind: "ProcessParkEvent".to_string(),
+                                    message: format!(
+                                        "park_build_generation `{stored}` is unreadable: {error}"
+                                    ),
+                                },
+                            )
+                        })
+                        .transpose()?;
                     page.events.push(ParkFeedEvent {
                         seq,
                         at_ms: plugin_u64_from_sql("ProcessParkEvent", "at_ms", at_ms)?,
@@ -186,6 +215,7 @@ pub(super) async fn process_park_feed(
                                 message: error.to_string(),
                             }
                         })?,
+                        build_generation,
                     });
                     page.next = ParkFeedCursor::from_store_sequence(seq);
                 }

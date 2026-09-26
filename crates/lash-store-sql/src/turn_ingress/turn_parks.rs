@@ -16,10 +16,10 @@
 pub const TABLE: &str = "turn_parks";
 
 /// Every column a park row carries, in insert order.
-pub const INSERT_COLUMNS: &str = "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, park_executable_generation, engine_ref";
+pub const INSERT_COLUMNS: &str = "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, park_executable_generation, engine_ref, park_build_generation";
 
 /// The stored record's read projection.
-pub const RECORD_COLUMNS: &str = "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref, resume_intent";
+pub const RECORD_COLUMNS: &str = "session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref, resume_intent, park_build_generation";
 
 /// The grouped count `count_parks_by_reason` reads for drain status.
 ///
@@ -46,20 +46,27 @@ crate::statements! {
         /// code, `?5` the reason payload, `?6` the park instant, `?7` the same
         /// instant as `last_refused_ms`, `?8` = 1 attempt, `?9` the retired
         /// generation the reason names (`park_executable_generation`, NULL for any other
-        /// reason; FIG-3571), `?10` the engine's handle when the engine parked it.
-        insert = "INSERT INTO turn_parks (session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, park_executable_generation, engine_ref)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)";
+        /// reason; FIG-3571), `?10` the engine's handle when the engine parked it,
+        /// `?11` the build generation of the parked checkpoint
+        /// (`park_build_generation`, NULL when the writer records
+        /// none; FIG-3795).
+        insert = "INSERT INTO turn_parks (session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, park_executable_generation, engine_ref, park_build_generation)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)";
 
         /// Re-park of the same turn `?2` in session `?1`: `park_id` and
         /// `since_ms` are kept, the reason refreshes, `last_refused_ms` moves
         /// to `?5`, `park_executable_generation` to `?6`, `attempts` counts
         /// the refusal, a requested redrive is cleared (it ran and parked
-        /// again), and engine handle `?7` replaces the stored one when given.
+        /// again), engine handle `?7` replaces the stored one when given, and
+        /// `park_build_generation` `?8` refreshes the recorded generation
+        /// when the write carries one (FIG-3795: a stamp-less write never
+        /// erases the recorded fact).
         update_same_turn = "UPDATE turn_parks
              SET reason_code = ?3, reason_json = ?4,
                  last_refused_ms = ?5, attempts = attempts + 1,
                  park_executable_generation = ?6,
-                 engine_ref = COALESCE(?7, engine_ref), resume_intent = NULL
+                 engine_ref = COALESCE(?7, engine_ref), resume_intent = NULL,
+                 park_build_generation = COALESCE(?8, park_build_generation)
              WHERE session_id = ?1 AND turn_id = ?2";
 
         /// Store engine handle `?3` on session `?1`'s park of turn `?2`,
@@ -79,7 +86,7 @@ crate::statements! {
              WHERE session_id = ?1 AND turn_id <> ?2
              RETURNING turn_id, park_id";
 
-        select_by_session = "SELECT session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref, resume_intent
+        select_by_session = "SELECT session_id, turn_id, park_id, reason_code, reason_json, since_ms, last_refused_ms, attempts, engine_ref, resume_intent, park_build_generation
              FROM turn_parks
              WHERE session_id = ?1";
 

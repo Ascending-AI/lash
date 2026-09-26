@@ -891,10 +891,22 @@ impl ProcessEventAppendRequest {
         park: &crate::store::ProcessParkWrite,
         after_event_sequence: u64,
     ) -> Self {
-        let payload = match &park.engine {
-            Some(engine) => serde_json::json!({ "reason": park.reason, "engine": engine }),
-            None => serde_json::json!({ "reason": park.reason }),
-        };
+        let mut payload = serde_json::json!({ "reason": park.reason });
+        let object = payload
+            .as_object_mut()
+            .expect("the parked payload is an object");
+        if let Some(engine) = &park.engine {
+            object.insert(
+                "engine".to_string(),
+                serde_json::to_value(engine).expect("an engine park serializes"),
+            );
+        }
+        if let Some(generation) = &park.build_generation {
+            object.insert(
+                "build_generation".to_string(),
+                serde_json::to_value(generation).expect("a build generation serializes"),
+            );
+        }
         Self::new("process.parked", payload).with_replay_key(format!(
             "process:{process_id}:parked:after:{after_event_sequence}"
         ))

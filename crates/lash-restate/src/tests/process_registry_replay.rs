@@ -1145,6 +1145,7 @@ pub(super) async fn running_process_cancel_uses_native_signal_without_poll_delay
         continuation_store(),
         cancel_ingress,
         test_restate_authority_id(),
+        lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
     ));
     let registration = rerunnable_registration();
     let process_id = registry
@@ -1227,6 +1228,7 @@ pub(super) async fn session_turn_cancel_propagates_runner_infrastructure_failure
             signal_transport.clone(),
         )),
         test_restate_authority_id(),
+        lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
     ));
     let registration = rerunnable_session_turn_registration();
     let process_id = registry
@@ -1369,6 +1371,7 @@ pub(super) async fn non_session_cancel_propagates_runner_infrastructure_failure(
             signal_transport.clone(),
         )),
         test_restate_authority_id(),
+        lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
     ));
     let registration = rerunnable_registration();
     let process_id = registry
@@ -1446,6 +1449,7 @@ pub(super) async fn cancel_watch_reissues_after_attach_ceiling_until_segment_com
         continuation_store(),
         RestateIngressClient::new(connection),
         test_restate_authority_id(),
+        lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
     );
     let registration = rerunnable_registration();
     let process_id = registry
@@ -1509,6 +1513,7 @@ pub(super) async fn a_broken_cancel_watch_fails_the_attempt_after_its_retries() 
             Arc::new(BrokenCancelWatchTransport),
         )),
         test_restate_authority_id(),
+        lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
     );
 
     let error = tokio::time::timeout(
@@ -1552,6 +1557,7 @@ pub(super) async fn an_unregistered_cancel_watch_service_is_a_terminal_not_an_in
             Arc::new(UnregisteredCancelWatchTransport),
         )),
         test_restate_authority_id(),
+        lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
     );
 
     let error = workflow
@@ -1692,6 +1698,8 @@ pub(super) async fn durable_segment_handover_resumes_once_and_terminalizes_once(
     let persisted = lash_core::PersistedSegmentHandover {
         writer: String::new(),
         segment_ordinal: 1,
+        written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+        route: "LashProcessWorkflow".to_string(),
         handover: first_handover,
     };
     continuations
@@ -1931,6 +1939,8 @@ pub(super) async fn restate_segment_transition_replay_matrix_preserves_lineage_i
             let persisted = lash_core::PersistedSegmentHandover {
                 writer: String::new(),
                 segment_ordinal: next,
+                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                route: "LashProcessWorkflow".to_string(),
                 handover: boundary,
             };
             continuations

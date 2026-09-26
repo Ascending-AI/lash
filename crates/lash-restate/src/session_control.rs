@@ -13,6 +13,7 @@ use crate::{RestateAdminClient, RestateInvocationId};
 pub(crate) struct RestateSessionControl {
     pub(crate) admin: Option<RestateAdminClient>,
     pub(crate) processes: Arc<dyn lash_core::ProcessRegistry>,
+    pub(crate) continuations: Arc<dyn lash_core::ProcessContinuationStore>,
 }
 
 fn refusal(error: impl std::fmt::Display) -> EngineRefusal {
@@ -155,6 +156,7 @@ impl SessionControlEngine for RestateSessionControl {
             } else if invocation.target_service_name == crate::LashService::ProcessWorkflow.name() {
                 let pass = crate::process::park_reconcile::reconcile_process_invocations(
                     &self.processes,
+                    &self.continuations,
                     vec![invocation],
                 )
                 .await

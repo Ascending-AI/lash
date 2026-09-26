@@ -261,6 +261,7 @@ async fn real_process_signal_wait_names_the_durable_key_and_resolves() {
                 fencing_token: lease.fencing_token,
                 attempt: 1,
                 started_at_ms: 1,
+                build_generation: None,
                 generation: None,
             },
             &lash_core::ProcessExecutionWriteAuthority::lease(lease.clone()),

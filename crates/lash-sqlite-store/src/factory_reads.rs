@@ -5,7 +5,8 @@
 use super::*;
 
 /// A turn park feed row: sequence, session and turn ids, park id, kind and
-/// cause columns, serialized reason and the parked-at instant.
+/// cause columns, serialized reason, the parked-at instant and the
+/// recorded park build generation.
 type ParkFeedRow = (
     i64,
     String,
@@ -15,6 +16,7 @@ type ParkFeedRow = (
     Option<String>,
     Option<String>,
     i64,
+    Option<String>,
 );
 
 impl SqliteSessionStoreFactory {
@@ -72,18 +74,43 @@ impl SqliteSessionStoreFactory {
                         row.get::<_, Option<String>>(5)?,
                         row.get::<_, Option<String>>(6)?,
                         row.get::<_, i64>(7)?,
+                        row.get::<_, Option<String>>(8)?,
                     ))
                 })?;
                 rows.collect::<Result<Vec<_>, _>>()
             })
             .await
             .map_err(sqlite_error)?;
-        for (seq, session_id, turn_id, park_id, kind, cause, reason_json, at_ms) in rows {
+        for (
+            seq,
+            session_id,
+            turn_id,
+            park_id,
+            kind,
+            cause,
+            reason_json,
+            at_ms,
+            build_generation,
+        ) in rows
+        {
             let kind = lash_core_execution::store::ParkEventKind::decode_columns(
                 &kind,
                 cause.as_deref(),
                 reason_json.as_deref(),
             )?;
+            let build_generation = build_generation
+                .map(|stored| {
+                    lash_core_execution::engine::BuildGeneration::parse(&stored).map_err(|error| {
+                        StoreError::StoredDataCorrupt {
+                            record_kind: "TurnParkEvent",
+                            message: format!(
+                                "stored turn park event carries park_build_generation \
+                                 `{stored}`: {error}"
+                            ),
+                        }
+                    })
+                })
+                .transpose()?;
             page.events.push(lash_core_execution::store::ParkFeedEvent {
                 seq: u64::try_from(seq).unwrap_or_default(),
                 at_ms: u64::try_from(at_ms).unwrap_or_default(),
@@ -95,6 +122,7 @@ impl SqliteSessionStoreFactory {
                     u64::try_from(park_id).unwrap_or_default(),
                 ),
                 kind,
+                build_generation,
             });
             page.next = lash_core_execution::store::ParkFeedCursor::from_store_sequence(
                 u64::try_from(seq).unwrap_or_default(),

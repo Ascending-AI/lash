@@ -621,7 +621,8 @@ lash_store_sql::statements! {
         /// conflict. SQLite reads the ordinal under its write lock and decides
         /// the same thing in Rust.
         upsert_identical = "INSERT INTO process_segment_handovers
-             (process_id, segment_ordinal, handover_json) VALUES (?1, ?2, ?3)
+             (process_id, segment_ordinal, handover_json, written_generation, route)
+             VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT (process_id, segment_ordinal) DO UPDATE
              SET handover_json = process_segment_handovers.handover_json
              WHERE process_segment_handovers.handover_json = EXCLUDED.handover_json

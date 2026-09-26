@@ -708,6 +708,7 @@ async fn durable_process_registry_preserves_identity_lifecycle_and_fencing_inner
         attempt: 1,
         started_at_ms: renewed.claimed_at_epoch_ms,
         generation: None,
+        build_generation: None,
     };
     assert!(started.same_execution(&ProcessStarted {
         owner: renewed.owner.clone(),

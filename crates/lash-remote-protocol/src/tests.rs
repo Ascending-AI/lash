@@ -2180,6 +2180,7 @@ fn remote_process_record() -> RemoteProcessRecord {
             attempts: 2,
             refusing: true,
             engine: None,
+            build_generation: None,
         }),
         status: RemoteProcessStatus::Running,
         outcome: None,
