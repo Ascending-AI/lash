@@ -722,7 +722,7 @@ async fn run_root_journal(
         .scoped_effect_controller(drive_root_scope(admitted.session(), admitted.root()))
         .map_err(refused_scope)?;
     let root = admitted.root().clone();
-    let (recorded, result) = match driver.run_root(scoped, admitted).await {
+    let (ended, result) = match driver.run_root(scoped, admitted).await {
         Ok(outcome) => (outcome.clone(), Ok(outcome)),
         // A retryable end records nothing: the run is not over.
         Err(abort @ (DriveAbort::Retry(_) | DriveAbort::Parked { .. })) => {
@@ -733,7 +733,7 @@ async fn run_root_journal(
         }
     };
     // The key runs once; a later drive that admits this root reads this.
-    controller.context().set(TURN_OUTCOME_STATE, Json(recorded));
+    controller.context().set(TURN_OUTCOME_STATE, Json(ended));
     result
 }
 
