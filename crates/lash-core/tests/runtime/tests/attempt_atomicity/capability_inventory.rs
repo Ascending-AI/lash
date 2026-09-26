@@ -31,6 +31,7 @@ pub(super) async fn exercise_attempt_capabilities(attempt: &lash_core::AttemptCo
     let _ = attempt.named_phase("attempt-capability-law");
     let _ = attempt.completion_key();
     let _ = attempt.intent_identity(0);
+    let _ = attempt.logical_root();
     let sessions = attempt.sessions();
     let _ = sessions.model().await;
     let _ = sessions.snapshot_current().await;

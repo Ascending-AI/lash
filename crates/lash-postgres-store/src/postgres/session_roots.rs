@@ -87,6 +87,10 @@ pub(crate) async fn root_terminal_conn(
 /// Write `terminal` in the caller's transaction, deciding it against the
 /// stored evidence first: the same terminal is a no-op, another one is
 /// [`StoreError::RootAlreadyTerminal`].
+#[expect(
+    dead_code,
+    reason = "the commit-path writer for RuntimeCommit::root_terminal lands with S7-B"
+)]
 pub(crate) async fn write_root_terminal_conn(
     conn: &mut PgConnection,
     terminal: &RootTerminal,

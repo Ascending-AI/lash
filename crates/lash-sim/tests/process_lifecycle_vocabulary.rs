@@ -28,7 +28,7 @@ const SCANNED_ROOTS: &[&str] = &[
 /// Files that legitimately spell the vocabulary, each for a reason that is not
 /// a query predicate.
 ///
-/// - The two schema files declare the durable `CHECK` vocabulary and its
+/// - The schema files declare the durable `CHECK` vocabulary and its
 ///   partial indexes. That surface is owned by FIG-2811 and is deliberately out
 ///   of scope here: `schema_congruence` matches these declarations as literal
 ///   text, so generating them would move the gate rather than satisfy it.
@@ -39,6 +39,7 @@ const SCANNED_ROOTS: &[&str] = &[
 ///   text is the `schema.sql` declaration verbatim, not a query predicate.
 const EXEMPT_FILES: &[&str] = &[
     "lash-sqlite-store/src/schema.rs",
+    "lash-sqlite-store/src/schema_fragments.rs",
     "lash-core/src/store_backend_support/required_constraints.rs",
     "lash-postgres-store/src/postgres/schema/migrations.rs",
 ];

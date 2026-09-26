@@ -129,11 +129,13 @@ async fn session_operations_delegate_to_runtime() -> Result<()> {
     session.turn(TurnInput::text("usage")).run().await?;
     let usage = session.usage_report();
     assert_eq!(usage.usage.usage.output_tokens, 2);
-    session
-        .admin()
-        .commands()
-        .refresh_tool_catalog("control admin test", "control-admin-refresh")
-        .await?;
+    Box::pin(
+        session
+            .admin()
+            .commands()
+            .refresh_tool_catalog("control admin test", "control-admin-refresh"),
+    )
+    .await?;
     session.refresh_background_graph().await?;
     assert!(session.admin().processes().list().await?.is_empty());
     let err = session
@@ -400,16 +402,20 @@ async fn session_commands_enqueue_idempotently_by_source_key() -> Result<()> {
     .build(crate::testing::runtime_lease_owner())?;
     let session = core.session("command-idempotency").open().await?;
 
-    let first = session
-        .admin()
-        .commands()
-        .refresh_tool_catalog("test refresh", "same-refresh")
-        .await?;
-    let second = session
-        .admin()
-        .commands()
-        .refresh_tool_catalog("test refresh", "same-refresh")
-        .await?;
+    let first = Box::pin(
+        session
+            .admin()
+            .commands()
+            .refresh_tool_catalog("test refresh", "same-refresh"),
+    )
+    .await?;
+    let second = Box::pin(
+        session
+            .admin()
+            .commands()
+            .refresh_tool_catalog("test refresh", "same-refresh"),
+    )
+    .await?;
 
     assert_eq!(first.batch_id, second.batch_id);
     assert_eq!(

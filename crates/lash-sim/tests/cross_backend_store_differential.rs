@@ -2363,12 +2363,12 @@ async fn cross_backend_store_differential_agrees() {
         &run_nonce,
     )
     .await;
-    plugin_state_case::compare_plugin_state(
+    Box::pin(plugin_state_case::compare_plugin_state(
         sqlite_root.path(),
         &postgres,
         &database_url,
         &run_nonce,
-    )
+    ))
     .await;
     let mut divergences = String::new();
     let mut residue_violations = String::new();

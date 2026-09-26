@@ -183,14 +183,11 @@ async fn queued_session_command_restores_the_recorded_typescript_session() -> Re
     );
     tools.replace("after_refresh");
 
-    let receipt = session
-        .admin()
-        .commands()
-        .refresh_tool_catalog(
-            "restore the recorded typescript session",
-            "typescript-session-refresh",
-        )
-        .await?;
+    let receipt = Box::pin(session.admin().commands().refresh_tool_catalog(
+        "restore the recorded typescript session",
+        "typescript-session-refresh",
+    ))
+    .await?;
 
     // Wait for evidence that the *queued command* was applied, read without a
     // runtime: the durable head's own tool-state snapshot, and the batch

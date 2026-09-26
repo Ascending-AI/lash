@@ -329,6 +329,24 @@ const CENSUS: &[(&str, RetentionClass)] = &[
         // Host receipts lack a safe terminal gate (FIG-1956 / FIG-653).
         KnownGap { issue: "FIG-1956" },
     ),
+    (
+        "session_roots",
+        LifecycleOwned {
+            scope: "session deletion",
+        },
+    ),
+    (
+        "session_root_inputs",
+        LifecycleOwned {
+            scope: "session deletion",
+        },
+    ),
+    (
+        "control_intents",
+        LifecycleOwned {
+            scope: "session deletion; a close_session intent stays as the deleted-session tombstone",
+        },
+    ),
 ];
 
 /// Tables only the SQLite catalog carries: its attachment bytes, and its
@@ -465,7 +483,7 @@ fn postgres_name(sqlite: &str) -> String {
 }
 
 fn assert_classified(source: &str, postgres: bool) {
-    assert_eq!(CENSUS.len(), 51, "ratified census must remain explicit");
+    assert_eq!(CENSUS.len(), 54, "ratified census must remain explicit");
     let mut declared = BTreeSet::new();
     let entries = CENSUS
         .iter()

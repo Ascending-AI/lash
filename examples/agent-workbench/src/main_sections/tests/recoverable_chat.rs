@@ -454,9 +454,12 @@ fn tool_catalog_refresh_close_preserves_a_concurrent_retirement_refusal() {
         let session_id = state.current_session_id();
         retiring_run_handle.retire_on_next_run(&session_id);
 
-        let error = enqueue_tool_catalog_refresh(&state, "close_retirement_race")
-            .await
-            .expect_err("tool-catalog refresh close must preserve a concurrent retirement");
+        let error = Box::pin(enqueue_tool_catalog_refresh(
+            &state,
+            "close_retirement_race",
+        ))
+        .await
+        .expect_err("tool-catalog refresh close must preserve a concurrent retirement");
 
         assert_deleted_session_conflict(&error, &session_id);
     });
@@ -561,7 +564,7 @@ fn retired_session_cancel_and_tool_refresh_return_the_typed_conflict() {
             .expect_err("retired session cancellation must be refused");
         assert_deleted_session_conflict(&cancel_error, &session_id);
 
-        let refresh_error = enqueue_tool_catalog_refresh(&state, "retired_session_test")
+        let refresh_error = Box::pin(enqueue_tool_catalog_refresh(&state, "retired_session_test"))
             .await
             .expect_err("retired session tool refresh must be refused");
         assert_deleted_session_conflict(&refresh_error, &session_id);

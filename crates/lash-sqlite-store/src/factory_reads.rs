@@ -4,6 +4,19 @@
 
 use super::*;
 
+/// A turn park feed row: sequence, session and turn ids, park id, kind and
+/// cause columns, serialized reason and the parked-at instant.
+type ParkFeedRow = (
+    i64,
+    String,
+    String,
+    i64,
+    String,
+    Option<String>,
+    Option<String>,
+    i64,
+);
+
 impl SqliteSessionStoreFactory {
     /// [`SessionStoreFactory::turn_park_feed`] over the durable core.
     pub(crate) async fn read_turn_park_feed(
@@ -26,16 +39,7 @@ impl SqliteSessionStoreFactory {
             .map_err(|error| StoreError::Backend(error.to_string()))?;
         let after_seq = i64::try_from(after.store_sequence()).unwrap_or(i64::MAX);
         let limit = i64::try_from(limit.get()).unwrap_or(i64::MAX);
-        let rows: Vec<(
-            i64,
-            String,
-            String,
-            i64,
-            String,
-            Option<String>,
-            Option<String>,
-            i64,
-        )> = conn
+        let rows: Vec<ParkFeedRow> = conn
             .read(move |conn| {
                 let clock = &crate::turn_ingress::turn_ingress_sql().turn_park_clock;
                 let horizon: i64 = conn

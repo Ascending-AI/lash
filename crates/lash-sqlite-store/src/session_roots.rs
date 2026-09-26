@@ -20,7 +20,7 @@ use lash_store_sql::session_roots::{
 use rusqlite::{Connection, OptionalExtension, params};
 
 use crate::conn::TxOutcome;
-use crate::scope_fence::Schema;
+use crate::schema_layout::Schema;
 use crate::{StoreError, sqlite_error, stored_data_corrupt};
 
 /// Every logical-root statement the session catalog issues.
@@ -53,13 +53,17 @@ fn sql_i64(field: &str, value: u64) -> Result<i64, StoreError> {
         .map_err(|_| StoreError::Backend(format!("{field} {value} exceeds the stored range")))
 }
 
+/// The stored terminal-evidence row: kind, serialized cause, head revision and
+/// the terminal instant, all unset until the root goes terminal.
+type TerminalRow = (Option<String>, Option<String>, Option<i64>, Option<i64>);
+
 /// The terminal evidence of `root` in `session_id`, read on `conn`.
 pub(crate) fn root_terminal_conn(
     conn: &Connection,
     session_id: &SessionId,
     root: &TurnId,
 ) -> Result<Option<RootTerminal>, StoreError> {
-    let row: Option<(Option<String>, Option<String>, Option<i64>, Option<i64>)> = conn
+    let row: Option<TerminalRow> = conn
         .query_row(
             session_roots_sql().roots.select_terminal.sql(),
             params![session_id.as_str(), root.as_str()],
@@ -86,6 +90,10 @@ pub(crate) fn root_terminal_conn(
 /// Write `terminal` in the caller's transaction, deciding it against the
 /// stored evidence first: the same terminal is a no-op, another one is
 /// [`StoreError::RootAlreadyTerminal`].
+#[expect(
+    dead_code,
+    reason = "the commit-path writer for RuntimeCommit::root_terminal lands with S7-B"
+)]
 pub(crate) fn write_root_terminal_conn(
     tx: &Connection,
     terminal: &RootTerminal,

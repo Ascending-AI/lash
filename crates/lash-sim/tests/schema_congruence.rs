@@ -136,6 +136,9 @@ const TABLE_REGISTRY: &[TablePair] = &[
         "lash_session_meta_pending_observer_intents",
     ),
     pair("session_head", "lash_sessions"),
+    pair("session_roots", "lash_session_roots"),
+    pair("session_root_inputs", "lash_session_root_inputs"),
+    pair("control_intents", "lash_control_intents"),
     pair("tool_intent_submissions", "lash_tool_intent_submissions"),
     pair("trigger_deliveries", "lash_trigger_deliveries"),
     pair(

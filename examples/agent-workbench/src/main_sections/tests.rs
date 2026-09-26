@@ -977,12 +977,12 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
         approvals: approvals::WorkbenchApprovals::in_memory().unwrap(),
     };
 
-    let receipt = enqueue_tool_catalog_refresh(&state, "initial_empty")
+    let receipt = Box::pin(enqueue_tool_catalog_refresh(&state, "initial_empty"))
         .await
         .expect("enqueue initial empty refresh");
     drain_refresh_batch(&state, &receipt).await;
     mail_world.add_account("Late Account").expect("add account");
-    let receipt = enqueue_tool_catalog_refresh(&state, "account_added")
+    let receipt = Box::pin(enqueue_tool_catalog_refresh(&state, "account_added"))
         .await
         .expect("enqueue account refresh");
     drain_refresh_batch(&state, &receipt).await;
@@ -1017,7 +1017,7 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
     mail_world
         .remove_account("late_account")
         .expect("remove account");
-    let receipt = enqueue_tool_catalog_refresh(&state, "account_removed")
+    let receipt = Box::pin(enqueue_tool_catalog_refresh(&state, "account_removed"))
         .await
         .expect("enqueue removal refresh");
     drain_refresh_batch(&state, &receipt).await;
@@ -1045,7 +1045,7 @@ async fn inbox_added_after_session_open_updates_persisted_tool_catalog_inner() {
     mail_world
         .add_account("Late Account")
         .expect("re-add account");
-    let receipt = enqueue_tool_catalog_refresh(&state, "account_readded")
+    let receipt = Box::pin(enqueue_tool_catalog_refresh(&state, "account_readded"))
         .await
         .expect("enqueue re-add refresh");
     drain_refresh_batch(&state, &receipt).await;

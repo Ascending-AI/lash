@@ -21,11 +21,11 @@ note: required by a bound in `SessionStoreFactory`
    |                                ^^^^^^^^^^^^^^^^^^^^^^^^ required by this bound in `SessionStoreFactory`
 
 error[E0277]: the trait bound `DelegatingFactory: AttachmentRootSet` is not satisfied
-  --> tests/ui/attachment_gc_requires_explicit_root_set.rs:79:9
+  --> tests/ui/attachment_gc_requires_explicit_root_set.rs:95:9
    |
-78 |     let _ = reclaim_unreferenced_attachments(
+94 |     let _ = reclaim_unreferenced_attachments(
    |             -------------------------------- required by a bound introduced by this call
-79 |         factory,
+95 |         factory,
    |         ^^^^^^^ unsatisfied trait bound
    |
 help: the trait `AttachmentRootSet` is not implemented for `DelegatingFactory`
@@ -48,33 +48,33 @@ note: required by a bound in `reclaim_unreferenced_attachments`
    |        ^^^^^^^^^^^^^^^^^ required by this bound in `reclaim_unreferenced_attachments`
 
 error[E0277]: the trait bound `DelegatingFactory: AttachmentRootSet` is not satisfied
-  --> tests/ui/attachment_gc_requires_explicit_root_set.rs:78:13
-   |
-78 |       let _ = reclaim_unreferenced_attachments(
-   |  _____________^
-79 | |         factory,
-80 | |         &backend,
-81 | |         AttachmentReclamationPolicy {
-...  |
-84 | |         },
-85 | |     );
-   | |_____^ unsatisfied trait bound
-   |
+   --> tests/ui/attachment_gc_requires_explicit_root_set.rs:94:13
+    |
+ 94 |       let _ = reclaim_unreferenced_attachments(
+    |  _____________^
+ 95 | |         factory,
+ 96 | |         &backend,
+ 97 | |         AttachmentReclamationPolicy {
+...   |
+100 | |         },
+101 | |     );
+    | |_____^ unsatisfied trait bound
+    |
 help: the trait `AttachmentRootSet` is not implemented for `DelegatingFactory`
-  --> tests/ui/attachment_gc_requires_explicit_root_set.rs:10:1
-   |
-10 | struct DelegatingFactory {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^
+   --> tests/ui/attachment_gc_requires_explicit_root_set.rs:10:1
+    |
+ 10 | struct DelegatingFactory {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^
 help: the trait `AttachmentRootSet` is implemented for `SqliteSessionStoreFactory`
-  --> $WORKSPACE/crates/lash-sqlite-store/src/lib.rs
-   |
-   | impl lash_core_execution::AttachmentRootSet for SqliteSessionStoreFactory {
-   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   --> $WORKSPACE/crates/lash-sqlite-store/src/lib.rs
+    |
+    | impl lash_core_execution::AttachmentRootSet for SqliteSessionStoreFactory {
+    | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 note: required by a bound in `reclaim_unreferenced_attachments`
-  --> $WORKSPACE/crates/lash-core-store/src/attachments.rs
-   |
-   | pub async fn reclaim_unreferenced_attachments<R>(
-   |              -------------------------------- required by a bound in this function
+   --> $WORKSPACE/crates/lash-core-store/src/attachments.rs
+    |
+    | pub async fn reclaim_unreferenced_attachments<R>(
+    |              -------------------------------- required by a bound in this function
 ...
-   |     R: AttachmentRootSet + ?Sized,
-   |        ^^^^^^^^^^^^^^^^^ required by this bound in `reclaim_unreferenced_attachments`
+    |     R: AttachmentRootSet + ?Sized,
+    |        ^^^^^^^^^^^^^^^^^ required by this bound in `reclaim_unreferenced_attachments`
