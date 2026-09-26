@@ -399,6 +399,7 @@ CREATE TABLE lash_durable_read_fixture.lash_process_park_events (
     cause text,
     reason_json text,
     at_ms bigint NOT NULL,
+    park_build_generation text,
     CONSTRAINT ck_process_park_events_kind CHECK ((kind = ANY (ARRAY['parked'::text, 'unparked'::text, 'cancelled'::text]))),
     CONSTRAINT ck_process_park_events_parked_reason CHECK ((((kind = 'parked'::text) AND (reason_json IS NOT NULL) AND (cause IS NULL)) OR ((kind <> 'parked'::text) AND (reason_json IS NULL) AND (cause IS NOT NULL))))
 );
@@ -412,7 +413,9 @@ CREATE TABLE lash_durable_read_fixture.lash_process_segment_handovers (
     process_id text NOT NULL COLLATE pg_catalog."C",
     segment_ordinal bigint NOT NULL,
     handover_json text NOT NULL,
-    started_json text
+    started_json text,
+    written_generation text,
+    route text NOT NULL
 );
 
 
@@ -473,6 +476,8 @@ CREATE TABLE lash_durable_read_fixture.lash_processes (
     parked_since_ms bigint,
     parked_reason_code text,
     park_executable_generation text,
+    park_build_generation text,
+    segment_generation text,
     record_json text NOT NULL,
     CONSTRAINT ck_processes_lifetime CHECK ((lifetime = ANY (ARRAY['until'::text, 'detached'::text]))),
     CONSTRAINT ck_processes_lifetime_scope CHECK ((((lifetime = 'detached'::text) AND (lifetime_scope_kind IS NULL) AND (lifetime_scope_id IS NULL)) OR ((lifetime = 'until'::text) AND (lifetime_scope_kind = ANY (ARRAY['turn'::text, 'queue_drain'::text, 'process'::text, 'session'::text])) AND (lifetime_scope_id IS NOT NULL)))),
@@ -922,6 +927,7 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_park_events (
     cause text,
     reason_json text,
     at_ms bigint NOT NULL,
+    park_build_generation text,
     CONSTRAINT ck_turn_park_events_kind CHECK ((kind = ANY (ARRAY['parked'::text, 'unparked'::text, 'cancelled'::text, 'redrive_requested'::text]))),
     CONSTRAINT ck_turn_park_events_parked_reason CHECK ((((kind = 'parked'::text) AND (reason_json IS NOT NULL) AND (cause IS NULL)) OR ((kind <> 'parked'::text) AND (reason_json IS NULL) AND (cause IS NOT NULL))))
 );
@@ -943,6 +949,7 @@ CREATE TABLE lash_durable_read_fixture.lash_turn_parks (
     park_executable_generation text,
     engine_ref text,
     resume_intent bigint,
+    park_build_generation text,
     CONSTRAINT ck_turn_parks_attempts CHECK ((attempts >= 1))
 );
 
@@ -2149,6 +2156,13 @@ CREATE INDEX idx_lash_process_observers_process ON lash_durable_read_fixture.las
 
 
 --
+-- Name: idx_lash_process_segment_handovers_route; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_process_segment_handovers_route ON lash_durable_read_fixture.lash_process_segment_handovers USING btree (route);
+
+
+--
 -- Name: idx_lash_process_tombstones_change; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -2191,6 +2205,13 @@ CREATE INDEX idx_lash_processes_lifetime_scope ON lash_durable_read_fixture.lash
 
 
 --
+-- Name: idx_lash_processes_live_generation; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_processes_live_generation ON lash_durable_read_fixture.lash_processes USING btree (segment_generation) WHERE ((status = ANY (ARRAY['running'::text, 'waiting'::text])) AND (segment_generation IS NOT NULL));
+
+
+--
 -- Name: idx_lash_processes_live_worklist; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
 --
 
@@ -2202,6 +2223,13 @@ CREATE INDEX idx_lash_processes_live_worklist ON lash_durable_read_fixture.lash_
 --
 
 CREATE INDEX idx_lash_processes_originator ON lash_durable_read_fixture.lash_processes USING btree (originator_id);
+
+
+--
+-- Name: idx_lash_processes_park_build_generation; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_processes_park_build_generation ON lash_durable_read_fixture.lash_processes USING btree (park_build_generation) WHERE (park_build_generation IS NOT NULL);
 
 
 --
@@ -2370,6 +2398,13 @@ CREATE INDEX idx_lash_trigger_subscriptions_registrant ON lash_durable_read_fixt
 --
 
 CREATE INDEX idx_lash_trigger_subscriptions_source ON lash_durable_read_fixture.lash_trigger_subscriptions USING btree (source_type, source_key, lifecycle);
+
+
+--
+-- Name: idx_lash_turn_parks_build_generation; Type: INDEX; Schema: lash_durable_read_fixture; Owner: -
+--
+
+CREATE INDEX idx_lash_turn_parks_build_generation ON lash_durable_read_fixture.lash_turn_parks USING btree (park_build_generation) WHERE (park_build_generation IS NOT NULL);
 
 
 --

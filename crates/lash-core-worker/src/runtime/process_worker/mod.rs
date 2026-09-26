@@ -610,6 +610,7 @@ impl DurableProcessWorker {
                         fencing_token,
                         attempt,
                         started_at_ms: self.now_ms(),
+                        build_generation: None,
                         generation,
                     },
                     &execution_write_authority,

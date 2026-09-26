@@ -106,6 +106,8 @@ async fn admission_invariant_ends_the_process_failed(step: Step, seed: u64) {
             &process_id,
             lash_core::PersistedSegmentHandover {
                 segment_ordinal: 1,
+                written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+                route: "LashProcessWorkflow".to_string(),
                 writer: String::new(),
                 handover: lash_core::SegmentHandover {
                     reason: lash_core::BoundaryReason::JournalBudget,
@@ -123,6 +125,7 @@ async fn admission_invariant_ends_the_process_failed(step: Step, seed: u64) {
                 lash_core::SegmentStartMarker {
                     nonce: "an-earlier-execution".to_string(),
                     started_at_ms: 1,
+                    build_generation: None,
                 },
             )
             .await

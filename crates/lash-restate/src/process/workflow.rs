@@ -211,6 +211,10 @@ pub(crate) struct LashProcessWorkflowImpl<R> {
     /// children's cancels through (FIG-3822).
     parent_end_delivery: Arc<dyn lash_core::ProcessWorkSubstrate>,
     authority_id: crate::RestateAuthorityId,
+    /// The drain generation of the build this workflow's segments admit
+    /// under (FIG-3795 S1): each start marker, handover and park stamps it,
+    /// beside the route the successor was sent under.
+    build_generation: lash_core::engine::BuildGeneration,
     trace_sink: Option<Arc<dyn lash_trace::TraceSink>>,
     trace_context: lash_trace::TraceContext,
 }
@@ -259,6 +263,7 @@ impl<R> LashProcessWorkflowImpl<R> {
         continuations: Arc<dyn lash_core::ProcessContinuationStore>,
         cancel_ingress: RestateIngressClient,
         authority_id: crate::RestateAuthorityId,
+        build_generation: lash_core::engine::BuildGeneration,
     ) -> Self {
         let parent_end_delivery = Arc::new(super::RestateProcessIngressRunner::over_ingress(
             cancel_ingress.clone(),
@@ -272,6 +277,7 @@ impl<R> LashProcessWorkflowImpl<R> {
             Some(cancel_ingress),
             parent_end_delivery,
             authority_id,
+            build_generation,
         )
     }
 
@@ -291,6 +297,7 @@ impl<R> LashProcessWorkflowImpl<R> {
             None,
             parent_end_delivery,
             crate::RestateAuthorityId::new("lash-restate-tests").expect("valid test authority"),
+            lash_core::engine::BuildGeneration::for_test("lash-restate-tests"),
         )
     }
 
@@ -301,6 +308,7 @@ impl<R> LashProcessWorkflowImpl<R> {
         cancel_ingress: Option<RestateIngressClient>,
         parent_end_delivery: Arc<dyn lash_core::ProcessWorkSubstrate>,
         authority_id: crate::RestateAuthorityId,
+        build_generation: lash_core::engine::BuildGeneration,
     ) -> Self {
         Self {
             runner,
@@ -311,6 +319,7 @@ impl<R> LashProcessWorkflowImpl<R> {
             cancel_ingress,
             parent_end_delivery,
             authority_id,
+            build_generation,
             trace_sink: None,
             trace_context: lash_trace::TraceContext::default(),
         }
@@ -896,12 +905,20 @@ where
             return;
         };
         let code = reason.code();
+        // The park carries the checkpoint's generation stamp (FIG-3795 S8):
+        // the recorded admission's build generation, never the refusing
+        // build's own.
+        let write = lash_core::store::ProcessParkWrite {
+            reason,
+            engine: None,
+            build_generation: started.build_generation().cloned(),
+        };
         let parked = match self.registry.get_process(process_id).await {
             Ok(Some(record)) => {
                 self.registry
                     .park_process_with_authority(
                         process_id,
-                        reason.into(),
+                        write,
                         &park_authority(&record, started),
                     )
                     .await
@@ -1047,6 +1064,7 @@ where
             &process_id,
             input.segment_ordinal,
             current_generation.clone(),
+            self.build_generation.clone(),
             move || selector(&registration),
         )
         .await?
@@ -1334,10 +1352,14 @@ where
         let registry = &self.registry;
         let continuations = &self.continuations;
         let pid = &process_id;
-        let reference_id = format!(
-            "{}/{successor_key}",
-            crate::LashService::ProcessWorkflow.name()
-        );
+        // The route is data (FIG-3795 S3/S5): the service name the successor
+        // is sent under is recorded with the handover, and the external
+        // reference names that same route rather than recomputing one.
+        // Generation lanes are FIG-3795 part D; until then the route is the
+        // stable name.
+        let route = crate::LashService::ProcessWorkflow.name().to_string();
+        let written_generation = Some(self.build_generation.clone());
+        let reference_id = format!("{route}/{successor_key}");
         let Json(handed_over) = context
             .run_json_or_retry_send::<Result<(), String>, _>(
                 HANDOVER_STEP.to_string(),
@@ -1362,6 +1384,8 @@ where
                             lash_core::PersistedSegmentHandover {
                                 writer,
                                 segment_ordinal: next_segment_ordinal,
+                                written_generation,
+                                route,
                                 handover,
                             },
                         )

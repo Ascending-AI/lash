@@ -41,6 +41,7 @@ pub(crate) fn decode_turn_park_row(row: &sqlx::postgres::PgRow) -> Result<TurnPa
     let attempts: i64 = row.try_get(7).map_err(store_sqlx_error)?;
     let engine_ref: Option<String> = row.try_get(8).map_err(store_sqlx_error)?;
     let resume_intent: Option<i64> = row.try_get(9).map_err(store_sqlx_error)?;
+    let build_generation: Option<String> = row.try_get(10).map_err(store_sqlx_error)?;
     TurnPark::decode(
         SessionId::from(session_id),
         root.into(),
@@ -54,6 +55,7 @@ pub(crate) fn decode_turn_park_row(row: &sqlx::postgres::PgRow) -> Result<TurnPa
         resume_intent
             .map(|intent| stored_u64("resume_intent", intent))
             .transpose()?,
+        build_generation.as_deref(),
     )
 }
 
@@ -115,6 +117,10 @@ pub(crate) async fn record_turn_park_tx(
         .reason
         .retired_executable_generation_key()
         .map(str::to_string);
+    let park_build_generation = write
+        .build_generation
+        .as_ref()
+        .map(|generation| generation.as_str().to_string());
     let (head, redrive) = match stored.as_ref() {
         Some(park) => {
             let redrive = match park.resume_intent {
@@ -160,6 +166,7 @@ pub(crate) async fn record_turn_park_tx(
                 .bind(at_ms)
                 .bind(park_executable_generation.as_deref())
                 .bind(engine_ref.as_deref())
+                .bind(park_build_generation.as_deref())
                 .execute(&mut **tx)
                 .await
                 .map_err(store_sqlx_error)?;
@@ -179,6 +186,11 @@ pub(crate) async fn record_turn_park_tx(
             park.resume_intent = None;
             if write.engine.is_some() {
                 park.engine.clone_from(&write.engine);
+            }
+            // COALESCE on the row: a stamp-less write keeps the recorded
+            // generation.
+            if write.build_generation.is_some() {
+                park.build_generation = write.build_generation.clone();
             }
             return Ok(park);
         }
@@ -223,6 +235,7 @@ pub(crate) async fn record_turn_park_tx(
         write.turn_id.as_str(),
         &write.reason,
         write.at_ms,
+        park_build_generation.as_deref(),
     )
     .await?;
     sqlx::query(turn_parks.insert.sql())
@@ -236,6 +249,7 @@ pub(crate) async fn record_turn_park_tx(
         .bind(1_i64)
         .bind(park_executable_generation.as_deref())
         .bind(engine_ref.as_deref())
+        .bind(park_build_generation.as_deref())
         .execute(&mut **tx)
         .await
         .map_err(store_sqlx_error)?;
@@ -249,6 +263,7 @@ pub(crate) async fn record_turn_park_tx(
         attempts: 1,
         engine: write.engine.clone(),
         resume_intent: None,
+        build_generation: write.build_generation.clone(),
     })
 }
 

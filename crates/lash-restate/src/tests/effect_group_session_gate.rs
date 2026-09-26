@@ -325,6 +325,7 @@ fn endpoint(sessions: Arc<dyn SessionStoreFactory>, executors: Arc<CountingExecu
             crate::RestateIngressClient::new("http://127.0.0.1:9".to_string()),
             restate_sdk::context::RunRetryPolicy::new(),
             sessions,
+            crate::LashService::EffectGroupDispatch.name().to_string(),
         ))
         .build()
 }

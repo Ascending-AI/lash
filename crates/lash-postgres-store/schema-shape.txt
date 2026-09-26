@@ -214,6 +214,7 @@ table lash_process_park_events
   column at_ms bigint not-null
   column cause text nullable
   column kind text not-null
+  column park_build_generation text nullable
   column park_id bigint not-null
   column process_id text not-null
   column reason_json text nullable
@@ -287,8 +288,10 @@ table lash_process_park_events
 table lash_process_segment_handovers
   column handover_json text not-null
   column process_id text not-null
+  column route text not-null
   column segment_ordinal bigint not-null
   column started_json text nullable
+  column written_generation text nullable
   primary-key (process_id, segment_ordinal)
   foreign-key (process_id) references lash_processes (process_id) on delete cascade
 table lash_process_tombstones
@@ -323,11 +326,13 @@ table lash_processes
   column lifetime_scope_id text nullable
   column lifetime_scope_kind text nullable
   column originator_id text not-null
+  column park_build_generation text nullable
   column park_executable_generation text nullable
   column parked_reason_code text nullable
   column parked_since_ms bigint nullable
   column process_id text not-null
   column record_json text not-null
+  column segment_generation text nullable
   column start_key text nullable
   column status text not-null
   column updated_at_ms bigint not-null
@@ -1303,6 +1308,7 @@ table lash_turn_park_events
   column at_ms bigint not-null
   column cause text nullable
   column kind text not-null
+  column park_build_generation text nullable
   column park_id bigint not-null
   column reason_json text nullable
   payload-shape lash_turn_park_events.reason_json ParkReason
@@ -1378,6 +1384,7 @@ table lash_turn_parks
   column attempts bigint not-null
   column engine_ref text nullable
   column last_refused_ms bigint not-null
+  column park_build_generation text nullable
   column park_executable_generation text nullable
   column park_id bigint not-null
   column reason_code text not-null

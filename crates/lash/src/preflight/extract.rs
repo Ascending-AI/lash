@@ -819,6 +819,8 @@ mod tests {
         let payload = serde_json::to_string(&lash_core::PersistedSegmentHandover {
             writer: String::new(),
             segment_ordinal: 1,
+            written_generation: Some(lash_core::engine::BuildGeneration::for_test("t0")),
+            route: "LashProcessWorkflow".to_string(),
             handover: lash_core::SegmentHandover {
                 reason: lash_core::BoundaryReason::JournalBudget,
                 program_hash: current,

@@ -130,6 +130,7 @@ impl TryFrom<lash_core::store::ProcessPark> for RemoteProcessPark {
             attempts,
             refusing,
             engine,
+            build_generation,
         } = value;
         // The mirror is the reason's serde form, arm for arm: a round trip
         // through it is the conversion, so a core arm the mirror lacks is
@@ -148,6 +149,7 @@ impl TryFrom<lash_core::store::ProcessPark> for RemoteProcessPark {
             attempts,
             refusing,
             engine: engine.map(|engine| engine.as_str().to_string()),
+            build_generation: build_generation.map(|generation| generation.as_str().to_owned()),
         })
     }
 }
@@ -165,6 +167,7 @@ impl TryFrom<RemoteProcessPark> for lash_core::store::ProcessPark {
             attempts,
             refusing,
             engine,
+            build_generation,
         } = value;
         let reason = serde_json::to_value(&reason)
             .and_then(serde_json::from_value)
@@ -172,6 +175,16 @@ impl TryFrom<RemoteProcessPark> for lash_core::store::ProcessPark {
                 type_name: "RemoteProcessPark",
                 message: format!("park reason is not a core park reason: {error}"),
             })?;
+        let build_generation = build_generation
+            .map(|text| {
+                lash_core::engine::BuildGeneration::parse(&text).map_err(|error| {
+                    RemoteProtocolError::InvalidEnvelope {
+                        type_name: "RemoteProcessPark",
+                        message: error.to_string(),
+                    }
+                })
+            })
+            .transpose()?;
         Ok(Self {
             reason,
             park_id: lash_core::store::ParkId::from_feed_sequence(park_id),
@@ -180,6 +193,7 @@ impl TryFrom<RemoteProcessPark> for lash_core::store::ProcessPark {
             attempts,
             refusing,
             engine: engine.map(lash_core::store::EnginePark::new),
+            build_generation,
         })
     }
 }

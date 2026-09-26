@@ -567,6 +567,14 @@ impl RestateProcessIngressRunner {
             .as_ref()
             .map_or(0, |handover| handover.segment_ordinal);
         let workflow_key = process_segment_workflow_key(&process_id, segment_ordinal);
+        // The route is data (FIG-3795 S3/S5): a redrive addresses the route
+        // the latest handover recorded rather than recomputing a name. A
+        // root segment, which has no handover, was sent under the stable
+        // name.
+        let route = latest_handover.as_ref().map_or_else(
+            || crate::LashService::ProcessWorkflow.name().to_string(),
+            |handover| handover.route.clone(),
+        );
         let registration = ProcessRegistration {
             start_key: record.start_key,
             input: record.input,
@@ -585,7 +593,7 @@ impl RestateProcessIngressRunner {
         let invocation_id = self
             .ingress
             .send_workflow_json(
-                crate::LashService::ProcessWorkflow.name(),
+                route.as_str(),
                 &workflow_key,
                 "run",
                 &RestateProcessWorkflowInput {
@@ -605,10 +613,7 @@ impl RestateProcessIngressRunner {
                 &process_id,
                 ProcessExternalRef {
                     backend: "restate".to_string(),
-                    id: format!(
-                        "{}/{workflow_key}",
-                        crate::LashService::ProcessWorkflow.name()
-                    ),
+                    id: format!("{route}/{workflow_key}"),
                     metadata: Some(serde_json::json!({ "invocation_id": invocation_id })),
                     segment_ordinal: Some(segment_ordinal),
                 },
@@ -663,7 +668,8 @@ impl RestateProcessIngressRunner {
         // its worklist (FIG-3675). A failed reconcile is reported and retried
         // by the next pass; it never stops this one.
         if let Some(admin) = self.park_reconciler.get()
-            && let Err(error) = reconcile_process_parks(admin, &self.registry).await
+            && let Err(error) =
+                reconcile_process_parks(admin, &self.registry, &self.continuations).await
         {
             tracing::warn!(
                 error = %error,
@@ -1020,10 +1026,13 @@ impl RestateProcessDeployment {
     }
 
     /// The process workflow over `serving`'s worker, under its segment
-    /// policy. Only [`crate::services::bind_lash_services`] binds it.
+    /// policy, stamping `build_generation` on every admission, handover and
+    /// park it writes (FIG-3795). Only
+    /// [`crate::services::bind_lash_services`] binds it.
     pub(crate) fn workflow(
         &self,
         serving: RestateProcessServing,
+        build_generation: lash_core::engine::BuildGeneration,
     ) -> LashProcessWorkflowImpl<RestateCoreProcessRunner> {
         let RestateProcessServing {
             worker,
@@ -1036,6 +1045,7 @@ impl RestateProcessDeployment {
             Arc::clone(&self.continuations),
             self.ingress.clone(),
             self.authority_id.clone(),
+            build_generation,
         );
         if let Some(selector) = segment_effect_budget {
             workflow = workflow.with_segment_effect_budget(selector);

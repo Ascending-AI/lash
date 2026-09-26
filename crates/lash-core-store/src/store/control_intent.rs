@@ -692,6 +692,7 @@ mod tests {
             attempts: 1,
             engine: None,
             resume_intent: resume_intent.map(ControlIntentId::from_sequence),
+            build_generation: None,
         }
     }
 

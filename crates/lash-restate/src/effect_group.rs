@@ -89,9 +89,18 @@ pub use state_record::*;
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum EffectGroupOpenResponse {
-    OpenedFresh,
+    /// A fresh group: `dispatch_route` is the recorded route the dispatch
+    /// runs under, as the request declared it (FIG-3795 S10).
+    OpenedFresh {
+        dispatch_route: String,
+    },
     ReopenedReady,
-    ReopenedPreparing,
+    /// A preparing group the caller may submit the dispatch for:
+    /// `dispatch_route` is the route the index retains, which a reopen's
+    /// offer never overrides.
+    ReopenedPreparing {
+        dispatch_route: String,
+    },
     ReopenedClosed {
         effective: EffectGroupCloseDisposition,
     },
@@ -314,6 +323,12 @@ pub enum EffectGroupRetirementCancelResponse {
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 pub struct EffectGroupOpenRequest {
     pub shape: EffectGroupShape,
+    /// The route — the full Restate service name — the group's dispatch is
+    /// sent under (FIG-3795 S10). The index records it verbatim at open, and
+    /// a reopen keeps the retained route: the route is data, and every later
+    /// dispatcher self-call or host-side group call addresses the recorded
+    /// route rather than recomputing a name.
+    pub dispatch_route: String,
     /// The opener asked for a content-checked reopen (FIG-3586,
     /// `GroupReopen::RetainedContent`): a reopen whose offered membership
     /// differs from the retained one is refused rather than served.
@@ -555,10 +570,12 @@ impl EffectGroupState {
         request.shape.validate_wire()?;
         let Some(mut record) = load_index(&ctx).await? else {
             let shape_digest = request.shape.digest()?;
+            let dispatch_route = request.dispatch_route.clone();
             store_index(
                 &ctx,
                 EffectGroupStateRecord {
                     shape_digest,
+                    dispatch_route: dispatch_route.clone(),
                     lifecycle: EffectGroupLifecycle::Preparing {
                         dispatch: EffectGroupDispatchState::Unadopted,
                         live: EffectGroupStateLiveRecord {
@@ -572,7 +589,9 @@ impl EffectGroupState {
                     },
                 },
             );
-            return Ok(Json(EffectGroupOpenResponse::OpenedFresh));
+            return Ok(Json(EffectGroupOpenResponse::OpenedFresh {
+                dispatch_route,
+            }));
         };
         if matches!(record.lifecycle, EffectGroupLifecycle::Retired { .. }) {
             return Ok(Json(EffectGroupOpenResponse::Retired));
@@ -602,8 +621,11 @@ impl EffectGroupState {
         // entry keeps its cumulative disposition but its reopened marker
         // re-enables rank reads — the flag clear the SQL entries take.
         let mut marked = false;
+        let dispatch_route = record.dispatch_route.clone();
         let response = match &mut record.lifecycle {
-            EffectGroupLifecycle::Preparing { .. } => EffectGroupOpenResponse::ReopenedPreparing,
+            EffectGroupLifecycle::Preparing { .. } => {
+                EffectGroupOpenResponse::ReopenedPreparing { dispatch_route }
+            }
             EffectGroupLifecycle::Ready { .. } => EffectGroupOpenResponse::ReopenedReady,
             EffectGroupLifecycle::Closed {
                 effective,
@@ -1354,10 +1376,20 @@ impl EffectGroupState {
                 // the completed run recovers its stable invocation id without
                 // re-executing it; if a test assembled Ready directly, the
                 // probe guard makes the newly-created run exit before sending.
+                // The send addresses the recorded dispatch route (FIG-3795
+                // S10), never a name recomputed from this build.
                 let group_key = ctx.key().to_string();
                 let handle = ctx
-                    .workflow_client::<EffectGroupDispatchClient>(group_key.clone())
-                    .run(Json(EffectGroupDispatchRequest { group_key }))
+                    .request::<Json<EffectGroupDispatchRequest>, Json<()>>(
+                        restate_sdk::context::RequestTarget::workflow(
+                            record.dispatch_route.clone(),
+                            group_key.clone(),
+                            "run",
+                        ),
+                        Json(EffectGroupDispatchRequest {
+                            group_key: group_key.clone(),
+                        }),
+                    )
                     .send()
                     .await?;
                 (
@@ -1523,7 +1555,6 @@ mod payload;
 #[cfg(test)]
 pub(crate) use dispatch::EffectGroupChildRequest;
 pub(crate) use dispatch::EffectGroupDispatch;
-pub(crate) use dispatch::EffectGroupDispatchClient;
 pub use dispatch::EffectGroupDispatchRequest;
 pub use payload::{
     EFFECT_GROUP_PAYLOAD_FORMAT_VERSION, EffectGroupPayloadGetResponse,

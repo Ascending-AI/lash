@@ -41,10 +41,10 @@ use crate::durable_wait::{
 use crate::effect_group::{
     EffectGroupAdmitSemanticRequest, EffectGroupAdmitSemanticResponse, EffectGroupCloseRequest,
     EffectGroupCloseResponse, EffectGroupCommitChildRequest, EffectGroupCommitChildResponse,
-    EffectGroupDispatchClient, EffectGroupDispatchRequest, EffectGroupDrainBlockersRequest,
-    EffectGroupDrainBlockersResponse, EffectGroupOpenRequest, EffectGroupOpenResponse,
-    EffectGroupPayloadClient, EffectGroupPayloadGetResponse, EffectGroupProbeResponse,
-    EffectGroupReadRankRequest, EffectGroupReadRankResponse, EffectGroupStateClient,
+    EffectGroupDispatchRequest, EffectGroupDrainBlockersRequest, EffectGroupDrainBlockersResponse,
+    EffectGroupOpenRequest, EffectGroupOpenResponse, EffectGroupPayloadClient,
+    EffectGroupPayloadGetResponse, EffectGroupProbeResponse, EffectGroupReadRankRequest,
+    EffectGroupReadRankResponse, EffectGroupStateClient,
 };
 use crate::process::{
     LashProcessWorkflowClient, RestateProcessAwaitRequest, RestateProcessCancelRequest,
@@ -566,6 +566,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
         &'run self,
         _group_key: String,
         _children: Vec<lash_core::RuntimeEffectEnvelope>,
+        _route: String,
     ) -> Pin<Box<dyn Future<Output = Result<Option<usize>, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
@@ -595,6 +596,7 @@ pub trait RestateControllerContext<'ctx>: Send + Sync + 'ctx {
     fn effect_group_submit<'run>(
         &'run self,
         _request: EffectGroupDispatchRequest,
+        _route: String,
     ) -> Pin<Box<dyn Future<Output = Result<String, TerminalError>> + Send + 'run>>
     where
         'ctx: 'run,
@@ -1454,13 +1456,18 @@ macro_rules! impl_restate_controller_context {
                     &'run self,
                     group_key: String,
                     children: Vec<lash_core::RuntimeEffectEnvelope>,
+                    route: String,
                 ) -> Pin<Box<dyn Future<Output = Result<Option<usize>, TerminalError>> + Send + 'run>>
                 where
                     'ctx: 'run,
                 {
                     let call = self
-                        .workflow_client::<EffectGroupDispatchClient>(group_key)
-                        .preflight(Json(children))
+                        .request::<Json<Vec<lash_core::RuntimeEffectEnvelope>>, Json<Option<usize>>>(
+                            restate_sdk::context::RequestTarget::workflow(
+                                route, group_key, "preflight",
+                            ),
+                            Json(children),
+                        )
                         .call();
                     Box::pin(async move {
                         let Json(response) = call.await?;
@@ -1489,13 +1496,20 @@ macro_rules! impl_restate_controller_context {
                 fn effect_group_submit<'run>(
                     &'run self,
                     request: EffectGroupDispatchRequest,
+                    route: String,
                 ) -> Pin<Box<dyn Future<Output = Result<String, TerminalError>> + Send + 'run>>
                 where
                     'ctx: 'run,
                 {
                     let handle = self
-                        .workflow_client::<EffectGroupDispatchClient>(request.group_key.clone())
-                        .run(Json(request))
+                        .request::<Json<EffectGroupDispatchRequest>, Json<()>>(
+                            restate_sdk::context::RequestTarget::workflow(
+                                route,
+                                request.group_key.clone(),
+                                "run",
+                            ),
+                            Json(request),
+                        )
                         .send();
                     Box::pin(async move {
                         let handle = handle.await?;

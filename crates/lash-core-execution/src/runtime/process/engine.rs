@@ -39,12 +39,33 @@ pub struct PersistedSegmentHandover {
     /// no writer and matches none.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub writer: String,
+    /// The drain generation of the build that wrote this handover
+    /// (FIG-3795 S3): the build the successor's send was made under, which a
+    /// refused successor is re-routed back to. Rows written before the stamp
+    /// existed carry none; a missing stamp is never derived.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub written_generation: Option<crate::engine::BuildGeneration>,
+    /// The full Restate service name the successor was sent under
+    /// (FIG-3795 S3): the recorded route a cancel, redrive or drain re-send
+    /// addresses rather than a name recomputed from the running build. Rows
+    /// written before the column existed decode to the stable workflow name —
+    /// the only route a pre-stamp build could have sent under.
+    #[serde(default = "PersistedSegmentHandover::legacy_route")]
+    pub route: String,
     pub handover: SegmentHandover,
 }
 
 impl PersistedSegmentHandover {
     pub fn program_hash(&self) -> &str {
         &self.handover.program_hash
+    }
+
+    /// The route every handover written before the stamp existed was sent
+    /// under: generation lanes do not exist before FIG-3795 part D, so the
+    /// stable workflow service name is the only possible value. The name is
+    /// frozen history for those rows — it is not the live service constant.
+    fn legacy_route() -> String {
+        "LashProcessWorkflow".to_string()
     }
 }
 

@@ -10,7 +10,7 @@ error: cannot construct `SegmentStarted` with struct literal syntax due to priva
 12 |         authority,
    |         --------- private field
    |
-   = note: ...and other private field `generation` that was not provided
+   = note: ...and other private fields `generation` and `build_generation` that were not provided
 help: you might have meant to use the `new` associated function
    |
  9 -     SegmentStarted {
@@ -18,5 +18,5 @@ help: you might have meant to use the `new` associated function
 11 -         segment_ordinal: 0,
 12 -         authority,
 13 -     }
- 9 +     SegmentStarted::new(_, _, _, _)
+ 9 +     SegmentStarted::new(_, _, _, _, _)
    |

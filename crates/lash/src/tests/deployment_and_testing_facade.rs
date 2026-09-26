@@ -101,6 +101,7 @@ async fn deployment_drain_status_counts_parked_and_in_flight_turns() {
                 at_ms: 1,
                 engine: None,
                 after_redrive: None,
+                build_generation: None,
             })
             .await
             .expect("park the turn");
@@ -229,6 +230,7 @@ async fn parked_work_merges_parked_turns_and_processes() {
             at_ms: 1,
             engine: None,
             after_redrive: None,
+            build_generation: None,
         })
         .await
         .expect("park the turn");

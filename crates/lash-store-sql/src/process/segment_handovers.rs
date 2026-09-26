@@ -3,8 +3,12 @@
 /// The table's unprefixed name.
 pub const TABLE: &str = "process_segment_handovers";
 
-/// Every column, in insert order.
-pub const INSERT_COLUMNS: &str = "process_id, segment_ordinal, handover_json";
+/// Every column, in insert order. `written_generation` and `route` are the
+/// drain-generation stamps the handover's writer records beside the handover
+/// (FIG-3795 S3): the build generation the send was made under and the full
+/// service name the successor was sent under.
+pub const INSERT_COLUMNS: &str =
+    "process_id, segment_ordinal, handover_json, written_generation, route";
 
 /// What the SQLite preflight walk reports for a parked segment.
 ///
