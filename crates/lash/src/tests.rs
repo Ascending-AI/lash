@@ -1,14 +1,15 @@
 use crate::admin::SessionConfigPatch;
 use crate::support::SessionWorkEngine;
 use crate::support::{
-    Arc, BTreeMap, CancellationToken, EffectHost, EmbedError, LashCore, PluginFactory,
-    ProcessRegistry, PromptContribution, PromptLayerSink, PromptSlot, PromptTemplate,
-    ProviderHandle, Result, RunActivityCollector, RuntimeSessionState,
-    SelectedQueuedWorkDrainRefusalCause, SessionError, SessionObservationSubscription,
-    SessionResume, SessionSpec, SessionStoreFactory, StaticPluginFactory, StdMutex, ToolProvider,
-    TurnActivity, TurnActivityId, TurnActivitySink, TurnEvent, TurnInput, TurnOutcome, TurnReport,
-    async_trait, message_text,
+    Arc, CancellationToken, EffectHost, EmbedError, LashCore, PluginFactory, ProcessRegistry,
+    PromptContribution, PromptLayerSink, PromptSlot, PromptTemplate, ProviderHandle, Result,
+    RunActivityCollector, RuntimeSessionState, SelectedQueuedWorkDrainRefusalCause, SessionError,
+    SessionObservationSubscription, SessionResume, SessionStoreFactory, StaticPluginFactory,
+    StdMutex, ToolProvider, TurnActivity, TurnActivityId, TurnActivitySink, TurnEvent, TurnInput,
+    TurnOutcome, TurnReport, async_trait, message_text,
 };
+#[cfg(feature = "rlm")]
+use crate::support::{BTreeMap, SessionSpec};
 use lash_core::ProcessExecutionEnvStore;
 use lash_core::facade_support::{
     AgentFrameReasonFacadeOps, RuntimeSessionStateFacadeOps, SessionGraphFacadeOps,
@@ -2510,6 +2511,7 @@ mod standard_compaction_persistence;
 mod tool_intent_ingress;
 mod tool_restore_report;
 mod turn_streaming;
+#[cfg(feature = "rlm")]
 mod usage_durability;
 
 /// `SnapshotStore` backs the facade tests, so it owes the displacement contract

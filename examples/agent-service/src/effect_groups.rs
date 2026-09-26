@@ -140,7 +140,7 @@ pub(crate) async fn run_effect_group(
     let ingress = RestateIngressClient::new(
         state
             .restate_ingress_url()
-            .expect("Restate durability validates the ingress URL")
+            .unwrap_or_else(|| panic!("Restate durability validates the ingress URL"))
             .to_string(),
     );
     ensure_group_is_new(&ingress, &request.run_id).await?;
@@ -157,7 +157,7 @@ pub(crate) async fn run_effect_group(
     let first = report
         .settlements
         .first()
-        .expect("a terminal three-child report has rank one");
+        .unwrap_or_else(|| panic!("a terminal three-child report has rank one"));
     if workflow.group_key != report.group_key
         || workflow.first_position != first.position
         || workflow.first_sequence != first.sequence
@@ -177,7 +177,7 @@ pub(crate) async fn get_effect_group(
     let ingress = RestateIngressClient::new(
         state
             .restate_ingress_url()
-            .expect("Restate durability validates the ingress URL")
+            .unwrap_or_else(|| panic!("Restate durability validates the ingress URL"))
             .to_string(),
     );
     read_effect_group_report(&ingress, run_id).await.map(Json)
@@ -291,7 +291,7 @@ async fn read_effect_group_report(
 
     let first = settlements
         .first()
-        .expect("the worked group always has three children");
+        .unwrap_or_else(|| panic!("the worked group always has three children"));
     let mut positions = settlements
         .iter()
         .map(|settlement| settlement.position)
@@ -354,7 +354,11 @@ fn effect_group(
             RuntimeEffectEnvelope::new(
                 RuntimeEffectInvocation::new(
                     EffectAddress::new(scope.clone(), child_replay_key(&group_key, position))
-                        .expect("worked effect-group scope and child replay key are admitted"),
+                        .unwrap_or_else(|err| {
+                            panic!(
+                                "worked effect-group scope and child replay key are admitted: {err:?}"
+                            )
+                        }),
                     RuntimeAttribution::none(),
                     format!("sleep-{position}"),
                 ),
@@ -368,8 +372,9 @@ fn effect_group(
         .collect();
     RuntimeEffectGroup::try_new(
         RuntimeEffectInvocation::new(
-            EffectAddress::new(scope.clone(), format!("{group_key}:group"))
-                .expect("worked effect-group scope and group replay key are admitted"),
+            EffectAddress::new(scope.clone(), format!("{group_key}:group")).unwrap_or_else(|err| {
+                panic!("worked effect-group scope and group replay key are admitted: {err:?}")
+            }),
             RuntimeAttribution::none(),
             "effect-group",
         ),

@@ -3,9 +3,12 @@
 // the test under way would then report as a runtime defect. Clippy's
 // `allow-expect-in-tests` reaches `#[test]` functions only, not the fixtures
 // they call.
-#![expect(
-    clippy::expect_used,
-    reason = "test-support fixtures: a broken setup assumption aborts the test"
+#![cfg_attr(
+    feature = "rlm",
+    expect(
+        clippy::expect_used,
+        reason = "test-support fixtures: a broken setup assumption aborts the test"
+    )
 )]
 
 /// Derives a durable frame-node identity through the runtime's canonical

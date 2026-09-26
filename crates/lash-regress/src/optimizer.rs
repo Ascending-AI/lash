@@ -437,8 +437,8 @@ fn form_literal_bytes(n: &mut Node, walk: &Walk) -> PassAction {
             for idx in 1..nodes.len() {
                 let (prev_slice, curr_slice) = nodes.split_at_mut(idx);
                 match (
-                    get_literal_bytes(prev_slice.last_mut().unwrap()),
-                    get_literal_bytes(curr_slice.first_mut().unwrap()),
+                    get_literal_bytes(&mut prev_slice[idx - 1]),
+                    get_literal_bytes(&mut curr_slice[0]),
                 ) {
                     (Some(prev_bytes), Some(curr_bytes))
                         if !prev_bytes.is_empty() && !curr_bytes.is_empty() =>

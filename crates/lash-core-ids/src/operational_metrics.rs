@@ -166,7 +166,7 @@ impl TestMetrics {
         TEST_OBSERVATIONS.with(|slot| {
             slot.borrow()
                 .as_ref()
-                .expect("test metrics are installed")
+                .unwrap_or_else(|| panic!("test metrics are installed"))
                 .iter()
                 .filter(|observed| **observed == name)
                 .count() as u64

@@ -107,8 +107,9 @@ impl DevProviderScenario {
     pub(crate) fn provider(self) -> ProviderHandle {
         #[cfg(feature = "provider-wire-fixtures")]
         if self == Self::ValidEmptyCompletion {
-            return crate::valid_empty_completion::provider()
-                .expect("the checked-in valid-empty Provider Wire Script must parse");
+            return crate::valid_empty_completion::provider().unwrap_or_else(|err| {
+                panic!("the checked-in valid-empty Provider Wire Script must parse: {err:?}")
+            });
         }
         let retry_delay_ms = if self == Self::RetryResetPartial {
             2_000

@@ -135,30 +135,36 @@ async fn memory_backend() -> Result<lash::Backend> {
     .into())
 }
 
+/// Everything `standard_core` needs beside the provider and model: the turn
+/// shape, optional tools and trace sink, and an optional shutdown witness.
+pub(super) struct StandardCoreSpec<'a> {
+    pub(super) output_cap: usize,
+    pub(super) turn_budget: usize,
+    pub(super) instructions: &'a str,
+    pub(super) tools: Option<Arc<dyn ToolProvider>>,
+    pub(super) trace_path: PathBuf,
+    pub(super) shutdown_witness: Option<Arc<dyn lash::plugins::PluginFactory>>,
+}
+
 pub(super) async fn standard_core(
     provider: ProviderHandle,
     model: ModelSpec,
-    output_cap: usize,
-    turn_budget: usize,
-    instructions: &str,
-    tools: Option<Arc<dyn ToolProvider>>,
-    trace_path: PathBuf,
-    shutdown_witness: Option<Arc<dyn lash::plugins::PluginFactory>>,
+    spec: StandardCoreSpec<'_>,
 ) -> Result<LashCore> {
     let mut builder = LashCore::standard_builder(
         memory_backend().await?,
-        lash::TurnBudget::bounded(turn_budget),
+        lash::TurnBudget::bounded(spec.turn_budget),
     )
     .without_queued_work()
     .provider(provider)
     .model(model)
-    .generation(generation(output_cap))
-    .instructions(instructions)
+    .generation(generation(spec.output_cap))
+    .instructions(spec.instructions)
     .commit_budget(lash::CommitBudget::bounded(1024 * 1024, 512))
     .queued_work_batching(lash::QueuedWorkBatchingConfig::new(1024))
-    .trace_sink(Arc::new(JsonlTraceSink::new(trace_path)))
+    .trace_sink(Arc::new(JsonlTraceSink::new(spec.trace_path)))
     .trace_level(TraceLevel::Extended);
-    if let Some(tools) = tools {
+    if let Some(tools) = spec.tools {
         builder = builder.tools(tools);
     }
     if let Some(marker) = super::shutdown_marker::factory_from_env("slack-clone-live-e2e")
@@ -166,7 +172,7 @@ pub(super) async fn standard_core(
     {
         builder = builder.plugin(marker);
     }
-    if let Some(witness) = shutdown_witness {
+    if let Some(witness) = spec.shutdown_witness {
         builder = builder.plugin(witness);
     }
     builder
