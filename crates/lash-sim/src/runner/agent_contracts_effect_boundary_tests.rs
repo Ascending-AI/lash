@@ -364,13 +364,12 @@ finish(winner);
     );
 
     // Whether the turn itself succeeds is `a_race_turn_on_restate_succeeds`'s
-    // verdict (parked on FIG-3826); this law is about what crossed the layer.
+    // verdict; this law is about what crossed the layer.
     drop(outcome);
 }
 
 /// A race whose tool wins ends its turn cleanly on Restate.
 #[tokio::test]
-#[ignore = "parked: the opener's end reads its own closed group as a refused caller on Restate (FIG-3826)"]
 async fn a_race_turn_on_restate_succeeds() {
     let (core, _, engine) = agent_process_contract_core_with_effect_layer(
         "lash_runtime race turn",
