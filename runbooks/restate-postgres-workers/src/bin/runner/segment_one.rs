@@ -9,8 +9,6 @@ pub(super) async fn run_workflow_segment_one(
     storage: &PostgresStorage,
     admin_url: &str,
     ingress_url: &str,
-    mock_provider_base_url: &str,
-    trace_dir: Option<PathBuf>,
 ) -> Result<SegmentOneOutput> {
     run_cold_process_await_event_vectors(admin_url, ingress_url).await?;
 
@@ -23,13 +21,7 @@ pub(super) async fn run_workflow_segment_one(
     submit_workflow(ingress_url, &main_request).await?;
     let main_response = wait_for_terminal_result(storage.pool(), &main_request.workflow_id).await?;
     assert_kitchen_sink_response(&main_response, true)?;
-    wait_for_queued_work(
-        storage,
-        mock_provider_base_url,
-        trace_dir.clone(),
-        ingress_url,
-    )
-    .await?;
+    wait_for_driven_wakes(storage.pool(), 1).await?;
     let main_wake_request = TurnRequest {
         workflow_id: "e2e-main-wake".to_string(),
         fail_once: false,
@@ -77,13 +69,7 @@ pub(super) async fn run_workflow_segment_one(
         wait_for_terminal_result(storage.pool(), &failover_request.workflow_id).await?;
     assert_kitchen_sink_response(&failover_response, true)?;
     wait_for_process_signal_wait(storage.pool(), &signal_process_id, "first", 1).await?;
-    wait_for_queued_work(
-        storage,
-        mock_provider_base_url,
-        trace_dir.clone(),
-        ingress_url,
-    )
-    .await?;
+    wait_for_driven_wakes(storage.pool(), 2).await?;
     let failover_wake_request = TurnRequest {
         workflow_id: "e2e-failover-wake".to_string(),
         fail_once: false,

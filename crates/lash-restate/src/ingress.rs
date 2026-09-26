@@ -540,6 +540,32 @@ impl RestateIngressClient {
         decode_response("Restate workflow call", &url, response).await
     }
 
+    /// Attach to a workflow's `run` by its key: `Ok` once it ended with an
+    /// output, the status error its failure answers with otherwise.
+    pub(crate) async fn attach_workflow_run(
+        &self,
+        workflow: &str,
+        workflow_key: &str,
+    ) -> Result<(), RestateHttpError> {
+        let workflow = restate_path_component(workflow);
+        let workflow_key = restate_path_component(workflow_key);
+        let url = format_restate_url(
+            self.connection.ingress_url(),
+            &format!("restate/workflow/{workflow}/{workflow_key}/attach"),
+        );
+        let response = send_request(
+            &self.connection,
+            RestateRequestClass::Attach,
+            "Restate workflow attach",
+            HttpRequest::new(HttpMethod::Get, &url, ""),
+        )
+        .await?;
+        if !response.is_success() {
+            return Err(status_error("Restate workflow attach", url, response).await);
+        }
+        Ok(())
+    }
+
     pub async fn call_workflow_empty<R>(
         &self,
         workflow: &str,

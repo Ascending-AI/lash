@@ -291,6 +291,44 @@ async fn list_scope_process_handles(
     .unwrap_or_default()
 }
 
+/// A [`RuntimeHandle`] held weakly, every part of it: it keeps nothing of
+/// the runtime alive, so a registry of open sessions never holds what a
+/// session's engine holds back.
+#[derive(Clone)]
+pub struct WeakRuntimeHandle {
+    runtime: std::sync::Weak<Mutex<LashRuntime>>,
+    observation: std::sync::Weak<ArcSwap<RuntimeObservation>>,
+    live_replay_store: std::sync::Weak<dyn LiveReplayStore>,
+    process_env_store: std::sync::Weak<dyn crate::ProcessExecutionEnvStore>,
+    process_engines: crate::WeakProcessEngineRegistry,
+}
+
+impl WeakRuntimeHandle {
+    /// The handle, while its runtime is alive.
+    #[must_use]
+    pub fn upgrade(&self) -> Option<RuntimeHandle> {
+        Some(RuntimeHandle {
+            runtime: self.runtime.upgrade()?,
+            observation: self.observation.upgrade()?,
+            live_replay_store: self.live_replay_store.upgrade()?,
+            process_env_store: self.process_env_store.upgrade()?,
+            process_engines: self.process_engines.upgrade()?,
+        })
+    }
+
+    /// Whether the runtime is still alive.
+    #[must_use]
+    pub fn is_alive(&self) -> bool {
+        self.runtime.strong_count() > 0
+    }
+
+    /// Whether this is a weak hold on `handle`'s runtime.
+    #[must_use]
+    pub fn names(&self, handle: &RuntimeHandle) -> bool {
+        std::ptr::eq(self.runtime.as_ptr(), Arc::as_ptr(&handle.runtime))
+    }
+}
+
 #[derive(Clone)]
 pub struct RuntimeHandle {
     pub runtime: Arc<Mutex<LashRuntime>>,
@@ -337,6 +375,20 @@ impl RuntimeHandle {
         Arc::clone(&self.runtime)
     }
 
+    /// This handle, holding its runtime weakly: it does not keep the runtime
+    /// alive, and [`WeakRuntimeHandle::upgrade`] answers the handle back while
+    /// some other holder does.
+    #[must_use]
+    pub fn downgrade(&self) -> WeakRuntimeHandle {
+        WeakRuntimeHandle {
+            runtime: Arc::downgrade(&self.runtime),
+            observation: Arc::downgrade(&self.observation),
+            live_replay_store: Arc::downgrade(&self.live_replay_store),
+            process_env_store: Arc::downgrade(&self.process_env_store),
+            process_engines: self.process_engines.downgrade(),
+        }
+    }
+
     /// Retire an execution artifact owner across the runtime's environment and
     /// process-engine stores after its effect journal is durably unreachable.
     pub async fn retire_artifact_owner(
@@ -361,6 +413,30 @@ impl RuntimeHandle {
     /// represented in the serializable session projection.
     pub fn publish_resident_from(&self, runtime: &LashRuntime) {
         self.publish_from_inner(runtime, true);
+    }
+
+    /// Adopt `runtime`'s state as this handle's observation without
+    /// publishing an event: the change it reflects was committed, and
+    /// published, by another runtime of the same session (a turn an engine
+    /// drove, FIG-3600). The cursor moves to the live replay's current
+    /// position.
+    pub fn adopt_observation_from(&self, runtime: &LashRuntime) {
+        let revision = SessionRevision::from_runtime(runtime);
+        let previous = self.observation.load_full();
+        let (read_view, usage_report, authority_fingerprint) = export_observation_state(runtime);
+        let cursor = self
+            .live_replay_store
+            .current_cursor(&SessionId::from(runtime.session_id()), revision);
+        let next = RuntimeObservation::from_runtime(
+            runtime,
+            cursor,
+            Some(previous.as_ref()),
+            revision,
+            read_view,
+            usage_report,
+            authority_fingerprint,
+        );
+        self.observation.store(Arc::new(next));
     }
 
     fn publish_from_inner(&self, runtime: &LashRuntime, force_resident: bool) {

@@ -256,10 +256,10 @@ pub use native_substrate::{
     QueuedWorkWakeOutcome,
 };
 pub use native_substrate::{
-    NativeProcessAdmissionDriver, NativeProcessWork, NativeQueuedWork, NativeQueuedWorkConfigError,
-    NativeSubstrateConfig, NativeSubstrateConfigError, NoSessionWork, ProcessTerminalWait,
-    ProcessWorkSubstrate, ProcessWorkWiring, SessionDriver, SessionWorkEngine, WorkCadencePolicy,
-    WorkerSweepPolicy,
+    InlineSessionWork, NativeProcessAdmissionDriver, NativeProcessWork, NativeQueuedWork,
+    NativeQueuedWorkConfigError, NativeSubstrateConfig, NativeSubstrateConfigError, NoSessionWork,
+    ProcessTerminalWait, ProcessWorkSubstrate, ProcessWorkWiring, SessionDriver, SessionWorkEngine,
+    WorkCadencePolicy, WorkerSweepPolicy,
 };
 pub use native_substrate::{WakeDeliveryDriveReport, WakeDeliveryDriver};
 pub use observation::{
@@ -269,7 +269,7 @@ pub use observation::{
     PreparedLiveReplayPublication, RuntimeHandle, RuntimeObservation, SessionCursor,
     SessionCursorError, SessionObservation, SessionObservationEvent,
     SessionObservationEventPayload, SessionObservationSubscription, SessionProcessEventKind,
-    SessionQueueEventKind, SessionResume, SessionRevision,
+    SessionQueueEventKind, SessionResume, SessionRevision, WeakRuntimeHandle,
 };
 pub use observation_publisher::{ObservationSource, drive_with_observations};
 #[cfg(any(test, feature = "testing"))]
@@ -321,7 +321,7 @@ pub use process::{
     StoreRealization, UnavailableProcessService, WAKE_ENQUEUING_STALE_AFTER_MS, WaitKind,
     WaitState, WakeDelivery, WakeDeliveryBlockedGroup, WakeDeliveryClaimOutcome,
     WakeDeliveryConfig, WakeDeliveryDisposition, WakeDeliveryReport, WakeDeliveryState,
-    WakeDiscardReason, WatchedRegistry, allocate_process_event_sequence,
+    WakeDiscardReason, WatchedRegistry, WeakProcessEngineRegistry, allocate_process_event_sequence,
     apply_process_event_projection, apply_process_status_projection,
     artifact_destination_owner_retired_error, artifact_owner_is_permanently_retired,
     artifact_owner_retired_error, artifact_staging_edge_missing_error,

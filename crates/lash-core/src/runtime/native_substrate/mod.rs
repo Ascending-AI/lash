@@ -5,7 +5,7 @@ pub(crate) use lash_core_execution::runtime::native_substrate::NativeProcessAwai
 #[allow(unused_imports)]
 pub(crate) use lash_core_execution::runtime::native_substrate::lane_wait;
 pub use lash_core_execution::runtime::native_substrate::{
-    NativeProcessAdmissionDriver, NativeProcessWork, NativeSubstrateConfig,
+    InlineSessionWork, NativeProcessAdmissionDriver, NativeProcessWork, NativeSubstrateConfig,
     NativeSubstrateConfigError, NoSessionWork, ProcessTerminalWait, ProcessWorkSubstrate,
     ProcessWorkWiring, SessionDriver, SessionWorkEngine, WakeDeliveryDriveReport,
     WakeDeliveryDriver, WorkCadencePolicy, WorkerSweepPolicy,

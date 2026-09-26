@@ -12,6 +12,7 @@ use crate::runtime::{NativeSubstrateConfigError, WorkerSlotKind, WorkerSlotSuppl
 
 use super::{SessionDriver, SessionWorkEngine, WorkCadencePolicy};
 
+mod drive_ledger;
 mod scheduler;
 mod task;
 mod types;
@@ -77,6 +78,8 @@ pub(crate) struct NativeQueuedWorkInner {
     pub(super) wake_tasks: TaskTracker,
     pub(super) scheduler: Arc<QueuedWorkExecutionScheduler>,
     pub(super) work_cadence: WorkCadencePolicy,
+    /// What `await_drive` waits on: per-session asks and completed runs.
+    pub(super) drives: drive_ledger::DriveLedger,
     #[cfg(test)]
     pub(super) test_dispatch: tracing::Dispatch,
 }
@@ -140,19 +143,17 @@ impl NativeQueuedWork {
         .expect("default work cadence is valid"))
     }
 
+    /// `shutdown` stops the engine with its owner: once it is cancelled no
+    /// drive starts and a drive in flight is dropped.
     pub(crate) fn with_execution_concurrency_and_work_cadence(
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         concurrency: usize,
         work_cadence: WorkCadencePolicy,
+        shutdown: CancellationToken,
     ) -> Result<Self, NativeQueuedWorkConfigError> {
         let concurrency = QueuedWorkExecutionConcurrency::new(concurrency)?;
-        Self::from_parts_with_work_cadence(
-            run_handle,
-            CancellationToken::new(),
-            Some(concurrency),
-            work_cadence,
-        )
-        .map_err(Into::into)
+        Self::from_parts_with_work_cadence(run_handle, shutdown, Some(concurrency), work_cadence)
+            .map_err(Into::into)
     }
 
     #[expect(
@@ -167,22 +168,19 @@ impl NativeQueuedWork {
             run_handle,
             supplier,
             WorkCadencePolicy::default(),
+            CancellationToken::new(),
         )
         .expect("default work cadence is valid")
     }
 
+    /// `shutdown` as for [`Self::with_execution_concurrency_and_work_cadence`].
     pub(crate) fn with_worker_slot_supplier_and_work_cadence(
         run_handle: Arc<dyn QueuedWorkRunHandle>,
         supplier: Arc<dyn WorkerSlotSupplier>,
         work_cadence: WorkCadencePolicy,
+        shutdown: CancellationToken,
     ) -> Result<Self, NativeSubstrateConfigError> {
-        Self::from_parts_with_supplier(
-            run_handle,
-            CancellationToken::new(),
-            None,
-            Some(supplier),
-            work_cadence,
-        )
+        Self::from_parts_with_supplier(run_handle, shutdown, None, Some(supplier), work_cadence)
     }
 
     #[cfg(test)]
@@ -242,6 +240,7 @@ impl NativeQueuedWork {
                     (None, None) => QueuedWorkExecutionScheduler::unbounded(),
                 }),
                 work_cadence,
+                drives: drive_ledger::DriveLedger::default(),
                 #[cfg(test)]
                 test_dispatch: tracing::Dispatch::new(tracing::subscriber::NoSubscriber::default()),
             }),
@@ -308,12 +307,28 @@ impl NativeQueuedWork {
 /// The in-process session-work engine of the interim SQL backends (FIG-3600
 /// ruling Q2; FIG-3668 deletes it with them): an ask is coalesced per
 /// session, and its run handle drives the session in process.
+#[async_trait::async_trait]
 impl SessionWorkEngine for NativeQueuedWork {
     fn schedule_drive(&self, session: &SessionId, request: crate::engine::DriveRequestId) {
+        self.inner.drives.request(session);
         self.notify_pending_work(Some(session), request.as_str());
     }
 
     fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
         Arc::clone(self.inner.driver.get_or_init(|| driver))
+    }
+
+    /// Re-asks (coalesced with any run already queued), then waits for the
+    /// first dispatcher run that began after the ask. It never drives beside
+    /// the dispatcher: two in-process drives of one session contend on its
+    /// execution lane.
+    async fn await_drive(
+        &self,
+        session: &SessionId,
+        request: &crate::engine::DriveRequestId,
+    ) -> Result<crate::engine::DriveOutcome, crate::engine::DriveAbort> {
+        let ask = self.inner.drives.request(session);
+        self.notify_pending_work(Some(session), request.as_str());
+        self.inner.drives.wait(session, ask).await
     }
 }

@@ -19,7 +19,6 @@ use chrono_tz::Tz;
 use croner::parser::{CronParser, Seconds};
 use futures_util::FutureExt as _;
 use lash::TurnInput;
-use lash::rlm::RlmTurnBuilderExt as _;
 use lash::runtime::AwaitEventResolver as _;
 use restate_sdk::context::{
     ContextClient, ContextReadState, ContextSideEffects, ContextWriteState, RunFuture,
@@ -46,19 +45,6 @@ pub(crate) use session_delete_client::{
 };
 
 const CRON_STATE_KEY: &str = "state";
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub(crate) struct WorkbenchTurnWorkflowRequest {
-    pub turn_id: TurnId,
-    pub session_id: SessionId,
-    pub text: String,
-    pub model: ModelSelection,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub attachment_id: Option<String>,
-}
-
-mod queued_turn_request;
-pub(crate) use queued_turn_request::{QueuedTurnScope, WorkbenchQueuedTurnWorkflowRequest};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct WorkbenchButtonTriggerWorkflowRequest {
@@ -144,99 +130,6 @@ impl From<&WorkbenchCronState> for WorkbenchCronInfo {
 }
 
 #[restate_sdk::workflow]
-pub(crate) trait WorkbenchTurnWorkflow {
-    async fn run(request: Json<WorkbenchTurnWorkflowRequest>) -> HandlerResult<Json<()>>;
-}
-
-pub(crate) struct WorkbenchTurnWorkflowImpl {
-    state: AppState,
-}
-
-impl WorkbenchTurnWorkflowImpl {
-    pub(crate) fn new(state: AppState) -> Self {
-        Self { state }
-    }
-}
-
-impl WorkbenchTurnWorkflow for WorkbenchTurnWorkflowImpl {
-    async fn run(
-        &self,
-        ctx: WorkflowContext<'_>,
-        Json(request): Json<WorkbenchTurnWorkflowRequest>,
-    ) -> HandlerResult<Json<()>> {
-        let session_id = request.session_id.clone();
-        let controller = lash_restate::RestateRuntimeEffectController::new(
-            ctx,
-            configured_restate_authority_id()?,
-        );
-        Box::pin(run_user_turn_terminalized(
-            self.state.clone(),
-            request,
-            &controller,
-        ))
-        .await?;
-        sync_cron_jobs_with_context(&self.state, controller.context(), &session_id, "user_turn")
-            .await?;
-        self.state
-            .queued_work_driver
-            .drain_session(&session_id, "user_turn_completed")
-            .await
-            // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
-            .map_err(classified_plugin_handler_error)?;
-        Ok(Json(()))
-    }
-}
-
-#[restate_sdk::workflow]
-pub(crate) trait WorkbenchQueuedTurnWorkflow {
-    async fn run(request: Json<WorkbenchQueuedTurnWorkflowRequest>) -> HandlerResult<Json<()>>;
-}
-
-pub(crate) struct WorkbenchQueuedTurnWorkflowImpl {
-    state: AppState,
-}
-
-impl WorkbenchQueuedTurnWorkflowImpl {
-    pub(crate) fn new(state: AppState) -> Self {
-        Self { state }
-    }
-}
-
-impl WorkbenchQueuedTurnWorkflow for WorkbenchQueuedTurnWorkflowImpl {
-    async fn run(
-        &self,
-        ctx: WorkflowContext<'_>,
-        Json(request): Json<WorkbenchQueuedTurnWorkflowRequest>,
-    ) -> HandlerResult<Json<()>> {
-        let session_id = request.session_id.clone();
-        let controller = lash_restate::RestateRuntimeEffectController::new(
-            ctx,
-            configured_restate_authority_id()?,
-        );
-        Box::pin(run_queued_turn_terminalized(
-            self.state.clone(),
-            request,
-            &controller,
-        ))
-        .await?;
-        self.state
-            .queued_work_driver
-            .drain_session(&session_id, "queued_turn_completed")
-            .await
-            // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
-            .map_err(classified_plugin_handler_error)?;
-        sync_cron_jobs_with_context(
-            &self.state,
-            controller.context(),
-            &session_id,
-            "queued_turn",
-        )
-        .await?;
-        Ok(Json(()))
-    }
-}
-
-#[restate_sdk::workflow]
 pub(crate) trait WorkbenchButtonTriggerWorkflow {
     async fn run(request: Json<WorkbenchButtonTriggerWorkflowRequest>) -> HandlerResult<Json<()>>;
 }
@@ -257,20 +150,15 @@ impl WorkbenchButtonTriggerWorkflow for WorkbenchButtonTriggerWorkflowImpl {
         ctx: WorkflowContext<'_>,
         Json(request): Json<WorkbenchButtonTriggerWorkflowRequest>,
     ) -> HandlerResult<Json<()>> {
-        let session_id = request.session_id.clone();
         let controller = lash_restate::RestateRuntimeEffectController::new(
             ctx,
             configured_restate_authority_id()?,
         );
+        // The trigger's work reaches the session durably, and the session's
+        // engine drives it.
         run_button_trigger(self.state.clone(), request, &controller)
             .await
             .map_err(terminal_handler_error)?;
-        self.state
-            .queued_work_driver
-            .drain_session(&session_id, "button_trigger")
-            .await
-            // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
-            .map_err(classified_plugin_handler_error)?;
         Ok(Json(()))
     }
 }
@@ -296,7 +184,6 @@ impl WorkbenchMailReceivedWorkflow for WorkbenchMailReceivedWorkflowImpl {
         ctx: WorkflowContext<'_>,
         Json(request): Json<WorkbenchMailReceivedWorkflowRequest>,
     ) -> HandlerResult<Json<()>> {
-        let session_id = request.session_id.clone();
         let controller = lash_restate::RestateRuntimeEffectController::new(
             ctx,
             configured_restate_authority_id()?,
@@ -304,12 +191,6 @@ impl WorkbenchMailReceivedWorkflow for WorkbenchMailReceivedWorkflowImpl {
         run_mail_received(self.state.clone(), request, &controller)
             .await
             .map_err(terminal_handler_error)?;
-        self.state
-            .queued_work_driver
-            .drain_session(&session_id, "mail_received")
-            .await
-            // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
-            .map_err(classified_plugin_handler_error)?;
         Ok(Json(()))
     }
 }
@@ -557,12 +438,6 @@ impl WorkbenchCronJob for WorkbenchCronJobImpl {
             "workbench-cron:trace-emit-completed",
         )
         .await?;
-        self.state
-            .queued_work_driver
-            .drain_session(&state.request.session_id, "cron_tick")
-            .await
-            // Audited: typed queued-work store refusals use the shared terminal classifier; ambiguous failures remain retryable.
-            .map_err(classified_plugin_handler_error)?;
         Ok(Json(()))
     }
 
@@ -590,35 +465,6 @@ mod endpoint_host;
 pub(crate) use endpoint_host::spawn_owned_restate_endpoint;
 #[cfg(test)]
 pub(crate) use endpoint_host::spawn_restate_endpoint;
-
-pub(crate) async fn submit_user_turn(
-    state: &AppState,
-    request: WorkbenchTurnWorkflowRequest,
-) -> Result<lash_restate::RestateInvocationId, AppError> {
-    submit_restate_workflow_json(
-        &state.restate_http,
-        &state.restate_ingress_url,
-        "WorkbenchTurnWorkflow",
-        &request.turn_id,
-        &request,
-    )
-    .await
-}
-
-pub(crate) async fn submit_queued_turn_request(
-    restate_http: &reqwest::Client,
-    restate_ingress_url: &str,
-    request: &WorkbenchQueuedTurnWorkflowRequest,
-) -> Result<lash_restate::RestateInvocationId, AppError> {
-    submit_restate_workflow_json(
-        restate_http,
-        restate_ingress_url,
-        "WorkbenchQueuedTurnWorkflow",
-        &request.turn_id,
-        request,
-    )
-    .await
-}
 
 pub(crate) async fn submit_button_trigger(
     state: &AppState,
@@ -771,57 +617,10 @@ pub(crate) async fn cancel_cron_jobs_for_session(
     Ok(())
 }
 
-async fn run_user_turn(
-    state: AppState,
-    request: WorkbenchTurnWorkflowRequest,
-    controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
-) -> Result<(), AppError> {
-    journaled_session_admission(&state, controller, &request.session_id, "restate.user_turn")
-        .await?;
-    let input = workbench_turn_input(&state, &request).await?;
-    let turn_model_id = request.model.model.clone();
-    let turn_model = model_spec_from_selection(request.model);
-    let turn_scope =
-        lash::runtime::ExecutionScope::turn(request.session_id.as_str(), request.turn_id.clone());
-    let opened = state
-        .open_session(&request.session_id, "restate.user_turn")
-        .await;
-    let session = or_park_refused(&state, &turn_scope, opened, AppError::session_open).await?;
-    apply_model_selection_to_session(&state, &session, turn_model.clone(), "restate_user_turn")
-        .await?;
-    let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
-    let ui_events = ChannelTurnEvents {
-        turn_state: Arc::clone(&turn_state),
-    };
-    let output = session
-        .turn(input)
-        .turn_id(request.turn_id.clone())
-        .require_finish()
-        // Audited: require_finish only validates local turn-builder configuration and performs no session-store I/O.
-        .map_err(AppError::internal)?
-        .stream_to_with_effects(&ui_events, controller)
-        .await;
-    let output = or_park_refused(&state, &turn_scope, output, AppError::runtime).await?;
-    record_turn_output_for_model(
-        &state,
-        &session,
-        TurnOutputIdentity {
-            turn_id: &request.turn_id,
-            durable_turn_id: &request.turn_id,
-        },
-        output,
-        turn_state,
-        "restate_user_turn.completed",
-        Some(&turn_model_id),
-    )
-    .await?;
-    Ok(())
-}
-
 #[expect(clippy::expect_used, reason = "`image/png` is a valid MediaType")]
 pub(crate) async fn workbench_turn_input(
     state: &AppState,
-    request: &WorkbenchTurnWorkflowRequest,
+    request: &UserTurnRequest,
 ) -> Result<TurnInput, AppError> {
     let mut input = TurnInput::text(request.text.clone());
     if let Some(attachment_id) = request.attachment_id.as_deref() {
@@ -842,26 +641,6 @@ pub(crate) async fn workbench_turn_input(
     Ok(input)
 }
 
-async fn run_user_turn_terminalized(
-    state: AppState,
-    request: WorkbenchTurnWorkflowRequest,
-    controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
-) -> HandlerResult<()> {
-    let session_id = request.session_id.clone();
-    let turn_id = request.turn_id.clone();
-    terminalize_turn_execution(
-        &state,
-        &session_id,
-        &turn_id,
-        "restate_user_turn.failed",
-        // Boxed: this future is within a few bytes of the large-future budget.
-        AssertUnwindSafe(Box::pin(run_user_turn(state.clone(), request, controller)))
-            .catch_unwind()
-            .await,
-    )
-    .await
-}
-
 async fn run_button_trigger(
     state: AppState,
     request: WorkbenchButtonTriggerWorkflowRequest,
@@ -874,6 +653,8 @@ async fn run_button_trigger(
         "restate.button_trigger",
     )
     .await?;
+    // The wake it delivers is a root the engine starts on its own.
+    watch_session_roots(&state, &request.session_id);
     state.set_selected_model(request.model.clone());
     let scoped_effect_controller = controller
         .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(format!(
@@ -927,6 +708,8 @@ async fn run_mail_received(
         "restate.mail_received",
     )
     .await?;
+    // The wake it delivers is a root the engine starts on its own.
+    watch_session_roots(&state, &request.session_id);
     state.set_selected_model(request.model.clone());
     let scoped_effect_controller = controller
         .scoped_effect_controller(lash::runtime::AdmittedScope::runtime_operation(format!(
@@ -1083,113 +866,6 @@ async fn run_process_cancel(
         }),
     );
     Ok(())
-}
-
-async fn run_queued_turn(
-    state: AppState,
-    request: WorkbenchQueuedTurnWorkflowRequest,
-    controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
-) -> Result<(), AppError> {
-    journaled_session_admission(
-        &state,
-        controller,
-        &request.session_id,
-        "restate.queued_turn",
-    )
-    .await?;
-    let turn_output_turn_id = request.drain_id();
-    let drain_scope =
-        lash::runtime::ExecutionScope::queue_drain(request.session_id.as_str(), request.drain_id());
-    let opened = state
-        .open_session(&request.session_id, "restate.queued_turn")
-        .await;
-    let session = or_park_refused(&state, &drain_scope, opened, AppError::session_open).await?;
-    let selected_model = model_spec_from_selection(state.selected_model());
-    let turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
-    let ui_events = ChannelTurnEvents {
-        turn_state: Arc::clone(&turn_state),
-    };
-    state.trace_for_session(
-        &request.session_id,
-        "queued_work.restate.start",
-        json!({
-            "reason": request.reason,
-            "session_id": request.session_id,
-            "turn_id": request.turn_id,
-            "model": serde_json::to_value(&selected_model).unwrap_or(Value::Null),
-        }),
-    );
-    let output = match &request.scope {
-        QueuedTurnScope::All => {
-            let drain = request
-                .queued_turn(&session)
-                .stream_to_with_effects(&ui_events, controller)
-                .await;
-            or_park_refused(&state, &drain_scope, drain, AppError::runtime)
-                .await?
-                .ran()
-        }
-        QueuedTurnScope::Selected { batch_ids } => {
-            let drain = request
-                .selected_queued_turn(&session, batch_ids)
-                .stream_to_with_effects(&ui_events, controller)
-                .await;
-            or_park_refused(&state, &drain_scope, drain, AppError::runtime)
-                .await?
-                .turn
-        }
-    };
-    let Some(output) = output else {
-        state.trace_for_session(
-            &request.session_id,
-            "queued_work.restate.empty",
-            json!({
-                "reason": request.reason,
-                "session_id": request.session_id,
-                "turn_id": request.turn_id,
-            }),
-        );
-        state.publish_turn_done(&request.session_id, &request.turn_id);
-        return Ok(());
-    };
-    record_turn_output_for_model(
-        &state,
-        &session,
-        TurnOutputIdentity {
-            turn_id: &request.turn_id,
-            durable_turn_id: &TurnId::from(turn_output_turn_id),
-        },
-        output,
-        turn_state,
-        "restate_queued_turn.completed",
-        Some(&selected_model.id),
-    )
-    .await?;
-    Ok(())
-}
-
-async fn run_queued_turn_terminalized(
-    state: AppState,
-    request: WorkbenchQueuedTurnWorkflowRequest,
-    controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
-) -> HandlerResult<()> {
-    let session_id = request.session_id.clone();
-    let turn_id = request.turn_id.clone();
-    terminalize_turn_execution(
-        &state,
-        &session_id,
-        &turn_id,
-        "restate_queued_turn.failed",
-        // Boxed: this future is within a few bytes of the large-future budget.
-        AssertUnwindSafe(Box::pin(run_queued_turn(
-            state.clone(),
-            request,
-            controller,
-        )))
-        .catch_unwind()
-        .await,
-    )
-    .await
 }
 
 pub(crate) async fn terminalize_turn_execution(
@@ -1409,12 +1085,12 @@ pub(crate) async fn record_turn_output_with_durable_turn_id(
     .await
 }
 
-struct TurnOutputIdentity<'a> {
-    turn_id: &'a TurnId,
-    durable_turn_id: &'a TurnId,
+pub(crate) struct TurnOutputIdentity<'a> {
+    pub(crate) turn_id: &'a TurnId,
+    pub(crate) durable_turn_id: &'a TurnId,
 }
 
-async fn record_turn_output_for_model(
+pub(crate) async fn record_turn_output_for_model(
     state: &AppState,
     session: &lash::LashSession,
     identity: TurnOutputIdentity<'_>,
@@ -1560,9 +1236,59 @@ fn cron_request_from_registration(
 
 mod error_helpers;
 use error_helpers::*;
-mod queued_work_ext;
-use queued_work_ext::QueuedWorkExt;
-mod session_admission;
-use session_admission::{journaled_session_admission, or_park_refused};
+mod turn_follow;
+pub(crate) use turn_follow::*;
+
+/// Journaled outcome of a workflow-entry session admission.
+///
+/// The fence read happens exactly once, on first execution; recording its
+/// outcome in the journal keeps every later attempt on the same command
+/// sequence. An unjournaled early-return refusal diverges replay (the session
+/// can be retired between attempts) and trips a Restate journal mismatch,
+/// which retries the invocation forever.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "outcome")]
+enum JournaledSessionAdmission {
+    Admitted,
+    Refused { message: String },
+}
+
+/// Admit `session_id` for `surface` through the session fence, journaling the
+/// outcome so replays are deterministic. A refusal is the typed conflict.
+async fn journaled_session_admission(
+    state: &AppState,
+    controller: &lash_restate::RestateRuntimeEffectController<'_, WorkflowContext<'_>>,
+    session_id: &SessionId,
+    surface: &'static str,
+) -> Result<(), AppError> {
+    let admission_state = state.clone();
+    let admission_session_id = SessionId::from(session_id.to_string());
+    let Json(admission) = controller
+        .context()
+        .run(move || async move {
+            let outcome = match admission_state
+                .admit_session_id(&admission_session_id, surface)
+                .await
+            {
+                Ok(()) => JournaledSessionAdmission::Admitted,
+                Err(refusal) if refusal.verdict == AppErrorVerdict::Terminal => {
+                    JournaledSessionAdmission::Refused {
+                        message: refusal.message,
+                    }
+                }
+                // Admission read failures (tombstone probe unavailable) stay
+                // retryable inside the journaled step.
+                Err(error) => return Err(HandlerError::from(error)),
+            };
+            Ok(Json(outcome))
+        })
+        .name(surface)
+        .await
+        .map_err(AppError::internal)?;
+    match admission {
+        JournaledSessionAdmission::Admitted => Ok(()),
+        JournaledSessionAdmission::Refused { message } => Err(AppError::conflict(message)),
+    }
+}
 #[cfg(test)]
 mod tests;

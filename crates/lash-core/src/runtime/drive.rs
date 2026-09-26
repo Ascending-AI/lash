@@ -138,9 +138,7 @@ impl DriveRootRun {
         let (stop, terminal) = match outcome {
             crate::TurnOutcome::Finished(_) => (None, true),
             crate::TurnOutcome::Stopped(stop) => (Some(stop.clone()), true),
-            crate::TurnOutcome::AgentFrameSwitch { .. } | crate::TurnOutcome::Queued { .. } => {
-                (None, false)
-            }
+            crate::TurnOutcome::AgentFrameSwitch { .. } => (None, false),
         };
         let ends = match ends {
             RootEnd::Settles => true,
@@ -295,6 +293,88 @@ pub async fn run_admitted_root_with(
     Box::pin(runtime.run_admitted_root_step(controller, admitted, &sinks, None))
         .await
         .map(|run| run.outcome)
+}
+
+/// What one admitted root's run left behind in this process: how it ended,
+/// the physical turns it assembled when they ran here, and the accepted
+/// inputs its recorded claim drove.
+///
+/// The facade's settled-root mailbox is filled from it (FIG-3600 S5b): a
+/// handle waiting on one of `driven_inputs` answers with the turn as it ran,
+/// instead of rebuilding a thinner report from the store.
+#[doc(hidden)]
+pub struct RootReport {
+    pub outcome: RootOutcome,
+    pub run: Option<AgentFrameRun>,
+    pub driven_inputs: Vec<crate::InputId>,
+}
+
+impl From<RootRun> for RootReport {
+    fn from(run: RootRun) -> Self {
+        Self {
+            outcome: run.outcome,
+            run: run.run,
+            driven_inputs: run.driven_inputs,
+        }
+    }
+}
+
+/// [`drive_session_with`], also answering each root's [`RootReport`].
+#[doc(hidden)]
+pub async fn drive_session_reporting(
+    runtime: &mut LashRuntime,
+    controller: &ScopedEffectController<'_>,
+    request: &DriveRequest,
+    sinks: DriveSinks<'_>,
+) -> Result<(DriveOutcome, Vec<RootReport>), DriveAbort> {
+    Box::pin(runtime.drive_until(
+        controller,
+        request,
+        &sinks,
+        None,
+        FollowOnRecovery::Recover,
+        |_| false,
+    ))
+    .await
+    .map(|run| {
+        (
+            run.outcome,
+            run.runs.into_iter().map(RootReport::from).collect(),
+        )
+    })
+}
+
+/// [`run_admitted_root_with`], answering the root's [`RootReport`].
+#[doc(hidden)]
+pub async fn run_admitted_root_reporting(
+    runtime: &mut LashRuntime,
+    controller: &ScopedEffectController<'_>,
+    admitted: Admitted,
+    sinks: DriveSinks<'_>,
+) -> Result<RootReport, DriveAbort> {
+    Box::pin(runtime.run_admitted_root_step(controller, admitted, &sinks, None))
+        .await
+        .map(RootReport::from)
+}
+
+/// The root a physical turn belongs to, and its ordinal within the root: a
+/// root's turns are the root itself, then `{root}:agent-frame:{n}`
+/// ([`QueuedRunPosition::derive_turn_id`](crate::store::QueuedRunPosition::derive_turn_id)).
+#[must_use]
+pub fn root_of_physical_turn(turn: &TurnId) -> (TurnId, u64) {
+    if let Some((root, ordinal)) = turn.as_str().rsplit_once(":agent-frame:")
+        && let Ok(ordinal) = ordinal.parse::<u64>()
+        && ordinal > 0
+    {
+        return (TurnId::from(root), ordinal);
+    }
+    (turn.clone(), 0)
+}
+
+/// Physical turn `ordinal` of `root`.
+#[must_use]
+pub fn physical_turn_of(root: &TurnId, ordinal: u64) -> TurnId {
+    crate::store::QueuedRunPosition::derive_turn_id(root, ordinal)
 }
 
 /// The disposition of a runtime error that ends a drive attempt.

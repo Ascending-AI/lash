@@ -331,36 +331,12 @@ finish(await handle);
     state.restate_ingress_url = restate_ingress_url;
     let old_session_id = state.current_session_id();
     let turn_text = "start and await the held process";
-    let Json(accepted) = send_turn(
-        State(state.clone()),
-        Query(SessionQuery::default()),
-        Json(TurnRequest {
-            text: turn_text.to_string(),
-            model: Some("test-model".to_string()),
-            model_variant: None,
-            attachment_id: None,
-        }),
-    )
-    .await
-    .expect("send the process-await turn through the production handler");
-    assert!(accepted.accepted);
-    let submitted = restate_requests
-        .recv()
-        .await
-        .expect("capture the submitted turn");
-    let turn_id = submitted
-        .pointer("/body/turn_id")
-        .and_then(Value::as_str)
-        .expect("submitted turn id")
-        .to_string();
-    let turn_id = TurnId::from(turn_id);
-    assert!(state.active_turns.contains(&old_session_id, &turn_id));
     let session = state
         .core
         .session(old_session_id.clone())
         .open()
         .await
-        .expect("open the submitted session");
+        .expect("open the session the turn will run on");
     let await_entered = Arc::new(ProcessAwaitEntered {
         entered: tokio::sync::Notify::new(),
     });
@@ -369,14 +345,17 @@ finish(await handle);
             Arc::clone(&await_entered) as Arc<dyn lash::runtime::RuntimeTurnPhaseProbe>
         )
         .await;
-    let run_turn_id = turn_id.clone();
-    let turn = tokio::spawn(async move {
-        session
-            .turn(lash::TurnInput::text(turn_text))
-            .turn_id(run_turn_id)
-            .run()
-            .await
-    });
+    // The engine drives a session's roots on the most recent open of it, so
+    // the turn is sent from the session the probe is installed on, under a
+    // claim as the send route would take.
+    let turn_id = TurnId::from(format!("workbench-turn-{}", uuid::Uuid::new_v4()));
+    state.track_turn(&old_session_id, &turn_id);
+    let turn = session
+        .send(lash::TurnInput::text(turn_text))
+        .id(turn_id.clone())
+        .await
+        .expect("send the process-await turn");
+    let turn = tokio::spawn(async move { turn.outcome().await });
     tokio::time::timeout(Duration::from_secs(10), await_entered.entered.notified())
         .await
         .expect("the turn reaches a real process await");
@@ -394,12 +373,8 @@ finish(await handle);
         .expect("the cancelled turn joins")
         .expect("the cancelled turn commits its terminal");
     assert!(
-        matches!(
-            turn.result.outcome,
-            lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. })
-        ),
-        "the delete must settle the running turn as cancelled, got {:?}",
-        turn.result.outcome
+        matches!(turn.status, lash::TurnStatus::Cancelled),
+        "the delete must settle the running turn as cancelled, got {turn:?}"
     );
     assert_ne!(snapshot.settings.session_id, old_session_id);
     assert_eq!(state.current_session_id(), snapshot.settings.session_id);
@@ -598,17 +573,6 @@ fn every_session_bound_route_refuses_a_retired_id_with_the_same_conflict() {
             (
                 "GET /api/queued-work",
                 Box::pin(list_queued_work(State(state.clone()), Query(query())).map_ok(drop)),
-            ),
-            (
-                "POST /api/queued-work/{batch}/run",
-                Box::pin(
-                    run_queued_work_batch(
-                        AxumPath("any-batch".to_string()),
-                        State(state.clone()),
-                        Query(query()),
-                    )
-                    .map_ok(drop),
-                ),
             ),
             (
                 "POST /api/queued-work/{batch}/cancel",

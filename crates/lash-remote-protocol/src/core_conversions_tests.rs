@@ -81,8 +81,6 @@ fn code_block_failure_conversion_preserves_kind_and_message() {
 
 #[test]
 fn turn_input_round_trips_remote_safe_fields() {
-    let mut prompt = lash_core::PromptLayer::new();
-    prompt.add_contribution(lash_core::PromptContribution::guidance("Guide", "remote"));
     let mut input = lash_core::TurnInput::items([
         lash_core::InputItem::text("a"),
         lash_core::InputItem::text("b"),
@@ -95,7 +93,6 @@ fn turn_input_round_trips_remote_safe_fields() {
         serde_json::json!({ "mode": "remote" }),
     ));
     input.trace_turn_id = Some(TurnId::from("trace-1"));
-    input.turn_context.set_prompt_layer(prompt.clone());
 
     let remote = RemoteTurnInput::try_from(input).expect("remote conversion");
     assert_eq!(remote.items.len(), 3);
@@ -110,7 +107,6 @@ fn turn_input_round_trips_remote_safe_fields() {
         remote.protocol_turn_options.as_ref().unwrap().payload,
         serde_json::json!({ "mode": "remote" })
     );
-    assert_eq!(remote.prompt_layer, Some(prompt.clone().into()));
 
     let core = lash_core::TurnInput::try_from(remote).expect("core conversion");
     assert!(matches!(
@@ -124,40 +120,21 @@ fn turn_input_round_trips_remote_safe_fields() {
         core.protocol_turn_options.unwrap().payload,
         serde_json::json!({ "mode": "remote" })
     );
-    assert_eq!(core.turn_context.prompt_layer(), &prompt);
 }
 
 #[test]
-fn remote_turn_request_idempotency_key_contract() {
-    // `idempotency_key` is a host-transport key that lash does not deduplicate
-    // on (see `RemoteTurnRequest::idempotency_key`), so it must never reach
-    // the core turn input. Two requests that differ only in the key convert
-    // identically: the same key is admitted twice, and dedup is the host's
-    // `source_key` at admission.
-    fn request(idempotency_key: Option<&str>) -> RemoteTurnRequest {
-        RemoteTurnRequest {
-            session_id: SessionId::from("session"),
-            turn_id: TurnId::from("turn"),
-            idempotency_key: idempotency_key.map(str::to_string),
-            input: RemoteTurnInput::text("hello"),
-            tool_grants: Vec::new(),
-            metadata: HashMap::new(),
-        }
-    }
-
-    let keyed =
-        lash_core::TurnInput::try_from(request(Some("same-key"))).expect("keyed request converts");
-    let resend = lash_core::TurnInput::try_from(request(Some("same-key")))
-        .expect("resent keyed request converts");
-    let unkeyed = lash_core::TurnInput::try_from(request(None)).expect("unkeyed request converts");
-
-    assert_eq!(
-        serde_json::to_value(&keyed).expect("serialize keyed"),
-        serde_json::to_value(&resend).expect("serialize resend"),
-    );
-    assert_eq!(
-        serde_json::to_value(&keyed).expect("serialize keyed"),
-        serde_json::to_value(&unkeyed).expect("serialize unkeyed"),
+fn a_per_turn_prompt_layer_is_refused_at_the_remote_boundary() {
+    // A per-turn prompt lives in the process-local turn context, which a
+    // durable acceptance does not carry: the wire has no field for it.
+    let mut prompt = lash_core::PromptLayer::new();
+    prompt.add_contribution(lash_core::PromptContribution::guidance("Guide", "remote"));
+    let mut input = lash_core::TurnInput::text("a");
+    input.turn_context.set_prompt_layer(prompt);
+    let error = RemoteTurnInput::try_from(input).expect_err("a per-turn prompt is refused");
+    assert!(
+        matches!(&error, RemoteProtocolError::NonRemoteSafeTurnInput(message)
+            if message.contains("prompt")),
+        "{error:?}"
     );
 }
 
@@ -1121,7 +1098,7 @@ fn remote_turn_result_maps_core_semantics() {
         ],
     );
     remote.validate().expect("valid turn result");
-    assert_eq!(remote.status(), RemoteTurnStatus::Completed);
+    assert_eq!(remote.status(), RemoteTurnStatus::Answered);
     assert_eq!(remote.usage.usage.input_tokens, 1);
     assert_eq!(remote.usage.usage.output_tokens, 2);
     assert_eq!(remote.execution.started_at_ms, 1_700_000_000_000);

@@ -207,12 +207,6 @@ impl AppState {
     }
 
     #[cfg(test)]
-    pub(crate) fn track_queued_turn(&self, session_id: &SessionId, turn_id: &TurnId) {
-        self.active_turns
-            .insert(session_id, turn_id, WorkbenchTurnKind::Queued);
-    }
-
-    #[cfg(test)]
     pub(crate) fn track_turn_prompt(
         &self,
         session_id: &SessionId,
@@ -387,7 +381,7 @@ impl AppState {
         // receipts stay a list because that is what this returns to its
         // callers and what the traces are shaped around.
         let mut receipts = Vec::with_capacity(active.iter().len());
-        if let Some(ActiveTurn { address, kind, .. }) = active {
+        if let Some(ActiveTurn { address, .. }) = active {
             let request_id = format!("workbench-stop-{}", uuid::Uuid::new_v4());
             let cancel = driver
                 .request_cancel(
@@ -444,8 +438,10 @@ impl AppState {
                     address: address.clone(),
                 },
             };
+            // A pending terminal keeps the claim while the root still runs (its
+            // follower releases it); a claim with no running root is pruned.
             let routing_retained = if receipt.terminal_is_pending() {
-                match self.restate_turn_is_active(&address, kind).await {
+                match self.lash_turn_is_active(&address).await {
                     Ok(true) => true,
                     Ok(false) => {
                         self.active_turns
@@ -496,27 +492,20 @@ impl AppState {
         Ok(receipts)
     }
 
-    /// Whether Restate still reports the turn's invocation as running.
-    ///
-    /// The workflow name comes from the claim's own kind. It used to be
-    /// re-derived by sniffing the turn id for a `workbench-queued-` prefix,
-    /// with every other shape falling through to the user workflow — and this
-    /// probe is what decides whether a pending-terminal cancel keeps or drops
-    /// the routing claim, so the wrong name answered `None` and dropped a turn
-    /// that was still running.
-    pub(crate) async fn restate_turn_is_active(
+    /// Whether Restate still reports the root's `LashTurn` invocation (the one
+    /// lash's engine runs it in, keyed by the session and the root) as running.
+    pub(crate) async fn lash_turn_is_active(
         &self,
         address: &lash::TurnAddress,
-        kind: WorkbenchTurnKind,
     ) -> AnyhowResult<bool> {
-        let workflow = kind.workflow_name();
         let admin =
             lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::with_client(
                 self.restate_admin_url.clone(),
                 self.restate_http.clone(),
             ));
+        let key = lash_restate::turn_workflow_key(&address.session_id, &address.turn_id);
         Ok(admin
-            .workflow_invocation_status(workflow, &address.turn_id, "run")
+            .workflow_invocation_status("LashTurn", &key, "run")
             .await?
             .is_some_and(|status| status.is_still_active()))
     }
@@ -1508,6 +1497,18 @@ pub(crate) fn parked_turn_message(error: &lash::EmbedError) -> Option<String> {
             if error.turn_failure_cause() == lash::runtime::TurnFailureCause::Parked =>
         {
             &error.code
+        }
+        // A followed root that parked: its handle answers it unsettled.
+        lash::EmbedError::Send(error)
+            if matches!(
+                error.as_ref(),
+                lash::SendError::NotSettled {
+                    status: lash::TurnStatus::Parked(_),
+                    ..
+                }
+            ) =>
+        {
+            return Some(format!("turn_parked: {}", crate::PARKED_TURN_MESSAGE));
         }
         _ => return None,
     };

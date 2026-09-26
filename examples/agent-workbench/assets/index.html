@@ -1521,22 +1521,6 @@
     .queued-work-meta { font-family: var(--font-ui); font-size: 0.72rem; color: var(--ash-text); }
     .queued-work-actions { display: flex; justify-content: flex-end; gap: var(--space-xs); }
 
-    .work-run {
-      min-height: 2rem;
-      padding: 0 var(--space-sm);
-      border: 1px solid var(--sodium);
-      border-radius: 4px;
-      background: var(--sodium-tint);
-      color: var(--sodium-soft);
-      font-family: var(--font-ui);
-      font-size: 0.68rem;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      cursor: pointer;
-    }
-    .work-run:hover { background: oklch(0.74 0.155 65 / 0.18); }
-    .work-run:disabled { opacity: 0.5; cursor: wait; }
-
     .work-list {
       min-width: 0;
       min-height: 0;
@@ -6512,12 +6496,6 @@
 
         const actions = document.createElement("div");
         actions.className = "queued-work-actions";
-        const run = document.createElement("button");
-        run.className = "work-run";
-        run.type = "button";
-        run.textContent = "run";
-        run.title = "Run only this queued-work batch now";
-        run.setAttribute("aria-label", "Run queued-work batch " + batch.batch_id);
         const cancel = document.createElement("button");
         cancel.className = "work-cancel";
         cancel.type = "button";
@@ -6525,27 +6503,21 @@
         cancel.title = "Cancel this pending queued-work batch";
         cancel.setAttribute("aria-label", "Cancel queued-work batch " + batch.batch_id);
 
-        async function act(kind, button) {
-          run.disabled = true;
+        cancel.addEventListener("click", async () => {
           cancel.disabled = true;
-          button.textContent = kind === "run" ? "starting" : "cancelling";
+          cancel.textContent = "cancelling";
           try {
-            const path = "/api/queued-work/" + encodeURIComponent(batch.batch_id)
-              + (kind === "run" ? "/run" : "");
-            const response = await fetch(path, { method: kind === "run" ? "POST" : "DELETE" });
+            const path = "/api/queued-work/" + encodeURIComponent(batch.batch_id);
+            const response = await fetch(path, { method: "DELETE" });
             if (!response.ok) throw new Error("queued-work action failed");
             await refreshQueuedWork();
-            if (kind === "run") loadState().catch(() => {});
           } catch (_) {
-            run.disabled = false;
             cancel.disabled = false;
-            button.textContent = kind === "run" ? "retry run" : "retry cancel";
-            queuedWorkCount.textContent = kind + " failed — retry";
+            cancel.textContent = "retry cancel";
+            queuedWorkCount.textContent = "cancel failed — retry";
           }
-        }
-        run.addEventListener("click", () => act("run", run));
-        cancel.addEventListener("click", () => act("cancel", cancel));
-        actions.append(run, cancel);
+        });
+        actions.append(cancel);
         card.append(id, meta, actions);
         queuedWorkList.appendChild(card);
       }

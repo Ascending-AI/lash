@@ -93,10 +93,10 @@ finish(await handle);
     )
     .await;
 
-    let invocation =
+    let mut turn =
         run_workbench_turn_via_restate(&harness.state, "Run the typed process llm_query repro.")
             .await;
-    wait_for_restate_invocation_success(&harness.state, &invocation, Duration::from_secs(30)).await;
+    wait_for_workbench_turn_settled(&mut turn, Duration::from_secs(30)).await;
     wait_for_workbench_message(&harness.state, "personal", Duration::from_secs(30)).await;
     assert_eq!(
         provider_calls.load(std::sync::atomic::Ordering::SeqCst),
@@ -173,8 +173,8 @@ finish(`tool batch settled: ${found.length}`);
     )
     .await;
 
-    let invocation = run_workbench_turn_via_restate(&harness.state, "Search twice at once.").await;
-    wait_for_restate_invocation_success(&harness.state, &invocation, Duration::from_secs(30)).await;
+    let mut turn = run_workbench_turn_via_restate(&harness.state, "Search twice at once.").await;
+    wait_for_workbench_turn_settled(&mut turn, Duration::from_secs(30)).await;
     wait_for_workbench_message(
         &harness.state,
         "tool batch settled: 2",
@@ -314,8 +314,9 @@ async fn live_restate_suspended_sleep_cancel_wakes_and_streams_evidence_inner() 
     )
     .await;
 
-    let invocation_id =
+    let turn =
         run_workbench_turn_via_restate(&harness.state, "cancel this suspended durable sleep").await;
+    let invocation_id = lash_turn_invocation(&harness.state, &turn, Duration::from_secs(30)).await;
     wait_for_workbench_restate_invocation_suspended(
         &harness.state,
         &invocation_id,
@@ -455,11 +456,12 @@ finish(await handle);
     )
     .await;
 
-    let invocation_id = run_workbench_turn_via_restate(
+    let turn = run_workbench_turn_via_restate(
         &harness.state,
         "start and await the held process, then accept Stop",
     )
     .await;
+    let invocation_id = lash_turn_invocation(&harness.state, &turn, Duration::from_secs(30)).await;
     wait_for_workbench_restate_invocation_suspended(
         &harness.state,
         &invocation_id,
@@ -621,7 +623,7 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
     .await;
     let session_id = harness.state.current_session_id();
     let mut product_events = harness.state.event_tx.subscribe(&session_id);
-    let (failed_invocation, failed_address) =
+    let (mut failed_turn, failed_address) =
         submit_workbench_turn_via_restate(&harness.state, "trigger deterministic auth failure")
             .await;
     let terminal = harness
@@ -643,16 +645,9 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
         None,
         "provider failure is not cancellation"
     );
-    let invocation = wait_for_restate_invocation_completion(
-        &harness.state,
-        &failed_invocation,
-        Duration::from_secs(20),
-    )
-    .await;
-    assert!(
-        invocation.completed_successfully(),
-        "Restate must durably complete the honest ProviderError turn result"
-    );
+    // The honest ProviderError result is a settled turn: its follower records
+    // it and releases the route.
+    wait_for_workbench_turn_settled(&mut failed_turn, Duration::from_secs(20)).await;
     assert!(
         harness
             .state
@@ -688,17 +683,12 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
             && !message.text.to_ascii_lowercase().contains("cancelled")
     }));
 
-    let (recovery_invocation, recovery_address) = submit_workbench_turn_via_restate(
+    let (mut recovery_turn, recovery_address) = submit_workbench_turn_via_restate(
         &harness.state,
         "prove the same session accepts the next turn",
     )
     .await;
-    wait_for_restate_invocation_success(
-        &harness.state,
-        &recovery_invocation,
-        Duration::from_secs(20),
-    )
-    .await;
+    wait_for_workbench_turn_settled(&mut recovery_turn, Duration::from_secs(20)).await;
     let recovery_terminal = harness
         .state
         .core
@@ -725,37 +715,17 @@ async fn live_restate_provider_auth_failure_terminalizes_and_session_recovers_in
 async fn submit_workbench_turn_via_restate(
     state: &AppState,
     text: &str,
-) -> (lash_restate::RestateInvocationId, lash::TurnAddress) {
-    state.push_message("user", text);
-    let turn_id = TurnId::from(format!("workbench-turn-{}", uuid::Uuid::new_v4()));
-    let session_id = state.current_session_id();
-    let request = restate::WorkbenchTurnWorkflowRequest {
-        turn_id: turn_id.clone(),
-        session_id: session_id.clone(),
-        text: text.to_string(),
-        model: state.selected_model(),
-        attachment_id: None,
-    };
-    state.track_turn_prompt(&session_id, &turn_id, text.to_string(), None);
+) -> (WorkbenchTurn, lash::TurnAddress) {
+    let turn = run_workbench_turn_via_restate(state, text).await;
     let session = state
         .core
-        .session(&session_id)
+        .session(&turn.session_id)
         .open()
         .await
         .expect("open workbench session for durable turn address");
-    let address = session.turn_address(&turn_id);
-    session
-        .close()
-        .await
-        .expect("close workbench address session");
-    let invocation_id = tokio::time::timeout(
-        Duration::from_secs(60),
-        restate::submit_user_turn(state, request),
-    )
-    .await
-    .expect("Restate-backed workbench turn timed out")
-    .expect("submit Restate-backed workbench turn");
-    (invocation_id, address)
+    let address = session.turn_address(&turn.turn_id);
+    drop(session);
+    (turn, address)
 }
 
 async fn wait_for_restate_invocation_completion(
@@ -834,10 +804,10 @@ async fn live_restate_rate_limit_retry_converges_observers_to_one_copy_inner() {
         }
     });
 
-    let (invocation, address) =
+    let (mut turn, address) =
         submit_workbench_turn_via_restate(&harness.state, "trigger deterministic rate limit retry")
             .await;
-    wait_for_restate_invocation_success(&harness.state, &invocation, Duration::from_secs(20)).await;
+    wait_for_workbench_turn_settled(&mut turn, Duration::from_secs(20)).await;
     let terminal = harness
         .state
         .core
@@ -1037,7 +1007,7 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
     // terminally with the session still live. (A turn genuinely held inside a
     // real workflow settles under revocation and lets the delete succeed --
     // the revokes E2E test covers that path; the route additionally sweeps
-    // orphans via its cooperative cancel's liveness probe.)
+    // orphans through its cooperative cancel.)
     let (harness, data_dir) = live_failure_path_harness(
         "delete-failure",
         failure_provider::DevProviderScenario::RenderedSurface,
@@ -1056,8 +1026,8 @@ async fn live_restate_terminal_session_delete_failure_keeps_the_session_live_inn
 
     // Submit the durable delete workflow directly -- the redrive path a
     // delete whose submitting process died leaves behind. The route would
-    // first sweep the orphan claim through its cooperative cancel's liveness
-    // probe; the workflow alone must reach its own bounded terminal failure.
+    // first sweep the orphan claim through its cooperative cancel; the
+    // workflow alone must reach its own bounded terminal failure.
     let execution_scope = lash::runtime::ExecutionScope::session_delete(&session_id);
     let delete_invocation_id = restate::submit_session_delete(
         &harness.state,
@@ -1205,11 +1175,13 @@ finish(await handle);
     .await;
 
     let deleted_session_id = harness.state.current_session_id();
-    let turn_invocation_id = run_workbench_turn_via_restate(
+    let mut turn = run_workbench_turn_via_restate(
         &harness.state,
         "await a process while this session is deleted",
     )
     .await;
+    let turn_invocation_id =
+        lash_turn_invocation(&harness.state, &turn, Duration::from_secs(30)).await;
     wait_for_workbench_restate_invocation_suspended(
         &harness.state,
         &turn_invocation_id,
@@ -1280,28 +1252,15 @@ finish(await handle);
         "session revocation immediately emitted a process cancel: {immediate_events:#?}"
     );
 
-    let turn_status = wait_for_restate_invocation_completion(
-        &harness.state,
-        &turn_invocation_id,
-        Duration::from_secs(20),
-    )
-    .await;
-    assert!(
-        !turn_status.completed_successfully(),
-        "a tombstoned session turn must not report successful completion"
-    );
+    let turn_failure = wait_for_workbench_turn_failed(&mut turn, Duration::from_secs(20)).await;
     // Re-baselined for FIG-2358: the revoked turn resumes while the delete
     // workflow is inside its bounded settle window, so the session fence
     // refuses it as retiring ("is being deleted"); a turn that resumes after
     // the tombstone commits gets the deleted refusal ("used and deleted").
     // Either way it is the shared typed retirement refusal, never success.
     assert!(
-        turn_status
-            .completion_failure
-            .as_deref()
-            .is_some_and(|failure| failure.contains("used and deleted")
-                || failure.contains("is being deleted")),
-        "revoked turn must terminalize as the typed retirement refusal: {turn_status:#?}"
+        turn_failure.contains("used and deleted") || turn_failure.contains("is being deleted"),
+        "revoked turn must terminalize as the typed retirement refusal: {turn_failure}"
     );
     let process_terminal = tokio::time::timeout_at(
         process_settles_by,
@@ -1407,14 +1366,9 @@ finish("started lifecycle gates");
     .await;
 
     let deleted_session_id = harness.state.current_session_id();
-    let turn_invocation_id =
+    let mut turn =
         run_workbench_turn_via_restate(&harness.state, "start process lifecycle gates").await;
-    wait_for_restate_invocation_success(
-        &harness.state,
-        &turn_invocation_id,
-        Duration::from_secs(30),
-    )
-    .await;
+    wait_for_workbench_turn_settled(&mut turn, Duration::from_secs(30)).await;
     let (survivor_id, cancellable_id) = wait_for_named_running_processes(
         &harness.state,
         &["survivor", "cancellable"],
@@ -1699,7 +1653,7 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
         .event_tx
         .subscribe(&harness.state.current_session_id());
 
-    let turn_invocation_id =
+    let mut turn =
         run_workbench_turn_via_restate(&harness.state, "initial turn input_ingress_gate=true")
             .await;
     assert_eq!(
@@ -1747,65 +1701,48 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
             Some(expected)
         );
     }
-    let queued_turn = harness
-        .state
-        .active_turns
-        .for_session(&session_id)
-        // The claim carries the workflow that owns it, so this no longer has
-        // to read the fact back out of the turn id.
-        .filter(|active_turn| active_turn.kind == WorkbenchTurnKind::Queued)
-        .expect("queued-work driver must publish the queued turn address");
-    wait_for_restate_invocation_success(
-        &harness.state,
-        &turn_invocation_id,
-        Duration::from_secs(30),
-    )
-    .await;
-    wait_for_workbench_message(
-        &harness.state,
-        "queued turn settled",
-        Duration::from_secs(30),
-    )
-    .await;
-    admission_gate.wait_until_admitted().await;
-    // The page's reads answer from the durable head and never claim the session
-    // execution lease (FIG-3144, FIG-3151), so `/api/state` answers *through* a
-    // held admitted open rather than queueing behind it. The gated cron-sync
-    // open is the only place on the live stack where a real held admission can
-    // be observed, so that contract is pinned here.
-    let Json(held_read) = Box::pin(app_state(
-        State(harness.state.clone()),
-        Query(SessionQuery::default()),
-    ))
-    .await
-    .expect("a lease-free read must answer while an admitted open is held");
-    drop(held_read);
-    let (_, _, _, contentions_under_hold) = admission_gate.counts();
-    assert_eq!(
-        contentions_under_hold, 0,
-        "a lease-free read contended with the held cron-sync admission"
-    );
-    admission_gate.release();
-    wait_for_restate_workflow_success(
-        &harness.state,
-        "WorkbenchQueuedTurnWorkflow",
-        &queued_turn.address.turn_id,
-        Duration::from_secs(30),
-    )
-    .await;
-    let Json(snapshot) = Box::pin(app_state(
-        State(harness.state.clone()),
-        Query(SessionQuery::default()),
-    ))
-    .await
-    .expect("read the settled workbench state");
-    admission_gate.finish();
-    let (_attempts, acquisitions, admissions, _contentions) = admission_gate.counts();
-    assert_eq!(
-        acquisitions, admissions,
-        "every successful open claim must pass admit_session_state"
-    );
+    wait_for_workbench_turn_settled(&mut turn, Duration::from_secs(30)).await;
+    // The next-turn input is a root the session's engine starts on its own:
+    // no route follows it, and its reply reaches the page through the
+    // committed transcript.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let snapshot = loop {
+        let Json(snapshot) = Box::pin(app_state(
+            State(harness.state.clone()),
+            Query(SessionQuery::default()),
+        ))
+        .await
+        .expect("read the workbench state");
+        let queued_reply_committed = snapshot.transcript.iter().any(|row| {
+            matches!(
+                row,
+                TranscriptRow::Message { message } if message.text.contains("queued turn settled")
+            )
+        });
+        if snapshot.observation.turn_index >= 2 && queued_reply_committed {
+            break snapshot;
+        }
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the queued input's own turn did not commit; turn_index={}",
+            snapshot.observation.turn_index
+        );
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    };
 
+    // The engine-started root's follower settles it through its own open,
+    // and the engine's drive opens the session once more for its last
+    // admission pass: the gate counts every claim on the session, so it arms
+    // once that follower is done and the engine runs nothing on the session.
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    while harness.state.active_turns.follows.follows_any(&session_id) {
+        assert!(
+            tokio::time::Instant::now() < deadline,
+            "the queued root's follower did not finish"
+        );
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    wait_for_session_engine_idle(&admin_url, &session_id, Duration::from_secs(30)).await;
     admission_gate.arm();
     let state_for_holder = harness.state.clone();
     let session_id_for_holder = session_id.clone();
@@ -1815,11 +1752,21 @@ async fn live_restate_turn_input_ingress_delivers_once_and_queues_after_settle_i
             .await
     });
     admission_gate.wait_until_admitted().await;
+    // The page's reads answer from the durable head and never claim the session
+    // execution lease (FIG-3144, FIG-3151), so `/api/state` answers *through* a
+    // held admitted open rather than queueing behind it.
+    let Json(held_read) = Box::pin(app_state(
+        State(harness.state.clone()),
+        Query(SessionQuery::default()),
+    ))
+    .await
+    .expect("a lease-free read must answer while an admitted open is held");
+    drop(held_read);
     // The bounded-retry refusal belongs to the surfaces that still take the
-    // lease. `/api/queued_work/<batch>/run` opens the session before it can look
-    // at the batch, so it is the live surface that still answers 503 while the
-    // lane is held; the page's reads no longer reach this path at all.
-    let exhausted = Box::pin(run_queued_work_batch(
+    // lease. `DELETE /api/queued-work/<batch>` opens the session before it can
+    // look at the batch, so it is the live surface that still answers 503 while
+    // the lane is held; the page's reads no longer reach this path at all.
+    let exhausted = Box::pin(cancel_queued_work_batch(
         AxumPath("no-such-batch".to_string()),
         State(harness.state.clone()),
         Query(SessionQuery::default()),
@@ -2032,28 +1979,21 @@ async fn live_restate_ingress_owner_restart_for_store(backend: &'static str) {
     let turn_id = TurnId::from(format!("workbench-turn-recovery-{backend}-e2e"));
     std::fs::write(data_dir.join("session-id"), session_id.as_str())
         .expect("write recovery E2E session id");
-    let active_turns = ActiveTurns::persistent(data_dir.join("active-turns.json"))
-        .expect("open recovery E2E active-turn routing");
-    active_turns.insert(&session_id, &turn_id, WorkbenchTurnKind::User);
 
     let mut first = spawn_recovery_e2e_child(&data_dir, endpoint_bind, &ingress_url, backend);
     let first_pid = first.id();
     wait_for_endpoint_socket(endpoint_bind).await;
     let deployment_id = register_restate_deployment(&admin_url, &endpoint_url).await;
-    let request = restate::WorkbenchTurnWorkflowRequest {
-        turn_id: turn_id.clone(),
-        session_id: session_id.clone(),
-        text: "hold until durable cancellation".to_string(),
-        model: ModelSelection {
-            model: "mock-model".to_string(),
-            model_variant: Some("high".to_string()),
-        },
-        attachment_id: None,
-    };
-    let invocation_id = lash_restate::RestateIngressClient::new(ingress_url.clone())
-        .send_workflow_json("WorkbenchTurnWorkflow", &turn_id, "run", &request)
-        .await
-        .expect("submit recovery E2E turn");
+    // The first owner sends the turn once its handlers are registered, as the
+    // browser's send would reach it.
+    std::fs::write(data_dir.join(RECOVERY_E2E_START_TURN), turn_id.as_str())
+        .expect("ask the first owner to send the recovery E2E turn");
+    let invocation_id = lash_turn_invocation_at(
+        &admin_url,
+        &lash::TurnAddress::new(&session_id, &turn_id),
+        Duration::from_secs(20),
+    )
+    .await;
     wait_for_provider_owner(&data_dir, first_pid, Duration::from_secs(20)).await;
     let admitted = restate_invocation_status_with_deployment(&admin_url, &invocation_id)
         .await
@@ -2255,6 +2195,10 @@ async fn wait_for_restate_deployment_and_unpinned_invocations_drained(
     }
 }
 
+/// The file whose appearance asks a recovery child to send the turn it names.
+/// Only the first owner finds it unconsumed: it removes the file once sent.
+const RECOVERY_E2E_START_TURN: &str = "start-turn";
+
 fn spawn_recovery_e2e_child(
     data_dir: &std::path::Path,
     endpoint_bind: SocketAddr,
@@ -2331,13 +2275,41 @@ async fn live_restate_recovery_child() {
         lease_timings,
     )
     .await;
+    let state = harness.state.clone();
     restate::spawn_restate_endpoint(
         endpoint_bind,
         harness.state,
         harness.backend,
         harness.process_worker,
     );
-    std::future::pending::<()>().await;
+    let start_turn = data_dir.join(RECOVERY_E2E_START_TURN);
+    let mut followers = Vec::new();
+    loop {
+        if let Ok(turn_id) = std::fs::read_to_string(&start_turn) {
+            let session_id = state.current_session_id();
+            let turn_id = TurnId::from(turn_id.trim().to_string());
+            state.track_turn(&session_id, &turn_id);
+            followers.push(
+                restate::start_user_turn(
+                    &state,
+                    restate::UserTurnRequest {
+                        turn_id,
+                        session_id,
+                        text: "hold until durable cancellation".to_string(),
+                        model: ModelSelection {
+                            model: "mock-model".to_string(),
+                            model_variant: Some("high".to_string()),
+                        },
+                        attachment_id: None,
+                    },
+                )
+                .await
+                .expect("send the recovery E2E turn"),
+            );
+            std::fs::remove_file(&start_turn).expect("consume the recovery E2E start request");
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
 async fn wait_for_provider_owner(data_dir: &std::path::Path, expected_pid: u32, timeout: Duration) {
@@ -2468,42 +2440,5 @@ async fn wait_for_session_lease_generation(
             "replacement did not supersede the dead session-lease generation within {timeout:?}"
         );
         tokio::time::sleep(Duration::from_millis(100)).await;
-    }
-}
-
-async fn wait_for_restate_workflow_success(
-    state: &AppState,
-    workflow: &str,
-    workflow_key: &str,
-    timeout: Duration,
-) {
-    let admin =
-        lash_restate::RestateAdminClient::new(lash_restate::RestateConnection::with_client(
-            state.restate_admin_url.clone(),
-            state.restate_http.clone(),
-        ));
-    let deadline = tokio::time::Instant::now() + timeout;
-    loop {
-        match admin
-            .workflow_invocation_status(workflow, workflow_key, "run")
-            .await
-            .expect("query queued-work workflow status")
-        {
-            Some(status) if status.completed_successfully() => return,
-            Some(status)
-                if status.status == lash_restate::RestateInvocationLifecycle::Completed =>
-            {
-                panic!(
-                    "Restate workflow {workflow}/{workflow_key} completed unsuccessfully: {status:#?}"
-                )
-            }
-            _ => {}
-        }
-        assert!(
-            tokio::time::Instant::now() < deadline,
-            "Restate workflow {workflow}/{workflow_key} did not complete within {timeout:?}"
-        );
-        // Pace polling of the external admin API; this is not test-race sequencing.
-        tokio::time::sleep(Duration::from_millis(50)).await;
     }
 }

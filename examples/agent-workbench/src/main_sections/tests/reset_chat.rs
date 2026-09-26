@@ -52,7 +52,6 @@ pub(super) async fn reset_chat_deletes_old_session_and_clears_trigger_started_wo
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(1024),
-        queued_work_driver: inert_queued_work(),
         restate_ingress_url,
         restate_admin_url: "http://127.0.0.1:9070".to_string(),
         restate_http: reqwest::Client::new(),

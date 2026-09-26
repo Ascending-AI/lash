@@ -25,8 +25,8 @@ impl AppState {
     ///
     /// The durable head this attach needs is the same one `/api/state` reads
     /// without a lease, so it is read the same way and handed to
-    /// [`lash::SessionBuilder::open_with_state`], which admits nothing and
-    /// claims nothing. The builder is still
+    /// [`lash::SessionBuilder::observe_with_state`], which admits nothing,
+    /// claims nothing, and is never a runtime the session's drives run on. The builder is still
     /// [`Self::observer_session_builder`]: no model statement, so observing a
     /// session never writes config authority over its settled head
     /// (FIG-3144, FIG-3151).
@@ -52,7 +52,7 @@ impl AppState {
                 state
             });
         self.observer_session_builder(session_id.to_string())
-            .open_with_state(state)
+            .observe_with_state(state)
             .await
     }
 }

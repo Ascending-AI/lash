@@ -27,11 +27,8 @@ persistence sink, so a client can observe an activity before its corresponding
 app row exists; clients must not perform read-after-see database reads. Once the
 HTTP 200 stream has started, a failed turn or a client that disconnects produces
 a silently truncated stream, with the error reported only in the server logs.
-That behavior is deliberate for this raw transport lane.
-
-In Restate mode the endpoint returns 501. Restate clients must use the app-owned
-turn outbox keyed by `turn_id` that the progress stream reads, as described in
-the Restate section below.
+That behavior is deliberate for this raw transport lane. It serves both
+durability modes: the session's engine drives the turn either way.
 
 Validate the example build and unit tests:
 
@@ -84,8 +81,8 @@ The durability mode can also be passed as `--durability local`. Both modes keep
 their stores in one SQLite store set under `$AGENT_SERVICE_DATA_DIR/lash-sessions`.
 Local durability opens that root as a file `SqliteBackend`, its effect journal
 beside the stores. Restate durability opens the same root as a `SqliteStoreSet`
-and runs a `RestateEngine` over it: every turn runs in the foreground under a
-handler-scoped controller. Restate mode is feature-gated and
+and runs a `RestateEngine` over it: every turn is driven by lash's
+`LashSession` service in a Restate handler. Restate mode is feature-gated and
 uses these local defaults:
 
 | Path | App | Restate endpoint | Ingress | Admin |
@@ -114,10 +111,10 @@ and register `http://host.docker.internal:9080` (or add
 `--add-host=host.docker.internal:host-gateway` on Linux).
 
 For the live E2E, use the one-command recipe. It starts the agent-service
-Restate endpoint in-process, registers it through the Restate Admin API, submits
-a turn through Restate ingress, runs a named background process against
-the tic-tac-toe board through `LashProcessWorkflow`, verifies app
-outbox/message persistence, and removes the container on exit:
+Restate endpoint in-process, registers it through the Restate Admin API, sends
+a chat message through the chat route (which `LashSession` drives), runs a named
+background process against the tic-tac-toe board through `LashProcessWorkflow`,
+verifies the persisted assistant message, and removes the container on exit:
 
 ```bash
 just agent-service-restate-e2e
@@ -131,21 +128,23 @@ The recipe starts `restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0
 local Docker networking needs different addresses.
 
 In Restate mode the Axum app still serves `AGENT_SERVICE_ADDR`, the same process
-also serves a Restate endpoint on `AGENT_SERVICE_RESTATE_ADDR`, and browser
-turns finish the app-specific `AgentServiceTurnWorkflow/{turn_id}/run/send`
-through `RESTATE_INGRESS_URL`. `RESTATE_AUTHORITY_ID` identifies the durable
+also serves a Restate endpoint on `AGENT_SERVICE_RESTATE_ADDR`, and the chat
+route hands each message to the chat session's `send(input).id(turn_id)`: the
+session's engine asks lash's `LashSession` service, through
+`RESTATE_INGRESS_URL`, to drive it. `RESTATE_AUTHORITY_ID` identifies the durable
 Restate state independently of that endpoint; preserve it across endpoint
 moves and choose a different value for every independent Restate state. The endpoint starts from
 `RestateEngine::endpoint_builder`, which binds every Lash-owned service,
 among them the generic `LashProcessWorkflow` over the service's process worker
 and the store set's process registry, so background process starts from a turn
 are reconstructed from the SQLite durable-core catalog instead of running in the
-route process. The service binds only its own workflows beside them. `AgentServiceTurnWorkflowRequest` carries only stable turn, chat, text,
-model, and model-variant data; board state stays in the app database. The
-workflow creates a `RestateRuntimeEffectController` and calls
-`session.turn(...).turn_id(...).stream_to_with_effects(..., &controller)`.
-The stable chat/session id and turn id keep Restate replay and Lash final
-commit addressed to the same operation.
+route process. The service binds only its effect-group demo workflow beside
+them: it runs no turn itself. The chat id names the session and the turn id
+names the root, so Restate replay and Lash's final commit address the same
+operation. The route reads the settled turn through the send handle
+(`output_into`), the same way in both durability modes; a host whose HTTP
+process is not the `LashTurn` worker sees live events only through a shared
+`LiveReplayStore`, while the settled outcome always resolves from the store.
 
 Among the Lash-owned services are the effect-group ones: `EffectGroupIndex`,
 `EffectGroupPayload`, `EffectGroupDispatch`, `LashDurableWaitWorkflow`, and
@@ -201,9 +200,6 @@ and is observed by a replayed turn owner. Cancellation is cooperative and does
 not guarantee detached effects have stopped. Chat and turn ids are routing
 identity, not authorization; this localhost example verifies that the chat
 exists, while a production service must authenticate and authorize callers.
-Turn progress is written to an app-owned
-SQLite outbox keyed by `turn_id`, so the NDJSON route can stream progress after
-route restart or while the workflow is running in the Restate handler.
 Semantic progress is sourced from the Lash session observation API rather than
 from a route-local side channel: the route captures
 `session.observe().current_observation().cursor` before the turn, emits that
@@ -214,9 +210,7 @@ until the session commit is observed. If the cursor is no longer in the bounded
 replay window, the stream emits `replay_gap` with the public
 `RemoteLiveReplayGap` payload plus a fresh remote observation snapshot,
 including the requested cursor, latest cursor, latest revision, and reason.
-Restate mode uses the same live replay path for turn activity and keeps the app
-outbox focused on durable product rows such as user messages, assistant
-messages, errors, and `done`.
+Restate mode uses the same route and the same live replay path.
 
 Then open `http://127.0.0.1:3000`.
 

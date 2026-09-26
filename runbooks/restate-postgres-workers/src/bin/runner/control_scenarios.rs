@@ -477,9 +477,10 @@ pub(super) async fn drive_suspended_sleep_cancel_scenario(
         scenario: TurnScenario::TurnControlSleep,
         signal: None,
     };
-    let invocation_id = submit_workflow(ingress_url, &request).await?;
+    submit_workflow(ingress_url, &request).await?;
     let admin = RestateAdminClient::new(admin_url.to_string());
-    wait_for_invocation_suspended(&admin, &invocation_id, Duration::from_secs(90)).await?;
+    let turn_invocation = lash_turn_invocation(&admin, &request).await?;
+    wait_for_invocation_suspended(&admin, &turn_invocation, Duration::from_secs(90)).await?;
     report_workflow_progress(&request.workflow_id, "durable-sleep-suspended");
 
     let evidence_id = "e2e-cancel-suspended-sleep";
@@ -537,8 +538,9 @@ pub(super) async fn drive_engine_restart_scenario(
         scenario: TurnScenario::TurnControlSleep,
         signal: None,
     };
-    let sleeping_invocation_id = submit_workflow(ingress_url, &sleeping).await?;
+    submit_workflow(ingress_url, &sleeping).await?;
     let admin = RestateAdminClient::new(admin_url.to_string());
+    let sleeping_invocation_id = lash_turn_invocation(&admin, &sleeping).await?;
     wait_for_cancel_gate_attempts(storage.pool(), &parked.workflow_id, 1).await?;
     wait_for_invocation_suspended(&admin, &sleeping_invocation_id, Duration::from_secs(90)).await?;
     record_harness_signal(storage.pool(), "engine-restart-ready").await?;
@@ -715,15 +717,24 @@ pub(super) async fn drive_break_glass_scenario(
     // Cancelled terminal. Graceful Restate cancellation cannot interrupt
     // arbitrary local user code blocked inside a running side-effect closure.
     let break_glass = turn_control_request("e2e-turn-break-glass", false);
-    let invocation_id = submit_workflow(ingress_url, &break_glass).await?;
+    // The engine's `LashTurn` runs the turn, so the kill lands there; the
+    // workflow that sent it only awaits it, and is killed after it so no
+    // waiter outlives the gate.
+    let workflow_invocation = submit_workflow(ingress_url, &break_glass).await?;
     wait_for_cancel_gate(storage.pool(), &break_glass.workflow_id).await?;
     let admin = RestateAdminClient::new(admin_url.to_string());
+    let invocation_id = lash_turn_invocation(&admin, &break_glass).await?;
     admin
         .kill_invocation_for_test_cleanup(&invocation_id)
         .await
         .context("kill Restate invocation as break-glass")?;
     report_workflow_progress(&break_glass.workflow_id, "admin-kill-requested");
     wait_for_invocation_terminal(&admin, &invocation_id).await?;
+    admin
+        .kill_invocation_for_test_cleanup(&workflow_invocation)
+        .await
+        .context("kill the break-glass workflow's waiter")?;
+    wait_for_invocation_terminal(&admin, &workflow_invocation).await?;
 
     let driver = TurnWorkDriver::for_catalog(
         Arc::new(RestateEffectHost::new(
@@ -1047,6 +1058,30 @@ pub(super) async fn wait_for_invocation_terminal(
         tokio::time::sleep(Duration::from_millis(250)).await;
     }
     anyhow::bail!("break-glass invocation `{invocation_id}` did not terminate")
+}
+
+/// The engine's `LashTurn` invocation running `request`'s turn: the root the
+/// worker sends under the workflow id.
+pub(super) async fn lash_turn_invocation(
+    admin: &RestateAdminClient,
+    request: &TurnRequest,
+) -> Result<RestateInvocationId> {
+    let address = turn_address(request).await?;
+    let key = lash_restate::turn_workflow_key(&address.session_id, &address.turn_id);
+    let deadline = Instant::now() + Duration::from_secs(90);
+    loop {
+        if let Some(status) = admin
+            .workflow_invocation_status("LashTurn", &key, "run")
+            .await
+            .context("read the engine's LashTurn invocation")?
+        {
+            return Ok(RestateInvocationId::new(status.id));
+        }
+        if Instant::now() >= deadline {
+            anyhow::bail!("the engine admitted no LashTurn for `{key}` within 90s");
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 }
 
 pub(super) async fn wait_for_invocation_suspended(

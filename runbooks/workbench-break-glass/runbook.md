@@ -20,7 +20,7 @@ scripted evidence. This runbook covers only the operator and browser story.
 1. Boot only with `AGENT_WORKBENCH_DEV_PROVIDER_SCENARIO=exec-blocked`. Its first call
    emits a ten-minute foreground TypeScript sleep; its second call deterministically
    finishes `session recovered after break glass`.
-2. Identify the exact `WorkbenchTurnWorkflow` invocation by the active turn id. Never
+2. Identify the exact `LashTurn` invocation by the active turn's `<session>:<turn>` key. Never
    kill by service prefix, most-recent guess, container, or process id.
 3. Use Restate Admin `PATCH /invocations/<id>/kill`, not cooperative cancel. KILL is
    owner destruction, not cancellation evidence, and must never produce a rendered or
@@ -94,20 +94,21 @@ Submit `enter the deterministic exec block`. Poll until all of these agree:
 Record the turn id. Screenshot `01-exec-blocked.png`; save state and matching trace rows
 as `01-exec-blocked-state.json` and `01-exec-blocked-trace.json`.
 
-Query Restate by the exact turn id, escaping it as a SQL string literal:
+Query Restate by the exact `<session-id>:<turn-id>` key, escaping it as a SQL string literal:
 
 ```sql
 SELECT id, target_service_name, target_service_key, target_handler_name, status,
        completion_result, completion_failure
 FROM sys_invocation
-WHERE target_service_name = 'WorkbenchTurnWorkflow'
-  AND target_service_key = '<exact-turn-id>'
+WHERE target_service_name = 'LashTurn'
+  AND target_service_key = '<exact-session-id>:<exact-turn-id>'
   AND target_handler_name = 'run'
 ORDER BY modified_at DESC
 ```
 
 Require exactly one active row and save the query response as
-`01-restate-invocation.json`. Its `target_service_key` must equal the UI/API turn id.
+`01-restate-invocation.json`. Its `target_service_key` must equal the UI/API session id
+and turn id joined by `:`.
 
 ## Phase 2 — Admin-KILL the invocation
 
@@ -174,7 +175,7 @@ Restate container are gone.
 | Item | Objective gate | Verdict | Evidence |
 |------|----------------|---------|----------|
 | Deterministic wedge | exact route is running in foreground ten-minute exec | | `01-exec-blocked.*` |
-| Exact invocation | Restate row key equals active turn id | | `01-restate-invocation.json` |
+| Exact invocation | Restate `LashTurn` key equals `<session>:<active turn id>` | | `01-restate-invocation.json` |
 | Admin KILL | exact invocation becomes non-active | | `02-killed-invocation.json` |
 | No fabricated cancellation | UI/API/trace never report Cancelled or evidence | | `02-*`, `03-*` |
 | Honest route pruning | `cancellation_recorded_terminal_pending` with no terminal and no terminal_error; unknown-terminal disclosure survives a re-render on the projection and in the trace; route clears | | `03-pruned-*` |

@@ -29,13 +29,11 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
         })
         .build()
         .into_handle();
-    let mut state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
-    let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
-    state.restate_ingress_url = restate_ingress_url;
+    let state = recoverable_chat_test_state_with_provider(data_dir.path(), 16, provider).await;
     let session_id = state.current_session_id();
     let initial_prompt = "switch through three frames";
 
-    let _ = send_turn(
+    let Json(accepted) = send_turn(
         State(state.clone()),
         Query(SessionQuery::default()),
         Json(TurnRequest {
@@ -47,54 +45,34 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
     )
     .await
     .expect("submit initial real send");
-    let initial_submission = restate_requests
-        .recv()
-        .await
-        .expect("capture initial real send");
-    let initial_turn_id = initial_submission
-        .pointer("/body/turn_id")
-        .and_then(Value::as_str)
-        .expect("initial real-send turn id")
-        .to_string();
-    let initial_turn_id = TurnId::from(initial_turn_id);
+    let initial_turn_id = started_turn_id(&accepted);
+    wait_for_turn_released(
+        &state,
+        &session_id,
+        &initial_turn_id,
+        Duration::from_secs(30),
+    )
+    .await;
+    // The follower's own handle may still hold the session's lease a moment
+    // after it releases the claim: open through the host's bounded retry.
     let session = state
-        .core
-        .session(session_id.clone())
-        .open()
+        .open_session(&session_id, "test")
         .await
         .expect("open multi-frame session");
-    let initial_turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let initial_output = session
-        .turn(lash::TurnInput::text(initial_prompt))
-        .turn_id(initial_turn_id.clone())
-        .require_finish()
-        .expect("require initial finish")
-        .stream_to(&ChannelTurnEvents {
-            turn_state: Arc::clone(&initial_turn_state),
-        })
+        .root(initial_turn_id.clone())
+        .output()
         .await
-        .expect("run real send across two frame switches");
+        .expect("the real send settled across two frame switches")
+        .result;
     assert_eq!(
         initial_output.final_value(),
         Some(&json!("third frame answer"))
     );
-    crate::restate::record_turn_output(
-        &state,
-        &session,
-        &initial_turn_id,
-        initial_output,
-        initial_turn_state,
-        "test.continue_as.three_frames.completed",
-    )
-    .await
-    .expect("record initial multi-frame send");
-    crate::restate::settle_workbench_turn(&state, &session_id, &initial_turn_id)
-        .await
-        .expect("settle initial multi-frame send");
     session.close().await.expect("close after frame switches");
 
     let ordinary_prompt = "ordinary send inside the final follow frame";
-    let _ = send_turn(
+    let Json(accepted) = send_turn(
         State(state.clone()),
         Query(SessionQuery::default()),
         Json(TurnRequest {
@@ -106,50 +84,30 @@ async fn two_continue_as_switches_keep_real_sends_and_show_the_current_follow_ta
     )
     .await
     .expect("submit ordinary follow-frame send");
-    let ordinary_submission = restate_requests
-        .recv()
-        .await
-        .expect("capture ordinary follow-frame send");
-    let ordinary_turn_id = ordinary_submission
-        .pointer("/body/turn_id")
-        .and_then(Value::as_str)
-        .expect("ordinary real-send turn id")
-        .to_string();
-    let ordinary_turn_id = TurnId::from(ordinary_turn_id);
+    let ordinary_turn_id = started_turn_id(&accepted);
+    wait_for_turn_released(
+        &state,
+        &session_id,
+        &ordinary_turn_id,
+        Duration::from_secs(30),
+    )
+    .await;
+    // The follower's own handle may still hold the session's lease a moment
+    // after it releases the claim: open through the host's bounded retry.
     let session = state
-        .core
-        .session(session_id.clone())
-        .open()
+        .open_session(&session_id, "test")
         .await
         .expect("reopen final follow frame");
-    let ordinary_turn_state = Arc::new(Mutex::new(TurnStreamState::default()));
     let ordinary_output = session
-        .turn(lash::TurnInput::text(ordinary_prompt))
-        .turn_id(ordinary_turn_id.clone())
-        .require_finish()
-        .expect("require ordinary follow-frame finish")
-        .stream_to(&ChannelTurnEvents {
-            turn_state: Arc::clone(&ordinary_turn_state),
-        })
+        .root(ordinary_turn_id.clone())
+        .output()
         .await
-        .expect("run ordinary follow-frame send");
+        .expect("the ordinary follow-frame send settled")
+        .result;
     assert_eq!(
         ordinary_output.final_value(),
         Some(&json!("ordinary follow-frame answer"))
     );
-    crate::restate::record_turn_output(
-        &state,
-        &session,
-        &ordinary_turn_id,
-        ordinary_output,
-        ordinary_turn_state,
-        "test.continue_as.ordinary_follow_frame.completed",
-    )
-    .await
-    .expect("record ordinary follow-frame send");
-    crate::restate::settle_workbench_turn(&state, &session_id, &ordinary_turn_id)
-        .await
-        .expect("settle ordinary follow-frame send");
 
     assert!(
         session.read_view().messages().iter().any(|message| {

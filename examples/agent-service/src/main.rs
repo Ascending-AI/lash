@@ -73,8 +73,6 @@ use crate::effect_groups::{
     AgentServiceEffectGroupWorkflowImpl,
 };
 use crate::raw_activities::stream_raw_activities;
-#[cfg(feature = "restate")]
-use crate::restate::{AgentServiceTurnWorkflow, AgentServiceTurnWorkflowImpl};
 use crate::routes::{
     cancel_turn, chat_board, create_chat, fork_chat, index, list_chat_branch_points, list_chats,
     list_messages, pin_chat_branch_point, send_message, settings, update_chat_model,
@@ -413,10 +411,6 @@ async fn async_main() -> anyhow_like::Result<()> {
         let restate_ingress_url =
             (durability == AgentServiceDurability::Restate).then_some(restate_ingress_url);
         #[cfg(feature = "restate")]
-        let restate_authority_id = (durability == AgentServiceDurability::Restate).then_some(
-            restate_authority_id.unwrap_or_else(|| panic!("Restate authority configured")),
-        );
-        #[cfg(feature = "restate")]
         let state = AppStateData::from_shared_db(
             core,
             turn_work_driver,
@@ -425,7 +419,6 @@ async fn async_main() -> anyhow_like::Result<()> {
             Some(model_variant),
             durability,
             restate_ingress_url,
-            restate_authority_id,
         );
         #[cfg(not(feature = "restate"))]
         let state = AppStateData::new(
@@ -443,17 +436,14 @@ async fn async_main() -> anyhow_like::Result<()> {
 
         #[cfg(feature = "restate")]
         let restate_endpoint = if let Some(restate_backend) = restate_backend {
-            // Lash's own services come from the backend; the service binds
-            // only its turn and effect-group demo workflows beside them.
+            // Lash's own services come from the backend, and `LashSession`
+            // among them drives every chat turn; the service binds only its
+            // effect-group demo workflow beside them.
             let endpoint = restate_backend
                 .endpoint_builder(
                     process_worker
                         .unwrap_or_else(|| panic!("process worker configured for Restate")),
                 )
-                .bind(lash_restate::turn_service(
-                    AgentServiceTurnWorkflowImpl::new(state.clone()).serve(),
-                    "run",
-                ))
                 .bind(AgentServiceEffectGroupWorkflowImpl.serve())
                 .build();
             let _ = restate_backend

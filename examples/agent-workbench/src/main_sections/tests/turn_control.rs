@@ -3,6 +3,7 @@ use super::tests::{
     spawn_restate_ingress_capture, text_response,
 };
 use super::*;
+use lash::SessionId;
 use lash::TurnId;
 
 struct ExpiringTerminalAttach {
@@ -135,7 +136,6 @@ async fn turn_input_route_records_exact_active_and_next_turn_ingress_inner() {
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx,
-        queued_work_driver: inert_queued_work(),
         restate_ingress_url: "http://127.0.0.1:8080".to_string(),
         restate_admin_url: "http://127.0.0.1:9070".to_string(),
         restate_http: reqwest::Client::new(),
@@ -315,8 +315,8 @@ async fn spawn_restate_admin_with_workflow_status(status: Option<&str>) -> Strin
             .map(|status| {
                 vec![json!({
                     "id": "inv_test_turn",
-                    "target": "workflow/WorkbenchTurnWorkflow/test/run",
-                    "target_service_name": "WorkbenchTurnWorkflow",
+                    "target": "workflow/LashTurn/test/run",
+                    "target_service_name": "LashTurn",
                     "target_service_key": "test",
                     "target_handler_name": "run",
                     "status": status,
@@ -390,7 +390,6 @@ async fn turn_cancel_test_state_with_ingress(
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx,
-        queued_work_driver: inert_queued_work(),
         restate_ingress_url,
         restate_admin_url: admin_url,
         restate_http: reqwest::Client::new(),
@@ -678,7 +677,7 @@ finish(await handle);
         .processes()
         .observer()
         .expect("process observer configured");
-    let (restate_ingress_url, mut restate_requests) = spawn_restate_ingress_capture().await;
+    let (restate_ingress_url, _restate_requests) = spawn_restate_ingress_capture().await;
     let state = AppState {
         unknown_turn_terminals: UnknownTurnTerminals::default(),
         core,
@@ -696,7 +695,6 @@ finish(await handle);
         trace_sink: None,
         lashlang_execution: Arc::new(TraceLashlangGraphStore::default()),
         event_tx: SessionEventRegistry::new(16),
-        queued_work_driver: inert_queued_work(),
         restate_ingress_url,
         restate_admin_url: "http://127.0.0.1:9070".to_string(),
         restate_http: reqwest::Client::new(),
@@ -708,34 +706,12 @@ finish(await handle);
     };
     let session_id = state.current_session_id();
     let turn_text = "start and await the held process";
-    let Json(accepted) = send_turn(
-        State(state.clone()),
-        Query(SessionQuery::default()),
-        Json(TurnRequest {
-            text: turn_text.to_string(),
-            model: Some("test-model".to_string()),
-            model_variant: None,
-            attachment_id: None,
-        }),
-    )
-    .await
-    .expect("send process-await turn through the production handler");
-    assert!(accepted.accepted);
-    let submitted = restate_requests
-        .recv()
-        .await
-        .expect("capture submitted process-await Restate turn");
-    let turn_id = submitted
-        .pointer("/body/turn_id")
-        .and_then(Value::as_str)
-        .expect("submitted process-await turn id")
-        .to_string();
     let session = state
         .core
         .session(session_id.clone())
         .open()
         .await
-        .expect("open submitted Stop-over-process session");
+        .expect("open the Stop-over-process session");
     let await_entered = Arc::new(ProcessAwaitEntered {
         entered: tokio::sync::Notify::new(),
     });
@@ -744,14 +720,17 @@ finish(await handle);
             Arc::clone(&await_entered) as Arc<dyn lash::runtime::RuntimeTurnPhaseProbe>
         )
         .await;
-    let run_turn_id = turn_id.clone();
-    let turn = tokio::spawn(async move {
-        session
-            .turn(lash::TurnInput::text(turn_text))
-            .turn_id(run_turn_id)
-            .run()
-            .await
-    });
+    // The engine drives a session's roots on the most recent open of it, so
+    // the turn is sent from the session the probe is installed on, under a
+    // claim as the send route would take.
+    let turn_id = TurnId::from(format!("workbench-turn-{}", uuid::Uuid::new_v4()));
+    state.track_turn(&session_id, &turn_id);
+    let turn = session
+        .send(lash::TurnInput::text(turn_text))
+        .id(turn_id.clone())
+        .await
+        .expect("send the process-await turn");
+    let turn = tokio::spawn(async move { turn.outcome().await });
 
     let process_id = tokio::time::timeout(Duration::from_secs(10), async {
         await_entered.entered.notified().await;
@@ -801,10 +780,10 @@ finish(await handle);
             ..
         }]
     ));
-    assert!(matches!(
-        turn.result.outcome,
-        lash::TurnOutcome::Stopped(lash::TurnStop::Cancelled { .. })
-    ));
+    assert!(
+        matches!(turn.status, lash::TurnStatus::Cancelled),
+        "{turn:?}"
+    );
     assert!(matches!(
         process_registry
             .get_process(&process_id)
@@ -816,6 +795,8 @@ finish(await handle);
             if !output.is_success()
                 && output.value_for_projection()["source"] == "cancellation"
     ));
+    super::tests::wait_for_turn_released(&state, &session_id, &turn_id, Duration::from_secs(10))
+        .await;
     assert!(state.active_turns.for_session(&session_id).is_none());
     let _ = std::fs::remove_dir_all(data_dir);
 }
@@ -1361,16 +1342,14 @@ async fn a_confirmed_tombstone_retires_the_route_a_cancel_had_to_keep_inner() {
     let _ = std::fs::remove_dir_all(&data_dir);
 }
 
-/// A mock Restate admin that reports one named workflow as running and records
-/// every workflow the workbench asked about.
+/// A mock Restate admin that reports one `LashTurn` key as running and records
+/// every `LashTurn` key the workbench asked about.
 async fn spawn_restate_admin_recording_probes(
-    running_workflow: &'static str,
+    running_key: String,
 ) -> (String, Arc<Mutex<Vec<String>>>) {
-    const WORKFLOWS: [&str; 2] = ["WorkbenchTurnWorkflow", "WorkbenchQueuedTurnWorkflow"];
-
     #[derive(Clone)]
     struct Probes {
-        running_workflow: &'static str,
+        running_key: String,
         seen: Arc<Mutex<Vec<String>>>,
     }
 
@@ -1380,18 +1359,24 @@ async fn spawn_restate_admin_recording_probes(
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
-        let asked = WORKFLOWS
-            .into_iter()
-            .find(|workflow| sql.contains(&format!("target_service_name = '{workflow}'")));
-        if let Some(asked) = asked {
-            probes.seen.lock_recover().push(asked.to_string());
+        let asked = sql
+            .contains("target_service_name = 'LashTurn'")
+            .then(|| {
+                sql.split("target_service_key = '")
+                    .nth(1)
+                    .and_then(|rest| rest.split('\'').next())
+                    .map(str::to_string)
+            })
+            .flatten();
+        if let Some(asked) = &asked {
+            probes.seen.lock_recover().push(asked.clone());
         }
-        let rows = if asked == Some(probes.running_workflow) {
+        let rows = if asked.as_deref() == Some(probes.running_key.as_str()) {
             vec![json!({
                 "id": "inv_test_turn",
-                "target": format!("workflow/{}/test/run", probes.running_workflow),
-                "target_service_name": probes.running_workflow,
-                "target_service_key": "test",
+                "target": format!("workflow/LashTurn/{}/run", probes.running_key),
+                "target_service_name": "LashTurn",
+                "target_service_key": probes.running_key,
                 "target_handler_name": "run",
                 "status": "running",
             })]
@@ -1409,7 +1394,7 @@ async fn spawn_restate_admin_recording_probes(
     let app = Router::new().route(
         "/query",
         post(query_status).with_state(Probes {
-            running_workflow,
+            running_key,
             seen: Arc::clone(&seen),
         }),
     );
@@ -1422,33 +1407,30 @@ async fn spawn_restate_admin_recording_probes(
 }
 
 #[test]
-fn a_queued_turns_cancel_probes_the_queued_workflow_whatever_its_id_looks_like() {
-    run_async_test_on_stack_budget("workbench-queued-turn-probe-kind", || {
-        a_queued_turns_cancel_probes_the_queued_workflow_whatever_its_id_looks_like_inner()
+fn a_pending_cancel_probes_the_roots_lash_turn() {
+    run_async_test_on_stack_budget("workbench-turn-probe-lash-turn", || {
+        a_pending_cancel_probes_the_roots_lash_turn_inner()
     });
 }
 
-/// FIG-3292: the workflow that owns a turn used to be recovered by sniffing a
-/// `workbench-queued-` prefix off the turn id, with every other shape falling
-/// through to the user workflow.
-///
-/// That probe is what decides whether a cancel whose terminal is still pending
-/// keeps or drops the turn's routing claim, so asking about the wrong workflow
-/// answers "no such invocation" and drops a turn that is still running. The
-/// kind now travels with the claim, so the id is free to say anything.
-async fn a_queued_turns_cancel_probes_the_queued_workflow_whatever_its_id_looks_like_inner() {
+/// A cancel whose terminal is still pending keeps the turn's claim only while
+/// its root still runs, and the root runs in lash's `LashTurn` invocation,
+/// keyed by the session and the root. Asking about any other invocation
+/// answers "no such invocation" and drops a turn that is still running.
+async fn a_pending_cancel_probes_the_roots_lash_turn_inner() {
     let data_dir = std::env::temp_dir().join(format!(
-        "agent-workbench-queued-probe-{}",
+        "agent-workbench-turn-probe-{}",
         uuid::Uuid::new_v4()
     ));
     std::fs::create_dir_all(&data_dir).expect("create temp workbench dir");
-    let (admin_url, probed) =
-        spawn_restate_admin_recording_probes("WorkbenchQueuedTurnWorkflow").await;
+    let session_id = SessionId::from(format!("probe-session-{}", uuid::Uuid::new_v4()));
+    let turn_id = TurnId::from("plainly-named-turn");
+    let key = lash_restate::turn_workflow_key(&session_id, &turn_id);
+    let (admin_url, probed) = spawn_restate_admin_recording_probes(key.clone()).await;
     let state = turn_cancel_test_state(&data_dir, admin_url).await;
-    let session_id = state.current_session_id();
-    // No `workbench-queued-` prefix. Only the claim knows what this is.
-    let turn_id = TurnId::from("plainly-named-queued-turn");
-    state.track_queued_turn(&session_id, &turn_id);
+    state.sessions.ensure(&session_id);
+    state.sessions.select(&session_id);
+    state.track_turn(&session_id, &turn_id);
 
     let (driver, acknowledge) = expiring_terminal_driver(&state);
     let receipts = tokio::time::timeout(Duration::from_secs(5), async {
@@ -1465,7 +1447,7 @@ async fn a_queued_turns_cancel_probes_the_queued_workflow_whatever_its_id_looks_
     })
     .await
     .expect("the cancel must not hang")
-    .expect("cancel the queued turn");
+    .expect("cancel the turn");
 
     assert!(
         matches!(
@@ -1476,8 +1458,8 @@ async fn a_queued_turns_cancel_probes_the_queued_workflow_whatever_its_id_looks_
     );
     assert_eq!(
         probed.lock_recover().as_slice(),
-        ["WorkbenchQueuedTurnWorkflow".to_string()],
-        "the liveness probe asks the workflow the claim names"
+        [key],
+        "the liveness probe asks the root's LashTurn"
     );
     assert!(
         state.active_turns.for_session(&session_id).is_some(),

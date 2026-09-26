@@ -30,6 +30,7 @@ use crate::{PluginError, ProcessAwaitOutput, SessionId};
 ///
 /// The engine runs the kernel's drive through the [`SessionDriver`] the core
 /// installs; it never decides what a drive admits.
+#[async_trait::async_trait]
 pub trait SessionWorkEngine: Send + Sync {
     /// Ask the engine to drive `session` for `request`. Returns once the ask
     /// is handed to the engine, not once the drive ran.
@@ -47,6 +48,41 @@ pub trait SessionWorkEngine: Send + Sync {
     fn control(&self) -> Arc<dyn crate::engine::SessionControlEngine> {
         Arc::new(crate::engine::NoEngineControl)
     }
+
+    /// Wait until a drive of `session` that began after `request` was
+    /// scheduled has stopped, and answer how it stopped.
+    ///
+    /// Idempotent, and it never drives twice for one request id: an ask the
+    /// engine lost is re-issued under the same id. This is a **wake
+    /// barrier**, not the resolution of anything the request followed: a
+    /// drive may stop before an input's root settled (another driver holds
+    /// it, or the root parked), so a caller reads the outcome from the store
+    /// and uses this only to learn that a drive ran, or that the engine
+    /// refused one.
+    ///
+    /// The default is an engine that runs no drives: it refuses with
+    /// [`SessionWorkUnavailable`](crate::RuntimeErrorCode::SessionWorkUnavailable).
+    async fn await_drive(
+        &self,
+        session: &SessionId,
+        request: &crate::engine::DriveRequestId,
+    ) -> Result<crate::engine::DriveOutcome, crate::engine::DriveAbort> {
+        Err(session_work_unavailable(session, request))
+    }
+}
+
+/// The refusal of an engine that runs no drives, asked to wait for one.
+fn session_work_unavailable(
+    session: &SessionId,
+    request: &crate::engine::DriveRequestId,
+) -> crate::engine::DriveAbort {
+    crate::engine::DriveAbort::Refused(crate::RuntimeError::new(
+        crate::RuntimeErrorCode::SessionWorkUnavailable,
+        format!(
+            "drive `{}` of session `{session}` cannot be awaited: this deployment runs no session work",
+            request.as_str()
+        ),
+    ))
 }
 
 /// The kernel's drive of one session, as the core installs it on its
@@ -216,6 +252,111 @@ impl SessionWorkEngine for NoSessionWork {
 
     fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
         Arc::clone(self.driver.get_or_init(|| driver))
+    }
+}
+
+/// The session work of a host that runs every accepted input itself: an ask
+/// schedules nothing, and a caller waiting on a drive runs it in its own task
+/// through the installed driver (FIG-3600 S5b, D1 §2.4).
+///
+/// It stands in for an engine where a host drains queued work by hand and
+/// wants no background drive competing with it; a waiter still gets its
+/// input driven. One drive of a session runs at a time, and a request id is
+/// driven once: a second waiter on it is answered at once and reads the
+/// outcome from the store. Nothing retries a drive a caller's task ran, so a
+/// failed attempt is that caller's answer.
+pub struct InlineSessionWork {
+    /// The generation of the build the waiter's drive runs on.
+    build_generation: crate::engine::BuildGeneration,
+    driver: std::sync::OnceLock<Arc<dyn SessionDriver>>,
+    sessions: std::sync::Mutex<
+        std::collections::HashMap<SessionId, Arc<tokio::sync::Mutex<InlineDrives>>>,
+    >,
+}
+
+/// The request ids an inline engine drove for one session, oldest first.
+#[derive(Default)]
+struct InlineDrives {
+    drove: std::collections::VecDeque<String>,
+}
+
+/// Request ids an inline engine remembers per session.
+const INLINE_DROVE_CAPACITY: usize = 1024;
+
+impl InlineSessionWork {
+    /// Inline session work for a build of `build_generation`: the
+    /// generation the backend the driver runs on carries.
+    pub fn new(build_generation: crate::engine::BuildGeneration) -> Self {
+        Self {
+            build_generation,
+            driver: std::sync::OnceLock::new(),
+            sessions: std::sync::Mutex::default(),
+        }
+    }
+
+    fn session_drives(&self, session: &SessionId) -> Arc<tokio::sync::Mutex<InlineDrives>> {
+        let mut sessions = self
+            .sessions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        Arc::clone(sessions.entry(session.clone()).or_default())
+    }
+}
+
+impl std::fmt::Debug for InlineSessionWork {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str("InlineSessionWork")
+    }
+}
+
+#[async_trait::async_trait]
+impl SessionWorkEngine for InlineSessionWork {
+    fn schedule_drive(&self, session: &SessionId, request: crate::engine::DriveRequestId) {
+        tracing::trace!(
+            session_id = session.as_str(),
+            request = request.as_str(),
+            "session drive not scheduled: a waiter drives it inline"
+        );
+    }
+
+    fn install_session_driver(&self, driver: Arc<dyn SessionDriver>) -> Arc<dyn SessionDriver> {
+        Arc::clone(self.driver.get_or_init(|| driver))
+    }
+
+    async fn await_drive(
+        &self,
+        session: &SessionId,
+        request: &crate::engine::DriveRequestId,
+    ) -> Result<crate::engine::DriveOutcome, crate::engine::DriveAbort> {
+        let Some(driver) = self.driver.get() else {
+            return Err(session_work_unavailable(session, request));
+        };
+        let drives = self.session_drives(session);
+        let mut drives = drives.lock().await;
+        if drives.drove.iter().any(|drove| drove == request.as_str()) {
+            return Ok(crate::engine::DriveOutcome {
+                ran: Vec::new(),
+                stop: crate::engine::DriveStop::Idle,
+            });
+        }
+        let outcome = driver
+            .drive(crate::engine::DriveRequest {
+                session: session.clone(),
+                request: request.clone(),
+                build_generation: self.build_generation.clone(),
+            })
+            .await
+            .map_err(|abort| match abort {
+                crate::engine::DriveAbort::Retry(error) => {
+                    crate::engine::DriveAbort::Refused(error)
+                }
+                abort => abort,
+            })?;
+        if drives.drove.len() >= INLINE_DROVE_CAPACITY {
+            drives.drove.pop_front();
+        }
+        drives.drove.push_back(request.as_str().to_owned());
+        Ok(outcome)
     }
 }
 

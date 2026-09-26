@@ -1343,47 +1343,42 @@ async fn record_tool_attempt(
     Ok(count)
 }
 
-/// Claim the one exit a crash-injecting scenario takes at `marker`, recorded
-/// under the scenario's workflow. `true` exactly once per marker, so a
-/// redelivered invocation that reaches the same point again runs through.
-pub async fn claim_crash_exit(
-    pool: &PgPool,
-    marker: &str,
-    workflow_id: &str,
-    worker_id: &str,
-) -> bool {
-    let inserted = match sqlx::query(
-        "INSERT INTO lash_e2e_failover_markers
-             (workflow_id, worker_id, peer_takeover_expected, created_at_ms)
-         VALUES ($1, $2, FALSE, $3)
-         ON CONFLICT (workflow_id) DO NOTHING",
+/// The engine's queued roots on `session_id`, oldest first. The engine drives
+/// queued work, a process wake among it, the moment it is enqueued, under the
+/// queued run's `drive-run:` root; each committed turn's key names its root.
+pub async fn driven_queued_roots(pool: &PgPool, session_id: &str) -> Result<Vec<String>> {
+    let keys: Vec<String> = sqlx::query_scalar(
+        "SELECT turn_id FROM lash_runtime_turn_commits
+         WHERE session_id = $1 AND turn_id LIKE '%drive-run:%'
+         ORDER BY committed_at_ms, turn_id",
     )
-    .bind(marker)
-    .bind(worker_id)
-    .bind(current_epoch_ms() as i64)
-    .execute(pool)
+    .bind(session_id)
+    .fetch_all(pool)
     .await
-    {
-        Ok(result) => result.rows_affected() == 1,
-        Err(err) => {
-            tracing::error!(marker, worker_id, error = %err, "failed to claim crash marker");
-            return false;
+    .with_context(|| format!("list the queued roots driven on `{session_id}`"))?;
+    let mut roots = Vec::new();
+    for key in keys {
+        let Ok(key) = serde_json::from_str::<serde_json::Value>(&key) else {
+            continue;
+        };
+        let scope = &key["scope"];
+        if scope["type"].as_str() != Some("turn") {
+            continue;
         }
-    };
-    if inserted {
-        let _ = record_worker_event(
-            pool,
-            workflow_id,
-            worker_id,
-            "intentional_exit",
-            serde_json::json!({"marker": marker}),
-        )
-        .await;
+        let Some(turn) = scope["turn_id"].as_str() else {
+            continue;
+        };
+        if turn.starts_with("drive-run:")
+            && !turn.contains(":agent-frame:")
+            && !roots.iter().any(|root| root == turn)
+        {
+            roots.push(turn.to_string());
+        }
     }
-    inserted
+    Ok(roots)
 }
 
-/// Whether the exit at `marker` has already been taken.
+/// Whether the one crash exit keyed by `marker` (a workflow id) was taken.
 pub async fn crash_exit_taken(pool: &PgPool, marker: &str) -> Result<bool> {
     sqlx::query_scalar(
         "SELECT EXISTS (SELECT 1 FROM lash_e2e_failover_markers WHERE workflow_id = $1)",

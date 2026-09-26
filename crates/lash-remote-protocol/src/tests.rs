@@ -21,7 +21,7 @@ const EXAMPLE_BINDING_KEY: &str = "example.call_path";
 mod version_refusal_tests;
 use version_refusal_tests::decode_empty_envelope;
 
-/// Refusal witness (FIG-3588): the generation-99 decoder rejects its immediate
+/// Refusal witness (FIG-3600): the generation-100 decoder rejects its immediate
 /// predecessor before attempting to decode the envelope body.
 ///
 /// The predecessor is a literal, not `REMOTE_PROTOCOL_VERSION - 1`: a derived
@@ -307,7 +307,6 @@ fn remote_turn_request_json_round_trips() {
     let request = RemoteTurnRequest {
         session_id: SessionId::from("session"),
         turn_id: TurnId::from("turn"),
-        idempotency_key: Some("idem".to_string()),
         input: RemoteTurnInput {
             items: vec![
                 RemoteInputItem::Text {
@@ -324,7 +323,6 @@ fn remote_turn_request_json_round_trips() {
                 payload: serde_json::json!({ "answer": "raw" }),
             }),
             trace_turn_id: Some(TurnId::from("trace")),
-            prompt_layer: Some(RemotePromptLayer::new()),
         },
         tool_grants: vec![demo_grant("demo", "tools", "search")],
         metadata: HashMap::new(),
@@ -566,7 +564,7 @@ fn remote_turn_result_derives_status_from_its_outcome() {
             text: "done".into(),
         },
     };
-    assert_eq!(result.status(), RemoteTurnStatus::Completed);
+    assert_eq!(result.status(), RemoteTurnStatus::Answered);
     let wire = result.encode_json().unwrap();
     assert_eq!(RemoteTurnReport::decode_json(&wire).unwrap(), result);
 }
@@ -846,7 +844,7 @@ fn protocol_62_session_filter_is_refused_before_removed_field_decode() {
         serde_json::to_value(Envelope::new(RemoteTriggerSubscriptionFilter::for_session(
             "session-blue",
         )))
-        .expect("serialize canonical version-99 filter"),
+        .expect("serialize canonical version-100 filter"),
         serde_json::json!({
             "protocol_version": 100,
             "registrant_scope_id": "session:session-blue",

@@ -351,6 +351,33 @@ impl LashRuntime {
         );
     }
 
+    /// Bring the resident session to its store's committed head when another
+    /// runtime committed past it (FIG-3600: a turn a session-work engine ran
+    /// for this session). Answers whether it reloaded.
+    pub async fn adopt_committed_head(&mut self) -> Result<bool, RuntimeError> {
+        let Some(store) = self
+            .session
+            .as_ref()
+            .and_then(|session| session.history_store())
+        else {
+            return Ok(false);
+        };
+        let head = store.load_session_head_meta().await.map_err(|err| {
+            RuntimeError::new(
+                RuntimeErrorCode::ResidentSessionReloadFailed,
+                format!("failed to read the committed head: {err}"),
+            )
+        })?;
+        match head {
+            Some(head) if head.head_revision != self.state.head_revision => {
+                self.invalidate_resident_session_state();
+                self.reload_invalidated_resident_session_state().await?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
+
     pub async fn reload_invalidated_resident_session_state(&mut self) -> Result<(), RuntimeError> {
         self.reload_invalidated_resident_session_state_under_lease(None)
             .await

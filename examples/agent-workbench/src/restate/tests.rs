@@ -403,59 +403,6 @@ async fn a_parked_turn_fails_its_attempt_retryably_without_settling() {
 /// FIG-3735: a generation refusal whose scope has no turn in flight ran
 /// nothing a journal could hold, so the handler path keeps it terminal: it
 /// settles, records the failure, and writes no park.
-#[tokio::test]
-async fn a_generation_refusal_with_nothing_in_flight_stays_terminal() {
-    let data_dir = tempfile::tempdir().expect("tempdir");
-    let state = crate::tests::recoverable_chat_test_state_with_trigger_store(
-        data_dir.path(),
-        crate::tests::memory_trigger_store(),
-    )
-    .await;
-    let session_id = state.current_session_id();
-    let turn_id = TurnId::from("never-accepted-turn");
-    state.track_turn(&session_id, &turn_id);
-    let refusal = lash::EmbedError::Store(
-        lash::persistence::StoreError::SessionStateVersionUnsupported {
-            found: 1,
-            current: 2,
-        },
-    );
-    assert!(refusal.session_state_version_refusal().is_some());
-    let error = super::session_admission::park_generation_refused_turn(
-        &state,
-        lash::runtime::ExecutionScope::turn(session_id.as_str(), turn_id.clone()),
-        refusal,
-        AppError::runtime,
-    )
-    .await;
-    assert_ne!(
-        error.verdict,
-        crate::AppErrorVerdict::Parked,
-        "nothing was in flight: {}",
-        error.message
-    );
-    let handler_error = super::terminalize_turn_execution(
-        &state,
-        &session_id,
-        &turn_id,
-        "restate_user_turn.failed",
-        Ok(Err(error)),
-    )
-    .await
-    .expect_err("the refused turn fails its attempt");
-    let rendered =
-        <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(&handler_error)
-            .to_string();
-    assert!(
-        rendered.starts_with("Terminal error"),
-        "a refusal with nothing journaled ends the invocation: {rendered}"
-    );
-    assert!(
-        state.active_turns.for_session(&session_id).is_none(),
-        "the terminal refusal settles its turn"
-    );
-}
-
 #[test]
 fn foreign_effect_controller_codes_remain_explicit_extensions() {
     let error = lash::runtime::RuntimeEffectControllerError::foreign(
@@ -483,77 +430,6 @@ fn nested_deleted_session_details_preserve_controller_store_context() {
     assert_eq!(
         crate::deleted_session_details(&error),
         Some(("retired-nested-context", Some("session_deleted"),))
-    );
-}
-
-#[tokio::test]
-async fn queued_work_wake_preserves_a_retired_session_terminal() {
-    let data_dir = tempfile::tempdir().expect("tempdir");
-    let store_factory: Arc<dyn lash::persistence::SessionStoreFactory> = Arc::new(
-        lash_sqlite_store::SqliteSessionStoreFactory::new(data_dir.path().join("lash-sessions")),
-    );
-    let session_id = "retired-queued-work-wake";
-    drop(
-        store_factory
-            .create_store(&lash::persistence::SessionStoreCreateRequest {
-                pending_observer_intents: Vec::new(),
-                session_id: SessionId::from(session_id.to_string()),
-                relation: lash::persistence::SessionRelation::default(),
-                policy: lash::runtime::SessionPolicy::new(lash::TurnBudget::Unbounded),
-            })
-            .await
-            .expect("create session before retirement"),
-    );
-    store_factory
-        .delete_session(&SessionId::from(session_id))
-        .await
-        .expect("retire queued-work session");
-    let queued_work_driver =
-        lash::runtime::NativeQueuedWork::new(Arc::new(crate::WorkbenchQueuedWorkSubmitter {
-            sessions: crate::WorkbenchSessions::fresh(),
-            store_factory,
-            restate_ingress_url: "http://127.0.0.1:8080".to_string(),
-            restate_http: reqwest::Client::new(),
-            active_turns: crate::ActiveTurns::default(),
-        }));
-
-    let error = queued_work_driver
-        .drain_session(&SessionId::from(session_id), "retired_session_regression")
-        .await
-        .expect_err("the queued-work wake must refuse the retired session");
-    let classified = AppError::runtime(lash::EmbedError::Plugin(error.clone()));
-
-    assert_eq!(classified.status, axum::http::StatusCode::CONFLICT);
-    assert_eq!(
-        classified.message,
-        crate::deleted_session_message(&SessionId::from(session_id))
-    );
-    assert_eq!(classified.verdict, crate::AppErrorVerdict::Terminal);
-
-    let rendered = <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(
-        &super::classified_plugin_handler_error(error),
-    )
-    .to_string();
-    assert!(
-        rendered.starts_with("Terminal error"),
-        "the retired-session refusal must be terminal: {rendered}"
-    );
-    assert!(
-        rendered.contains(&crate::deleted_session_message(&SessionId::from(
-            session_id
-        ))),
-        "the terminal must retain the canonical message: {rendered}"
-    );
-
-    let ambiguous = super::classified_plugin_handler_error(lash::plugins::PluginError::Session(
-        "temporary queued-work outage".to_string(),
-    ));
-    let ambiguous_rendered =
-        <restate_sdk::errors::HandlerError as AsRef<dyn std::error::Error>>::as_ref(&ambiguous)
-            .to_string();
-    assert!(
-        !ambiguous_rendered.starts_with("Terminal error"),
-        "ambiguous queued-work failures must remain retryable: {ambiguous_rendered}"
     );
 }
 
@@ -713,10 +589,10 @@ async fn cron_occurrence_redrive_reemits_the_reserved_process_start() {
 }
 
 /// Replay ownership chooses where effects execute; it does not stop the facade
-/// from deriving and handing the turn scope to the backend's effect host.
-/// A Restate backend can still reject an effect that needs a live handler,
-/// but that refusal comes from the scoped host controller rather than from a
-/// facade ownership preflight.
+/// from deriving and handing the turn scope to the backend's effect host. A
+/// Restate backend binds turn control to its own host; a turn it runs does so
+/// inside its session drive's handler, never on the caller's foreground
+/// (FIG-3600), so only the in-process host runs a turn here.
 #[tokio::test]
 async fn turn_control_binding_routes_foreground_turns_through_the_configured_host() {
     let data_dir = tempfile::tempdir().expect("turn control binding tempdir");
@@ -779,36 +655,9 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
             .unwrap_or_else(|error| panic!("build {name} ownership core: {error:?}"))
     };
 
-    let controller_owned = ownership_core(restate.into(), "Restate");
-    let session = controller_owned
-        .session("workbench-controller-owned-replay")
-        .open()
-        .await
-        .expect("open the controller-owned session");
-    let failure = session
-        .turn(lash::TurnInput::text("drive me from the foreground"))
-        .turn_id("controller-owned-foreground-turn")
-        .run()
-        .await
-        .expect_err("the deployment-only host cannot execute an LLM effect");
-    assert!(
-        matches!(
-            failure,
-            lash::EmbedError::Runtime(ref error)
-                if error.code
-                    == lash::runtime::RuntimeErrorCode::EngineEffectHostRequiresHandlerScope
-        ),
-        "the scoped Restate host must issue the handler-scope refusal: {failure:?}"
-    );
-    assert_eq!(
-        provider_calls.load(Ordering::SeqCst),
-        0,
-        "the scoped host refuses before invoking the local provider executor"
-    );
-    session.close().await.expect("close the failed session");
-
-    // A backend whose host journals effects in process uses the same
-    // facade entry point and executes the local provider body instead.
+    // A backend whose host journals effects in process runs the turn
+    // through the same facade entry point and executes the local provider
+    // body.
     let in_process = ownership_core(
         crate::tests::test_file_backend(&data_dir.path().join("in-process")).into(),
         "SQLite",
@@ -818,17 +667,19 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
         .open()
         .await
         .expect("open the session on the in-process host");
-    let mut stream = session
-        .turn(lash::TurnInput::text("drive me from the foreground"))
-        .stream()
-        .expect("an in-process host creates a scoped foreground stream");
+    let handle = session
+        .send(lash::TurnInput::text("drive me from the foreground"))
+        .await
+        .expect("an in-process host accepts the input");
+    let mut stream = handle.events();
     while let Some(activity) = stream.next_activity().await {
         activity.expect("the in-process host streams turn activity");
     }
-    let report = stream
-        .finish()
+    let report = handle
+        .output()
         .await
-        .expect("an in-process host executes the same foreground turn");
+        .expect("an in-process host executes the turn")
+        .result;
     assert_eq!(
         report.final_value(),
         Some(&serde_json::json!("ownership answer"))
@@ -836,7 +687,7 @@ async fn turn_control_binding_routes_foreground_turns_through_the_configured_hos
     assert_eq!(
         provider_calls.load(Ordering::SeqCst),
         1,
-        "the in-process host runs the turn the Restate host refused"
+        "the in-process host runs the turn once"
     );
     session.close().await.expect("close the executed session");
 }
@@ -962,23 +813,3 @@ use lash::sync::MutexExt;
 
 mod cron_replay;
 mod cron_tests;
-
-#[async_trait::async_trait]
-trait QueuedWorkExt {
-    async fn drain_session(
-        &self,
-        session_id: &SessionId,
-        reason: &str,
-    ) -> Result<(), lash::plugins::PluginError>;
-}
-
-#[async_trait::async_trait]
-impl QueuedWorkExt for lash::runtime::NativeQueuedWork {
-    async fn drain_session(
-        &self,
-        session_id: &SessionId,
-        reason: &str,
-    ) -> Result<(), lash::plugins::PluginError> {
-        self.drive_now(session_id, reason).await
-    }
-}

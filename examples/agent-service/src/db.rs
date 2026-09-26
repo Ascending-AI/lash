@@ -1,4 +1,3 @@
-use lash::TurnId;
 use std::path::Path;
 
 use axum::http::StatusCode;
@@ -142,13 +141,6 @@ pub(crate) struct ChatModelSelection {
     pub(crate) model_variant: Option<String>,
 }
 
-#[cfg(feature = "restate")]
-#[derive(Debug)]
-pub(crate) struct TurnOutboxEvent {
-    pub(crate) id: i64,
-    pub(crate) item_json: String,
-}
-
 pub(crate) struct AppDb {
     conn: Connection,
 }
@@ -197,14 +189,6 @@ impl AppDb {
                 board_json TEXT NOT NULL,
                 updated_at TEXT NOT NULL
             );
-            CREATE TABLE IF NOT EXISTS turn_events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                turn_id TEXT NOT NULL,
-                item_json TEXT NOT NULL,
-                created_at TEXT NOT NULL
-            );
-            CREATE INDEX IF NOT EXISTS idx_turn_events_turn_id_id
-                ON turn_events(turn_id, id);
             CREATE TABLE IF NOT EXISTS chat_branch_points (
                 source_chat_id TEXT NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
                 node_id TEXT NOT NULL,
@@ -245,43 +229,6 @@ impl AppDb {
             ));
         }
         Ok(Self { conn })
-    }
-
-    pub(crate) fn insert_turn_event<T: Serialize>(
-        &mut self,
-        turn_id: &TurnId,
-        item: &T,
-    ) -> AppResult<()> {
-        let item_json =
-            serde_json::to_string(item).map_err(|err| AppError::internal(err.to_string()))?;
-        self.conn.execute(
-            "INSERT INTO turn_events (turn_id, item_json, created_at)
-             VALUES (?1, ?2, datetime('now'))",
-            params![turn_id.as_str(), item_json],
-        )?;
-        Ok(())
-    }
-
-    #[cfg(feature = "restate")]
-    pub(crate) fn list_turn_events_after(
-        &mut self,
-        turn_id: &TurnId,
-        last_id: i64,
-    ) -> AppResult<Vec<TurnOutboxEvent>> {
-        let mut stmt = self.conn.prepare(
-            "SELECT id, item_json
-             FROM turn_events
-             WHERE turn_id = ?1 AND id > ?2
-             ORDER BY id ASC",
-        )?;
-        let rows = stmt.query_map(params![turn_id.as_str(), last_id], |row| {
-            Ok(TurnOutboxEvent {
-                id: row.get(0)?,
-                item_json: row.get(1)?,
-            })
-        })?;
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(AppError::from)
     }
 
     pub(crate) fn list_chats(&mut self) -> AppResult<Vec<ChatSummary>> {

@@ -66,6 +66,11 @@ pub enum RuntimeErrorCode {
     /// accepted input is answered, if at all, by the driver that holds or
     /// settled it.
     AcceptedTurnInputCeded,
+    /// A caller waited on a session drive (`SessionWorkEngine::await_drive`)
+    /// of a deployment that runs no session work: nothing will ever drive the
+    /// session, so nothing will answer the wait. Configuring the core with a
+    /// session-work engine is the recovery.
+    SessionWorkUnavailable,
     /// A turn was attempted on a runtime opened with
     /// `ToolSurfaceOpenMode::PreservePersisted` (FIG-3353). That open declared
     /// it would not run a turn: its tool surface was never reconciled and no
@@ -552,6 +557,7 @@ impl RuntimeErrorCode {
             Self::SessionExecutionLaneBusy => "session_execution_lane_busy",
             Self::TurnInputSettlementSuperseded => "turn_input_settlement_superseded",
             Self::AcceptedTurnInputCeded => "accepted_turn_input_ceded",
+            Self::SessionWorkUnavailable => "session_work_unavailable",
             Self::TurnExecutionRequiresReconciledToolSurface => {
                 "turn_execution_requires_reconciled_tool_surface"
             }
@@ -819,6 +825,7 @@ impl RuntimeErrorCode {
         Self::SessionExecutionLaneBusy,
         Self::TurnInputSettlementSuperseded,
         Self::AcceptedTurnInputCeded,
+        Self::SessionWorkUnavailable,
         Self::TurnExecutionRequiresReconciledToolSurface,
         Self::StoreCommitContended,
         Self::QueuedRunPending,
@@ -1012,6 +1019,7 @@ impl RuntimeErrorCode {
             "session_execution_lane_busy" => Self::SessionExecutionLaneBusy,
             "turn_input_settlement_superseded" => Self::TurnInputSettlementSuperseded,
             "accepted_turn_input_ceded" => Self::AcceptedTurnInputCeded,
+            "session_work_unavailable" => Self::SessionWorkUnavailable,
             "turn_execution_requires_reconciled_tool_surface" => {
                 Self::TurnExecutionRequiresReconciledToolSurface
             }

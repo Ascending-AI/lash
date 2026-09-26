@@ -4,9 +4,10 @@ use crate::support::DurableProcessWorkerConfig;
 use crate::support::{
     Arc, DurableProcessWorker, NativeProcessWork, NativeSubstrateConfig, NoSessionWork,
     ProcessRegistry, ProcessWorkSubstrate, ProcessWorkWiring, SessionStoreFactory,
-    SessionWorkEngine, WorkerProcessWork, WorkerSlotSupplier,
+    SessionWorkEngine, WorkerProcessWork, WorkerSlotSupplier, async_trait,
 };
 use lash_core::facade_support;
+use tokio_util::sync::CancellationToken;
 
 /// How a [`LashCore`] resolves its process-work port, decided at `build()`
 /// and shared across clones.
@@ -73,6 +74,8 @@ pub(super) enum QueuedWorkSource {
 }
 
 pub(super) enum QueuedPortSetup {
+    /// The host turned the backend's own engine off: nothing would drive an
+    /// accepted input, so a send is refused before it accepts anything.
     Disabled,
     Native {
         driver: Arc<NativeQueuedWorkRunHandle>,
@@ -111,17 +114,82 @@ impl ResolvedPorts {
     }
 }
 
+/// Stops the core's in-process drives once its host holds nothing of the
+/// core: no core, session, durable session or send handle. A host that has
+/// let go of all of them has stopped this worker, so a drive still running
+/// on one of its sessions stops with it instead of holding the session's
+/// lane on its own; a peer takes the lane over as from any stopped worker.
+///
+/// Drives hold runtimes, and runtimes hold the engine, so the engine alone
+/// never learns that its host is gone: its shutdown is a child of this token.
+pub(crate) struct DriveLifetime(CancellationToken);
+
+impl DriveLifetime {
+    pub(crate) fn new() -> Arc<Self> {
+        Arc::new(Self(CancellationToken::new()))
+    }
+
+    pub(super) fn token(&self) -> CancellationToken {
+        self.0.clone()
+    }
+}
+
+impl Drop for DriveLifetime {
+    fn drop(&mut self) {
+        self.0.cancel();
+    }
+}
+
+/// The core's queued work as a host-held handle carries it: the engine, and
+/// the lifetime that keeps its in-process drives running.
+#[derive(Clone)]
+pub(crate) struct HeldWork {
+    work: Arc<ResolvedQueuedWork>,
+    _drives: Arc<DriveLifetime>,
+}
+
+impl HeldWork {
+    pub(crate) fn new(work: Arc<ResolvedQueuedWork>, drives: Arc<DriveLifetime>) -> Self {
+        Self {
+            work,
+            _drives: drives,
+        }
+    }
+
+    /// The engine alone, for what a runtime holds.
+    pub(crate) fn engine(&self) -> Arc<ResolvedQueuedWork> {
+        Arc::clone(&self.work)
+    }
+}
+
+impl std::ops::Deref for HeldWork {
+    type Target = ResolvedQueuedWork;
+
+    fn deref(&self) -> &ResolvedQueuedWork {
+        &self.work
+    }
+}
+
 pub(crate) struct ResolvedQueuedWork {
     port: Arc<dyn SessionWorkEngine>,
     wake: std::sync::Mutex<Option<facade_support::WakeDeliveryDriver>>,
+    /// No engine would drive an accepted input (FIG-3600 S5b).
+    refuses_sends: bool,
 }
 
 impl ResolvedQueuedWork {
-    fn new(port: Arc<dyn SessionWorkEngine>) -> Self {
+    fn new(port: Arc<dyn SessionWorkEngine>, refuses_sends: bool) -> Self {
         Self {
             port,
             wake: std::sync::Mutex::new(None),
+            refuses_sends,
         }
+    }
+
+    /// Whether a send must be refused before acceptance: no engine and no
+    /// in-process drive would ever run what it accepted.
+    pub(crate) fn refuses_sends(&self) -> bool {
+        self.refuses_sends
     }
 
     fn install_wake(&self, wake: facade_support::WakeDeliveryDriver) {
@@ -161,6 +229,7 @@ impl Drop for ResolvedQueuedWork {
     }
 }
 
+#[async_trait]
 impl SessionWorkEngine for ResolvedQueuedWork {
     fn schedule_drive(
         &self,
@@ -176,6 +245,14 @@ impl SessionWorkEngine for ResolvedQueuedWork {
     ) -> Arc<dyn lash_core::SessionDriver> {
         self.port.install_session_driver(driver)
     }
+
+    async fn await_drive(
+        &self,
+        session: &lash_core::SessionId,
+        request: &lash_core::engine::DriveRequestId,
+    ) -> std::result::Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
+        self.port.await_drive(session, request).await
+    }
 }
 
 /// Shared, lazily-initialized host-work state for a [`LashCore`].
@@ -187,10 +264,12 @@ pub(crate) struct NativeSubstrateSlot {
     pub(super) setup: NativeSubstrateSetup,
     drivers: tokio::sync::OnceCell<ResolvedPorts>,
     phase_probe_slot: Option<lash_core::runtime::RuntimeTurnPhaseProbeSlot>,
+    /// The core's [`DriveLifetime`]: the native engine shuts down with it.
+    drives_shutdown: CancellationToken,
 }
 
 impl NativeSubstrateSlot {
-    pub(super) fn new(setup: NativeSubstrateSetup) -> Self {
+    pub(super) fn new(setup: NativeSubstrateSetup, drives: &DriveLifetime) -> Self {
         let phase_probe_slot = match &setup.process {
             ProcessPortSetup::NativeDefault { config, .. } => {
                 Some(config.turn_phase_probe_slot.clone())
@@ -201,6 +280,7 @@ impl NativeSubstrateSlot {
             setup,
             drivers: tokio::sync::OnceCell::new(),
             phase_probe_slot,
+            drives_shutdown: drives.token(),
         }
     }
 
@@ -214,6 +294,7 @@ impl NativeSubstrateSlot {
     pub(crate) async fn ports(&self) -> ResolvedPorts {
         self.drivers
             .get_or_init(|| async {
+                let refuses_sends = matches!(self.setup.queued, QueuedPortSetup::Disabled);
                 let queued_port: Arc<dyn SessionWorkEngine> = match &self.setup.queued {
                     QueuedPortSetup::Disabled => Arc::new(NoSessionWork::new()),
                     QueuedPortSetup::External { port } => Arc::clone(port),
@@ -230,6 +311,7 @@ impl NativeSubstrateSlot {
                                     run_handle,
                                     Arc::clone(slot_supplier),
                                     work_cadence,
+                                    self.drives_shutdown.clone(),
                                 )
                                 .expect("native work cadence was validated at build")
                             }
@@ -237,6 +319,7 @@ impl NativeSubstrateSlot {
                                 run_handle,
                                 *execution_concurrency,
                                 work_cadence,
+                                self.drives_shutdown.clone(),
                             )
                             .expect("queued-work concurrency was validated at build"),
                         })
@@ -267,7 +350,7 @@ impl NativeSubstrateSlot {
                         (wiring, true)
                     }
                 };
-                let queued = Arc::new(ResolvedQueuedWork::new(queued_port));
+                let queued = Arc::new(ResolvedQueuedWork::new(queued_port, refuses_sends));
                 let setup = &self.setup.wake;
                 let queued_for_wake: Arc<dyn SessionWorkEngine> = queued.clone();
                 let wake = facade_support::wake_delivery_driver_with_work_cadence(

@@ -99,7 +99,7 @@ async fn chat_completion(State(state): State<AppState>, Json(request): Json<Valu
             ),
             MockScenario::FrameSwitchCrashStart => (
                 "frame_switch_crash_start",
-                frame_switch_start_script(&workflow_id, "frame_switch_crash_follow=true"),
+                frame_switch_crash_start_script(&workflow_id),
             ),
             MockScenario::FrameSwitchCancelStart => (
                 "frame_switch_cancel_start",
@@ -394,6 +394,24 @@ Switch to a fresh frame and carry the non-empty baton seed.
 <typescript>
 await control.continue_as({{
   task: "Complete the durable follow-on. workflow_id={workflow_id} {follow_marker}",
+  seed: {{ baton: "seed:{workflow_id}" }}
+}});
+</typescript>
+"#
+    )
+}
+
+/// The frame switch whose original turn exits its worker once, in a tool
+/// before the switch commits: whichever worker the engine's drive lands on.
+fn frame_switch_crash_start_script(workflow_id: &str) -> String {
+    format!(
+        r#"
+Crash once, then switch to a fresh frame and carry the non-empty baton seed.
+
+<typescript>
+await tools.crash_once({{ workflow_id: "{workflow_id}", peer_takeover: false }});
+await control.continue_as({{
+  task: "Complete the durable follow-on. workflow_id={workflow_id} frame_switch_crash_follow=true",
   seed: {{ baton: "seed:{workflow_id}" }}
 }});
 </typescript>

@@ -19,6 +19,7 @@ use lash_sansio::SessionId;
 mod advanced_builder;
 mod drain;
 pub(crate) mod queued_work;
+pub(crate) mod residents;
 mod runtime_host_config;
 mod session_policy;
 mod tool_child_context;
@@ -28,9 +29,11 @@ mod worker_capacity;
 pub use advanced_builder::AdvancedLashCoreBuilder;
 pub use drain::DeploymentDrainStatus;
 use queued_work::{NativeQueuedWorkRunConfig, NativeQueuedWorkRunHandle};
+pub(crate) use work_drivers::HeldWork;
 use work_drivers::{
-    NativeSubstrateSetup, NativeSubstrateSlot, ProcessPortSetup, ProcessWorkSelection,
-    ProcessWorkSource, QueuedPortSetup, QueuedWorkSource, WakeDeliveryDriverSetup,
+    DriveLifetime, NativeSubstrateSetup, NativeSubstrateSlot, ProcessPortSetup,
+    ProcessWorkSelection, ProcessWorkSource, QueuedPortSetup, QueuedWorkSource,
+    WakeDeliveryDriverSetup,
 };
 #[derive(Clone)]
 /// Owns the configured runtime services used to create and resume Lash sessions.
@@ -65,10 +68,16 @@ pub struct LashCore {
     pub(crate) worker_slot_supplier: Option<Arc<dyn WorkerSlotSupplier>>,
     /// Shared across core clones so native substrate ports are constructed at most once.
     pub(crate) substrate_slot: Arc<NativeSubstrateSlot>,
+    /// Held by every core clone and every session, durable session and send
+    /// handle: its drop stops the core's in-process drives.
+    pub(crate) drive_lifetime: Arc<DriveLifetime>,
     /// The session driver this core installed on its backend's session-work
     /// engine (FIG-3600). The engine may hold it weakly, so the core keeps it
     /// for its whole life.
     pub(crate) _session_driver: Arc<dyn lash_core::SessionDriver>,
+    /// The sessions this core has open in this process: the driver runs a
+    /// drive on the open session's runtime (FIG-3600 S5b).
+    pub(crate) residents: Arc<residents::ResidentSessions>,
     /// Host-facing process event sink, retained so a worker config built from
     /// this core reports its worker faults to the same sink the registry
     /// decorator emits events on.
@@ -105,6 +114,15 @@ impl Default for SessionDeleteReport {
 }
 
 impl LashCore {
+    /// The core's queued work as a host-held handle carries it: holding it
+    /// keeps the core's in-process drives running.
+    pub(crate) async fn held_work(&self) -> HeldWork {
+        HeldWork::new(
+            Arc::clone(&self.substrate_slot.ports().await.queued),
+            Arc::clone(&self.drive_lifetime),
+        )
+    }
+
     /// A [`LashCoreBuilder`] over `backend`, the one substrate every
     /// persistence port and the effect host of this core come from (ADR 0102).
     ///
@@ -326,6 +344,7 @@ impl LashCore {
         let handle =
             RuntimeHandle::with_live_replay_store(runtime, Arc::clone(&self.live_replay_store));
         let process_lifecycle_route = self.process_lifecycle_feed.register(&handle);
+        binding.register_resident(&handle);
         let parent_session_id =
             crate::session::recorded_parent_session_id(binding.store().as_ref()).await?;
         Ok(LashSession {
@@ -1183,7 +1202,9 @@ impl LashCoreBuilder {
             process_event_sink.clone(),
             native_substrate.clone(),
         )?;
+        let residents = Arc::new(residents::ResidentSessions::default());
         let (queued_port, session_driver) = Self::resolve_queued_work(
+            Arc::clone(&residents),
             self.queued_work_source,
             backend.session_work(),
             session_execution_owner.clone(),
@@ -1209,7 +1230,8 @@ impl LashCoreBuilder {
             },
         };
 
-        let substrate_slot = Arc::new(NativeSubstrateSlot::new(substrate));
+        let drive_lifetime = DriveLifetime::new();
+        let substrate_slot = Arc::new(NativeSubstrateSlot::new(substrate, &drive_lifetime));
         let plugin_factories = Arc::new(plugin_factories);
         let tool_child_context_source = tool_child_context::CoreToolChildContextSource::install(
             &env,
@@ -1249,7 +1271,9 @@ impl LashCoreBuilder {
             process_execution_concurrency,
             worker_slot_supplier,
             substrate_slot,
+            drive_lifetime,
             _session_driver: session_driver,
+            residents,
             process_event_sink,
             tool_intent_submission_gates: Default::default(),
             tool_child_context_source,
@@ -1310,6 +1334,7 @@ impl LashCoreBuilder {
     /// and the driver the core keeps.
     #[allow(clippy::too_many_arguments)]
     fn resolve_queued_work(
+        residents: Arc<residents::ResidentSessions>,
         queued_work_source: QueuedWorkSource,
         backend_engine: Option<Arc<dyn lash_core::SessionWorkEngine>>,
         session_execution_owner: lash_core::LeaseOwnerIdentity,
@@ -1324,8 +1349,10 @@ impl LashCoreBuilder {
         queued_work_execution_concurrency: usize,
     ) -> (QueuedPortSetup, Arc<dyn lash_core::SessionDriver>) {
         let owner = session_execution_owner.clone();
+        let build_generation = env.core.backend().build_generation().clone();
         let driver = Arc::new(NativeQueuedWorkRunHandle::new(Arc::new(
             NativeQueuedWorkRunConfig {
+                residents,
                 session_execution_owner,
                 env,
                 policy,
@@ -1337,7 +1364,18 @@ impl LashCoreBuilder {
             },
         )));
         match (queued_work_source, backend_engine) {
-            (QueuedWorkSource::Disabled, _) => (QueuedPortSetup::Disabled, driver),
+            // The host turned the backend's own engine off: a send is
+            // refused, since nothing would drive what it accepted.
+            (QueuedWorkSource::Disabled, Some(_)) => (QueuedPortSetup::Disabled, driver),
+            // No engine on the backend and the host drains queued work itself:
+            // a waiting send drives its session in the caller's task (D1 §2.4;
+            // S5d deletes `without_queued_work` and this arm together).
+            (QueuedWorkSource::Disabled, None) => {
+                let port: Arc<dyn lash_core::SessionWorkEngine> =
+                    Arc::new(lash_core::runtime::InlineSessionWork::new(build_generation));
+                let installed = install_session_driver(&port, driver, &owner);
+                (QueuedPortSetup::External { port }, installed)
+            }
             (QueuedWorkSource::Backend, Some(port)) => {
                 let installed = install_session_driver(&port, driver, &owner);
                 (QueuedPortSetup::External { port }, installed)

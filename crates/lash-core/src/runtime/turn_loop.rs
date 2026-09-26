@@ -64,8 +64,6 @@ pub(in crate::runtime) struct TurnLeaseScope<'lease> {
 fn trace_outcome(outcome: &TurnOutcome) -> Option<lash_trace::TraceTurnOutcome> {
     use lash_trace::{TraceTurnCompletionReason as Reason, TraceTurnOutcome as Outcome};
     Some(match outcome {
-        // A queued call ran no turn, so there is no completed turn to trace.
-        TurnOutcome::Queued { .. } => return None,
         TurnOutcome::Finished(TurnFinish::AssistantMessage { .. }) => Outcome::Completed {
             done_reason: Reason::AssistantMessage,
         },

@@ -51,7 +51,8 @@ pub use engine::{
     AdmittedProcessIdentity, PersistedSegmentHandover, ProcessEngine, ProcessEngineAdmission,
     ProcessEngineProcessContext, ProcessEngineRegistration, ProcessEngineRegistry,
     ProcessEngineRunContext, ProcessEngineRunGuard, ProcessEngineRuntimeContext, ProcessInfraError,
-    ProcessRunOutcome, SegmentHandover, settle_started_process_engine_artifacts,
+    ProcessRunOutcome, SegmentHandover, WeakProcessEngineRegistry,
+    settle_started_process_engine_artifacts,
 };
 pub use events::{
     AbandonEvidence, AbandonWriter, PROCESS_WAKE_DELIVERY_FORMAT_VERSION, ProcessAwaitOutput,
