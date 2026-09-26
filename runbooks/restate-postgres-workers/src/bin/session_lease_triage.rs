@@ -794,6 +794,7 @@ async fn commit_cas_livelock(
             root_terminal: None,
             release_session_execution_lease: None,
             config: state.config,
+            execution_config: None,
             current_frame_node_id: state.current_frame_node_id,
             graph: lash_core::store::GraphAppend::PreserveHead,
             graph_base_leaf_node_id: state.graph.leaf_node_id.clone(),
