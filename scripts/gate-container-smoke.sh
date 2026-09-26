@@ -8,6 +8,8 @@ source "$repo/scripts/worktree-gate-env.sh"
 lash_gate_acquire gate-container-smoke
 # shellcheck source=scripts/ci/s3-service.sh
 source "$repo/scripts/ci/s3-service.sh"
+# shellcheck source=scripts/ci/pg-service.sh
+source "$repo/scripts/ci/pg-service.sh"
 
 postgres_container="lash-gate-smoke-postgres-${LASH_GATE_WORKTREE_SLUG}"
 s3_container="lash-gate-smoke-s3-${LASH_GATE_WORKTREE_SLUG}"
@@ -49,7 +51,7 @@ docker run -d --name "$restate_container" \
   restatedev/restate:1.7.12@sha256:bb9c93ab92bb401548841b35dba0e7236a3b108bc1d7d4c06a8f3ece46b80d4b >/dev/null
 
 deadline=$((SECONDS + 60))
-until docker exec "$postgres_container" pg_isready -U lash -d lash >/dev/null 2>&1; do
+until lash_pg_ready docker exec "$postgres_container"; do
   ((SECONDS < deadline)) || { docker logs "$postgres_container" >&2; exit 1; }
   sleep 1
 done

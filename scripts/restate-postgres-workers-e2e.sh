@@ -25,6 +25,10 @@ compose=(docker compose -p "$compose_project" -f "$repo/runbooks/restate-postgre
 # The S3 service's image, credentials and bucket, which the compose file reads.
 # shellcheck source=scripts/ci/s3-service.sh
 source "$repo/scripts/ci/s3-service.sh"
+# The Postgres readiness probe: TCP only, so it answers against the image's
+# final server, never its socket-only temporary init server.
+# shellcheck source=scripts/ci/pg-service.sh
+source "$repo/scripts/ci/pg-service.sh"
 s3_port="${LASH_E2E_S3_PORT:-$((LASH_E2E_PORT_BASE + 40))}"
 export LASH_E2E_S3_PORT="$s3_port"
 trace_volume="${compose_project}_trace-output"
@@ -124,9 +128,14 @@ for image in $("${compose[@]}" config --images); do bash scripts/docker-pull-wit
 # alone first lets the harness apply the committed schema artifact before any
 # worker starts — the same step `lash migrate` performs in a deployment.
 "${compose[@]}" up -d postgres
-until "${compose[@]}" exec -T postgres pg_isready -U lash -d lash >/dev/null 2>&1; do
-  sleep 1
-done
+# Wait for the final server, not the image's temporary init server: that one
+# listens on the unix socket alone, so only a TCP answer counts. A unix-socket
+# pg_isready can pass against the temporary server and release the schema
+# apply below into its shutdown ("the database system is shutting down").
+if ! lash_pg_wait postgres 90 "${compose[@]}" exec -T postgres; then
+  "${compose[@]}" logs postgres >&2 || true
+  exit 1
+fi
 "${compose[@]}" exec -T postgres psql -U lash -d lash -v ON_ERROR_STOP=1 -q \
   < "$repo/crates/lash-postgres-store/schema.sql"
 "${compose[@]}" up -d s3 restate mock-provider worker-a worker-b worker-proxy
