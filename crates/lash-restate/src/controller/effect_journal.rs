@@ -64,7 +64,11 @@ use serde::{Deserialize, Serialize};
 /// the executable generation it runs under, and an execution-environment sync
 /// no longer journals a cell replay-key grammar (FIG-3571): the turn's one
 /// generation is checked at its admission.
-pub const EFFECT_JOURNAL_VERSION: u32 = 10;
+/// 11: an opener's end waits out each group it closed at the group's drain
+/// barrier instead of awaiting the group's remaining ranks as its caller, so
+/// the end journals the index's `drain_blockers` call where it journaled rank
+/// reads and rank waits (FIG-3826).
+pub const EFFECT_JOURNAL_VERSION: u32 = 11;
 
 /// The entry field the generation is stamped under.
 const EFFECT_JOURNAL_VERSION_FIELD: &str = "effect_journal_version";

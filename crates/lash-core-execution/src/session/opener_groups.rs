@@ -42,7 +42,10 @@
 //!    `closing` one — an earlier end recorded it and failed before it
 //!    finished — resumes. Every group the end handles is then finalized with
 //!    the opener's own steps. On Restate, whose engine-side index is the
-//!    closing twin, the opener waits out each held group's remaining ranks;
+//!    closing twin, the opener waits at each held group's drain barrier until
+//!    no committed child still owes its drain. It does not await the ranks
+//!    on the group's cursor: its own close ended the caller's interest, and
+//!    the index refuses a caller's await of a closed group (FIG-3676);
 //! 3. every closed group's settled ranks are incorporated through the
 //!    journaled `IncorporateGroupSettlements` record.
 //!
@@ -68,7 +71,6 @@
 use std::sync::Arc;
 
 use lash_sansio::sync::MutexExt;
-use tokio_util::sync::CancellationToken;
 
 use super::execution_context::RuntimeExecutionContext;
 use super::settlement_incorporation::ContextFinalizationSteps;
@@ -486,16 +488,12 @@ impl<'run> RuntimeExecutionContext<'run> {
         let mut closed = OpenerGroupsClosed::default();
         let mut remaining = Vec::with_capacity(held.len());
         for handle in held {
-            let cursor = (
-                handle.group_key().to_string(),
-                handle.children(),
-                handle.consumed(),
-            );
+            let group = (handle.group_key().to_string(), handle.children());
             controller
                 .close_effect_group(handle, LoserPolicy::Cancel)
                 .await?;
-            closed.groups.push(cursor.0.clone());
-            remaining.push(cursor);
+            closed.groups.push(group.0.clone());
+            remaining.push(group);
         }
         match closing {
             Some(closing) => {
@@ -540,23 +538,30 @@ impl<'run> RuntimeExecutionContext<'run> {
             None => {
                 // Restate: the close seated a cancelled rank for every child
                 // whose final record had not committed, and a committed child
-                // ranks once its drain finishes. Waiting out the remaining
-                // ranks on the cursor the consumer left is step 1 seen from
-                // the opener: every protected obligation is finished before
-                // the opener's outcome and accounting commit.
-                for (group_key, children, consumed) in remaining {
-                    let mut handle =
-                        crate::EffectGroupHandle::restored(group_key, children, consumed)?;
-                    while !handle.is_exhausted() {
-                        controller
-                            .await_next_settlement(
-                                &mut handle,
-                                crate::runtime::TurnCancelWait::unobserved(
-                                    CancellationToken::new(),
+                // ranks once its drain finishes. A group allocates commit
+                // positions `1..=children`, so waiting at the drain barrier
+                // of the position past the last one is step 1 seen from the
+                // opener: every protected obligation is finished before the
+                // opener's outcome and accounting commit. The wait is the
+                // host's, not the caller's: the close just ended the caller's
+                // interest, so an await on the consumer's cursor is refused
+                // (FIG-3676).
+                for (group_key, children) in remaining {
+                    let past_every_commit = u64::try_from(children)
+                        .ok()
+                        .and_then(|children| children.checked_add(1))
+                        .ok_or_else(|| {
+                            RuntimeEffectControllerError::new(
+                                crate::RuntimeErrorCode::RuntimeEffectGroupShape,
+                                format!(
+                                    "effect group {group_key} has more children than commit \
+                                     positions"
                                 ),
                             )
-                            .await?;
-                    }
+                        })?;
+                    controller
+                        .await_group_child_drain_admission(&group_key, past_every_commit)
+                        .await?;
                 }
             }
         }
