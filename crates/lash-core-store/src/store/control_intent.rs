@@ -312,6 +312,147 @@ pub fn stored_intent_kind(kind: &ControlIntentKind) -> Result<String, super::Sto
     })
 }
 
+/// The verb an operator applies to a parked root (ADR 0104 O4).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RootVerb {
+    /// Resume the root's stopped execution under the same fence.
+    Redrive,
+    /// End the root `Cancelled`, settling the inputs it held.
+    Cancel,
+    /// End the root and drive the inputs it held under a new root.
+    Fork,
+}
+
+/// An operator's verb on the parked root `root` of `session_id`, compared
+/// against the park it saw (`park`, the CAS token).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RootIntentRequest {
+    pub session_id: SessionId,
+    pub root: TurnId,
+    pub park: ParkId,
+    pub verb: RootVerb,
+}
+
+/// Why a root verb's store half refused: nothing was written.
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum RootIntentRefused {
+    /// The root holds no park.
+    #[error("the root is not parked")]
+    NotParked,
+    /// The root parked again since the caller read it: act on `current`.
+    #[error("the park was superseded by park {current}")]
+    ParkSuperseded { current: ParkId },
+    /// A redrive of the root already runs, or is on its way: cancel the
+    /// running root cooperatively instead, or wait for it to park again.
+    #[error("the root is being redriven by intent {intent}")]
+    Redriving { intent: ControlIntentId },
+    /// A cancel or fork of the root is still open.
+    #[error("intent {intent} is still open on the root")]
+    IntentOpen { intent: ControlIntentId },
+    /// The session is closing: its `CloseSession` intent ends every root.
+    #[error("the session is closing")]
+    SessionClosing,
+    /// The root owns effect groups that are live or closing (D2 Q4): they
+    /// settle first.
+    #[error("the root owns {count} effect group(s) that are live or closing")]
+    EffectGroupsOpen { count: usize },
+    /// The store did not answer.
+    #[error(transparent)]
+    Store(#[from] super::StoreError),
+}
+
+/// What a root verb's store transaction read, for [`decide_root_intent`].
+#[derive(Clone, Copy, Debug)]
+pub struct RootIntentFacts<'a> {
+    /// The session's `CloseSession` intent, when it is closing.
+    pub closing: Option<ControlIntentId>,
+    /// The session's park.
+    pub park: Option<&'a super::TurnPark>,
+    /// The session's open verbs (every open intent but its close).
+    pub open_verbs: &'a [ControlIntent],
+    /// The redrive the park's `resume_intent` names, as stored.
+    pub resume: Option<&'a ControlIntent>,
+}
+
+/// What a root verb's store half writes besides its own intent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RootIntentPlan {
+    /// The park the verb acts on.
+    pub park: super::TurnPark,
+    /// Open redrives of the root a cancel or fork supersedes.
+    pub supersede: Vec<ControlIntent>,
+}
+
+/// Decide `request` against what its transaction read (D2 §1.4, §2): the
+/// park must be the root's and the one the caller saw; no other cancel or
+/// fork may be open; a cancel or fork supersedes a redrive that has not
+/// resumed the root yet and refuses one that has.
+///
+/// # Errors
+/// The refusal the verb answers; nothing is written.
+pub fn decide_root_intent(
+    request: &RootIntentRequest,
+    facts: &RootIntentFacts<'_>,
+) -> Result<RootIntentPlan, RootIntentRefused> {
+    if facts.closing.is_some() {
+        return Err(RootIntentRefused::SessionClosing);
+    }
+    let park = facts
+        .park
+        .filter(|park| park.turn_id == request.root)
+        .ok_or(RootIntentRefused::NotParked)?;
+    if park.park_id != request.park {
+        return Err(RootIntentRefused::ParkSuperseded {
+            current: park.park_id,
+        });
+    }
+    let root_verb = |intent: &&ControlIntent| match &intent.kind {
+        ControlIntentKind::Redrive { root, .. }
+        | ControlIntentKind::Cancel { root, .. }
+        | ControlIntentKind::Fork { root, .. } => *root == request.root,
+        ControlIntentKind::CloseSession { .. } => false,
+    };
+    if let Some(open) = facts.open_verbs.iter().filter(root_verb).find(|intent| {
+        matches!(
+            intent.kind,
+            ControlIntentKind::Cancel { .. } | ControlIntentKind::Fork { .. }
+        )
+    }) {
+        return Err(RootIntentRefused::IntentOpen { intent: open.id });
+    }
+    // A redrive the park names: open means it has not resumed the root yet;
+    // acknowledged means it did, and the root runs until it parks again
+    // (which clears `resume_intent`) or commits (which clears the park).
+    let redrive = facts.resume.filter(|intent| {
+        intent.state.is_open() || matches!(intent.state, ControlIntentState::Acknowledged { .. })
+    });
+    let supersede = match (request.verb, redrive) {
+        (_, None) => Vec::new(),
+        (RootVerb::Redrive, Some(redrive)) => {
+            return Err(RootIntentRefused::Redriving { intent: redrive.id });
+        }
+        (_, Some(redrive)) if redrive.state.is_open() => vec![redrive.clone()],
+        (_, Some(redrive)) => {
+            return Err(RootIntentRefused::Redriving { intent: redrive.id });
+        }
+    };
+    Ok(RootIntentPlan {
+        park: park.clone(),
+        supersede,
+    })
+}
+
+/// The root a fork of input root `root`'s park `park` drives its held
+/// inputs under (D2 §1.4): `{root}~fork{park}`. A park is forked at most
+/// once (the fork deletes it), so the name is unique, and it is known before
+/// the fork's intent is written.
+#[must_use]
+pub fn forked_root(root: &TurnId, park: ParkId) -> TurnId {
+    TurnId::from(format!("{root}~fork{park}"))
+}
+
 /// The deployment's control-intent ledger (FIG-3600 S7, ADR 0104 O4, astra
 /// B6), carried by the session store factory.
 ///
@@ -377,6 +518,32 @@ pub trait ControlIntentStore: Send + Sync {
         &self,
         id: ControlIntentId,
     ) -> Result<Option<ControlIntent>, super::StoreError>;
+
+    /// Open an operator's verb on a parked root: the store half of its
+    /// intent, in one transaction, decided by [`decide_root_intent`].
+    ///
+    /// - **Redrive** records the intent on the park (`resume_intent`) and
+    ///   feeds `RedriveRequested`. The drive epoch does not move: the parked
+    ///   root's sealed fence stays current, so the resumed execution replays
+    ///   under it.
+    /// - **Cancel** writes the root's terminal evidence
+    ///   (`OperatorCancelled`), settles the inputs it held `Cancelled` and
+    ///   hands its claims' other rows back open (a queued root's run settles
+    ///   with it), deletes the park (feed `Cancelled{Operator}`), supersedes
+    ///   an open redrive, and raises the drive epoch under admission
+    ///   `intent:{id}`.
+    /// - **Fork** is a cancel whose held inputs return open, bound to the
+    ///   new root [`forked_root`] (an input root) in their original order;
+    ///   a queued root's members return open unbound, and the next admission
+    ///   mints their root. The cause is `Forked`.
+    ///
+    /// The intent is `Pending`, carrying the park's engine handle for the
+    /// engine half.
+    async fn open_root_intent(
+        &self,
+        request: &RootIntentRequest,
+        at_ms: u64,
+    ) -> Result<ControlIntent, RootIntentRefused>;
 }
 
 #[cfg(test)]
