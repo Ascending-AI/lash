@@ -682,20 +682,24 @@ async fn migrate_pool(database_url: &str) -> Result<PgPool, StoreError> {
 mod tests {
     use super::*;
 
-    /// The upgrade path and the bootstrap provision the identical table: the
-    /// catalog's statements are literally the bytes `schema.sql` declares, so
-    /// the two paths can never disagree about the ledger's shape.
+    /// The upgrade path and the bootstrap provision identical objects: a
+    /// catalog step that creates an object states it exactly the way
+    /// `schema.sql` does, so the two paths can never disagree about that
+    /// object's shape. A step that alters an existing table carries no byte
+    /// contract with the artifact — `schema.sql` folds the added column into
+    /// its `CREATE TABLE` body — so the structural suites own that
+    /// equivalence.
     #[test]
-    fn the_ledger_ddl_matches_the_schema_artifact() {
-        let catalog = EXPAND_MIGRATIONS
-            .iter()
-            .map(|migration| migration.statements)
-            .collect::<Vec<_>>()
-            .join("\n");
-        assert!(
-            SCHEMA_DDL.contains(&catalog),
-            "schema.sql does not contain the migration catalog's ledger DDL verbatim"
-        );
+    fn created_objects_match_the_schema_artifact() {
+        for migration in EXPAND_MIGRATIONS {
+            if migration.statements.starts_with("CREATE") {
+                assert!(
+                    SCHEMA_DDL.contains(migration.statements),
+                    "schema.sql does not contain {}'s DDL verbatim",
+                    migration.id
+                );
+            }
+        }
     }
 
     /// The catalog must chain to the current component: a step targeting a
