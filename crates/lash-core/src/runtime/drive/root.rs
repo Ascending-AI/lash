@@ -483,6 +483,18 @@ struct ClaimTrace {
     turn_index: usize,
 }
 
+/// What the claim probe decided for the head row: either the outcome the
+/// journal records (a claim or a refusal) or a race the step retries.
+enum RootClaimProbe {
+    /// The journaled `ClaimAcceptedTurnInput` outcome.
+    Drive(crate::AcceptedTurnInputDrive),
+    /// The claim attempt returned no claim yet the head row reads claimable
+    /// and held by nobody: claim and read raced, so the step defers to a
+    /// later admission instead of journaling a refusal over a row nothing
+    /// owns.
+    HeadMissedByClaimRace,
+}
+
 /// The first execution of an input root's claim.
 ///
 /// Everything it needs is captured at the drive site; none of it enters the
@@ -539,25 +551,26 @@ impl RuntimeEffectLocalRunner for RootInputClaimRunner {
         // on every later drive and wedge the session. Like admission and the
         // seal, the step runs again; only a claim or a refusal is recorded.
         let root = self.root.clone();
-        let drive = self.claim().await.map_err(|err| {
+        let drive = match self.claim().await.map_err(|err| {
             let mut fault = crate::RuntimeEffectControllerError::from(
                 crate::runtime::runtime_error_from_store_commit(err),
             );
             fault.message = format!("root input claim failed: {}", fault.message);
             fault.retryable_uncommitted_derivation()
-        })?;
-        if matches!(
-            drive,
-            crate::AcceptedTurnInputDrive::Refused {
-                refusal: crate::AcceptedTurnInputRefusal::HeldByLiveClaim
+        })? {
+            RootClaimProbe::Drive(drive) => drive,
+            // The claim attempt missed the head yet the read shows it
+            // claimable and held by nobody: the two raced, so the step
+            // defers to a later admission rather than journal a refusal that
+            // would cede the root over a row nothing owns (review of #2290).
+            RootClaimProbe::HeadMissedByClaimRace => {
+                return Err(crate::RuntimeEffectControllerError::new(
+                    RuntimeErrorCode::SessionExecutionLaneBusy,
+                    format!("root `{root}` missed its head on a claim race"),
+                )
+                .retryable_uncommitted_derivation());
             }
-        ) {
-            return Err(crate::RuntimeEffectControllerError::new(
-                RuntimeErrorCode::SessionExecutionLaneBusy,
-                format!("root `{root}` waits for a live input claim"),
-            )
-            .retryable_uncommitted_derivation());
-        }
+        };
         Ok(crate::RuntimeEffectOutcome::ClaimAcceptedTurnInput { drive })
     }
 }
@@ -586,9 +599,11 @@ impl RootInputClaimRunner {
     /// mutating it: bound to this root means an earlier execution of it
     /// aborted, and this redrive re-takes the set that execution drove
     /// (FIG-3589); held means another driver has it; absent means it was
-    /// settled, cancelled, or pruned. Nothing here ever drops, withdraws, or
-    /// re-admits a row.
-    async fn claim(self) -> Result<crate::AcceptedTurnInputDrive, crate::StoreError> {
+    /// settled, cancelled, or pruned; pending after a missed claim means the
+    /// claim raced, so the step asks to run again rather than record a
+    /// refusal. Nothing here ever drops, withdraws, or re-admits a row.
+    async fn claim(self) -> Result<RootClaimProbe, crate::StoreError> {
+        let probe = |drive| RootClaimProbe::Drive(drive);
         if let Some(claim) = self
             .store
             .claim_next_turn_inputs(&self.session_id, &self.fence, &self.owner, self.max_inputs)
@@ -606,7 +621,7 @@ impl RootInputClaimRunner {
                             .collect::<Vec<_>>(),
                     }),
                 );
-                return self.admit_or_release(claim).await;
+                return self.admit_or_release(claim).await.map(probe);
             }
             self.emit(
                 "turn_input.claim_abandoned",
@@ -626,7 +641,7 @@ impl RootInputClaimRunner {
             .iter()
             .find(|read| read.input.input_id == self.head)
             .map(|read| read.status.clone());
-        Ok(match status {
+        Ok(probe(match status {
             Some(crate::PendingTurnInputReadStatus::TurnBound { turn_id, .. })
                 if turn_id == self.root =>
             {
@@ -637,13 +652,16 @@ impl RootInputClaimRunner {
                     },
                 }
             }
+            Some(crate::PendingTurnInputReadStatus::Pending) => {
+                return Ok(RootClaimProbe::HeadMissedByClaimRace);
+            }
             Some(_) => crate::AcceptedTurnInputDrive::Refused {
                 refusal: crate::AcceptedTurnInputRefusal::HeldByLiveClaim,
             },
             None => crate::AcceptedTurnInputDrive::Refused {
                 refusal: crate::AcceptedTurnInputRefusal::SettledOrRemoved,
             },
-        })
+        }))
     }
 
     /// [`Self::admit`], handing the rows back when it fails: the failed

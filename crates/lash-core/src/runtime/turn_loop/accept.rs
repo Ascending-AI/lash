@@ -322,8 +322,10 @@ impl LashRuntime {
             &request,
             &sinks,
             Some((&accepted_id, &input)),
-            crate::runtime::drive::FollowOnRecovery::Decline,
-            None,
+            crate::runtime::drive::DriveLimits {
+                follow_on: crate::runtime::drive::FollowOnRecovery::Decline,
+                max_roots: None,
+            },
             |run| run.driven_inputs.contains(&accepted_id),
         ))
         .await

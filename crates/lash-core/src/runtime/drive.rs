@@ -218,6 +218,15 @@ pub(crate) enum FollowOnRecovery {
     Decline,
 }
 
+/// The bounds a drive loop runs under: whether it recovers the follow-on
+/// the session head owes, and how many roots one invocation runs before it
+/// yields to a continuation.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct DriveLimits {
+    pub(crate) follow_on: FollowOnRecovery,
+    pub(crate) max_roots: Option<usize>,
+}
+
 /// How a drive loop ended, with the roots it ran.
 pub(crate) struct DriveRun {
     pub(crate) outcome: DriveOutcome,
@@ -256,8 +265,10 @@ pub async fn drive_session_with(
         request,
         &sinks,
         None,
-        FollowOnRecovery::Recover,
-        Some(crate::engine::MAX_ROOTS_PER_DRIVE),
+        DriveLimits {
+            follow_on: FollowOnRecovery::Recover,
+            max_roots: Some(crate::engine::MAX_ROOTS_PER_DRIVE),
+        },
         |_| false,
     ))
     .await?;
@@ -345,8 +356,10 @@ pub async fn drive_session_reporting(
         request,
         &sinks,
         None,
-        FollowOnRecovery::Recover,
-        Some(crate::engine::MAX_ROOTS_PER_DRIVE),
+        DriveLimits {
+            follow_on: FollowOnRecovery::Recover,
+            max_roots: Some(crate::engine::MAX_ROOTS_PER_DRIVE),
+        },
         |_| false,
     ))
     .await?;
@@ -445,8 +458,7 @@ impl LashRuntime {
         request: &DriveRequest,
         sinks: &DriveSinks<'_>,
         live: Option<(&crate::InputId, &crate::TurnInput)>,
-        follow_on: FollowOnRecovery,
-        max_roots: Option<usize>,
+        limits: DriveLimits,
         mut done: impl FnMut(&RootRun) -> bool,
     ) -> Result<DriveRun, DriveAbort> {
         let mut runs: Vec<RootRun> = Vec::new();
@@ -466,7 +478,7 @@ impl LashRuntime {
                     break DriveStop::RootTerminal { root, kind, commit };
                 }
             };
-            if follow_on == FollowOnRecovery::Decline
+            if limits.follow_on == FollowOnRecovery::Decline
                 && matches!(
                     admitted.work(),
                     crate::engine::AdmittedWork::FollowOn { .. }
@@ -497,7 +509,7 @@ impl LashRuntime {
             if finished {
                 break DriveStop::Yielded { root };
             }
-            if max_roots.is_some_and(|max| runs.len() >= max) {
+            if limits.max_roots.is_some_and(|max| runs.len() >= max) {
                 budget_exhausted = true;
                 break DriveStop::Yielded { root };
             }

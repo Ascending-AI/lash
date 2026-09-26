@@ -320,7 +320,9 @@ pub async fn drain_hand_over_slot(
 /// session never stops the others' recovery. Only a catalog that cannot be
 /// listed fails the pass. A queued batch whose `available_at_ms` is still
 /// ahead of `now_ms` does not count as open: a later tick asks for it once
-/// it is due.
+/// it is due. A session the engine still holds live work for is left alone:
+/// its ask was not lost, its owner is simply still running, and a sibling
+/// drive would fence it.
 pub async fn reconcile_session_drives(
     sessions: &dyn SessionStoreFactory,
     engine: &dyn SessionWorkEngine,
@@ -341,6 +343,14 @@ pub async fn reconcile_session_drives(
         report.scanned += 1;
         match oldest_open_row(sessions, &session, now_ms).await {
             Ok(Some(row)) => {
+                // Checked after the row read: a row's writer registered
+                // with the engine before it wrote, so a live owner is
+                // visible here and keeps its session — a suspended
+                // invocation's resumption re-decides the session's open
+                // ingress itself, and a sibling drive would only fence it.
+                if engine.session_work_in_flight(&session).await {
+                    continue;
+                }
                 engine.schedule_drive(&session, reconcile_drive_request(tick, &row));
                 report.scheduled.push(session);
             }

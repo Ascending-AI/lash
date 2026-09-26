@@ -253,6 +253,10 @@ impl SessionWorkEngine for ResolvedQueuedWork {
     ) -> std::result::Result<lash_core::engine::DriveOutcome, lash_core::engine::DriveAbort> {
         self.port.await_drive(session, request).await
     }
+
+    async fn session_work_in_flight(&self, session: &lash_core::SessionId) -> bool {
+        self.port.session_work_in_flight(session).await
+    }
 }
 
 /// Shared, lazily-initialized host-work state for a [`LashCore`].
@@ -305,10 +309,10 @@ impl NativeSubstrateSlot {
                     } => {
                         let run_handle = Arc::clone(driver);
                         let work_cadence = self.setup.config.work_cadence.clone();
-                        Arc::new(match slot_supplier {
+                        let engine = match slot_supplier {
                             Some(slot_supplier) => {
                                 facade_support::native_queued_work_with_worker_slot_supplier_and_work_cadence(
-                                    run_handle,
+                                    run_handle.clone(),
                                     Arc::clone(slot_supplier),
                                     work_cadence,
                                     self.drives_shutdown.clone(),
@@ -322,7 +326,11 @@ impl NativeSubstrateSlot {
                                 self.drives_shutdown.clone(),
                             )
                             .expect("queued-work concurrency was validated at build"),
-                        })
+                        };
+                        // The run handle is also the driver: installing it
+                        // starts the engine's reconcile tick.
+                        engine.install_session_driver(driver.clone());
+                        Arc::new(engine)
                     }
                 };
                 let (process, drive_process_on_open) = match &self.setup.process {

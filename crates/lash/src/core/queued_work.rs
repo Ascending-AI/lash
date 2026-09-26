@@ -27,7 +27,7 @@ pub(crate) fn native_queued_work_handle_for_tests(
     core: &crate::LashCore,
     store_factory: Arc<dyn SessionStoreFactory>,
 ) -> NativeQueuedWorkRunHandle {
-    NativeQueuedWorkRunHandle::new(Arc::new(NativeQueuedWorkRunConfig {
+    let handle = NativeQueuedWorkRunHandle::new(Arc::new(NativeQueuedWorkRunConfig {
         residents: Arc::clone(&core.residents),
         session_execution_owner: core.session_execution_owner.clone(),
         env: core.env.clone(),
@@ -37,7 +37,9 @@ pub(crate) fn native_queued_work_handle_for_tests(
         store_factory,
         live_replay_store: Arc::clone(&core.live_replay_store),
         process_lifecycle_available: core.process_lifecycle_available,
-    }))
+    }));
+    handle.bind_substrate_slot(std::sync::Arc::downgrade(&core.substrate_slot));
+    handle
 }
 
 /// The core's session driver (FIG-3600): opens a session's runtime with the
@@ -50,6 +52,10 @@ pub(crate) fn native_queued_work_handle_for_tests(
 pub(crate) struct NativeQueuedWorkRunHandle {
     config: Arc<NativeQueuedWorkRunConfig>,
     next_request: std::sync::atomic::AtomicU64,
+    /// The core's resolved work ports, bound once the substrate slot exists:
+    /// the reconcile pass asks this port for drives, not the environment's
+    /// build-time placeholder.
+    substrate_slot: std::sync::OnceLock<std::sync::Weak<super::work_drivers::NativeSubstrateSlot>>,
 }
 
 impl NativeQueuedWorkRunHandle {
@@ -57,7 +63,19 @@ impl NativeQueuedWorkRunHandle {
         Self {
             config,
             next_request: std::sync::atomic::AtomicU64::new(0),
+            substrate_slot: std::sync::OnceLock::new(),
         }
+    }
+
+    /// Bind the substrate slot that resolves this core's work ports. The
+    /// slot is built after the driver (its setup embeds the driver), so the
+    /// binding lands late; a reconcile before it falls back to the
+    /// environment's port.
+    pub(crate) fn bind_substrate_slot(
+        &self,
+        slot: std::sync::Weak<super::work_drivers::NativeSubstrateSlot>,
+    ) {
+        let _ = self.substrate_slot.set(slot);
     }
 
     /// A drive request unique to this process incarnation: the in-process
@@ -283,7 +301,14 @@ impl lash_core::SessionDriver for NativeQueuedWorkRunHandle {
         page: std::num::NonZeroUsize,
         tick: &str,
     ) -> std::result::Result<lash_core::engine::ReconcileCursor, lash_core::StoreError> {
-        let work = self.config.env.queued_work();
+        // The environment's build-time queued port is a placeholder; the
+        // drive arm asks the port the substrate resolved — the engine the
+        // core's sends schedule on.
+        let work: Arc<dyn lash_core::SessionWorkEngine> =
+            match self.substrate_slot.get().and_then(std::sync::Weak::upgrade) {
+                Some(slot) => slot.ports().await.queued_port(),
+                None => self.config.env.queued_work(),
+            };
         let process_port = self.config.env.process_work();
         let processes = self
             .config

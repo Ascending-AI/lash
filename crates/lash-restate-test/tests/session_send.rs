@@ -386,7 +386,7 @@ async fn dropping_the_handle_stops_nothing() {
 }
 
 /// L-S11: a row committed whose schedule was lost (its process died between
-/// the commit and the ask) is driven by the next reconcile sweep.
+/// the commit and the ask) is driven by the engine's reconcile tick.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn dropped_schedule_is_reconciled() {
     let world = world(0x5505).await;
@@ -407,7 +407,7 @@ async fn dropped_schedule_is_reconciled() {
         .await
         .expect("open the session store")
         .expect("the session exists");
-    let row = store
+    store
         .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
             session_id.clone(),
             lash_core::TurnInputIngress::NextTurn,
@@ -415,42 +415,46 @@ async fn dropped_schedule_is_reconciled() {
         ))
         .await
         .expect("commit the row");
-    world.backend.server().settle().await;
+    // The engine driver's own reconcile tick (ADR 0104 O2) re-asks for the
+    // row nobody scheduled: the pass finds it within one tick and its drive
+    // drains it.
+    tokio::time::timeout(Duration::from_secs(60), async {
+        loop {
+            if session
+                .durable()
+                .pending_turn_inputs()
+                .await
+                .expect("pending")
+                .is_empty()
+            {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+    })
+    .await
+    .expect("the reconcile tick's drive drains the row");
+    #[derive(Debug, serde::Deserialize)]
+    struct DriveAsk {
+        idempotency_key: Option<String>,
+    }
+    let asks = lash_restate::RestateAdminClient::new(world.backend.connection())
+        .query_json::<DriveAsk>(
+            "SELECT idempotency_key FROM sys_invocation \
+             WHERE target_service_name = 'LashSession' AND target_service_key = 'dropped-schedule'",
+        )
+        .await
+        .expect("sys_invocation");
     assert!(
-        world.backend.server().invocations().iter().all(|view| !view
-            .target
-            .starts_with(lash_restate_test::SESSION_DRIVER_SERVICE)),
-        "no drive runs for a row nobody asked about"
+        asks.iter().any(|ask| ask
+            .idempotency_key
+            .as_deref()
+            .is_some_and(|key| key.starts_with("reconcile:"))),
+        "a reconcile pass asked for the drive: {asks:?}"
     );
 
+    // A sweep after the drain finds nothing open and asks for nothing.
     let engine = Arc::clone(world.backend.restate().session_work_engine());
-    let report = lash_core::drive::reconcile_session_drives(
-        world.backend.stores().session_store_factory().as_ref(),
-        engine.as_ref() as &dyn SessionWorkEngine,
-        "boot-1",
-        None,
-        std::num::NonZeroUsize::MIN.saturating_add(63),
-        u64::MAX,
-    )
-    .await
-    .expect("sweep");
-    assert_eq!(report.scheduled, std::slice::from_ref(&session_id));
-    let outcome = attach(
-        &world.backend,
-        &session_id,
-        lash_core::drive::reconcile_drive_request("boot-1", &format!("input:{}", row.input_id)),
-    )
-    .await;
-    assert_eq!(answers(&outcome), ["answer 1"]);
-    assert!(
-        session
-            .durable()
-            .pending_turn_inputs()
-            .await
-            .expect("pending")
-            .is_empty()
-    );
-    // A second sweep finds nothing open and asks for nothing.
     let again = lash_core::drive::reconcile_session_drives(
         world.backend.stores().session_store_factory().as_ref(),
         engine.as_ref() as &dyn SessionWorkEngine,
@@ -462,6 +466,100 @@ async fn dropped_schedule_is_reconciled() {
     .await
     .expect("sweep again");
     assert!(again.scheduled.is_empty());
+}
+
+/// A session whose open ingress an engine-side invocation still owns is
+/// never re-asked by the sweep, however reclaimable its durable rows look:
+/// the suspended turn's lease may have lapsed, but its resumption
+/// re-decides the session's pending work itself, and a sibling drive would
+/// only fence it (S5a review).
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_session_with_live_engine_work_is_not_re_asked() {
+    let world = world(0x5e55).await;
+    world.gate.armed.store(true, Ordering::SeqCst);
+    let session = world.core.session("in-flight").open().await.expect("open");
+    let session_id = SessionId::from("in-flight");
+    let receipt = session
+        .durable()
+        .enqueue(lash::TurnInput::text("hold the model"))
+        .send()
+        .await
+        .expect("accept");
+    tokio::time::timeout(Duration::from_secs(20), world.gate.reached.notified())
+        .await
+        .expect("the first turn is running");
+    // A row lands with no ask of its own — lost-ask-shaped ingress while
+    // the session's turn invocation is live on the engine.
+    let store = world
+        .backend
+        .stores()
+        .session_store_factory()
+        .open_existing_store_by_id(&session_id)
+        .await
+        .expect("open the session store")
+        .expect("the session exists");
+    store
+        .enqueue_pending_turn_input(lash_core::PendingTurnInputDraft::new(
+            session_id.clone(),
+            lash_core::TurnInputIngress::NextTurn,
+            lash::TurnInput::text("queued behind the live turn"),
+        ))
+        .await
+        .expect("commit the row");
+
+    let engine = Arc::clone(world.backend.restate().session_work_engine());
+    let report = lash_core::drive::reconcile_session_drives(
+        world.backend.stores().session_store_factory().as_ref(),
+        engine.as_ref() as &dyn SessionWorkEngine,
+        "drain-1",
+        None,
+        std::num::NonZeroUsize::MIN.saturating_add(63),
+        u64::MAX,
+    )
+    .await
+    .expect("sweep");
+    assert!(
+        report.scheduled.is_empty(),
+        "a live engine invocation owns the session's re-decision: {report:?}"
+    );
+
+    // The production sweep is the engine driver's own reconcile tick
+    // (ADR 0104 O2), which reaches the engine through the core's resolved
+    // work port. A full tick after the row lands must still find no sibling
+    // scheduled for the live session.
+    tokio::time::sleep(Duration::from_secs(11)).await;
+    #[derive(Debug, serde::Deserialize)]
+    struct DriveAsk {
+        idempotency_key: Option<String>,
+    }
+    let asks = lash_restate::RestateAdminClient::new(world.backend.connection())
+        .query_json::<DriveAsk>(
+            "SELECT idempotency_key FROM sys_invocation \
+             WHERE target_service_name = 'LashSession' AND target_service_key = 'in-flight'",
+        )
+        .await
+        .expect("sys_invocation");
+    assert!(
+        asks.iter().all(|row| !row
+            .idempotency_key
+            .as_deref()
+            .is_some_and(|key| key.starts_with("reconcile:"))),
+        "the reconcile tick scheduled no sibling for a live session: {asks:?}"
+    );
+
+    // The live drive's own re-admission picks the row up once the turn
+    // ends: no sibling ever ran, and the work is not stranded.
+    world.gate.release.notify_one();
+    let outcome = attach(&world.backend, &session_id, request_of(&receipt.input_id)).await;
+    assert_eq!(answers(&outcome), ["answer 1", "answer 2"]);
+    assert!(
+        session
+            .durable()
+            .pending_turn_inputs()
+            .await
+            .expect("pending")
+            .is_empty()
+    );
 }
 
 /// LOW-14 (#2290 review): one engine serves one session driver, so a second

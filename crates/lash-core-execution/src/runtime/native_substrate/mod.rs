@@ -69,6 +69,20 @@ pub trait SessionWorkEngine: Send + Sync {
     ) -> Result<crate::engine::DriveOutcome, crate::engine::DriveAbort> {
         Err(session_work_unavailable(session, request))
     }
+
+    /// Whether the engine still holds live work for `session`: an in-flight
+    /// drive, turn, or other invocation whose resumption re-decides the
+    /// session's open ingress itself. The reconcile sweep leaves such a
+    /// session alone — its ask was not lost, its owner is simply still
+    /// running — while a session with no live engine work and open ingress
+    /// gets the re-ask it is owed.
+    ///
+    /// The default answers `false`: an engine that cannot see its live work
+    /// is asked anyway, because the cost of a redundant ask (the drive
+    /// finds the work held and stops) is below the cost of a lost one.
+    async fn session_work_in_flight(&self, _session: &SessionId) -> bool {
+        false
+    }
 }
 
 /// The refusal of an engine that runs no drives, asked to wait for one.

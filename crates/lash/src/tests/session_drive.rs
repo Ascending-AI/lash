@@ -1,7 +1,7 @@
 //! Laws of the session drive's scheduling (FIG-3600, D5): one scheduled
 //! drive is bounded per invocation and hands its remainder to a
-//! continuation request, and the reconcile sweep's two standing callers
-//! re-ask work whose drive schedule was lost.
+//! continuation request, and the engine driver's reconcile tick re-asks
+//! work whose drive schedule was lost.
 //!
 //! Every law runs twice: on the in-process engine of the interim SQLite
 //! backend, and on lash-restate's engine over the Restate server double.
@@ -89,9 +89,10 @@ async fn fixture_with_batching(
 /// invocation's root budget still drains — and a waiter on the ask observes
 /// the chain's end, not the first leg's yield (review of #2290, HIGH-2 and
 /// LOW-17). Rows committed through the store alone schedule nothing; the
-/// law's own ask is the only deliberate drive, but the core's boot sweep
-/// may legitimately ask again for the same rows (ADR 0104 O2), so sibling
-/// drive chains are accounted, not assumed away.
+/// law's own ask is the only deliberate drive, but the engine driver's
+/// reconcile tick may legitimately ask again for the same rows (ADR 0104
+/// O2) while no invocation holds the session's work, so sibling drive
+/// chains are accounted, not assumed away.
 async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs(
     engine: Engine,
 ) -> Result<()> {
@@ -134,7 +135,7 @@ async fn a_scheduled_drive_drains_more_roots_than_one_invocation_runs(
     let mut observed = outcome.ran.len();
     if matches!(engine, Engine::Restate) {
         // The waiter observes the roots of every leg in its own chain; a
-        // reconcile sweep's sibling chain legitimately owns the roots it
+        // reconcile tick's sibling chain legitimately owns the roots it
         // claimed first. Await those chains before the global assertions:
         // the direct chain can report Idle while a sibling still runs the
         // roots it claimed, so completion is only settled once every
@@ -204,13 +205,11 @@ async fn sibling_drive_roots(
         .collect())
 }
 
-/// The reconcile sweep's standing caller besides boot (ADR 0104 O2, review
-/// HIGH-2): a row committed whose drive ask was lost — here committed
-/// through the store alone so no ask was ever made — is driven by the next
-/// `drain_status`.
-async fn a_drain_status_sweeps_sessions_whose_drive_schedule_was_lost(
-    engine: Engine,
-) -> Result<()> {
+/// The engine driver's reconcile tick (ADR 0104 O2, review HIGH-2): a row
+/// committed whose drive ask was lost — here committed through the store
+/// alone so no ask was ever made — is driven by a tick without anything
+/// asking for it again.
+async fn a_lost_drive_schedule_is_healed_by_the_reconcile_tick(engine: Engine) -> Result<()> {
     let fixture = fixture(engine, 1).await?;
     let session = fixture.core.session("send-drain-sweep").open().await?;
     let session_id = lash_core::SessionId::from("send-drain-sweep");
@@ -229,8 +228,6 @@ async fn a_drain_status_sweeps_sessions_whose_drive_schedule_was_lost(
         .await
         .expect("enqueue the input");
 
-    fixture.core.drain_status(false).await?;
-
     tokio::time::timeout(std::time::Duration::from_secs(60), async {
         loop {
             if session.durable().pending_turn_inputs().await?.is_empty() {
@@ -246,10 +243,11 @@ async fn a_drain_status_sweeps_sessions_whose_drive_schedule_was_lost(
     Ok(())
 }
 
-/// The reconcile sweep's other caller (ADR 0104 O2, review HIGH-2): a core
-/// that boots over a session holding open ingress nothing scheduled asks
-/// for the drive itself, before any host sends anything.
-async fn a_core_boot_sweeps_sessions_whose_drive_schedule_was_lost(engine: Engine) -> Result<()> {
+/// The other half of the same guarantee (ADR 0104 O2, review HIGH-2): a
+/// core that boots over a session holding open ingress nothing scheduled
+/// drives it on the engine driver's first reconcile tick, before any host
+/// sends anything.
+async fn a_booted_core_drives_lost_work_on_its_first_reconcile_tick(engine: Engine) -> Result<()> {
     let (backend, double) = engine_backend(engine).await;
     let session_id = lash_core::SessionId::from("send-boot-sweep");
     let store = backend
@@ -292,7 +290,7 @@ async fn a_core_boot_sweeps_sessions_whose_drive_schedule_was_lost(engine: Engin
         }
     })
     .await
-    .expect("the boot sweep's drive drains the input");
+    .expect("the first reconcile tick's drive drains the input");
     drop(double);
     assert_eq!(calls.load(Ordering::SeqCst), 1);
     Ok(())
@@ -310,14 +308,13 @@ macro_rules! session_drive_laws {
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn a_drain_status_sweeps_sessions_whose_drive_schedule_was_lost() -> Result<()> {
-                super::a_drain_status_sweeps_sessions_whose_drive_schedule_was_lost($engine_variant)
-                    .await
+            async fn a_lost_drive_schedule_is_healed_by_the_reconcile_tick() -> Result<()> {
+                super::a_lost_drive_schedule_is_healed_by_the_reconcile_tick($engine_variant).await
             }
 
             #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
-            async fn a_core_boot_sweeps_sessions_whose_drive_schedule_was_lost() -> Result<()> {
-                super::a_core_boot_sweeps_sessions_whose_drive_schedule_was_lost($engine_variant)
+            async fn a_booted_core_drives_lost_work_on_its_first_reconcile_tick() -> Result<()> {
+                super::a_booted_core_drives_lost_work_on_its_first_reconcile_tick($engine_variant)
                     .await
             }
         }
