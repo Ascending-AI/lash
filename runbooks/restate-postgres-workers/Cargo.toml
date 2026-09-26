@@ -77,3 +77,5 @@ tokio-util = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = "0.3"
 uuid = { workspace = true }
+
+[dev-dependencies]

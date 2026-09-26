@@ -54,6 +54,11 @@ hmac = { workspace = true }
 tracing-subscriber = { workspace = true, optional = true }
 
 [dev-dependencies]
+# Kernel tests whose effects need an engine run on the Restate server double
+# (FIG-3668, D1 PR-S2). A dev-dependency cycle where the double links this
+# crate: only types from below the cycle cross it.
+lash-restate-test = { workspace = true }
+lash-conformance = { workspace = true }
 insta = "1"
 # ADR 0102: the crate's tests that need a concrete store or effect host run in
 # `tests/store_backed` over a SQLite memory backend. The store depends on this

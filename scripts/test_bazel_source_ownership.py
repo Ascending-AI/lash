@@ -120,7 +120,7 @@ class SourceOwnershipTests(unittest.TestCase):
         selected = {}
         for args in declarations("crates/lash-core-execution", {"lash_rust_feature_test"}):
             name = ast.literal_eval(args["name"])
-            if name.endswith("__fv_981024b5"):
+            if name.endswith("__fv_866e4b5e"):
                 selected[ast.literal_eval(args["crate_name"])] = (
                     ast.literal_eval(args["args"]) if "args" in args else []
                 )

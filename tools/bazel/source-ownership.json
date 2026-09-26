@@ -83,6 +83,7 @@
         "tests/runtime_support/**/*.rs",
         "tests/runtime/tests/assembler.rs",
         "tests/runtime/tests/core_contracts.rs",
+        "tests/runtime/tests/kernel_door.rs",
         "tests/runtime/tests/language_runtime_value.rs",
         "tests/runtime/tests/projection.rs",
         "tests/runtime/tests/replay_mismatch.rs",

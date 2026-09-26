@@ -8,6 +8,11 @@
 //! (`Backend`, `AdmittedScope`, `ScopedEffectController`) lives below
 //! lash-core, so even a lash-core unit test shares it.
 
+#![expect(
+    clippy::expect_used,
+    reason = "test target: the shared turn helper asserts its setup, and clippy exempts only #[test] functions"
+)]
+
 use std::sync::Arc;
 
 use lash_core::facade_support::{TurnFinish, TurnOptions, TurnOutcome};
@@ -85,5 +90,100 @@ async fn a_kernel_turn_finishes_inside_a_handler_on_the_double() {
             TurnOutcome::Finished(TurnFinish::AssistantMessage { text }) if text == "Done"
         ),
         "{outcome:?}"
+    );
+}
+
+/// The kernel door: the test keeps its runtime by `&mut` and runs the turn in
+/// its own task on the scoped controller of a handler it opened (D1 F2).
+#[tokio::test(flavor = "multi_thread")]
+async fn a_kernel_turn_finishes_in_an_open_handler() {
+    let double = lash_restate_test::backend(0x2a, lash_restate_test::ServerConfig::default())
+        .await
+        .expect("server double");
+    Box::pin(a_turn_finishes_in_an_open_handler(&double)).await;
+}
+
+/// The same door under serial scheduling: the lent handler parks on its
+/// release, which the server sees, so the turn's own frames keep the turn
+/// and no stall preemption is needed.
+#[tokio::test(flavor = "current_thread")]
+async fn a_kernel_turn_finishes_in_an_open_handler_under_serial_scheduling() {
+    let double = lash_restate_test::backend(
+        0x2b,
+        lash_restate_test::ServerConfig::default()
+            .scheduling(lash_restate_test::Scheduling::Serial),
+    )
+    .await
+    .expect("server double");
+    Box::pin(a_turn_finishes_in_an_open_handler(&double)).await;
+    assert_eq!(
+        double.server().stats().stall_preemptions,
+        0,
+        "the open handler ran fully sequenced"
+    );
+}
+
+async fn a_turn_finishes_in_an_open_handler(double: &lash_restate_test::RestateTestBackend) {
+    let backend = double.lash_backend();
+    let transport = mock_provider(vec![MockCall {
+        stream_events: Vec::new(),
+        response: Ok(LlmResponse {
+            parts: vec![LlmOutputPart::Text {
+                text: "Done".to_string(),
+                response_meta: None,
+            }],
+            response_metadata: Default::default(),
+            ..LlmResponse::default()
+        }),
+    }]);
+    let mut runtime = runtime_with_plugins_and_tools_and_host(
+        Vec::new(),
+        Arc::new(EmptyTools),
+        transport,
+        lash_core::facade_support::EmbeddedRuntimeHost::new(test_runtime_host_config(&backend)),
+    )
+    .await;
+    let session_id = runtime.session_id().to_string();
+    let handler = double
+        .open_handler(AdmittedScope::turn(
+            session_id.as_str(),
+            "open-handler-turn",
+        ))
+        .await
+        .expect("open the turn's handler");
+    let turn = runtime
+        .stream_turn(
+            TurnInput::text("hello"),
+            TurnOptions::new(CancellationToken::new(), handler.scoped()),
+        )
+        .await
+        .expect("the turn runs in the open handler");
+    handler.close().await.expect("close the turn's handler");
+    assert!(
+        matches!(
+            &turn.outcome,
+            TurnOutcome::Finished(TurnFinish::AssistantMessage { text }) if text == "Done"
+        ),
+        "{:?}",
+        turn.outcome
+    );
+    // The model call was journaled in the lent handler's invocation.
+    let lent = double
+        .server()
+        .invocations()
+        .into_iter()
+        .find(|view| view.target.starts_with("LashTestHandlerLender/"))
+        .expect("the lent handler's invocation");
+    assert_eq!(lent.status, "completed", "{lent:?}");
+    let journal = double
+        .server()
+        .journal(&lent.id)
+        .expect("the lent handler's journal");
+    assert!(
+        journal.iter().any(|entry| entry
+            .name
+            .as_deref()
+            .is_some_and(|name| name.starts_with("lash:"))),
+        "the turn's effects were journaled in the lent handler: {journal:?}"
     );
 }

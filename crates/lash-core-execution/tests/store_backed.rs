@@ -24,3 +24,6 @@ mod support;
 
 #[path = "store_backed/kernel/mod.rs"]
 mod kernel;
+
+#[path = "store_backed/kernel_door.rs"]
+mod kernel_door;

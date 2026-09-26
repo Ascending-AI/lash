@@ -79,10 +79,12 @@ pub struct RestateTestBackend {
     server: RestateTestServer,
     restate: Arc<RestateEngine>,
     stores: Arc<lash_sqlite_store::SqliteStoreSet>,
+    engine_stores: Arc<dyn StoreSet>,
     clock: Arc<TestClock>,
     connection: RestateConnection,
     processes: RestateProcessWorkerSlot,
     jobs: Arc<ParkedJobs>,
+    loans: Arc<crate::open_handler::Loans>,
     authority: RestateAuthorityId,
 }
 
@@ -103,7 +105,27 @@ impl std::fmt::Debug for RestateTestBackend {
 /// `ServerConfig::default()` unless a test needs another time mode, protocol
 /// version, retry policy or always-replay.
 pub async fn backend(seed: u64, config: ServerConfig) -> Result<RestateTestBackend, BackendError> {
-    RestateTestBackend::build(config.with_seed(seed), None, "", DeploymentHooks::default()).await
+    backend_with(seed, config, |stores| stores).await
+}
+
+/// [`backend`] over a decorated store set: `decorate_stores` wraps the SQLite
+/// memory store set before the engine is built, so the engine, its process
+/// deployment and every service it binds run over the decorated stores. A
+/// layer added after the engine exists reaches only the ports read through
+/// the backend, not the stores the engine's own services hold.
+pub async fn backend_with(
+    seed: u64,
+    config: ServerConfig,
+    decorate_stores: impl FnOnce(Arc<dyn StoreSet>) -> Arc<dyn StoreSet>,
+) -> Result<RestateTestBackend, BackendError> {
+    RestateTestBackend::build(
+        config.with_seed(seed),
+        None,
+        "",
+        DeploymentHooks::default(),
+        decorate_stores,
+    )
+    .await
 }
 
 /// [`backend`] with a `label` and deployment `hooks` on the first build, so
@@ -117,7 +139,7 @@ pub async fn backend_with_build(
     label: impl Into<String>,
     hooks: DeploymentHooks,
 ) -> Result<RestateTestBackend, BackendError> {
-    RestateTestBackend::build(config.with_seed(seed), None, label, hooks).await
+    RestateTestBackend::build(config.with_seed(seed), None, label, hooks, |stores| stores).await
 }
 
 /// [`backend`], whose endpoint cuts every process segment after
@@ -133,6 +155,7 @@ pub async fn backend_with_segment_budget(
         Some(segment_effect_budget),
         "",
         DeploymentHooks::default(),
+        |stores| stores,
     )
     .await
 }
@@ -143,6 +166,7 @@ impl RestateTestBackend {
         segment_effect_budget: Option<u64>,
         first_label: impl Into<String>,
         first_hooks: DeploymentHooks,
+        decorate_stores: impl FnOnce(Arc<dyn StoreSet>) -> Arc<dyn StoreSet>,
     ) -> Result<Self, BackendError> {
         let clock = Arc::new(TestClock::new(config.start_time_ms));
         let server = RestateTestServer::new(config)?;
@@ -160,8 +184,9 @@ impl RestateTestBackend {
         let authority =
             RestateAuthorityId::new(format!("lash-restate-test-{}", server.config().seed))
                 .map_err(|error| BackendError::Authority(error.to_string()))?;
+        let engine_stores = decorate_stores(Arc::clone(&stores) as Arc<dyn StoreSet>);
         let restate = Arc::new(RestateEngine::new(
-            Arc::clone(&stores) as Arc<dyn StoreSet>,
+            Arc::clone(&engine_stores),
             RestateConfig::new(
                 connection.clone(),
                 authority.clone(),
@@ -177,11 +202,15 @@ impl RestateTestBackend {
             Some(budget) => serving.with_segment_effect_budget_selector(move |_| budget),
             None => serving,
         };
+        let loans = Arc::new(crate::open_handler::Loans::default());
         let endpoint = restate
             .endpoint_builder(serving)
             .bind(HandlerHost {
                 jobs: Arc::clone(&jobs),
                 authority: authority.clone(),
+            })
+            .bind(crate::open_handler::HandlerLender {
+                loans: Arc::clone(&loans),
             })
             .build();
         server
@@ -191,10 +220,12 @@ impl RestateTestBackend {
             server,
             restate,
             stores,
+            engine_stores,
             clock,
             connection,
             processes,
             jobs,
+            loans,
             authority,
         })
     }
@@ -217,6 +248,9 @@ impl RestateTestBackend {
                 jobs: Arc::clone(&self.jobs),
                 authority: self.authority.clone(),
             })
+            .bind(crate::open_handler::HandlerLender {
+                loans: Arc::clone(&self.loans),
+            })
             .build();
         Ok(self.server.register_with(endpoint, label, hooks).await?)
     }
@@ -238,9 +272,33 @@ impl RestateTestBackend {
         &self.restate
     }
 
-    /// The storage-only store set under the engine.
+    pub(crate) fn loans(&self) -> &crate::open_handler::Loans {
+        &self.loans
+    }
+
+    pub(crate) fn authority(&self) -> &RestateAuthorityId {
+        &self.authority
+    }
+
+    /// The storage-only store set [`backend_with`]'s `decorate_stores` was
+    /// applied to — the set as it was before decoration. A decorator's
+    /// layers do not apply to the ports this set hands out; the decorated
+    /// set the engine and its services run over is
+    /// [`engine_stores`](Self::engine_stores).
+    ///
+    /// [`backend_with`]: crate::backend_with
     pub fn stores(&self) -> &Arc<lash_sqlite_store::SqliteStoreSet> {
         &self.stores
+    }
+
+    /// The store set the engine was built over: `decorate_stores`'s answer
+    /// on a [`backend_with`] double, [`stores`](Self::stores) itself
+    /// otherwise. A test reaching a port a decorator replaced — a faulted
+    /// double's registry, say — reads it here.
+    ///
+    /// [`backend_with`]: crate::backend_with
+    pub fn engine_stores(&self) -> &Arc<dyn StoreSet> {
+        &self.engine_stores
     }
 
     /// The virtual clock the stores stamp with; the server moves it.

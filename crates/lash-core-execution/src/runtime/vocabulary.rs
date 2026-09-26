@@ -431,6 +431,21 @@ pub trait SessionStoreFactory: crate::AttachmentRootSet + Send + Sync {
         Ok(None)
     }
 
+    /// A fresh session store on this factory's catalog that no session owns
+    /// yet — storage only — whose first admitted session binds it.
+    ///
+    /// The open reads through this factory, so a decorator's answer is the
+    /// one the caller sees. Factories without an unbound-open seam report
+    /// `StoreError::UnsupportedStoreOperation` rather than hand out a store
+    /// that bypasses them.
+    async fn open_unbound_store(
+        &self,
+    ) -> Result<Arc<dyn crate::store::RuntimePersistence>, crate::StoreError> {
+        Err(crate::StoreError::UnsupportedStoreOperation {
+            operation: "open_unbound_store",
+        })
+    }
+
     /// Read one settled session without acquiring its execution lease or
     /// exposing a persistence capability that can mutate it.
     ///

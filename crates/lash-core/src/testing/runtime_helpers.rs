@@ -17,7 +17,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-pub use super::layered_backend::LayeredBackend;
+pub use super::layered_backend::{LayeredBackend, LayeredStores};
 pub use super::recording_store::{
     RecordingSessionStoreFactory, RecordingStore, SessionExecutionLeaseReleaseGate,
 };

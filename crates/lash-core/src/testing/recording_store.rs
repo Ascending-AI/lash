@@ -770,6 +770,12 @@ impl SessionStoreFactory for RecordingSessionStoreFactory {
             .map(|store| self.record(session_id, store)))
     }
 
+    // The unbound store has no session id to record under; the caller that
+    // wants it recorded wraps it, as the storage-only twins do.
+    async fn open_unbound_store(&self) -> Result<Arc<dyn RuntimePersistence>, StoreError> {
+        self.inner.open_unbound_store().await
+    }
+
     async fn read_session(
         &self,
         session_id: &SessionId,

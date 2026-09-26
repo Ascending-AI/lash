@@ -4,6 +4,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use super::*;
+use crate::session_listing::list_session_summaries;
 
 /// `process <name>(<param>: str) -> str { finish <param> }`, the publishable
 /// one-process module these store fixtures need. ADR 0096 retired the Lashlang

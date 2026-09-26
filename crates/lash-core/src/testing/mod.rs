@@ -60,6 +60,8 @@ pub use lash_core_execution::testing::{
 pub mod adversarial_text;
 pub mod checkpoint_observer;
 pub mod conformance_support;
+#[cfg(test)]
+mod kernel_door_tests;
 mod layered_backend;
 mod live_replay;
 mod recording_store;
@@ -97,6 +99,51 @@ pub(crate) async fn memory_backend() -> crate::Backend {
     std::sync::Arc::new(sqlite_memory_backend().await).into()
 }
 
+/// A fresh Restate server double under `seed` with `config`: lash-restate's
+/// engine over a SQLite memory store set, the twin of [`memory_backend`] for a
+/// kernel test whose effects run on an engine. Hold the double to the end of
+/// the test and never build a core over the handle itself (FIG-3723); a turn
+/// runs on `double.open_handler(scope)`'s scoped controller. Under
+/// `Scheduling::Serial`, a scripted provider that waits on the test holds
+/// `double.server().outside_gates().enter()` across the wait.
+#[cfg(test)]
+pub(crate) async fn kernel_double(
+    seed: u64,
+    config: lash_restate_test::ServerConfig,
+) -> lash_restate_test::RestateTestBackend {
+    lash_restate_test::backend(seed, config)
+        .await
+        .expect("build the Restate server double")
+}
+
+#[cfg(test)]
+std::thread_local! {
+    /// The store sets the running test opened, held as its backends are.
+    static TEST_STORE_SETS: std::cell::RefCell<Vec<std::sync::Arc<lash_sqlite_store::SqliteStoreSet>>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// A fresh SQLite memory store set, storage only (no engine), held for the
+/// rest of the running test: the twin of [`memory_backend`] for a test that reaches
+/// only store ports.
+#[cfg(test)]
+pub(crate) async fn memory_store_set() -> std::sync::Arc<lash_sqlite_store::SqliteStoreSet> {
+    let stores = std::sync::Arc::new(
+        lash_sqlite_store::SqliteStoreSet::memory()
+            .await
+            .expect("open a SQLite memory store set"),
+    );
+    TEST_STORE_SETS.with(|held| held.borrow_mut().push(std::sync::Arc::clone(&stores)));
+    stores
+}
+
+/// [`memory_store_set`] as a backend whose effect host is the recording
+/// double: for a test that needs a `Backend` value but runs no effect.
+#[cfg(test)]
+pub(crate) async fn memory_store_backend() -> crate::Backend {
+    lash_conformance::recording_backend_over(memory_store_set().await)
+}
+
 /// A [`runtime_helpers::RecordingStore`] over a fresh, unbound store of a
 /// fresh memory backend: the first session admitted binds it.
 #[cfg(test)]
@@ -113,6 +160,24 @@ pub(crate) async fn unbound_recording_store_on(
     runtime_helpers::RecordingStore::over(std::sync::Arc::new(
         backend.open_store().await.expect("open an unbound store"),
     ))
+}
+
+/// The twin of [`unbound_recording_store`] on the Restate server double: a
+/// [`runtime_helpers::RecordingStore`] over a fresh, unbound store of the
+/// double's engine store set, storage only. The open reads through
+/// [`RestateTestBackend::engine_stores`] — the decorated set — so a
+/// `backend_with` layer on its session-store factory applies here too.
+#[cfg(test)]
+pub(crate) async fn double_unbound_recording_store(
+    double: &lash_restate_test::RestateTestBackend,
+) -> runtime_helpers::RecordingStore {
+    runtime_helpers::RecordingStore::over(
+        crate::SessionStoreFactory::open_unbound_store(
+            crate::StoreSet::session_store_factory(double.engine_stores().as_ref()).as_ref(),
+        )
+        .await
+        .expect("open an unbound store on the double's engine store set"),
+    )
 }
 
 /// Marks resident state stale for downstream reload-race tests.
