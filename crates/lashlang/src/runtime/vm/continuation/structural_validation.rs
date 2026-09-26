@@ -255,18 +255,20 @@ impl<'a> ContinuationValidator<'a> {
         depth: usize,
         frame: &VmFrameContinuation,
     ) -> Result<(), ContinuationError> {
-        let VmFrameReturnContinuation::Callback {
+        let VmFrameReturnContinuation::Callback(callback) = &frame.return_target else {
+            return Ok(());
+        };
+        let VmCallbackContinuation {
             function,
+            this_arg,
             calls,
             next_index,
             results,
             completion,
             allow_effects: _,
             live_url_search_params,
-        } = &frame.return_target
-        else {
-            return Ok(());
-        };
+            array_like,
+        } = callback.as_ref();
         self.validate_callback_cursors(
             depth,
             calls,
@@ -277,10 +279,34 @@ impl<'a> ContinuationValidator<'a> {
         )?;
         validate_value(function, &format!("frame {depth} callback function"))?;
         validate_heap_reference(self.heap, function)?;
+        validate_value(this_arg, &format!("frame {depth} callback receiver"))?;
+        validate_heap_reference(self.heap, this_arg)?;
         validate_values(calls, &format!("frame {depth} callback calls"))?;
         validate_heap_references(self.heap, calls)?;
         validate_values(results, &format!("frame {depth} callback results"))?;
-        validate_heap_references(self.heap, results)
+        validate_heap_references(self.heap, results)?;
+        if let Some(walk) = array_like {
+            validate_value(
+                &walk.receiver,
+                &format!("frame {depth} array-like receiver"),
+            )?;
+            validate_heap_reference(self.heap, &walk.receiver)?;
+        }
+        if let VmCallbackCompletion::Reduce { accumulator } = completion {
+            validate_value(accumulator, &format!("frame {depth} reduce accumulator"))?;
+            validate_heap_reference(self.heap, accumulator)?;
+        }
+        if let VmCallbackCompletion::Sort(state) = completion {
+            validate_values(&state.pending, &format!("frame {depth} sort pending"))?;
+            validate_heap_references(self.heap, &state.pending)?;
+            validate_values(&state.sorted, &format!("frame {depth} sort sorted"))?;
+            validate_heap_references(self.heap, &state.sorted)?;
+            validate_value(&state.current, &format!("frame {depth} sort current"))?;
+            validate_heap_reference(self.heap, &state.current)?;
+            validate_value(&state.receiver, &format!("frame {depth} sort receiver"))?;
+            validate_heap_reference(self.heap, &state.receiver)?;
+        }
+        Ok(())
     }
 
     fn validate_callback_cursors(
@@ -293,8 +319,24 @@ impl<'a> ContinuationValidator<'a> {
         live_url_search_params: bool,
     ) -> Result<(), ContinuationError> {
         let result_valid = match completion {
-            VmCallbackCompletion::Collect => results.len().saturating_add(1) == next_index,
+            VmCallbackCompletion::Collect
+            | VmCallbackCompletion::Map { .. }
+            | VmCallbackCompletion::FlatMap => results.len().saturating_add(1) == next_index,
+            // `filter` keeps only the elements its predicate answered
+            // truthy: at most one per completed call.
+            VmCallbackCompletion::Filter => results.len() < next_index,
             VmCallbackCompletion::Discard => next_index >= 1 && results.is_empty(),
+            // The element-keyed completions fold each answer into the
+            // completion itself — an early answer pops the frame, so a
+            // suspended driver has none parked. `reduce` threads its
+            // accumulator through the next call's arguments and `sort`
+            // through its ordering state; neither stores a `results` entry.
+            VmCallbackCompletion::Every
+            | VmCallbackCompletion::Some
+            | VmCallbackCompletion::Find
+            | VmCallbackCompletion::FindIndex
+            | VmCallbackCompletion::Reduce { .. }
+            | VmCallbackCompletion::Sort(_) => results.is_empty(),
         };
         let cursor_valid = if live_url_search_params {
             calls.len() == 1

@@ -472,9 +472,9 @@ no probe that fires it fails that test.
   `TS_DATE_IMMUTABLE`, and a named property on an array as
   `TS_ARRAY_NON_INDEX_PROPERTY_UNSUPPORTED`.
 - Deleting an object field preserves aliases and returns the ECMA boolean.
-  Deleting a present dense-array index would create a hole, so it rejects at
-  runtime with `TS_DELETE_ARRAY_INDEX_UNSUPPORTED` and directs the author to
-  `splice(index, 1)`.
+  Deleting a present array index empties the slot into a hole — `i in a`
+  answers `false`, the callback iterators skip it, and `a.length` does not
+  move — exactly ECMA's `DeletePropertyOrThrow` on an integer index.
 - Async array callbacks run sequentially in v1
   (`TS_ASYNC_MAP_SEQUENTIAL_V1`): result order matches Node, while callback
   interleaving and shared-mutation order can differ. The census records it as
@@ -517,9 +517,13 @@ no probe that fires it fails that test.
   already rejects the statically typed shapes (TS2362 and TS2363 for
   arithmetic, TS2365 for `+`, TS2464 for a computed key), and the `any`-typed
   and string-context ones are an unsupported feature, Function.prototype's
-  source text. The divergence from Node is registered as
-  `function-source-text`: Node prints `function includes() { [native code] }`
-  for `String('y'.includes)`; lash refuses.
+  source text. `Function.prototype.toString` answers the same text, so calling
+  it on a callable receiver refuses as `TS_FUNCTION_TOSTRING_UNSUPPORTED` — a
+  non-callable one throws the `TypeError` ECMA runs first — while
+  `bind`/`call`/`apply` and `name`/`length` work on every function. The
+  divergence from Node is registered as `function-source-text`: Node prints
+  `function includes() { [native code] }` for `String('y'.includes)`; lash
+  refuses.
 - `Number.prototype.toString` accepts the full ECMA radix range 2–36 and
   rejects an out-of-range radix with a guest `RangeError`, and `toFixed`,
   `toExponential` and `toPrecision` follow the ECMA digit bounds with Node's
@@ -748,6 +752,7 @@ The shipped instance names are `at`, `concat`, `copyWithin`, `charAt`, `charCode
 `startsWith`, `substring`, `toExponential`, `toFixed`, `toPrecision`,
 `toReversed`, `toSorted`, `toSpliced`, `set`, `keys`, `toLowerCase`,
 `toUpperCase`, `toString`, `trim`, `trimEnd`, `trimStart`, `test`, `valueOf`, `values`,
+`call`, `apply`, `bind`,
 `with`, `hasOwnProperty`, `union`, `intersection`, `difference`,
 `symmetricDifference`, `isSubsetOf`, `isSupersetOf`, `isDisjointFrom`,
 `toJSON`, `getTime`, `getUTCFullYear`, `getUTCMonth`, `getUTCDate`,

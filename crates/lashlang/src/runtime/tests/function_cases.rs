@@ -1040,12 +1040,10 @@ async fn builtin_callback_continuation_preserves_reentry_and_occurrence_counters
     .expect("AST-only callback program links");
     let program = crate::testing::harness::compile_linked_main(&linked);
     let continuation = find_instruction_continuation(&program, |continuation| {
-        continuation.frame_stack.iter().any(|frame| {
-            matches!(
-                frame.return_target,
-                VmFrameReturnContinuation::Callback { .. }
-            )
-        })
+        continuation
+            .frame_stack
+            .iter()
+            .any(|frame| matches!(frame.return_target, VmFrameReturnContinuation::Callback(_)))
     })
     .await;
     let counters = continuation.occurrence_counters.clone();
@@ -1104,12 +1102,10 @@ async fn filter_shaped_callback_parks_inside_the_shared_driver_and_resumes() {
     .expect("filter-shaped callback program links");
     let program = crate::testing::harness::compile_linked_main(&linked);
     let continuation = find_instruction_continuation(&program, |continuation| {
-        continuation.frame_stack.iter().any(|frame| {
-            matches!(
-                frame.return_target,
-                VmFrameReturnContinuation::Callback { .. }
-            )
-        })
+        continuation
+            .frame_stack
+            .iter()
+            .any(|frame| matches!(frame.return_target, VmFrameReturnContinuation::Callback(_)))
     })
     .await;
     let restored: VmContinuation = serde_json::from_slice(

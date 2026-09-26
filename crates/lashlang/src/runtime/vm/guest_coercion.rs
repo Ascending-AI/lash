@@ -21,6 +21,7 @@
 //! program performs the same effects in the same order.
 
 use super::*;
+use crate::runtime::BuiltinPrototype;
 use crate::runtime::heap::ErrorKind;
 use crate::runtime::heap::guest_coercion::{GuestPrimitive, PrimitiveHint};
 
@@ -444,6 +445,49 @@ impl<H: ExecutionHost> Vm<'_, H> {
         for (index, value) in arguments.iter_mut().enumerate() {
             if let Some(hint) = parameter_hint(parameters, index)
                 && self.heap.has_guest_primitive_hooks(value)?
+            {
+                *value = self.heap.javascript_to_primitive_with_hint(value, hint)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// The detached-call twin of `convert_guest_arguments` (FIG-3787): the
+    /// parameter table is keyed on the method's prototype, since a
+    /// re-attached method runs on a receiver of any shape. A compound
+    /// argument at a converted position is coerced unconditionally — the
+    /// member path's hook gate would leave `{ valueOf: undefined }` raw for
+    /// the pure method to misread, where ECMA's `ToPrimitive` throws its
+    /// `TypeError`.
+    pub(super) fn convert_detached_guest_arguments(
+        &mut self,
+        prototype: BuiltinPrototype,
+        method: &str,
+        args: &mut [Value],
+    ) -> Result<(), RuntimeError> {
+        let parameters = match prototype {
+            BuiltinPrototype::String => string_method_parameters(method),
+            BuiltinPrototype::Number => number_method_parameters(method),
+            _ => None,
+        };
+        // `String.prototype.concat` converts every argument.
+        let every = prototype == BuiltinPrototype::String && method == "concat";
+        let parameters = match parameters {
+            Some(parameters) => Some(parameters),
+            None if every => Some(&[S][..]),
+            None => None,
+        };
+        let Some(parameters) = parameters else {
+            return Ok(());
+        };
+        for (index, value) in args.iter_mut().enumerate() {
+            let hint = if every {
+                S
+            } else {
+                parameter_hint(parameters, index)
+            };
+            if let Some(hint) = hint
+                && matches!(value, Value::Ref(_) | Value::Record(_))
             {
                 *value = self.heap.javascript_to_primitive_with_hint(value, hint)?;
             }

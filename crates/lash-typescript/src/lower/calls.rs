@@ -955,11 +955,13 @@ impl Lowerer {
                     }
                 }
                 "keys" => {
+                    // `keys` visits every index `0..length`, holes included —
+                    // `Object.keys` would skip them (FIG-3787).
                     let key = self.temporary("array_key");
                     LashExpr::Map {
                         items: Box::new(LashExpr::BuiltinCall {
                             name: "__typescript_stdlib".into(),
-                            args: vec![LashExpr::String("Object.keys".into()), variable()],
+                            args: vec![LashExpr::String("__enumerate".into()), variable()],
                         }),
                         function: Box::new(LashExpr::Function(Box::new(FunctionExpr {
                             name: None,
@@ -967,9 +969,9 @@ impl Lowerer {
                             receiver: None,
                             params: vec![key.as_str().into()],
                             captures: Vec::new(),
-                            body: Box::new(LashExpr::JavaScriptUnary {
-                                op: JavaScriptUnaryOp::Plus,
-                                expr: Box::new(LashExpr::Variable(key.as_str().into())),
+                            body: Box::new(LashExpr::Index {
+                                target: Box::new(LashExpr::Variable(key.as_str().into())),
+                                index: Box::new(LashExpr::Number(1.0)),
                             }),
                         }))),
                     }

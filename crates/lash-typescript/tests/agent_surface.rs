@@ -790,7 +790,7 @@ fn instance_stdlib_collision_matrix_guard_sweeps_all_stdlib_methods() {
     let methods = lash_typescript::accepted_instance_methods();
     assert_eq!(
         methods.len(),
-        91,
+        94,
         "the collision matrix must sweep every accepted instance method"
     );
 

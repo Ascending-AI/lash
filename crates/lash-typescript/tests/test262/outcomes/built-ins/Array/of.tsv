@@ -1,14 +1,14 @@
 # test262-path	class	qualifier
-test/built-ins/Array/of/construct-this-with-the-number-of-arguments.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/of/construct-this-with-the-number-of-arguments.js	refused	TS_NEW_UNSUPPORTED
 test/built-ins/Array/of/creates-a-new-array-from-arguments.js	pass	-
 test/built-ins/Array/of/does-not-use-prototype-properties.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Array/of/does-not-use-set-for-indices.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Array/of/length.js	pass	-
 test/built-ins/Array/of/name.js	pass	-
 test/built-ins/Array/of/of.js	pass	-
-test/built-ins/Array/of/return-a-custom-instance.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Array/of/return-a-new-array-object.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Array/of/return-abrupt-from-contructor.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/of/return-a-custom-instance.js	refused	TS_INSTANCEOF_UNSUPPORTED
+test/built-ins/Array/of/return-a-new-array-object.js	refused	TS_NEW_UNSUPPORTED
+test/built-ins/Array/of/return-abrupt-from-contructor.js	refused	TS_NEW_UNSUPPORTED
 test/built-ins/Array/of/return-abrupt-from-data-property.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Array/of/return-abrupt-from-setting-length.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Array/of/sets-length.js	refused	TS_METHOD_UNSUPPORTED

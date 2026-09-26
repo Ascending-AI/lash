@@ -1051,7 +1051,7 @@ test/built-ins/RegExp/property-escapes/unsupported-property-Line_Break-negated.j
 test/built-ins/RegExp/property-escapes/unsupported-property-Line_Break-with-value-negated.js	pass	-
 test/built-ins/RegExp/property-escapes/unsupported-property-Line_Break-with-value.js	pass	-
 test/built-ins/RegExp/property-escapes/unsupported-property-Line_Break.js	pass	-
-test/built-ins/RegExp/prototype/15.10.6.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/RegExp/prototype/15.10.6.js	pass	-
 test/built-ins/RegExp/prototype/S15.10.5.1_A1.js	pass	-
 test/built-ins/RegExp/prototype/S15.10.5.1_A2.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/RegExp/prototype/S15.10.5.1_A3.js	refused	TS_INSTANCEOF_UNSUPPORTED

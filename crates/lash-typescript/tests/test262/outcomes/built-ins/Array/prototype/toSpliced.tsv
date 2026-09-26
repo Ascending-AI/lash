@@ -8,12 +8,12 @@ test/built-ins/Array/prototype/toSpliced/frozen-this-value.js	refused	TS_METHOD_
 test/built-ins/Array/prototype/toSpliced/holes-not-preserved.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Array/prototype/toSpliced/ignores-species.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Array/prototype/toSpliced/immutable.js	pass	-
-test/built-ins/Array/prototype/toSpliced/length-casted-to-zero.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Array/prototype/toSpliced/length-clamped-to-2pow53minus1.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/toSpliced/length-casted-to-zero.js	pass	-
+test/built-ins/Array/prototype/toSpliced/length-clamped-to-2pow53minus1.js	pass	-
 test/built-ins/Array/prototype/toSpliced/length-decreased-while-iterating.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Array/prototype/toSpliced/length-exceeding-array-length-limit.js	refused	TS_ACCESSOR_UNSUPPORTED
 test/built-ins/Array/prototype/toSpliced/length-increased-while-iterating.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Array/prototype/toSpliced/length-tolength.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/toSpliced/length-tolength.js	pass	-
 test/built-ins/Array/prototype/toSpliced/length.js	pass	-
 test/built-ins/Array/prototype/toSpliced/mutate-while-iterating.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Array/prototype/toSpliced/name.js	pass	-
@@ -26,5 +26,5 @@ test/built-ins/Array/prototype/toSpliced/start-neg-less-than-minus-length-is-zer
 test/built-ins/Array/prototype/toSpliced/start-neg-subtracted-from-length.js	pass	-
 test/built-ins/Array/prototype/toSpliced/start-undefined-and-deleteCount-missing.js	pass	-
 test/built-ins/Array/prototype/toSpliced/this-value-boolean.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
-test/built-ins/Array/prototype/toSpliced/this-value-nullish.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/toSpliced/this-value-nullish.js	pass	-
 test/built-ins/Array/prototype/toSpliced/unmodified.js	pass	-

@@ -27,7 +27,7 @@ test/language/statements/function/13.2-19-b-3gs.js	pass	-
 test/language/statements/function/13.2-19-s.js	refused	TS_FUNCTION_CONSTRUCTOR_UNSUPPORTED
 test/language/statements/function/13.2-2-s.js	pass	-
 test/language/statements/function/13.2-3-s.js	refused	TS_NEW_UNSUPPORTED
-test/language/statements/function/13.2-30-s.js	refused	TS_METHOD_UNSUPPORTED
+test/language/statements/function/13.2-30-s.js	pass	-
 test/language/statements/function/13.2-4-s.js	pass	-
 test/language/statements/function/S10.1.1_A1_T1.js	pass	-
 test/language/statements/function/S13.2.1_A1_T1.js	refused	TS_SOURCE_NESTING_LIMIT
@@ -74,7 +74,7 @@ test/language/statements/function/S13.2.2_A7_T1.js	refused	TS_NEW_UNSUPPORTED
 test/language/statements/function/S13.2.2_A7_T2.js	refused	TS_NEW_UNSUPPORTED
 test/language/statements/function/S13.2.2_A8_T1.js	refused	TS_NEW_UNSUPPORTED
 test/language/statements/function/S13.2.2_A8_T2.js	refused	TS_NEW_UNSUPPORTED
-test/language/statements/function/S13.2.2_A8_T3.js	refused	TS_METHOD_UNSUPPORTED
+test/language/statements/function/S13.2.2_A8_T3.js	refused	TS_NEW_UNSUPPORTED
 test/language/statements/function/S13.2.2_A9.js	refused	TS_NEW_UNSUPPORTED
 test/language/statements/function/S13.2_A1_T1.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/language/statements/function/S13.2_A1_T2.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED

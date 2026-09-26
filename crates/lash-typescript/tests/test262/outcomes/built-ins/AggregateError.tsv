@@ -3,7 +3,7 @@ test/built-ins/AggregateError/cause-property.js	pass	-
 test/built-ins/AggregateError/length.js	pass	-
 test/built-ins/AggregateError/message-method-prop-cast.js	pass	-
 test/built-ins/AggregateError/message-method-prop.js	pass	-
-test/built-ins/AggregateError/message-undefined-no-prop.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/AggregateError/message-undefined-no-prop.js	pass	-
 test/built-ins/AggregateError/name.js	pass	-
 test/built-ins/AggregateError/newtarget-is-undefined.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/AggregateError/newtarget-proto.js	refused	TS_METHOD_UNSUPPORTED

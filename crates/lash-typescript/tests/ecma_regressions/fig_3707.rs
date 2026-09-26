@@ -48,15 +48,13 @@ fn array_callbacks_skip_the_elements_a_callback_removes() {
     for (source, expected) in cases {
         assert_eq!(finished(source), expected, "{source}");
     }
-    // `map`'s result keeps the original length, so a skipped element is a
-    // hole, which the dense array model refuses by name.
-    let error = execute(
-        "const arr = [1, 2, 3, 4, 5]; finish(arr.map(() => { arr.length = 2; return 1; }).length);",
-    )
-    .expect_err("a map result with holes is not representable");
-    assert!(
-        error.to_string().contains("TS_SPARSE_ARRAY_UNSUPPORTED"),
-        "{error}"
+    // `map`'s result keeps the original length; elements the callback's
+    // truncation skipped are holes the sparse model now carries.
+    assert_eq!(
+        finished(
+            "const arr = [1, 2, 3, 4, 5]; const r = arr.map(() => { arr.length = 2; return 1; }); finish(`${r.length}|${2 in r}|${r[0]}`);"
+        ),
+        Value::String("5|false|1".into())
     );
 }
 

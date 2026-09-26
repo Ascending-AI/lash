@@ -1,2 +1,2 @@
 # kind	name	status	reason	probe
-typescript	array-index-delete	rejected	TS_DELETE_ARRAY_INDEX_UNSUPPORTED	const a = [1, 2]; delete a[0];
+typescript	array-index-delete	accepted	-	-

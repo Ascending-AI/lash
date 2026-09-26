@@ -1697,16 +1697,11 @@ async fn heap_member_delete_preserves_aliases_and_survives_continuation_round_tr
         ))),
     ]);
     let compiled = compile_ast(&array_delete).expect("compile dense-array deletion probe");
-    let error = execute(&compiled, &mut State::new(), &Host)
+    // Deleting a present index empties the slot — `0 in a` now answers
+    // `false` — where the dialect once refused to create the hole.
+    execute(&compiled, &mut State::new(), &Host)
         .await
-        .expect_err("deleting a present dense-array index must reject");
-    assert!(
-        error
-            .to_string()
-            .contains("TS_DELETE_ARRAY_INDEX_UNSUPPORTED")
-            && error.to_string().contains("splice"),
-        "{error}"
-    );
+        .expect("deleting a present dense-array index leaves a hole");
 }
 
 #[tokio::test(flavor = "current_thread")]

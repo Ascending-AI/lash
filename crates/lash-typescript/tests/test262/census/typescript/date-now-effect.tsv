@@ -1,0 +1,2 @@
+# kind	name	status	reason	probe
+typescript	date-now-effect	rejected	TS_DATE_NOW_EFFECT_REQUIRED	const d = Date.bind(null); d(0);

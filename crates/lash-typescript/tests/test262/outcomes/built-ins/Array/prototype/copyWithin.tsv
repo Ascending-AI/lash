@@ -5,8 +5,8 @@ test/built-ins/Array/prototype/copyWithin/coerced-values-start-change-start.js	r
 test/built-ins/Array/prototype/copyWithin/coerced-values-start-change-target.js	refused	TS_SPARSE_ARRAY_UNSUPPORTED
 test/built-ins/Array/prototype/copyWithin/coerced-values-start.js	pass	-
 test/built-ins/Array/prototype/copyWithin/coerced-values-target.js	pass	-
-test/built-ins/Array/prototype/copyWithin/fill-holes.js	fail	FIG-3700
-test/built-ins/Array/prototype/copyWithin/length-near-integer-limit.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/copyWithin/fill-holes.js	pass	-
+test/built-ins/Array/prototype/copyWithin/length-near-integer-limit.js	pass	-
 test/built-ins/Array/prototype/copyWithin/length.js	pass	-
 test/built-ins/Array/prototype/copyWithin/name.js	pass	-
 test/built-ins/Array/prototype/copyWithin/negative-end.js	pass	-
@@ -27,6 +27,6 @@ test/built-ins/Array/prototype/copyWithin/return-abrupt-from-set-target-value.js
 test/built-ins/Array/prototype/copyWithin/return-abrupt-from-start.js	pass	-
 test/built-ins/Array/prototype/copyWithin/return-abrupt-from-target.js	pass	-
 test/built-ins/Array/prototype/copyWithin/return-abrupt-from-this-length.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Array/prototype/copyWithin/return-abrupt-from-this.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Array/prototype/copyWithin/return-this.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/copyWithin/return-abrupt-from-this.js	pass	-
+test/built-ins/Array/prototype/copyWithin/return-this.js	pass	-
 test/built-ins/Array/prototype/copyWithin/undefined-end.js	pass	-

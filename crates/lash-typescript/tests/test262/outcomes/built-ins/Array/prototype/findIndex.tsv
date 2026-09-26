@@ -1,6 +1,6 @@
 # test262-path	class	qualifier
 test/built-ins/Array/prototype/findIndex/array-altered-during-loop.js	pass	-
-test/built-ins/Array/prototype/findIndex/call-with-boolean.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/findIndex/call-with-boolean.js	pass	-
 test/built-ins/Array/prototype/findIndex/length.js	pass	-
 test/built-ins/Array/prototype/findIndex/name.js	pass	-
 test/built-ins/Array/prototype/findIndex/predicate-call-parameters.js	pass	-
@@ -12,4 +12,4 @@ test/built-ins/Array/prototype/findIndex/prop-desc.js	pass	-
 test/built-ins/Array/prototype/findIndex/return-abrupt-from-predicate-call.js	pass	-
 test/built-ins/Array/prototype/findIndex/return-abrupt-from-property.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Array/prototype/findIndex/return-abrupt-from-this-length.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Array/prototype/findIndex/return-abrupt-from-this.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/findIndex/return-abrupt-from-this.js	pass	-

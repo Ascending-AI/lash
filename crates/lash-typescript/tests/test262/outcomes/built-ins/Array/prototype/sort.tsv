@@ -12,9 +12,9 @@ test/built-ins/Array/prototype/sort/S15.4.4.11_A2.1_T3.js	pass	-
 test/built-ins/Array/prototype/sort/S15.4.4.11_A2.2_T1.js	pass	-
 test/built-ins/Array/prototype/sort/S15.4.4.11_A2.2_T2.js	pass	-
 test/built-ins/Array/prototype/sort/S15.4.4.11_A2.2_T3.js	pass	-
-test/built-ins/Array/prototype/sort/S15.4.4.11_A3_T1.js	fail	FIG-3700
-test/built-ins/Array/prototype/sort/S15.4.4.11_A3_T2.js	fail	FIG-3700
-test/built-ins/Array/prototype/sort/S15.4.4.11_A4_T3.js	fail	FIG-3700
+test/built-ins/Array/prototype/sort/S15.4.4.11_A3_T1.js	pass	-
+test/built-ins/Array/prototype/sort/S15.4.4.11_A3_T2.js	pass	-
+test/built-ins/Array/prototype/sort/S15.4.4.11_A4_T3.js	pass	-
 test/built-ins/Array/prototype/sort/S15.4.4.11_A5_T1.js	pass	-
 test/built-ins/Array/prototype/sort/S15.4.4.11_A6_T2.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
 test/built-ins/Array/prototype/sort/bug_596_1.js	pass	-

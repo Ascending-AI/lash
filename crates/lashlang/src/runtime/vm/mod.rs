@@ -16,6 +16,7 @@ mod exceptions;
 mod heap_plan;
 mod javascript;
 mod javascript_array;
+mod javascript_array_like;
 mod javascript_codec;
 pub(crate) mod javascript_date;
 mod javascript_json;
@@ -547,8 +548,9 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
                     self.begin_callback_driver(
                         function,
                         items.into_iter().map(|item| vec![item]).collect(),
-                        true,
+                        CallbackCompletion::Collect,
                         false,
+                        Value::Undefined,
                     )?;
                 }
             }
@@ -1630,7 +1632,7 @@ impl<'a, H: ExecutionHost> Vm<'a, H> {
         Ok(())
     }
 }
-mod functions;
+pub(crate) mod functions;
 use functions::*;
 mod guest_coercion;
 use guest_coercion::*;

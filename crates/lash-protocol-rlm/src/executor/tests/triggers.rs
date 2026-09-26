@@ -1700,6 +1700,12 @@ pub(super) fn executor_reports_a_disabled_lashlang_ability_at_link_time() {
 /// arguments, and converts a computed object-literal key before its value.
 /// This source spells none of those, so the artifact's IR is unchanged and
 /// only the hashes moved.
+///
+/// FIG-3787 re-pinned them again: `LASHLANG_SEMANTIC_HASH_VERSION` moved to
+/// `v24` because the array-callback lowering gates element visits on a
+/// per-index `HasProperty` probe and writes `map`'s output positionally.
+/// This source spells no array callback, so the artifact's IR is unchanged
+/// and only the hashes moved.
 /// The arrow spelling under test. The capture's own `source` field records the
 /// *retired* record form it was taken from, so a re-pin compiles this one.
 const TRIGGER_INPUTS_ARROW_SOURCE: &str = r#"

@@ -5,7 +5,7 @@ test/built-ins/Array/prototype/fill/fill-values-custom-start-and-end.js	pass	-
 test/built-ins/Array/prototype/fill/fill-values-relative-end.js	pass	-
 test/built-ins/Array/prototype/fill/fill-values-relative-start.js	pass	-
 test/built-ins/Array/prototype/fill/fill-values.js	pass	-
-test/built-ins/Array/prototype/fill/length-near-integer-limit.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/fill/length-near-integer-limit.js	pass	-
 test/built-ins/Array/prototype/fill/length.js	pass	-
 test/built-ins/Array/prototype/fill/name.js	pass	-
 test/built-ins/Array/prototype/fill/prop-desc.js	pass	-
@@ -13,5 +13,5 @@ test/built-ins/Array/prototype/fill/return-abrupt-from-end.js	pass	-
 test/built-ins/Array/prototype/fill/return-abrupt-from-setting-property-value.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Array/prototype/fill/return-abrupt-from-start.js	pass	-
 test/built-ins/Array/prototype/fill/return-abrupt-from-this-length.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Array/prototype/fill/return-abrupt-from-this.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Array/prototype/fill/return-this.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/fill/return-abrupt-from-this.js	pass	-
+test/built-ins/Array/prototype/fill/return-this.js	pass	-

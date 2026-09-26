@@ -466,7 +466,7 @@ impl Heap {
         self.allocate_object(HeapObject::Record(Box::new(record)))
     }
 
-    fn allocate_object(&mut self, object: HeapObject) -> Result<Value, RuntimeError> {
+    pub(crate) fn allocate_object(&mut self, object: HeapObject) -> Result<Value, RuntimeError> {
         let logical_bytes = object.logical_bytes();
         let next_live = self.live_logical_bytes.saturating_add(logical_bytes);
         if next_live > self.logical_byte_limit {

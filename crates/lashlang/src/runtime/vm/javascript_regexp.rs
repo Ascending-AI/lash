@@ -629,10 +629,16 @@ impl<H: ExecutionHost> Vm<'_, H> {
         self.charge_intrinsic_work(units.len());
         let (global, sticky) = match self.heap.get(receiver)? {
             HeapObject::RegExp(regexp) => (regexp.flags.contains('g'), regexp.flags.contains('y')),
+
+            // `exec`'s receiver check is ECMA's: anything that is not a RegExp
+            // throws a catchable TypeError, not an internal shaping failure.
             _ => {
-                return Err(RuntimeError::type_error(
-                    "RegExp.exec requires a RegExp receiver",
-                ));
+                let text = self.v8_value_text(&Value::Ref(receiver))?;
+                return Err(RuntimeError::IncompatibleReceiver {
+                    message: format!(
+                        "Method RegExp.prototype.exec called on incompatible receiver {text}"
+                    ),
+                });
             }
         };
         let stateful = global || sticky;

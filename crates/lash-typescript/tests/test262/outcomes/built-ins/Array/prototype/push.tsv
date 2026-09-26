@@ -1,18 +1,18 @@
 # test262-path	class	qualifier
 test/built-ins/Array/prototype/push/S15.4.4.7_A1_T1.js	refused	TS_NEW_UNSUPPORTED
 test/built-ins/Array/prototype/push/S15.4.4.7_A1_T2.js	pass	-
-test/built-ins/Array/prototype/push/S15.4.4.7_A2_T1.js	fail	FIG-3700
+test/built-ins/Array/prototype/push/S15.4.4.7_A2_T1.js	pass	-
 test/built-ins/Array/prototype/push/S15.4.4.7_A2_T2.js	refused	TS_NEW_UNSUPPORTED
-test/built-ins/Array/prototype/push/S15.4.4.7_A2_T3.js	fail	FIG-3700
+test/built-ins/Array/prototype/push/S15.4.4.7_A2_T3.js	pass	-
 test/built-ins/Array/prototype/push/S15.4.4.7_A3.js	refused	TS_SPARSE_ARRAY_UNSUPPORTED
-test/built-ins/Array/prototype/push/S15.4.4.7_A4_T1.js	fail	FIG-3700
-test/built-ins/Array/prototype/push/S15.4.4.7_A4_T2.js	fail	FIG-3700
-test/built-ins/Array/prototype/push/S15.4.4.7_A4_T3.js	fail	FIG-3700
+test/built-ins/Array/prototype/push/S15.4.4.7_A4_T1.js	pass	-
+test/built-ins/Array/prototype/push/S15.4.4.7_A4_T2.js	pass	-
+test/built-ins/Array/prototype/push/S15.4.4.7_A4_T3.js	pass	-
 test/built-ins/Array/prototype/push/S15.4.4.7_A5_T1.js	refused	TS_PROTOTYPE_MUTATION_UNSUPPORTED
-test/built-ins/Array/prototype/push/call-with-boolean.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Array/prototype/push/clamps-to-integer-limit.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/push/call-with-boolean.js	pass	-
+test/built-ins/Array/prototype/push/clamps-to-integer-limit.js	pass	-
 test/built-ins/Array/prototype/push/length-near-integer-limit-set-failure.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Array/prototype/push/length-near-integer-limit.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/push/length-near-integer-limit.js	pass	-
 test/built-ins/Array/prototype/push/length.js	pass	-
 test/built-ins/Array/prototype/push/name.js	pass	-
 test/built-ins/Array/prototype/push/prop-desc.js	pass	-
@@ -20,5 +20,5 @@ test/built-ins/Array/prototype/push/set-length-array-is-frozen.js	refused	TS_MET
 test/built-ins/Array/prototype/push/set-length-array-length-is-non-writable.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Array/prototype/push/set-length-zero-array-is-frozen.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Array/prototype/push/set-length-zero-array-length-is-non-writable.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Array/prototype/push/throws-if-integer-limit-exceeded.js	refused	TS_METHOD_UNSUPPORTED
-test/built-ins/Array/prototype/push/throws-with-string-receiver.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/push/throws-if-integer-limit-exceeded.js	pass	-
+test/built-ins/Array/prototype/push/throws-with-string-receiver.js	pass	-

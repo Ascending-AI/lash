@@ -4,4 +4,4 @@ test/built-ins/Array/prototype/values/iteration.js	refused	TS_METHOD_UNSUPPORTED
 test/built-ins/Array/prototype/values/length.js	pass	-
 test/built-ins/Array/prototype/values/name.js	pass	-
 test/built-ins/Array/prototype/values/prop-desc.js	pass	-
-test/built-ins/Array/prototype/values/this-val-non-obj-coercible.js	refused	TS_METHOD_UNSUPPORTED
+test/built-ins/Array/prototype/values/this-val-non-obj-coercible.js	pass	-

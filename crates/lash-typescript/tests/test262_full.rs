@@ -5,6 +5,10 @@
     clippy::expect_used,
     reason = "test target: clippy's allow-unwrap-in-tests only exempts #[test] functions, and the helpers around them in this target are test code too"
 )]
+// FIG-2971: this file is test/tooling/host code; ambient fs/env/process
+// access is sanctioned here (the workspace clippy ban targets production
+// library code).
+#![allow(clippy::disallowed_methods)]
 
 #[path = "test262/support/ingest.rs"]
 #[allow(dead_code, reason = "not every ingest helper is used in this shard")]
@@ -23,6 +27,18 @@ mod metadata;
 mod runner;
 
 use std::collections::BTreeSet;
+
+/// Dev-time focused row runner: `TEST262_ONLY=a.js,b.js` prints each observed
+/// outcome instead of running the full selection.
+#[test]
+fn focused_rows() {
+    let Ok(filter) = std::env::var("TEST262_ONLY") else {
+        return;
+    };
+    for relative in filter.split(',') {
+        eprintln!("{relative}\n  -> {}", runner::run(relative));
+    }
+}
 
 #[test]
 fn full_selection_matches_the_ratchet() {
